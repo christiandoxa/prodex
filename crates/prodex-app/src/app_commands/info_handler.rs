@@ -157,6 +157,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             ),
         ),
     ];
+    fields.retain(|(label, _)| show_info_field(label, quota.five_hour_profiles_with_data));
     if let Some(token_summary) = token_summary.as_ref() {
         fields.push((
             "Token usage".to_string(),
@@ -165,6 +166,10 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
     }
     print_info_panel(&fields)?;
     Ok(())
+}
+
+fn show_info_field(label: &str, five_hour_profiles_with_data: usize) -> bool {
+    five_hour_profiles_with_data > 0 || !matches!(label, "Codex 5h pool" | "Codex 5h runway")
 }
 
 fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
@@ -251,9 +256,10 @@ fn info_panel_tui_label_width(fields: &[(String, String)]) -> usize {
 
 fn info_panel_value_color(label: &str, value: &str) -> Color {
     let lower = value.to_ascii_lowercase();
+    let quota_available = label == "Codex quota data" && lower.contains("unavailable=0");
     if lower.contains("error")
         || lower.contains("missing")
-        || lower.contains("unavailable")
+        || (lower.contains("unavailable") && !quota_available)
         || lower.contains("exhausted")
         || lower.contains("critical")
         || lower.contains("thin")
@@ -264,6 +270,7 @@ fn info_panel_value_color(label: &str, value: &str) -> Color {
         || lower.contains("healthy")
         || lower.contains("up to date")
         || label == "Active profile"
+        || quota_available
     {
         Color::Green
     } else if label.contains("Runtime") || label.contains("Codex") {
@@ -297,6 +304,23 @@ mod tests {
             info_panel_value_color("Active profile", "main"),
             Color::Green
         );
+        let quota_label = "Codex quota data";
+        assert_eq!(
+            info_panel_value_color(quota_label, "unavailable=0"),
+            Color::Green
+        );
+        assert_eq!(
+            info_panel_value_color(quota_label, "unavailable=1"),
+            Color::Red
+        );
+    }
+
+    #[test]
+    fn info_panel_hides_unavailable_five_hour_fields() {
+        assert!(!show_info_field("Codex 5h pool", 0));
+        assert!(!show_info_field("Codex 5h runway", 0));
+        assert!(show_info_field("Codex weekly pool", 0));
+        assert!(show_info_field("Codex 5h pool", 1));
     }
 
     #[test]

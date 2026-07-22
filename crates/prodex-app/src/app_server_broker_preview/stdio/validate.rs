@@ -116,7 +116,7 @@ fn write_validate_diagnostic_stream<R: BufRead, W: Write>(
     }
     let summary = session.into_report_json();
     app_server_broker_log_preview_summary(&log_path, &summary);
-    app_server_broker_audit_preview_summary(mode, &summary);
+    app_server_broker_audit_preview_summary(mode, &summary)?;
     serde_json::to_writer(&mut diagnostics_writer, &summary)?;
     diagnostics_writer.write_all(b"\n")?;
     Ok((

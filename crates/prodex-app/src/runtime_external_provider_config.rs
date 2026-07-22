@@ -397,6 +397,7 @@ fn external_catalog_model(
         "upgrade": null,
         "base_instructions": "",
         "supports_reasoning_summaries": true,
+        "supports_reasoning_summary_parameter": true,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
         "default_verbosity": null,

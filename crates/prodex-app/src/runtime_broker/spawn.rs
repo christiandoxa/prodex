@@ -104,7 +104,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
             broker_key,
             &existing,
             health.as_ref(),
-        ) {
+        )? {
             RuntimeBrokerVersionGuardOutcome::Compatible => {}
             RuntimeBrokerVersionGuardOutcome::Replaced => return Ok(None),
             RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {
@@ -187,7 +187,7 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
             &broker_key,
             &registry,
             health.as_ref(),
-        ) {
+        )? {
             RuntimeBrokerVersionGuardOutcome::Compatible => {}
             RuntimeBrokerVersionGuardOutcome::Replaced
             | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => continue,
@@ -342,7 +342,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
                 &broker_key,
                 &existing,
                 health.as_ref(),
-            ) {
+            )? {
                 RuntimeBrokerVersionGuardOutcome::Compatible => {
                     if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
                         &existing,

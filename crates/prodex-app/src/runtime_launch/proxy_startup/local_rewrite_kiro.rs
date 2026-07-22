@@ -17,9 +17,7 @@ use super::provider_sse_events::{
     runtime_provider_sse_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
 };
-use crate::profile_commands::{
-    create_private_kiro_temp_root, read_kiro_auth_secret, write_kiro_cli_data_dir,
-};
+use crate::profile_commands::prepare_kiro_cli_data_dir;
 use crate::runtime_anthropic::{
     RuntimeAnthropicMessagesRequest, build_runtime_anthropic_error_parts,
     translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
@@ -51,7 +49,6 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -229,11 +226,8 @@ pub(super) fn send_runtime_kiro_upstream_request(
             copilot_context: None,
         });
     }
-    let overlay_root = create_private_kiro_temp_root("runtime")?;
-    let result = (|| {
-        let secret = read_kiro_auth_secret(&auth.codex_home)?;
-        let data_dir = overlay_root.join("kiro-data");
-        write_kiro_cli_data_dir(&data_dir, &secret)?;
+    let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
+    (|| {
         let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
         if let Some(region) = secret
             .region
@@ -305,9 +299,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             gemini_context: None,
             copilot_context: None,
         })
-    })();
-    schedule_runtime_kiro_overlay_cleanup(&shared.runtime_shared.async_runtime, overlay_root);
-    result
+    })()
 }
 
 pub(super) fn runtime_kiro_compact_response_parts(
@@ -325,7 +317,7 @@ pub(super) fn runtime_kiro_compact_response_parts(
 fn runtime_kiro_semantic_compact_summary(
     request_id: u64,
     body: &[u8],
-    async_runtime: &Arc<TokioRuntime>,
+    _async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> Result<String> {
     let rewritten = prodex_provider_core::kiro_provider_core_semantic_compact_request_body(body)
@@ -342,11 +334,8 @@ fn runtime_kiro_semantic_compact_summary(
         runtime_kiro_rewrite_options(),
     )?;
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    let overlay_root = create_private_kiro_temp_root("compact")?;
-    let result = (|| {
-        let secret = read_kiro_auth_secret(&auth.codex_home)?;
-        let data_dir = overlay_root.join("kiro-data");
-        write_kiro_cli_data_dir(&data_dir, &secret)?;
+    let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
+    (|| {
         let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
         if let Some(region) = secret
             .region
@@ -385,19 +374,7 @@ fn runtime_kiro_semantic_compact_summary(
         let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         prodex_provider_core::kiro_provider_core_compact_summary_from_response(&response)
             .map_err(anyhow::Error::msg)
-    })();
-    schedule_runtime_kiro_overlay_cleanup(async_runtime, overlay_root);
-    result
-}
-
-fn schedule_runtime_kiro_overlay_cleanup(async_runtime: &Arc<TokioRuntime>, overlay_root: PathBuf) {
-    schedule_runtime_kiro_blocking_work(async_runtime, move || {
-        runtime_kiro_remove_overlay(overlay_root);
-    });
-}
-
-fn runtime_kiro_remove_overlay(overlay_root: PathBuf) {
-    let _ = fs::remove_dir_all(overlay_root);
+    })()
 }
 
 fn schedule_runtime_kiro_blocking_work(
@@ -527,10 +504,7 @@ fn runtime_kiro_streaming_reader(
     shared: &RuntimeLocalRewriteProxyShared,
     conversations: RuntimeDeepSeekConversationStore,
 ) -> Result<RuntimeKiroStreamingReader> {
-    let secret = read_kiro_auth_secret(&auth.codex_home)?;
-    let overlay_root = create_private_kiro_temp_root("runtime")?;
-    let data_dir = overlay_root.join("kiro-data");
-    write_kiro_cli_data_dir(&data_dir, &secret)?;
+    let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
     let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret
         .region
@@ -565,7 +539,6 @@ fn runtime_kiro_streaming_reader(
             chat_completions_route,
             conversations,
         );
-        runtime_kiro_remove_overlay(overlay_root);
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
                 err.to_string(),

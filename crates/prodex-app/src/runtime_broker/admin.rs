@@ -1,8 +1,8 @@
 use super::{
-    RuntimeRotationProxyShared, audit_log_event_best_effort,
-    build_runtime_proxy_json_error_response, path_without_query, release_runtime_session_affinity,
-    runtime_broker_metadata_by_log_path, runtime_broker_metadata_for_log_path,
-    runtime_broker_metrics_snapshot, runtime_proxy_log, runtime_proxy_persistence_enabled,
+    RuntimeRotationProxyShared, audit_log_event, build_runtime_proxy_json_error_response,
+    path_without_query, release_runtime_session_affinity, runtime_broker_metadata_by_log_path,
+    runtime_broker_metadata_for_log_path, runtime_broker_metrics_snapshot, runtime_proxy_log,
+    runtime_proxy_persistence_enabled,
 };
 use anyhow::{Context, Result};
 use prodex_runtime_broker::{RuntimeBrokerHealth, RuntimeBrokerMetadata};
@@ -212,7 +212,7 @@ fn runtime_broker_activation_response(
         shared,
         format!("runtime_broker_activate current_profile={current_profile}"),
     );
-    audit_log_event_best_effort(
+    if let Err(err) = audit_log_event(
         "runtime_broker",
         "activate_profile",
         "success",
@@ -221,7 +221,13 @@ fn runtime_broker_activation_response(
             "listen_addr": metadata.listen_addr,
             "current_profile": current_profile,
         }),
-    );
+    ) {
+        return Some(build_runtime_proxy_json_error_response(
+            500,
+            "audit_persistence_failed",
+            &err.to_string(),
+        ));
+    }
     Some(build_runtime_proxy_json_response(
         200,
         serde_json::to_string(&prodex_runtime_broker::runtime_broker_activation_success(
@@ -266,7 +272,7 @@ fn runtime_broker_session_affinity_release_response(
             &err.to_string(),
         ));
     }
-    audit_log_event_best_effort(
+    if let Err(err) = audit_log_event(
         "runtime_broker",
         "release_session_affinity",
         "success",
@@ -274,7 +280,13 @@ fn runtime_broker_session_affinity_release_response(
             "broker_key": metadata.broker_key,
             "listen_addr": metadata.listen_addr,
         }),
-    );
+    ) {
+        return Some(build_runtime_proxy_json_error_response(
+            500,
+            "audit_persistence_failed",
+            &err.to_string(),
+        ));
+    }
     Some(build_runtime_proxy_json_response(
         200,
         serde_json::to_string(

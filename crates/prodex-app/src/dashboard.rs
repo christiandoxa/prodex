@@ -21,7 +21,7 @@ use server::{
 use crate::dashboard_html::DASHBOARD_HTML;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, ProviderQuotaSnapshot,
-    QuotaProviderFilter, audit_log_event_best_effort, collect_profile_summaries,
+    QuotaProviderFilter, audit_log_event, collect_profile_summaries,
     collect_quota_reports_with_filters, create_codex_home_if_missing, ensure_path_is_unique,
     format_copilot_main_quota, format_copilot_quota_status, format_copilot_reset_summary,
     format_gemini_main_quota, format_gemini_quota_status, format_gemini_reset_summary,
@@ -334,15 +334,15 @@ impl DashboardServer {
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
-        audit_log_event_best_effort(
-            "dashboard",
-            "profile_activate",
-            "success",
-            json!({ "profile_name": state.active_profile }),
-        );
-        respond_json(
+        respond_json_result(
             request,
-            json!({ "status": "ok", "activeProfile": state.active_profile }),
+            audit_log_event(
+                "dashboard",
+                "profile_activate",
+                "success",
+                json!({ "profile_name": state.active_profile }),
+            )
+            .map(|()| json!({ "status": "ok", "activeProfile": state.active_profile })),
         )
     }
 
@@ -394,23 +394,25 @@ impl DashboardServer {
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
-        audit_log_event_best_effort(
-            "dashboard",
-            "profile_add",
-            "success",
-            json!({
-                "profile_name": name,
-                "managed": true,
-                "activated": state.active_profile.as_deref() == Some(name.as_str()),
-            }),
-        );
-        respond_json(
+        respond_json_result(
             request,
-            json!({
-                "status": "ok",
-                "profile": name,
-                "activeProfile": state.active_profile,
-                "codexHome": codex_home.display().to_string(),
+            audit_log_event(
+                "dashboard",
+                "profile_add",
+                "success",
+                json!({
+                    "profile_name": name,
+                    "managed": true,
+                    "activated": state.active_profile.as_deref() == Some(name.as_str()),
+                }),
+            )
+            .map(|()| {
+                json!({
+                    "status": "ok",
+                    "profile": name,
+                    "activeProfile": state.active_profile,
+                    "codexHome": codex_home.display().to_string(),
+                })
             }),
         )
     }
@@ -436,18 +438,18 @@ impl DashboardServer {
         {
             return respond_error(request, StatusCode(500), err);
         }
-        audit_log_event_best_effort(
-            "dashboard",
-            "profile_remove",
-            "success",
-            json!({
-                "profile_name": name,
-                "active_profile": state.active_profile,
-            }),
-        );
-        respond_json(
+        respond_json_result(
             request,
-            json!({ "status": "ok", "activeProfile": state.active_profile }),
+            audit_log_event(
+                "dashboard",
+                "profile_remove",
+                "success",
+                json!({
+                    "profile_name": name,
+                    "active_profile": state.active_profile,
+                }),
+            )
+            .map(|()| json!({ "status": "ok", "activeProfile": state.active_profile })),
         )
     }
 }

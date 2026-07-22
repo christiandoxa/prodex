@@ -118,6 +118,7 @@ fn native_copilot_cli_uses_local_responses_provider_contract() {
         listen_addr: "127.0.0.1:48123".parse().unwrap(),
         openai_mount_path: "/v1".to_string(),
         local_model_provider_id: Some(SUPER_COPILOT_PROVIDER_ID.to_string()),
+        force_http_responses: false,
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: std::env::temp_dir(),

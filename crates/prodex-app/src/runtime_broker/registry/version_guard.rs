@@ -1,9 +1,11 @@
 use std::env;
 
+use anyhow::Result;
+
 use super::runtime_broker_observed_binary_identity;
 use crate::{
     AppPaths, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeBrokerVersionGuardOutcome,
-    audit_log_event_best_effort, cleanup_runtime_broker_stale_leases,
+    audit_log_event, cleanup_runtime_broker_stale_leases,
     remove_runtime_broker_registry_if_instance_matches, runtime_current_prodex_binary_identity,
     runtime_current_prodex_version_identity, runtime_process_pid_alive, terminate_runtime_process,
 };
@@ -13,9 +15,9 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
     health: Option<&RuntimeBrokerHealth>,
-) -> RuntimeBrokerVersionGuardOutcome {
+) -> Result<RuntimeBrokerVersionGuardOutcome> {
     if !runtime_process_pid_alive(registry.pid) {
-        return RuntimeBrokerVersionGuardOutcome::Compatible;
+        return Ok(RuntimeBrokerVersionGuardOutcome::Compatible);
     }
 
     let observed_identity = runtime_broker_observed_binary_identity(registry, health);
@@ -45,7 +47,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
         live_leases,
     );
     if decision.outcome != RuntimeBrokerVersionGuardOutcome::Replaced {
-        return decision.outcome;
+        return Ok(decision.outcome);
     }
     let current_identity = decision.current_identity;
     let replacement_reason = decision.replacement_reason.unwrap_or_else(|| {
@@ -54,7 +56,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             &observed_identity,
         )
     });
-    audit_log_event_best_effort(
+    audit_log_event(
         "runtime_broker",
         "replace_stale_broker",
         "success",
@@ -80,8 +82,8 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             "active_requests": health.map(|health| health.active_requests),
             "platform": env::consts::OS,
         }),
-    );
+    )?;
     terminate_runtime_process(registry.pid);
     remove_runtime_broker_registry_if_instance_matches(paths, broker_key, &registry.instance_id);
-    RuntimeBrokerVersionGuardOutcome::Replaced
+    Ok(RuntimeBrokerVersionGuardOutcome::Replaced)
 }

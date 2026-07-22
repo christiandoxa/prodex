@@ -127,7 +127,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
             required: &[
                 "SecretLocation",
                 "redaction_redacted_body_snippet",
-                "audit_log_event_best_effort",
+                "audit_log_event",
             ],
         },
     ];

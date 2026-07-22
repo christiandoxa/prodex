@@ -378,6 +378,7 @@ fn deepseek_catalog_model(
         "upgrade": null,
         "base_instructions": DEEPSEEK_BASE_INSTRUCTIONS,
         "supports_reasoning_summaries": false,
+        "supports_reasoning_summary_parameter": false,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
         "default_verbosity": null,

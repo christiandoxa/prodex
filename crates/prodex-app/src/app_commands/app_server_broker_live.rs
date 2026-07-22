@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 use crate::app_server_broker::{AppServerBrokerLiveValidator, app_server_broker_pump_live_stream};
 
 pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()> {
-    let plan = super::super::runtime_launch::codex_app_server_broker_child_plan(profile)?;
+    let (plan, runtime_proxy) =
+        super::super::runtime_launch::codex_app_server_broker_launch(profile)?;
+    let plan = &plan;
     let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);
     command
@@ -29,6 +31,17 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
             plan.binary.to_string_lossy()
         )
     })?;
+    let _runtime_proxy_lease = match runtime_proxy.as_ref() {
+        Some(proxy) => match proxy.create_child_lease(child.id()) {
+            Ok(lease) => Some(lease),
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        },
+        None => None,
+    };
     let child_stdin = child
         .stdin
         .take()

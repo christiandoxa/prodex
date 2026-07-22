@@ -1,4 +1,5 @@
 use super::*;
+mod command_server;
 pub(crate) mod gateway_config;
 #[path = "runtime_launch/gateway_shutdown.rs"]
 mod gateway_shutdown;
@@ -10,9 +11,15 @@ mod preflight;
 mod provider_names;
 mod providers;
 mod resume_provider;
-mod resume_repair;
+pub(crate) mod resume_repair;
 mod selection;
 mod session_delete;
+pub(super) use command_server::codex_app_server_broker_launch;
+#[cfg(test)]
+use command_server::prepare_codex_command_server_runtime_launch;
+use command_server::{
+    RunLaunchRoute, execute_codex_command_server_managed_runtime, run_launch_route,
+};
 #[cfg(test)]
 use gateway_config::{
     gateway_admin_tokens_config, gateway_call_id_header_config, gateway_guardrail_config,
@@ -42,6 +49,7 @@ use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 struct RunCommandStrategy {
     args: RunArgs,
     codex_args: Vec<OsString>,
+    command_server: bool,
     include_code_review: bool,
     dry_run: bool,
     model_provider_override: Option<String>,
@@ -63,6 +71,7 @@ impl RunCommandStrategy {
         let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&codex_feature_args);
         let (mut codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
+        let command_server = is_codex_command_server_subcommand(&codex_args);
         let mut model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
         let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
@@ -115,6 +124,7 @@ impl RunCommandStrategy {
         Ok(Self {
             args,
             codex_args,
+            command_server,
             include_code_review,
             dry_run,
             model_provider_override,
@@ -180,7 +190,11 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             );
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
-        let mut child = codex_tui_child_plan(prepared.codex_home.clone(), runtime_args);
+        let mut child = if self.command_server {
+            codex_child_plan(prepared.codex_home.clone(), runtime_args)
+        } else {
+            codex_tui_child_plan(prepared.codex_home.clone(), runtime_args)
+        };
         isolate_auto_external_provider_child_env(self.auto_external_provider, &mut child);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
@@ -240,11 +254,7 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
-    if run_launch_route(&args) == RunLaunchRoute::CodexCommandServerDirectPassthrough {
-        quota_base_url(args.base_url.as_deref())?;
-        return handle_codex_command_server_direct_passthrough(args);
-    }
-
+    let route = run_launch_route(&args);
     let strategy = RunCommandStrategy::new(args)?;
     if strategy.dry_run {
         return print_runtime_launch_dry_run(
@@ -257,7 +267,12 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
             None,
         );
     }
-    execute_runtime_launch(strategy)
+    match route {
+        RunLaunchRoute::ManagedRuntime => execute_runtime_launch(strategy),
+        RunLaunchRoute::CodexCommandServerManagedStdio => {
+            execute_codex_command_server_managed_runtime(strategy)
+        }
+    }
 }
 
 pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
@@ -275,65 +290,6 @@ pub(crate) fn start_policy_gateway_application_inner(
     preferred_listen_addr: Option<String>,
 ) -> Result<GatewayApplication> {
     gateway_startup::start_policy_gateway_application(service_mode, preferred_listen_addr)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RunLaunchRoute {
-    ManagedRuntime,
-    CodexCommandServerDirectPassthrough,
-}
-
-fn run_launch_route(args: &RunArgs) -> RunLaunchRoute {
-    // Command servers own stdio; keep Prodex preflight/proxy wrapping out of the stream.
-    if !args.dry_run && is_codex_command_server_subcommand(&args.codex_args) {
-        return RunLaunchRoute::CodexCommandServerDirectPassthrough;
-    }
-    RunLaunchRoute::ManagedRuntime
-}
-
-fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
-    let plan = codex_command_server_direct_passthrough_plan(args)?;
-    exit_with_status(run_child_plan(&plan, None)?)
-}
-
-fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildProcessPlan> {
-    codex_command_server_child_plan(args.profile.as_deref(), args.codex_args, args.no_proxy)
-}
-
-pub(super) fn codex_app_server_broker_child_plan(
-    profile: Option<&str>,
-) -> Result<ChildProcessPlan> {
-    codex_command_server_child_plan(profile, vec![OsString::from("app-server")], false)
-}
-
-fn codex_command_server_child_plan(
-    profile: Option<&str>,
-    codex_args: Vec<OsString>,
-    no_proxy: bool,
-) -> Result<ChildProcessPlan> {
-    let paths = AppPaths::discover()?;
-    let state = AppState::load_and_repair(&paths)?;
-    let selection =
-        RuntimeLaunchSelection::resolve(&paths, &state, profile, None, None, None, None)?;
-
-    if !selection.profileless_local_home
-        && state
-            .profiles
-            .get(&selection.selected_profile_name)
-            .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
-            .managed
-    {
-        ensure_managed_runtime_launch_home_under_root(&paths, &selection.codex_home)?;
-        prepare_managed_codex_home_for_runtime_launch(&paths, &selection.codex_home)?;
-    }
-
-    let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&codex_args);
-    repair_resume_session_in_home(&selection.codex_home, &codex_args)?;
-    let mut child = codex_child_plan(selection.codex_home, codex_args);
-    if no_proxy {
-        remove_upstream_proxy_env(&mut child);
-    }
-    Ok(child)
 }
 
 struct RuntimeLaunchPreparationBuilder<'a> {
@@ -362,9 +318,18 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         })
     }
 
-    fn build(mut self) -> Result<PreparedRuntimeLaunch> {
+    fn build(self) -> Result<PreparedRuntimeLaunch> {
+        self.build_with_terminal_output(true)
+    }
+
+    fn build_with_terminal_output(
+        mut self,
+        terminal_output: bool,
+    ) -> Result<PreparedRuntimeLaunch> {
         self.record_selection()?;
-        self.handle_non_openai_model_provider()?;
+        if terminal_output {
+            self.handle_non_openai_model_provider()?;
+        }
 
         if self.selection.profileless_local_home {
             create_codex_home_if_missing(&self.selection.codex_home)?;
@@ -502,12 +467,13 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
-        if request.external_provider == Some("kiro") {
+        if runtime_launch_uses_kiro_connect_proxy(request) {
             let proxy = start_runtime_kiro_connect_proxy(paths, request.upstream_no_proxy)?;
             return Ok(Some(RuntimeProxyEndpoint {
                 listen_addr: proxy.listen_addr(),
                 openai_mount_path: String::new(),
                 local_model_provider_id: None,
+                force_http_responses: false,
                 realtime_ws_base_url: None,
                 realtime_ws_model: None,
                 lease_dir: paths.root.join("runtime-kiro-connect-proxy-leases"),
@@ -536,6 +502,8 @@ impl RuntimeProxyStartupFactory {
         }
 
         let runtime_upstream_base_url = quota_base_url(request.base_url)?;
+        let response_governance_enabled =
+            RuntimeConfig::from_env_policy_and_cli(paths)?.force_http_response_transport();
         if request.presidio_redaction_enabled || request.smart_context_enabled {
             return Ok(Some(start_runtime_proxy_endpoint(
                 paths,
@@ -546,7 +514,9 @@ impl RuntimeProxyStartupFactory {
                 !request.allow_auto_rotate,
             )?));
         }
-        if request.force_runtime_proxy && !request.allow_auto_rotate {
+        if (request.force_runtime_proxy || response_governance_enabled)
+            && !request.allow_auto_rotate
+        {
             return Ok(Some(start_runtime_proxy_endpoint(
                 paths,
                 state,
@@ -557,6 +527,7 @@ impl RuntimeProxyStartupFactory {
             )?));
         }
         if request.force_runtime_proxy
+            || response_governance_enabled
             || should_enable_runtime_rotation_proxy(
                 state,
                 &selection.selected_profile_name,
@@ -586,12 +557,13 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
-        if request.external_provider == Some("kiro") {
+        if runtime_launch_uses_kiro_connect_proxy(request) {
             let proxy = RuntimeKiroConnectProxy::dry_run();
             return Ok(Some(RuntimeProxyEndpoint {
                 listen_addr: proxy.listen_addr(),
                 openai_mount_path: String::new(),
                 local_model_provider_id: None,
+                force_http_responses: false,
                 realtime_ws_base_url: None,
                 realtime_ws_model: None,
                 lease_dir: paths.root.join("runtime-kiro-connect-proxy-dry-run-leases"),
@@ -615,6 +587,7 @@ impl RuntimeProxyStartupFactory {
         if request.presidio_redaction_enabled
             || request.force_runtime_proxy
             || request.smart_context_enabled
+            || RuntimeConfig::from_env_policy_and_cli(paths)?.force_http_response_transport()
             || should_enable_runtime_rotation_proxy(
                 state,
                 &selection.selected_profile_name,
@@ -686,6 +659,8 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
             .context("failed to build dry-run runtime proxy address")?,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        force_http_responses: RuntimeConfig::from_env_policy_and_cli(paths)?
+            .force_http_response_transport(),
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
@@ -731,6 +706,7 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
             .context("failed to build dry-run runtime local rewrite proxy address")?,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         local_model_provider_id: Some(local_model_provider_id.to_string()),
+        force_http_responses: false,
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-local-proxy-dry-run-leases"),
@@ -769,6 +745,8 @@ fn start_runtime_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        force_http_responses: RuntimeConfig::from_env_policy_and_cli(paths)?
+            .force_http_response_transport(),
         realtime_ws_base_url: proxy
             .realtime_ws_sidecar_addr
             .map(|addr| format!("http://{addr}{RUNTIME_PROXY_OPENAI_MOUNT_PATH}/realtime")),
@@ -825,6 +803,7 @@ fn start_local_rewrite_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         local_model_provider_id: Some(local_model_provider_id.to_string()),
+        force_http_responses: false,
         realtime_ws_base_url: proxy
             .realtime_ws_sidecar_addr
             .map(|addr| format!("http://{addr}")),

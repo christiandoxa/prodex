@@ -58,7 +58,7 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
     }
     print_profile_import_progress("Profile import complete.")?;
     prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "import",
         "success",
@@ -72,7 +72,7 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
             "source_active_profile": source_active_profile.clone(),
             "active_profile": state.active_profile.clone(),
         }),
-    );
+    )?;
 
     let fields = prodex_profile_export::profile_import_summary_fields(
         prodex_profile_export::ProfileImportSummary {

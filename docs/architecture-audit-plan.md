@@ -915,8 +915,8 @@ Missing or incomplete compared to the target state:
 - Kiro conformance depth still trails Gemini / DeepSeek even though chat-completions degraded request/response mapping, invalid response-shape rejection, rejected control, legacy function mapping, and passthrough fixture coverage exists
 - fixture-backed unsupported/degraded parameter matrix per provider/model for more endpoints
 - provider stream termination / error fixture matrix across all supported providers
-- app-server JSON-RPC schema fixtures and drift detection
-- app-server thread / turn / item lifecycle replay tests
+- upstream-generated app-server schema conformance beyond the broker's checked-in protocol-surface fixtures
+- live cross-release app-server lifecycle replay beyond the checked-in thread/turn/item validation corpus
 - gateway auth / budget / virtual-key / route-fallback integration matrix
 - security regression matrix for malformed frames, oversized payloads, key leakage, role separation
 

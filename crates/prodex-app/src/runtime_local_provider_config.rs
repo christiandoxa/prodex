@@ -173,6 +173,7 @@ fn local_catalog_model(
         "upgrade": null,
         "base_instructions": null,
         "supports_reasoning_summaries": false,
+        "supports_reasoning_summary_parameter": false,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
         "default_verbosity": null,
@@ -272,12 +273,12 @@ mod tests {
 
     #[test]
     fn provider_capability_catalogs_expose_standard_reasoning_efforts() {
-        for (provider_id, model) in [
-            ("prodex-local", "local/qwen"),
-            ("prodex-copilot", "gpt-5.5"),
-            ("prodex-anthropic", "claude-sonnet-4-6"),
-            ("prodex-deepseek", "deepseek-v4-pro"),
-            ("prodex-gemini", "gemini-2.5-pro"),
+        for (provider_id, model, supports_reasoning_summary_parameter) in [
+            ("prodex-local", "local/qwen", false),
+            ("prodex-copilot", "gpt-5.5", true),
+            ("prodex-anthropic", "claude-sonnet-4-6", true),
+            ("prodex-deepseek", "deepseek-v4-pro", false),
+            ("prodex-gemini", "gemini-2.5-pro", true),
         ] {
             let codex_home = temp_codex_home(provider_id);
             let user_args = vec![
@@ -291,6 +292,12 @@ mod tests {
                 .expect("provider catalog should prepare");
             let catalog_path = catalog_path_from_args(&args);
             assert_contains_standard_efforts(&catalog_efforts(&catalog_path));
+            let catalog: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+            assert_eq!(
+                catalog["models"][0]["supports_reasoning_summary_parameter"],
+                supports_reasoning_summary_parameter
+            );
 
             let _ = fs::remove_dir_all(codex_home);
         }

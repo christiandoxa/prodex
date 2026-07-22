@@ -70,6 +70,8 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
         realtime_ws_base_url,
         openai_mount_path,
         local_model_provider_id: None,
+        force_http_responses: crate::RuntimeConfig::from_env_policy_and_cli(paths)?
+            .force_http_response_transport(),
         realtime_ws_model: None,
         lease_dir,
         broker_session_affinity_control: Some(RuntimeBrokerSessionAffinityControl {

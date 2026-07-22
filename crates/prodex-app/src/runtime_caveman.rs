@@ -96,6 +96,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        if !self.args.dry_run {
+            crate::app_commands::runtime_launch::resume_repair::repair_resume_session_in_shared_home(
+                &prepared.paths.shared_codex_root,
+                &self.codex_args,
+            )?;
+        }
         if self.presidio_enabled {
             ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
@@ -579,6 +585,10 @@ mod tests {
             .expect("bare session id should be normalized to resume");
         assert_eq!(
             rendered.get(resume_index + 1).map(String::as_str),
+            Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
+        );
+        assert_eq!(
+            prodex_runtime_launch::codex_resume_session_id(&strategy.codex_args),
             Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
         );
         assert!(

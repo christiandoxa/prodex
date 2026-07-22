@@ -211,6 +211,7 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
         listen_addr: "127.0.0.1:33475".parse().expect("listen addr should parse"),
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        force_http_responses: false,
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: lease_dir.clone(),
@@ -287,7 +288,8 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
     };
 
     let outcome =
-        replace_runtime_broker_if_version_mismatch_with_health(&paths, broker_key, &registry, None);
+        replace_runtime_broker_if_version_mismatch_with_health(&paths, broker_key, &registry, None)
+            .expect("version guard should persist its audit event");
 
     assert_eq!(
         outcome,

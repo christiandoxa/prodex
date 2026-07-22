@@ -40,7 +40,7 @@ fn resolved_gateway_request_constraints_map_defaults_and_strict_policy() {
 }
 
 #[test]
-fn run_launch_route_sends_command_server_subcommands_directly() {
+fn run_launch_route_sends_command_server_subcommands_through_managed_stdio() {
     let mcp_args = test_run_args(vec![
         OsString::from("mcp-server"),
         OsString::from("--stdio"),
@@ -56,20 +56,20 @@ fn run_launch_route_sends_command_server_subcommands_directly() {
 
     assert_eq!(
         run_launch_route(&mcp_args),
-        RunLaunchRoute::CodexCommandServerDirectPassthrough
+        RunLaunchRoute::CodexCommandServerManagedStdio
     );
     assert_eq!(
         run_launch_route(&app_args),
-        RunLaunchRoute::CodexCommandServerDirectPassthrough
+        RunLaunchRoute::CodexCommandServerManagedStdio
     );
     assert_eq!(
         run_launch_route(&exec_args),
-        RunLaunchRoute::CodexCommandServerDirectPassthrough
+        RunLaunchRoute::CodexCommandServerManagedStdio
     );
 }
 
 #[test]
-fn run_launch_route_preserves_app_server_protocol_args_for_direct_passthrough() {
+fn run_launch_route_preserves_app_server_protocol_args_for_managed_stdio() {
     let passthrough = vec![
         OsString::from("app-server"),
         OsString::from("experimentalFeature/list"),
@@ -86,13 +86,13 @@ fn run_launch_route_preserves_app_server_protocol_args_for_direct_passthrough() 
 
     assert_eq!(
         run_launch_route(&args),
-        RunLaunchRoute::CodexCommandServerDirectPassthrough
+        RunLaunchRoute::CodexCommandServerManagedStdio
     );
     assert_eq!(args.codex_args, passthrough);
 }
 
 #[test]
-fn run_launch_route_preserves_release_0141_command_server_args_for_direct_passthrough() {
+fn run_launch_route_preserves_release_0141_command_server_args_for_managed_stdio() {
     for passthrough in [
         vec![
             OsString::from("app-server"),
@@ -133,7 +133,7 @@ fn run_launch_route_preserves_release_0141_command_server_args_for_direct_passth
 
         assert_eq!(
             run_launch_route(&args),
-            RunLaunchRoute::CodexCommandServerDirectPassthrough
+            RunLaunchRoute::CodexCommandServerManagedStdio
         );
         assert_eq!(args.codex_args, passthrough);
     }
@@ -153,7 +153,7 @@ fn run_launch_route_keeps_codex_exec_hook_trust_flag_managed_and_unmodified() {
 }
 
 #[test]
-fn run_launch_route_preserves_mcp_meta_args_for_direct_passthrough() {
+fn run_launch_route_preserves_mcp_meta_args_for_managed_stdio() {
     let passthrough = vec![
         OsString::from("mcp-server"),
         OsString::from("--stdio"),
@@ -168,13 +168,13 @@ fn run_launch_route_preserves_mcp_meta_args_for_direct_passthrough() {
 
     assert_eq!(
         run_launch_route(&args),
-        RunLaunchRoute::CodexCommandServerDirectPassthrough
+        RunLaunchRoute::CodexCommandServerManagedStdio
     );
     assert_eq!(args.codex_args, passthrough);
 }
 
 #[test]
-fn command_server_direct_passthrough_uses_selected_profile_home() {
+fn command_server_managed_stdio_uses_selected_profile_home() {
     let root = temp_dir("command-server-profile-home");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let main_home = root.join("main-home");
@@ -216,11 +216,15 @@ fn command_server_direct_passthrough_uses_selected_profile_home() {
     ]);
     args.profile = Some("second".to_string());
 
-    let plan = codex_command_server_direct_passthrough_plan(args).unwrap();
+    let strategy = RunCommandStrategy::new(args).unwrap();
+    let prepared = prepare_codex_command_server_runtime_launch(strategy.runtime_request()).unwrap();
+    let plan = strategy
+        .build_plan(&prepared, prepared.runtime_proxy.as_ref())
+        .unwrap();
 
-    assert_eq!(plan.codex_home, second_home);
+    assert_eq!(plan.child.codex_home, second_home);
     assert_eq!(
-        plan.args,
+        plan.child.args,
         vec![
             OsString::from("exec-server"),
             OsString::from("--remote"),
@@ -230,7 +234,7 @@ fn command_server_direct_passthrough_uses_selected_profile_home() {
 }
 
 #[test]
-fn command_server_direct_passthrough_rewrites_legacy_profile_v2_for_codex_0134() {
+fn command_server_managed_stdio_rewrites_legacy_profile_v2_for_codex_0134() {
     let root = temp_dir("command-server-profile-v2-rewrite");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let main_home = root.join("main-home");
@@ -259,10 +263,14 @@ fn command_server_direct_passthrough_rewrites_legacy_profile_v2_for_codex_0134()
         OsString::from("--stdio"),
     ]);
 
-    let plan = codex_command_server_direct_passthrough_plan(args).unwrap();
+    let strategy = RunCommandStrategy::new(args).unwrap();
+    let prepared = prepare_codex_command_server_runtime_launch(strategy.runtime_request()).unwrap();
+    let plan = strategy
+        .build_plan(&prepared, prepared.runtime_proxy.as_ref())
+        .unwrap();
 
     assert_eq!(
-        plan.args,
+        plan.child.args,
         vec![
             OsString::from("exec-server"),
             OsString::from("--profile"),
@@ -270,6 +278,107 @@ fn command_server_direct_passthrough_rewrites_legacy_profile_v2_for_codex_0134()
             OsString::from("--stdio"),
         ]
     );
+}
+
+#[test]
+fn command_server_managed_stdio_routes_model_traffic_through_runtime_proxy() {
+    let root = temp_dir("command-server-runtime-proxy");
+    let codex_home = root.join("codex-home");
+    fs::create_dir_all(&codex_home).unwrap();
+    let strategy = RunCommandStrategy::new(test_run_args(vec![
+        OsString::from("app-server"),
+        OsString::from("--stdio"),
+    ]))
+    .unwrap();
+    let endpoint = RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:4455".parse().unwrap(),
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
+        force_http_responses: true,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
+        lease_dir: root.join("leases"),
+        broker_session_affinity_control: None,
+        _lease: None,
+        _direct_proxy: None,
+        _kiro_connect_proxy: None,
+    };
+    let prepared = PreparedRuntimeLaunch {
+        paths: AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("legacy-shared-codex"),
+        },
+        codex_home,
+        managed: false,
+        runtime_proxy: None,
+    };
+
+    let plan = strategy.build_plan(&prepared, Some(&endpoint)).unwrap();
+    let args = plan
+        .child
+        .args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>();
+
+    assert!(
+        args.iter().any(|arg| {
+            arg.as_ref() == "chatgpt_base_url=\"http://127.0.0.1:4455/backend-api\""
+        })
+    );
+    assert!(args.iter().any(|arg| {
+        arg.as_ref()
+            == format!(
+                "openai_base_url=\"http://127.0.0.1:4455{}\"",
+                RUNTIME_PROXY_OPENAI_MOUNT_PATH
+            )
+    }));
+    assert!(args.iter().any(|arg| {
+        arg.as_ref() == "model_providers.prodex-openai-governed-http.supports_websockets=false"
+    }));
+    assert_eq!(args[args.len() - 2..], ["app-server", "--stdio"]);
+    assert!(!args.iter().any(|arg| arg.contains("disable_paste_burst")));
+}
+
+#[test]
+fn response_governance_forces_runtime_proxy_for_single_profile() {
+    let root = temp_dir("response-governance-single-profile-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let codex_home = root.join("codex-home");
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        root.join("policy.toml"),
+        "version = 1\n[governance]\nmode = \"enterprise_observe\"\ninspection = \"observe\"\n",
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home,
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+    let strategy =
+        RunCommandStrategy::new(test_run_args(vec![OsString::from("app-server")])).unwrap();
+
+    let prepared = prepare_runtime_launch_dry_run(strategy.runtime_request()).unwrap();
+    let endpoint = prepared
+        .runtime_proxy
+        .expect("response governance should force a runtime proxy");
+
+    assert!(endpoint.force_http_responses);
 }
 
 #[test]
@@ -283,6 +392,16 @@ fn run_launch_route_keeps_remote_control_managed() {
 fn run_launch_route_keeps_explicit_dry_run_managed_for_command_server() {
     let mut args = test_run_args(vec![OsString::from("mcp-server")]);
     args.dry_run = true;
+
+    assert_eq!(run_launch_route(&args), RunLaunchRoute::ManagedRuntime);
+}
+
+#[test]
+fn run_launch_route_keeps_passthrough_dry_run_managed_for_command_server() {
+    let args = test_run_args(vec![
+        OsString::from("--dry-run"),
+        OsString::from("mcp-server"),
+    ]);
 
     assert_eq!(run_launch_route(&args), RunLaunchRoute::ManagedRuntime);
 }

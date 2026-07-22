@@ -8,6 +8,7 @@ const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
 const CODEX_PROFILE_ARG: &str = "--profile";
 const CODEX_LEGACY_PROFILE_V2_ARG: &str = "--profile-v2";
+const PRODEX_GOVERNED_HTTP_PROVIDER_ID: &str = "prodex-openai-governed-http";
 
 pub fn runtime_proxy_codex_passthrough_args(
     runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
@@ -20,6 +21,12 @@ pub fn runtime_proxy_codex_passthrough_args(
                     proxy.listen_addr,
                     proxy.openai_mount_path,
                     local_provider_id,
+                    user_args,
+                )
+            } else if proxy.force_http_responses {
+                runtime_proxy_governed_http_codex_args(
+                    proxy.listen_addr,
+                    proxy.openai_mount_path,
                     user_args,
                 )
             } else if proxy.openai_mount_path == runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH {
@@ -38,6 +45,70 @@ pub fn runtime_proxy_codex_passthrough_args(
             )
         })
         .unwrap_or_else(|| user_args.to_vec())
+}
+
+fn runtime_proxy_governed_http_codex_args(
+    listen_addr: SocketAddr,
+    openai_mount_path: &str,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    let mut args = scope_codex_exec_config_args(&runtime_proxy_codex_args_with_mount_path(
+        listen_addr,
+        openai_mount_path,
+        user_args,
+    ));
+    let proxy_openai_base = format!(
+        "http://{listen_addr}{}",
+        normalize_mount_path(openai_mount_path)
+    );
+    let overrides = [
+        format!(
+            "model_provider={}",
+            toml_string_literal(PRODEX_GOVERNED_HTTP_PROVIDER_ID)
+        ),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.name={}",
+            toml_string_literal("OpenAI through Prodex governance")
+        ),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.base_url={}",
+            toml_string_literal(&proxy_openai_base)
+        ),
+        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.wire_api=\"responses\""),
+        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.requires_openai_auth=true"),
+        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_websockets=false"),
+    ];
+    let insert_at = governed_http_config_insertion_index(&args);
+    args.splice(
+        insert_at..insert_at,
+        overrides
+            .into_iter()
+            .flat_map(|value| [OsString::from("-c"), OsString::from(value)]),
+    );
+    args
+}
+
+fn governed_http_config_insertion_index(args: &[OsString]) -> usize {
+    let Some(command_index) = first_codex_positional_arg_index(args) else {
+        return args.len();
+    };
+    let Some(command) = args[command_index].to_str() else {
+        return command_index;
+    };
+    if !matches!(command, "exec" | "resume") {
+        return command_index;
+    }
+    let after_command = command_index + 1;
+    let nested = first_codex_positional_arg_index(&args[after_command..])
+        .map(|index| after_command + index)
+        .unwrap_or(args.len());
+    if command == "exec" && args.get(nested).and_then(|arg| arg.to_str()) == Some("resume") {
+        let after_resume = nested + 1;
+        return first_codex_positional_arg_index(&args[after_resume..])
+            .map(|index| after_resume + index)
+            .unwrap_or(args.len());
+    }
+    nested
 }
 
 pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {

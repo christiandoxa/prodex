@@ -71,7 +71,7 @@ pub(super) fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
         if parse_failed || invalid_frame {
             let summary = session.into_report_json();
             app_server_broker_log_preview_summary(&log_path, &summary);
-            app_server_broker_audit_preview_summary(mode, &summary);
+            app_server_broker_audit_preview_summary(mode, &summary)?;
             serde_json::to_writer(&mut diagnostics_writer, &summary)?;
             diagnostics_writer.write_all(b"\n")?;
             let (parse_error_count, invalid_frame_count) = validation_failure_counts(&summary);
@@ -105,7 +105,7 @@ pub(super) fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
     let pending_failure = session.finish(line_index);
     let summary = session.into_report_json();
     app_server_broker_log_preview_summary(&log_path, &summary);
-    app_server_broker_audit_preview_summary(mode, &summary);
+    app_server_broker_audit_preview_summary(mode, &summary)?;
     serde_json::to_writer(&mut diagnostics_writer, &summary)?;
     diagnostics_writer.write_all(b"\n")?;
     diagnostics_writer.flush()?;
@@ -123,7 +123,7 @@ fn finish_failed_session<D: Write>(
 ) -> anyhow::Result<()> {
     let summary = session.into_report_json();
     app_server_broker_log_preview_summary(log_path, &summary);
-    app_server_broker_audit_preview_summary(mode, &summary);
+    app_server_broker_audit_preview_summary(mode, &summary)?;
     serde_json::to_writer(&mut *diagnostics_writer, &summary)?;
     diagnostics_writer.write_all(b"\n")?;
     Ok(())

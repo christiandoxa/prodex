@@ -479,7 +479,11 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
     assert!(rendered.contains(&"model_context_window=1048576".to_string()));
     assert!(rendered.contains(&"model_auto_compact_token_limit=900000".to_string()));
     assert!(rendered.contains(&"model_reasoning_summary=\"none\"".to_string()));
-    assert!(rendered.contains(&"model_supports_reasoning_summaries=true".to_string()));
+    assert!(
+        !rendered
+            .iter()
+            .any(|arg| arg.starts_with("model_supports_reasoning_summaries="))
+    );
     assert!(rendered.contains(&"web_search=\"live\"".to_string()));
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(rendered.contains(&"features.image_generation=true".to_string()));

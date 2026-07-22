@@ -105,7 +105,7 @@ fn finish_locked<D: Write>(
     state.finished = true;
     let summary = std::mem::take(&mut state.session).into_report_json();
     app_server_broker_log_preview_summary(&state.log_path, &summary);
-    app_server_broker_audit_preview_summary("stdio-live", &summary);
+    app_server_broker_audit_preview_summary("stdio-live", &summary)?;
     serde_json::to_writer(&mut *diagnostics, &summary)?;
     diagnostics.write_all(b"\n")?;
     diagnostics.flush()?;

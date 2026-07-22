@@ -1,5 +1,5 @@
 use crate::audit_log::append_audit_event;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::cell::RefCell;
@@ -11,13 +11,14 @@ pub(crate) use prodex_core::{absolutize, default_codex_home};
 #[cfg(test)]
 pub(crate) use prodex_core::{same_path, select_default_codex_home};
 
-pub(crate) fn audit_log_event_best_effort(
+pub(crate) fn audit_log_event(
     component: &str,
     action: &str,
     outcome: &str,
     details: serde_json::Value,
-) {
-    let _ = append_audit_event(component, action, outcome, details);
+) -> Result<()> {
+    append_audit_event(component, action, outcome, details)
+        .with_context(|| format!("failed to append audit event {component}/{action}"))
 }
 
 pub(crate) fn print_launch_status(message: &str) {
@@ -110,4 +111,36 @@ fn render_launch_status_tui(
     message: &str,
 ) -> Result<()> {
     draw_status_panel_terminal(terminal, "Prodex Launch", "preflight", "Status", message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn audit_log_event_surfaces_persistence_failure() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "prodex-audit-failure-test-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        let blocker = root.join("not-a-directory");
+        fs::write(&blocker, "blocked").expect("blocking file should be written");
+        let _audit_dir = crate::TestEnvVarGuard::set(
+            "PRODEX_AUDIT_LOG_DIR",
+            blocker.to_str().expect("test path should be UTF-8"),
+        );
+
+        let error = audit_log_event("profile", "add", "success", serde_json::json!({}))
+            .expect_err("audit persistence failure must be visible");
+
+        assert!(format!("{error:#}").contains("failed to append audit event profile/add"));
+        let _ = fs::remove_dir_all(root);
+    }
 }

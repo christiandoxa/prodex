@@ -4,8 +4,9 @@ use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
 use std::fmt;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 #[path = "kiro_command.rs"]
 mod command;
 use command::run_kiro_metadata_command;
@@ -13,6 +14,10 @@ use command::run_kiro_metadata_command;
 mod environment;
 use environment::discover_kiro_database_path;
 pub(crate) use environment::kiro_cli_data_dir_env;
+#[path = "kiro_store.rs"]
+mod store;
+pub(crate) use store::prepare_kiro_cli_data_dir;
+use store::{KIRO_DATA_DIR, write_kiro_cli_data_dir};
 
 use super::manage::print_profile_panel;
 use super::write_secret_text_file;
@@ -22,7 +27,7 @@ use crate::runtime_kiro_acp::{
 use crate::secret_store_support::secret_file_read_error;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
+    audit_log_event, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
     managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
 };
 
@@ -163,7 +168,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
             true,
             model_catalog_refreshed,
         )?;
-        audit_kiro_import(&state, &existing_name, &context, true);
+        audit_kiro_import(&state, &existing_name, &context, true)?;
         return Ok(());
     } else {
         let requested = args
@@ -209,7 +214,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
         false,
         model_catalog_refreshed,
     )?;
-    audit_kiro_import(&state, &profile_name, &context, false);
+    audit_kiro_import(&state, &profile_name, &context, false)?;
     Ok(())
 }
 
@@ -281,8 +286,8 @@ fn audit_kiro_import(
     profile_name: &str,
     context: &KiroImportContext,
     updated_existing: bool,
-) {
-    audit_log_event_best_effort(
+) -> Result<()> {
+    audit_log_event(
         "profile",
         "import_kiro",
         "success",
@@ -299,7 +304,7 @@ fn audit_kiro_import(
             "activated": state.active_profile.as_deref() == Some(profile_name),
             "updated_existing": updated_existing,
         }),
-    );
+    )
 }
 
 fn default_kiro_profile_name(
@@ -528,99 +533,6 @@ fn read_kiro_auth_secret_text(path: &Path) -> Result<String> {
         .with_context(|| format!("failed to read {}", path.display()))
 }
 
-pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) -> Result<()> {
-    ensure_private_kiro_data_dir(data_dir)?;
-    let database_path = data_dir.join("data.sqlite3");
-    let connection = Connection::open(&database_path)
-        .with_context(|| format!("failed to open {}", database_path.display()))?;
-    connection.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS migrations (
-            id INTEGER PRIMARY KEY,
-            version INTEGER NOT NULL,
-            migration_time INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY,
-            command TEXT,
-            shell TEXT,
-            pid INTEGER,
-            session_id TEXT,
-            cwd TEXT,
-            start_time INTEGER,
-            end_time INTEGER,
-            duration INTEGER,
-            hostname TEXT,
-            exit_code INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS state (
-            key TEXT PRIMARY KEY,
-            value BLOB
-        );
-        CREATE TABLE IF NOT EXISTS auth_kv (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        CREATE TABLE IF NOT EXISTS conversations (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        CREATE TABLE IF NOT EXISTS conversations_v2 (
-            key TEXT NOT NULL,
-            conversation_id TEXT NOT NULL,
-            value TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY (key, conversation_id)
-        );
-        CREATE TABLE IF NOT EXISTS extracted_kas_versions (
-            version TEXT PRIMARY KEY,
-            last_used_at INTEGER NOT NULL
-        );
-        "#,
-    )?;
-    for version in 0..=9_i64 {
-        connection.execute(
-            "INSERT OR IGNORE INTO migrations (version, migration_time) VALUES (?1, strftime('%s', 'now'))",
-            params![version],
-        )?;
-    }
-    connection.execute(
-        "INSERT OR REPLACE INTO auth_kv(key, value) VALUES(?1, ?2)",
-        params![secret.auth_key, secret.auth_json],
-    )?;
-    if let Some(profile_state) = kiro_profile_state_json(secret)? {
-        connection.execute(
-            "INSERT OR REPLACE INTO state(key, value) VALUES(?1, ?2)",
-            params![KIRO_PROFILE_STATE_KEY, profile_state],
-        )?;
-    } else {
-        connection.execute(
-            "DELETE FROM state WHERE key = ?1",
-            params![KIRO_PROFILE_STATE_KEY],
-        )?;
-    }
-    write_kiro_state_entry(
-        &connection,
-        KIRO_START_URL_STATE_KEY,
-        secret.start_url.as_deref(),
-    )?;
-    write_kiro_state_entry(&connection, KIRO_REGION_STATE_KEY, secret.region.as_deref())?;
-    Ok(())
-}
-
-fn ensure_private_kiro_data_dir(data_dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(data_dir)
-        .with_context(|| format!("failed to create {}", data_dir.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("failed to make {} private", data_dir.display()))?;
-    }
-    Ok(())
-}
-
 fn write_kiro_auth_secret(codex_home: &Path, secret: &KiroAuthSecret) -> Result<()> {
     let path = codex_home.join(KIRO_CREDENTIALS_FILE);
     write_secret_text_file(
@@ -645,37 +557,32 @@ fn write_kiro_model_catalog_snapshot_with_command(
     secret: &KiroAuthSecret,
     command: &std::ffi::OsStr,
 ) -> Result<()> {
-    let overlay_root = create_private_kiro_temp_root("catalog")?;
-    let result = (|| {
-        let data_dir = overlay_root.join("kiro-data");
-        write_kiro_cli_data_dir(&data_dir, secret)?;
-        let mut extra_env = kiro_cli_data_dir_env(&data_dir);
-        if let Some(region) = secret
-            .region
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            extra_env.push((OsString::from("AWS_REGION"), OsString::from(region)));
-        }
-        let cwd = env::current_dir().unwrap_or_else(|_| codex_home.to_path_buf());
-        let models = native_kiro_model_catalog(command, &cwd, &extra_env).or_else(|_| {
-            let bootstrap = runtime_kiro_acp_bootstrap_with_command(command, &cwd, &extra_env)?;
-            Ok::<_, anyhow::Error>(runtime_kiro_acp_model_catalog(&bootstrap.session))
-        })?;
-        let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        if models.is_empty() {
-            let _ = std::fs::remove_file(&path);
-            return Ok(());
-        }
-        write_secret_text_file(
-            &path,
-            &serde_json::to_string_pretty(&serde_json::json!({ "models": models }))
-                .context("failed to serialize Kiro model catalog")?,
-        )
-    })();
-    let _ = std::fs::remove_dir_all(overlay_root);
-    result
+    let data_dir = codex_home.join(KIRO_DATA_DIR);
+    write_kiro_cli_data_dir(&data_dir, secret)?;
+    let mut extra_env = kiro_cli_data_dir_env(&data_dir);
+    if let Some(region) = secret
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        extra_env.push((OsString::from("AWS_REGION"), OsString::from(region)));
+    }
+    let cwd = env::current_dir().unwrap_or_else(|_| codex_home.to_path_buf());
+    let models = native_kiro_model_catalog(command, &cwd, &extra_env).or_else(|_| {
+        let bootstrap = runtime_kiro_acp_bootstrap_with_command(command, &cwd, &extra_env)?;
+        Ok::<_, anyhow::Error>(runtime_kiro_acp_model_catalog(&bootstrap.session))
+    })?;
+    let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
+    if models.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    write_secret_text_file(
+        &path,
+        &serde_json::to_string_pretty(&serde_json::json!({ "models": models }))
+            .context("failed to serialize Kiro model catalog")?,
+    )
 }
 
 fn native_kiro_model_catalog(
@@ -739,52 +646,6 @@ fn native_kiro_model_catalog(
     Ok(models)
 }
 
-pub(crate) fn create_private_kiro_temp_root(name: &str) -> Result<PathBuf> {
-    for _ in 0..8 {
-        let mut random = [0_u8; 16];
-        getrandom::fill(&mut random)
-            .context("failed to generate Kiro snapshot temp directory name")?;
-        let path = env::temp_dir().join(format!(
-            "prodex-kiro-{name}-{}-{}",
-            std::process::id(),
-            kiro_hex(&random)
-        ));
-        match create_private_kiro_temp_root_dir(&path) {
-            Ok(()) => return Ok(path),
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("failed to create private {}", path.display()));
-            }
-        }
-    }
-    bail!("failed to create unique Kiro snapshot temp directory")
-}
-
-fn create_private_kiro_temp_root_dir(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = std::fs::DirBuilder::new();
-        builder.mode(0o700);
-        builder.create(path)
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::create_dir(path)
-    }
-}
-
-fn kiro_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
 fn read_kiro_whoami_json() -> Result<Value> {
     let output = run_kiro_metadata_command(&kiro_bin(), &["whoami", "--format", "json"], None, &[])
         .context("failed to execute Kiro CLI")?;
@@ -797,74 +658,11 @@ fn read_kiro_whoami_json() -> Result<Value> {
     serde_json::from_slice(&output.stdout).context("failed to parse Kiro whoami JSON")
 }
 
-fn kiro_profile_state_json(secret: &KiroAuthSecret) -> Result<Option<String>> {
-    let Some(arn) = secret
-        .profile_arn
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    let Some(profile_name) = secret
-        .profile_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    serde_json::to_string(&serde_json::json!({
-        "arn": arn,
-        "profile_name": profile_name,
-        "user_id": secret.email.as_deref().map(str::trim).filter(|value| !value.is_empty()),
-    }))
-    .map(Some)
-    .context("failed to serialize Kiro profile state")
-}
-
-fn write_kiro_state_entry(connection: &Connection, key: &str, value: Option<&str>) -> Result<()> {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        connection.execute(
-            "INSERT OR REPLACE INTO state(key, value) VALUES(?1, ?2)",
-            params![key, value],
-        )?;
-    } else {
-        connection.execute("DELETE FROM state WHERE key = ?1", params![key])?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn kiro_snapshot_temp_dir_is_unique_and_private() {
-        let first =
-            create_private_kiro_temp_root("test").expect("first temp dir should be created");
-        let second =
-            create_private_kiro_temp_root("test").expect("second temp dir should be created");
-        assert_ne!(first, second);
-        assert!(first.is_dir());
-        assert!(second.is_dir());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&first).unwrap().permissions().mode() & 0o777,
-                0o700
-            );
-            assert_eq!(
-                fs::metadata(&second).unwrap().permissions().mode() & 0o777,
-                0o700
-            );
-        }
-        let _ = fs::remove_dir_all(first);
-        let _ = fs::remove_dir_all(second);
-    }
 
     #[cfg(unix)]
     #[test]
@@ -1002,7 +800,7 @@ sys.exit(1)
 
     #[test]
     fn write_kiro_cli_data_dir_materializes_auth_and_profile_state() {
-        let data_dir = std::env::temp_dir().join(format!(
+        let root = std::env::temp_dir().join(format!(
             "prodex-kiro-data-{}-{}",
             std::process::id(),
             SystemTime::now()
@@ -1010,11 +808,21 @@ sys.exit(1)
                 .unwrap()
                 .as_nanos()
         ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let codex_home = root.join("codex-home");
+        create_codex_home_if_missing(&codex_home).unwrap();
+        let data_dir = codex_home.join(KIRO_DATA_DIR);
         let secret = KiroAuthSecret {
             auth_key: "codewhisperer:odic:token".to_string(),
             auth_kind: "builder-id".to_string(),
             auth_json: serde_json::json!({
                 "access_token": "kiro-access-token",
+                "expires_at": "2026-01-01T00:00:00Z",
                 "region": "us-east-1"
             })
             .to_string(),
@@ -1027,13 +835,26 @@ sys.exit(1)
             region: Some("us-east-1".to_string()),
         };
 
-        write_kiro_cli_data_dir(&data_dir, &secret).expect("data dir should materialize");
+        write_kiro_auth_secret(&codex_home, &secret).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("data.sqlite3"), []).unwrap();
+        let (prepared_data_dir, _) =
+            prepare_kiro_cli_data_dir(&codex_home).expect("data dir should materialize");
+        assert_eq!(prepared_data_dir, data_dir);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(
                 fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777,
                 0o700
+            );
+            assert_eq!(
+                fs::metadata(data_dir.join("data.sqlite3"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
             );
         }
 
@@ -1092,7 +913,39 @@ sys.exit(1)
             );
         }
 
-        let _ = std::fs::remove_dir_all(data_dir);
+        let refreshed_auth = serde_json::json!({
+            "access_token": "kiro-refreshed-access-token",
+            "expires_at": "2026-01-02T00:00:00Z",
+            "region": "us-east-1"
+        })
+        .to_string();
+        connection
+            .execute(
+                "UPDATE auth_kv SET value = ?1 WHERE key = ?2",
+                params![refreshed_auth, secret.auth_key],
+            )
+            .unwrap();
+        drop(connection);
+
+        let (_, prepared_secret) = prepare_kiro_cli_data_dir(&codex_home).unwrap();
+        assert_eq!(prepared_secret.auth_json, refreshed_auth);
+        assert_eq!(
+            read_kiro_auth_secret(&codex_home).unwrap().auth_json,
+            refreshed_auth
+        );
+
+        #[cfg(unix)]
+        {
+            let database_path = data_dir.join("data.sqlite3");
+            fs::remove_file(&database_path).unwrap();
+            let outside = root.join("outside.sqlite3");
+            fs::write(&outside, []).unwrap();
+            std::os::unix::fs::symlink(outside, database_path).unwrap();
+            let error = prepare_kiro_cli_data_dir(&codex_home).unwrap_err();
+            assert!(error.to_string().contains("not a regular Kiro database"));
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

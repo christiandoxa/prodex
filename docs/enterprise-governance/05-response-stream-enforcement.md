@@ -14,7 +14,7 @@ post-commit termination without weakening affinity or no-mid-stream rotation.
 | Buffered HTTP response | Successful bodies run typed inspection/masking and full-coverage/output-limit obligations before commit; denial is content-free and mandatory-audited when configured | Inspection remains bounded to supported response schemas and modalities |
 | HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
 | Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the governed stream wrapper | Structured tool-call semantics remain limited to the adapter's normalized emitted bytes |
-| Generic Codex WebSocket response | Request frames use typed inspection while native response tracking preserves retry and affinity; observe mode records unsupported response coverage, while enforce mode rejects the upgrade with an HTTPS-fallback response before commit | Native upstream-to-client frames remain transport-transparent and therefore do not use the local-rewrite response-obligation PEP |
+| Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and is rejected before upgrade in enforce mode | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
 | Gemini Live WebSocket response | Client frames are classified/governed; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
 | Usage reconciliation | Commit state is tracked at first delivery; post-commit policy termination is audited and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
@@ -24,11 +24,14 @@ Its bounded pre-commit prefix can deny before any local byte is released;
 violations discovered later are explicit post-commit termination and never
 permit retry or rotation.
 
-Translated Responses adapters advertise `supports_websockets=false`, matching
-Codex's provider contract, and use HTTPS/SSE. A defensive WebSocket attempt gets
-an explicit HTTPS-fallback response; Gemini Live remains the translated
-WebSocket path. Native OpenAI auto-rotate WebSockets are handled by the separate
-transport-transparent runtime proxy.
+When response inspection is active, Prodex launches Codex with a dedicated
+OpenAI-compatible provider that advertises `supports_websockets=false` and
+points at the runtime proxy. This keeps auto-rotation and affinity in the proxy
+while routing inspectable model output through HTTPS/SSE. A defensive direct
+WebSocket attempt is observed as unsupported coverage or rejected with an
+explicit HTTPS-fallback response according to rollout mode. Gemini Live remains
+the translated governed WebSocket path. With inspection off, native OpenAI
+WebSockets retain the transport-transparent runtime proxy behavior.
 
 ## Response Enforcement Contract
 
@@ -231,6 +234,8 @@ an upstream `429`, quota exhaustion, or provider transport failure.
 
 Existing focused tests verify that:
 
+- active response inspection forces a runtime proxy even for a single profile;
+- the governed Codex provider disables WebSockets and retains the proxy base URL;
 - a buffered output keyword returns `403 policy_violation` before local body
   delivery;
 - a streaming output keyword is not returned to the client;

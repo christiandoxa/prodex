@@ -96,10 +96,7 @@ fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
     if request.smart_context_enabled {
         print_launch_status("Smart Context runtime proxy requested.");
     }
-    if request
-        .external_provider
-        .is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"))
-    {
+    if runtime_launch_uses_kiro_connect_proxy(request) {
         print_launch_status("authenticated local Kiro transport tunnel requested.");
     }
     let proxied_external_provider = request.external_provider.is_some_and(|provider| {
@@ -108,6 +105,13 @@ fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
     if request.model_provider_override.is_some() || proxied_external_provider {
         print_launch_status("local provider bridge requested.");
     }
+}
+
+pub(crate) fn runtime_launch_uses_kiro_connect_proxy(request: &RuntimeLaunchRequest<'_>) -> bool {
+    request
+        .external_provider
+        .is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"))
+        && request.model_provider_override.is_none()
 }
 
 fn run_runtime_launch_execution(
