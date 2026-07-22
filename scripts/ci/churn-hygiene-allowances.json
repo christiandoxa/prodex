@@ -1,5 +1,22 @@
 [
   {
+    "id": "audited-runtime-governance-release-0.338.0",
+    "requiredSubjects": [
+      "fix: close audited runtime and governance gaps",
+      "refactor: split builtin authentication policy rules",
+      "test: keep Kiro fixture within stream idle timeout",
+      "chore(release): release 0.338.0",
+      "chore(ci): record reviewed 0.338.0 churn"
+    ],
+    "caps": {
+      "maxFiles": 80,
+      "maxBehaviorFiles": 60,
+      "maxLines": 1800,
+      "maxFileLines": 180
+    },
+    "reason": "Reviewed the complete 0.338.0 runtime, authentication-assurance, header-limit, deadline, Kiro lifecycle, live-metrics, and control-plane HA audit range plus synchronized GitHub-only release metadata; verified with focused regressions, the full locked all-features suite, strict Clippy, complete preflight and boundary guards, an optimized locked build, release hygiene, and tracked-diff secret and identifier review."
+  },
+  {
     "id": "audited-distributed-runtime-boundaries-feature-0.332.0",
     "requiredSubjects": [
       "feat(enterprise): harden distributed runtime boundaries"
