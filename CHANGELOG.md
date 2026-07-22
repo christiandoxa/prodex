@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.337.0 - 2026-07-22
+
+### Misc
+
+- Harden response enforcement (`c675728`)
+
 ## 0.336.0 - 2026-07-22
 
 ### Misc
@@ -78,16 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Support Codex realtime v3 passthrough (`96a4908`)
-
-## 0.325.0 - 2026-07-20
-
-### CLI
-
-- Preserve partial quota windows (`477823e`)
-
-### Deps
-
-- Bump serde from 1.0.228 to 1.0.229 in the cargo group (#31) (`1c9251a`)
-- Bump debian from `60eac75` to `7b140f3` (#35) (`7c093ba`)
-- Bump rust from `7d0723d` to `8fa55b2` (#34) (`1fe6689`)
-- Bump the fuzz-cargo group in /fuzz with 2 updates (#32) (`db8aa3a`)
