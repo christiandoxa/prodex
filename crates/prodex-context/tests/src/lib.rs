@@ -52,10 +52,13 @@ fn temp_context_root(name: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock should be after epoch")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "prodex-context-{name}-{}-{unique}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .expect("temp dir should resolve")
+        .join(format!(
+            "prodex-context-{name}-{}-{unique}",
+            std::process::id()
+        ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("temp context root should be created");
     root

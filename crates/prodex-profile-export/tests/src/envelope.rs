@@ -123,14 +123,17 @@ fn profile_export_bundle_rejects_reparse_point_reads() {
 }
 
 pub(super) fn profile_export_private_temp_dir(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "prodex-profile-export-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .expect("temp dir should resolve")
+        .join(format!(
+            "prodex-profile-export-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     #[cfg(unix)]

@@ -7,7 +7,10 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    env::temp_dir().join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
+    env::temp_dir()
+        .canonicalize()
+        .expect("temp dir should resolve")
+        .join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
 }
 
 #[test]

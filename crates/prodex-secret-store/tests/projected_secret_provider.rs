@@ -12,7 +12,10 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("prodex-projected-secret-{name}-{stamp}"));
+    let path = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("prodex-projected-secret-{name}-{stamp}"));
     fs::create_dir_all(&path).unwrap();
     #[cfg(unix)]
     {

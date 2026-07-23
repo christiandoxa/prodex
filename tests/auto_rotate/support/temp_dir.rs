@@ -13,6 +13,9 @@ static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl TestDir {
     pub(crate) fn new() -> Self {
+        let temp_root = std::env::temp_dir()
+            .canonicalize()
+            .expect("failed to resolve temp dir");
         for _ in 0..32 {
             let unique = format!(
                 "prodex-test-{}-{}-{}",
@@ -23,7 +26,7 @@ impl TestDir {
                     .as_nanos(),
                 TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed),
             );
-            let path = std::env::temp_dir().join(unique);
+            let path = temp_root.join(unique);
             match fs::create_dir(&path) {
                 Ok(()) => {
                     #[cfg(unix)]
