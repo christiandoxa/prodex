@@ -1,4 +1,4 @@
-use super::Fixture;
+use super::{Fixture, chatgpt_id_token};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
@@ -18,6 +18,7 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
     prompt: &str,
     answer: &str,
 ) -> PtyRunOutput {
+    let login_id_token = chatgpt_id_token("main@example.com");
     let (master, slave) = open_pty();
     let slave_file = unsafe { File::from_raw_fd(slave) };
     let stdin_slave = slave_file
@@ -34,6 +35,7 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("TEST_LOGIN_ID_TOKEN", login_id_token)
         .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
         .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
