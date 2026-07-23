@@ -357,6 +357,24 @@ fn sse_overload_does_not_bind_session_before_commit() {
         .current_profile("main")
         .upstream_base_url(backend.base_url())
         .build();
+    let now = Local::now().timestamp();
+    let usage = usage_with_main_windows(95, 18_000, 95, 604_800);
+    {
+        let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
+        for profile_name in ["main", "second"] {
+            runtime.profile_probe_cache.insert(
+                profile_name.to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage.clone()),
+                },
+            );
+        }
+    }
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
