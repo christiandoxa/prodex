@@ -369,13 +369,16 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        env::temp_dir()
+        #[cfg(windows)]
+        let temp_root = env::temp_dir();
+        #[cfg(not(windows))]
+        let temp_root = env::temp_dir()
             .canonicalize()
-            .expect("temp dir should resolve")
-            .join(format!(
-                "prodex-rtk-wrapper-{name}-{}-{stamp}",
-                std::process::id()
-            ))
+            .expect("temp dir should resolve");
+        temp_root.join(format!(
+            "prodex-rtk-wrapper-{name}-{}-{stamp}",
+            std::process::id()
+        ))
     }
 
     #[test]
