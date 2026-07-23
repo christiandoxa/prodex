@@ -2,7 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.341.0 - 2026-07-23
+
+### Misc
+
+- Complete gateway lifecycle and provider health (`a001973`)
+
 ## 0.340.0 - 2026-07-23
+
+### Docs
+
+- Clarify Copilot native response transport (`2b289c4`)
 
 ### Misc
 
@@ -80,19 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited governance gaps (`253e493`)
-
-## 0.329.0 - 2026-07-20
-
-### Runtime
-
-- Harden timeout and secret cleanup (`078701b`)
-- Isolate provider conversation state (`b0dc453`)
-
-### CLI
-
-- Preserve Windows ACL handle rights (`35f520f`)
-- Harden Windows lease contention (`45fb27c`)
-
-### Misc
-
-- Bound metadata discovery processes (`789cd2c`)
