@@ -11,7 +11,9 @@ use prodex_application::{
 use prodex_domain::{RequestId, TenantContext, TenantId};
 use prodex_gateway_core::GatewayExpiredReservationRecoveryRequest;
 use prodex_observability::TraceContext;
-use prodex_storage::{DurableStoreKind, ExpiredReservationRecoveryCommand};
+use prodex_storage::{
+    DurableStoreKind, ExpiredReservationRecoveryCommand, GovernanceRepositoryError,
+};
 
 use super::local_rewrite::{RuntimeGovernanceAuthority, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
@@ -70,24 +72,28 @@ pub(super) fn spawn_runtime_gateway_reservation_recovery_worker(
             let log_path = shared.runtime_shared.log_path.clone();
             Ok(Some(thread::spawn(move || {
                 while !shutdown.load(Ordering::SeqCst) {
-                    let tenant_ids =
-                        recovery_tenant_ids(governance_authority.as_ref(), &gateway_credentials);
-                    match runtime.block_on(recover_postgres_once(
-                        &repository,
-                        &tenant_ids,
-                        now_unix_ms(),
-                    )) {
-                        Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
-                            &log_path,
-                            &format!(
-                                "gateway_reservation_recovery status=success backend=postgres selected={} released={}",
-                                report.selected, report.released
+                    match recovery_tenant_ids(governance_authority.as_ref(), &gateway_credentials) {
+                        Ok(tenant_ids) => match runtime.block_on(recover_postgres_once(
+                            &repository,
+                            &tenant_ids,
+                            now_unix_ms(),
+                        )) {
+                            Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
+                                &log_path,
+                                &format!(
+                                    "gateway_reservation_recovery status=success backend=postgres selected={} released={}",
+                                    report.selected, report.released
+                                ),
                             ),
-                        ),
-                        Ok(_) => {}
+                            Ok(_) => {}
+                            Err(_) => runtime_proxy_log_to_path(
+                                &log_path,
+                                "gateway_reservation_recovery status=error backend=postgres phase=recovery",
+                            ),
+                        },
                         Err(_) => runtime_proxy_log_to_path(
                             &log_path,
-                            "gateway_reservation_recovery status=error backend=postgres",
+                            "gateway_reservation_recovery status=error backend=postgres phase=tenant_discovery",
                         ),
                     }
                     wait_for_next_run(&shutdown);
@@ -181,20 +187,22 @@ fn plan_recovery(
 fn recovery_tenant_ids(
     governance_authority: Option<&RuntimeGovernanceAuthority>,
     gateway_credentials: &super::local_rewrite_gateway_credentials::RuntimeGatewayCredentialState,
-) -> Vec<TenantId> {
+) -> std::result::Result<Vec<TenantId>, GovernanceRepositoryError> {
     let mut tenant_ids = BTreeSet::new();
     if let Some(authority) = governance_authority {
-        tenant_ids.extend(authority.tenant_ids().unwrap_or_default());
+        tenant_ids.extend(authority.tenant_ids()?);
     }
     let snapshot = gateway_credentials.current.load_full();
-    if let Ok(keys) = snapshot.virtual_keys.lock() {
-        tenant_ids.extend(
-            keys.iter()
-                .filter_map(|entry| entry.tenant_id.as_deref())
-                .filter_map(|value| value.parse::<TenantId>().ok()),
-        );
-    }
-    tenant_ids.into_iter().collect()
+    let keys = snapshot
+        .virtual_keys
+        .lock()
+        .map_err(|_| GovernanceRepositoryError::Database)?;
+    tenant_ids.extend(
+        keys.iter()
+            .filter_map(|entry| entry.tenant_id.as_deref())
+            .filter_map(|value| value.parse::<TenantId>().ok()),
+    );
+    Ok(tenant_ids.into_iter().collect())
 }
 
 fn now_unix_ms() -> u64 {
@@ -218,9 +226,19 @@ fn wait_for_next_run(shutdown: &AtomicBool) {
 
 #[cfg(test)]
 mod tests {
-    use super::plan_recovery;
+    use super::{plan_recovery, recovery_tenant_ids};
+    use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeLocalRewriteProviderOptions;
+    use crate::runtime_launch::proxy_startup::local_rewrite_gateway_config::{
+        RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
+        RuntimeGatewaySsoConfig,
+    };
+    use crate::runtime_launch::proxy_startup::local_rewrite_gateway_credentials::{
+        RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialState,
+        runtime_gateway_initial_credential_snapshot,
+    };
     use prodex_domain::TenantId;
     use prodex_storage::{DurableStoreKind, ExpiredReservationRecoveryCommand};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn recovery_planning_uses_application_boundary_for_both_durable_stores() {
@@ -248,5 +266,38 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn recovery_tenant_discovery_reports_poisoned_virtual_key_state() {
+        let virtual_keys = Arc::new(Mutex::new(Vec::new()));
+        let poisoned = Arc::clone(&virtual_keys);
+        assert!(
+            std::thread::spawn(move || {
+                let _guard = poisoned.lock().unwrap();
+                panic!("poison virtual key lock");
+            })
+            .join()
+            .is_err()
+        );
+        let credentials =
+            RuntimeGatewayCredentialState::new(runtime_gateway_initial_credential_snapshot(
+                RuntimeGatewayCredentialRefreshCandidate {
+                    fingerprint: [0; 32],
+                    provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                        api_keys: vec!["test-api-key".to_string()],
+                    },
+                    provider_credential: None,
+                    auth_token_hash: None,
+                    admin_tokens: Vec::new(),
+                    sso: RuntimeGatewaySsoConfig::default(),
+                    virtual_keys: Vec::new(),
+                    guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+                    observability: RuntimeGatewayObservabilityConfig::default(),
+                },
+                virtual_keys,
+            ));
+
+        assert!(recovery_tenant_ids(None, &credentials).is_err());
     }
 }

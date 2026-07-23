@@ -1125,12 +1125,27 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                             as u16,
                     )),
                 };
-                let tenant_ids = discovered
+                let tenant_ids = match discovered
                     .and_then(|discovered| {
                         authority.merge_tenant_ids(discovered)?;
                         authority.tenant_ids()
                     })
-                    .unwrap_or_default();
+                {
+                    Ok(tenant_ids) => tenant_ids,
+                    Err(_) => {
+                        runtime_proxy_log_to_path(
+                            &log_path,
+                            "governance_snapshot_refresh status=error phase=tenant_discovery action=retain_lkg",
+                        );
+                        for _ in 0..50 {
+                            if shutdown.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        continue;
+                    }
+                };
                 let mut next_policy = (*policy_snapshots.load_full()).clone();
                 let mut next_classification = (*classification_snapshots.load_full()).clone();
                 let mut next_provider = (*provider_snapshots.load_full()).clone();
@@ -1285,19 +1300,25 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                             .unwrap_or(u64::MAX);
                         let tenant_ids = governance_authority
                             .as_ref()
-                            .and_then(|authority| authority.tenant_ids().ok())
-                            .unwrap_or_default();
-                        let status = if siem_worker
-                            .run_once_postgres(&repository, &runtime, &tenant_ids, now_unix_ms)
-                            .is_ok()
-                        {
-                            "success"
-                        } else {
-                            "error"
+                            .ok_or(prodex_storage::GovernanceRepositoryError::Database)
+                            .and_then(RuntimeGovernanceAuthority::tenant_ids);
+                        let (status, phase) = match tenant_ids {
+                            Ok(tenant_ids) if siem_worker
+                                .run_once_postgres(
+                                    &repository,
+                                    &runtime,
+                                    &tenant_ids,
+                                    now_unix_ms,
+                                )
+                                .is_ok() => ("success", "export"),
+                            Ok(_) => ("error", "export"),
+                            Err(_) => ("error", "tenant_discovery"),
                         };
                         runtime_proxy_log_to_path(
                             &log_path,
-                            &format!("governance_siem_worker status={status} backend=postgres"),
+                            &format!(
+                                "governance_siem_worker status={status} backend=postgres phase={phase}"
+                            ),
                         );
                         for _ in 0..50 {
                             if shutdown.load(Ordering::SeqCst) {
@@ -1477,56 +1498,5 @@ fn handle_runtime_local_rewrite_proxy_request(
     run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);
 }
 #[cfg(test)]
-mod request_guard_tests {
-    use super::super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
-    use super::{RuntimeGovernanceAuthority, runtime_gateway_try_reserve_background_task};
-    use prodex_domain::TenantId;
-    use prodex_storage::GovernanceRepositoryError;
-    use std::cell::Cell;
-    use std::collections::BTreeSet;
-    use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn gateway_usage_request_guard_releases_request_id() {
-        let request_ids = Arc::new(Mutex::new(BTreeSet::from([7])));
-        {
-            let _guard = RuntimeGatewayUsageRequestGuard {
-                request_ids: Arc::clone(&request_ids),
-                reconciliation: super::RuntimeGatewayReconciliationQueue::new(),
-                request_id: 7,
-            };
-        }
-
-        assert!(request_ids.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn gateway_background_task_slots_are_bounded() {
-        let slots = Arc::new(tokio::sync::Semaphore::new(1));
-        let permit = runtime_gateway_try_reserve_background_task(&slots).unwrap();
-        assert!(runtime_gateway_try_reserve_background_task(&slots).is_none());
-        drop(permit);
-        assert!(runtime_gateway_try_reserve_background_task(&slots).is_some());
-    }
-
-    #[test]
-    fn governance_tenant_capacity_is_reserved_before_commit() {
-        let configured = (0..crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS)
-            .map(|_| TenantId::new())
-            .collect();
-        let authority = RuntimeGovernanceAuthority::Sqlite {
-            path: "unused.sqlite".into(),
-            tenant_ids: Arc::new(Mutex::new(configured)),
-        };
-        let committed = Cell::new(false);
-
-        assert_eq!(
-            authority.commit_for_tenant(TenantId::new(), || {
-                committed.set(true);
-                Ok(())
-            }),
-            Err(GovernanceRepositoryError::SnapshotUnavailable)
-        );
-        assert!(!committed.get());
-    }
-}
+#[path = "local_rewrite_request_guard_tests.rs"]
+mod request_guard_tests;

@@ -1813,7 +1813,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-chat-compat",
+    "name": "copilot-request-responses-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -1826,12 +1826,7 @@
     },
     "expected_body": {
       "model": "codex",
-      "messages": [
-        {
-          "role": "user",
-          "content": "hello copilot"
-        }
-      ],
+      "input": "hello copilot",
       "stream": false
     },
     "expected_loss": "lossless",
@@ -1863,35 +1858,37 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-response-responses-chat-compat",
+    "name": "copilot-response-responses-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "response",
     "model": "codex",
     "input_headers": {},
     "input_body": {
-      "id": "chatcmpl_copilot_1",
-      "object": "chat.completion",
-      "created": 1735689700,
+      "id": "resp_copilot_1",
+      "object": "response",
+      "created_at": 1735689700,
       "model": "codex",
-      "choices": [
+      "output": [
         {
-          "index": 0,
-          "message": {
-            "role": "assistant",
-            "content": "hello copilot"
-          },
-          "finish_reason": "stop"
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello copilot"
+            }
+          ]
         }
       ],
       "usage": {
-        "prompt_tokens": 17,
-        "completion_tokens": 9,
+        "input_tokens": 17,
+        "output_tokens": 9,
         "total_tokens": 26
       }
     },
     "expected_body": {
-      "id": "chatcmpl_copilot_1",
+      "id": "resp_copilot_1",
       "object": "response",
       "created_at": 1735689700,
       "model": "codex",
@@ -1944,8 +1941,8 @@
         }
       ],
       "usage": {
-        "prompt_tokens": 11,
-        "completion_tokens": 5,
+        "input_tokens": 11,
+        "output_tokens": 5,
         "total_tokens": 16
       }
     },
@@ -1966,8 +1963,8 @@
         }
       ],
       "usage": {
-        "prompt_tokens": 11,
-        "completion_tokens": 5,
+        "input_tokens": 11,
+        "output_tokens": 5,
         "total_tokens": 16
       }
     },
@@ -1979,25 +1976,25 @@
     }
   },
   {
-    "name": "copilot-stream-responses-chat-compat",
+    "name": "copilot-stream-responses-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "stream-event",
     "model": "codex",
     "input_headers": {},
-    "input_body": "data: {\"choices\":[{\"delta\":{\"content\":\"co\"},\"finish_reason\":null}]}\n\n",
+    "input_body": "event: response.output_text.delta\ndata: {\"delta\":\"co\",\"type\":\"response.output_text.delta\"}\n\n",
     "expected_body": "event: response.output_text.delta\ndata: {\"delta\":\"co\",\"type\":\"response.output_text.delta\"}\n\n",
     "expected_loss": "lossless",
     "expected_usage": null
   },
   {
-    "name": "copilot-stream-done-completes-response",
+    "name": "copilot-stream-completed-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "stream-event",
     "model": "codex",
     "input_headers": {},
-    "input_body": "data: [DONE]\n\n",
+    "input_body": "event: response.completed\ndata: {}\n\n",
     "expected_body": "event: response.completed\ndata: {}\n\n",
     "expected_loss": "lossless",
     "expected_usage": null
@@ -2137,7 +2134,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-custom-tool-call-chat-compat",
+    "name": "copilot-request-responses-custom-tool-call-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2155,8 +2152,19 @@
       ],
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": [
+        {
+          "type": "custom_tool_call",
+          "call_id": "call_custom_1",
+          "name": "apply_patch",
+          "input": "*** Begin Patch\n*** End Patch\n"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2177,7 +2185,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-non-function-tools-chat-compat",
+    "name": "copilot-request-responses-non-function-tools-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2193,8 +2201,17 @@
       ],
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": "hello",
+      "tools": [
+        {
+          "type": "web_search_preview"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2217,7 +2234,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-parallel-tool-calls-false-chat-compat",
+    "name": "copilot-request-responses-parallel-tool-calls-false-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2229,8 +2246,13 @@
       "parallel_tool_calls": false,
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": "hello",
+      "parallel_tool_calls": false,
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2251,7 +2273,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-stop-sequences-chat-compat",
+    "name": "copilot-request-responses-stop-sequences-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2265,8 +2287,15 @@
       ],
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": "hello",
+      "stop_sequences": [
+        "END"
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2291,7 +2320,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-n-greater-than-one-chat-compat",
+    "name": "copilot-request-responses-n-greater-than-one-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2303,8 +2332,13 @@
       "n": 2,
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": "hello",
+      "n": 2,
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2327,7 +2361,7 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-request-responses-rejects-safety-identifier-chat-compat",
+    "name": "copilot-request-responses-safety-identifier-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "request",
@@ -2339,8 +2373,13 @@
       "safety_identifier": "safe_123",
       "stream": false
     },
-    "expected_body": null,
-    "expected_loss": "rejected",
+    "expected_body": {
+      "model": "codex",
+      "input": "hello",
+      "safety_identifier": "safe_123",
+      "stream": false
+    },
+    "expected_loss": "lossless",
     "expected_usage": null
   },
   {
@@ -2363,39 +2402,29 @@
     "expected_usage": null
   },
   {
-    "name": "copilot-response-responses-function-call-chat-compat",
+    "name": "copilot-response-responses-function-call-native-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
     "operation": "response",
     "model": "codex",
     "input_headers": {},
     "input_body": {
-      "id": "chatcmpl_copilot_tool_1",
-      "object": "chat.completion",
-      "created": 1735689900,
+      "id": "resp_copilot_tool_1",
+      "object": "response",
+      "created_at": 1735689900,
       "model": "codex",
-      "choices": [
+      "output": [
         {
-          "index": 0,
-          "message": {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-              {
-                "id": "call_2",
-                "function": {
-                  "name": "tools.echo",
-                  "arguments": "{\"text\":\"hello\"}"
-                }
-              }
-            ]
-          },
-          "finish_reason": "tool_calls"
+          "type": "function_call",
+          "call_id": "call_2",
+          "namespace": "tools",
+          "name": "echo",
+          "arguments": "{\"text\":\"hello\"}"
         }
       ]
     },
     "expected_body": {
-      "id": "chatcmpl_copilot_tool_1",
+      "id": "resp_copilot_tool_1",
       "object": "response",
       "created_at": 1735689900,
       "model": "codex",
@@ -2524,56 +2553,6 @@
     "input_headers": {},
     "input_body": "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"functions.exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"echo hi\\\"}\"}}]}}]}\n\n",
     "expected_body": "event: response.function_call_arguments.delta\ndata: {\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"rtk echo hi\\\"}\",\"type\":\"response.function_call_arguments.delta\"}\n\n",
-    "expected_loss": "lossless",
-    "expected_usage": null
-  },
-  {
-    "name": "copilot-response-responses-function-call-chat-compat",
-    "provider": "copilot",
-    "endpoint": "responses",
-    "operation": "response",
-    "model": "codex",
-    "input_headers": {},
-    "input_body": {
-      "id": "chatcmpl_copilot_tool_1",
-      "object": "chat.completion",
-      "created": 1735689900,
-      "model": "codex",
-      "choices": [
-        {
-          "index": 0,
-          "message": {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-              {
-                "id": "call_2",
-                "function": {
-                  "name": "tools.echo",
-                  "arguments": "{\"text\":\"hello\"}"
-                }
-              }
-            ]
-          },
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "expected_body": {
-      "id": "chatcmpl_copilot_tool_1",
-      "object": "response",
-      "created_at": 1735689900,
-      "model": "codex",
-      "output": [
-        {
-          "type": "function_call",
-          "call_id": "call_2",
-          "namespace": "tools",
-          "name": "echo",
-          "arguments": "{\"text\":\"hello\"}"
-        }
-      ]
-    },
     "expected_loss": "lossless",
     "expected_usage": null
   },

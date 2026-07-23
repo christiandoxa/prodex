@@ -78,7 +78,7 @@ const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatu
 const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Translated,
+        ProviderCapabilityStatus::Native,
     ),
     (
         ProviderEndpoint::ResponsesCompact,
@@ -196,6 +196,7 @@ const CHAT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Messages,
 ];
 const COPILOT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
     ProviderEndpoint::ResponsesCompact,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
@@ -275,7 +276,7 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
         adapter: Some(StaticProviderAdapter::new(ProviderId::Copilot)),
         translator: Some(&COPILOT_TRANSLATOR),
         client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiChatCompletions,
+        upstream_request_format: ProviderWireFormat::OpenAiResponses,
         response_format: ProviderWireFormat::OpenAiResponses,
         supports_streaming: true,
         supports_model_fallback: true,

@@ -239,7 +239,7 @@ fn v1_conformance_fixtures_cover_error_classification_for_supported_non_openai_t
 }
 
 #[test]
-fn anthropic_and_copilot_responses_translators_publish_chat_compat_surface() {
+fn anthropic_chat_compat_and_copilot_native_responses_publish_expected_surface() {
     for (provider, endpoint, model, expected_upstream) in [
         (
             ProviderId::Anthropic,
@@ -251,13 +251,13 @@ fn anthropic_and_copilot_responses_translators_publish_chat_compat_surface() {
             ProviderId::Copilot,
             ProviderEndpoint::Responses,
             "codex",
-            prodex_provider_core::ProviderWireFormat::OpenAiChatCompletions,
+            prodex_provider_core::ProviderWireFormat::OpenAiResponses,
         ),
         (
             ProviderId::Copilot,
             ProviderEndpoint::ResponsesCompact,
             "codex",
-            prodex_provider_core::ProviderWireFormat::OpenAiChatCompletions,
+            prodex_provider_core::ProviderWireFormat::OpenAiResponses,
         ),
     ] {
         let translator = provider_translator(provider);
@@ -559,113 +559,42 @@ fn translated_providers_advertise_known_parameter_limitations_explicitly() {
             .any(|reason| reason.field == "response_format.type")
     );
 
-    for provider in [ProviderId::Anthropic, ProviderId::Copilot] {
-        let support =
-            provider_translator(provider).supported_params(ProviderEndpoint::Responses, "test");
-        assert!(support.supported, "{provider:?}");
+    let support = provider_translator(ProviderId::Anthropic)
+        .supported_params(ProviderEndpoint::Responses, "test");
+    assert!(support.supported);
+    for field in [
+        "input[*].content[type!=text]",
+        "response_format.type",
+        "reasoning",
+        "previous_response_id",
+        "tools[type!=function]",
+        "tool_choice[type!=function]",
+        "parallel_tool_calls=false",
+        "logprobs/top_logprobs",
+        "messages",
+        "metadata",
+        "safety_identifier",
+        "web_search_options",
+        "n>1",
+        "stop_sequences",
+    ] {
         assert!(
             support
                 .unsupported
                 .iter()
-                .any(|reason| reason.field == "input[*].content[type!=text]"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "response_format.type"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "reasoning"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "previous_response_id"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "tools[type!=function]"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "tool_choice[type!=function]"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "parallel_tool_calls=false"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "logprobs/top_logprobs"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "messages"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "metadata"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "safety_identifier"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "web_search_options"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "n>1"),
-            "{provider:?}"
-        );
-        assert!(
-            support
-                .unsupported
-                .iter()
-                .any(|reason| reason.field == "stop_sequences"),
-            "{provider:?}"
+                .any(|reason| reason.field == field),
+            "anthropic {field}"
         );
     }
+
+    let copilot = provider_translator(ProviderId::Copilot)
+        .supported_params(ProviderEndpoint::Responses, "codex");
+    assert!(copilot.supported);
+    assert!(copilot.unsupported.is_empty());
 }
 
 #[test]
-fn translated_providers_have_explicit_error_mapping_fixtures() {
+fn providers_have_explicit_error_mapping_fixtures() {
     for provider in [
         ProviderId::Anthropic,
         ProviderId::Copilot,
@@ -702,7 +631,7 @@ fn provider_error_mapping_fixtures_cover_every_class() {
 }
 
 #[test]
-fn translated_providers_have_explicit_usage_fixtures() {
+fn providers_have_explicit_usage_fixtures() {
     for provider in [
         ProviderId::Anthropic,
         ProviderId::Copilot,
@@ -781,7 +710,6 @@ fn provider_conformance_fixtures_cover_required_edge_case_buckets() {
 fn v1_translated_providers_have_explicit_non_lossless_fixtures() {
     for provider in [
         ProviderId::Anthropic,
-        ProviderId::Copilot,
         ProviderId::DeepSeek,
         ProviderId::Gemini,
         ProviderId::Kiro,
@@ -1044,6 +972,7 @@ fn translated_provider_passthrough_endpoints_have_fixture_coverage_where_claimed
     for (provider, endpoint) in [
         (ProviderId::Anthropic, ProviderEndpoint::ChatCompletions),
         (ProviderId::Anthropic, ProviderEndpoint::Messages),
+        (ProviderId::Copilot, ProviderEndpoint::Responses),
         (ProviderId::Copilot, ProviderEndpoint::ResponsesCompact),
         (ProviderId::Copilot, ProviderEndpoint::ChatCompletions),
         (ProviderId::Copilot, ProviderEndpoint::Messages),

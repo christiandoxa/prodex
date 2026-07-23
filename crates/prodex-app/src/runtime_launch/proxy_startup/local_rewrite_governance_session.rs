@@ -301,7 +301,7 @@ impl RuntimeGatewayGovernanceSessionStore {
                     != Some(provider_descriptor_revision)
                 || snapshot.affinity_provider != Some(provider));
         if snapshot.existing && !security_relevant_change {
-            self.remember_memory(command_record(&command, key, false));
+            self.remember_memory(command_record(&command, key, false))?;
             if let Some(bank) = bank {
                 let mut state = self
                     .0
@@ -315,7 +315,7 @@ impl RuntimeGatewayGovernanceSessionStore {
             return Ok(());
         }
         let Some(bank) = bank else {
-            self.remember_memory(command_record(&command, key, false));
+            self.remember_memory(command_record(&command, key, false))?;
             return Ok(());
         };
         let (acknowledge, response) = sync_channel(1);
@@ -330,7 +330,7 @@ impl RuntimeGatewayGovernanceSessionStore {
         })?;
         match response.recv_timeout(RUNTIME_GATEWAY_GOVERNANCE_SESSION_ACK_TIMEOUT) {
             Ok(Ok(GovernanceSessionUpsertOutcome::Stored(record))) => {
-                self.remember_memory(stored_record(*record)?);
+                self.remember_memory(stored_record(*record)?)?;
                 Ok(())
             }
             Ok(Ok(GovernanceSessionUpsertOutcome::ConcurrentLimitReached)) => {
@@ -340,10 +340,15 @@ impl RuntimeGatewayGovernanceSessionStore {
         }
     }
 
-    fn remember_memory(&self, incoming: RuntimeGatewayGovernanceSessionRecord) {
-        let Ok(mut state) = self.0.state.lock() else {
-            return;
-        };
+    fn remember_memory(
+        &self,
+        incoming: RuntimeGatewayGovernanceSessionRecord,
+    ) -> Result<(), RuntimeGatewayGovernanceSessionPersistError> {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .map_err(|_| RuntimeGatewayGovernanceSessionPersistError::Unavailable)?;
         state
             .sessions
             .entry(incoming.session_id_hash)
@@ -370,6 +375,7 @@ impl RuntimeGatewayGovernanceSessionStore {
             };
             state.sessions.remove(&stale);
         }
+        Ok(())
     }
 
     pub(super) fn configured_violation(
@@ -466,7 +472,11 @@ fn runtime_gateway_governance_session_bank(
     fail_closed_on_revocation_error: bool,
     shutdown: Arc<AtomicBool>,
 ) {
-    runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
+    if runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref()).is_err()
+        && fail_closed_on_revocation_error
+    {
+        runtime_gateway_governance_sessions_mark_unavailable(&store);
+    }
     let mut revocation_epochs = BTreeMap::new();
     if runtime_gateway_governance_session_revocation_changed(
         &authority,
@@ -540,7 +550,16 @@ fn runtime_gateway_governance_session_bank(
                     if fail_closed_on_revocation_error {
                         runtime_gateway_governance_sessions_mark_unavailable(&store);
                     }
-                    runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
+                    if runtime_gateway_governance_session_refresh(
+                        &store,
+                        &authority,
+                        sqlite.as_ref(),
+                    )
+                    .is_err()
+                        && fail_closed_on_revocation_error
+                    {
+                        runtime_gateway_governance_sessions_mark_unavailable(&store);
+                    }
                     refreshed_at = std::time::Instant::now();
                 }
                 Ok(false) => {}
@@ -555,7 +574,12 @@ fn runtime_gateway_governance_session_bank(
             if fail_closed_on_revocation_error {
                 runtime_gateway_governance_sessions_mark_unavailable(&store);
             }
-            runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
+            if runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref())
+                .is_err()
+                && fail_closed_on_revocation_error
+            {
+                runtime_gateway_governance_sessions_mark_unavailable(&store);
+            }
             refreshed_at = std::time::Instant::now();
         }
     }
@@ -689,10 +713,8 @@ fn runtime_gateway_governance_session_refresh(
     store: &RuntimeGatewayGovernanceSessionStore,
     authority: &RuntimeGovernanceAuthority,
     sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
-) {
-    let Ok(tenant_ids) = authority.tenant_ids() else {
-        return;
-    };
+) -> Result<(), GovernanceRepositoryError> {
+    let tenant_ids = authority.tenant_ids()?;
     let now_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -720,26 +742,22 @@ fn runtime_gateway_governance_session_refresh(
                 RUNTIME_GATEWAY_GOVERNANCE_SESSION_LIMIT as u16,
             )),
         };
-        let Ok(records) = loaded else {
-            continue;
-        };
+        let records = loaded?;
         let records = records
             .into_iter()
             .map(stored_record)
-            .collect::<Result<Vec<_>, _>>();
-        let Ok(records) = records else {
-            continue;
-        };
-        let Ok(state) = store.0.state.lock() else {
-            continue;
-        };
-        drop(state);
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| GovernanceRepositoryError::Database)?;
         for record in records {
-            store.remember_memory(record);
+            store
+                .remember_memory(record)
+                .map_err(|_| GovernanceRepositoryError::Database)?;
         }
-        let Ok(mut state) = store.0.state.lock() else {
-            continue;
-        };
+        let mut state = store
+            .0
+            .state
+            .lock()
+            .map_err(|_| GovernanceRepositoryError::Database)?;
         state.hydrated_tenants.insert(*tenant_id);
         while state.sessions.len() > RUNTIME_GATEWAY_GOVERNANCE_SESSION_LIMIT {
             let Some(stale) = state
@@ -753,6 +771,7 @@ fn runtime_gateway_governance_session_refresh(
             state.sessions.remove(&stale);
         }
     }
+    Ok(())
 }
 
 fn command_record(
@@ -854,6 +873,10 @@ pub(super) fn runtime_gateway_governance_session_hash(
 }
 
 #[cfg(test)]
+#[path = "local_rewrite_governance_session_error_tests.rs"]
+mod error_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use prodex_domain::{PrincipalKind, Role};
@@ -918,38 +941,6 @@ mod tests {
         assert!(!resumed.provider_revision_mismatch(7, 9));
         assert!(resumed.provider_revision_mismatch(8, 9));
         assert!(!resumed.policy.revoked);
-    }
-
-    #[test]
-    fn durable_session_round_trips_separate_provider_revisions() {
-        let tenant_id = TenantId::new();
-        let principal = principal(tenant_id);
-        let policy_revision = PolicyRevisionId::new();
-        let record = GovernanceSessionRecord {
-            tenant_id,
-            session_id_hash: "a".repeat(64),
-            principal_id: principal.id,
-            channel: Channel::Api,
-            credential_scope: CredentialScope::DataPlane,
-            classification: DataClassification::Restricted,
-            policy_revision_id: policy_revision,
-            provider_registry_revision: "7".to_string(),
-            provider_descriptor_revision: 9,
-            provider_affinity: Some("gemini".to_string()),
-            created_at_unix_ms: 100_000,
-            last_seen_at_unix_ms: 112_000,
-            absolute_expires_at_unix_ms: 200_000,
-            idle_expires_at_unix_ms: 150_000,
-            revoked_at_unix_ms: None,
-            revocation_reason_code: None,
-        };
-
-        let stored = stored_record(record).unwrap();
-        assert_eq!(stored.registry_revision, 7);
-        assert_eq!(stored.provider_descriptor_revision, 9);
-        assert_eq!(stored.provider, ProviderId::Gemini);
-        assert_eq!(stored.classification, DataClassification::Restricted);
-        assert_eq!(stored.policy_revision, policy_revision);
     }
 
     #[test]

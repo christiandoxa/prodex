@@ -9,17 +9,18 @@ pub use self::request::{
 pub use self::response::copilot_provider_core_response_id_from_value;
 use crate::translator::{
     ProviderParamSupport, ProviderTransformInput, ProviderTransformResult, ProviderTranslator,
-    ProviderUnsupportedReason,
 };
-use crate::translators::openai_chat_compat::{
-    responses_chat_compat_supported_params, translate_chat_response_to_responses,
-    translate_chat_stream_event_to_responses, translate_responses_request_to_chat,
-};
-use crate::translators::{provider_declares_passthrough, unsupported_endpoint_result};
-use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
+use crate::translators::PassthroughTranslator;
+use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 
 #[derive(Clone, Copy)]
 pub struct CopilotTranslator;
+
+impl CopilotTranslator {
+    fn passthrough() -> PassthroughTranslator {
+        PassthroughTranslator::new(ProviderId::Copilot)
+    }
+}
 
 impl ProviderTranslator for CopilotTranslator {
     fn provider(&self) -> ProviderId {
@@ -27,111 +28,27 @@ impl ProviderTranslator for CopilotTranslator {
     }
 
     fn client_wire_format(&self) -> ProviderWireFormat {
-        ProviderWireFormat::OpenAiResponses
+        Self::passthrough().client_wire_format()
     }
 
     fn upstream_wire_format(&self) -> ProviderWireFormat {
-        // ponytail: reuse the shared chat-compat path for Responses; keep compact passthrough until Copilot needs different behavior.
-        ProviderWireFormat::OpenAiChatCompletions
+        Self::passthrough().upstream_wire_format()
     }
 
-    fn supported_params(&self, endpoint: ProviderEndpoint, _model: &str) -> ProviderParamSupport {
-        if endpoint == ProviderEndpoint::Responses {
-            return responses_chat_compat_supported_params(self.provider());
-        }
-        if provider_supported_endpoints(self.provider()).contains(&endpoint) {
-            ProviderParamSupport::full()
-        } else {
-            ProviderParamSupport {
-                supported: false,
-                unsupported: vec![ProviderUnsupportedReason {
-                    field: endpoint.label().to_string(),
-                    reason: format!(
-                        "{} does not expose {}",
-                        self.provider().label(),
-                        endpoint.label()
-                    ),
-                }],
-            }
-        }
+    fn supported_params(&self, endpoint: ProviderEndpoint, model: &str) -> ProviderParamSupport {
+        Self::passthrough().supported_params(endpoint, model)
     }
 
     fn transform_request(&self, input: ProviderTransformInput) -> ProviderTransformResult {
-        if input.endpoint == ProviderEndpoint::Responses {
-            translate_responses_request_to_chat(ProviderId::Copilot, input, "codex")
-        } else if provider_declares_passthrough(
-            self.provider(),
-            input.endpoint,
-            self.client_wire_format(),
-            self.upstream_wire_format(),
-        ) {
-            ProviderTransformResult::lossless(
-                self.provider(),
-                input.endpoint,
-                self.client_wire_format(),
-                self.upstream_wire_format(),
-                input.body,
-            )
-        } else {
-            unsupported_endpoint_result(
-                self.provider(),
-                input.endpoint,
-                self.client_wire_format(),
-                self.upstream_wire_format(),
-            )
-        }
+        Self::passthrough().transform_request(input)
     }
 
     fn transform_response(&self, input: ProviderTransformInput) -> ProviderTransformResult {
-        if input.endpoint == ProviderEndpoint::Responses {
-            translate_chat_response_to_responses(ProviderId::Copilot, input)
-        } else if provider_declares_passthrough(
-            self.provider(),
-            input.endpoint,
-            self.upstream_wire_format(),
-            self.client_wire_format(),
-        ) {
-            ProviderTransformResult::lossless(
-                self.provider(),
-                input.endpoint,
-                self.upstream_wire_format(),
-                self.client_wire_format(),
-                input.body,
-            )
-        } else {
-            unsupported_endpoint_result(
-                self.provider(),
-                input.endpoint,
-                self.upstream_wire_format(),
-                self.client_wire_format(),
-            )
-        }
+        Self::passthrough().transform_response(input)
     }
 
     fn transform_stream_event(&self, input: ProviderTransformInput) -> ProviderTransformResult {
-        if input.endpoint == ProviderEndpoint::Responses {
-            translate_chat_stream_event_to_responses(ProviderId::Copilot, input)
-        } else if provider_declares_passthrough(
-            self.provider(),
-            input.endpoint,
-            self.upstream_wire_format(),
-            self.client_wire_format(),
-        ) {
-            ProviderTransformResult::lossless(
-                self.provider(),
-                input.endpoint,
-                self.upstream_wire_format(),
-                self.client_wire_format(),
-                input.body,
-            )
-        } else {
-            unsupported_endpoint_result(
-                self.provider(),
-                input.endpoint,
-                self.upstream_wire_format(),
-                self.client_wire_format(),
-            )
-        }
+        Self::passthrough().transform_stream_event(input)
     }
 }
 

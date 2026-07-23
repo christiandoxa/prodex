@@ -111,7 +111,7 @@
   },
   {
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
-    "maxLines": 1071,
+    "maxLines": 1000,
     "reason": "Cross-provider conformance v1 fixtures verify capability, transform status, stream termination, usage, error, and tool-call contracts across every supported provider."
   },
   {
@@ -191,7 +191,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1532,
+    "maxLines": 1502,
     "reason": "Gateway launch composes durable tenant discovery, governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
@@ -201,7 +201,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
-    "maxLines": 1143,
+    "maxLines": 1134,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {

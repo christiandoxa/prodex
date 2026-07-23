@@ -322,115 +322,49 @@ fn translated_responses_contract_surface_exposes_known_parameter_limitations() {
             .any(|field| field == "response_format.type")
     );
 
-    for provider in ["anthropic", "copilot"] {
-        let contract = matrix
-            .iter()
-            .find(|spec| spec.provider == provider)
-            .expect("provider contract");
-        let responses = contract
-            .endpoint_status
-            .iter()
-            .find(|endpoint| endpoint.endpoint == "responses")
-            .expect("responses endpoint");
+    let responses = matrix
+        .iter()
+        .find(|spec| spec.provider == "anthropic")
+        .expect("anthropic contract")
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses")
+        .expect("responses endpoint");
+    for field in [
+        "input[*].content[type!=text]",
+        "response_format.type",
+        "reasoning",
+        "previous_response_id",
+        "tools[type!=function]",
+        "tool_choice[type!=function]",
+        "parallel_tool_calls=false",
+        "logprobs/top_logprobs",
+        "messages",
+        "metadata",
+        "safety_identifier",
+        "web_search_options",
+        "n>1",
+        "stop_sequences",
+    ] {
         assert!(
             responses
                 .unsupported_params
                 .iter()
-                .any(|field| field == "input[*].content[type!=text]"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "response_format.type"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "reasoning"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "previous_response_id"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "tools[type!=function]"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "tool_choice[type!=function]"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "parallel_tool_calls=false"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "logprobs/top_logprobs"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "messages"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "metadata"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "safety_identifier"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "web_search_options"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "n>1"),
-            "{provider}"
-        );
-        assert!(
-            responses
-                .unsupported_params
-                .iter()
-                .any(|field| field == "stop_sequences"),
-            "{provider}"
+                .any(|value| value == field),
+            "anthropic {field}"
         );
     }
+
+    let copilot_responses = matrix
+        .iter()
+        .find(|spec| spec.provider == "copilot")
+        .expect("copilot contract")
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses")
+        .expect("responses endpoint");
+    assert_eq!(copilot_responses.status, "native");
+    assert!(copilot_responses.unsupported_params.is_empty());
 }
 
 #[test]
