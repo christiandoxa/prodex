@@ -89,7 +89,7 @@ hash instead of the source path.
 | `gateway.adaptive_routing.window_size` | none | `128` | Maximum recent outcome/latency observations retained per model, from `1` through `4096`. |
 | `gateway.adaptive_routing.min_samples` | none | `8` | Minimum observations required before quality-based recommendation; it cannot exceed `window_size`. |
 | `gateway.adaptive_routing.exploration_rate` | none | `0.0` | Deterministic bounded exploration probability from `0.0` through `1.0`. Hard affinity and quota exclusions still win. |
-| `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. `postgres` stores admin-managed virtual keys, cumulative per-key/grouped request counts, token/cost reservations, usage counters, and billing ledger rows in a shared Postgres database. `redis` stores compatibility state and is not a durable production accounting backend. |
+| `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. Governance artifact lifecycle is available only with `sqlite` or `postgres`; file/Redis requests receive the documented `501 governance_policy_operation_unsupported`. `postgres` stores admin-managed virtual keys, cumulative per-key/grouped request counts, token/cost reservations, usage counters, and billing ledger rows in a shared database. `redis` stores compatibility state and is not a durable production accounting backend. |
 | `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | Optional non-empty SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root and non-blank values are preserved exactly. |
 | `gateway.state.postgres_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Postgres connection URL. Required when `backend="postgres"`. |
 | `gateway.state.postgres_url_ref` | none | empty | Projected Postgres connection-URL reference. Use instead of `postgres_url_env`; required for the production Postgres backend. |
@@ -388,9 +388,9 @@ policy attributes.
 Gateway publication accepts authentication strength from verified OIDC `acr` or
 workload identity, MFA from verified human OIDC, and reauthentication only from
 a bounded OIDC `auth_time` window. Missing evidence fails the matching selector
-or obligation closed. Strength values outside 1 through 3, partner network zone,
-`use_tool`, and `mutate_control_plane` remain rejected because the current data
-plane cannot produce trustworthy evidence for them.
+or obligation closed. Strength values outside 1 through 3 are rejected. The
+public policy schema exposes only action and network-zone selectors backed by
+current trustworthy data-plane evidence.
 
 Effects are `allow`, `require_approval`, and `deny`. A deny rule cannot carry
 obligations. Typed obligation kinds are `mask_finding`,

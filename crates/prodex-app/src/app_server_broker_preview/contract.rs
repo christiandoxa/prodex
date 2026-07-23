@@ -53,6 +53,12 @@ pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
         "jsonrpc": "2.0",
         "wire_omits_jsonrpc_header": true,
         "default_mode": "direct-passthrough",
+        "scope": {
+            "child_processes_per_invocation": 1,
+            "session_multiplexing": "delegated-to-codex-app-server",
+            "broker_owned_routing": false,
+            "model_routing_owner": "runtime-proxy"
+        },
         "schema_validation": {
             "protocol_surface_fixture": true,
             "fixture_drift_tests": true,
@@ -223,6 +229,15 @@ mod tests {
     #[test]
     fn broker_contract_preserves_upstream_error_semantics() {
         let contract = app_server_broker_contract_json();
+        assert_eq!(
+            contract["scope"]["session_multiplexing"],
+            "delegated-to-codex-app-server"
+        );
+        assert_eq!(
+            contract["scope"]["broker_owned_routing"],
+            serde_json::Value::Bool(false)
+        );
+        assert_eq!(contract["scope"]["model_routing_owner"], "runtime-proxy");
         assert_eq!(contract["errors"]["upstream_jsonrpc"], "passthrough");
         assert_eq!(
             contract["errors"]["validation_failure"],

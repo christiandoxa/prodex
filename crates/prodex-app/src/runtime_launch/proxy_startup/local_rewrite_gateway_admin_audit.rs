@@ -1,7 +1,6 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
 use runtime_proxy_crate::path_without_query;
-use std::path::Path;
 
 pub(super) fn runtime_gateway_audit_admin_auth_event(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -13,13 +12,13 @@ pub(super) fn runtime_gateway_audit_admin_auth_event(
         "state_backend": shared.gateway_state_store.label(),
         "details": details,
     });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(&path, "gateway_admin", action, outcome, payload);
+    crate::audit_log::append_runtime_audit_event_best_effort(
+        &shared.runtime_shared,
+        "gateway_admin",
+        action,
+        outcome,
+        payload,
+    );
 }
 
 pub(super) fn runtime_gateway_audit_admin_request_denied_event(
@@ -188,14 +187,8 @@ pub(super) fn runtime_gateway_audit_admin_route_explain_event(
             "truncated": details.truncated,
         },
     });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
+    crate::audit_log::append_runtime_audit_event_best_effort(
+        &shared.runtime_shared,
         "gateway_admin",
         "route_explain",
         "success",

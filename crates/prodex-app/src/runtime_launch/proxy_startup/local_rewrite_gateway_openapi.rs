@@ -80,7 +80,7 @@ mod tests {
     const COMPONENTS_DIGEST: &str =
         "c2400ae0ae697f55ecdb969515aad49ebe4a6c28b5ad361934ebf88f41ed6326";
     const DOCUMENT_DIGEST: &str =
-        "dceb89cc36d9b6303c04d8fb208c793ce1240e49eeca9e3ec460b36b66d111fd";
+        "a948b18ef5086f126b260b7deaeef096481acef904ef8f84788a8b23aa242866";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -135,6 +135,33 @@ mod tests {
     fn openapi_components_contract_is_stable() {
         let spec = runtime_gateway_openapi_spec_for_mount(CANONICAL_MOUNT_PATH);
         assert_eq!(digest(&spec["components"]), COMPONENTS_DIGEST);
+    }
+
+    #[test]
+    fn openapi_documents_governance_backend_support() {
+        let spec = runtime_gateway_openapi_spec_for_mount(CANONICAL_MOUNT_PATH);
+        assert_eq!(
+            spec["x-prodex-governance-lifecycle-backends"],
+            serde_json::json!(["sqlite", "postgres"])
+        );
+        for (path, method) in [
+            ("/v1/prodex/gateway/policies", "get"),
+            ("/v1/prodex/gateway/policies", "post"),
+            ("/v1/prodex/gateway/policies/status", "get"),
+            ("/v1/prodex/gateway/policies/{revision_id}", "get"),
+            ("/v1/prodex/gateway/policies/{revision_id}/submit", "post"),
+            (
+                "/v1/prodex/gateway/policies/{revision_id}/approvals/{approval_id}/votes",
+                "post",
+            ),
+            ("/v1/prodex/gateway/policies/{revision_id}/activate", "post"),
+            ("/v1/prodex/gateway/policies/{revision_id}/rollback", "post"),
+        ] {
+            assert!(
+                spec["paths"][path][method]["responses"]["501"].is_object(),
+                "{method} {path} must document unsupported state backends"
+            );
+        }
     }
 
     #[test]

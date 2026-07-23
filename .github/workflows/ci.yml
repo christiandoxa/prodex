@@ -169,11 +169,11 @@ jobs:
             detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
 
   windows-security:
-    name: Windows native security tests
+    name: Windows full workspace and installer tests
     needs: changes
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
 
@@ -194,11 +194,48 @@ jobs:
         with:
           cache-bin: false
 
-      - name: Test native secret files, broker bootstrap, and profile export
-        run: cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
 
-      - name: Test native broker capability persistence
-        run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
+      - name: Run full Windows Rust suite
+        env:
+          RUST_BACKTRACE: "1"
+        run: npm run test:full -- --jobs 2 --test-threads 2
+
+      - name: Build Windows installer fixture binary
+        run: cargo build --locked --bin prodex
+
+      - name: Test Windows installer
+        run: npm run installer:test
+
+  macos-workspace:
+    name: macOS full workspace tests
+    needs: changes
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -206,11 +243,10 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Build Windows installer fixture binary
-        run: cargo build --locked --bin prodex
-
-      - name: Test Windows installer
-        run: npm run installer:test
+      - name: Run full macOS Rust suite
+        env:
+          RUST_BACKTRACE: "1"
+        run: npm run test:full -- --jobs 2 --test-threads 2
 
   process-guard:
     runs-on: ubuntu-latest
@@ -1003,6 +1039,7 @@ jobs:
       - docs-lint
       - secret-scan
       - windows-security
+      - macos-workspace
       - process-guard
       - compat-replay-gate
       - supply-chain

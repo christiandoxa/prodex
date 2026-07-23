@@ -379,10 +379,8 @@ fn runtime_governance_policy_rule(
             credential_scope: rule.condition.credential_scope,
             action: rule.condition.action.map(|value| match value {
                 Action::InvokeModel => GovernedAction::InvokeModel,
-                Action::UseTool => GovernedAction::UseTool,
                 Action::UploadContent => GovernedAction::UploadContent,
                 Action::CompactContext => GovernedAction::CompactContext,
-                Action::MutateControlPlane => GovernedAction::MutateControlPlane,
             }),
             route: rule
                 .condition
@@ -408,7 +406,6 @@ fn runtime_governance_policy_rule(
             network_zone: rule.condition.network_zone.map(|value| match value {
                 Zone::Local => NetworkZone::Local,
                 Zone::TrustedInternal => NetworkZone::TrustedInternal,
-                Zone::Partner => NetworkZone::Partner,
                 Zone::Public => NetworkZone::Public,
                 Zone::Unknown => NetworkZone::Unknown,
             }),

@@ -2027,6 +2027,7 @@
     "version": "__PRODEX_VERSION__"
   },
   "openapi": "3.1.0",
+  "x-prodex-governance-lifecycle-backends": ["sqlite", "postgres"],
   "paths": {
     "/livez": {
       "get": {
@@ -2866,6 +2867,7 @@
           "200": {"description": "Tenant policy revision metadata", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "401": {"$ref": "#/components/responses/GatewayError"},
           "403": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -2881,6 +2883,7 @@
           "401": {"$ref": "#/components/responses/GatewayError"},
           "403": {"$ref": "#/components/responses/GatewayError"},
           "409": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -2908,6 +2911,7 @@
           "200": {"description": "Active and last-known-good policy pointers", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "401": {"$ref": "#/components/responses/GatewayError"},
           "403": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -2922,7 +2926,8 @@
           "200": {"description": "Policy revision metadata without artifact content", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "401": {"$ref": "#/components/responses/GatewayError"},
           "403": {"$ref": "#/components/responses/GatewayError"},
-          "404": {"$ref": "#/components/responses/GatewayError"}
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
         "summary": "Get tenant policy revision metadata"
@@ -2943,6 +2948,7 @@
           "403": {"$ref": "#/components/responses/GatewayError"},
           "404": {"$ref": "#/components/responses/GatewayError"},
           "409": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -2965,6 +2971,7 @@
           "403": {"$ref": "#/components/responses/GatewayError"},
           "404": {"$ref": "#/components/responses/GatewayError"},
           "409": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -2988,6 +2995,7 @@
           "409": {"$ref": "#/components/responses/GatewayError"},
           "412": {"$ref": "#/components/responses/GatewayError"},
           "428": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -3011,6 +3019,7 @@
           "409": {"$ref": "#/components/responses/GatewayError"},
           "412": {"$ref": "#/components/responses/GatewayError"},
           "428": {"$ref": "#/components/responses/GatewayError"},
+          "501": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
