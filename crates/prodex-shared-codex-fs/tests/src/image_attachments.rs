@@ -295,10 +295,17 @@ fn persist_codex_session_local_images_array_rewrites_clipboard_path() {
     fs::write(&image_source, b"local image bytes").expect("source image should write");
     fs::write(
         &session_file,
-        format!(
-            r#"{{"type":"event_msg","payload":{{"type":"user_message","message":"[Image #1]","images":[],"local_images":["{}"],"text_elements":[{{"placeholder":"[Image #1]"}}]}}}}"#,
-            image_source.display()
-        ),
+        serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "[Image #1]",
+                "images": [],
+                "local_images": [image_source.as_path()],
+                "text_elements": [{ "placeholder": "[Image #1]" }]
+            }
+        })
+        .to_string(),
     )
     .expect("session should write");
 
@@ -310,8 +317,12 @@ fn persist_codex_session_local_images_array_rewrites_clipboard_path() {
         b"local image bytes"
     );
     let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
-    assert!(rewritten.contains(&copied.display().to_string()));
-    assert!(!rewritten.contains(&image_source.display().to_string()));
+    let rewritten: serde_json::Value =
+        serde_json::from_str(&rewritten).expect("valid session JSON");
+    assert_eq!(
+        rewritten["payload"]["local_images"][0].as_str(),
+        Some(copied.to_string_lossy().as_ref())
+    );
 }
 
 #[test]
@@ -529,12 +540,18 @@ fn persist_codex_session_pasted_text_paths_in_tool_arguments() {
     fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
     fs::create_dir_all(paste_source.parent().unwrap()).expect("paste source dir should exist");
     fs::write(&paste_source, b"important pasted context").expect("paste source should write");
+    let arguments = serde_json::json!({
+        "path": paste_source.as_path(),
+        "max_bytes": 12_000
+    })
+    .to_string();
     fs::write(
         &session_file,
-        format!(
-            r#"{{"type":"response_item","payload":{{"arguments":"{{\"path\":\"{}\",\"max_bytes\":12000}}"}}}}"#,
-            paste_source.display()
-        ),
+        serde_json::json!({
+            "type": "response_item",
+            "payload": { "arguments": arguments }
+        })
+        .to_string(),
     )
     .expect("session should write");
 
@@ -547,13 +564,17 @@ fn persist_codex_session_pasted_text_paths_in_tool_arguments() {
         b"important pasted context"
     );
     let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
-    assert!(
-        rewritten.contains(&copied.display().to_string()),
-        "session should point at stable pasted-text path: {rewritten}"
-    );
-    assert!(
-        !rewritten.contains(&paste_source.display().to_string()),
-        "session should not retain ephemeral overlay path: {rewritten}"
+    let rewritten: serde_json::Value =
+        serde_json::from_str(&rewritten).expect("valid session JSON");
+    let arguments: serde_json::Value = serde_json::from_str(
+        rewritten["payload"]["arguments"]
+            .as_str()
+            .expect("tool arguments string"),
+    )
+    .expect("valid tool arguments JSON");
+    assert_eq!(
+        arguments["path"].as_str(),
+        Some(copied.to_string_lossy().as_ref())
     );
 }
 
@@ -572,10 +593,16 @@ fn persist_codex_session_attachment_image_paths_in_goal_resume_context() {
     fs::write(&image_source, b"png attachment bytes").expect("image source should write");
     fs::write(
         &session_file,
-        format!(
-            r#"{{"type":"event","payload":{{"content":[{{"type":"input_text","text":"resume goal with image file: {}"}}]}}}}"#,
-            image_source.display()
-        ),
+        serde_json::json!({
+            "type": "event",
+            "payload": {
+                "content": [{
+                    "type": "input_text",
+                    "text": format!("resume goal with image file: {}", image_source.display())
+                }]
+            }
+        })
+        .to_string(),
     )
     .expect("session should write");
 
@@ -587,13 +614,18 @@ fn persist_codex_session_attachment_image_paths_in_goal_resume_context() {
         b"png attachment bytes"
     );
     let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    let rewritten: serde_json::Value =
+        serde_json::from_str(&rewritten).expect("valid session JSON");
+    let text = rewritten["payload"]["content"][0]["text"]
+        .as_str()
+        .expect("goal text");
     assert!(
-        rewritten.contains(&copied.display().to_string()),
-        "session should point at stable attachment image path: {rewritten}"
+        text.contains(&copied.display().to_string()),
+        "session should point at stable attachment image path: {text}"
     );
     assert!(
-        !rewritten.contains(&image_source.display().to_string()),
-        "session should not retain ephemeral overlay image path: {rewritten}"
+        !text.contains(&image_source.display().to_string()),
+        "session should not retain ephemeral overlay image path: {text}"
     );
 }
 

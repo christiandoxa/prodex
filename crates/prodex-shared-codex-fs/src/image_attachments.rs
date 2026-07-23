@@ -1,11 +1,12 @@
 use super::*;
+use std::borrow::Cow;
 use std::io::{Read, Write};
 
 const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
-const CODEX_ATTACHMENT_PATH_MARKER: &str = "/attachments/";
+const CODEX_ATTACHMENT_PATH_MARKERS: [&str; 2] = ["/attachments/", "\\attachments\\"];
 const CODEX_PASTED_TEXT_PREFIX: &str = "pasted-text-";
 const CODEX_ATTACHMENT_IMAGE_PREFIX: &str = "image-";
 const CODEX_GOAL_OBJECTIVE_FILE: &str = "goal-objective.md";
@@ -180,7 +181,8 @@ pub(crate) fn codex_session_image_attachments_are_stable(
             continue;
         };
         let raw_path = &contents[path_start..path_start + relative_path_end];
-        let path = Path::new(raw_path);
+        let decoded_path = decode_codex_session_path(raw_path);
+        let path = Path::new(decoded_path.as_ref());
         let is_clipboard_path = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -193,7 +195,8 @@ pub(crate) fn codex_session_image_attachments_are_stable(
 
     let mut cursor = 0;
     while let Some((path_start, path_end)) = next_codex_session_clipboard_path(contents, cursor) {
-        let path = Path::new(&contents[path_start..path_end]);
+        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
+        let path = Path::new(decoded_path.as_ref());
         if path.is_absolute() && !path.starts_with(&stable_image_dir) {
             return false;
         }
@@ -202,7 +205,8 @@ pub(crate) fn codex_session_image_attachments_are_stable(
 
     let mut cursor = 0;
     while let Some((path_start, path_end)) = next_codex_session_attachment_path(contents, cursor) {
-        let path = Path::new(&contents[path_start..path_end]);
+        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
+        let path = Path::new(decoded_path.as_ref());
         if path.is_absolute()
             && codex_attachment_path_suffix(path).is_some()
             && !path.starts_with(&stable_attachment_dir)
@@ -276,7 +280,8 @@ fn image_tag_path_attr(tag: &str) -> Option<(usize, &'static str, &'static str)>
 }
 
 fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<Option<String>> {
-    let source = Path::new(raw_path);
+    let decoded_source = decode_codex_session_path(raw_path);
+    let source = Path::new(decoded_source.as_ref());
     if !source.is_absolute() {
         return Ok(None);
     }
@@ -296,7 +301,7 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
         }
         copy_shared_codex_file(source, &destination)?;
     }
-    Ok(Some(destination.display().to_string()))
+    Ok(Some(render_codex_session_path(&destination, raw_path)))
 }
 
 fn rewrite_codex_session_inline_attachment_paths(
@@ -347,7 +352,7 @@ fn next_codex_session_clipboard_path(contents: &str, cursor: usize) -> Option<(u
     }
 
     let mut path_end = marker_start + CODEX_CLIPBOARD_PREFIX.len();
-    while path_end < bytes.len() && is_codex_session_path_byte(bytes[path_end]) {
+    while path_end < bytes.len() && codex_session_path_continues(contents, path_end) {
         path_end += 1;
     }
     while path_end > marker_start && bytes[path_end - 1] == b'.' {
@@ -359,7 +364,14 @@ fn next_codex_session_clipboard_path(contents: &str, cursor: usize) -> Option<(u
 }
 
 fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(usize, usize)> {
-    let marker_start = cursor + contents[cursor..].find(CODEX_ATTACHMENT_PATH_MARKER)?;
+    let (marker_start, marker_len) = CODEX_ATTACHMENT_PATH_MARKERS
+        .iter()
+        .filter_map(|marker| {
+            contents[cursor..]
+                .find(marker)
+                .map(|offset| (cursor + offset, marker.len()))
+        })
+        .min_by_key(|(start, _)| *start)?;
     let bytes = contents.as_bytes();
 
     let mut path_start = marker_start;
@@ -367,24 +379,36 @@ fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(
         path_start -= 1;
     }
 
-    let mut path_end = marker_start + CODEX_ATTACHMENT_PATH_MARKER.len();
-    while path_end < bytes.len() && is_codex_session_path_byte(bytes[path_end]) {
+    let mut path_end = marker_start + marker_len;
+    while path_end < bytes.len() && codex_session_path_continues(contents, path_end) {
         path_end += 1;
     }
     while path_end > marker_start && bytes[path_end - 1] == b'.' {
         path_end -= 1;
     }
 
-    (path_start < marker_start && path_end > marker_start + CODEX_ATTACHMENT_PATH_MARKER.len())
+    (path_start < marker_start && path_end > marker_start + marker_len)
         .then_some((path_start, path_end))
+}
+
+fn codex_session_path_continues(contents: &str, index: usize) -> bool {
+    let bytes = contents.as_bytes();
+    if bytes[index] == b'\\' {
+        let mut end = index;
+        while bytes.get(end) == Some(&b'\\') {
+            end += 1;
+        }
+        if bytes.get(end) == Some(&b'"') {
+            return false;
+        }
+    }
+    is_codex_session_path_byte(bytes[index])
 }
 
 fn is_codex_session_path_byte(byte: u8) -> bool {
     !matches!(
         byte,
-        b'\\'
-            | b'"'
-            | b'\''
+        b'"' | b'\''
             | b'<'
             | b'>'
             | b'('
@@ -406,7 +430,8 @@ fn stable_codex_session_attachment_path(
     codex_home: &Path,
     raw_path: &str,
 ) -> Result<Option<String>> {
-    let source = Path::new(raw_path);
+    let decoded_source = decode_codex_session_path(raw_path);
+    let source = Path::new(decoded_source.as_ref());
     if !source.is_absolute() {
         return Ok(None);
     }
@@ -422,7 +447,60 @@ fn stable_codex_session_attachment_path(
         }
         copy_shared_codex_file(source, &destination)?;
     }
-    Ok(Some(destination.display().to_string()))
+    Ok(Some(render_codex_session_path(&destination, raw_path)))
+}
+
+fn render_codex_session_path(path: &Path, raw_path: &str) -> String {
+    let rendered = path.display().to_string();
+    #[cfg(windows)]
+    {
+        let escape_width = codex_session_path_escape_width(raw_path);
+        if escape_width > 1 {
+            return rendered.replace('\\', &"\\".repeat(escape_width));
+        }
+    }
+    let _ = raw_path;
+    rendered
+}
+
+fn decode_codex_session_path(raw_path: &str) -> Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        let escape_width = codex_session_path_escape_width(raw_path);
+        if escape_width > 1 {
+            let mut decoded = String::with_capacity(raw_path.len());
+            let mut backslashes = 0usize;
+            for character in raw_path.chars() {
+                if character == '\\' {
+                    backslashes += 1;
+                    continue;
+                }
+                decoded.extend(std::iter::repeat_n(
+                    '\\',
+                    backslashes.div_ceil(escape_width),
+                ));
+                backslashes = 0;
+                decoded.push(character);
+            }
+            decoded.extend(std::iter::repeat_n(
+                '\\',
+                backslashes.div_ceil(escape_width),
+            ));
+            return Cow::Owned(decoded);
+        }
+    }
+    Cow::Borrowed(raw_path)
+}
+
+#[cfg(windows)]
+fn codex_session_path_escape_width(raw_path: &str) -> usize {
+    raw_path
+        .as_bytes()
+        .split(|byte| *byte != b'\\')
+        .map(<[u8]>::len)
+        .filter(|width| *width > 0)
+        .min()
+        .unwrap_or(1)
 }
 
 fn codex_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
