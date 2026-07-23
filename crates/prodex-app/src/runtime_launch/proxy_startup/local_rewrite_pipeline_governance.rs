@@ -171,57 +171,6 @@ pub(super) fn runtime_local_rewrite_dispatch_control_plane<'target, 'shared>(
     Ok(request)
 }
 
-pub(super) fn runtime_local_rewrite_pre_reservation_governance<'target, 'shared>(
-    mut request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteGovernedRequest<'target, 'shared>> {
-    if request.state.deadline_expired() {
-        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
-    }
-    if let Some(block) = runtime_proxy_crate::runtime_gateway_guardrail_block(
-        &request.captured.body,
-        &shared.gateway_guardrails,
-    ) {
-        let reason = block.kind.as_str();
-        if let Some(plan) = request.constraints.as_mut() {
-            plan.reject_governance(reason);
-        }
-        match runtime_local_rewrite_material_audit(
-            request.state.application.as_ref(),
-            request.state.request_id,
-            shared,
-            "admission_denied",
-            AuditOutcome::Denied,
-            reason,
-        ) {
-            Some(Err(_)) => {
-                return Err(request
-                    .state
-                    .reject(runtime_local_rewrite_audit_unavailable_response()));
-            }
-            Some(Ok(())) => {}
-            None => runtime_gateway_audit_data_plane_guardrail_blocked(
-                shared,
-                &request.captured.path_and_query,
-                reason,
-            ),
-        }
-        runtime_local_rewrite_log_guardrail(
-            request.state.request_id,
-            &request.captured.path_and_query,
-            reason,
-            shared,
-        );
-        let response = build_runtime_proxy_json_error_response(
-            403,
-            reason,
-            "gateway guardrail blocked this request",
-        );
-        return Err(request.reject(response));
-    }
-    Ok(RuntimeLocalRewriteGovernedRequest(request))
-}
-
 fn runtime_local_rewrite_log_guardrail(
     request_id: u64,
     path: &str,
@@ -336,6 +285,7 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
     request.state.guards.usage = Some(RuntimeGatewayUsageRequestGuard::new(
         shared,
         request.state.request_id,
+        &request.captured,
     ));
     Ok(RuntimeLocalRewriteReservedRequest {
         request,
@@ -377,14 +327,10 @@ fn runtime_local_rewrite_log_virtual_key_rejection(
     );
 }
 
-pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared>(
-    reserved: RuntimeLocalRewriteReservedRequest<'target, 'shared>,
+pub(super) fn runtime_local_rewrite_enforce_guardrails<'target, 'shared>(
+    mut request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteReservedRequest<'target, 'shared>> {
-    let RuntimeLocalRewriteReservedRequest {
-        mut request,
-        application_admission,
-    } = reserved;
+) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteGovernedRequest<'target, 'shared>> {
     if request.state.deadline_expired() {
         return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
     }
@@ -434,19 +380,25 @@ pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared
         if let Some(plan) = request.constraints.as_mut() {
             plan.reject_governance(reason);
         }
-        if runtime_local_rewrite_material_audit(
+        match runtime_local_rewrite_material_audit(
             request.state.application.as_ref(),
             request.state.request_id,
             shared,
             "admission_denied",
             AuditOutcome::Denied,
             reason,
-        )
-        .is_some_and(|result| result.is_err())
-        {
-            return Err(request
-                .state
-                .reject(runtime_local_rewrite_audit_unavailable_response()));
+        ) {
+            Some(Err(_)) => {
+                return Err(request
+                    .state
+                    .reject(runtime_local_rewrite_audit_unavailable_response()));
+            }
+            Some(Ok(())) => {}
+            None => runtime_gateway_audit_data_plane_guardrail_blocked(
+                shared,
+                &request.captured.path_and_query,
+                reason,
+            ),
         }
         runtime_local_rewrite_log_guardrail(
             request.state.request_id,
@@ -456,15 +408,12 @@ pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared
         );
         let response = build_runtime_proxy_json_error_response(
             403,
-            "policy_violation",
+            reason,
             "gateway guardrail blocked this request",
         );
         return Err(request.reject(response));
     }
-    Ok(RuntimeLocalRewriteReservedRequest {
-        request,
-        application_admission,
-    })
+    Ok(RuntimeLocalRewriteGovernedRequest(request))
 }
 
 fn runtime_local_rewrite_log_webhook_rejection(

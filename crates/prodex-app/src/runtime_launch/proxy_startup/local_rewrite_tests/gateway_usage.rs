@@ -1,4 +1,3 @@
-use super::super::gemini_rewrite::RuntimeGeminiProviderAuth;
 use super::*;
 use crate::TestEnvVarGuard;
 use std::fs;
@@ -7,6 +6,9 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
+
+#[path = "gateway_realtime.rs"]
+mod gateway_realtime;
 
 fn start_guardrail_webhook_response(body: &'static str) -> std::net::SocketAddr {
     let server = TinyServer::http("127.0.0.1:0").expect("guardrail webhook should bind");
@@ -20,69 +22,6 @@ fn start_guardrail_webhook_response(body: &'static str) -> std::net::SocketAddr 
         }
     });
     addr
-}
-
-#[test]
-fn gateway_realtime_websocket_requires_virtual_key_auth() {
-    let root = temp_root("gateway-realtime-websocket-auth");
-    let paths = app_paths_for_root(root);
-    let virtual_token = "team-a-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-        provider: RuntimeLocalRewriteProviderOptions::Gemini {
-            auth: RuntimeGeminiProviderAuth::ApiKeys {
-                api_keys: vec!["gemini-key".to_string()],
-            },
-            thinking_budget_tokens: None,
-            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
-            name: "team-a".to_string(),
-            tenant_id: None,
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
-            allowed_models: Vec::new(),
-            budget_microusd: None,
-            request_budget: None,
-            rpm_limit: None,
-            tpm_limit: None,
-        }],
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })
-    .expect("gateway proxy should start");
-
-    let response = reqwest::blocking::Client::new()
-        .get(format!("http://{}/v1/realtime", proxy.listen_addr))
-        .header("Upgrade", "websocket")
-        .header("Connection", "Upgrade")
-        .header(
-            "Sec-WebSocket-Key",
-            ["dGhl", "IHNhbXBs", "ZSBub25jZQ=="].concat(),
-        )
-        .header("Sec-WebSocket-Version", "13")
-        .send()
-        .expect("websocket handshake request should be sent");
-    assert_eq!(response.status().as_u16(), 401);
-    let body: serde_json::Value = response.json().expect("error response should be json");
-    assert_eq!(body["error"]["code"], "invalid_gateway_key");
 }
 
 #[test]
@@ -209,7 +148,7 @@ fn gateway_admin_auth_rejects_before_reading_request_body() {
 #[test]
 fn gateway_guardrail_webhook_fail_closed_blocks_missing_allow_field() {
     let root = temp_root("gateway-guardrail-webhook-missing-allow");
-    let paths = app_paths_for_root(root);
+    let paths = app_paths_for_root(root.clone());
     let webhook_addr = start_guardrail_webhook_response("{}");
     let upstream = TestUpstream::start_n(0);
     let virtual_token = "team-a-token";
@@ -265,6 +204,8 @@ fn gateway_guardrail_webhook_fail_closed_blocks_missing_allow_field() {
     assert_eq!(response.status().as_u16(), 403);
     let body: serde_json::Value = response.json().expect("error response should be json");
     assert_eq!(body["error"]["code"], "policy_violation");
+    assert!(!root.join("gateway-virtual-key-usage.json").exists());
+    assert!(!root.join("gateway-billing-ledger.jsonl").exists());
 }
 
 #[test]
@@ -777,7 +718,7 @@ fn gateway_usage_persistence_failure_logs_stable_error_without_path_or_token() {
 #[test]
 fn gateway_upstream_transport_failure_uses_stable_response_without_endpoint_details() {
     let root = temp_root("gateway-upstream-transport-failure");
-    let paths = app_paths_for_root(root);
+    let paths = app_paths_for_root(root.clone());
     let closed_listener =
         TcpListener::bind("127.0.0.1:0").expect("closed upstream listener should bind");
     let closed_addr = closed_listener
@@ -839,6 +780,18 @@ fn gateway_upstream_transport_failure_uses_stable_response_without_endpoint_deta
     assert!(!body.contains(&closed_addr.port().to_string()));
     assert!(!body.contains("Connection refused"));
     assert!(!body.contains(virtual_token));
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("profile_transport_failure"));
+    assert!(runtime_log.contains("profile_health"));
+    assert!(runtime_log.contains("profile=local"));
+    assert!(runtime_log.contains("route=responses"));
+    let usage = wait_for_usage_file(&root.join("gateway-virtual-key-usage.json"));
+    assert_eq!(usage["team-a"]["requests_total"], 1);
+    wait_for_ledger_file_key_response_status(
+        &root.join("gateway-billing-ledger.jsonl"),
+        "team-a",
+        502,
+    );
 }
 
 #[test]

@@ -2,6 +2,8 @@
 mod dispatch;
 #[path = "local_rewrite_pipeline_governance.rs"]
 mod governance;
+#[path = "local_rewrite_pipeline_websocket.rs"]
+mod websocket;
 
 use dispatch::{
     runtime_gateway_operational_probe_response, runtime_local_rewrite_dispatch_builtin_models,
@@ -9,10 +11,10 @@ use dispatch::{
 };
 use governance::{
     runtime_local_rewrite_apply_constraints, runtime_local_rewrite_dispatch_control_plane,
-    runtime_local_rewrite_post_reservation_governance,
-    runtime_local_rewrite_pre_reservation_governance, runtime_local_rewrite_prepare_constraints,
+    runtime_local_rewrite_enforce_guardrails, runtime_local_rewrite_prepare_constraints,
     runtime_local_rewrite_reserve_virtual_key,
 };
+use websocket::runtime_local_rewrite_dispatch_websocket;
 
 use super::local_rewrite::{
     RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER, RuntimeLocalRewriteProxyShared,
@@ -63,8 +65,7 @@ use super::local_rewrite_gateway_request_auth::runtime_local_rewrite_request_is_
 use super::local_rewrite_gateway_route_load::RuntimeGatewayRouteLoadGuard;
 use super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
 use super::local_rewrite_gateway_workload_identity::runtime_gateway_workload_credential;
-use super::local_rewrite_gemini_compact::respond_runtime_gemini_compact_request;
-use super::local_rewrite_gemini_live::handle_runtime_gemini_live_websocket_request;
+use super::local_rewrite_gemini_compact::runtime_gemini_compact_response;
 use super::local_rewrite_kiro::{
     runtime_kiro_compact_response_parts, runtime_kiro_model_catalog_from_provider,
     runtime_kiro_models_buffered_response,
@@ -93,10 +94,10 @@ use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
 use prodex_application::{
     ApplicationInspectionPlan, ApplicationRequestContextError, ApplicationRequestDeadline,
 };
-use prodex_domain::RequestId;
+use prodex_domain::{RequestId, ReservationReconciliationReason};
 use runtime_proxy_crate::{
-    RuntimeProxyRequest, is_runtime_realtime_websocket_path, path_without_query,
-    runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    RuntimeProxyRequest, path_without_query, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
 };
 use std::time::{Duration, Instant};
 
@@ -154,7 +155,6 @@ struct RuntimeLocalRewriteReservedRequest<'target, 'shared> {
     request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
     application_admission: RuntimeGatewayApplicationAdmission,
 }
-
 struct RuntimeLocalRewriteDispatchReadyRequest<'target> {
     state: RuntimeLocalRewriteRequestState<'target>,
     captured: RuntimeProxyRequest,
@@ -180,7 +180,14 @@ impl RuntimeLocalRewriteRequestState<'_> {
         self.context.deadline().is_expired_at(Instant::now())
     }
 
-    fn reply(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineReply {
+    fn reply(
+        mut self,
+        response: tiny_http::ResponseBox,
+        reason: ReservationReconciliationReason,
+    ) -> RuntimeLocalRewritePipelineReply {
+        if let Some(usage) = self.guards.usage.as_mut() {
+            usage.mark_terminal(response.status_code().0, reason);
+        }
         RuntimeLocalRewritePipelineReply {
             request: self.request,
             response,
@@ -189,11 +196,15 @@ impl RuntimeLocalRewriteRequestState<'_> {
     }
 
     fn reject(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        RuntimeLocalRewritePipelineExit::Rejected(Box::new(self.reply(response)))
+        RuntimeLocalRewritePipelineExit::Rejected(Box::new(
+            self.reply(response, ReservationReconciliationReason::Cancelled),
+        ))
     }
 
     fn respond(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        RuntimeLocalRewritePipelineExit::Responded(Box::new(self.reply(response)))
+        RuntimeLocalRewritePipelineExit::Responded(Box::new(
+            self.reply(response, ReservationReconciliationReason::Completed),
+        ))
     }
 }
 
@@ -238,14 +249,13 @@ fn try_run_runtime_local_rewrite_pipeline(
     let canonical = runtime_local_rewrite_canonical_context(request, target, shared)?;
     let authenticated = runtime_local_rewrite_authenticate(canonical, shared)?;
     let admitted = runtime_local_rewrite_bounded_admission(authenticated, shared)?;
-    let admitted = runtime_local_rewrite_dispatch_websocket(admitted, shared)?;
     let captured = runtime_local_rewrite_capture_body(admitted, shared)?;
     let prepared = runtime_local_rewrite_prepare_constraints(captured, shared)?;
     let prepared = runtime_local_rewrite_dispatch_control_plane(prepared, shared)?;
-    let governed = runtime_local_rewrite_pre_reservation_governance(prepared, shared)?;
+    let governed = runtime_local_rewrite_enforce_guardrails(prepared, shared)?;
     let reserved = runtime_local_rewrite_reserve_virtual_key(governed, shared)?;
-    let reserved = runtime_local_rewrite_post_reservation_governance(reserved, shared)?;
     let ready = runtime_local_rewrite_apply_constraints(reserved, shared)?;
+    let ready = runtime_local_rewrite_dispatch_websocket(ready, shared)?;
     let ready = runtime_local_rewrite_dispatch_compact(ready, shared)?;
     let ready = runtime_local_rewrite_dispatch_builtin_models(ready, shared)?;
     runtime_local_rewrite_dispatch_provider(ready, shared)
@@ -658,49 +668,6 @@ fn runtime_local_rewrite_bounded_admission<'target>(
     Ok(RuntimeLocalRewriteAdmittedRequest(state))
 }
 
-fn runtime_local_rewrite_dispatch_websocket<'target>(
-    admitted: RuntimeLocalRewriteAdmittedRequest<'target>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAdmittedRequest<'target>> {
-    if admitted.0.deadline_expired() {
-        return Err(admitted
-            .0
-            .reject(runtime_local_rewrite_request_timeout_response()));
-    }
-    if !admitted.0.request.is_websocket_upgrade() {
-        return Ok(admitted);
-    }
-    let state = admitted.0;
-    if matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Gemini { .. }
-    ) && is_runtime_realtime_websocket_path(&state.path)
-    {
-        handle_runtime_gemini_live_websocket_request(
-            state.request_id,
-            state.request,
-            shared,
-            state.application.as_ref(),
-        );
-        return Err(RuntimeLocalRewritePipelineExit::Handled);
-    }
-    runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "local_rewrite_websocket_https_fallback",
-            [
-                runtime_proxy_log_field("request", state.request_id.to_string()),
-                runtime_proxy_log_field("transport", "websocket"),
-                runtime_proxy_log_field("path", path_without_query(&state.path)),
-            ],
-        ),
-    );
-    Err(state.reject(build_runtime_proxy_text_response(
-        501,
-        "provider adapter requires the HTTPS Responses transport",
-    )))
-}
-
 fn runtime_local_rewrite_capture_body<'target>(
     admitted: RuntimeLocalRewriteAdmittedRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -709,14 +676,18 @@ fn runtime_local_rewrite_capture_body<'target>(
     if state.deadline_expired() {
         return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
     }
-    let mut captured = match state
-        .request
-        .capture(shared.runtime_shared.runtime_config.max_request_body_bytes)
-    {
-        Ok(captured) => captured,
-        Err(err) => {
-            let response = runtime_local_rewrite_capture_rejection(&state, shared, &err);
-            return Err(state.reject(response));
+    let mut captured = if state.request.is_websocket_upgrade() {
+        state.request.header_request()
+    } else {
+        match state
+            .request
+            .capture(shared.runtime_shared.runtime_config.max_request_body_bytes)
+        {
+            Ok(captured) => captured,
+            Err(err) => {
+                let response = runtime_local_rewrite_capture_rejection(&state, shared, &err);
+                return Err(state.reject(response));
+            }
         }
     };
     if state.deadline_expired() {

@@ -14,6 +14,7 @@ fn gateway_usage_request_guard_releases_request_id() {
             request_ids: Arc::clone(&request_ids),
             reconciliation: super::RuntimeGatewayReconciliationQueue::new(),
             request_id: 7,
+            terminal: None,
         };
     }
 

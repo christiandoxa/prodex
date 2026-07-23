@@ -555,7 +555,7 @@ pub(super) fn runtime_local_rewrite_json_parts(
     }
 }
 
-fn runtime_local_rewrite_route_kind(endpoint: ProviderEndpoint) -> RuntimeRouteKind {
+pub(super) fn runtime_local_rewrite_route_kind(endpoint: ProviderEndpoint) -> RuntimeRouteKind {
     match endpoint {
         ProviderEndpoint::Responses | ProviderEndpoint::ChatCompletions => {
             RuntimeRouteKind::Responses

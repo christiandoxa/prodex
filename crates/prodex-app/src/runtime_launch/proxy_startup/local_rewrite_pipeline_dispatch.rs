@@ -1,25 +1,29 @@
+use super::super::local_rewrite::RUNTIME_LOCAL_REWRITE_PROFILE;
 use super::super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
+use super::super::local_rewrite_upstream::runtime_local_rewrite_route_kind;
 use super::{
     RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE, RuntimeLocalRewriteDispatchReadyRequest,
-    RuntimeLocalRewritePipelineExit, RuntimeLocalRewritePipelineResult,
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
-    RuntimeProviderBridgeKind, RuntimeProxyRequest, build_runtime_proxy_json_error_response,
-    build_runtime_proxy_text_response, path_without_query, respond_runtime_gemini_compact_request,
+    RuntimeLocalRewritePipelineResult, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult, RuntimeProviderBridgeKind, RuntimeProxyRequest,
+    build_runtime_proxy_json_error_response, build_runtime_proxy_text_response, path_without_query,
     respond_runtime_local_rewrite_proxy_request, runtime_copilot_model_catalog_from_provider,
     runtime_gateway_application_provider_dispatch,
     runtime_gateway_application_provider_dispatch_attempt,
-    runtime_gateway_application_provider_retry_precommit, runtime_kiro_compact_response_parts,
-    runtime_kiro_model_catalog_from_provider, runtime_kiro_models_buffered_response,
-    runtime_local_rewrite_request_timeout_response, runtime_local_rewrite_response_with_call_id,
-    runtime_provider_error_class, runtime_provider_models_buffered_response,
-    runtime_provider_request_ledger_message, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message, send_runtime_local_rewrite_upstream_request,
+    runtime_gateway_application_provider_retry_precommit, runtime_gemini_compact_response,
+    runtime_kiro_compact_response_parts, runtime_kiro_model_catalog_from_provider,
+    runtime_kiro_models_buffered_response, runtime_local_rewrite_request_timeout_response,
+    runtime_local_rewrite_response_with_call_id, runtime_provider_error_class,
+    runtime_provider_models_buffered_response, runtime_provider_request_ledger_message,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    send_runtime_local_rewrite_upstream_request,
 };
 use crate::runtime_proxy::{
     RuntimeHeapTrimmedBufferedResponseParts, build_runtime_proxy_response_from_parts,
-    runtime_proxy_local_overload_pressure_active,
+    bump_runtime_profile_health_score, commit_runtime_proxy_profile_selection_with_policy,
+    note_runtime_profile_transport_failure, runtime_proxy_local_overload_pressure_active,
 };
+use crate::{RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY, RuntimeRouteKind};
 use prodex_provider_core::ProviderErrorClass;
 use prodex_provider_spi::ProviderRetryCause;
 use std::sync::atomic::Ordering;
@@ -53,14 +57,13 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
         };
     let selected_shared = provider_dispatch.selected_shared(shared);
     if let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &selected_shared.provider {
-        respond_runtime_gemini_compact_request(
+        let response = runtime_gemini_compact_response(
             request.state.request_id,
-            request.state.request,
             &request.captured,
             &selected_shared,
             auth,
         );
-        return Err(RuntimeLocalRewritePipelineExit::Handled);
+        return Err(request.state.respond(response));
     }
     if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &selected_shared.provider {
         let parts = runtime_kiro_compact_response_parts(
@@ -214,6 +217,13 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
                 }
             }
         };
+        let selected_provider = provider_dispatch.provider();
+        let profile_name = if selected_provider == shared.provider.bridge_kind().provider_id() {
+            RUNTIME_LOCAL_REWRITE_PROFILE
+        } else {
+            selected_provider.label()
+        };
+        let route_kind = runtime_local_rewrite_route_kind(provider_dispatch.endpoint());
         let selected_shared = provider_dispatch.selected_shared(shared);
         let started_at = Instant::now();
         let result = send_runtime_local_rewrite_upstream_request(
@@ -226,6 +236,13 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
             selected_shared.provider.bridge_kind(),
             &result,
             started_at.elapsed(),
+        );
+        runtime_local_rewrite_record_provider_health(
+            shared,
+            profile_name,
+            route_kind,
+            selected_shared.provider.bridge_kind(),
+            &result,
         );
         match result {
             Ok(response)
@@ -309,6 +326,46 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         response_governance,
     );
     Ok(())
+}
+
+fn runtime_local_rewrite_record_provider_health(
+    shared: &RuntimeLocalRewriteProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    provider: RuntimeProviderBridgeKind,
+    result: &anyhow::Result<RuntimeLocalRewriteUpstreamResult>,
+) {
+    match result {
+        Err(error) => note_runtime_profile_transport_failure(
+            &shared.runtime_shared,
+            profile_name,
+            route_kind,
+            "governed_provider_dispatch",
+            error,
+        ),
+        Ok(response) if (200..400).contains(&response.status()) => {
+            let _ = commit_runtime_proxy_profile_selection_with_policy(
+                &shared.runtime_shared,
+                profile_name,
+                route_kind,
+                false,
+            );
+        }
+        Ok(response)
+            if response.status() == 503
+                || runtime_local_rewrite_buffered_provider_fallback_class(response, provider)
+                    == Some(ProviderErrorClass::Transient) =>
+        {
+            let _ = bump_runtime_profile_health_score(
+                &shared.runtime_shared,
+                profile_name,
+                route_kind,
+                RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                "governed_provider_overload",
+            );
+        }
+        Ok(_) => {}
+    }
 }
 
 fn runtime_local_rewrite_record_provider_metric(
