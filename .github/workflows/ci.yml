@@ -578,9 +578,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          syft_image="anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f"
+          for attempt in 1 2 3; do
+            if docker pull "$syft_image"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
           docker run --rm \
             -v "${PWD}:/source:ro" \
-            anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f \
+            "$syft_image" \
             dir:/source --exclude './target/**' --exclude './.git/**' -o spdx-json \
             > source-sbom.spdx.json
           node -e 'JSON.parse(require("node:fs").readFileSync("source-sbom.spdx.json", "utf8"))'
