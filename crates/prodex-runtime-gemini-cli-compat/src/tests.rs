@@ -280,6 +280,19 @@ fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
     let extensions =
         active_extension_manifests_from_roots(std::slice::from_ref(&extensions_root), None);
     write_gemini_mcp_config(&codex_home, &extensions, None).unwrap();
+    fs::write(
+        codex_home.join("hooks.json"),
+        serde_json::json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "Read",
+                    "hooks": [{"type": "command", "command": "echo existing"}]
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
     write_gemini_hooks(&codex_home, &extensions, None).unwrap();
     write_gemini_prompts(&codex_home, &extensions, None).unwrap();
     write_gemini_skills(&codex_home, &extensions).unwrap();
@@ -294,18 +307,29 @@ fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
 
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(codex_home.join("hooks.json")).unwrap()).unwrap();
+    let expected_status = "Gemini extension workspace-tools: Checking shell";
+    let (hook_group, generated_hook) = hooks["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|group| {
+            group["hooks"].as_array()?.iter().find_map(|hook| {
+                (hook["statusMessage"].as_str() == Some(expected_status)).then_some((group, hook))
+            })
+        })
+        .expect("workspace-tools hook should be generated");
     assert_eq!(
-        hooks["hooks"]["PreToolUse"][0]["matcher"],
+        hook_group["matcher"],
         serde_json::Value::String("Bash".to_string())
     );
-    let hook_command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        .as_str()
-        .unwrap();
-    assert!(Path::new(hook_command).ends_with(Path::new("workspace").join("check.sh")));
-    assert_eq!(
-        hooks["hooks"]["PreToolUse"][0]["hooks"][0]["statusMessage"],
-        serde_json::Value::String("Gemini extension workspace-tools: Checking shell".to_string())
+    let hook_command = generated_hook["command"].as_str().unwrap();
+    assert!(
+        hook_command
+            .replace('\\', "/")
+            .ends_with("/workspace/check.sh"),
+        "unexpected hook command: {hook_command}"
     );
+    assert_eq!(generated_hook["statusMessage"], expected_status);
 
     let prompt =
         fs::read_to_string(codex_home.join("prompts").join("workspace-tools-review.md")).unwrap();
