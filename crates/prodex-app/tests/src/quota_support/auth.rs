@@ -1,7 +1,11 @@
 use super::*;
 use std::{
     fs,
+    io::{Read, Write},
+    net::{Shutdown, TcpListener},
     path::PathBuf,
+    thread,
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -180,6 +184,64 @@ fn codex_openai_auth_originator_honors_upstream_override() {
     );
 
     assert_eq!(codex_openai_auth_originator(), "codex-tui");
+}
+
+#[test]
+fn usage_request_retries_one_transient_disconnect() {
+    let root = temp_dir("usage-retry");
+    fs::create_dir_all(&root).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for attempt in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let mut buffer = [0_u8; 512];
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            if attempt == 0 {
+                let _ = stream.shutdown(Shutdown::Both);
+                continue;
+            }
+            let body = br#"{"ok":true}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+    let client = Client::builder()
+        .no_proxy()
+        .connect_timeout(Duration::from_secs(1))
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let auth = UsageAuth {
+        access_token: "test-token".to_string(),
+        account_id: Some("test-account".to_string()),
+        refresh_token: None,
+        expires_at: None,
+        last_refresh: None,
+    };
+
+    let (_, body) = send_usage_request(
+        &client,
+        &root,
+        &format!("http://{address}/backend-api/wham/usage"),
+        &auth,
+    )
+    .unwrap();
+
+    assert_eq!(body, br#"{"ok":true}"#);
+    server.join().unwrap();
 }
 
 fn temp_dir(name: &str) -> PathBuf {

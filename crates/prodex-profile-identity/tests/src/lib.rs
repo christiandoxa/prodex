@@ -336,6 +336,10 @@ fn profile_name_validation_matches_cli_rules() {
         "profile name cannot contain path separators"
     );
     assert_eq!(
+        validate_profile_name("bad\\name").unwrap_err().to_string(),
+        "profile name cannot contain path separators"
+    );
+    assert_eq!(
         validate_profile_name("..").unwrap_err().to_string(),
         "profile name cannot be '.' or '..'"
     );

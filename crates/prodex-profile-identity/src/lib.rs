@@ -378,7 +378,7 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
         bail!("profile name cannot be empty");
     }
 
-    if name.contains(std::path::MAIN_SEPARATOR) {
+    if name.contains('/') || name.contains('\\') {
         bail!("profile name cannot contain path separators");
     }
 

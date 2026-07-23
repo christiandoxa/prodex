@@ -29,6 +29,9 @@ use std::fmt;
 use std::path::Path;
 use zeroize::{Zeroize, Zeroizing};
 
+mod usage_request;
+use usage_request::send_usage_request;
+
 #[derive(Serialize)]
 struct ChatgptRefreshRequest {
     client_id: &'static str,
@@ -574,31 +577,6 @@ fn refresh_usage_auth_from_disk_with_proxy_policy(
         UsageAuthSyncSource::Refreshed,
         expected_current,
     ))
-}
-
-fn send_usage_request(
-    client: &Client,
-    codex_home: &Path,
-    usage_url: &str,
-    auth: &UsageAuth,
-) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-    let mut request = codex_openai_auth_headers_for_home(client.get(usage_url), codex_home)?
-        .header("Authorization", format!("Bearer {}", auth.access_token));
-
-    if let Some(account_id) = auth.account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", account_id);
-    }
-
-    let response = request
-        .send()
-        .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
-    let status = response.status();
-    let body = read_blocking_response_body_with_limit(
-        response,
-        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
-        "failed to read quota response body",
-    )?;
-    Ok((status, body))
 }
 
 fn send_rate_limit_reset_credit_consume_request(
