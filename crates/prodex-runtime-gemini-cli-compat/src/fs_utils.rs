@@ -257,7 +257,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("prodex-gemini-cli-compat-fs-{name}-{stamp}"))
+        std::env::temp_dir()
+            .canonicalize()
+            .expect("temp dir should resolve")
+            .join(format!("prodex-gemini-cli-compat-fs-{name}-{stamp}"))
     }
 
     #[test]

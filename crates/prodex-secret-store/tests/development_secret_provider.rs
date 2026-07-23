@@ -12,7 +12,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!(
+    let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "prodex-development-secret-{name}-{}-{stamp:x}",
         std::process::id()
     ));

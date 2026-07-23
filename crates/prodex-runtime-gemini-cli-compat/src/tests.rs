@@ -7,7 +7,10 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("prodex-gemini-cli-compat-{name}-{stamp}"))
+    std::env::temp_dir()
+        .canonicalize()
+        .expect("temp dir should resolve")
+        .join(format!("prodex-gemini-cli-compat-{name}-{stamp}"))
 }
 
 #[cfg(unix)]

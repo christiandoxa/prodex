@@ -18,7 +18,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "prodex-secret-store-{name}-{}-{nanos:x}",
         std::process::id()
     ));
