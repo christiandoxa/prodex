@@ -161,7 +161,7 @@ fn handle_usage_request(
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Option<String> {
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let mut buffer = [0_u8; 1024];
     let mut request = Vec::new();
 

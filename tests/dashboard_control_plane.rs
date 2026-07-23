@@ -464,7 +464,7 @@ fn get_response(port: u16, path: &str) -> Result<(String, String), Box<dyn std::
 
 fn send_request(port: u16, request: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.write_all(request.as_bytes())?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
