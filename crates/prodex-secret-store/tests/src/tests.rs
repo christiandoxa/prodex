@@ -3,8 +3,8 @@ use crate::{
     RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
     SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
     SecretStoreErrorStatus, SecretValue, auth_json_location, auth_json_path,
-    plan_refresh_lease_error_response, plan_secret_error_response, read_private_file_bounded,
-    write_private_file_atomic,
+    ensure_private_directory, plan_refresh_lease_error_response, plan_secret_error_response,
+    read_private_file_bounded, write_private_file_atomic,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -154,6 +154,32 @@ fn file_backend_honors_caller_specific_bounds() {
         .unwrap()
         .unwrap()
         .with_bytes(|bytes| assert_eq!(bytes, b"1234"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn file_backend_seals_owned_child_process_output() {
+    let root = temp_dir("seal-child-output");
+    ensure_private_directory(&root).unwrap();
+    let path = root.join("auth.json");
+    fs::write(&path, "child-secret").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let backend = FileSecretBackend::new();
+    let location = SecretLocation::file(&path);
+
+    assert!(backend.seal_existing(&location).unwrap());
+    assert_eq!(
+        SecretManager::new(backend)
+            .read_text(&location)
+            .unwrap()
+            .as_deref(),
+        Some("child-secret")
+    );
 
     let _ = fs::remove_dir_all(root);
 }

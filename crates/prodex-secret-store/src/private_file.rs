@@ -5,6 +5,11 @@ use zeroize::Zeroizing;
 
 use crate::secure_file::{self, FileSecurity};
 
+/// Creates or tightens a directory for current-user-private secret storage.
+pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    secure_file::ensure_private_directory(path)
+}
+
 /// Reads a current-user-private regular file without following path indirection.
 ///
 /// Returns `None` when the file does not exist and rejects untrusted parents,

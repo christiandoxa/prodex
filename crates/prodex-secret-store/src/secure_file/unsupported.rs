@@ -15,6 +15,10 @@ impl Directory {
         Err(unsupported())
     }
 
+    pub(super) fn ensure_private_child(&self, _name: &OsStr) -> io::Result<Self> {
+        Err(unsupported())
+    }
+
     pub(super) fn open_child(&self, _name: &OsStr, _create: bool) -> io::Result<Self> {
         Err(unsupported())
     }

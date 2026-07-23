@@ -21,6 +21,7 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FileSecurity {
     Private,
+    UnsealedPrivate,
     Projected,
 }
 
@@ -108,6 +109,28 @@ pub(crate) fn open_file(path: &Path, security: FileSecurity) -> io::Result<Optio
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    let name = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| invalid_input("private directory name cannot be empty"))?;
+    validate_name(name)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    SecureDirectory::open(parent, true)?
+        .0
+        .ensure_private_child(name)
+        .map(drop)
+}
+
+pub(crate) fn seal_private_file(path: &Path, max_bytes: u64) -> io::Result<bool> {
+    let Some(opened) = open_file(path, FileSecurity::UnsealedPrivate)? else {
+        return Ok(false);
+    };
+    let bytes = Zeroizing::new(opened.read_bounded(max_bytes)?);
+    write_private_atomic(path, &bytes)?;
+    Ok(true)
 }
 
 pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -1,6 +1,4 @@
 use super::{TestDir, UsageServer, Value, fs, json};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct Fixture {
@@ -31,10 +29,8 @@ pub(crate) fn setup_fixture() -> Fixture {
     let codex_stdin_log = temp_dir.path.join("codex-stdin.log");
     let codex_bin = bin_root.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
 
-    fs::create_dir_all(&prodex_home).expect("failed to create prodex home");
+    secure_test_directory(&temp_dir.path);
     fs::create_dir_all(&shared_codex_home).expect("failed to create shared codex home");
-    fs::create_dir_all(&main_home).expect("failed to create main home");
-    fs::create_dir_all(&second_home).expect("failed to create second home");
     fs::create_dir_all(&bin_root).expect("failed to create bin dir");
     for directory in [
         &prodex_home,
@@ -230,10 +226,8 @@ pub(crate) fn write_json(path: &Path, value: &Value) {
     .expect("failed to write json");
 }
 
-fn secure_test_directory(_path: &Path) {
-    #[cfg(unix)]
-    fs::set_permissions(_path, fs::Permissions::from_mode(0o700))
-        .expect("failed to secure test directory");
+fn secure_test_directory(path: &Path) {
+    secret_store::ensure_private_directory(path).expect("failed to secure test directory");
 }
 
 fn write_executable(path: &Path, content: &str) {

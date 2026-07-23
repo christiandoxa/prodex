@@ -71,6 +71,33 @@ impl Directory {
         Ok(Self { file })
     }
 
+    pub(super) fn ensure_private_child(&self, name: &OsStr) -> io::Result<Self> {
+        let name = c_name(name)?;
+        let mut fd = openat_directory(self.file.as_raw_fd(), &name);
+        if fd == -1 && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
+            // SAFETY: the parent descriptor is live and the single component
+            // cannot follow a final symlink.
+            let result = unsafe { libc::mkdirat(self.file.as_raw_fd(), name.as_ptr(), 0o700) };
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(error);
+                }
+            }
+            fd = openat_directory(self.file.as_raw_fd(), &name);
+        }
+        let file = file_from_fd(fd)?;
+        if !file.metadata()?.is_dir() {
+            return Err(permission_denied("secret parent is not a directory"));
+        }
+        // SAFETY: `file` owns the opened directory, so no path is followed here.
+        if unsafe { libc::fchmod(file.as_raw_fd(), 0o700) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        validate_directory(&file.metadata()?)?;
+        Ok(Self { file })
+    }
+
     pub(super) fn open_file(&self, name: &OsStr, security: FileSecurity) -> io::Result<File> {
         let name = c_name(name)?;
         // SAFETY: the parent fd is live and `name` is a single NUL-terminated
@@ -220,6 +247,11 @@ fn validate_file(metadata: &Metadata, security: FileSecurity) -> io::Result<()> 
         FileSecurity::Private => {
             if metadata.uid() != euid || metadata.mode() & 0o077 != 0 {
                 return Err(permission_denied("secret file is not private to its owner"));
+            }
+        }
+        FileSecurity::UnsealedPrivate => {
+            if metadata.uid() != euid {
+                return Err(permission_denied("secret file is not owned by this user"));
             }
         }
         FileSecurity::Projected => {
