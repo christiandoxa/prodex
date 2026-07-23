@@ -20,6 +20,7 @@ impl ImageAttachmentTestDir {
         Self { path }
     }
 
+    #[cfg(unix)]
     fn app_paths(&self) -> AppPaths {
         AppPaths {
             root: self.path.join("prodex"),

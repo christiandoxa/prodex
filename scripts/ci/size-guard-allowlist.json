@@ -171,8 +171,8 @@
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
-    "maxLines": 1058,
-    "reason": "Shared Codex home preparation now covers corrupt transcript metadata recovery; capped until history, transcript, and attachment fixtures split by domain."
+    "maxLines": 1064,
+    "reason": "Shared Codex home preparation now covers corrupt transcript metadata recovery and Unix-only filesystem safety fixtures; capped until history, transcript, and attachment fixtures split by domain."
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",

@@ -1,5 +1,9 @@
+#[cfg(unix)]
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 #[path = "auto_rotate/support/temp_dir.rs"]
