@@ -44,13 +44,13 @@
   {
     "provider": "copilot",
     "client_request_format": "openai-responses",
-    "upstream_request_format": "openai-chat-completions",
+    "upstream_request_format": "openai-responses",
     "response_format": "openai-responses",
     "canonical_client_endpoint": "/v1/responses",
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": true,
-    "transform_status": "translated",
+    "transform_status": "passthrough",
     "required_endpoints": [
       "responses",
       "responses/compact",

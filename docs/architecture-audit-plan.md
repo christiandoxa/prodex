@@ -664,7 +664,7 @@ Recent split or verified-below-threshold files:
 - `crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs` (~123; buffered chat response conversion after stream split)
 - `crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs` (~147; chat stream event conversion)
 - `crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs` (~147; shared JSON/text/tool helpers)
-- `crates/prodex-provider-core/src/translators/copilot.rs` (~103; Copilot translator contract wiring after test split)
+- `crates/prodex-provider-core/src/translators/copilot.rs` (~56; Copilot native Responses passthrough contract wiring)
 - `crates/prodex-provider-core/src/translators/copilot/request.rs` (~124; canonical-model, encrypted-content, agent-input, and vision-input helpers)
 - `crates/prodex-provider-core/src/translators/copilot/response.rs` (~15; response-id extraction)
 - `crates/prodex-provider-core/src/translators/copilot/tests.rs` (~83; Copilot characterization tests)
@@ -941,7 +941,7 @@ Highest risk seams:
 1. freeze behavior with more characterization tests around current app-side rewrites
 2. finish moving pure Gemini / DeepSeek / Kiro transforms behind `prodex-provider-core`
 3. replace app-side chat-compatible fallback helpers with provider-core-backed bridges wherever pending-message/session state is not required
-4. deepen Anthropic and Copilot coverage beyond the current Responses chat-compat path
+4. deepen Anthropic coverage beyond chat compatibility and keep Copilot's native Responses contract aligned with runtime behavior
 5. reduce `provider_bridge.rs` to orchestration + logging + compatibility shims
 6. keep `docs/provider-conformance.md` and `docs/provider-capabilities.md` synced with the actual contract matrix
 
