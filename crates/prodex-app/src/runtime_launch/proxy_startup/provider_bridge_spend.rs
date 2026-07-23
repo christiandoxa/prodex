@@ -135,6 +135,38 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
     }
 }
 
+pub(super) fn runtime_provider_gateway_terminal_spend_event(
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    path_and_query: &str,
+    model: Option<&str>,
+    status: u16,
+    reason: ReservationReconciliationReason,
+) -> RuntimeProviderGatewaySpendEvent {
+    RuntimeProviderGatewaySpendEvent {
+        event: "gateway_spend",
+        phase: "response",
+        request: request_id,
+        key_name: None,
+        tenant_id: None,
+        request_id: runtime_provider_gateway_spend_request_id(),
+        legacy_request_sequence: request_id,
+        call_id: runtime_provider_gateway_spend_call_id(),
+        provider: runtime_provider_label(kind).to_string(),
+        path: path_without_query(path_and_query).to_string(),
+        model: model.unwrap_or("unknown").to_string(),
+        status,
+        elapsed_ms: 0,
+        request_bytes: 0,
+        response_bytes: Some(0),
+        input_tokens: Some(0),
+        output_tokens: Some(0),
+        cost_usd: Some(0.0),
+        reconciliation_reason: Some(reason),
+        sink: "runtime-log".to_string(),
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) event: &'static str,

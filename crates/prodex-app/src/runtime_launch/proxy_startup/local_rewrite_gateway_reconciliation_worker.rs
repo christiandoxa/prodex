@@ -101,9 +101,9 @@ impl RuntimeGatewayReconciliationQueue {
 pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
     shared: &RuntimeLocalRewriteProxyShared,
     event: RuntimeProviderGatewaySpendEvent,
-) {
+) -> bool {
     if event.phase != "response" {
-        return;
+        return false;
     }
     let should_reconcile = shared
         .gateway_usage
@@ -122,7 +122,7 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                 ],
             ),
         );
-        return;
+        return false;
     }
     let request = event.request;
     if !shared.gateway_usage.reconciliation.enqueue(event) {
@@ -136,9 +136,10 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                 ],
             ),
         );
-        return;
+        return false;
     }
     start_runtime_gateway_reconciliation_workers(shared);
+    true
 }
 
 fn start_runtime_gateway_reconciliation_workers(shared: &RuntimeLocalRewriteProxyShared) {

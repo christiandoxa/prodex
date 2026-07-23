@@ -160,7 +160,6 @@ fn provider_bridge_contract_records_translation_boundary() {
     );
     for kind in [
         RuntimeProviderBridgeKind::Anthropic,
-        RuntimeProviderBridgeKind::Copilot,
         RuntimeProviderBridgeKind::DeepSeek,
     ] {
         assert_eq!(
@@ -169,6 +168,15 @@ fn provider_bridge_contract_records_translation_boundary() {
         );
         assert!(provider_adapter(kind.provider_id()).supports_model_fallback());
     }
+    assert_eq!(
+        provider_adapter(RuntimeProviderBridgeKind::Copilot.provider_id())
+            .upstream_request_format(),
+        ProviderWireFormat::OpenAiResponses
+    );
+    assert!(
+        provider_adapter(RuntimeProviderBridgeKind::Copilot.provider_id())
+            .supports_model_fallback()
+    );
     assert_eq!(
         provider_adapter(RuntimeProviderBridgeKind::Gemini.provider_id()).upstream_request_format(),
         ProviderWireFormat::GeminiGenerateContent
@@ -444,7 +452,7 @@ fn provider_native_passthrough_is_explicit() {
         RuntimeProviderBridgeKind::Anthropic,
         "/v1/responses"
     ));
-    assert!(!runtime_provider_native_passthrough(
+    assert!(runtime_provider_native_passthrough(
         RuntimeProviderBridgeKind::Copilot,
         "/v1/responses"
     ));

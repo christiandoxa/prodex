@@ -23,7 +23,22 @@ const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_RETRY_DELAY: Duration = Duration::from_
 
 pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_spend_event(
     shared: &RuntimeLocalRewriteProxyShared,
+    event: RuntimeProviderGatewaySpendEvent,
+) {
+    emit_runtime_gateway_spend_event_inner(shared, event, false);
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_terminal_spend_event(
+    shared: &RuntimeLocalRewriteProxyShared,
+    event: RuntimeProviderGatewaySpendEvent,
+) {
+    emit_runtime_gateway_spend_event_inner(shared, event, true);
+}
+
+fn emit_runtime_gateway_spend_event_inner(
+    shared: &RuntimeLocalRewriteProxyShared,
     mut event: RuntimeProviderGatewaySpendEvent,
+    require_reconciliation: bool,
 ) {
     let typed_request_id = shared
         .gateway_usage
@@ -55,8 +70,12 @@ pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_spend_event
             .as_ref()
             .and_then(|scope| scope.tenant_id.as_deref()),
     );
+    let reconciliation_scheduled =
+        schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
+    if require_reconciliation && !reconciliation_scheduled {
+        return;
+    }
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
-    schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
     if !shared.gateway_observability.sink_enabled("jsonl")
         && !shared.gateway_observability.sink_enabled("http")
     {

@@ -27,7 +27,9 @@ mod observability;
 #[path = "local_rewrite_transport/projected_credential.rs"]
 mod projected_credential;
 
-pub(super) use observability::emit_runtime_gateway_spend_event;
+pub(super) use observability::{
+    emit_runtime_gateway_spend_event, emit_runtime_gateway_terminal_spend_event,
+};
 pub(super) use projected_credential::{
     runtime_gateway_with_outbound_secret, runtime_local_rewrite_with_projected_provider_secret,
 };

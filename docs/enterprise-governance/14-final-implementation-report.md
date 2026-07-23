@@ -81,8 +81,9 @@ is the enterprise authority; Redis remains rebuildable coordination.
   `prodex-presidio` and `prodex-authn`: typed inspection, policy, obligations,
   routing and identity contracts.
 - `prodex-app`: composition, snapshot refresh, authenticated lifecycle APIs,
-  durable session/audit workers, SIEM export and unary/SSE/WebSocket/Gemini
-  PEPs.
+  durable session/audit workers, SIEM export, unary/SSE PEPs, and the governed
+  Gemini Live compatibility PEP. Virtual-key realtime sessions fail closed
+  until bounded per-frame token accounting exists.
 - `prodex-storage`, `prodex-storage-sqlite-runtime` and
   `prodex-storage-postgres-runtime`: generic four-kind governance repository,
   sessions, audit, export and SIEM outbox adapters.

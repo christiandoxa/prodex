@@ -4,8 +4,8 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
-use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
+use super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::*;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
@@ -30,13 +30,12 @@ fn runtime_gemini_compact_error_log_value(_err: &anyhow::Error) -> String {
     "semantic_compact_failed".to_string()
 }
 
-pub(super) fn respond_runtime_gemini_compact_request(
+pub(super) fn runtime_gemini_compact_response(
     request_id: u64,
-    request: RuntimeLocalRewriteRequest,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeGeminiProviderAuth,
-) {
+) -> tiny_http::ResponseBox {
     let semantic = gemini_provider_core_semantic_compact_request_body(&captured.body)
         .map_err(anyhow::Error::msg)
         .and_then(|body| {
@@ -90,7 +89,7 @@ pub(super) fn respond_runtime_gemini_compact_request(
             Ok((parts, profile_name.to_string()))
         });
 
-    let parts = match semantic {
+    let (parts, provider_completed) = match semantic {
         Ok((parts, profile_name)) => {
             runtime_proxy_log(
                 &shared.runtime_shared,
@@ -108,7 +107,7 @@ pub(super) fn respond_runtime_gemini_compact_request(
                     ],
                 ),
             );
-            parts
+            (parts, true)
         }
         Err(err) => {
             runtime_proxy_log(
@@ -130,12 +129,23 @@ pub(super) fn respond_runtime_gemini_compact_request(
                     ],
                 ),
             );
-            runtime_gemini_local_compact_response_parts(&captured.body)
+            (
+                runtime_gemini_local_compact_response_parts(&captured.body),
+                false,
+            )
         }
     };
-    let _ = request.respond(runtime_local_rewrite_response_with_call_id(
-        parts, request_id, shared,
-    ));
+    if provider_completed {
+        emit_runtime_gateway_response_spend_event_for_body(
+            request_id,
+            captured,
+            shared,
+            parts.status,
+            0,
+            parts.body.as_slice(),
+        );
+    }
+    runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
 }
 
 pub(super) fn runtime_gemini_semantic_compact_response_parts(

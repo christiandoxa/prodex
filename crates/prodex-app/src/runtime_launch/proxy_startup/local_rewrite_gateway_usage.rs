@@ -40,20 +40,56 @@ pub(super) struct RuntimeGatewayUsageRequestGuard {
     pub(super) reconciliation:
         super::local_rewrite_gateway_reconciliation_worker::RuntimeGatewayReconciliationQueue,
     pub(super) request_id: u64,
+    pub(super) terminal: Option<(
+        RuntimeLocalRewriteProxyShared,
+        super::provider_bridge::RuntimeProviderGatewaySpendEvent,
+    )>,
 }
 
 impl RuntimeGatewayUsageRequestGuard {
-    pub(super) fn new(shared: &RuntimeLocalRewriteProxyShared, request_id: u64) -> Self {
+    pub(super) fn new(
+        shared: &RuntimeLocalRewriteProxyShared,
+        request_id: u64,
+        captured: &RuntimeProxyRequest,
+    ) -> Self {
+        let model = super::provider_bridge::runtime_provider_model_from_body(&captured.body);
         Self {
             request_ids: Arc::clone(&shared.gateway_usage.request_ids),
             reconciliation: shared.gateway_usage.reconciliation.clone(),
             request_id,
+            terminal: Some((
+                shared.clone(),
+                super::provider_bridge::runtime_provider_gateway_terminal_spend_event(
+                    request_id,
+                    shared.provider.bridge_kind(),
+                    &captured.path_and_query,
+                    model.as_deref(),
+                    499,
+                    prodex_domain::ReservationReconciliationReason::Cancelled,
+                ),
+            )),
+        }
+    }
+
+    pub(super) fn mark_terminal(
+        &mut self,
+        status: u16,
+        reason: prodex_domain::ReservationReconciliationReason,
+    ) {
+        if let Some((_, event)) = self.terminal.as_mut() {
+            event.status = status;
+            event.reconciliation_reason = Some(reason);
         }
     }
 }
 
 impl Drop for RuntimeGatewayUsageRequestGuard {
     fn drop(&mut self) {
+        if let Some((shared, event)) = self.terminal.take() {
+            super::local_rewrite_transport::emit_runtime_gateway_terminal_spend_event(
+                &shared, event,
+            );
+        }
         self.request_ids
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

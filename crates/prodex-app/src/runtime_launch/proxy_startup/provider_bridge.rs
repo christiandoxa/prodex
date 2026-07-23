@@ -33,6 +33,7 @@ pub(super) use super::provider_bridge_spend::{
     runtime_provider_gateway_response_spend_event_from_tokens,
     runtime_provider_gateway_spend_apply_admission_ids,
     runtime_provider_gateway_spend_apply_ledger_scope, runtime_provider_gateway_spend_event,
+    runtime_provider_gateway_terminal_spend_event,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

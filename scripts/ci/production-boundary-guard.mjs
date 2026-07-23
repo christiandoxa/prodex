@@ -39,6 +39,8 @@ const FILES = Object.freeze({
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/token_claims.rs",
   pipeline:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline.rs",
+  websocket:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_websocket.rs",
   governance:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_governance.rs",
   dispatch:
@@ -140,14 +142,13 @@ export function validateProductionBoundary(sources) {
         "runtime_local_rewrite_canonical_context(request, target, shared)",
         "runtime_local_rewrite_authenticate(canonical, shared)",
         "runtime_local_rewrite_bounded_admission(authenticated, shared)",
-        "runtime_local_rewrite_dispatch_websocket(admitted, shared)",
         "runtime_local_rewrite_capture_body(admitted, shared)",
         "runtime_local_rewrite_prepare_constraints(captured, shared)",
         "runtime_local_rewrite_dispatch_control_plane(prepared, shared)",
-        "runtime_local_rewrite_pre_reservation_governance(prepared, shared)",
+        "runtime_local_rewrite_enforce_guardrails(prepared, shared)",
         "runtime_local_rewrite_reserve_virtual_key(governed, shared)",
-        "runtime_local_rewrite_post_reservation_governance(reserved, shared)",
         "runtime_local_rewrite_apply_constraints(reserved, shared)",
+        "runtime_local_rewrite_dispatch_websocket(ready, shared)",
         "runtime_local_rewrite_dispatch_provider(ready, shared)",
       ],
       `${FILES.pipeline}: canonical/auth/admission/governance/reservation/dispatch stages must remain ordered`,
@@ -172,6 +173,28 @@ export function validateProductionBoundary(sources) {
       `${FILES.pipeline}: production stages must retain typed input/output/rejection state`,
     );
   }
+  const websocketDispatch =
+    functionBody(sources.websocket, "runtime_local_rewrite_dispatch_websocket") ?? "";
+  requireOrdered(
+    errors,
+    websocketDispatch,
+    [
+      ".gateway_usage",
+      '"virtual_key_realtime_not_supported"',
+      '"governed_realtime_not_supported"',
+      "runtime_gateway_application_provider_dispatch(",
+      "handle_runtime_gemini_live_websocket_request(",
+    ],
+    `${FILES.pipeline}: realtime websocket dispatch must fail closed for virtual-key accounting and use governed provider routing`,
+  );
+  const captureBody = functionBody(sources.pipeline, "runtime_local_rewrite_capture_body") ?? "";
+  requireBefore(
+    errors,
+    captureBody,
+    "state.request.is_websocket_upgrade()",
+    "state.request.header_request()",
+    `${FILES.pipeline}: websocket handshakes must be captured from headers without blocking on a nonexistent body`,
+  );
 
   const canonical = functionBody(sources.pipeline, "runtime_local_rewrite_canonical_context");
   requireOrdered(
@@ -264,6 +287,20 @@ export function validateProductionBoundary(sources) {
     "prodex_gateway_http::plan_gateway_http_error_response(&error)",
     `${FILES.pipeline}: request-context metadata failures must retain canonical gateway HTTP status mapping`,
   );
+  const providerHealth =
+    functionBody(sources.dispatch, "runtime_local_rewrite_record_provider_health") ?? "";
+  for (const required of [
+    "note_runtime_profile_transport_failure(",
+    "commit_runtime_proxy_profile_selection_with_policy(",
+    "bump_runtime_profile_health_score(",
+  ]) {
+    requireText(
+      errors,
+      providerHealth,
+      required,
+      `${FILES.dispatch}: governed provider outcomes must update route health and circuit state`,
+    );
+  }
   const adminAuth = functionBody(sources.pipeline, "runtime_local_rewrite_preauthorize_admin") ?? "";
   requireBefore(
     errors,
@@ -1437,14 +1474,13 @@ function runSelfTest() {
       runtime_local_rewrite_canonical_context(request, target, shared);
       runtime_local_rewrite_authenticate(canonical, shared);
       runtime_local_rewrite_bounded_admission(authenticated, shared);
-      runtime_local_rewrite_dispatch_websocket(admitted, shared);
       runtime_local_rewrite_capture_body(admitted, shared);
       runtime_local_rewrite_prepare_constraints(captured, shared);
       runtime_local_rewrite_dispatch_control_plane(prepared, shared);
-      runtime_local_rewrite_pre_reservation_governance(prepared, shared);
+      runtime_local_rewrite_enforce_guardrails(prepared, shared);
       runtime_local_rewrite_reserve_virtual_key(governed, shared);
-      runtime_local_rewrite_post_reservation_governance(reserved, shared);
       runtime_local_rewrite_apply_constraints(reserved, shared);
+      runtime_local_rewrite_dispatch_websocket(ready, shared);
       runtime_local_rewrite_dispatch_provider(ready, shared);
     }
     fn runtime_local_rewrite_canonical_context() {
@@ -1473,11 +1509,21 @@ function runSelfTest() {
       runtime_gateway_application_data_plane_authorization();
     }
     fn runtime_local_rewrite_capture_body() {
+      if state.request.is_websocket_upgrade() {
+        state.request.header_request();
+      }
       captured.path_and_query = state.context.target().path_and_query().to_string();
     }
     fn runtime_local_rewrite_bounded_admission() {
       runtime_gateway_application_local_admission(application, shared);
       acquire_runtime_proxy_active_request_slot_with_wait();
+    }`,
+    websocket: `fn runtime_local_rewrite_dispatch_websocket() {
+      shared.gateway_usage.request_ids;
+      "virtual_key_realtime_not_supported";
+      "governed_realtime_not_supported";
+      runtime_gateway_application_provider_dispatch();
+      handle_runtime_gemini_live_websocket_request();
     }`,
     directRuntime: `async fn handle() {
       try_acquire_gateway_request_permit();
@@ -1506,6 +1552,11 @@ function runSelfTest() {
     dispatch: `fn runtime_local_rewrite_dispatch_provider() {
       let provider_dispatch = runtime_gateway_application_provider_dispatch(&request.application_admission, shared);
       send_runtime_local_rewrite_upstream_request(request, &provider_dispatch);
+    }
+    fn runtime_local_rewrite_record_provider_health() {
+      note_runtime_profile_transport_failure();
+      commit_runtime_proxy_profile_selection_with_policy();
+      bump_runtime_profile_health_score();
     }`,
     providerSender: `fn send_runtime_local_rewrite_upstream_request() {
       let provider = dispatch.provider();
@@ -1888,8 +1939,8 @@ function runSelfTest() {
     validateProductionBoundary({
       ...valid,
       pipeline: valid.pipeline.replace(
-        "runtime_local_rewrite_bounded_admission(authenticated, shared);\n      runtime_local_rewrite_dispatch_websocket(admitted, shared);",
-        "runtime_local_rewrite_dispatch_websocket(admitted, shared);\n      runtime_local_rewrite_bounded_admission(authenticated, shared);",
+        "runtime_local_rewrite_reserve_virtual_key(governed, shared);\n      runtime_local_rewrite_apply_constraints(reserved, shared);",
+        "runtime_local_rewrite_apply_constraints(reserved, shared);\n      runtime_local_rewrite_reserve_virtual_key(governed, shared);",
       ),
     }).some((error) => error.includes("stages must remain ordered")),
     "pipeline stage reorder accepted",
@@ -1897,7 +1948,7 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      pipeline: valid.pipeline.replace("struct RuntimeLocalRewriteReservedRequest;", ""),
+      pipeline: valid.pipeline.replace("struct RuntimeLocalRewriteDispatchReadyRequest;", ""),
     }).some((error) => error.includes("typed input/output/rejection")),
     "untyped pipeline stage accepted",
   );
