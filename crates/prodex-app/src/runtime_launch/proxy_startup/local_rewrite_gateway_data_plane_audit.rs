@@ -1,7 +1,6 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use runtime_proxy_crate::path_without_query;
 use serde_json::Value;
-use std::path::Path;
 
 pub(super) fn runtime_gateway_audit_data_plane_auth_failed(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -113,14 +112,8 @@ pub(super) fn runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
 }
 
 fn append_failure(shared: &RuntimeLocalRewriteProxyShared, action: &str, payload: Value) {
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
+    crate::audit_log::append_runtime_audit_event_best_effort(
+        &shared.runtime_shared,
         "gateway_data_plane",
         action,
         "failure",

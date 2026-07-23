@@ -20,7 +20,6 @@ use crate::{
 use anyhow::Result;
 use prodex_domain::CallId;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use std::path::Path;
 
 #[path = "local_rewrite_response_dispatch.rs"]
 mod dispatch;
@@ -93,14 +92,8 @@ fn runtime_gateway_audit_response_blocked(
             reason,
         );
     }
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
+    crate::audit_log::append_runtime_audit_event_best_effort(
+        &shared.runtime_shared,
         "gateway_data_plane",
         action,
         "failure",

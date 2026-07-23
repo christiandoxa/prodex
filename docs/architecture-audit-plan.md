@@ -1,12 +1,10 @@
 # Prodex Architecture Audit and Milestone Plan
 
-> Historical refactor journal. Current architecture and supported behavior are
-> documented in `docs/architecture.md`, `docs/provider-conformance.md`, and
+> Historical refactor journal, not an authoritative backlog or capability
+> contract. Current architecture and supported behavior are documented in
+> `docs/architecture.md`, `docs/provider-conformance.md`,
+> `docs/provider-capabilities.md`, and
 > `docs/enterprise-governance/implementation-ledger.md`.
-
-This note captures the current repository state before the next structural refactor.
-
-It is based on the current worktree, not intent.
 
 Related current docs:
 
@@ -526,13 +524,16 @@ Current state:
   directions, validates bounded JSON-RPC frames, and fails closed on malformed
   traffic
 
-So Phase 2 now includes diagnostic envelope parsing, preview streaming,
-passthrough-aware observation, fail-closed validation, and an opt-in live broker.
-Cross-session multiplexing and broker-owned routing policy remain future work.
+Phase 2 is complete for its declared scope: diagnostic envelope parsing,
+preview streaming, passthrough-aware observation, fail-closed validation, and
+an opt-in live broker. One broker invocation owns one Codex app-server child;
+Codex owns thread/session multiplexing inside that child and the runtime proxy
+owns model routing. A second broker-owned routing plane is intentionally out of
+scope because it would duplicate affinity and transport policy.
 
 `mcp-server`, `app-server`, and `exec-server` launch routes remain direct
-passthrough by default. The opt-in broker enforces the protocol contract but
-does not invent broker-owned routing policy.
+passthrough by default. The opt-in broker enforces the protocol contract without
+changing upstream routing semantics.
 
 ### 5. Where gateway state / auth / budgets / routing / audit are concentrated
 
@@ -907,18 +908,19 @@ High-value current coverage already exists and should be treated as characteriza
 
 These are the current regression net. Do not delete heuristics that they indirectly cover before new fixtures exist.
 
-### 8. Missing conformance tests
+### 8. Current conformance gates
 
-Missing or incomplete compared to the target state:
+The current provider contract is closed and machine-readable:
 
-- Anthropic and Copilot now have tested Responses chat-compat coverage in provider-core, but their non-Responses endpoint depth still trails Gemini / DeepSeek
-- Kiro conformance depth still trails Gemini / DeepSeek even though chat-completions degraded request/response mapping, invalid response-shape rejection, rejected control, legacy function mapping, and passthrough fixture coverage exists
-- fixture-backed unsupported/degraded parameter matrix per provider/model for more endpoints
-- provider stream termination / error fixture matrix across all supported providers
-- upstream-generated app-server schema conformance beyond the broker's checked-in protocol-surface fixtures
-- live cross-release app-server lifecycle replay beyond the checked-in thread/turn/item validation corpus
-- gateway auth / budget / virtual-key / route-fallback integration matrix
-- security regression matrix for malformed frames, oversized payloads, key leakage, role separation
+- every claimed native, passthrough, or translated endpoint requires request and response fixtures
+- unsupported endpoints must stay unsupported in parameter negotiation and return stable capability errors
+- every translated provider requires explicit error-class, usage, and non-lossless fixtures
+- current Responses providers require request, response, and stream-event coverage
+- app-server lifecycle/schema drift is checked against imported upstream Codex fixtures
+- gateway auth, budgets, virtual keys, fallback routing, malformed frames, bounded payloads, key leakage, and role separation are covered by focused integration/security suites
+
+Live provider behavior and managed multi-replica infrastructure remain deployment
+acceptance evidence, not unchecked source capability claims.
 
 ### 9. Likely regression risks
 

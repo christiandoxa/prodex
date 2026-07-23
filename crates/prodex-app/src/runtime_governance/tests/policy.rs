@@ -12,10 +12,9 @@ use prodex_domain::{
     SessionPolicyContext, TenantContext, TenantId,
 };
 use prodex_runtime_policy::{
-    RuntimeGovernancePolicyAction, RuntimeGovernancePolicyChannel, RuntimeGovernancePolicyEffect,
-    RuntimeGovernancePolicyNetworkZone, RuntimeGovernancePolicyObligation,
-    RuntimeGovernancePolicyRule, RuntimeGovernancePolicyRuleCondition,
-    RuntimePolicyGovernanceSettings,
+    RuntimeGovernancePolicyChannel, RuntimeGovernancePolicyEffect,
+    RuntimeGovernancePolicyObligation, RuntimeGovernancePolicyRule,
+    RuntimeGovernancePolicyRuleCondition, RuntimePolicyGovernanceSettings,
 };
 
 pub(super) fn policy_effect(
@@ -149,14 +148,6 @@ fn serialized_policy_artifact_accepts_verified_authentication_evidence_only() {
     let mut invalid = rule();
     invalid.condition.minimum_authentication_strength = Some(4);
     assert!(compile(invalid).is_err());
-
-    let mut unsupported = rule();
-    unsupported.condition.action = Some(RuntimeGovernancePolicyAction::UseTool);
-    assert!(compile(unsupported).is_err());
-
-    let mut unsupported = rule();
-    unsupported.condition.network_zone = Some(RuntimeGovernancePolicyNetworkZone::Partner);
-    assert!(compile(unsupported).is_err());
 
     let mut invalid = rule();
     invalid.obligations =

@@ -16,14 +16,8 @@ fn runtime_gateway_audit_post_guardrail_webhook_blocked(
     shared: &RuntimeLocalRewriteProxyShared,
     reason: &str,
 ) {
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
+    crate::audit_log::append_runtime_audit_event_best_effort(
+        &shared.runtime_shared,
         "gateway_data_plane",
         "response_guardrail_webhook_blocked",
         "failure",

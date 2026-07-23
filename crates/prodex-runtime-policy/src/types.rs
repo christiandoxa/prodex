@@ -137,10 +137,8 @@ pub enum RuntimeGovernancePolicyChannel {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGovernancePolicyAction {
     InvokeModel,
-    UseTool,
     UploadContent,
     CompactContext,
-    MutateControlPlane,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,7 +155,6 @@ pub enum RuntimeGovernancePolicyRequestRisk {
 pub enum RuntimeGovernancePolicyNetworkZone {
     Local,
     TrustedInternal,
-    Partner,
     Public,
     Unknown,
 }

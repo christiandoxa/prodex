@@ -1,7 +1,6 @@
 use super::validate_runtime_policy_file;
 use crate::{
     MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES, MAX_GATEWAY_GUARDRAIL_KEYWORDS,
-    RuntimeGovernancePolicyAction, RuntimeGovernancePolicyNetworkZone,
     RuntimeGovernancePolicyObligation, RuntimePolicyFile,
 };
 use std::path::Path;
@@ -43,26 +42,38 @@ reason_code = "policy.allow"
         .expect_err("out-of-range authentication strength must be rejected");
     assert!(error.to_string().contains("between 1 and 3"));
 
-    let mut policy = base.clone();
-    policy.governance.policy_rules[0].condition.action =
-        Some(RuntimeGovernancePolicyAction::UseTool);
-    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
-        .expect_err("unproduced action must be rejected");
-    assert!(error.to_string().contains("action selector"));
-
-    let mut policy = base.clone();
-    policy.governance.policy_rules[0].condition.network_zone =
-        Some(RuntimeGovernancePolicyNetworkZone::Partner);
-    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
-        .expect_err("unverified partner zone must be rejected");
-    assert!(error.to_string().contains("partner network selector"));
-
     let mut policy = base;
     policy.governance.policy_rules[0].obligations =
         vec![RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value: 4 }];
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
         .expect_err("out-of-range authentication obligation must be rejected");
     assert!(error.to_string().contains("between 1 and 3"));
+}
+
+#[test]
+fn governance_policy_schema_rejects_unavailable_evidence_selectors() {
+    for selector in [
+        "action = \"use_tool\"",
+        "action = \"mutate_control_plane\"",
+        "network_zone = \"partner\"",
+    ] {
+        let input = format!(
+            r#"
+version = 1
+[[governance.policy_rules]]
+id = "allow.api"
+effect = "allow"
+obligations = []
+reason_code = "policy.allow"
+[governance.policy_rules.condition]
+{selector}
+"#
+        );
+        assert!(
+            toml::from_str::<RuntimePolicyFile>(&input).is_err(),
+            "unavailable selector should not be part of the public schema: {selector}"
+        );
+    }
 }
 
 #[test]

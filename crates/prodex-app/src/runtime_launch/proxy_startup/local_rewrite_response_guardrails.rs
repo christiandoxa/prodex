@@ -4,7 +4,6 @@ use crate::RuntimeRotationProxyShared;
 use prodex_application::ApplicationResponseObligationPlan;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::{self, Cursor, Read};
-use std::path::Path;
 
 const RESPONSE_INSPECTION_PREFLIGHT_BYTES: usize = 4 * 1024;
 const RESPONSE_INSPECTION_WINDOW_BYTES: usize =
@@ -218,14 +217,8 @@ impl RuntimeGatewayGuardrailAudit {
                     "commit_state": commit_state,
                 },
             });
-            let default_log_dir = self
-                .runtime_shared
-                .log_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            let path = prodex_audit_log::audit_log_path(default_log_dir);
-            let _ = prodex_audit_log::append_audit_event(
-                &path,
+            crate::audit_log::append_runtime_audit_event_best_effort(
+                &self.runtime_shared,
                 "gateway_data_plane",
                 "response_guardrail_blocked",
                 "failure",

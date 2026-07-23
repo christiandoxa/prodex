@@ -282,26 +282,6 @@ fn validate_governance_policy_rules(
                 path.display()
             );
         }
-        if matches!(
-            rule.condition.action,
-            Some(
-                crate::types::RuntimeGovernancePolicyAction::UseTool
-                    | crate::types::RuntimeGovernancePolicyAction::MutateControlPlane
-            )
-        ) {
-            bail!(
-                "gateway governance policy action selector is not produced by the data plane in {}",
-                path.display()
-            );
-        }
-        if rule.condition.network_zone
-            == Some(crate::types::RuntimeGovernancePolicyNetworkZone::Partner)
-        {
-            bail!(
-                "gateway governance partner network selector requires unavailable trusted zone evidence in {}",
-                path.display()
-            );
-        }
         for selector in [
             rule.condition.team_id.as_deref(),
             rule.condition.project_id.as_deref(),
