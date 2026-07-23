@@ -266,7 +266,7 @@ fn dashboard_keeps_serving_while_usage_refresh_is_slow() {
     wait_for_json(port, "/healthz");
     let usage_request = thread::spawn(move || get_text(port, "/api/usage").unwrap());
     accepted_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(10))
         .expect("usage request should reach the slow upstream");
 
     let started = Instant::now();

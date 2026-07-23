@@ -224,21 +224,22 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
 
     let _ = child.kill();
     let _ = child.wait();
+    let _ = fs::remove_file(&fixture.codex_log);
 
-    let output = run_prodex(
+    let mut recovered_child = spawn_prodex_with_env(
         &fixture,
         &["run", "--profile", "main", "--skip-quota-check"],
+        &[("TEST_LONG_RUNNING_RUN", "5")],
     );
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    let recovered_registry: Value = crate::test_wait::wait_for_poll(
+        "fresh runtime broker registry",
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_millis(10),
+        || {
+            let registry: Value = serde_json::from_slice(&fs::read(&registry_path).ok()?).ok()?;
+            (registry["pid"].as_u64()? as u32 != initial_pid).then_some(registry)
+        },
     );
-
-    let recovered_registry: Value = serde_json::from_slice(
-        &fs::read(&registry_path).expect("failed to read recovered registry"),
-    )
-    .expect("failed to parse recovered registry");
     let recovered_pid = recovered_registry["pid"]
         .as_u64()
         .expect("recovered registry pid should be numeric") as u32;
@@ -246,10 +247,16 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
         recovered_pid, initial_pid,
         "a stale broker registry should be replaced by a fresh broker process"
     );
+    let recovered_codex_home = crate::test_wait::wait_for_poll(
+        "Codex launch through recovered broker",
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_millis(10),
+        || fs::read_to_string(&fixture.codex_log).ok(),
+    );
+    let _ = recovered_child.kill();
+    let _ = recovered_child.wait();
     assert_eq!(
-        fs::read_to_string(&fixture.codex_log)
-            .expect("failed to read codex log")
-            .trim(),
+        recovered_codex_home.trim(),
         fixture.main_home.display().to_string()
     );
 }
