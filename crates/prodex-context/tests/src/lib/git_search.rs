@@ -159,6 +159,29 @@ fn search_output_shortens_repeated_absolute_cwd_prefix() {
 }
 
 #[test]
+fn search_output_parses_windows_drive_paths() {
+    for input in [
+        "C:\\workspace\\prodex\\src\\lib.rs:10:fn alpha() {}\nC:\\workspace\\prodex\\src\\lib.rs:20:fn beta() {}\n",
+        "C:\\workspace\\prodex\\src\\lib.rs\n10:fn alpha() {}\n20:fn beta() {}\n",
+    ] {
+        let report = compact_command_output_with_options(
+            input,
+            &CommandOutputCompactOptions {
+                kind: CommandOutputKind::Auto,
+                ..CommandOutputCompactOptions::default()
+            },
+        );
+
+        assert_eq!(report.detected_kind, CommandOutputKind::Search);
+        assert!(
+            report
+                .output
+                .contains("C:/workspace/prodex/src/lib.rs (2 matches):")
+        );
+    }
+}
+
+#[test]
 fn search_with_many_rust_file_matches_stays_search_output() {
     let input = "\
 src/lib.rs:10:fn alpha() {}

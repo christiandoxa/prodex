@@ -69,11 +69,7 @@ fn collect_context_static_duplicate_candidates(
                 path.display()
             );
         }
-        let relative_path = path
-            .strip_prefix(root)
-            .unwrap_or(path.as_path())
-            .display()
-            .to_string();
+        let relative_path = super::context_relative_path(root, path);
         candidates.extend(context_static_duplicate_candidates_for_text(
             root,
             path,

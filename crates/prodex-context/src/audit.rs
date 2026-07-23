@@ -32,6 +32,13 @@ pub fn collect_context_static_duplicate_report(
     duplicates::collect_context_static_duplicate_report(root, limit)
 }
 
+fn context_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<ContextAuditReport> {
     let mut paths = Vec::new();
     let read_root = ContextReadRoot::open(root)?;
@@ -68,11 +75,7 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
         let chars = text.chars().count();
         let words = text.split_whitespace().count();
         let estimated_tokens = estimate_context_tokens(chars, words);
-        let relative_path = path
-            .strip_prefix(root)
-            .unwrap_or(path.as_path())
-            .display()
-            .to_string();
+        let relative_path = context_relative_path(root, &path);
         let compressible = is_compressible_context_file(&path);
         if is_static_duplicate_context_file(&path) {
             duplicate_candidates.extend(context_static_duplicate_candidates_for_text(
