@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 917,
+    "maxLines": 909,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {

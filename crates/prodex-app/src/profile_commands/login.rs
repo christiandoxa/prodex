@@ -12,7 +12,6 @@ use std::os::unix::process::ExitStatusExt;
 use std::os::windows::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
-use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
     tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
     tui_primary_style, tui_secondary_style, tui_title_style,
@@ -22,6 +21,7 @@ mod api_key;
 mod claude;
 mod copilot_import;
 mod google;
+mod home;
 mod login_menu;
 mod profile_names;
 mod request;
@@ -30,6 +30,7 @@ use self::api_key::*;
 use self::claude::*;
 use self::copilot_import::*;
 use self::google::*;
+use self::home::create_temporary_login_home;
 use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
@@ -40,13 +41,13 @@ use super::manage::print_profile_panel;
 use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
-    agy_bin, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
-    exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
-    persist_login_home, prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret,
-    remove_dir_if_exists, required_auth_json_text, resolve_profile_name, run_child_plan,
-    unique_profile_name_for_email, update_existing_profile_auth, validate_credential_free_http_url,
-    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
+    agy_bin, codex_child_plan, exit_with_status, fetch_profile_email, fetch_profile_identity,
+    find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
+    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, read_auth_summary,
+    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
+    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
+    validate_credential_free_http_url, write_gemini_oauth_secret,
+    write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 
@@ -436,6 +437,18 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
         &codex_child_plan(codex_home.to_path_buf(), command_args),
         None,
     )?;
+    if status.success() && login_request.method != LoginMethod::Status {
+        let auth_location = secret_store::auth_json_location(codex_home);
+        secret_store::FileSecretBackend::new()
+            .seal_existing(&auth_location)
+            .map_err(anyhow::Error::new)
+            .with_context(|| {
+                format!(
+                    "failed to secure {}",
+                    secret_store::auth_json_path(codex_home).display()
+                )
+            })?;
+    }
     if status.success()
         && login_request.method == LoginMethod::ApiKey
         && login_request.openai_base_url_specified
@@ -864,27 +877,6 @@ mod url_boundary_tests {
 
 fn success_exit_status() -> ExitStatus {
     ExitStatus::from_raw(0)
-}
-
-fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
-    ensure_managed_profiles_root(paths)?;
-
-    for attempt in 0..100 {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let candidate = paths
-            .managed_profiles_root
-            .join(format!(".login-{}-{stamp}-{attempt}", std::process::id()));
-        if candidate.exists() {
-            continue;
-        }
-        create_codex_home_if_missing(&candidate)?;
-        return Ok(candidate);
-    }
-
-    bail!("failed to allocate a temporary CODEX_HOME for login")
 }
 
 fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {

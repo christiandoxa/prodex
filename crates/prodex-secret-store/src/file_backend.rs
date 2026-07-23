@@ -55,6 +55,13 @@ impl FileSecretBackend {
         })
     }
 
+    /// Atomically seals trusted child-process output with the private file policy.
+    pub fn seal_existing(&self, location: &SecretLocation) -> Result<bool, SecretError> {
+        let path = file_path(location)?;
+        secure_file::seal_private_file(path, FILE_SECRET_MAX_BYTES)
+            .map_err(|error| secure_error(path, error))
+    }
+
     /// Removes only the final entry beneath validated parent directories.
     ///
     /// This is for quarantining an invalid legacy entry after a normal private

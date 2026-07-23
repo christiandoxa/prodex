@@ -128,6 +128,22 @@ impl Directory {
         Self::from_file(path, file)
     }
 
+    pub(super) fn ensure_private_child(&self, name: &OsStr) -> io::Result<Self> {
+        self.require_path_identity()?;
+        let path = self.path.join(name);
+        if let Err(error) = fs::create_dir(&path) {
+            if error.kind() != io::ErrorKind::AlreadyExists {
+                return Err(error);
+            }
+        }
+        let file = open_directory(&path, true)?;
+        validate_directory(&file)?;
+        require_beneath(&self.file, &file)?;
+        set_private_acl(&file, true)?;
+        validate_acl(&file, AclUse::Directory)?;
+        Self::from_file(path, file)
+    }
+
     pub(super) fn open_file(&self, name: &OsStr, security: FileSecurity) -> io::Result<File> {
         self.require_path_identity()?;
         let path = self.path.join(name);
@@ -138,6 +154,7 @@ impl Directory {
             &file,
             match security {
                 FileSecurity::Private => AclUse::PrivateFile,
+                FileSecurity::UnsealedPrivate => AclUse::UnsealedPrivateFile,
                 FileSecurity::Projected => AclUse::ProjectedFile,
             },
         )?;
@@ -264,6 +281,7 @@ struct FileIdentity {
 enum AclUse {
     Directory,
     PrivateFile,
+    UnsealedPrivateFile,
     ProjectedFile,
 }
 
@@ -459,7 +477,7 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
             "secret object has no private owner or DACL",
         ));
     }
-    if matches!(usage, AclUse::PrivateFile) {
+    if matches!(usage, AclUse::PrivateFile | AclUse::UnsealedPrivateFile) {
         // SAFETY: both SID pointers are live for this descriptor/user buffer.
         if unsafe { EqualSid(owner, user.sid()) } == 0 {
             return Err(permission_denied(
@@ -529,7 +547,7 @@ fn sensitive_access(usage: AclUse) -> u32 {
                 | GENERIC_ALL
                 | GENERIC_WRITE
         }
-        AclUse::PrivateFile | AclUse::ProjectedFile => {
+        AclUse::PrivateFile | AclUse::UnsealedPrivateFile | AclUse::ProjectedFile => {
             FILE_GENERIC_READ
                 | FILE_GENERIC_WRITE
                 | DELETE

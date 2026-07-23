@@ -545,12 +545,15 @@ fn provider<'a>(providers: &'a Value, id: &str) -> &'a Value {
 
 fn write_secret_state(root: &Path) {
     let profile_home = root.join("profiles/openai-main");
-    fs::create_dir_all(&profile_home).expect("profile home should be created");
-    fs::write(
-        profile_home.join("auth.json"),
-        r#"{"not_auth_secret":"sk-secret-dashboard-test"}"#,
-    )
-    .expect("auth file should be written");
+    secret_store::ensure_private_directory(root).expect("temp root should be secured");
+    secret_store::ensure_private_directory(&profile_home)
+        .expect("profile home should be created securely");
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::auth_json_location(&profile_home),
+            r#"{"not_auth_secret":"sk-secret-dashboard-test"}"#,
+        )
+        .expect("auth file should be written securely");
     let state = serde_json::json!({
         "active_profile": "openai-main",
         "profiles": {

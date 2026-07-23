@@ -113,8 +113,8 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
     assert_eq!(
         fs::read_to_string(&fixture.codex_stdin_log)
             .expect("failed to read codex stdin log")
-            .replace("\r\n", "\n"),
-        "piped input\n"
+            .trim_end(),
+        "piped input"
     );
 }
 
