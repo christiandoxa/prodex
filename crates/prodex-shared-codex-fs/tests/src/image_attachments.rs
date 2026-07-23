@@ -59,7 +59,9 @@ fn persist_codex_session_image_attachments_rewrites_escaped_session_path() {
 
     persist_codex_session_image_attachments(&codex_home).expect("image attachments should persist");
 
-    let copied = codex_home.join("image_attachments/codex-clipboard-test.png");
+    let copied = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-test.png");
     assert_eq!(
         fs::read(&copied).expect("copied image should be readable"),
         b"png bytes"
@@ -209,7 +211,9 @@ fn persist_codex_session_image_attachments_rewrites_to_existing_stable_copy_when
     let old_path = temp_dir
         .path
         .join("deleted-overlay/codex-clipboard-test.png");
-    let stable = codex_home.join("image_attachments/codex-clipboard-test.png");
+    let stable = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-test.png");
     let session_file = sessions_dir.join("rollout.jsonl");
 
     fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
@@ -311,7 +315,9 @@ fn persist_codex_session_local_images_array_rewrites_clipboard_path() {
 
     persist_codex_session_image_attachments(&codex_home).expect("image attachments should persist");
 
-    let copied = codex_home.join("image_attachments/codex-clipboard-local-array.png");
+    let copied = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-local-array.png");
     assert_eq!(
         fs::read(&copied).expect("copied image should be readable"),
         b"local image bytes"
@@ -333,7 +339,9 @@ fn persist_codex_session_local_images_array_rewrites_to_existing_stable_copy_whe
     let old_path = temp_dir
         .path
         .join("deleted-overlay/codex-clipboard-local-array.png");
-    let stable = codex_home.join("image_attachments/codex-clipboard-local-array.png");
+    let stable = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-local-array.png");
     let session_file = sessions_dir.join("rollout.jsonl");
 
     fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
@@ -557,8 +565,10 @@ fn persist_codex_session_pasted_text_paths_in_tool_arguments() {
 
     persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
 
-    let copied =
-        codex_home.join("attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    let copied = codex_home
+        .join("attachments")
+        .join("11111111-2222-4333-8444-555555555555")
+        .join("pasted-text-1.txt");
     assert_eq!(
         fs::read(&copied).expect("copied paste should be readable"),
         b"important pasted context"
@@ -608,7 +618,10 @@ fn persist_codex_session_attachment_image_paths_in_goal_resume_context() {
 
     persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
 
-    let copied = codex_home.join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    let copied = codex_home
+        .join("attachments")
+        .join("31e02015-1740-4a23-85fe-51cf33a476e6")
+        .join("image-1.png");
     assert_eq!(
         fs::read(&copied).expect("copied image attachment should be readable"),
         b"png attachment bytes"
@@ -637,7 +650,10 @@ fn persist_codex_session_attachment_image_rewrites_to_existing_stable_copy_when_
     let old_path = temp_dir
         .path
         .join("deleted-overlay/attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
-    let stable = codex_home.join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    let stable = codex_home
+        .join("attachments")
+        .join("31e02015-1740-4a23-85fe-51cf33a476e6")
+        .join("image-1.png");
     let session_file = sessions_dir.join("rollout.jsonl");
 
     fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
@@ -673,8 +689,10 @@ fn persist_codex_session_pasted_text_rewrites_to_existing_stable_copy_when_sourc
     let old_path = temp_dir
         .path
         .join("deleted-overlay/attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
-    let stable =
-        codex_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
+    let stable = codex_home
+        .join("attachments")
+        .join("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+        .join("pasted-text-1.txt");
     let session_file = sessions_dir.join("rollout.jsonl");
 
     fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
