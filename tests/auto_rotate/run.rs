@@ -251,7 +251,11 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
         "Codex launch through recovered broker",
         std::time::Duration::from_secs(30),
         std::time::Duration::from_millis(10),
-        || fs::read_to_string(&fixture.codex_log).ok(),
+        || {
+            fs::read_to_string(&fixture.codex_log)
+                .ok()
+                .filter(|content| !content.trim().is_empty())
+        },
     );
     let _ = recovered_child.kill();
     let _ = recovered_child.wait();
