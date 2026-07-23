@@ -144,7 +144,10 @@ fn checked_in_provider_capabilities_doc_matches_generated_matrix() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/provider-capabilities.md");
     let actual = std::fs::read_to_string(&path).expect("provider capabilities doc should exist");
-    assert_eq!(actual, provider_capabilities_markdown());
+    assert_eq!(
+        actual.replace("\r\n", "\n"),
+        provider_capabilities_markdown()
+    );
 }
 
 #[test]
