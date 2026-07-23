@@ -298,12 +298,10 @@ fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
         hooks["hooks"]["PreToolUse"][0]["matcher"],
         serde_json::Value::String("Bash".to_string())
     );
-    assert!(
-        hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .ends_with("/workspace/check.sh")
-    );
+    let hook_command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(Path::new(hook_command).ends_with(Path::new("workspace").join("check.sh")));
     assert_eq!(
         hooks["hooks"]["PreToolUse"][0]["hooks"][0]["statusMessage"],
         serde_json::Value::String("Gemini extension workspace-tools: Checking shell".to_string())
