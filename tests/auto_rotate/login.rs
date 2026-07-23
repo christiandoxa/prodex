@@ -414,7 +414,7 @@ fn login_without_profile_falls_back_to_usage_email_when_id_token_is_missing() {
         &["login"],
         &[
             ("TEST_LOGIN_ACCOUNT_ID", "main-account"),
-            ("TEST_LOGIN_WITHOUT_ID_TOKEN", "1"),
+            ("TEST_LOGIN_ID_TOKEN", ""),
             ("CODEX_CHATGPT_BASE_URL", fixture.usage_base_url.as_str()),
         ],
     );

@@ -119,8 +119,7 @@ if [ "$1" = "login" ]; then
   fi
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
   token="${TEST_LOGIN_ACCESS_TOKEN:-test-token}"
-  id_token="${TEST_LOGIN_ID_TOKEN:-eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJlbWFpbCI6Im1haW5AZXhhbXBsZS5jb20ifQ.c2ln}"
-  if [ -n "$TEST_LOGIN_WITHOUT_ID_TOKEN" ]; then id_token=""; fi
+  id_token="${TEST_LOGIN_ID_TOKEN:-}"
   if [ -n "$id_token" ]; then
     printf '{"tokens":{"id_token":"%s","access_token":"%s","account_id":"%s"}}\n' "$id_token" "$token" "$account_id" > "$CODEX_HOME/auth.json"
   else
@@ -169,10 +168,7 @@ if not exist "%CODEX_HOME%" mkdir "%CODEX_HOME%"
 if defined prodex_with_api_key goto prodex_api_key
 if not defined TEST_LOGIN_ACCOUNT_ID set "TEST_LOGIN_ACCOUNT_ID=main-account"
 if not defined TEST_LOGIN_ACCESS_TOKEN set "TEST_LOGIN_ACCESS_TOKEN=test-token"
-if defined TEST_LOGIN_WITHOUT_ID_TOKEN goto prodex_no_id_token
-if not defined TEST_LOGIN_ID_TOKEN set "TEST_LOGIN_ID_TOKEN=eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJlbWFpbCI6Im1haW5AZXhhbXBsZS5jb20ifQ.c2ln"
 if defined TEST_LOGIN_ID_TOKEN goto prodex_id_token
-:prodex_no_id_token
 > "%CODEX_HOME%\auth.json" echo {"tokens":{"access_token":"%TEST_LOGIN_ACCESS_TOKEN%","account_id":"%TEST_LOGIN_ACCOUNT_ID%"}}
 goto prodex_session
 :prodex_id_token

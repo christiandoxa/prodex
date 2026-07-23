@@ -30,6 +30,7 @@ pub(crate) fn run_prodex_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
+    let login_id_token = super::chatgpt_id_token("main@example.com");
     let ready_timeout_ms = extra_env
         .iter()
         .find_map(|(key, value)| {
@@ -55,6 +56,7 @@ pub(crate) fn run_prodex_with_env(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("TEST_LOGIN_ID_TOKEN", login_id_token)
         .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
         .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", ready_timeout_ms)
         .env(
