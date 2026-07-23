@@ -50,21 +50,25 @@ fn session_current_filters_by_cwd() {
     fs::create_dir_all(&current).expect("current dir should be created");
     fs::create_dir_all(&other).expect("other dir should be created");
     fs::write(
-            sessions.join("current.jsonl"),
-            format!(
-                "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"current\",\"cwd\":\"{}\"}}}}\n",
-                current.display()
-            ),
-        )
-        .expect("current session should be written");
+        sessions.join("current.jsonl"),
+        serde_json::json!({
+            "timestamp": "2026-04-29T12:00:00Z",
+            "payload": { "id": "current", "cwd": current.as_path() }
+        })
+        .to_string()
+            + "\n",
+    )
+    .expect("current session should be written");
     fs::write(
-            sessions.join("other.jsonl"),
-            format!(
-                "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"other\",\"cwd\":\"{}\"}}}}\n",
-                other.display()
-            ),
-        )
-        .expect("other session should be written");
+        sessions.join("other.jsonl"),
+        serde_json::json!({
+            "timestamp": "2026-04-29T12:00:00Z",
+            "payload": { "id": "other", "cwd": other.as_path() }
+        })
+        .to_string()
+            + "\n",
+    )
+    .expect("other session should be written");
 
     let reports = collect_session_reports(&root, Some(&current), &AppState::default())
         .expect("sessions collect");
@@ -158,18 +162,30 @@ fn session_reports_filter_by_profile_and_query() {
     fs::create_dir_all(&beta_cwd).expect("beta cwd should be created");
     fs::write(
         sessions.join("alpha-special-path.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"alpha-session\",\"thread_name\":\"Issue Triage\",\"cwd\":\"{}\"}}}}\n",
-            alpha_cwd.display()
-        ),
+        serde_json::json!({
+            "timestamp": "2026-04-29T12:00:00Z",
+            "payload": {
+                "id": "alpha-session",
+                "thread_name": "Issue Triage",
+                "cwd": alpha_cwd.as_path()
+            }
+        })
+        .to_string()
+            + "\n",
     )
     .expect("alpha session should be written");
     fs::write(
         sessions.join("beta-special-path.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"beta-session\",\"thread_name\":\"Docs Review\",\"cwd\":\"{}\"}}}}\n",
-            beta_cwd.display()
-        ),
+        serde_json::json!({
+            "timestamp": "2026-04-29T12:00:00Z",
+            "payload": {
+                "id": "beta-session",
+                "thread_name": "Docs Review",
+                "cwd": beta_cwd.as_path()
+            }
+        })
+        .to_string()
+            + "\n",
     )
     .expect("beta session should be written");
     let state = AppState {

@@ -37,11 +37,24 @@ fn session_reports_parse_codex_jsonl_metadata() {
     fs::write(
         sessions.join("session-a.jsonl"),
         format!(
-                "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"sess-a\",\"thread_name\":\"Issue triage\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n{{\"timestamp\":\"2026-04-29T12:30:00Z\",\"type\":\"event\"}}\n",
-                cwd.display()
-            ),
-        )
-        .expect("session should be written");
+            "{}\n{}\n",
+            serde_json::json!({
+                "timestamp": "2026-04-29T12:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "sess-a",
+                    "thread_name": "Issue triage",
+                    "cwd": cwd.as_path(),
+                    "model_provider": "prodex-gemini"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-04-29T12:30:00Z",
+                "type": "event"
+            })
+        ),
+    )
+    .expect("session should be written");
 
     let reports =
         collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");

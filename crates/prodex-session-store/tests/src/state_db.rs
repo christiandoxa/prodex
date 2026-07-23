@@ -71,7 +71,7 @@ fn repair_resume_session_metadata_prefix_repoints_stale_overlay_rollout_path() {
         .expect("rollout path should read");
 
     assert_eq!(repaired, None);
-    assert_eq!(rollout_path, session_path.display().to_string());
+    assert_eq!(std::path::Path::new(&rollout_path), session_path.as_path());
     let _ = fs::remove_dir_all(root);
 }
 

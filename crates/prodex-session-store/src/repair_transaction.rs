@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use same_file::Handle;
 use std::ffi::OsString;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
@@ -149,7 +150,10 @@ fn acquire_repository_lock(root: &Path) -> Result<File> {
     let path = root.join(REPAIR_LOCK_FILE);
     let (file, created) = match CreatedPrivateFile::create(&path) {
         Ok(created) => (created.into_file(), true),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        Err(error)
+            if error.kind() == io::ErrorKind::AlreadyExists
+                || path.try_exists().unwrap_or(false) =>
+        {
             let (file, _) = open_regular_file(&path, true)?;
             set_private_mode(&file, &path)?;
             (file, false)
@@ -161,7 +165,7 @@ fn acquire_repository_lock(root: &Path) -> Result<File> {
     };
     file.lock()
         .with_context(|| format!("failed to lock session repository {}", root.display()))?;
-    verify_named_file(&path, &file.metadata()?)?;
+    verify_named_file(&path, &file)?;
     if created {
         file.sync_all()
             .with_context(|| format!("failed to sync repair lock {}", path.display()))?;
@@ -189,13 +193,16 @@ fn ensure_backup(path: &Path, contents: &[u8]) -> Result<Option<CreatedPrivateFi
             )?;
             Ok(Some(backup))
         }
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        Err(error)
+            if error.kind() == io::ErrorKind::AlreadyExists
+                || backup_path.try_exists().unwrap_or(false) =>
+        {
             let (backup, _) = open_regular_file(&backup_path, false)?;
             set_private_mode(&backup, &backup_path)?;
             backup
                 .sync_all()
                 .with_context(|| format!("failed to sync backup {}", backup_path.display()))?;
-            verify_named_file(&backup_path, &backup.metadata()?)?;
+            verify_named_file(&backup_path, &backup)?;
             Ok(None)
         }
         Err(error) => {
@@ -290,7 +297,7 @@ fn open_regular_file(path: &Path, writable: bool) -> Result<(File, Metadata)> {
         .open(path)
         .with_context(|| format!("failed to open repair file {}", path.display()))?;
     let descriptor = file.metadata()?;
-    if !same_file_identity(&named, &descriptor) {
+    if !same_named_file(path, &file)? {
         bail!("repair file changed while opening {}", path.display());
     }
     Ok((file, descriptor))
@@ -308,19 +315,31 @@ fn verify_source(path: &Path, source: &File, expected: &SourceRevision) -> Resul
     if named.file_type().is_symlink()
         || !named.is_file()
         || SourceRevision::from_metadata(&named) != *expected
+        || !same_named_file(path, source)?
     {
         bail!("session changed during repair: {}", path.display());
     }
     Ok(())
 }
 
-fn verify_named_file(path: &Path, expected: &Metadata) -> Result<()> {
+fn verify_named_file(path: &Path, file: &File) -> Result<()> {
     let named = fs::symlink_metadata(path)
         .with_context(|| format!("failed to verify repair file {}", path.display()))?;
-    if named.file_type().is_symlink() || !named.is_file() || !same_file_identity(&named, expected) {
+    if named.file_type().is_symlink() || !named.is_file() || !same_named_file(path, file)? {
         bail!("repair file changed while in use: {}", path.display());
     }
     Ok(())
+}
+
+pub(super) fn same_named_file(path: &Path, file: &File) -> Result<bool> {
+    let named = Handle::from_path(path)
+        .with_context(|| format!("failed to identify file {}", path.display()))?;
+    let descriptor = Handle::from_file(
+        file.try_clone()
+            .with_context(|| format!("failed to clone file {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to identify open file {}", path.display()))?;
+    Ok(named == descriptor)
 }
 
 fn set_private_mode(file: &File, path: &Path) -> Result<()> {
@@ -356,7 +375,7 @@ fn sync_directory(_path: &Path) -> Result<()> {
 struct CreatedPrivateFile {
     path: PathBuf,
     file: Option<File>,
-    identity: FileIdentity,
+    identity: Handle,
     armed: bool,
 }
 
@@ -371,7 +390,7 @@ impl CreatedPrivateFile {
             options.mode(PRIVATE_FILE_MODE);
         }
         let file = options.open(path)?;
-        let identity = FileIdentity::from_metadata(&file.metadata()?);
+        let identity = Handle::from_file(file.try_clone()?)?;
         let created = Self {
             path: path.to_path_buf(),
             file: Some(file),
@@ -379,7 +398,7 @@ impl CreatedPrivateFile {
             armed: true,
         };
         set_private_mode(created.file(), path).map_err(anyhow_to_io)?;
-        verify_named_file(path, &created.file().metadata()?).map_err(anyhow_to_io)?;
+        verify_named_file(path, created.file()).map_err(anyhow_to_io)?;
         Ok(created)
     }
 
@@ -402,10 +421,9 @@ impl CreatedPrivateFile {
     fn verify_replaced(&self, destination: &Path) -> Result<()> {
         let metadata = fs::symlink_metadata(destination)
             .with_context(|| format!("failed to verify replacement {}", destination.display()))?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || FileIdentity::from_metadata(&metadata) != self.identity
-        {
+        let identity = Handle::from_path(destination)
+            .with_context(|| format!("failed to identify replacement {}", destination.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() || identity != self.identity {
             bail!(
                 "repaired session replacement changed: {}",
                 destination.display()
@@ -430,9 +448,9 @@ impl Drop for CreatedPrivateFile {
             return;
         }
         drop(self.file.take());
-        if fs::symlink_metadata(&self.path)
+        if Handle::from_path(&self.path)
             .ok()
-            .is_some_and(|metadata| FileIdentity::from_metadata(&metadata) == self.identity)
+            .is_some_and(|identity| identity == self.identity)
         {
             let _ = fs::remove_file(&self.path);
         }
@@ -445,50 +463,7 @@ fn anyhow_to_io(error: anyhow::Error) -> io::Error {
 
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct FileIdentity {
-    device: u64,
-    inode: u64,
-}
-
-#[cfg(unix)]
-impl FileIdentity {
-    fn from_metadata(metadata: &Metadata) -> Self {
-        use std::os::unix::fs::MetadataExt;
-
-        Self {
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        }
-    }
-}
-
-#[cfg(not(unix))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FileIdentity {
-    length: u64,
-    modified: Option<std::time::SystemTime>,
-    created: Option<std::time::SystemTime>,
-}
-
-#[cfg(not(unix))]
-impl FileIdentity {
-    fn from_metadata(metadata: &Metadata) -> Self {
-        Self {
-            length: metadata.len(),
-            modified: metadata.modified().ok(),
-            created: metadata.created().ok(),
-        }
-    }
-}
-
-fn same_file_identity(left: &Metadata, right: &Metadata) -> bool {
-    FileIdentity::from_metadata(left) == FileIdentity::from_metadata(right)
-}
-
-#[cfg(unix)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SourceRevision {
-    identity: FileIdentity,
     length: u64,
     modified_seconds: i64,
     modified_nanoseconds: i64,
@@ -503,7 +478,6 @@ impl SourceRevision {
         use std::os::unix::fs::MetadataExt;
 
         Self {
-            identity: FileIdentity::from_metadata(metadata),
             length: metadata.len(),
             modified_seconds: metadata.mtime(),
             modified_nanoseconds: metadata.mtime_nsec(),
@@ -517,7 +491,6 @@ impl SourceRevision {
 #[cfg(not(unix))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SourceRevision {
-    identity: FileIdentity,
     length: u64,
     modified: Option<std::time::SystemTime>,
     created: Option<std::time::SystemTime>,
@@ -528,7 +501,6 @@ struct SourceRevision {
 impl SourceRevision {
     fn from_metadata(metadata: &Metadata) -> Self {
         Self {
-            identity: FileIdentity::from_metadata(metadata),
             length: metadata.len(),
             modified: metadata.modified().ok(),
             created: metadata.created().ok(),
