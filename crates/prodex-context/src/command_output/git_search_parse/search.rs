@@ -8,7 +8,10 @@ pub(crate) struct SearchMatch {
 }
 
 pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
-    let (path, rest) = line.split_once(':')?;
+    let separator_start = usize::from(has_windows_drive_prefix(line)) * 2;
+    let separator = line[separator_start..].find(':')? + separator_start;
+    let (path, rest) = line.split_at(separator);
+    let rest = rest.strip_prefix(':')?;
     if path.trim().is_empty() || rest.trim().is_empty() {
         return None;
     }
@@ -37,7 +40,7 @@ pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
     };
 
     Some(SearchMatch {
-        path: path.trim().to_string(),
+        path: normalize_file_list_path(path),
         line_number,
         text: text.trim().to_string(),
     })
@@ -56,7 +59,7 @@ pub(crate) fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {
         .and_then(|section| extract_json_string_field(section, "text"))
         .unwrap_or_default();
     Some(SearchMatch {
-        path: path.trim().to_string(),
+        path: normalize_file_list_path(&path),
         line_number: extract_json_usize_field(line, "line_number"),
         text: text.trim().to_string(),
     })
@@ -119,9 +122,11 @@ pub(crate) fn parse_json_string_prefix(input: &str) -> Option<String> {
 
 pub(crate) fn parse_search_heading_line(line: &str) -> Option<String> {
     let trimmed = line.trim();
+    let has_non_drive_colon = trimmed.contains(':')
+        && !(has_windows_drive_prefix(trimmed) && !trimmed[2..].contains(':'));
     if trimmed.is_empty()
         || trimmed == "--"
-        || trimmed.contains(':')
+        || has_non_drive_colon
         || trimmed.contains("://")
         || trimmed.split_whitespace().count() > 1
     {
@@ -179,6 +184,14 @@ pub(crate) fn looks_like_search_path(path: &str) -> bool {
     path.contains('/') || path.contains('\\') || path.contains('.')
 }
 
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+}
+
 pub(crate) fn looks_like_file_list_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty()
@@ -195,7 +208,9 @@ pub(crate) fn looks_like_file_list_line(line: &str) -> bool {
         || trimmed.starts_with("`-- ")
         || trimmed.contains("\u{251c}\u{2500}\u{2500} ")
         || trimmed.contains("\u{2514}\u{2500}\u{2500} ")
-        || (trimmed.contains('/') && !trimmed.contains("://") && !trimmed.contains(' '))
+        || ((trimmed.contains('/') || trimmed.contains('\\'))
+            && !trimmed.contains("://")
+            && !trimmed.contains(' '))
         || looks_like_bare_path_entry(trimmed)
 }
 
@@ -295,10 +310,10 @@ pub(crate) fn normalize_file_list_path(entry: &str) -> String {
         "\u{2514}\u{2500}\u{2500} ",
     ] {
         if let Some((_, path)) = trimmed.rsplit_once(marker) {
-            return path.trim().to_string();
+            return path.trim().replace('\\', "/");
         }
     }
-    trimmed.to_string()
+    trimmed.replace('\\', "/")
 }
 
 pub(crate) fn top_level_path_segment(path: &str) -> String {
