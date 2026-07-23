@@ -1,6 +1,6 @@
 use super::json;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -157,6 +157,7 @@ fn handle_usage_request(
 
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Write);
     active_requests.fetch_sub(1, Ordering::SeqCst);
 }
 
