@@ -3307,6 +3307,7 @@ dependencies = [
  "prodex-core",
  "prodex-state",
  "rusqlite",
+ "same-file",
  "serde",
  "serde_json",
 ]

@@ -1,4 +1,4 @@
-use super::SESSION_STORE_FILE_MAX_BYTES;
+use super::{SESSION_STORE_FILE_MAX_BYTES, repair_transaction::same_named_file};
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
@@ -69,19 +69,8 @@ fn open_session_regular_file(path: &Path) -> Result<fs::File> {
     }
     let file = fs::File::open(path)
         .with_context(|| format!("failed to read session {}", path.display()))?;
-    if !same_file_metadata(&metadata, &file.metadata()?) {
+    if !same_named_file(path, &file)? {
         bail!("session path changed while opening {}", path.display());
     }
     Ok(file)
-}
-
-#[cfg(unix)]
-fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
 }
