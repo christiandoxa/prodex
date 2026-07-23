@@ -13,6 +13,9 @@ static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl TestDir {
     pub(crate) fn new() -> Self {
+        #[cfg(windows)]
+        let temp_root = std::env::temp_dir();
+        #[cfg(not(windows))]
         let temp_root = std::env::temp_dir()
             .canonicalize()
             .expect("failed to resolve temp dir");

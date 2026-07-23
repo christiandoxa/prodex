@@ -33,10 +33,12 @@ fn login_without_profile_creates_profile_from_email() {
         Some(1)
     );
     assert!(
-        state["profiles"]["main_example.com"]["codex_home"]
-            .as_str()
-            .expect("codex_home should be a string")
-            .ends_with("/profiles/main_example.com")
+        std::path::Path::new(
+            state["profiles"]["main_example.com"]["codex_home"]
+                .as_str()
+                .expect("codex_home should be a string")
+        )
+        .ends_with(std::path::Path::new("profiles").join("main_example.com"))
     );
     assert!(
         fixture
@@ -106,10 +108,13 @@ fn login_with_api_key_and_base_url_creates_openai_compatible_profile() {
     );
     let codex_args =
         fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
-    assert!(codex_args.contains("model_provider=\"prodex-openai-compatible\""));
-    assert!(codex_args.contains(
-        "model_providers.prodex-openai-compatible.base_url=\"http://127.0.0.1:8080/v1\""
-    ));
+    let quote = if cfg!(windows) { "" } else { "\"" };
+    assert!(codex_args.contains(&format!(
+        "model_provider={quote}prodex-openai-compatible{quote}"
+    )));
+    assert!(codex_args.contains(&format!(
+        "model_providers.prodex-openai-compatible.base_url={quote}http://127.0.0.1:8080/v1{quote}"
+    )));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Quota Preflight"));
 }
 

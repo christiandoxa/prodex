@@ -446,7 +446,7 @@ fn replace_context_file_if_unchanged(
 
 fn create_context_temp_file(
     path: &Path,
-    permissions: fs::Permissions,
+    _permissions: fs::Permissions,
 ) -> io::Result<(PathBuf, File)> {
     for _ in 0..16 {
         let counter = CONTEXT_COMPRESS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -464,7 +464,7 @@ fn create_context_temp_file(
         #[cfg(unix)]
         {
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            options.mode(permissions.mode());
+            options.mode(_permissions.mode());
         }
         match options.open(&temp_path) {
             Ok(file) => return Ok((temp_path, file)),

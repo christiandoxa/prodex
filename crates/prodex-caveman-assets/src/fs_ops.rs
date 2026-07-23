@@ -194,6 +194,12 @@ fn ensure_no_symlink_component(path: &Path) -> Result<()> {
     let mut current = std::path::PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
+        if matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        ) {
+            continue;
+        }
         let metadata = match fs::symlink_metadata(&current) {
             Ok(metadata) => metadata,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),

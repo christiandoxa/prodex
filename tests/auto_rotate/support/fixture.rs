@@ -29,7 +29,7 @@ pub(crate) fn setup_fixture() -> Fixture {
     let codex_log = temp_dir.path.join("codex-home.log");
     let codex_args_log = temp_dir.path.join("codex-args.log");
     let codex_stdin_log = temp_dir.path.join("codex-stdin.log");
-    let codex_bin = bin_root.join("codex");
+    let codex_bin = bin_root.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
 
     fs::create_dir_all(&prodex_home).expect("failed to create prodex home");
     fs::create_dir_all(&shared_codex_home).expect("failed to create shared codex home");
@@ -81,6 +81,7 @@ pub(crate) fn setup_fixture() -> Fixture {
         }),
     );
 
+    #[cfg(not(windows))]
     write_executable(
         &codex_bin,
         r#"#!/bin/sh
@@ -141,6 +142,56 @@ exit 0
 "#,
     );
 
+    #[cfg(windows)]
+    write_executable(
+        &codex_bin,
+        r#"@echo off
+setlocal EnableExtensions
+> "%TEST_CODEX_LOG%" echo %CODEX_HOME%
+if defined TEST_CODEX_LOG_APPEND >> "%TEST_CODEX_LOG_APPEND%" echo %CODEX_HOME%
+set "prodex_first_arg=%~1"
+set "prodex_with_api_key="
+if defined TEST_CODEX_ARGS_LOG if not defined TEST_CODEX_ARGS_LOG_APPEND type nul > "%TEST_CODEX_ARGS_LOG%"
+:prodex_args
+if "%~1"=="" goto prodex_stdin
+if defined TEST_CODEX_ARGS_LOG >> "%TEST_CODEX_ARGS_LOG%" echo %~1
+if /I "%~1"=="--with-api-key" set "prodex_with_api_key=1"
+shift
+goto prodex_args
+:prodex_stdin
+if defined TEST_CODEX_STDIN_LOG more > "%TEST_CODEX_STDIN_LOG%"
+if defined TEST_LONG_RUNNING_RUN powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds %TEST_LONG_RUNNING_RUN%"
+if /I "%prodex_first_arg%"=="login" goto prodex_login
+goto prodex_session
+:prodex_login
+if not exist "%CODEX_HOME%" mkdir "%CODEX_HOME%"
+if defined prodex_with_api_key goto prodex_api_key
+if not defined TEST_LOGIN_ACCOUNT_ID set "TEST_LOGIN_ACCOUNT_ID=main-account"
+if not defined TEST_LOGIN_ACCESS_TOKEN set "TEST_LOGIN_ACCESS_TOKEN=test-token"
+if defined TEST_LOGIN_ID_TOKEN goto prodex_id_token
+> "%CODEX_HOME%\auth.json" echo {"tokens":{"access_token":"%TEST_LOGIN_ACCESS_TOKEN%","account_id":"%TEST_LOGIN_ACCOUNT_ID%"}}
+goto prodex_session
+:prodex_id_token
+> "%CODEX_HOME%\auth.json" echo {"tokens":{"id_token":"%TEST_LOGIN_ID_TOKEN%","access_token":"%TEST_LOGIN_ACCESS_TOKEN%","account_id":"%TEST_LOGIN_ACCOUNT_ID%"}}
+goto prodex_session
+:prodex_api_key
+set /p "prodex_api_key="
+> "%CODEX_HOME%\auth.json" echo {"auth_mode":"apikey","OPENAI_API_KEY":"%prodex_api_key%"}
+exit /b 0
+:prodex_session
+if not defined TEST_SESSION_MARKER goto prodex_memory
+if not exist "%CODEX_HOME%\sessions" mkdir "%CODEX_HOME%\sessions"
+>> "%CODEX_HOME%\history.jsonl" echo %TEST_SESSION_MARKER%
+> "%CODEX_HOME%\sessions\%TEST_SESSION_MARKER%.json" echo {"marker":"%TEST_SESSION_MARKER%"}
+:prodex_memory
+if not defined TEST_MEMORY_MARKER goto prodex_done
+if not exist "%CODEX_HOME%\memories" mkdir "%CODEX_HOME%\memories"
+> "%CODEX_HOME%\memories\%TEST_MEMORY_MARKER%.json" echo {"memory":"%TEST_MEMORY_MARKER%"}
+:prodex_done
+exit /b 0
+"#,
+    );
+
     Fixture {
         _temp_dir: temp_dir,
         usage_server,
@@ -179,9 +230,9 @@ pub(crate) fn write_json(path: &Path, value: &Value) {
     .expect("failed to write json");
 }
 
-fn secure_test_directory(path: &Path) {
+fn secure_test_directory(_path: &Path) {
     #[cfg(unix)]
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    fs::set_permissions(_path, fs::Permissions::from_mode(0o700))
         .expect("failed to secure test directory");
 }
 
@@ -189,6 +240,8 @@ fn write_executable(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("failed to create executable parent dir");
     }
+    #[cfg(windows)]
+    let content = content.replace('\n', "\r\n");
     fs::write(path, content).expect("failed to write executable");
 
     #[cfg(unix)]

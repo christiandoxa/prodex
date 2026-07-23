@@ -111,7 +111,9 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
         vec!["exec", "summarize concisely"]
     );
     assert_eq!(
-        fs::read_to_string(&fixture.codex_stdin_log).expect("failed to read codex stdin log"),
+        fs::read_to_string(&fixture.codex_stdin_log)
+            .expect("failed to read codex stdin log")
+            .replace("\r\n", "\n"),
         "piped input\n"
     );
 }
@@ -182,7 +184,7 @@ fn run_without_profile_keeps_the_active_ready_account() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Auto-selecting profile"));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
     let fixture = setup_fixture();
@@ -204,11 +206,21 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
         "registry should contain a live broker pid before failure"
     );
 
-    let _ = Command::new("kill")
+    #[cfg(unix)]
+    let kill_status = Command::new("kill")
         .arg("-9")
         .arg(initial_pid.to_string())
         .status()
         .expect("failed to kill broker pid");
+    #[cfg(windows)]
+    let kill_status = {
+        let initial_pid = initial_pid.to_string();
+        Command::new("taskkill")
+            .args(["/PID", initial_pid.as_str(), "/F"])
+            .status()
+            .expect("failed to kill broker pid")
+    };
+    assert!(kill_status.success(), "failed to kill broker pid");
 
     let _ = child.kill();
     let _ = child.wait();

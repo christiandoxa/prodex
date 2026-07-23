@@ -1,12 +1,17 @@
 use super::*;
+#[cfg(unix)]
 use filetime::FileTime;
+#[cfg(unix)]
 use std::io::Write;
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
 struct PrepareTestDir {
     path: PathBuf,
 }
 
+#[cfg(unix)]
 impl PrepareTestDir {
     fn new(name: &str) -> Self {
         let unique = SystemTime::now()
@@ -33,6 +38,7 @@ impl PrepareTestDir {
     }
 }
 
+#[cfg(unix)]
 impl Drop for PrepareTestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);

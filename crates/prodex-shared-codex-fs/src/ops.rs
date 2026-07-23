@@ -426,12 +426,12 @@ pub fn ensure_managed_profiles_root(paths: &AppPaths) -> Result<()> {
     secure_private_codex_directory(root)
 }
 
-fn secure_private_codex_directory(path: &Path) -> Result<()> {
+fn secure_private_codex_directory(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("failed to secure {}", path.display()))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to secure {}", _path.display()))?;
     }
     Ok(())
 }
