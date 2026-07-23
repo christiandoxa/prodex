@@ -435,8 +435,12 @@ fn gemini_cli_compat_settings_paths_follow_gemini_cli_precedence() {
     let home = PathBuf::from("/tmp/prodex-gemini-home");
     let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
     let config_home = home.join(".gemini");
-    let paths =
-        gemini_settings_source_paths_for_config_home(Some(&config_home), Some(&cwd), None, None);
+    let paths = gemini_settings_source_paths_for_config_home(
+        Some(&config_home),
+        Some(&cwd),
+        Some(Path::new("/etc/gemini-cli/settings.json")),
+        None,
+    );
     let repo_settings = PathBuf::from("/tmp/prodex-gemini-workspace/repo")
         .join(".gemini")
         .join("settings.json");
