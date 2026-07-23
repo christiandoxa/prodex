@@ -477,7 +477,7 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
             "secret object has no private owner or DACL",
         ));
     }
-    if matches!(usage, AclUse::PrivateFile | AclUse::UnsealedPrivateFile) {
+    if matches!(usage, AclUse::PrivateFile) {
         // SAFETY: both SID pointers are live for this descriptor/user buffer.
         if unsafe { EqualSid(owner, user.sid()) } == 0 {
             return Err(permission_denied(
