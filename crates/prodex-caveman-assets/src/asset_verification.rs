@@ -49,7 +49,8 @@ fn verify_file_set(label: &str, files: &[EmbeddedCavemanFile]) -> Result<()> {
 }
 
 fn verify_skill_frontmatter(label: &str, file: &EmbeddedCavemanFile) -> Result<()> {
-    let contents = file.contents.trim_start();
+    let normalized = file.contents.replace("\r\n", "\n");
+    let contents = normalized.trim_start();
     if !contents.starts_with("---\n") {
         bail!(
             "{label} embedded skill {} is missing YAML frontmatter",
@@ -126,4 +127,19 @@ fn verify_claude_manifest() -> Result<()> {
         bail!("Claude Caveman manifest name must be caveman");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skill_frontmatter_accepts_crlf() {
+        let file = EmbeddedCavemanFile {
+            relative_path: "skills/test/SKILL.md",
+            contents: "---\r\nname: test\r\ndescription: test\r\n---\r\n",
+        };
+
+        verify_skill_frontmatter("test", &file).unwrap();
+    }
 }
