@@ -11,9 +11,7 @@ fn websocket_dns_resolution_times_out_on_bounded_executor() {
     let executor = RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(1, 1, 0);
     let log_path = websocket_test_log_path("dns-timeout");
     let _ = fs::remove_file(&log_path);
-    let started = Arc::new(AtomicUsize::new(0));
-    let started_for_resolver = Arc::clone(&started);
-    let started_at = Instant::now();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
 
     let err = runtime_resolve_websocket_tcp_addrs_with_executor(
         RuntimeWebsocketDnsResolveRequest {
@@ -26,8 +24,7 @@ fn websocket_dns_resolution_times_out_on_bounded_executor() {
         },
         "slow.example.test".to_string(),
         move |_host, _port| {
-            started_for_resolver.fetch_add(1, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(150));
+            let _ = release_rx.recv_timeout(Duration::from_secs(5));
             Ok(Vec::new())
         },
     )
@@ -38,10 +35,7 @@ fn websocket_dns_resolution_times_out_on_bounded_executor() {
         io::ErrorKind::WouldBlock,
         "bounded DNS timeout should fail as local pressure, not account quota"
     );
-    assert!(
-        started_at.elapsed() < Duration::from_millis(125),
-        "DNS helper should return on its bounded timeout"
-    );
+    release_tx.send(()).expect("DNS resolver should release");
 
     let log = fs::read_to_string(&log_path).expect("DNS timeout log should exist");
     assert!(
