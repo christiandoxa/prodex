@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.339.0 - 2026-07-23
+
+### Misc
+
+- Close remaining audited gaps (`741553c`)
+
 ## 0.338.0 - 2026-07-22
 
 ### Runtime
@@ -78,9 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Decode readable zstd payloads (`626d2cd`)
-
-## 0.327.0 - 2026-07-20
-
-### Misc
-
-- Complete audited Codex and governance passthrough (`6f955c3`)
