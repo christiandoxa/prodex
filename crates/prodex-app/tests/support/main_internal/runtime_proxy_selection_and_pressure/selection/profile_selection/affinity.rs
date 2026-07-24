@@ -3,7 +3,7 @@ use super::*;
 fn selection_trace(
     shared: &RuntimeRotationProxyShared,
 ) -> runtime_proxy_crate::RuntimeRouteDecisionTrace {
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     let trace_line = log
         .lines()
@@ -410,7 +410,7 @@ fn hard_affinity_selection_matrix_ignores_local_penalties() {
             "{} hard affinity should beat transport backoff, health, and inflight heuristics",
             case.label
         );
-        runtime_proxy_flush_logs_for_path(&shared.log_path);
+        runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
         let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
         let trace_lines = log
             .lines()

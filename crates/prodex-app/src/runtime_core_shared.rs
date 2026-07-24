@@ -26,6 +26,7 @@ fn runtime_proxy_async_logger() -> &'static runtime_log::RuntimeAsyncLogger {
             runtime_proxy_log_queue_capacity(),
             runtime_proxy_format_dropped_log_marker,
         )
+        .expect("failed to start runtime log writer")
     })
 }
 
@@ -67,16 +68,24 @@ pub(super) fn create_runtime_proxy_log_path() -> PathBuf {
 }
 
 fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> PathBuf {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let sequence = RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let _ = fs::create_dir_all(dir);
-    dir.join(format!(
-        "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}-{sequence}.log",
-        std::process::id()
-    ))
+    fs::create_dir_all(dir).expect("failed to create runtime log directory");
+    for _ in 0..128 {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!(
+            "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}-{sequence}.log",
+            std::process::id()
+        ));
+        match open_runtime_proxy_private_file(&path) {
+            Ok(_) => return path,
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => panic!("failed to create private runtime log: {err}"),
+        }
+    }
+    panic!("failed to allocate a unique runtime log path")
 }
 
 pub(super) fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
@@ -121,7 +130,8 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
     let format = runtime_proxy_log_format();
     set_runtime_proxy_log_format(format);
     let log_path = create_runtime_proxy_log_path();
-    let _ = write_runtime_proxy_latest_log_pointer(&log_path);
+    write_runtime_proxy_latest_log_pointer(&log_path)
+        .expect("failed to update latest runtime log pointer");
     initialize_runtime_proxy_log_contents(&log_path);
     log_path
 }
@@ -129,7 +139,8 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
 pub(super) fn initialize_runtime_proxy_log_path_from_config(config: &RuntimeConfig) -> PathBuf {
     set_runtime_proxy_log_format(config.log_format);
     let log_path = create_runtime_proxy_log_path_in_dir(&config.log_dir);
-    let _ = write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir);
+    write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir)
+        .expect("failed to update latest runtime log pointer");
     initialize_runtime_proxy_log_contents(&log_path);
     log_path
 }
@@ -150,6 +161,9 @@ fn initialize_runtime_proxy_log_contents(log_path: &Path) {
             executable_sha256.unwrap_or_else(|| "-".to_string())
         ),
     );
+    runtime_proxy_async_logger()
+        .flush_path(log_path)
+        .expect("failed to initialize runtime log");
 }
 
 fn write_runtime_proxy_latest_log_pointer(log_path: &Path) -> io::Result<()> {
@@ -216,39 +230,8 @@ fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(test)]
-pub(super) fn runtime_proxy_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(4);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.worker_count),
-        runtime_proxy_worker_count_default(parallelism),
-    )
-    .clamp(1, 64)
-}
-
-#[cfg(test)]
-pub(super) fn runtime_proxy_async_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(4);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.async_worker_count),
-        runtime_proxy_async_worker_count_default(parallelism),
-    )
-    .clamp(2, 8)
-}
-
-#[cfg(test)]
 pub(super) fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
-        runtime_policy_proxy().and_then(|policy| policy.long_lived_queue_capacity),
-        runtime_proxy_long_lived_queue_capacity_default(worker_count),
-    )
-    .max(1)
+    runtime_proxy_long_lived_queue_capacity_default(worker_count)
 }
 
 fn runtime_heap_trim_last_requested_at_ms() -> &'static AtomicU64 {
@@ -330,45 +313,11 @@ pub(super) fn runtime_proxy_lane_limits(
     worker_count: usize,
     long_lived_worker_count: usize,
 ) -> RuntimeProxyLaneLimits {
-    let policy = runtime_policy_proxy();
-    let responses_override = usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
-        policy
-            .as_ref()
-            .and_then(|policy| policy.responses_active_limit),
-        0,
-    );
-    let compact_override = usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT",
-        policy
-            .as_ref()
-            .and_then(|policy| policy.compact_active_limit),
-        0,
-    );
-    let websocket_override = usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT",
-        policy
-            .as_ref()
-            .and_then(|policy| policy.websocket_active_limit),
-        0,
-    );
-    let standard_override = usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT",
-        policy
-            .as_ref()
-            .and_then(|policy| policy.standard_active_limit),
-        0,
-    );
     let limits = runtime_proxy_lane_limits_from_overrides(
         global_limit,
         worker_count,
         long_lived_worker_count,
-        RuntimeProxyLaneLimitOverrides {
-            responses: (responses_override > 0).then_some(responses_override),
-            compact: (compact_override > 0).then_some(compact_override),
-            websocket: (websocket_override > 0).then_some(websocket_override),
-            standard: (standard_override > 0).then_some(standard_override),
-        },
+        RuntimeProxyLaneLimitOverrides::default(),
     );
     RuntimeProxyLaneLimits {
         responses: limits.responses,
@@ -415,12 +364,14 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     logger.try_enqueue(log_path, line);
     #[cfg(test)]
     if !runtime_proxy_async_logger_pause_writes() {
-        logger.flush_path(log_path);
+        logger
+            .flush_path(log_path)
+            .expect("failed to flush runtime log");
     }
 }
 
-pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) {
-    runtime_proxy_async_logger().flush_path(log_path);
+pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) -> io::Result<()> {
+    runtime_proxy_async_logger().flush_path(log_path)
 }
 
 #[derive(Debug)]

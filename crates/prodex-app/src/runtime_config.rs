@@ -1,7 +1,5 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-#[cfg(any(test, feature = "bench-support"))]
-pub(super) use prodex_runtime_tuning::usize_override_with_policy;
 pub(super) use prodex_runtime_tuning::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
     RuntimeTuningSnapshot, RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,

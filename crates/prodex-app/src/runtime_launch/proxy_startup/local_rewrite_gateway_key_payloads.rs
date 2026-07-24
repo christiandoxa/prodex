@@ -6,33 +6,31 @@ use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayStoredVirtualKey, RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
 };
 use prodex_provider_core::microusd_to_usd;
+use std::sync::Mutex;
+
+pub(super) fn runtime_gateway_admin_state_snapshot<T: Clone>(state: &Mutex<T>) -> Result<T, ()> {
+    state.lock().map(|value| value.clone()).map_err(|_| ())
+}
+
+pub(super) fn runtime_gateway_admin_state_unavailable_response() -> tiny_http::ResponseBox {
+    crate::build_runtime_proxy_json_error_response(
+        503,
+        "gateway_state_unavailable",
+        "gateway state is temporarily unavailable",
+    )
+}
 
 pub(super) fn runtime_gateway_admin_keys_payload(
     shared: &RuntimeLocalRewriteProxyShared,
     object: &str,
     admin_auth: Option<&RuntimeGatewayAdminAuth>,
-) -> serde_json::Value {
-    let usage = shared
-        .gateway_usage
-        .usage
-        .lock()
-        .map(|usage| usage.clone())
-        .unwrap_or_default();
-    let entries = shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| entries.clone())
-        .unwrap_or_default();
-    let configured_names = shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| {
-            entries
-                .iter()
-                .map(|entry| entry.key.name.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+) -> Result<serde_json::Value, ()> {
+    let usage = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage)?;
+    let entries = runtime_gateway_admin_state_snapshot(&shared.gateway_virtual_keys)?;
+    let configured_names = entries
+        .iter()
+        .map(|entry| entry.key.name.clone())
+        .collect::<Vec<_>>();
     let keys = entries
         .iter()
         .filter(|entry| {
@@ -57,7 +55,7 @@ pub(super) fn runtime_gateway_admin_keys_payload(
         })
         .cloned()
         .collect::<Vec<_>>();
-    serde_json::json!({
+    Ok(serde_json::json!({
         "object": object,
         "keys": keys,
         "state_backend": shared.gateway_state_store.label(),
@@ -65,7 +63,7 @@ pub(super) fn runtime_gateway_admin_keys_payload(
         "key_store_path": shared.gateway_virtual_key_store_path.display().to_string(),
         "usage_path": shared.gateway_usage.path.as_ref().map(|path| path.display().to_string()),
         "unknown_persisted_keys": unknown_persisted_keys,
-    })
+    }))
 }
 
 pub(super) fn runtime_gateway_admin_key_json(
@@ -131,12 +129,31 @@ pub(super) fn runtime_gateway_admin_stored_key_json(
 pub(super) fn runtime_gateway_virtual_key_entry_by_name(
     shared: &RuntimeLocalRewriteProxyShared,
     name: &str,
-) -> Option<RuntimeGatewayVirtualKeyEntry> {
-    shared
+) -> Result<Option<RuntimeGatewayVirtualKeyEntry>, ()> {
+    Ok(shared
         .gateway_virtual_keys
         .lock()
-        .ok()?
+        .map_err(|_| ())?
         .iter()
         .find(|entry| entry.key.name.eq_ignore_ascii_case(name))
-        .cloned()
+        .cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn admin_state_snapshot_reports_poisoned_state() {
+        let state = Arc::new(Mutex::new(vec![1_u8]));
+        let poisoned = Arc::clone(&state);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("poison admin state");
+        })
+        .join();
+
+        assert!(runtime_gateway_admin_state_snapshot(&state).is_err());
+    }
 }

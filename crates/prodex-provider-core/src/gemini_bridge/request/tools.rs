@@ -80,9 +80,11 @@ pub fn gemini_provider_core_request_body_without_tool(
 
 pub fn gemini_provider_core_unsupported_tool_fallback_body(
     body: &[u8],
+    error_body: &[u8],
 ) -> Option<(&'static str, Vec<u8>)> {
     ["computerUse", "codeExecution", "urlContext", "googleSearch"]
         .into_iter()
+        .filter(|tool_name| crate::provider_error_rejects_request_member(error_body, tool_name))
         .find_map(|tool_name| {
             gemini_request_body_without_tool(body, tool_name).map(|body| (tool_name, body))
         })

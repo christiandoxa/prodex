@@ -107,7 +107,7 @@ pub use deepseek_bridge::{
 };
 pub use errors::{
     ProviderErrorClass, ProviderErrorClassification, classify_provider_error,
-    classify_provider_error_body,
+    classify_provider_error_body, provider_error_rejects_request_member,
 };
 pub use fallback::{
     provider_canonical_model, provider_gemini_retain_code_assist_models,

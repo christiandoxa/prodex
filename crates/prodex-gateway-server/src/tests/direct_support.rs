@@ -196,6 +196,50 @@ async fn in_process_upgrade_preserves_byte_order_and_closes_before_drain() {
 }
 
 #[tokio::test]
+async fn in_process_upgrade_respects_max_connection_age() {
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |config| config.max_connection_age = Duration::from_millis(50),
+        |_| async {
+            let (_application, handoff) = bounded_in_process_upgrade(NonZeroUsize::MIN);
+            let response = Response::builder()
+                .status(StatusCode::SWITCHING_PROTOCOLS)
+                .header(hyper::header::CONNECTION, "Upgrade")
+                .header(hyper::header::UPGRADE, "websocket")
+                .body(Full::new(Bytes::new()))
+                .unwrap();
+            Ok(GatewayHandlerResponse::with_in_process_upgrade(
+                response, handoff,
+            ))
+        },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(
+            b"GET /realtime HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    assert!(
+        super::read_headers(&mut client)
+            .await
+            .starts_with("HTTP/1.1 101")
+    );
+    let mut byte = [0_u8; 1];
+    assert_eq!(
+        timeout(Duration::from_secs(1), client.read(&mut byte))
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
+
+    stop.send(()).unwrap();
+    front.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn handler_overload_is_a_fail_fast_service_unavailable() {
     let (front_addr, stop, front) = spawn_direct_frontend(
         GatewayServerMode::DataPlane,

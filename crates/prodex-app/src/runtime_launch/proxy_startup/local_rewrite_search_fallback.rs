@@ -8,7 +8,10 @@ use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
     runtime_provider_label,
 };
-use super::provider_tools::runtime_provider_chat_request_body_without_web_search_options;
+use super::provider_tools::{
+    runtime_provider_chat_request_body_without_web_search_options,
+    runtime_provider_error_rejects_web_search_options,
+};
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
@@ -69,6 +72,7 @@ where
     let mut parts = runtime_local_rewrite_buffered_response_from_response(response)?;
     let mut class = runtime_provider_error_class(provider_kind, status, &parts.body);
     if status == 400
+        && runtime_provider_error_rejects_web_search_options(&parts.body)
         && let Some(fallback_body) = fallback_body
     {
         runtime_local_rewrite_log_chat_search_fallback(

@@ -2,6 +2,7 @@
 
 use super::super::gemini_rewrite::RuntimeGeminiAuth;
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_gateway_admission::RUNTIME_GATEWAY_REALTIME_FRAME_MAX_BYTES;
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_transport::runtime_local_rewrite_with_projected_provider_secret;
 use super::GEMINI_LIVE_WEBSOCKET_URL;
@@ -11,7 +12,13 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use std::time::Duration;
-use tungstenite::client::IntoClientRequest;
+use tungstenite::client::{IntoClientRequest, connect_with_config};
+
+pub(super) fn runtime_gemini_live_websocket_config() -> tungstenite::protocol::WebSocketConfig {
+    tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(RUNTIME_GATEWAY_REALTIME_FRAME_MAX_BYTES))
+        .max_frame_size(Some(RUNTIME_GATEWAY_REALTIME_FRAME_MAX_BYTES))
+}
 
 pub(super) fn runtime_gemini_live_connect(
     auth: &RuntimeGeminiAuth,
@@ -43,7 +50,8 @@ pub(super) fn runtime_gemini_live_connect(
         RuntimeGeminiAuth::Projected => unreachable!("projected auth is handled above"),
     }
     let (mut socket, _) =
-        tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
+        connect_with_config(request, Some(runtime_gemini_live_websocket_config()), 3)
+            .context("failed to connect Gemini Live websocket")?;
     runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))
         .context("failed to configure Gemini Live websocket timeout")?;
     Ok(socket)
@@ -58,7 +66,8 @@ fn runtime_gemini_live_connect_api_key(
         .context("failed to build Gemini Live websocket request")?;
     runtime_gemini_live_insert_api_key(&mut request, api_key)?;
     let (mut socket, _) =
-        tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
+        connect_with_config(request, Some(runtime_gemini_live_websocket_config()), 3)
+            .context("failed to connect Gemini Live websocket")?;
     runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))
         .context("failed to configure Gemini Live websocket timeout")?;
     Ok(socket)

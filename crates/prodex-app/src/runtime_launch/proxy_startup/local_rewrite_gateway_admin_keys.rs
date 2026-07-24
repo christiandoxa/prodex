@@ -26,7 +26,8 @@ use super::local_rewrite_gateway_admin_response::{
 };
 use super::local_rewrite_gateway_admin_store_mutation::runtime_gateway_mutate_admin_key_store_atomic;
 use super::local_rewrite_gateway_key_payloads::{
-    runtime_gateway_admin_key_json, runtime_gateway_admin_stored_key_json,
+    runtime_gateway_admin_key_json, runtime_gateway_admin_state_snapshot,
+    runtime_gateway_admin_state_unavailable_response, runtime_gateway_admin_stored_key_json,
     runtime_gateway_virtual_key_entry_by_name,
 };
 use super::local_rewrite_gateway_store_types::{
@@ -51,11 +52,9 @@ pub(super) fn runtime_gateway_admin_get_key_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    let entries = shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| entries.clone())
-        .unwrap_or_default();
+    let Ok(entries) = runtime_gateway_admin_state_snapshot(&shared.gateway_virtual_keys) else {
+        return runtime_gateway_admin_state_unavailable_response();
+    };
     let Some(entry) = entries
         .iter()
         .find(|entry| entry.key.name.eq_ignore_ascii_case(name))
@@ -74,17 +73,14 @@ pub(super) fn runtime_gateway_admin_get_key_response(
             &entry.key.name,
         );
     }
-    let usage = shared
-        .gateway_usage
-        .usage
-        .lock()
-        .ok()
-        .and_then(|usage| usage.get(&entry.key.name).cloned());
+    let Ok(usage) = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage) else {
+        return runtime_gateway_admin_state_unavailable_response();
+    };
     runtime_gateway_admin_key_json_response_with_etag(
         200,
         serde_json::json!({
             "object": "gateway.key",
-            "key": runtime_gateway_admin_key_json(entry, usage),
+            "key": runtime_gateway_admin_key_json(entry, usage.get(&entry.key.name).cloned()),
         }),
         &runtime_gateway_admin_key_etag(entry.updated_at_epoch),
     )
@@ -267,16 +263,22 @@ pub(super) fn runtime_gateway_admin_update_key_response(
     });
     match result {
         Ok(()) => {
-            let entry = runtime_gateway_virtual_key_entry_by_name(shared, name);
+            let entry = match runtime_gateway_virtual_key_entry_by_name(shared, name) {
+                Ok(Some(entry)) => entry,
+                Ok(None) | Err(()) => return runtime_gateway_admin_state_unavailable_response(),
+            };
+            let Ok(usage) = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage)
+            else {
+                return runtime_gateway_admin_state_unavailable_response();
+            };
             runtime_gateway_admin_json_response(
                 200,
                 serde_json::json!({
                     "object": "gateway.key",
-                    "key": entry.map(|entry| runtime_gateway_admin_key_json(
+                    "key": runtime_gateway_admin_key_json(
                         &entry,
-                        shared.gateway_usage.usage.lock().ok()
-                            .and_then(|usage| usage.get(&entry.key.name).cloned()),
-                    )),
+                        usage.get(&entry.key.name).cloned(),
+                    ),
                     "token": returned_token.as_ref().map(|token| token.as_str()),
                 }),
             )
@@ -463,7 +465,11 @@ fn policy_key_mutation_denied(
     name: &str,
     action: &'static str,
 ) -> Option<tiny_http::ResponseBox> {
-    let entry = runtime_gateway_virtual_key_entry_by_name(shared, name)?;
+    let entry = match runtime_gateway_virtual_key_entry_by_name(shared, name) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return None,
+        Err(()) => return Some(runtime_gateway_admin_state_unavailable_response()),
+    };
     if entry.source != RuntimeGatewayVirtualKeySource::Policy {
         return None;
     }

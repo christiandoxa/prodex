@@ -254,8 +254,9 @@ impl RuntimeGatewayApplication {
                 let _ = worker.join();
             }
         }
-        runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
-        requests_drained && health_drained && workers_finished
+        let logs_flushed =
+            runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path).is_ok();
+        requests_drained && health_drained && workers_finished && logs_flushed
     }
 }
 
@@ -349,7 +350,7 @@ impl Drop for RuntimeGatewayApplication {
                 );
             }
         }
-        runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
+        let _ = runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
     }
 }
 

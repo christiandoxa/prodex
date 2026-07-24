@@ -401,7 +401,7 @@ fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failur
         );
     }
 
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&shared.log_path).expect("local-pressure log should exist");
     for (index, (kind, _message)) in cases.into_iter().enumerate() {
         let request_id = 81 + index as u64;

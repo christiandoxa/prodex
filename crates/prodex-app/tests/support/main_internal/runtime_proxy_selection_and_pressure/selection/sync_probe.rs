@@ -35,7 +35,7 @@ sync_probe_pressure_pause_ms = 2
         RuntimeRouteKind::Responses
     ));
     runtime_proxy_sync_probe_pressure_pause(&shared, RuntimeRouteKind::Responses);
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let policy_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     assert!(
         policy_log.contains("runtime_proxy_sync_probe_pressure_pause route=responses pause_ms=2"),
@@ -53,7 +53,7 @@ sync_probe_pressure_pause_ms = 2
         Ordering::SeqCst,
     );
     runtime_proxy_sync_probe_pressure_pause(&env_shared, RuntimeRouteKind::Responses);
-    runtime_proxy_flush_logs_for_path(&env_shared.log_path);
+    runtime_proxy_flush_logs_for_path(&env_shared.log_path).expect("runtime log should flush");
     let env_log = fs::read_to_string(&env_shared.log_path).expect("runtime log should be readable");
     assert!(
         env_log.contains("runtime_proxy_sync_probe_pressure_pause route=responses pause_ms=1"),

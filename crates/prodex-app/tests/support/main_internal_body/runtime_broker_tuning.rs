@@ -1,29 +1,6 @@
 use super::*;
 
 #[test]
-fn runtime_proxy_worker_count_env_override_beats_policy_file() {
-    let temp_dir = TestDir::new();
-    let prodex_home = temp_dir.path.join("prodex");
-    fs::create_dir_all(&prodex_home).expect("prodex home should exist");
-    fs::write(
-        prodex_home.join("policy.toml"),
-        r#"
-version = 1
-
-[runtime_proxy]
-worker_count = 11
-"#,
-    )
-    .expect("policy file should write");
-    let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
-    let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "13");
-
-    clear_runtime_policy_cache();
-    assert_eq!(runtime_proxy_worker_count(), 13);
-    clear_runtime_policy_cache();
-}
-
-#[test]
 fn runtime_tuning_snapshot_reports_effective_policy_and_env_values() {
     let temp_dir = TestDir::new();
     let prodex_home = temp_dir.path.join("prodex");

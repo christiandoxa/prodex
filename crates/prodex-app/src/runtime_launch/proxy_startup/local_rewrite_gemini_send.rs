@@ -302,7 +302,10 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                     }
                     if status == 400
                         && let Some((tool_name, fallback_body)) =
-                            gemini_provider_core_unsupported_tool_fallback_body(&translated.body)
+                            gemini_provider_core_unsupported_tool_fallback_body(
+                                &translated.body,
+                                &parts.body,
+                            )
                     {
                         runtime_gemini_log_builtin_tool_fallback(
                             shared,

@@ -81,6 +81,38 @@ impl RuntimeGatewayUsageRequestGuard {
             event.reconciliation_reason = Some(reason);
         }
     }
+
+    pub(super) fn complete_realtime(
+        &mut self,
+        accounting: &super::local_rewrite_gateway_admission::RuntimeGatewayRealtimeAccountingPlan,
+        usage: super::local_rewrite_gateway_admission::RuntimeGatewayRealtimeUsage,
+        elapsed_ms: u128,
+    ) {
+        let Some((shared, terminal)) = self.terminal.take() else {
+            return;
+        };
+        let mut event =
+            super::provider_bridge::runtime_provider_gateway_response_spend_event_from_tokens(
+                self.request_id,
+                shared.provider.bridge_kind(),
+                &terminal.path,
+                Some(&accounting.model),
+                101,
+                elapsed_ms,
+                &[],
+                usage.output_bytes,
+                Some(usage.input_tokens),
+                Some(usage.output_tokens),
+                accounting.cost,
+            );
+        event.request_bytes = usage.input_bytes;
+        event.reconciliation_reason = Some(if usage.policy_interrupted {
+            prodex_domain::ReservationReconciliationReason::StreamInterrupted
+        } else {
+            prodex_domain::ReservationReconciliationReason::Completed
+        });
+        super::local_rewrite_transport::emit_runtime_gateway_spend_event(&shared, event);
+    }
 }
 
 impl Drop for RuntimeGatewayUsageRequestGuard {

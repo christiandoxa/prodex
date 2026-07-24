@@ -543,13 +543,6 @@ jobs:
           cp install.ps1 release-assets/install.ps1
           chmod 0755 release-assets/install.sh
 
-      - name: Attest installer provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
-        with:
-          subject-path: |
-            release-assets/install.sh
-            release-assets/install.ps1
-
       - name: Generate and verify release checksums
         shell: bash
         run: |
@@ -559,6 +552,79 @@ jobs:
             sha256sum install.sh install.ps1 prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
+
+      - name: Prepare antivirus engine health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scan-health
+          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > scan-health/eicar.com
+
+      - name: Verify antivirus engine detects EICAR
+        id: antivirus_health
+        continue-on-error: true
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^scan-health[\\/]')
+
+      - name: Require a working antivirus engine
+        if: ${{ always() }}
+        env:
+          SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}
+          SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}
+          SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scan-health/eicar.com
+          rmdir scan-health
+          if [ "${SCAN_OUTCOME}" != "failure" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "true" ]; then
+            echo "antivirus engine health check did not detect EICAR" >&2
+            exit 1
+          fi
+          : > "${GITHUB_STEP_SUMMARY}"
+
+      - name: Scan release assets for malware
+        id: release_malware_scan
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          found_summary: "True"
+          statistics_summary: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^release-assets[\\/]')
+
+      - name: Require clean release assets
+        env:
+          SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}
+          SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
+            echo "release asset malware scan did not finish cleanly" >&2
+            exit 1
+          fi
+          if grep -q '^## Issues$' "${GITHUB_STEP_SUMMARY}"; then
+            echo "release asset malware scan reported an engine issue" >&2
+            exit 1
+          fi
+          scanned="$(awk -F '|' '$2 ~ /^[[:space:]]*Scan[[:space:]]*$/ { gsub(/[[:space:]]/, "", $3); print $3; exit }' "${GITHUB_STEP_SUMMARY}")"
+          if [[ ! "${scanned}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "release asset malware scan did not scan any files" >&2
+            exit 1
+          fi
+
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        with:
+          subject-path: |
+            release-assets/install.sh
+            release-assets/install.ps1
 
       - name: Verify release provenance
         env:
@@ -597,6 +663,8 @@ jobs:
           \`\`\`
 
           Update future releases with \`prodex update\`.
+
+          All published assets passed the release malware gate.
           EOF
           if gh release view "${tag}" >/dev/null 2>&1; then
             gh release edit "${tag}" \

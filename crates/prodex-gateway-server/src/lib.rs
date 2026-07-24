@@ -877,6 +877,7 @@ where
                     frontend_upgrade,
                     backend_upgrade,
                     state.shutdown.clone(),
+                    state.max_connection_age,
                     permit,
                 ));
             }
@@ -885,6 +886,7 @@ where
                     frontend_upgrade,
                     upgrade,
                     state.shutdown.clone(),
+                    state.max_connection_age,
                     permit,
                 ));
             }
@@ -1084,6 +1086,7 @@ async fn tunnel_upgrades(
     frontend: upgrade::OnUpgrade,
     backend: upgrade::OnUpgrade,
     mut shutdown: watch::Receiver<bool>,
+    max_connection_age: Duration,
     _permit: Arc<OwnedSemaphorePermit>,
 ) {
     let upgrades = async {
@@ -1101,6 +1104,7 @@ async fn tunnel_upgrades(
     let mut backend = TokioIo::new(backend);
     tokio::select! {
         _ = shutdown.changed() => {}
+        _ = tokio::time::sleep(max_connection_age) => {}
         _ = tokio::io::copy_bidirectional(&mut frontend, &mut backend) => {}
     }
 }
@@ -1109,6 +1113,7 @@ async fn tunnel_in_process_upgrade(
     frontend: upgrade::OnUpgrade,
     handoff: GatewayInProcessUpgradeHandoff,
     mut shutdown: watch::Receiver<bool>,
+    max_connection_age: Duration,
     _permit: Arc<OwnedSemaphorePermit>,
 ) {
     let Ok(frontend) = (tokio::select! {
@@ -1145,6 +1150,7 @@ async fn tunnel_in_process_upgrade(
     };
     tokio::select! {
         _ = shutdown.changed() => {}
+        _ = tokio::time::sleep(max_connection_age) => {}
         _ = async { let _ = tokio::try_join!(upload, download); } => {}
     }
 }

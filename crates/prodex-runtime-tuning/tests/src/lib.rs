@@ -1,123 +1,18 @@
 use crate::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
-    RuntimeTuningSnapshotInput, percent_override_with_policy_value,
-    runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
-    runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
-    runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
-    runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
-    runtime_take_fault_injection_budget, runtime_tuning_snapshot_from_input,
-    runtime_websocket_dns_resolve_overflow_capacity_default,
+    RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,
+    runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
+    runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
+    runtime_proxy_long_lived_queue_capacity_default, runtime_proxy_long_lived_worker_count_default,
+    runtime_proxy_worker_count_default, runtime_take_fault_injection_budget,
+    runtime_tuning_snapshot_from_input, runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
     runtime_websocket_tcp_connect_queue_capacity_default,
-    runtime_websocket_tcp_connect_worker_count_default, timeout_override_ms_with_policy_value,
-    usize_override_with_policy_value,
+    runtime_websocket_tcp_connect_worker_count_default,
 };
 use std::time::Duration;
-
-#[test]
-fn usize_override_prefers_positive_env() {
-    assert_eq!(
-        usize_override_with_policy_value("PRODEX_TEST_TUNING_USIZE", Some("11"), Some(7), 3, false,),
-        11
-    );
-}
-
-fn assert_panics_with(message: &str, f: impl FnOnce() + std::panic::UnwindSafe) {
-    let err = std::panic::catch_unwind(f).expect_err("expected panic");
-    let text = err
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| err.downcast_ref::<&str>().copied())
-        .unwrap_or("");
-    assert!(
-        text.contains(message),
-        "panic {text:?} did not contain {message:?}"
-    );
-}
-
-#[test]
-fn runtime_tuning_positive_env_overrides_fail_closed_on_invalid_values() {
-    for (value, message) in [
-        ("", "PRODEX_TEST_TUNING_USIZE cannot be empty"),
-        (
-            " 11 ",
-            "PRODEX_TEST_TUNING_USIZE must not contain whitespace",
-        ),
-        (
-            "not-a-number",
-            "PRODEX_TEST_TUNING_USIZE must be an unsigned integer",
-        ),
-        ("0", "PRODEX_TEST_TUNING_USIZE must be greater than zero"),
-    ] {
-        assert_panics_with(message, || {
-            let _ = usize_override_with_policy_value(
-                "PRODEX_TEST_TUNING_USIZE",
-                Some(value),
-                Some(7),
-                3,
-                false,
-            );
-        });
-    }
-}
-
-#[test]
-fn runtime_tuning_allow_zero_env_overrides_still_reject_malformed_values() {
-    assert_eq!(
-        usize_override_with_policy_value(
-            "PRODEX_TEST_TUNING_ALLOW_ZERO",
-            Some("0"),
-            Some(7),
-            3,
-            true,
-        ),
-        0
-    );
-    assert_panics_with(
-        "PRODEX_TEST_TUNING_ALLOW_ZERO must not contain whitespace",
-        || {
-            let _ = usize_override_with_policy_value(
-                "PRODEX_TEST_TUNING_ALLOW_ZERO",
-                Some(" 0 "),
-                Some(7),
-                3,
-                true,
-            );
-        },
-    );
-}
-
-#[test]
-fn runtime_tuning_timeout_env_overrides_fail_closed_on_invalid_values() {
-    assert_panics_with(
-        "PRODEX_TEST_TUNING_TIMEOUT_MS must be greater than zero",
-        || {
-            let _ = timeout_override_ms_with_policy_value(
-                "PRODEX_TEST_TUNING_TIMEOUT_MS",
-                Some("0"),
-                Some(7),
-                3,
-            );
-        },
-    );
-}
-
-#[test]
-fn runtime_tuning_percent_env_overrides_fail_closed_on_invalid_values() {
-    assert_panics_with(
-        "PRODEX_TEST_TUNING_PERCENT must be greater than zero",
-        || {
-            let _ = percent_override_with_policy_value(
-                "PRODEX_TEST_TUNING_PERCENT",
-                Some("-1"),
-                Some(7),
-                3,
-            );
-        },
-    );
-}
 
 #[test]
 fn websocket_tcp_connect_defaults_are_bounded() {

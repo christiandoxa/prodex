@@ -17,7 +17,7 @@ pub(super) fn websocket_test_log_path(name: &str) -> PathBuf {
 pub(super) fn read_websocket_test_log_after_marker(log_path: &Path, marker: &str) -> String {
     let started_at = Instant::now();
     loop {
-        runtime_proxy_flush_logs_for_path(log_path);
+        runtime_proxy_flush_logs_for_path(log_path).expect("websocket test log should flush");
         let log = std::fs::read_to_string(log_path).unwrap_or_default();
         if log.contains(marker) || started_at.elapsed() >= Duration::from_secs(1) {
             return log;

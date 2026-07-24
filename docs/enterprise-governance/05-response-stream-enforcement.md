@@ -15,7 +15,7 @@ post-commit termination without weakening affinity or no-mid-stream rotation.
 | HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector withholds every possible literal-match prefix and handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
 | Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the governed stream wrapper | Structured tool-call semantics remain limited to the adapter's normalized emitted bytes |
 | Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and is rejected before upgrade in enforce mode | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
-| Gemini Live WebSocket response | Anonymous/personal compatibility client frames are classified/governed; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Virtual-key sessions return `501 virtual_key_realtime_not_supported` before upgrade because bounded per-frame token accounting is unavailable; binary provider output remains unsupported inspection coverage |
+| Gemini Live WebSocket response | Anonymous/personal and virtual-key text frames are bounded, classified/governed, token-accounted, and terminally reconciled; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
 | Usage reconciliation | Commit state is tracked at first delivery; policy termination explicitly marks the spend reader interrupted, is audited, and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
 
@@ -30,9 +30,10 @@ points at the runtime proxy. This keeps auto-rotation and affinity in the proxy
 while routing inspectable model output through HTTPS/SSE. A defensive direct
 WebSocket attempt is observed as unsupported coverage or rejected with an
 explicit HTTPS-fallback response according to rollout mode. Gemini Live remains
-the translated governed compatibility WebSocket path, while virtual-key
-realtime sessions fail closed before upgrade. With inspection off, native
-OpenAI WebSockets retain the transport-transparent runtime proxy behavior.
+the translated governed compatibility WebSocket path; virtual-key sessions use
+bounded reservations and per-frame accounting while retaining one provider for
+the session. With inspection off, native OpenAI WebSockets retain the
+transport-transparent runtime proxy behavior.
 
 ## Response Enforcement Contract
 
