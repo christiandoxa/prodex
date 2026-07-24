@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.346.0 - 2026-07-24
+
+### Runtime
+
+- Harden log, MCP, and Gemini boundaries (`fe12705`)
+
 ## 0.345.0 - 2026-07-24
 
 ### Runtime
@@ -84,10 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden process reporting and internal helpers (`7cb9042`)
-
-## 0.334.0 - 2026-07-21
-
-### CLI
-
-- Keep paste guard out of exec (`f1d27d2`)
-- Show process list and harden TUI input (`1c708d6`)
