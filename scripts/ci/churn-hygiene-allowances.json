@@ -5,7 +5,8 @@
       "fix: harden runtime and release pipeline",
       "fix: sync runtime test manifest",
       "chore(release): release 0.343.0",
-      "fix(ci): keep runtime log failures non-panicking"
+      "fix(ci): keep runtime log failures non-panicking",
+      "fix(ci): align secure logging test contracts"
     ],
     "caps": {
       "maxFiles": 72,

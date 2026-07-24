@@ -42,12 +42,12 @@ sync_probe_pressure_pause_ms = 2
         "policy pause override should be logged as effective pause: {policy_log}"
     );
 
-    let _ = fs::remove_file(&shared.log_path);
+    let env_temp_dir = TestDir::isolated();
     let _pause_env_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS", "1");
     clear_runtime_policy_cache();
 
-    let env_shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
+    let env_shared = RuntimeProxyFixtureBuilder::new().build_shared(&env_temp_dir);
     env_shared.local_overload_backoff_until.store(
         Local::now().timestamp().max(0) as u64 + 60,
         Ordering::SeqCst,
