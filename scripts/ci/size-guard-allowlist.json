@@ -106,8 +106,8 @@
   },
   {
     "file": "crates/prodex-provider-core/src/gemini_bridge/tests.rs",
-    "maxLines": 2126,
-    "reason": "Gemini bridge request, response, streaming, tool-call, multimodal, usage, and error conformance regressions remain colocated until split by fixture family."
+    "maxLines": 2137,
+    "reason": "Gemini bridge request, response, streaming, exact rejected-tool fallback, multimodal, usage, and error conformance regressions remain colocated until split by fixture family."
   },
   {
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
@@ -236,8 +236,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 936,
-    "reason": "Gateway virtual-key admission carries trusted team, project, user, group, and department scope into the governed PIP after request-auth, conversation admission state, and SCIM linkage moved to focused modules."
+    "maxLines": 1021,
+    "reason": "Gateway virtual-key admission carries trusted scope into the governed PIP and now owns the bounded Gemini Live reservation, accounting, and policy enforcement that share the same admitted key context."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
@@ -251,8 +251,8 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 1170,
-    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, atomic edge/application reload barriers, body limits, upgrades, and graceful drain."
+    "maxLines": 1176,
+    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, atomic edge/application reload barriers, body limits, bounded upgrade lifetimes, and graceful drain."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",
