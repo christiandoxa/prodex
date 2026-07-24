@@ -49,6 +49,33 @@ fn mcp_jsonl_bridge_reports_child_failure_without_waiting_for_stdin_eof() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn mcp_jsonl_bridge_stops_child_after_malformed_output() {
+    let started_at = Instant::now();
+    let output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args([
+            "__mcp-jsonl-bridge",
+            "sh",
+            "-c",
+            "printf 'not-json\\n'; exec sleep 30",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("bridge should run");
+
+    assert!(!output.status.success());
+    assert!(
+        started_at.elapsed() < Duration::from_secs(3),
+        "bridge should stop a child whose output is malformed"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("failed to parse MCP JSON line"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn runtime_goal_notify_rejects_an_invalid_marker_path() {
     let temp_dir = TestDir::new();

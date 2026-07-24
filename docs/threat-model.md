@@ -89,6 +89,9 @@ paths.
 | DDL during request handling | Availability impact and lock contention | External migrator-only DDL; request paths reject migration planning |
 | Redis whole-map JSON state | Lost updates and global lock contention | Atomic Lua/hash/counter operations only; durable ledger remains in PostgreSQL |
 | JWKS fetch on request path | Request stalls and identity availability coupling | Cached JWKS decisions, stale-while-revalidate/LKG semantics, no network in auth boundary |
+| Blocking I/O, unbounded workers, or mutex-held I/O on request paths | Queue starvation and gateway stalls | Async transport, bounded worker/queue limits, immutable snapshots, and no broad file or network reads while request-path locks are held |
+| Domain or shared crates depend on runtime adapters | Policy bypass and untestable side effects | Dependency inversion toward domain/application ports; composition roots alone select concrete adapters |
+| Trace context is dropped at a boundary | Incomplete incident and audit correlation | Validate and propagate bounded end-to-end trace context through gateway, application, provider, storage, and export boundaries |
 | Secret value leaks in domain, logs, environment, or projected paths | Credential compromise | `SecretRef` in domain, production rejection of CLI/environment credential sources, redacted secret material and provider debug output, canonical projected-root containment, private file modes, and log/error redaction |
 | Upstream provider error rewriting | Compatibility breakage and debugging loss | Pass-through upstream status/body/stream after upstream response exists |
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
