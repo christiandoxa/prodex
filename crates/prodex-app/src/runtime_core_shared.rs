@@ -211,7 +211,7 @@ fn write_runtime_proxy_private_file(path: &Path, bytes: &[u8]) -> io::Result<()>
 }
 
 #[cfg(unix)]
-fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     fs::OpenOptions::new()
@@ -222,7 +222,7 @@ fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(unix))]
-fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -364,9 +364,7 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     logger.try_enqueue(log_path, line);
     #[cfg(test)]
     if !runtime_proxy_async_logger_pause_writes() {
-        logger
-            .flush_path(log_path)
-            .expect("failed to flush runtime log");
+        let _ = logger.flush_path(log_path);
     }
 }
 

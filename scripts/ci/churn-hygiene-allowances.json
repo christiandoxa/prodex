@@ -1,5 +1,21 @@
 [
   {
+    "id": "audited-runtime-and-release-hardening-0.343.0",
+    "requiredSubjects": [
+      "fix: harden runtime and release pipeline",
+      "fix: sync runtime test manifest",
+      "chore(release): release 0.343.0",
+      "fix(ci): keep runtime log failures non-panicking"
+    ],
+    "caps": {
+      "maxFiles": 72,
+      "maxBehaviorFiles": 50,
+      "maxLines": 2100,
+      "maxFileLines": 200
+    },
+    "reason": "Reviewed the complete 0.343.0 source audit and GitHub-only release range, including exact optional-tool rejection fallback, fail-closed gateway state, bounded governed Gemini Live accounting, secure non-panicking runtime logging, upgrade connection-age enforcement, consolidated tuning configuration, behavior-backed provider tests, synchronized release metadata, and the pinned fail-closed malware gate; verified with focused regressions, the full locked all-features suite, strict Clippy, release preparation, an optimized locked build, Super Doctor, supply-chain and secret guards, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-runtime-governance-release-0.338.0",
     "requiredSubjects": [
       "fix: close audited runtime and governance gaps",
