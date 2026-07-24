@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.342.0 - 2026-07-24
+
+### Misc
+
+- Secure optimizer cache state (`9efa10b`)
+
 ## 0.341.0 - 2026-07-23
 
 ### Misc
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited production gaps (`d6b0a3a`)
-
-## 0.330.0 - 2026-07-21
-
-### Misc
-
-- Close audited governance gaps (`253e493`)
