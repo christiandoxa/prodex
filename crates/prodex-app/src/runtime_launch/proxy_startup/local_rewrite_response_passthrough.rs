@@ -1,8 +1,6 @@
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::{
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
-};
+use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
@@ -29,14 +27,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
     if stream {
         let mut headers = text_headers;
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let body = runtime_gateway_spend_stream_body(
-            Box::new(response),
-            request_id,
-            status,
-            captured,
-            shared,
-            response_governance.spend_termination.clone(),
-        );
+        let body = Box::new(response);
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -47,7 +38,13 @@ pub(super) fn respond_runtime_passthrough_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
+        respond_runtime_local_rewrite_stream(
+            request,
+            streaming,
+            captured,
+            shared,
+            response_governance,
+        );
         return;
     }
 

@@ -119,18 +119,20 @@
       "id": "SEC-INS-004",
       "phase": 2,
       "threat": "Sensitive output spans stream chunks and escapes a per-chunk detector.",
-      "control": "Incremental bounded response inspection with overlap and one precommit deadline.",
+      "control": "Incremental bounded literal inspection with overlap, plus bounded full precommit inspection for bank text/SSE.",
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "deterministic_stream_corpus",
-      "expected": "Boundary-spanning findings are detected under both transport-equivalent chunk models; outcomes classify as precommit before any safe chunk and postcommit afterward.",
+      "expected": "Boundary-spanning literals are detected under both transport-equivalent chunk models; bank text/SSE requiring full inspection is buffered and masked before release; direct unsupported transports are not reported as Full.",
       "implementation_status": "tested",
-      "evidence_required": "Deterministic randomized shared-inspector corpus for SSE byte reads and valid UTF-8 WebSocket frames, including Unicode splits and commit-state outcomes.",
+      "evidence_required": "Deterministic randomized shared-inspector corpus plus bounded full-stream masking and coverage-selection regressions.",
       "evidence": [
         "incremental_inspector_finds_every_chunk_boundary",
         "incremental_inspector_finds_unicode_across_three_chunks",
         "incremental_inspector_randomized_sse_and_websocket_chunk_corpus",
         "incremental_inspector_commit_outcome_is_stable_across_transport_chunking",
-        "gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage"
+        "gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage",
+        "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
+        "full_stream_inspection_buffers_and_masks_before_release"
       ]
     },
     {
@@ -402,7 +404,7 @@
       "evidence": [
         "all_governance_artifact_kinds_use_revisioned_authority",
         "governance migration catalog tests",
-        "npm run ci:backup-restore-drill: final synthetic RPO 2.004 s, RTO 1.442 s, governance fingerprint and audit-link verification"
+        "npm run ci:backup-restore-drill: final synthetic RPO 2.076 s, RTO 1.506 s, governance fingerprint and audit-link verification"
       ]
     },
     {
@@ -454,6 +456,7 @@
       "evidence_required": "Existing runtime quota/transport transparency regressions plus governed precommit failures.",
       "evidence": [
         "generic_429_passes_through_without_explicit_quota_code",
+        "only_successful_streaming_responses_are_governed",
         "codex_content_policy_errors_pass_through_without_quota_rotation",
         "transient_5xx_retries_only_before_commit"
       ]
@@ -503,6 +506,8 @@
       "evidence": [
         "bank_snapshot_denies_unsupported_inspection",
         "bank_response_inspection_requires_full_coverage",
+        "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
+        "full_stream_inspection_buffers_and_masks_before_release",
         "complete end-to-end dependency fault matrix pending"
       ]
     },
@@ -534,7 +539,7 @@
       "evidence_required": "Five comparable samples with machine metadata, raw output, load/soak errors and variance.",
       "evidence": [
         "12-performance-baseline-and-results.md maximum-bound and disabled-path Criterion tables",
-        "32/32 local load smoke at 68.56 ms p95 TTFT",
+        "32/32 local load smoke at 67.38 ms p95 TTFT; 458-test primary runtime stress tranche passed",
         "session-bank, audit/outbox pressure and external multi-replica soak remain deployment evidence"
       ]
     }

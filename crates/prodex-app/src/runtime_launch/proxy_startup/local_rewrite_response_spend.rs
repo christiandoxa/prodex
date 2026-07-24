@@ -68,6 +68,44 @@ pub(super) fn emit_runtime_gateway_response_spend_event_for_body(
     elapsed_ms: u128,
     response_body: &[u8],
 ) {
+    emit_runtime_gateway_response_spend_event_for_body_with_reason(
+        request_id,
+        captured,
+        shared,
+        status,
+        elapsed_ms,
+        response_body,
+        None,
+    );
+}
+
+pub(super) fn emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    status: u16,
+    response_body: &[u8],
+) {
+    emit_runtime_gateway_response_spend_event_for_body_with_reason(
+        request_id,
+        captured,
+        shared,
+        status,
+        0,
+        response_body,
+        Some(ReservationReconciliationReason::StreamInterrupted),
+    );
+}
+
+fn emit_runtime_gateway_response_spend_event_for_body_with_reason(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    status: u16,
+    elapsed_ms: u128,
+    response_body: &[u8],
+    reason: Option<ReservationReconciliationReason>,
+) {
     let provider_kind = shared.provider.bridge_kind();
     let model = runtime_provider_model_from_body(&captured.body);
     let cost = runtime_gateway_response_cost(
@@ -77,20 +115,19 @@ pub(super) fn emit_runtime_gateway_response_spend_event_for_body(
         shared,
         model.as_deref(),
     );
-    emit_runtime_gateway_spend_event(
-        shared,
-        runtime_provider_gateway_response_spend_event(
-            request_id,
-            provider_kind,
-            &captured.path_and_query,
-            model.as_deref(),
-            status,
-            elapsed_ms,
-            &captured.body,
-            response_body,
-            cost,
-        ),
+    let mut event = runtime_provider_gateway_response_spend_event(
+        request_id,
+        provider_kind,
+        &captured.path_and_query,
+        model.as_deref(),
+        status,
+        elapsed_ms,
+        &captured.body,
+        response_body,
+        cost,
     );
+    event.reconciliation_reason = reason;
+    emit_runtime_gateway_spend_event(shared, event);
 }
 
 fn runtime_gateway_response_cost(

@@ -699,40 +699,42 @@ mod tests {
     }
 
     #[test]
-    fn live_otlp_sink_exports_off_the_request_thread() {
+    fn live_otlp_sink_exports_off_thread_and_drains_on_shutdown() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind OTLP test listener");
         let addr = listener.local_addr().expect("resolve listener addr");
         let (request_tx, request_rx) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept OTLP export");
-            let mut header_bytes = Vec::new();
-            let mut byte = [0_u8; 1];
-            while !header_bytes.ends_with(b"\r\n\r\n") {
-                stream
-                    .read_exact(&mut byte)
-                    .expect("read request header byte");
-                header_bytes.push(byte[0]);
-            }
-            let headers = String::from_utf8(header_bytes).expect("header bytes should be utf8");
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then(|| {
-                        value
-                            .trim()
-                            .parse::<usize>()
-                            .expect("content-length number")
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept OTLP export");
+                let mut header_bytes = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !header_bytes.ends_with(b"\r\n\r\n") {
+                    stream
+                        .read_exact(&mut byte)
+                        .expect("read request header byte");
+                    header_bytes.push(byte[0]);
+                }
+                let headers = String::from_utf8(header_bytes).expect("header bytes should be utf8");
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length").then(|| {
+                            value
+                                .trim()
+                                .parse::<usize>()
+                                .expect("content-length number")
+                        })
                     })
-                })
-                .expect("content-length header");
-            let mut body = vec![0_u8; content_length];
-            stream.read_exact(&mut body).expect("read OTLP body");
-            request_tx.send(body).expect("record OTLP body");
-            thread::sleep(Duration::from_millis(500));
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-                .expect("write OTLP response");
+                    .expect("content-length header");
+                let mut body = vec![0_u8; content_length];
+                stream.read_exact(&mut body).expect("read OTLP body");
+                request_tx.send(body).expect("record OTLP body");
+                thread::sleep(Duration::from_millis(100));
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+                    .expect("write OTLP response");
+            }
         });
         let sink = OtlpHttpLogSink::start(
             OtlpHttpLogExportConfig {
@@ -760,7 +762,19 @@ mod tests {
             "gateway.request"
         );
 
-        server.join().expect("OTLP server should join");
+        sink.try_export(
+            "gateway.shutdown",
+            vec![OtlpLogAttribute::string("gateway.route", "shutdown")],
+        );
         drop(sink);
+        let body = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("queued OTLP body should drain");
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"]["stringValue"],
+            "gateway.shutdown"
+        );
+        server.join().expect("OTLP server should join");
     }
 }

@@ -8,7 +8,6 @@ use tiny_http::{Method, Request, StatusCode};
 
 mod server;
 
-pub(crate) use server::serve_dashboard;
 #[cfg(test)]
 use server::{
     dashboard_browser_command, dashboard_status_fields, read_dashboard_json_body_limited,
@@ -17,6 +16,7 @@ use server::{
     dashboard_json_body_error_status, percent_decode, read_json_body, respond_error, respond_html,
     respond_json, respond_json_result, respond_status,
 };
+pub(crate) use server::{open_browser, serve_dashboard};
 
 use crate::dashboard_html::DASHBOARD_HTML;
 use crate::{

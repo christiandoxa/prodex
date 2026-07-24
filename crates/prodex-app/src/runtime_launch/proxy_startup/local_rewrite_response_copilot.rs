@@ -4,9 +4,7 @@ use super::super::local_rewrite_copilot::{
     runtime_copilot_remember_bindings_from_responses_body,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::{
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
-};
+use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
@@ -45,14 +43,6 @@ pub(super) fn respond_runtime_copilot_rewrite(
             response,
             binding_recorder,
         ));
-        let body = runtime_gateway_spend_stream_body(
-            body,
-            request_id,
-            status,
-            captured,
-            shared,
-            response_governance.spend_termination.clone(),
-        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -63,7 +53,13 @@ pub(super) fn respond_runtime_copilot_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
+        respond_runtime_local_rewrite_stream(
+            request,
+            streaming,
+            captured,
+            shared,
+            response_governance,
+        );
         return;
     }
 

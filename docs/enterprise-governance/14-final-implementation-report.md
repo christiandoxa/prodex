@@ -1,8 +1,8 @@
 # Final Enterprise Governance Implementation Report
 
-Date: 2026-07-14 (Asia/Jakarta)
+Date: 2026-07-24 (Asia/Jakarta)
 
-Current tranche baseline revision: `8ca79a62`
+Current tranche baseline revision: `b9b9952`
 
 ## Report Scope
 
@@ -32,25 +32,28 @@ called tested only when a named test, guard, benchmark or artifact is recorded.
 | Runtime policy/bank config | `bank_governance_deployment_matrix_fails_closed`; enforcing snapshot/mode validation tests | Focused suite passed in candidate verification |
 | Governance SQLite lifecycle/session/audit/export | `cargo test -q -p prodex-storage-sqlite-runtime --test governance_repository -- --test-threads=1` | 9 passed |
 | Governance PostgreSQL lifecycle/session/audit/export | `npm run ci:storage-postgres-proof`; `postgres_policy_governance_activates_and_replays_idempotently`; `postgres_governance_lifecycle_supports_all_artifact_kinds` | live Docker PostgreSQL, RLS, TLS and four runtime tests passed |
-| Governance restore | `npm run ci:backup-restore-drill` | pass; AES-256-GCM backup and isolated restore measured final synthetic RPO 1.813 s and RTO 1.280 s; tenant/governance fingerprints, RLS and audit-chain links intact |
+| Governance restore | `npm run ci:backup-restore-drill` | pass; AES-256-GCM backup and isolated restore measured final synthetic RPO 2.076 s and RTO 1.506 s; tenant/governance fingerprints, RLS and audit-chain links intact |
 | Gateway lifecycle/session/export | `gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg`; `gateway_governance_artifacts_use_generic_maker_checker_lifecycle` | Focused HTTP regressions passed |
 | Cross-replica revocation epoch | `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` | Shared-authority epoch invalidates cached sessions; deployed two-gateway chaos remains pending |
 | Edge Host/proxy boundary | `production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing`; `non_loopback_server_requires_explicit_expected_host` | Exact trusted proxy, forwarding stripping and explicit non-loopback Host authority covered |
 | Gateway metrics | `prometheus_text_aggregates_keys_without_high_cardinality_labels` | Aggregate metrics contain no key, tenant or epoch labels |
+| Gemini OAuth | `pkce_challenge_matches_rfc_7636_s256_vector`; authorization URL regression | Authorization Code exchange uses PKCE S256 and the shared shell-free browser launcher |
+| Response enforcement | `bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets`; `full_stream_inspection_buffers_and_masks_before_release`; streaming guardrail integration | Bank text/SSE is bounded and fully inspected before commit; unsupported WebSocket coverage is not promoted; upstream error statuses remain pass-through |
+| OTLP log export | `live_otlp_sink_exports_off_thread_and_drains_on_shutdown`; `sink_counts_queue_pressure_and_failed_shutdown_drain` | Queued events drain on clean shutdown; queue pressure, export failure and bounded shutdown drops are counted and surfaced without payload content |
 | Tool metadata bound | `requested_tool_metadata_is_bounded` | passed |
 | Webhook content safety | `guardrail_webhook_policy_reason_is_stable_and_content_free` | passed |
 | Architecture/security guards | production, application, auth, config, provider-SPI, deployment-security and observability boundary guards | passed in focused verification |
 | Full repository gate | `npm run test:full -- --timings` | passed for the current tranche |
 | Formatting and lint | `cargo fmt --all --check`; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | passed for the current tranche |
 | Dependency policy | `cargo audit`; `cargo deny check advisories sources licenses bans` | no advisories or policy violations; stale skip entries emitted non-fatal warnings |
-| Runtime load and stress | `npm run ci:runtime-load-smoke`; `npm run ci:runtime-stress` | 32/32 load requests passed at 69.25 ms p95 TTFT; 445-test stress tranche and continuation repetitions passed |
+| Runtime load and stress | `npm run ci:runtime-load-smoke`; `npm run ci:runtime-stress` | 32/32 load requests passed at 67.38 ms p95 TTFT; 458-test primary stress tranche and continuation repetitions passed |
 | Documentation/JSON | Docs lint, JSON parse and diff check | See final gate record below |
 
 ## Governance Benchmark Evidence
 
 `cargo bench --locked --features bench-support --bench governance_hot_paths`
-was rerun for the `8ca79a62` tranche on 2026-07-14 with Criterion's 100-sample
-configuration. The current maximum-bound estimate intervals were:
+was last recorded for the `8ca79a62` tranche on 2026-07-14 with Criterion's
+100-sample configuration. Those maximum-bound estimate intervals were:
 
 | Maximum-bound case | Criterion estimate interval | Status |
 | --- | ---: | --- |
@@ -60,7 +63,7 @@ configuration. The current maximum-bound estimate intervals were:
 
 The earlier CPU-pinned compatibility comparison against `e308fdf6` passed all
 eight disabled-path p95/p99 budgets; the worst p99 delta was +4.4%. The current
-deterministic local load smoke passed 32/32 requests at 69.25 ms p95 TTFT.
+deterministic local load smoke passed 32/32 requests at 67.38 ms p95 TTFT.
 These results do not claim external provider capacity, multi-replica soak, or
 production queue/lock/resource SLOs.
 
@@ -69,11 +72,13 @@ production queue/lock/resource SLOs.
 Supported channels enter one authenticated gateway boundary, then execute one
 ordered application plan: bounded inspection, monotonic classification, pure
 PDP, obligation admission, hard-filtered deterministic routing, attached SPI
-adapter dispatch, incremental response enforcement, accounting and durable audit. Four
-independent per-tenant ArcSwap authorities publish policy, classification,
-provider-registry and routing-score active/LKG snapshots. SQLite is the local
-compatibility runtime; PostgreSQL with transaction-local tenant context and RLS
-is the enterprise authority; Redis remains rebuildable coordination.
+adapter dispatch, response enforcement, accounting and durable audit. Bank
+text/SSE requiring full inspection is bounded and held before commit; compatible
+non-bank streams retain incremental literal enforcement. Four independent
+per-tenant ArcSwap authorities publish policy, classification, provider-registry
+and routing-score active/LKG snapshots. SQLite is the local compatibility
+runtime; PostgreSQL with transaction-local tenant context and RLS is the
+enterprise authority; Redis remains rebuildable coordination.
 
 ## Material Modules and Schemas
 

@@ -5,13 +5,14 @@ mod quota;
 use crate::secret_store_support::secret_file_read_error;
 use crate::{create_codex_home_if_missing, print_wrapped_stderr};
 use anyhow::{Context, Result};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use code_assist::{GeminiCodeAssistSetupMode, resolve_gemini_code_assist_project_with_endpoint};
 pub(crate) use code_assist::{
     ensure_gemini_code_assist_project_if_missing, gemini_code_assist_endpoint,
 };
 use oauth::{
     exchange_google_oauth_code, fetch_google_user_email, gemini_oauth_authorize_url,
-    gemini_oauth_secret_from_token, open_browser, random_hex, refresh_google_oauth_token,
+    gemini_oauth_secret_from_token, random_hex, refresh_google_oauth_token,
     wait_for_google_oauth_code,
 };
 use quota::verify_gemini_code_assist_quota_access;
@@ -20,6 +21,7 @@ pub(crate) use quota::{
 };
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -111,14 +113,16 @@ pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSe
         .context("Google OAuth callback server did not expose a TCP address")?;
     let redirect_uri = format!("http://{listen_addr}/oauth2callback");
     let state = random_hex(24)?;
-    let auth_url = gemini_oauth_authorize_url(&redirect_uri, &state)?;
+    let code_verifier = random_hex(32)?;
+    let code_challenge = gemini_oauth_pkce_challenge(&code_verifier);
+    let auth_url = gemini_oauth_authorize_url(&redirect_uri, &state, &code_challenge)?;
 
     print_wrapped_stderr("Opening Google sign-in in your browser.")?;
     print_wrapped_stderr(&format!("If it does not open, visit: {auth_url}"))?;
-    let _ = open_browser(&auth_url);
+    let _ = crate::dashboard::open_browser(&auth_url);
 
     let code = wait_for_google_oauth_code(&server, &state)?;
-    let token = exchange_google_oauth_code(&client, &code, &redirect_uri)?;
+    let token = exchange_google_oauth_code(&client, &code, &redirect_uri, &code_verifier)?;
     let email = fetch_google_user_email(&client, &token.access_token)?;
     let secret = complete_gemini_oauth_secret(
         &client,
@@ -127,6 +131,10 @@ pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSe
     )?;
     write_gemini_oauth_secret(codex_home, &secret)?;
     Ok(secret)
+}
+
+fn gemini_oauth_pkce_challenge(code_verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
 }
 
 fn complete_gemini_oauth_secret(
@@ -240,6 +248,14 @@ mod tests {
     use super::*;
     use std::thread;
     use tiny_http::Response as TinyResponse;
+
+    #[test]
+    fn pkce_challenge_matches_rfc_7636_s256_vector() {
+        assert_eq!(
+            gemini_oauth_pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
 
     fn test_gemini_oauth_secret() -> GeminiOAuthSecret {
         GeminiOAuthSecret {

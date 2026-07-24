@@ -12,17 +12,24 @@ post-commit termination without weakening affinity or no-mid-stream rotation.
 | Path | Current behavior | Remaining gap |
 | --- | --- | --- |
 | Buffered HTTP response | Successful bodies run typed inspection/masking and full-coverage/output-limit obligations before commit; denial is content-free and mandatory-audited when configured | Inspection remains bounded to supported response schemas and modalities |
-| HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector withholds every possible literal-match prefix and handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
-| Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the governed stream wrapper | Structured tool-call semantics remain limited to the adapter's normalized emitted bytes |
+| HTTP streaming response | Bank mode buffers locally inspectable text/SSE output up to the existing 4 MiB response bound and performs full local masking, output-limit, keyword, and post-webhook checks before commit. Other modes retain the 4 KiB pre-commit hold and bounded incremental literal inspector | A non-bank violation found after commit terminates the stream; already released safe bytes cannot be recalled |
+| Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the same guard-then-account stream wrapper | Direct generic WebSocket and binary output remain explicit partial/unsupported coverage rather than being reported as `Full` |
 | Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and is rejected before upgrade in enforce mode | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
 | Gemini Live WebSocket response | Anonymous/personal and virtual-key text frames are bounded, classified/governed, token-accounted, and terminally reconciled; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
-| Usage reconciliation | Commit state is tracked at first delivery; policy termination explicitly marks the spend reader interrupted, is audited, and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
+| Usage reconciliation | The spend reader wraps the governed output, so pre-commit denial and post-commit guard errors reconcile once as interrupted while clean EOF remains completed | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
 
-The stream guard detects configured literals across arbitrary read boundaries.
-Its bounded pre-commit prefix can deny before any local byte is released;
-violations discovered later are explicit post-commit termination and never
-permit retry or rotation.
+Only successful `2xx` streaming responses enter local response enforcement.
+Upstream error status and body remain pass-through, preserving the gateway's
+transport-transparency contract.
+
+The compatibility stream guard detects configured literals across arbitrary
+read boundaries. Its bounded pre-commit prefix can deny before any local byte
+is released; violations discovered later are explicit post-commit termination
+and never permit retry or rotation. In bank mode, a policy that requires full
+response inspection takes the bounded full-buffer path instead. Overflow,
+non-UTF-8 output, unsupported coverage, or inspection failure denies before
+commit.
 
 When response inspection is active, Prodex launches Codex with a dedicated
 OpenAI-compatible provider that advertises `supports_websockets=false` and
@@ -117,28 +124,26 @@ malformed supported output, unsupported required modality, detector timeout,
 or invalid detector ranges lower coverage and follow the active failure mode.
 They cannot silently become `Full`.
 
-## Incremental SSE and WebSocket Algorithm
+## Bounded SSE and WebSocket Enforcement
 
-Transport fragments are first parsed into bounded provider events. Inspection
-walks documented content fields in normalized events, not arbitrary SSE lines,
-WebSocket framing bytes, or a stringified JSON object.
+Provider adapters emit normalized response bytes before the shared response
+PEP. For bank-mode text/SSE requests that require full inspection, the PEP
+reads the complete emitted body up to 4 MiB, applies the same local inspection
+and masking used for bounded unary responses, then evaluates output bounds,
+literal guardrails, and the post-response webhook before releasing any byte.
 
-Each streaming detector publishes a finite maximum match span. Let
+Other SSE paths use the configured finite literal maximum match span. Let
 `holdback = max_match_span - 1`, capped by the active validated limits. The PEP
-retains that many uncommitted content bytes so a finding split across chunks is
-detected before its suffix is released.
+retains that many uncommitted bytes so a configured literal split across reads
+is detected before its suffix is released.
 
 ```text
-for each transport fragment:
-    parse complete bounded events; retain bounded parser carry
-    for each supported text/tool segment:
-        combine prior detector tail + new segment
-        inspect in deterministic detector order
-        map findings to normalized segment ranges
-        if a deny finding or required-inspection failure:
-            deny before commit or terminate after commit
-        apply safe masks wholly inside held bytes
-        release only the safe prefix; retain declared holdback
+for each emitted byte chunk:
+    combine prior literal tail + new chunk
+    inspect configured literals in deterministic order
+    if a denial or output bound is reached:
+        deny before commit or terminate after commit
+    release only the safe prefix; retain declared holdback
 
 on clean end:
     inspect final carry and held tail
@@ -146,27 +151,11 @@ on clean end:
     reconcile completed usage
 ```
 
-A detector without a finite maximum span cannot be used as an incremental
-enforcement detector. Policy must choose one of three explicit alternatives:
-buffer the entire response up to a finite unary limit, disable streaming for
-that request, or deny/constrain execution. It must not pretend a fixed window
-fully covers an unbounded pattern.
-
-The implementation keeps independent bounded state for:
-
-- transport/event parser carry;
-- incomplete UTF-8 and escape sequences;
-- detector lookbehind and normalized-text mapping;
-- JSON nesting and partial tool/function arguments;
-- finding, reason, event, and output counts;
-- pre-commit bytes and maximum total inspected bytes;
-- one deadline inherited from the request.
-
-Unicode offsets are converted only within the exact inspected segment. Tests
-cover multibyte code points, combining marks, normalization differences,
-confusables, invalid UTF-8, and every split position of representative
-findings. Normalization may add a risk signal but must not corrupt emitted
-provider text.
+A detector without a finite maximum span is not treated as full incremental
+coverage. Policy must select bounded full buffering, constrain/disable that
+transport, or deny. Direct generic WebSocket and binary frames therefore stay
+partial or unsupported in enforcing modes. Gemini Live uses its separate
+bounded translated frame PEP.
 
 ## Tool Calls, Results, and Modalities
 
@@ -246,11 +235,15 @@ Existing focused tests verify that:
 - generic provider retry planning denies retry after first byte or
   cancellation; and
 - stream accounting distinguishes completed, policy-interrupted, provider-
-  interrupted, and client-cancelled terminal reasons.
+  interrupted, and client-cancelled terminal reasons;
+- bank text/SSE coverage is upgraded to `Full` only when bounded local
+  inspection is available; and
+- full buffered stream inspection masks a finding before any output is
+  released.
 
-Unit regressions prove literal-prefix holdback and policy-interrupted accounting
-selection. The deployment matrix still lacks an end-to-end durable
-reconciliation assertion and typed response findings.
+Unit regressions prove literal-prefix holdback, bounded full stream
+inspection, and policy-interrupted accounting selection. Deployment acceptance
+still lacks the complete external dependency-fault and multi-replica matrix.
 
 ### Phase 2 matrix
 
@@ -283,12 +276,13 @@ Integration assertions must prove:
 
 ## Exit Gate
 
-The response-enforcement exit gate is not met. It requires all supported
-provider response paths to use one typed PEP with an immutable response
-obligation, explicit coverage and classification, bounded normalized parsing,
-correct pre-commit denial, correct post-commit termination and accounting,
-mandatory content-free audit, and passing unary/SSE/WebSocket mode matrices.
+The source-level response-enforcement gate is met for declared supported
+paths: bounded unary responses and provider-normalized text/SSE use the shared
+typed response PEP, bank-required full inspection occurs before commit, and
+unsupported direct WebSocket or binary coverage fails closed instead of being
+reported as `Full`. Post-commit compatibility guard failures terminate without
+retry/rotation and reconcile as interrupted.
 
-The keyword-only wrappers may remain as compatibility inputs during observe
-rollout, but they cannot remain a second authoritative response policy after
-the typed PEP is enforced.
+This is not the deployment acceptance gate. External SIEM outage, managed
+failover, and deployed multi-replica dependency-fault evidence remain tracked
+as non-source acceptance work in the security matrix.

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::env;
 use std::ffi::OsString;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
@@ -63,7 +64,7 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
     let url = dashboard_url(server.server_addr());
     print_dashboard_status(&url, fallback_warning.as_deref())?;
     if args.open
-        && let Err(err) = open_dashboard_browser(&url)
+        && let Err(err) = open_browser(&url)
     {
         eprintln!("failed to open the dashboard browser: {err:#}\nOpen {url} manually.");
     }
@@ -214,15 +215,24 @@ fn dashboard_authority_is_local(authority: &str) -> bool {
         || is_local_dashboard_host(authority)
 }
 
-fn open_dashboard_browser(url: &str) -> Result<()> {
-    let (program, args) = dashboard_browser_command(url);
-    let mut child = Command::new(program)
-        .args(args)
+pub(crate) fn open_browser(url: &str) -> Result<()> {
+    let mut command =
+        if let Some(browser) = env::var_os("BROWSER").filter(|value| !value.is_empty()) {
+            let mut command = Command::new(browser);
+            command.arg(url);
+            command
+        } else {
+            let (program, args) = dashboard_browser_command(url);
+            let mut command = Command::new(program);
+            command.args(args);
+            command
+        };
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("failed to start {program}"))?;
+        .context("failed to start browser")?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });

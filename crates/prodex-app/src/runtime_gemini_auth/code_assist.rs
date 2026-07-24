@@ -505,7 +505,7 @@ pub(super) fn handle_gemini_validation(
         bail!("Gemini account validation requires an interactive terminal");
     }
     if let Some(url) = validation.url.as_deref() {
-        let _ = super::oauth::open_browser(url);
+        let _ = crate::dashboard::open_browser(url);
     }
     prompt_gemini_validation_tui(validation)?;
     Ok(())

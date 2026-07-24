@@ -1,6 +1,6 @@
 # Enterprise Governance Implementation Ledger
 
-Last updated: 2026-07-22 (Asia/Jakarta).
+Last updated: 2026-07-24 (Asia/Jakarta).
 
 This ledger is the authoritative progress index for the five-phase enterprise
 governance program. Status values are:
@@ -18,15 +18,15 @@ No row is complete merely because adjacent infrastructure exists.
 
 | ID | Requirement | Status | Evidence or next proof |
 | --- | --- | --- | --- |
-| B-01 | Clean current baseline before production changes | tested | Current tranche baseline HEAD `8ca79a62`; candidate evidence is the working diff from that revision |
+| B-01 | Clean current baseline before production changes | tested | Current tranche baseline HEAD `b9b9952`; candidate evidence is the audited working diff from that revision |
 | B-02 | Read architecture, threat, policy, deployment, provider, storage, and prior refactor evidence | tested | `00-baseline-and-inventory.md`, `01-target-architecture.md`, ADRs 0001-0010, and the machine-readable security matrix |
-| B-03 | Record host and toolchain | tested | Linux 6.17; Rust/Cargo 1.97.0; Node 24.18.0; npm 12.0.1; 16 logical CPUs; 29 GiB RAM |
+| B-03 | Record host and toolchain | tested | Linux 7.0.0-28-generic; Rust/Cargo 1.97.0; Node 24.18.0; npm 12.0.1; 12 logical CPUs; 30 GiB RAM |
 | B-04 | Run formatting baseline | tested | cargo fmt --check passed |
 | B-05 | Run Clippy baseline | tested | locked workspace/all-targets/all-features with warnings denied passed |
-| B-06 | Run Rust test baseline | tested | Candidate full workspace passed 2,835 tests across 189 suites |
+| B-06 | Run Rust test baseline | tested | `npm run test:full -- --timings` passed the current all-features workspace and serial runtime shards |
 | B-07 | Run npm install/test baseline | tested | `npm test` passed; `npm ci` is inapplicable because no lockfile is tracked and generated cross-platform workspace locks reject single-host installation |
 | B-08 | Run documentation and architecture guards | tested | docs lint, crate boundary, and deployment security guard passed |
-| B-09 | Capture baseline performance and resource evidence | tested | Current `8ca79a62` governance hot-path benchmark passed with 100-sample maximum-bound estimate intervals of 27.143-27.238 us inspection, 2.768-2.796 us PDP and 6.290-6.393 us routing; prior CPU-pinned `e308fdf6` comparison passed all eight disabled p95/p99 budgets |
+| B-09 | Capture baseline performance and resource evidence | tested | The recorded `8ca79a62` governance hot-path benchmark passed with 100-sample maximum-bound estimate intervals of 27.143-27.238 us inspection, 2.768-2.796 us PDP and 6.290-6.393 us routing; prior CPU-pinned `e308fdf6` comparison passed all eight disabled p95/p99 budgets |
 
 ## Phase 1 — Inspection Boundary
 
@@ -57,12 +57,12 @@ No row is complete merely because adjacent infrastructure exists.
 | P2-04 | Unsupported or partial coverage is explicit policy input | tested | `inspection_failure_mode_matrix_preserves_shadow_and_fail_closed_semantics` covers unsupported modalities and detector failures across observe, enforce, and bank modes |
 | P2-05 | Typed request and response obligations | tested | `obligation_matrix_preserves_classification_and_observe_enforce_semantics` and `request_and_session_obligations_return_stable_typed_violations` |
 | P2-06 | Structured request masking preserves provider schemas | tested | `mask_obligation_requires_explicit_masking_evidence` and schema-aware walker tests |
-| P2-07 | Incremental response inspection across stream chunks | tested | Exhaustive boundaries plus `incremental_inspector_randomized_sse_and_websocket_chunk_corpus` cover arbitrary SSE bytes, valid UTF-8 WebSocket frames, and Unicode splits |
-| P2-08 | Correct pre-commit denial and post-commit termination/accounting | tested | `incremental_inspector_commit_outcome_is_stable_across_transport_chunking`, `provider_retry_boundary_marks_irreversible_stages_committed`, and precommit-only retry regressions |
+| P2-07 | Incremental response inspection across stream chunks | tested | Exhaustive literal boundaries plus `incremental_inspector_randomized_sse_and_websocket_chunk_corpus` cover arbitrary SSE reads, valid UTF-8 WebSocket frames, and Unicode splits; bank-required text/SSE uses bounded full pre-commit inspection |
+| P2-08 | Correct pre-commit denial and post-commit termination/accounting | tested | `full_stream_inspection_buffers_and_masks_before_release`, `incremental_inspector_commit_outcome_is_stable_across_transport_chunking`, `provider_retry_boundary_marks_irreversible_stages_committed`, and precommit-only retry regressions |
 | P2-09 | Immutable governed request metadata context | tested | `application-boundary-guard.mjs` and redacted `Debug` tests in governance/application types |
 | P2-10 | Session classification monotonicity, binding, timeout, and revocation hooks | tested | Bounded memory snapshots, synchronous durable security-relevant updates, coalesced timestamp touches, SQLite/PG storage tests, `session_context_propagates_age_idle_classification_and_affinity`, `session_reuse_with_another_principal_is_revoked`, and revoke-route HTTP regression |
 | P2-11 | Phase 2 matrix, property, fuzz, and stream tests | tested | Deterministic SSE/WebSocket-equivalent chunk corpus plus 31-second, 117,401-execution governance-policy fuzz run |
-| P2-X | Phase 2 exit: every routed request has classification and coverage | tested | Enforcing application admission requires typed classification and coverage before routing |
+| P2-X | Phase 2 exit: every routed request has classification and coverage | tested | Enforcing application admission requires typed classification and coverage before routing; `bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets` proves supported bank SSE is `Full` while direct WebSocket remains partial/unsupported |
 
 ## Phase 3 — PDP, Policy Store, Approval, Audit, and SIEM
 
@@ -107,7 +107,7 @@ No row is complete merely because adjacent infrastructure exists.
 | ID | Requirement | Status | Evidence or next proof |
 | --- | --- | --- | --- |
 | P5-01 | CLI, IDE, API, and supported machine channels share one authenticated application boundary | tested | Production/application boundary guards cover forwarded HTTP, compact, SSE, and bounded Gemini Live virtual-key routes with reservation, per-frame accounting, and terminal reconciliation; the synthetic root bearer compatibility principal is restricted to personal mode |
-| P5-02 | OIDC PKCE/device or supported human flow, bearer validation, service identity, and mTLS | tested | Gateway browser Authorization Code with PKCE S256, Redis-shared one-time state and sessions, secure cookie login/callback/logout, signed back-channel logout, workload JWT/JWKS/scope verification, origin-allowlisted background JWKS refresh planning, Rustls client-certificate validation, and JWT `cnf.x5t#S256` peer binding are wired and covered by focused runtime tests; deployment IdP/PKI rotation remains acceptance evidence |
+| P5-02 | OIDC PKCE/device or supported human flow, bearer validation, service identity, and mTLS | tested | Gateway browser and Gemini Google OAuth Authorization Code flows use PKCE S256; Redis-shared one-time state/sessions, secure cookie login/callback/logout, signed back-channel logout, workload JWT/JWKS/scope verification, origin-allowlisted background JWKS refresh planning, Rustls client-certificate validation, and JWT `cnf.x5t#S256` peer binding are covered; deployment IdP/PKI rotation remains acceptance evidence |
 | P5-03 | Canonical routes, limits, deadlines, concurrency, distributed rate/quota, overload | tested | The typed pipeline now applies inspection, guardrails, and constraints before virtual-key mutation; every accepted reservation receives terminal reconciliation, and WebSocket/provider dispatch occurs only after governed admission |
 | P5-04 | Trusted proxies, safe client metadata, browser CSRF/Origin/Host/cookies | tested | Edge tests prove peer preservation, exact trusted proxies, bounded client derivation, forwarding-header stripping, explicit non-loopback Host authority, PKCE state/nonce validation, Secure/HttpOnly/SameSite browser sessions, Redis-backed multi-replica continuity, and local plus signed back-channel logout invalidation |
 | P5-05 | Typed session binding, timeouts, revocation, concurrency, re-auth/MFA, network risk, revision pinning | tested | Verified OIDC `acr`/`auth_time`, human MFA, and workload-identity assurance feed policy and session evidence. Authority hydration, atomic admission/revoke+audit/outbox, owner-bound current-session self-revoke, and `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` prove shared-authority invalidation; deployed two-gateway chaos remains deployment acceptance evidence. |
@@ -116,9 +116,9 @@ No row is complete merely because adjacent infrastructure exists.
 | P5-08 | SQLite local compatibility and enterprise migration tests | tested | `all_governance_artifact_kinds_use_revisioned_authority`, cross-tenant/CAS/LKG/audit/outbox tests |
 | P5-09 | External secret/Vault-compatible provider, leases, rotation, TLS identity, zeroization | tested | Bounded projected-secret adapter is the production Vault Agent/CSI boundary; direct Vault HTTP authority is intentionally unsupported |
 | P5-10 | Append-only durable audit and SIEM exporter operations | tested | Bounded audit writer/export API, SQLite exporter tests and live PostgreSQL outbox operations passed |
-| P5-11 | Low-cardinality metrics, alerts, SLOs, and runbooks | implemented | Live authn, authz, tenant-isolation, policy, and secret-provider counters feed the checked-in Prometheus rules and Grafana dashboard; dedicated serve roots export bounded asynchronous `gateway.request` OTLP logs; pager routing and achieved environment SLOs remain deployment evidence |
+| P5-11 | Low-cardinality metrics, alerts, SLOs, and runbooks | implemented | Live authn, authz, tenant-isolation, policy, and secret-provider counters feed the checked-in Prometheus rules and Grafana dashboard; dedicated serve roots export bounded asynchronous `gateway.request` OTLP logs with counted degradation and shutdown drain; pager routing and achieved environment SLOs remain deployment evidence |
 | P5-12 | Hardened Compose/Kubernetes, least privilege, HA, drain, deny-default network policy | implemented | Existing artifacts plus the durable PostgreSQL configuration-publication outbox/replica-ack transport cover source-level HA boundaries; bank governance/Vault/SIEM egress and deployed tests remain |
-| P5-13 | Encrypted backup, isolated restore, audit/policy/registry verification, and DR drills | tested | AES-256-GCM disposable PostgreSQL backup/isolated restore passed with final synthetic RPO 1.813 s and RTO 1.280 s; tenant/governance fingerprints, RLS, policy/provider/session/audit/SIEM links remained intact; production KMS/PITR and regional cutover remain deployment evidence |
+| P5-13 | Encrypted backup, isolated restore, audit/policy/registry verification, and DR drills | tested | AES-256-GCM disposable PostgreSQL backup/isolated restore passed with final synthetic RPO 2.076 s and RTO 1.506 s; tenant/governance fingerprints, RLS, policy/provider/session/audit/SIEM links remained intact; production KMS/PITR and regional cutover remain deployment evidence |
 | P5-14 | Phase 5 identity/session/RLS/Vault/audit/deployment/restore/chaos tests | implemented | Identity/session/config/deployment, live PostgreSQL/RLS/SIEM, fuzz, stress and restore gates passed; two-gateway chaos remains deployment acceptance work |
 | P5-X | Phase 5 exit: governed channel parity and tested bank profile | implemented | Governed HTTP, browser OIDC, workload JWT, and direct mTLS channels pass in-process guards; managed IdP/PKI rotation, failover, external SIEM delivery, and deployed multi-replica chaos remain environment acceptance blockers |
 

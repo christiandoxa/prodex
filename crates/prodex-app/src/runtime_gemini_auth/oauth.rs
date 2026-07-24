@@ -6,7 +6,6 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::env;
 use std::fmt;
-use std::process::{Command, Stdio};
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
 const GEMINI_OAUTH_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -62,7 +61,11 @@ impl fmt::Debug for GeminiUserInfoResponse {
     }
 }
 
-pub(super) fn gemini_oauth_authorize_url(redirect_uri: &str, state: &str) -> Result<String> {
+pub(super) fn gemini_oauth_authorize_url(
+    redirect_uri: &str,
+    state: &str,
+    code_challenge: &str,
+) -> Result<String> {
     let mut url = reqwest::Url::parse(GEMINI_OAUTH_AUTH_URL)
         .context("failed to parse Google OAuth authorize URL")?;
     let client_id = gemini_oauth_client_id();
@@ -73,7 +76,9 @@ pub(super) fn gemini_oauth_authorize_url(redirect_uri: &str, state: &str) -> Res
         .append_pair("scope", &GEMINI_OAUTH_SCOPES.join(" "))
         .append_pair("access_type", "offline")
         .append_pair("prompt", "consent")
-        .append_pair("state", state);
+        .append_pair("state", state)
+        .append_pair("code_challenge", code_challenge)
+        .append_pair("code_challenge_method", "S256");
     Ok(url.to_string())
 }
 
@@ -130,6 +135,7 @@ pub(super) fn exchange_google_oauth_code(
     client: &Client,
     code: &str,
     redirect_uri: &str,
+    code_verifier: &str,
 ) -> Result<GeminiTokenResponse> {
     let client_id = gemini_oauth_client_id();
     let client_secret = gemini_oauth_client_secret();
@@ -143,6 +149,7 @@ pub(super) fn exchange_google_oauth_code(
             ("client_id", &client_id),
             ("client_secret", &client_secret),
             ("code", code),
+            ("code_verifier", code_verifier),
             ("redirect_uri", redirect_uri),
             ("grant_type", "authorization_code"),
         ]))
@@ -294,56 +301,25 @@ pub(super) fn random_hex(byte_count: usize) -> Result<String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-pub(super) fn open_browser(url: &str) -> Result<()> {
-    if let Some(browser) = env::var_os("BROWSER").filter(|value| !value.is_empty()) {
-        let mut command = Command::new(browser);
-        command.arg(url);
-        spawn_quiet_browser(command).context("failed to open browser from BROWSER")?;
-        return Ok(());
-    }
-    if cfg!(target_os = "macos") {
-        let mut command = Command::new("open");
-        command.arg(url);
-        spawn_quiet_browser(command).context("failed to open browser with open")?;
-        return Ok(());
-    }
-    if cfg!(target_os = "windows") {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", url]);
-        spawn_quiet_browser(command).context("failed to open browser with start")?;
-        return Ok(());
-    }
-    if cfg!(all(unix, not(target_os = "macos"))) {
-        let mut command = Command::new("xdg-open");
-        command.arg(url);
-        spawn_quiet_browser(command).context("failed to open browser with xdg-open")?;
-        return Ok(());
-    }
-    Ok(())
-}
-
-fn spawn_quiet_browser(mut command: Command) -> Result<()> {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn gemini_oauth_authorize_url_includes_scopes_and_state() {
-        let url = gemini_oauth_authorize_url("http://127.0.0.1:1234/oauth2callback", "state-test")
-            .expect("authorize URL should build");
+        let url = gemini_oauth_authorize_url(
+            "http://127.0.0.1:1234/oauth2callback",
+            "state-test",
+            "challenge-test",
+        )
+        .expect("authorize URL should build");
 
         assert!(url.contains("client_id="));
         assert!(url.contains("state=state-test"));
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("cloud-platform"));
+        assert!(url.contains("code_challenge=challenge-test"));
+        assert!(url.contains("code_challenge_method=S256"));
     }
 
     #[test]
@@ -426,7 +402,7 @@ mod tests {
             report.to_str().expect("report path utf-8"),
         );
 
-        open_browser("https://example.test").expect("fake browser should spawn");
+        crate::dashboard::open_browser("https://example.test").expect("fake browser should spawn");
         for _ in 0..50 {
             if report.exists() {
                 break;
