@@ -115,6 +115,10 @@ impl TestDir {
                     #[cfg(unix)]
                     fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
                         .expect("failed to secure test temp dir");
+                    crate::runtime_core_shared::open_runtime_proxy_private_file(
+                        &path.join("runtime-proxy.log"),
+                    )
+                        .expect("failed to create private test runtime log");
                     return Self { path };
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
