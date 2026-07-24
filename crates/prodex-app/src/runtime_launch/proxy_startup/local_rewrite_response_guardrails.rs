@@ -46,6 +46,30 @@ fn runtime_gateway_response_status_is_governed(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
+pub(super) fn runtime_gateway_response_inspection_coverage(
+    governance_mode: prodex_config::GovernanceMode,
+    websocket: bool,
+    streaming: bool,
+    keyword_inspection: bool,
+    locally_inspectable: bool,
+    post_webhook: bool,
+) -> prodex_domain::InspectionCoverage {
+    if websocket && keyword_inspection {
+        prodex_domain::InspectionCoverage::Partial
+    } else if websocket {
+        prodex_domain::InspectionCoverage::Unsupported
+    } else if (!streaming && (keyword_inspection || post_webhook))
+        || (locally_inspectable
+            && (!streaming || governance_mode == prodex_config::GovernanceMode::BankEnforce))
+    {
+        prodex_domain::InspectionCoverage::Full
+    } else if keyword_inspection {
+        prodex_domain::InspectionCoverage::Partial
+    } else {
+        prodex_domain::InspectionCoverage::Unsupported
+    }
+}
+
 pub(super) fn runtime_gateway_guardrail_stream_body(
     mut body: Box<dyn Read + Send>,
     request_id: u64,
@@ -430,7 +454,8 @@ impl Read for RuntimeGatewayGuardrailStreamReader {
 mod tests {
     use super::{
         RuntimeGatewayIncrementalInspector, release_safe_bytes,
-        runtime_gateway_fully_inspect_stream_body, runtime_gateway_response_status_is_governed,
+        runtime_gateway_fully_inspect_stream_body, runtime_gateway_response_inspection_coverage,
+        runtime_gateway_response_status_is_governed,
     };
     use std::io::Cursor;
 
@@ -649,5 +674,42 @@ mod tests {
         assert!(runtime_gateway_response_status_is_governed(200));
         assert!(!runtime_gateway_response_status_is_governed(429));
         assert!(!runtime_gateway_response_status_is_governed(500));
+    }
+
+    #[test]
+    fn bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets() {
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::BankEnforce,
+                false,
+                true,
+                false,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Full,
+        );
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::EnterpriseEnforce,
+                false,
+                true,
+                false,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Unsupported,
+        );
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::BankEnforce,
+                true,
+                true,
+                true,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Partial,
+        );
     }
 }

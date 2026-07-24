@@ -535,6 +535,7 @@ pub(super) fn otlp_any_value(value: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
     use std::net::TcpListener;
 
     #[test]
@@ -573,5 +574,75 @@ mod tests {
         server.join().unwrap();
         assert!(stats.export_failed.load(Ordering::Relaxed) > 0);
         assert!(stats.shutdown_dropped.load(Ordering::Relaxed) > 0);
+    }
+
+    #[test]
+    fn live_sink_exports_off_thread_and_drains_on_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut header_bytes = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !header_bytes.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    header_bytes.push(byte[0]);
+                }
+                let headers = String::from_utf8(header_bytes).unwrap();
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap();
+                let mut body = vec![0_u8; content_length];
+                stream.read_exact(&mut body).unwrap();
+                request_tx.send(body).unwrap();
+                std::thread::sleep(Duration::from_millis(100));
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+                    .unwrap();
+            }
+        });
+        let sink = OtlpHttpLogSink::start(
+            OtlpHttpLogExportConfig {
+                endpoint: format!("http://{addr}/v1/logs"),
+                headers: Vec::new(),
+                timeout: Some(Duration::from_secs(1)),
+            },
+            "prodex-gateway",
+            "prodex.gateway",
+        )
+        .unwrap();
+
+        let started_at = std::time::Instant::now();
+        sink.try_export(
+            "gateway.request",
+            vec![OtlpLogAttribute::string("gateway.route", "responses")],
+        );
+        assert!(started_at.elapsed() < Duration::from_millis(250));
+        let body = request_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"]["stringValue"],
+            "gateway.request"
+        );
+
+        sink.try_export(
+            "gateway.shutdown",
+            vec![OtlpLogAttribute::string("gateway.route", "shutdown")],
+        );
+        drop(sink);
+        let body = request_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"]["stringValue"],
+            "gateway.shutdown"
+        );
+        server.join().unwrap();
     }
 }
