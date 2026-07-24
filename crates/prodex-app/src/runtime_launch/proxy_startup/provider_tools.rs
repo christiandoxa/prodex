@@ -5,6 +5,7 @@ use prodex_provider_core::{
     provider_core_chat_tool_choice_from_responses_request,
     provider_core_chat_tools_from_responses_request,
     provider_core_chat_web_search_options_from_responses_request,
+    provider_error_rejects_request_member,
 };
 
 pub(super) fn runtime_provider_chat_tools_from_responses_request(
@@ -23,6 +24,10 @@ pub(super) fn runtime_provider_chat_request_body_without_web_search_options(
     body: &[u8],
 ) -> Option<Vec<u8>> {
     provider_core_chat_request_body_without_web_search_options(body)
+}
+
+pub(super) fn runtime_provider_error_rejects_web_search_options(body: &[u8]) -> bool {
+    provider_error_rejects_request_member(body, "web_search_options")
 }
 
 pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(

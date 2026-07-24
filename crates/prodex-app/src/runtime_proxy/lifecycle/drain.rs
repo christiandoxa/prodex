@@ -32,8 +32,8 @@ impl RuntimeRotationProxy {
                 self.active_request_count.load(Ordering::SeqCst)
             ),
         );
-        runtime_proxy_flush_logs_for_path(&self.log_path);
-        drained
+        let logs_flushed = runtime_proxy_flush_logs_for_path(&self.log_path).is_ok();
+        drained && logs_flushed
     }
 }
 

@@ -36,35 +36,45 @@ impl RuntimeOperationalMetricRegistry {
         let Some(key) = runtime_operational_metric_key(name, labels) else {
             return;
         };
-        if let Ok(mut counters) = self.counters.lock() {
-            let counter = counters.entry(key).or_default();
-            *counter = counter.saturating_add(increment);
-        }
+        let mut counters = self
+            .counters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let counter = counters.entry(key).or_default();
+        *counter = counter.saturating_add(increment);
     }
 
     fn set_gauge(&self, name: &'static str, value: u64, labels: &[&TelemetryAttribute]) {
         let Some(key) = runtime_operational_metric_key(name, labels) else {
             return;
         };
-        if let Ok(mut gauges) = self.gauges.lock() {
-            gauges.insert(key, value);
-        }
+        self.gauges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, value);
     }
 
     fn replace_gauge(&self, name: &'static str, value: u64, labels: &[&TelemetryAttribute]) {
         let Some(key) = runtime_operational_metric_key(name, labels) else {
             return;
         };
-        if let Ok(mut gauges) = self.gauges.lock() {
-            gauges.retain(|existing, _| existing.name != name);
-            gauges.insert(key, value);
-        }
+        let mut gauges = self
+            .gauges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gauges.retain(|existing, _| existing.name != name);
+        gauges.insert(key, value);
     }
 
     fn render(&self) -> String {
-        let (Ok(counters), Ok(gauges)) = (self.counters.lock(), self.gauges.lock()) else {
-            return String::new();
-        };
+        let counters = self
+            .counters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let gauges = self
+            .gauges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         render_runtime_operational_metrics(&counters, &gauges)
     }
 }
@@ -447,5 +457,16 @@ mod tests {
         assert!(rendered.contains("authz_result=\"allowed\""));
         assert!(rendered.contains("# TYPE prodex_test_duration_ms gauge"));
         assert!(rendered.contains("prodex_test_duration_ms{duration_kind=\"latest\"} 17"));
+    }
+
+    #[test]
+    fn registry_recovers_poisoned_metric_storage() {
+        let registry = RuntimeOperationalMetricRegistry::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = registry.counters.lock().unwrap();
+            panic!("poison metric storage");
+        }));
+        registry.record("prodex_test_total", 1, &[]);
+        assert!(registry.render().contains("prodex_test_total 1"));
     }
 }

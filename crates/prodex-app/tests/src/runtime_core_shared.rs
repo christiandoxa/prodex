@@ -185,6 +185,7 @@ fn runtime_proxy_log_to_path_flushes_async_entries() {
     let _runtime_lock = acquire_test_runtime_lock();
     let dir = RuntimeProxyLogTestDir::new();
     let log_path = dir.log_path("async.log");
+    open_runtime_proxy_private_file(&log_path).expect("private runtime log should create");
 
     let pause_guard = RuntimeProxyAsyncLoggerPauseGuard::pause();
     runtime_proxy_log_to_path(&log_path, "async entry line1\nline2 request=7");
@@ -200,7 +201,7 @@ fn runtime_proxy_log_to_path_flushes_async_entries() {
     );
 
     drop(pause_guard);
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
 
     let log = fs::read_to_string(&log_path).expect("async runtime log should flush to disk");
     assert!(log.contains("async entry line1 line2 request=7"));
@@ -213,6 +214,7 @@ fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
     let _format = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_FORMAT", "text");
     let dir = RuntimeProxyLogTestDir::new();
     let log_path = dir.log_path("dropped.log");
+    open_runtime_proxy_private_file(&log_path).expect("private runtime log should create");
     let logger = runtime_proxy_async_logger();
     let capacity = logger.capacity();
 
@@ -231,7 +233,7 @@ fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
     );
 
     drop(pause_guard);
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
 
     let log = fs::read_to_string(&log_path).expect("async runtime log should flush to disk");
     let marker = log
@@ -256,6 +258,7 @@ fn runtime_proxy_log_to_path_preserves_valid_json_format() {
     set_runtime_proxy_log_format(RuntimeLogFormat::Json);
     let dir = RuntimeProxyLogTestDir::new();
     let log_path = dir.log_path("json.log");
+    open_runtime_proxy_private_file(&log_path).expect("private runtime log should create");
 
     runtime_proxy_log_to_path(
         &log_path,
@@ -269,7 +272,7 @@ fn runtime_proxy_log_to_path_preserves_valid_json_format() {
             ],
         ),
     );
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
 
     let line = fs::read_to_string(&log_path).expect("json runtime log should be readable");
     let value = serde_json::from_str::<serde_json::Value>(line.trim_end())

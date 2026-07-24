@@ -31,7 +31,9 @@ use super::local_rewrite_gateway_admin_scim::{
 };
 use super::local_rewrite_gateway_admin_sessions::runtime_gateway_admin_session_response;
 use super::local_rewrite_gateway_dashboard::runtime_gateway_admin_dashboard_response;
-use super::local_rewrite_gateway_key_payloads::runtime_gateway_admin_keys_payload;
+use super::local_rewrite_gateway_key_payloads::{
+    runtime_gateway_admin_keys_payload, runtime_gateway_admin_state_unavailable_response,
+};
 use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
 use super::*;
 use prodex_application::{
@@ -236,10 +238,9 @@ fn runtime_gateway_admin_dispatch(
         GatewayAdminRoute::RouteExplain => {
             runtime_gateway_admin_route_explain_response(captured, shared, admin_auth)
         }
-        GatewayAdminRoute::Usage => runtime_gateway_admin_json_response(
-            200,
-            runtime_gateway_admin_keys_payload(shared, "gateway.usage", Some(admin_auth)),
-        ),
+        GatewayAdminRoute::Usage => {
+            runtime_gateway_admin_keys_response(shared, "gateway.usage", admin_auth)
+        }
         GatewayAdminRoute::Ledger => {
             runtime_gateway_admin_ledger_response(&captured.path_and_query, shared, admin_auth)
         }
@@ -298,10 +299,7 @@ fn runtime_gateway_admin_dispatch(
             }
         }
         GatewayAdminRoute::Keys => match method.as_str() {
-            "GET" => runtime_gateway_admin_json_response(
-                200,
-                runtime_gateway_admin_keys_payload(shared, "gateway.keys", Some(admin_auth)),
-            ),
+            "GET" => runtime_gateway_admin_keys_response(shared, "gateway.keys", admin_auth),
             "POST" => match authorized_action {
                 Some(base_action) => runtime_gateway_admin_create_key_response(
                     captured,
@@ -395,6 +393,17 @@ fn runtime_gateway_admin_dispatch(
             "scim_user_not_found",
             "gateway SCIM user was not found",
         ),
+    }
+}
+
+fn runtime_gateway_admin_keys_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    object: &str,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> tiny_http::ResponseBox {
+    match runtime_gateway_admin_keys_payload(shared, object, Some(admin_auth)) {
+        Ok(payload) => runtime_gateway_admin_json_response(200, payload),
+        Err(()) => runtime_gateway_admin_state_unavailable_response(),
     }
 }
 

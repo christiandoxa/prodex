@@ -3519,7 +3519,7 @@ fn app_server_broker_upstream_schema_passthrough_runtime_log_matches_fixture() {
     let pointer = std::fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime log pointer should exist");
     let log_path = std::path::PathBuf::from(pointer.trim());
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&log_path).expect("runtime log should be readable");
 
     let observe_lines = log
@@ -3629,7 +3629,7 @@ fn app_server_broker_log_surface_fixture_matches_passthrough_log_output() {
     let pointer = std::fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime log pointer should exist");
     let log_path = std::path::PathBuf::from(pointer.trim());
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&log_path).expect("runtime log should be readable");
 
     let observe_lines = log
@@ -3941,7 +3941,7 @@ fn app_server_broker_passthrough_preview_runtime_log_summary_matches_diagnostics
     let pointer = std::fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime log pointer should exist");
     let log_path = std::path::PathBuf::from(pointer.trim());
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&log_path).expect("runtime log should be readable");
 
     let observe_lines = log
@@ -6124,7 +6124,7 @@ fn app_server_broker_write_stdio_passthrough_preview_stream_logs_runtime_metadat
     let pointer = std::fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime log pointer should exist");
     let log_path = std::path::PathBuf::from(pointer.trim());
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&log_path).expect("runtime log should be readable");
     assert!(log.contains("app_server_broker_observe"));
     assert!(log.contains("line=1"));
@@ -6158,7 +6158,7 @@ fn app_server_broker_runtime_log_redacts_secret_like_jsonrpc_ids() {
     let pointer = std::fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime log pointer should exist");
     let log_path = std::path::PathBuf::from(pointer.trim());
-    runtime_proxy_flush_logs_for_path(&log_path);
+    runtime_proxy_flush_logs_for_path(&log_path).expect("runtime log should flush");
     let log = std::fs::read_to_string(&log_path).expect("runtime log should be readable");
     assert!(!log.contains("raw-secret-token"), "log contents:\n{log}");
     assert!(!log.contains("raw-session-token"), "log contents:\n{log}");

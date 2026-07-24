@@ -659,7 +659,7 @@ fn gemini_provider_core_bypasses_translated_placeholder_ids() {
 }
 
 #[test]
-fn gemini_provider_core_unsupported_tool_fallback_body_removes_first_matching_tool() {
+fn gemini_provider_core_unsupported_tool_fallback_body_removes_only_rejected_tool() {
     let body = serde_json::to_vec(&serde_json::json!({
         "request": {
             "tools": [
@@ -671,7 +671,18 @@ fn gemini_provider_core_unsupported_tool_fallback_body_removes_first_matching_to
     }))
     .unwrap();
 
-    let (tool_name, stripped) = gemini_provider_core_unsupported_tool_fallback_body(&body).unwrap();
+    assert!(
+        gemini_provider_core_unsupported_tool_fallback_body(
+            &body,
+            br#"{"error":{"status":"INVALID_ARGUMENT","message":"temperature is invalid"}}"#,
+        )
+        .is_none()
+    );
+    let (tool_name, stripped) = gemini_provider_core_unsupported_tool_fallback_body(
+        &body,
+        br#"{"error":{"status":"INVALID_ARGUMENT","message":"codeExecution is not supported"}}"#,
+    )
+    .unwrap();
     let stripped: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
 
     assert_eq!(tool_name, "codeExecution");

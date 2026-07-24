@@ -1,6 +1,11 @@
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_application_data_plane::runtime_gateway_application_websocket_governance;
+use super::local_rewrite_gateway_admission::{
+    RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS, RuntimeGatewayRealtimeAccountingPlan,
+    RuntimeGatewayRealtimeUsage,
+};
 use super::local_rewrite_gateway_credentials::runtime_gateway_pin_request_credentials;
+use super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
 use super::local_rewrite_gemini::runtime_gemini_live_auth_attempts;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use crate::{
@@ -36,7 +41,7 @@ mod session;
 
 use self::connection::{
     runtime_gemini_live_connect, runtime_gemini_live_upgrade_response,
-    runtime_gemini_live_websocket_key,
+    runtime_gemini_live_websocket_config, runtime_gemini_live_websocket_key,
 };
 use self::session::{runtime_gemini_live_duplex_session, runtime_gemini_live_session};
 #[cfg(test)]
@@ -148,9 +153,12 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     request: RuntimeLocalRewriteRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
+    accounting: Option<RuntimeGatewayRealtimeAccountingPlan>,
+    mut usage_guard: Option<RuntimeGatewayUsageRequestGuard>,
 ) {
     let network_zone = request.network_zone();
     let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
+        runtime_gemini_live_mark_terminal(&mut usage_guard, 501);
         let _ = request.respond(build_runtime_proxy_text_response(
             501,
             "Gemini Live is only available for the Gemini provider.",
@@ -176,6 +184,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         )
         .is_err()
     }) {
+        runtime_gemini_live_mark_terminal(&mut usage_guard, 403);
         let _ = request.respond(build_runtime_proxy_text_response(
             403,
             "Gemini Live request was denied by governance policy.",
@@ -185,6 +194,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     let attempts = match runtime_gemini_live_auth_attempts(auth, shared) {
         Ok(attempts) => attempts,
         Err(_err) => {
+            runtime_gemini_live_mark_terminal(&mut usage_guard, 502);
             let _ = request.respond(build_runtime_proxy_text_response(
                 502,
                 RUNTIME_GEMINI_LIVE_AUTH_FAILED_MESSAGE,
@@ -231,6 +241,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
                 ],
             ),
         );
+        runtime_gemini_live_mark_terminal(&mut usage_guard, 502);
         let _ = request.respond(build_runtime_proxy_text_response(
             502,
             RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
@@ -238,6 +249,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         return;
     };
     let Some(websocket_key) = runtime_gemini_live_websocket_key(&request) else {
+        runtime_gemini_live_mark_terminal(&mut usage_guard, 400);
         let _ = request.respond(build_runtime_proxy_text_response(
             400,
             "Missing Sec-WebSocket-Key header for Gemini Live.",
@@ -247,6 +259,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     let response = match runtime_gemini_live_upgrade_response(&websocket_key) {
         Ok(response) => response,
         Err(_err) => {
+            runtime_gemini_live_mark_terminal(&mut usage_guard, 500);
             let _ = request.respond(build_runtime_proxy_text_response(
                 500,
                 RUNTIME_GEMINI_LIVE_UPGRADE_FAILED_MESSAGE,
@@ -255,9 +268,14 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         }
     };
     let Ok(upgraded) = request.upgrade("websocket", response.boxed()) else {
+        runtime_gemini_live_mark_terminal(&mut usage_guard, 500);
         return;
     };
-    let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
+    let mut local_socket = WsSocket::from_raw_socket(
+        upgraded,
+        WsRole::Server,
+        Some(runtime_gemini_live_websocket_config()),
+    );
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -268,14 +286,33 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
             ],
         ),
     );
-    if let Err(err) = runtime_gemini_live_session(
+    let accounting = accounting.unwrap_or_else(|| RuntimeGatewayRealtimeAccountingPlan {
+        token_limit: RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
+        model: shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone()
+            .unwrap_or_else(|| runtime_gemini_live_default_model().to_string()),
+        cost: prodex_provider_core::ProviderModelCost::default(),
+    });
+    let mut usage = RuntimeGatewayRealtimeUsage::default();
+    let session_started_at = std::time::Instant::now();
+    let session_result = runtime_gemini_live_session(
         request_id,
         &mut local_socket,
         &mut upstream_socket,
         shared,
         network_zone,
         authorized,
-    ) {
+        (&accounting, &mut usage),
+    );
+    usage.policy_interrupted |= session_result.is_err();
+    if let Some(guard) = usage_guard.as_mut() {
+        guard.complete_realtime(&accounting, usage, session_started_at.elapsed().as_millis());
+    }
+    if let Err(err) = session_result {
         runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -320,7 +357,8 @@ fn handle_runtime_gemini_live_tcp_stream(
         .set_write_timeout(Some(GEMINI_LIVE_HANDSHAKE_TIMEOUT))
         .context("failed to configure Gemini Live local handshake write timeout")?;
     let mut local_socket =
-        tungstenite::accept(stream).context("failed to accept Gemini Live sidecar websocket")?;
+        tungstenite::accept_with_config(stream, Some(runtime_gemini_live_websocket_config()))
+            .context("failed to accept Gemini Live sidecar websocket")?;
     local_socket
         .get_mut()
         .set_read_timeout(Some(GEMINI_LIVE_PUMP_TIMEOUT))
@@ -399,6 +437,18 @@ fn handle_runtime_gemini_live_tcp_stream(
             ],
         ),
     );
+    let accounting = RuntimeGatewayRealtimeAccountingPlan {
+        token_limit: RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
+        model: shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone()
+            .unwrap_or_else(|| runtime_gemini_live_default_model().to_string()),
+        cost: prodex_provider_core::ProviderModelCost::default(),
+    };
+    let mut usage = RuntimeGatewayRealtimeUsage::default();
     if let Err(err) = runtime_gemini_live_duplex_session(
         request_id,
         &mut local_socket,
@@ -406,6 +456,7 @@ fn handle_runtime_gemini_live_tcp_stream(
         shared,
         prodex_domain::NetworkZone::Local,
         None,
+        (&accounting, &mut usage),
     ) {
         runtime_proxy_log(
             &shared.runtime_shared,
@@ -429,6 +480,18 @@ fn handle_runtime_gemini_live_tcp_stream(
     let _ = upstream_socket.close(None);
     let _ = local_socket.close(None);
     Ok(())
+}
+
+fn runtime_gemini_live_mark_terminal(
+    usage_guard: &mut Option<RuntimeGatewayUsageRequestGuard>,
+    status: u16,
+) {
+    if let Some(guard) = usage_guard.as_mut() {
+        guard.mark_terminal(
+            status,
+            prodex_domain::ReservationReconciliationReason::Cancelled,
+        );
+    }
 }
 
 #[cfg(test)]

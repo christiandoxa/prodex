@@ -7,10 +7,19 @@ use super::super::{
 };
 
 #[test]
-fn gateway_realtime_websocket_requires_auth_and_fails_closed_for_virtual_keys() {
+fn gateway_realtime_websocket_requires_auth_and_reserves_bounded_virtual_key_usage() {
     let root = temp_root("gateway-realtime-websocket-auth");
     let paths = app_paths_for_root(root.clone());
     let virtual_token = "team-a-token";
+    let upstream = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let upstream_thread = std::thread::spawn(move || {
+        let _ = upstream.accept();
+    });
+    let _live_url = crate::TestEnvVarGuard::set(
+        "PRODEX_GEMINI_LIVE_URL",
+        &format!("ws://{upstream_addr}/live"),
+    );
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &AppState::default(),
@@ -75,15 +84,15 @@ fn gateway_realtime_websocket_requires_auth_and_fails_closed_for_virtual_keys() 
         .bearer_auth(virtual_token)
         .send()
         .expect("authorized websocket handshake request should be sent");
-    assert_eq!(response.status().as_u16(), 501);
-    let body: serde_json::Value = response.json().expect("error response should be json");
-    assert_eq!(body["error"]["code"], "virtual_key_realtime_not_supported");
+    assert_eq!(response.status().as_u16(), 502);
+    upstream_thread.join().unwrap();
 
     let usage = wait_for_usage_file(&root.join("gateway-virtual-key-usage.json"));
     assert_eq!(usage["team-a"]["requests_total"], 1);
+    assert_eq!(usage["team-a"]["tokens_this_minute"], 32_768);
     wait_for_ledger_file_key_response_status(
         &root.join("gateway-billing-ledger.jsonl"),
         "team-a",
-        501,
+        502,
     );
 }

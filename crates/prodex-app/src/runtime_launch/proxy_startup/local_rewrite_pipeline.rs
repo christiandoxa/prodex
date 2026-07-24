@@ -46,6 +46,7 @@ use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_request_path_requires_admin_auth,
 };
 use super::local_rewrite_gateway_admin_sessions::runtime_gateway_self_service_session_response;
+use super::local_rewrite_gateway_admission::RuntimeGatewayRealtimeAccountingPlan;
 use super::local_rewrite_gateway_browser::runtime_gateway_browser_auth_response;
 use super::local_rewrite_gateway_data_plane_audit::{
     runtime_gateway_audit_data_plane_auth_failed,
@@ -154,11 +155,13 @@ struct RuntimeLocalRewriteGovernedRequest<'target, 'shared>(
 struct RuntimeLocalRewriteReservedRequest<'target, 'shared> {
     request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
     application_admission: RuntimeGatewayApplicationAdmission,
+    realtime_accounting: Option<RuntimeGatewayRealtimeAccountingPlan>,
 }
 struct RuntimeLocalRewriteDispatchReadyRequest<'target> {
     state: RuntimeLocalRewriteRequestState<'target>,
     captured: RuntimeProxyRequest,
     application_admission: RuntimeGatewayApplicationAdmission,
+    realtime_accounting: Option<RuntimeGatewayRealtimeAccountingPlan>,
 }
 
 struct RuntimeLocalRewritePipelineReply {

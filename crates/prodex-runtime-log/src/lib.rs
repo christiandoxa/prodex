@@ -1,11 +1,13 @@
 use runtime_proxy_crate as runtime_proxy;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const RUNTIME_LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -103,6 +105,7 @@ struct RuntimeAsyncLoggerState {
     pending_by_path: BTreeMap<PathBuf, usize>,
     dropped_by_path: BTreeMap<PathBuf, u64>,
     dropped_overflow: Option<RuntimeDroppedLogCounter>,
+    errors_by_path: BTreeMap<PathBuf, (io::ErrorKind, String)>,
 }
 
 #[derive(Debug)]
@@ -138,7 +141,7 @@ impl RuntimeAsyncLogger {
     pub fn new(
         capacity: usize,
         dropped_marker_formatter: RuntimeDroppedLogMarkerFormatter,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let inner = Arc::new(RuntimeAsyncLoggerInner {
             state: Mutex::new(RuntimeAsyncLoggerState::default()),
             work_available: Condvar::new(),
@@ -147,10 +150,10 @@ impl RuntimeAsyncLogger {
             dropped_marker_formatter,
         });
         let worker_inner = Arc::clone(&inner);
-        let _ = thread::Builder::new()
+        thread::Builder::new()
             .name("prodex-runtime-log".to_string())
-            .spawn(move || runtime_async_logger_worker_loop(worker_inner));
-        Self { inner }
+            .spawn(move || runtime_async_logger_worker_loop(worker_inner))?;
+        Ok(Self { inner })
     }
 
     pub fn try_enqueue(&self, log_path: &Path, line: String) {
@@ -172,7 +175,7 @@ impl RuntimeAsyncLogger {
         self.inner.work_available.notify_one();
     }
 
-    pub fn flush_path(&self, log_path: &Path) {
+    pub fn flush_path(&self, log_path: &Path) -> io::Result<()> {
         let deadline = Instant::now() + RUNTIME_LOG_FLUSH_TIMEOUT;
         let mut state = self
             .inner
@@ -182,7 +185,10 @@ impl RuntimeAsyncLogger {
         while state.pending_by_path.get(log_path).copied().unwrap_or(0) > 0 {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return;
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out flushing runtime log",
+                ));
             }
             let (next_state, _) = self
                 .inner
@@ -190,6 +196,10 @@ impl RuntimeAsyncLogger {
                 .wait_timeout(state, remaining)
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             state = next_state;
+        }
+        match state.errors_by_path.remove(log_path) {
+            Some((kind, message)) => Err(io::Error::new(kind, message)),
+            None => Ok(()),
         }
     }
 
@@ -238,6 +248,11 @@ impl RuntimeAsyncLoggerState {
                 self.pending_by_path.remove(log_path);
             }
         }
+    }
+
+    fn record_write_error(&mut self, log_path: &Path, error: io::Error) {
+        self.errors_by_path
+            .insert(log_path.to_path_buf(), (error.kind(), error.to_string()));
     }
 
     fn note_dropped_log(&mut self, log_path: &Path, dropped_path_limit: usize) {
@@ -344,40 +359,44 @@ fn runtime_async_logger_worker_loop(inner: Arc<RuntimeAsyncLoggerInner>) {
 
         runtime_async_logger_wait_for_write_permit();
 
-        let mut completed_line_path = None;
-        let mut completed_marker_path = None;
+        let mut completed = Vec::with_capacity(2);
         if let Some(entry) = work_item.line {
-            runtime_write_log_line(&entry.log_path, &entry.line);
-            completed_line_path = Some(entry.log_path);
+            let result = runtime_write_log_line(&entry.log_path, &entry.line);
+            completed.push((entry.log_path, result));
         }
         if let Some(marker) = work_item.dropped_marker {
             let line = (inner.dropped_marker_formatter)(marker.marker);
-            runtime_write_log_line(&marker.log_path, &line);
-            completed_marker_path = Some(marker.log_path);
+            let result = runtime_write_log_line(&marker.log_path, &line);
+            completed.push((marker.log_path, result));
         }
 
         let mut state = inner
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(log_path) = completed_line_path {
-            state.decrement_pending_for_path(&log_path);
-        }
-        if let Some(log_path) = completed_marker_path {
+        for (log_path, result) in completed {
+            if let Err(error) = result {
+                state.record_write_error(&log_path, error);
+            }
             state.decrement_pending_for_path(&log_path);
         }
         inner.path_drained.notify_all();
     }
 }
 
-fn runtime_write_log_line(log_path: &Path, line: &str) {
-    if let Ok(mut file) = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
+fn runtime_write_log_line(log_path: &Path, line: &str) -> io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).append(true);
+    #[cfg(unix)]
     {
-        let _ = file.write_all(line.as_bytes());
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
     }
+    let mut file = options.open(log_path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("runtime log path is not a regular file"));
+    }
+    file.write_all(line.as_bytes())
 }
 
 #[doc(hidden)]
@@ -388,6 +407,21 @@ pub fn runtime_async_logger_writes_are_paused_for_test() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dropped_marker(marker: RuntimeDroppedLogMarker) -> String {
+        format!("dropped={}\n", marker.dropped_count)
+    }
+
+    fn test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "prodex-runtime-log-{}-{}-{name}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
 
     #[test]
     fn json_log_format_uses_typed_event_fields() {
@@ -408,5 +442,34 @@ mod tests {
         assert_eq!(value["fields"]["request"], "7");
         assert_eq!(value["fields"]["error"], "failed with spaces");
         assert_eq!(value["fields"]["empty"], "");
+    }
+
+    #[test]
+    fn async_logger_reports_missing_log_instead_of_creating_it() {
+        let path = test_path("missing.log");
+        let logger = RuntimeAsyncLogger::new(4, dropped_marker).unwrap();
+
+        logger.try_enqueue(&path, "entry\n".to_string());
+        let error = logger.flush_path(&path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn async_logger_refuses_symlink_log_targets() {
+        let target = test_path("target.log");
+        let link = test_path("link.log");
+        fs::write(&target, "original\n").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let logger = RuntimeAsyncLogger::new(4, dropped_marker).unwrap();
+
+        logger.try_enqueue(&link, "entry\n".to_string());
+        assert!(logger.flush_path(&link).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original\n");
+
+        let _ = fs::remove_file(link);
+        let _ = fs::remove_file(target);
     }
 }

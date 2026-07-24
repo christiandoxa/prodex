@@ -2,6 +2,9 @@ use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_auth::{
     RuntimeGatewayAdminAuth, runtime_gateway_admin_auth_is_unscoped,
 };
+use super::local_rewrite_gateway_key_payloads::{
+    runtime_gateway_admin_state_snapshot, runtime_gateway_admin_state_unavailable_response,
+};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -82,17 +85,12 @@ pub(super) fn runtime_gateway_prometheus_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    let usage = shared
-        .gateway_usage
-        .usage
-        .lock()
-        .map(|usage| usage.clone())
-        .unwrap_or_default();
-    let entries = shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| entries.clone())
-        .unwrap_or_default();
+    let Ok(usage) = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage) else {
+        return runtime_gateway_admin_state_unavailable_response();
+    };
+    let Ok(entries) = runtime_gateway_admin_state_snapshot(&shared.gateway_virtual_keys) else {
+        return runtime_gateway_admin_state_unavailable_response();
+    };
     let mut rows = BTreeMap::new();
     for entry in entries {
         if !admin_auth.can_access_entry(&entry) {

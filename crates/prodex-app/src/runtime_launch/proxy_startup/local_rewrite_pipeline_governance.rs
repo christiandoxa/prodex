@@ -290,6 +290,7 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
     Ok(RuntimeLocalRewriteReservedRequest {
         request,
         application_admission: admission.application,
+        realtime_accounting: admission.realtime_accounting,
     })
 }
 
@@ -447,6 +448,7 @@ pub(super) fn runtime_local_rewrite_apply_constraints<'target>(
     let RuntimeLocalRewriteReservedRequest {
         mut request,
         application_admission,
+        realtime_accounting,
     } = reserved;
     if request.state.deadline_expired() {
         return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
@@ -478,6 +480,7 @@ pub(super) fn runtime_local_rewrite_apply_constraints<'target>(
         state: request.state,
         captured: request.captured,
         application_admission,
+        realtime_accounting,
     })
 }
 use super::{

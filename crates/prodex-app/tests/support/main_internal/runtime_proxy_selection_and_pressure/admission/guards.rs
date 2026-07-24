@@ -576,7 +576,7 @@ fn profile_inflight_guard_drop_records_underflow_and_log_marker() {
     shared.lane_admission.set_profile_inflight("main", 0);
 
     drop(guard);
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
 
     assert_eq!(shared.lane_admission.profile_inflight_releases_total(), 1);
     assert_eq!(

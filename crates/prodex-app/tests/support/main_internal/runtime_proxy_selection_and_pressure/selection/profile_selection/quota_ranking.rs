@@ -177,7 +177,7 @@ fn response_selection_logs_plan_counts_before_pick() {
     .expect("selection should succeed");
 
     assert_eq!(selected.as_deref(), Some("second"));
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     assert!(
         log.contains(
@@ -237,7 +237,7 @@ fn response_selection_trace_preserves_optimistic_current_circuit_rejection() {
     .expect("selection should succeed");
     assert_eq!(selected.as_deref(), Some("second"));
 
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     let trace_lines = log
         .lines()
@@ -288,7 +288,7 @@ fn response_selection_emits_one_no_candidate_trace() {
     .expect("selection should succeed");
     assert_eq!(selected, None);
 
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     let trace_lines = log
         .lines()
@@ -329,7 +329,7 @@ fn direct_hard_selection_trace_has_explicit_affinity() {
         },
     );
 
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     let trace_json = log
         .lines()

@@ -51,6 +51,42 @@ export function validateProcessGuard(contents) {
   return violations;
 }
 
+export function validateReleaseMalwareGate(contents) {
+  const job = workflowJob(contents, "publish-github-release");
+  if (!job) return [".github/workflows/standalone-release.yml: missing publish-github-release job"];
+  const violations = [];
+  const action =
+    "hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e";
+  const prepare = job.indexOf("- name: Prepare release assets");
+  const scan = job.indexOf("- name: Scan release assets for malware");
+  const requireClean = job.indexOf("- name: Require clean release assets");
+  const publish = job.indexOf("- name: Publish GitHub release");
+  if (!(prepare >= 0 && prepare < scan && scan < requireClean && requireClean < publish)) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: malware scan must gate prepared assets before publication",
+    );
+  }
+  for (const marker of [
+    "- name: Verify antivirus engine detects EICAR",
+    "- name: Require a working antivirus engine",
+    `uses: ${action} # v0.20.1`,
+    "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
+    "Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')",
+    "SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}",
+    "release asset malware scan reported an engine issue",
+    "release asset malware scan did not scan any files",
+  ]) {
+    if (!job.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: malware gate missing ${marker}`);
+    }
+  }
+  const scanStep = scan >= 0 && requireClean > scan ? job.slice(scan, requireClean) : "";
+  if (scanStep.includes("continue-on-error: true")) {
+    violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
+  }
+  return violations;
+}
+
 export function validateWorkflow(filePath, contents) {
   const violations = [];
   let rustActions = 0;
@@ -149,6 +185,7 @@ function selfTest() {
 `;
   assert.deepEqual(validateProcessGuard(processJob), []);
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
+  assert.equal(validateReleaseMalwareGate("jobs:\n  other:\n").length, 1);
 }
 
 async function main() {
@@ -161,6 +198,9 @@ async function main() {
     violations.push(...validateWorkflow(filePath, contents));
     if (fileName === "ci.yml") {
       violations.push(...validateWindowsSecurityJob(contents), ...validateProcessGuard(contents));
+    }
+    if (fileName === "standalone-release.yml") {
+      violations.push(...validateReleaseMalwareGate(contents));
     }
   }
   violations.push(...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8")));

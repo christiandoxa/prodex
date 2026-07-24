@@ -427,7 +427,8 @@ The repository implements the source-owned controls in this contract:
   pre-commit denial and post-commit termination without retry or rotation;
 - Gemini Live compatibility paths enter governance before provider dispatch and
   apply bounded incremental response inspection; virtual-key realtime sessions
-  fail closed because their unbounded frames cannot be reconciled safely;
+  reserve a bounded token budget, account each text frame, reconcile terminal
+  usage, and keep one provider/profile fixed before upgrade;
 - Presidio is opt-in, bounded, and subject to mode-specific trust and egress
   validation; its findings are normalized into the typed inspection boundary;
 - immutable policy/classification revisions, tenant rollout modes, last-known-

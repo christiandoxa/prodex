@@ -8,8 +8,9 @@ use super::local_rewrite_application_data_plane::{
     runtime_gateway_application_data_plane_admission,
 };
 use super::local_rewrite_gateway_admission::{
-    RuntimeGatewayVirtualKeyAdmissionFailure, RuntimeGatewayVirtualKeyAdmissionOutcome,
-    runtime_gateway_conversation_namespace,
+    RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS, RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
+    RuntimeGatewayRealtimeAccountingPlan, RuntimeGatewayVirtualKeyAdmissionFailure,
+    RuntimeGatewayVirtualKeyAdmissionOutcome, runtime_gateway_conversation_namespace,
 };
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
@@ -240,6 +241,7 @@ struct RuntimeGatewayVirtualKeyPlanInput<'a> {
     reserved_tokens: u64,
     estimated_cost_microusd: Option<u64>,
     minute_epoch: u64,
+    reservation_ttl_ms: u64,
 }
 
 fn runtime_gateway_application_virtual_key_admission(
@@ -285,7 +287,7 @@ fn runtime_gateway_application_virtual_key_admission(
             reservation_id: prodex_domain::ReservationId::new(),
             durable_store,
             created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
-            ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
+            ttl_ms: input.reservation_ttl_ms,
         }),
         distributed_rate_limit: input.shared.gateway_redis_rate_limit_executor.is_some(),
         now_unix_ms: runtime_gateway_unix_epoch_millis(),
@@ -360,13 +362,34 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
         );
     }
-    let request_model = runtime_proxy_crate::runtime_gateway_request_model(&captured.body);
+    let realtime = runtime_proxy_crate::is_runtime_realtime_websocket_path(path_without_query(
+        &captured.path_and_query,
+    ));
+    let request_model = if realtime {
+        Some(
+            shared
+                .runtime_shared
+                .runtime_config
+                .gemini
+                .live_model
+                .clone()
+                .unwrap_or_else(|| {
+                    super::local_rewrite_gemini_live::runtime_gemini_live_default_model()
+                        .to_string()
+                }),
+        )
+    } else {
+        runtime_proxy_crate::runtime_gateway_request_model(&captured.body)
+    };
     let model = request_model
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
-    let input_tokens = estimate_request_input_tokens(&captured.body);
-    let reserved_tokens = runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body);
-    let reserved_output_tokens = reserved_tokens.saturating_sub(input_tokens);
+    let input_tokens = if realtime {
+        0
+    } else {
+        estimate_request_input_tokens(&captured.body)
+    };
+    let mut reserved_tokens = runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body);
     let route_load = match shared.gateway_route_load.lock() {
         Ok(load) => load.clone(),
         Err(_) => {
@@ -406,8 +429,6 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         &model,
         governed_cost,
     );
-    let estimated_cost_microusd =
-        calculate_cost_microusd(Some(input_tokens), Some(reserved_output_tokens), cost);
     let minute_epoch = runtime_proxy_crate::runtime_gateway_minute_epoch();
     let entry = match shared.gateway_virtual_keys.lock() {
         Ok(entries) => entries
@@ -437,6 +458,31 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     let usage_snapshot = usage
         .as_deref()
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
+    let realtime_token_limit = if realtime {
+        let current = usage_snapshot.get(&key.name).cloned().unwrap_or_default();
+        let used = if current.minute_epoch == minute_epoch {
+            current.tokens_this_minute
+        } else {
+            0
+        };
+        let available = key
+            .tpm_limit
+            .map(|limit| limit.saturating_sub(used))
+            .unwrap_or(RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS);
+        let limit = available.min(RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS);
+        if limit == 0 {
+            return Err(
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded.into(),
+            );
+        }
+        reserved_tokens = limit;
+        Some(limit)
+    } else {
+        None
+    };
+    let reserved_output_tokens = reserved_tokens.saturating_sub(input_tokens);
+    let estimated_cost_microusd =
+        calculate_cost_microusd(Some(input_tokens), Some(reserved_output_tokens), cost);
     let tenant_id = authorized_tenant
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
     let typed_request_id = authorized.request().request_id();
@@ -455,6 +501,11 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             reserved_tokens,
             estimated_cost_microusd,
             minute_epoch,
+            reservation_ttl_ms: if realtime {
+                RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS
+            } else {
+                RUNTIME_GATEWAY_RESERVATION_TTL_MS
+            },
         })?;
     let admission = virtual_key_plan.gateway.admission.clone();
     let usage_update = virtual_key_plan.gateway.usage_update;
@@ -656,6 +707,13 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             &admission.key_name,
         )),
         application,
+        realtime_accounting: realtime_token_limit.map(|token_limit| {
+            RuntimeGatewayRealtimeAccountingPlan {
+                token_limit,
+                model,
+                cost,
+            }
+        }),
     })
 }
 
@@ -667,6 +725,22 @@ fn runtime_gateway_application_admission_without_virtual_key(
     authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
     inspection: &ApplicationInspectionPlan,
 ) -> Result<RuntimeGatewayVirtualKeyAdmissionOutcome, RuntimeGatewayVirtualKeyAdmissionFailure> {
+    let realtime_accounting = runtime_proxy_crate::is_runtime_realtime_websocket_path(
+        path_without_query(&captured.path_and_query),
+    )
+    .then(|| RuntimeGatewayRealtimeAccountingPlan {
+        token_limit: RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
+        model: shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone()
+            .unwrap_or_else(|| {
+                super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
+            }),
+        cost: prodex_provider_core::ProviderModelCost::default(),
+    });
     let Some(tenant) = authorized.tenant_context() else {
         return Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
             namespace: None,
@@ -681,12 +755,18 @@ fn runtime_gateway_application_admission_without_virtual_key(
                     runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
                 )
             })?,
+            realtime_accounting,
         });
     };
     let call_id = CallId::new();
     let reservation_id = prodex_domain::ReservationId::new();
     let estimate = UsageAmount::new(
-        runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body).max(1),
+        realtime_accounting
+            .as_ref()
+            .map(|accounting| accounting.token_limit)
+            .unwrap_or_else(|| {
+                runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body).max(1)
+            }),
         0,
     );
     let command = prodex_storage::AtomicReservationCommand {
@@ -701,7 +781,11 @@ fn runtime_gateway_application_admission_without_virtual_key(
             estimate,
         },
         created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
-        ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
+        ttl_ms: if realtime_accounting.is_some() {
+            RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS
+        } else {
+            RUNTIME_GATEWAY_RESERVATION_TTL_MS
+        },
     };
     let application = runtime_gateway_application_data_plane_admission(
         authorized,
@@ -737,6 +821,7 @@ fn runtime_gateway_application_admission_without_virtual_key(
             &principal_id,
         )),
         application,
+        realtime_accounting,
     })
 }
 

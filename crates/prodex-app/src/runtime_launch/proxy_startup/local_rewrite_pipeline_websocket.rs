@@ -21,34 +21,7 @@ pub(super) fn runtime_local_rewrite_dispatch_websocket<'target>(
     if !request.state.request.is_websocket_upgrade() {
         return Ok(request);
     }
-    let state = request.state;
-    if is_runtime_realtime_websocket_path(&state.path)
-        && shared
-            .gateway_usage
-            .request_ids
-            .lock()
-            .map(|request_ids| request_ids.contains(&state.request_id))
-            .unwrap_or(true)
-    {
-        return Err(state.reject(build_runtime_proxy_json_error_response(
-            501,
-            "virtual_key_realtime_not_supported",
-            "virtual-key accounting does not support realtime websocket sessions",
-        )));
-    }
-    if is_runtime_realtime_websocket_path(&state.path)
-        && state
-            .application
-            .as_ref()
-            .and_then(|application| application.tenant_context())
-            .is_some()
-    {
-        return Err(state.reject(build_runtime_proxy_json_error_response(
-            501,
-            "governed_realtime_not_supported",
-            "governed realtime websocket sessions require bounded per-frame accounting",
-        )));
-    }
+    let mut state = request.state;
     let selected_shared =
         match runtime_gateway_application_provider_dispatch(&request.application_admission, shared)
         {
@@ -71,6 +44,8 @@ pub(super) fn runtime_local_rewrite_dispatch_websocket<'target>(
             state.request,
             &selected_shared,
             state.application.as_ref(),
+            request.realtime_accounting,
+            state.guards.usage.take(),
         );
         return Err(RuntimeLocalRewritePipelineExit::Handled);
     }

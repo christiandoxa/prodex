@@ -3213,6 +3213,7 @@ dependencies = [
 name = "prodex-runtime-log"
 version = "0.342.0"
 dependencies = [
+ "libc",
  "prodex-runtime-proxy",
  "serde_json",
 ]

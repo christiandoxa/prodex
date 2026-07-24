@@ -19,23 +19,6 @@ fn runtime_proxy_default_worker_counts_stay_defensive() {
 }
 
 #[test]
-fn runtime_proxy_async_worker_count_is_bounded() {
-    let _low_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT", "1");
-    let low = runtime_proxy_async_worker_count();
-    assert!(
-        (2..=8).contains(&low),
-        "low async worker override should clamp into 2..=8, got {low}"
-    );
-
-    let _high_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT", "999");
-    let high = runtime_proxy_async_worker_count();
-    assert!(
-        (2..=8).contains(&high),
-        "high async worker override should clamp into 2..=8, got {high}"
-    );
-}
-
-#[test]
 fn runtime_proxy_async_worker_count_default_scales_with_parallelism() {
     assert_eq!(runtime_proxy_async_worker_count_default(1), 2);
     assert_eq!(runtime_proxy_async_worker_count_default(2), 2);

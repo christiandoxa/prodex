@@ -82,8 +82,9 @@ is the enterprise authority; Redis remains rebuildable coordination.
   routing and identity contracts.
 - `prodex-app`: composition, snapshot refresh, authenticated lifecycle APIs,
   durable session/audit workers, SIEM export, unary/SSE PEPs, and the governed
-  Gemini Live compatibility PEP. Virtual-key realtime sessions fail closed
-  until bounded per-frame token accounting exists.
+  Gemini Live compatibility PEP. Virtual-key realtime sessions reserve bounded
+  tokens, account each text frame, reconcile terminal usage, and retain one
+  provider/profile for the session.
 - `prodex-storage`, `prodex-storage-sqlite-runtime` and
   `prodex-storage-postgres-runtime`: generic four-kind governance repository,
   sessions, audit, export and SIEM outbox adapters.
