@@ -6,6 +6,7 @@ use super::local_rewrite_provider_registry::{
     RuntimeGatewayGovernedProviderRegistrySnapshot, RuntimeGatewayProviderRuntimeSignals,
     RuntimeGatewayProviderRuntimeSnapshot,
 };
+use super::local_rewrite_response_guardrails::runtime_gateway_response_inspection_coverage;
 use super::provider_bridge::{RuntimeProviderGatewaySpendEvent, runtime_provider_model_from_body};
 use crate::{
     RuntimeProxyRequest, RuntimeRouteKind, runtime_profile_in_selection_backoff,
@@ -31,11 +32,11 @@ use prodex_application::{
 use prodex_domain::{
     ApprovalId, ApprovalState, AuditAction, AuditEvent, AuditEventId, AuditOutcome, AuditResource,
     CanonicalRoute, CapabilitySet, Channel, CredentialScope, DataClassification, DataModality,
-    EnvironmentContext, ExecutionApprovalBinding, GovernedAction, InspectionCoverage,
-    ModelCapability, NetworkZone, PolicyEffect, Principal, PrincipalPolicyAttributes, QuotaContext,
-    RequestId, RequestPolicyAttributes, RequestRisk, ReservationReconciliationReason,
-    ReservationRecord, SecretRef, SessionPolicyContext, TenantContext, TenantId,
-    TenantScopedResource, UsageAmount, compute_audit_chain_digest, execution_approval_id,
+    EnvironmentContext, ExecutionApprovalBinding, GovernedAction, ModelCapability, NetworkZone,
+    PolicyEffect, Principal, PrincipalPolicyAttributes, QuotaContext, RequestId,
+    RequestPolicyAttributes, RequestRisk, ReservationReconciliationReason, ReservationRecord,
+    SecretRef, SessionPolicyContext, TenantContext, TenantId, TenantScopedResource, UsageAmount,
+    compute_audit_chain_digest, execution_approval_id,
 };
 use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationRequest};
 use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
@@ -849,30 +850,6 @@ fn runtime_gateway_obligation_execution(
     )
 }
 
-fn runtime_gateway_response_inspection_coverage(
-    governance_mode: prodex_config::GovernanceMode,
-    websocket: bool,
-    streaming: bool,
-    keyword_inspection: bool,
-    locally_inspectable: bool,
-    post_webhook: bool,
-) -> InspectionCoverage {
-    if websocket && keyword_inspection {
-        InspectionCoverage::Partial
-    } else if websocket {
-        InspectionCoverage::Unsupported
-    } else if (!streaming && (keyword_inspection || post_webhook))
-        || (locally_inspectable
-            && (!streaming || governance_mode == prodex_config::GovernanceMode::BankEnforce))
-    {
-        InspectionCoverage::Full
-    } else if keyword_inspection {
-        InspectionCoverage::Partial
-    } else {
-        InspectionCoverage::Unsupported
-    }
-}
-
 fn runtime_gateway_buffered_response_is_locally_inspectable(
     captured: &RuntimeProxyRequest,
 ) -> bool {
@@ -1492,45 +1469,8 @@ mod tests {
         runtime_gateway_application_reconciliation_execution,
         runtime_gateway_application_usage_reconciliation, runtime_gateway_provider_endpoint,
         runtime_gateway_provider_executable_capabilities, runtime_gateway_requested_modalities,
-        runtime_gateway_requested_tools, runtime_gateway_response_inspection_coverage,
+        runtime_gateway_requested_tools,
     };
-
-    #[test]
-    fn bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets() {
-        assert_eq!(
-            runtime_gateway_response_inspection_coverage(
-                prodex_config::GovernanceMode::BankEnforce,
-                false,
-                true,
-                false,
-                true,
-                false,
-            ),
-            prodex_domain::InspectionCoverage::Full,
-        );
-        assert_eq!(
-            runtime_gateway_response_inspection_coverage(
-                prodex_config::GovernanceMode::EnterpriseEnforce,
-                false,
-                true,
-                false,
-                true,
-                false,
-            ),
-            prodex_domain::InspectionCoverage::Unsupported,
-        );
-        assert_eq!(
-            runtime_gateway_response_inspection_coverage(
-                prodex_config::GovernanceMode::BankEnforce,
-                true,
-                true,
-                true,
-                true,
-                false,
-            ),
-            prodex_domain::InspectionCoverage::Partial,
-        );
-    }
     use prodex_domain::{
         CallId, CapabilitySet, DataClassification, DataModality, ModelCapability, PolicyEffect,
         RequestId, ReservationId, ReservationReconciliationReason, ReservationRecord,

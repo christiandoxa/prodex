@@ -31,7 +31,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1800,
+    "maxLines": 1794,
     "reason": "Data-plane authorization, bounded HTTP policy projection, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
