@@ -5,12 +5,13 @@ use prodex_runtime_broker::{
 };
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 pub const DEFAULT_RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT: usize = 16;
+const RUNTIME_BROKER_LOG_LINE_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeLogFingerprint {
@@ -21,6 +22,7 @@ struct RuntimeLogFingerprint {
 #[derive(Debug, Clone)]
 struct RuntimeBrokerContinuityFailureReasonCacheEntry {
     fingerprint: RuntimeLogFingerprint,
+    parsed_len: u64,
     metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     last_used_at: u64,
 }
@@ -82,6 +84,7 @@ impl RuntimeBrokerContinuityFailureReasonCache {
         &mut self,
         log_path: &Path,
         fingerprint: RuntimeLogFingerprint,
+        parsed_len: u64,
         metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     ) {
         let touched_at = self.touch();
@@ -89,6 +92,7 @@ impl RuntimeBrokerContinuityFailureReasonCache {
             log_path.to_path_buf(),
             RuntimeBrokerContinuityFailureReasonCacheEntry {
                 fingerprint,
+                parsed_len,
                 metrics,
                 last_used_at: touched_at,
             },
@@ -160,20 +164,64 @@ fn runtime_log_fingerprint(metadata: &fs::Metadata) -> Option<RuntimeLogFingerpr
 fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
     log_path: &Path,
     start: u64,
-) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+    end: u64,
+) -> Option<(RuntimeBrokerContinuityFailureReasonMetrics, u64)> {
+    if start > end {
+        return None;
+    }
     let mut log = fs::File::open(log_path).ok()?;
     if start > 0 {
         log.seek(SeekFrom::Start(start)).ok()?;
     }
-    let mut buffer = Vec::new();
-    log.read_to_end(&mut buffer).ok()?;
-    Some(runtime_broker_continuity_failure_reason_metrics_from_log_bytes(&buffer))
+    let mut reader = BufReader::new(log.take(end - start));
+    let mut metrics = RuntimeBrokerContinuityFailureReasonMetrics::default();
+    let mut line = Vec::new();
+    let mut line_oversized = false;
+    let mut consumed = 0_u64;
+    let mut parsed_len = start;
+
+    loop {
+        let available = reader.fill_buf().ok()?;
+        if available.is_empty() {
+            break;
+        }
+        let take = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        let line_complete = available.get(take.saturating_sub(1)) == Some(&b'\n');
+        if !line_oversized {
+            if line.len().saturating_add(take) <= RUNTIME_BROKER_LOG_LINE_MAX_BYTES {
+                line.extend_from_slice(&available[..take]);
+            } else {
+                line.clear();
+                line_oversized = true;
+            }
+        }
+        reader.consume(take);
+        consumed = consumed.checked_add(u64::try_from(take).ok()?)?;
+        if line_complete {
+            if !line_oversized {
+                runtime_broker_merge_continuity_failure_reason_metrics(
+                    &mut metrics,
+                    runtime_broker_continuity_failure_reason_metrics_from_log_bytes(&line),
+                );
+            }
+            line.clear();
+            line_oversized = false;
+            parsed_len = start.checked_add(consumed)?;
+        }
+    }
+
+    Some((metrics, parsed_len))
 }
 
 pub fn runtime_broker_continuity_failure_reason_metrics_from_log_file(
     log_path: &Path,
 ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
-    runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0)
+    let end = fs::metadata(log_path).ok()?.len();
+    runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0, end)
+        .map(|(metrics, _)| metrics)
 }
 
 pub fn runtime_broker_cached_continuity_failure_reason_metrics(
@@ -186,6 +234,7 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
             .remove(log_path);
         return RuntimeBrokerContinuityFailureReasonMetrics::default();
     };
+    let log_len = metadata.len();
     let fingerprint = runtime_log_fingerprint(&metadata);
 
     let append_base = if let Some(fingerprint) = fingerprint.as_ref() {
@@ -204,23 +253,25 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
     };
 
     if let (Some(fingerprint), Some(base)) = (fingerprint.as_ref(), append_base)
-        && let Some(delta) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
-            log_path,
-            base.fingerprint.len,
-        )
+        && let Some((delta, parsed_len)) =
+            runtime_broker_continuity_failure_reason_metrics_from_log_range(
+                log_path,
+                base.parsed_len,
+                fingerprint.len,
+            )
     {
         let mut metrics = base.metrics.clone();
         runtime_broker_merge_continuity_failure_reason_metrics(&mut metrics, delta);
         let mut cache = runtime_broker_continuity_failure_reason_cache()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.store(log_path, fingerprint.clone(), metrics.clone());
+        cache.store(log_path, fingerprint.clone(), parsed_len, metrics.clone());
         cache.incremental_updates += 1;
         return metrics;
     }
 
-    let Some(metrics) =
-        runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0)
+    let Some((metrics, parsed_len)) =
+        runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0, log_len)
     else {
         runtime_broker_continuity_failure_reason_cache()
             .lock()
@@ -233,7 +284,7 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
         let mut cache = runtime_broker_continuity_failure_reason_cache()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.store(log_path, fingerprint, metrics.clone());
+        cache.store(log_path, fingerprint, parsed_len, metrics.clone());
         cache.full_rebuilds += 1;
     }
     metrics
@@ -260,7 +311,8 @@ pub const DEFAULT_RUNTIME_PROXY_CONTINUITY_FAILURE_REASON_METRICS_STORE_LIMIT: u
 
 #[derive(Debug, Clone)]
 struct RuntimeProxyContinuityFailureReasonMetricsEntry {
-    baseline_metrics: RuntimeBrokerContinuityFailureReasonMetrics,
+    baseline_metrics: Option<RuntimeBrokerContinuityFailureReasonMetrics>,
+    baseline_fingerprint: Option<RuntimeLogFingerprint>,
     live_metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     last_observed_fingerprint: Option<RuntimeLogFingerprint>,
     last_used_at: u64,
@@ -276,6 +328,11 @@ pub struct RuntimeProxyContinuityFailureReasonMetricsSnapshot {
 struct RuntimeProxyContinuityFailureReasonMetricsStore {
     entries: BTreeMap<PathBuf, RuntimeProxyContinuityFailureReasonMetricsEntry>,
     next_touch: u64,
+}
+
+enum RuntimeProxyContinuityFailureReasonSnapshotState {
+    Ready(RuntimeProxyContinuityFailureReasonMetricsSnapshot),
+    LoadBaseline(RuntimeLogFingerprint),
 }
 
 static RUNTIME_PROXY_CONTINUITY_FAILURE_REASON_METRICS: OnceLock<
@@ -340,24 +397,19 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
     }
 
     fn new_entry(
-        log_path: &Path,
         fingerprint: Option<RuntimeLogFingerprint>,
         touched_at: u64,
     ) -> RuntimeProxyContinuityFailureReasonMetricsEntry {
+        let baseline_metrics = fingerprint
+            .is_none()
+            .then(RuntimeBrokerContinuityFailureReasonMetrics::default);
         RuntimeProxyContinuityFailureReasonMetricsEntry {
-            baseline_metrics: runtime_broker_continuity_failure_reason_metrics_from_log_file(
-                log_path,
-            )
-            .unwrap_or_default(),
+            baseline_metrics,
+            baseline_fingerprint: fingerprint.clone(),
             live_metrics: RuntimeBrokerContinuityFailureReasonMetrics::default(),
             last_observed_fingerprint: fingerprint,
             last_used_at: touched_at,
         }
-    }
-
-    fn evict_stale_paths(&mut self, keep_log_path: Option<&Path>) {
-        self.entries
-            .retain(|path, _| Some(path.as_path()) == keep_log_path || fs::metadata(path).is_ok());
     }
 
     fn enforce_limit(&mut self, keep_log_path: Option<&Path>) {
@@ -382,10 +434,14 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         }
     }
 
-    fn record(&mut self, log_path: &Path, event: &str, reason: &str) {
-        self.evict_stale_paths(Some(log_path));
+    fn record(
+        &mut self,
+        log_path: &Path,
+        current_fingerprint: Option<RuntimeLogFingerprint>,
+        event: &str,
+        reason: &str,
+    ) {
         let touched_at = self.touch();
-        let current_fingerprint = Self::current_fingerprint(log_path);
         let needs_reset = self.entries.get(log_path).is_none_or(|entry| {
             Self::log_rotated(
                 current_fingerprint.as_ref(),
@@ -395,7 +451,7 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         if needs_reset {
             self.entries.insert(
                 log_path.to_path_buf(),
-                Self::new_entry(log_path, current_fingerprint.clone(), touched_at),
+                Self::new_entry(current_fingerprint.clone(), touched_at),
             );
         }
         if let Some(entry) = self.entries.get_mut(log_path) {
@@ -410,12 +466,11 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         self.enforce_limit(Some(log_path));
     }
 
-    fn snapshot(
+    fn snapshot_state(
         &mut self,
         log_path: &Path,
-    ) -> Option<RuntimeProxyContinuityFailureReasonMetricsSnapshot> {
-        self.evict_stale_paths(Some(log_path));
-        let current_fingerprint = Self::current_fingerprint(log_path);
+        current_fingerprint: Option<RuntimeLogFingerprint>,
+    ) -> Option<RuntimeProxyContinuityFailureReasonSnapshotState> {
         if current_fingerprint.is_none() {
             if self
                 .entries
@@ -428,10 +483,12 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
             let touched_at = self.touch();
             let entry = self.entries.get_mut(log_path)?;
             entry.last_used_at = touched_at;
-            return Some(RuntimeProxyContinuityFailureReasonMetricsSnapshot {
-                baseline_metrics: entry.baseline_metrics.clone(),
-                live_metrics: entry.live_metrics.clone(),
-            });
+            return Some(RuntimeProxyContinuityFailureReasonSnapshotState::Ready(
+                RuntimeProxyContinuityFailureReasonMetricsSnapshot {
+                    baseline_metrics: entry.baseline_metrics.clone().unwrap_or_default(),
+                    live_metrics: entry.live_metrics.clone(),
+                },
+            ));
         }
         let touched_at = self.touch();
         if self.entries.get(log_path).is_some_and(|entry| {
@@ -446,8 +503,35 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         let entry = self.entries.get_mut(log_path)?;
         entry.last_used_at = touched_at;
         entry.last_observed_fingerprint = current_fingerprint;
+        match entry.baseline_metrics.as_ref() {
+            Some(baseline_metrics) => {
+                Some(RuntimeProxyContinuityFailureReasonSnapshotState::Ready(
+                    RuntimeProxyContinuityFailureReasonMetricsSnapshot {
+                        baseline_metrics: baseline_metrics.clone(),
+                        live_metrics: entry.live_metrics.clone(),
+                    },
+                ))
+            }
+            None => entry
+                .baseline_fingerprint
+                .clone()
+                .map(RuntimeProxyContinuityFailureReasonSnapshotState::LoadBaseline),
+        }
+    }
+
+    fn install_baseline(
+        &mut self,
+        log_path: &Path,
+        fingerprint: &RuntimeLogFingerprint,
+        metrics: RuntimeBrokerContinuityFailureReasonMetrics,
+    ) -> Option<RuntimeProxyContinuityFailureReasonMetricsSnapshot> {
+        let entry = self.entries.get_mut(log_path)?;
+        if entry.baseline_fingerprint.as_ref() != Some(fingerprint) {
+            return None;
+        }
+        entry.baseline_metrics = Some(metrics.clone());
         Some(RuntimeProxyContinuityFailureReasonMetricsSnapshot {
-            baseline_metrics: entry.baseline_metrics.clone(),
+            baseline_metrics: metrics,
             live_metrics: entry.live_metrics.clone(),
         })
     }
@@ -474,19 +558,55 @@ pub fn runtime_proxy_record_continuity_failure_reason_for_log_path(
     if !supported {
         return;
     }
+    let current_fingerprint =
+        RuntimeProxyContinuityFailureReasonMetricsStore::current_fingerprint(log_path);
     runtime_proxy_continuity_failure_reason_metrics_store()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .record(log_path, event, reason);
+        .record(log_path, current_fingerprint, event, reason);
 }
 
 pub fn runtime_proxy_continuity_failure_reason_metrics_snapshot(
     log_path: &Path,
 ) -> Option<RuntimeProxyContinuityFailureReasonMetricsSnapshot> {
-    runtime_proxy_continuity_failure_reason_metrics_store()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .snapshot(log_path)
+    for _ in 0..2 {
+        let current_fingerprint =
+            RuntimeProxyContinuityFailureReasonMetricsStore::current_fingerprint(log_path);
+        let state = runtime_proxy_continuity_failure_reason_metrics_store()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot_state(log_path, current_fingerprint)?;
+        match state {
+            RuntimeProxyContinuityFailureReasonSnapshotState::Ready(snapshot) => {
+                return Some(snapshot);
+            }
+            RuntimeProxyContinuityFailureReasonSnapshotState::LoadBaseline(fingerprint) => {
+                let (metrics, _) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+                    log_path,
+                    0,
+                    fingerprint.len,
+                )?;
+                let current_fingerprint =
+                    RuntimeProxyContinuityFailureReasonMetricsStore::current_fingerprint(log_path);
+                if current_fingerprint.is_none()
+                    || RuntimeProxyContinuityFailureReasonMetricsStore::log_rotated(
+                        current_fingerprint.as_ref(),
+                        Some(&fingerprint),
+                    )
+                {
+                    return None;
+                }
+                if let Some(snapshot) = runtime_proxy_continuity_failure_reason_metrics_store()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .install_baseline(log_path, &fingerprint, metrics)
+                {
+                    return Some(snapshot);
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn clear_runtime_proxy_continuity_failure_reason_metrics(log_path: &Path) {

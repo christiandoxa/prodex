@@ -158,3 +158,51 @@ fn continuity_failure_reason_metrics_incrementally_update_when_log_appends() {
 
     fs::remove_file(&log_path).expect("test log should clean up");
 }
+
+#[test]
+fn continuity_failure_reason_metrics_wait_for_complete_appended_line() {
+    let _guard = lock_continuity_cache();
+    clear_runtime_broker_continuity_failure_reason_cache_for_test();
+    let log_path = temp_log_path("partial-line");
+    fs::write(
+        &log_path,
+        "stale_continuation reason=previous_response_not_found",
+    )
+    .expect("partial test log should write");
+
+    let partial = runtime_broker_cached_continuity_failure_reason_metrics(&log_path);
+    assert!(partial.stale_continuation.is_empty());
+
+    let mut log = fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .expect("partial test log should open");
+    writeln!(log).expect("partial test log should complete");
+    drop(log);
+
+    let complete = runtime_broker_cached_continuity_failure_reason_metrics(&log_path);
+    assert_eq!(
+        complete.stale_continuation,
+        BTreeMap::from([("previous_response_not_found".to_string(), 1)])
+    );
+
+    fs::remove_file(&log_path).expect("test log should clean up");
+}
+
+#[test]
+fn continuity_failure_reason_metrics_skip_oversized_line_and_continue() {
+    let _guard = lock_continuity_cache();
+    clear_runtime_broker_continuity_failure_reason_cache_for_test();
+    let log_path = temp_log_path("oversized-line");
+    let mut content = vec![b'x'; RUNTIME_BROKER_LOG_LINE_MAX_BYTES + 1];
+    content.extend_from_slice(b"\nstale_continuation reason=previous_response_not_found\n");
+    fs::write(&log_path, content).expect("oversized test log should write");
+
+    let metrics = runtime_broker_cached_continuity_failure_reason_metrics(&log_path);
+
+    assert_eq!(
+        metrics.stale_continuation,
+        BTreeMap::from([("previous_response_not_found".to_string(), 1)])
+    );
+    fs::remove_file(&log_path).expect("test log should clean up");
+}

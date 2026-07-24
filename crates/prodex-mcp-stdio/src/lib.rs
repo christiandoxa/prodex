@@ -21,7 +21,7 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
         }
     };
     if first.to_ascii_lowercase().starts_with("content-length:") {
-        let mut content_length = parse_content_length(&first)?;
+        let content_length = parse_content_length(&first)?;
         if content_length > MCP_MESSAGE_MAX_BYTES {
             anyhow::bail!(
                 "MCP message exceeds safe size limit ({} bytes)",
@@ -34,13 +34,7 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
                 break;
             }
             if trimmed.to_ascii_lowercase().starts_with("content-length:") {
-                content_length = parse_content_length(trimmed)?;
-                if content_length > MCP_MESSAGE_MAX_BYTES {
-                    anyhow::bail!(
-                        "MCP message exceeds safe size limit ({} bytes)",
-                        MCP_MESSAGE_MAX_BYTES
-                    );
-                }
+                anyhow::bail!("duplicate MCP Content-Length header");
             }
         }
         let mut body = vec![0_u8; content_length];
@@ -148,6 +142,16 @@ mod tests {
         let err = read_mcp_message(&mut reader).expect_err("oversized MCP frame should fail");
 
         assert!(err.to_string().contains("safe size limit"));
+    }
+
+    #[test]
+    fn rejects_duplicate_content_length_header() {
+        let mut reader =
+            BufReader::new(b"Content-Length: 1\r\nContent-Length: 2\r\n\r\n{}".as_slice());
+
+        let err = read_mcp_message(&mut reader).expect_err("ambiguous MCP frame should fail");
+
+        assert!(err.to_string().contains("duplicate MCP Content-Length"));
     }
 
     #[test]
