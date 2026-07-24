@@ -185,7 +185,7 @@ mod tests {
             std::process::id(),
             thread::current().name().unwrap_or("unnamed")
         ));
-        let _ = fs::remove_file(&log_path);
+        crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
 
         let handle = try_spawn_runtime_background_worker(
             "prodex-panic-worker",
@@ -223,7 +223,7 @@ mod tests {
             std::process::id(),
             thread::current().name().unwrap_or("unnamed")
         ));
-        let _ = fs::remove_file(&log_path);
+        crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = Arc::clone(&shutdown);
         let calls = Arc::new(AtomicUsize::new(0));

@@ -105,6 +105,7 @@ mod tests {
         let blocked_parent = dir.join("not-a-directory");
         fs::write(&blocked_parent, b"blocked").expect("blocking file should be written");
         let runtime_log_path = dir.join("runtime.log");
+        crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&runtime_log_path);
 
         append_runtime_audit_event_to_paths_best_effort(
             &runtime_log_path,

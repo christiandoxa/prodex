@@ -231,6 +231,11 @@ pub(super) mod test_support {
             legacy_shared_codex_root: root.join("shared"),
             root,
         };
+        let log_path = env::temp_dir().join(format!(
+            "prodex-websocket-message-test-{name}-{}.log",
+            std::process::id()
+        ));
+        crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
 
         RuntimeRotationProxyShared {
             runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
@@ -262,10 +267,7 @@ pub(super) mod test_support {
                 profile_backoff_updated_at: BTreeMap::new(),
                 profile_health: BTreeMap::new(),
             })),
-            log_path: env::temp_dir().join(format!(
-                "prodex-websocket-message-test-{name}-{}.log",
-                std::process::id()
-            )),
+            log_path,
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
