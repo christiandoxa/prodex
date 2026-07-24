@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.345.0 - 2026-07-24
+
+### Runtime
+
+- Complete audited security paths (`aaaf603`)
+
 ## 0.344.0 - 2026-07-24
 
 ### Runtime
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Keep paste guard out of exec (`f1d27d2`)
 - Show process list and harden TUI input (`1c708d6`)
-
-## 0.333.0 - 2026-07-21
-
-### CLI
-
-- Harden quota retry, terminal input, and update freshness (`4ca3c46`)
