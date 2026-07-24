@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.343.0 - 2026-07-24
+
+### Runtime
+
+- Sync runtime test manifest (`dde40db`)
+- Harden runtime and release pipeline (`e9ed1e0`)
+
 ## 0.342.0 - 2026-07-24
 
 ### Misc
@@ -84,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden distributed runtime boundaries (`71f9ea5`)
-
-## 0.331.0 - 2026-07-21
-
-### Misc
-
-- Close audited production gaps (`d6b0a3a`)
