@@ -18,7 +18,6 @@ const SERIALIZED_TAGS = Object.freeze([
   TAGS.serial,
   TAGS.quarantine,
 ]);
-const SERIALIZED_ENV_PARALLEL_TAGS = Object.freeze([...SERIALIZED_TAGS, TAGS.env, TAGS.envParallel]);
 const CONTINUATION_TAGS = Object.freeze([
   TAGS.stress,
   TAGS.stressSkip,
@@ -75,11 +74,6 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         id: "root-log-paths",
         filter: "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
         label: "log-paths",
-      },
-      {
-        id: "root-worker-count",
-        filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_",
-        label: "worker-count",
       },
       {
         id: "root-endpoint-child",
@@ -667,11 +661,6 @@ export const RUNTIME_CI_TEST_CASES = [
   {
     name: "runtime_proxy_streams_anthropic_messages_from_buffered_responses",
     tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_worker_count_env_override_beats_policy_file",
-    label: "env-sensitive-worker-count",
-    tags: SERIALIZED_ENV_PARALLEL_TAGS,
   },
   {
     name: "runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through",
