@@ -8,8 +8,9 @@ use super::local_rewrite_response_guardrails::{
     RuntimeGatewayGuardrailStreamPlan, runtime_gateway_guardrail_stream_body,
 };
 use super::local_rewrite_response_spend::{
-    RuntimeGatewaySpendTermination, emit_runtime_gateway_response_spend_event_for_body,
-    runtime_gateway_spend_stream_body,
+    RuntimeGatewaySpendTermination,
+    emit_runtime_gateway_policy_interrupted_response_spend_event_for_body,
+    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
@@ -322,34 +323,68 @@ pub(super) fn runtime_local_rewrite_governed_response_with_call_id(
 pub(super) fn respond_runtime_local_rewrite_stream(
     request: RuntimeLocalRewriteRequest,
     mut streaming: RuntimeStreamingResponse,
+    captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     governance: RuntimeGatewayResponseGovernance,
 ) {
     let body = std::mem::replace(&mut streaming.body, Box::new(std::io::empty()));
+    let termination = governance.spend_termination.clone();
     match runtime_gateway_guardrail_stream_body(
         body,
         streaming.request_id,
+        streaming.status,
         shared,
         governance.obligations,
         governance.audit_context,
-        governance.spend_termination,
+        termination.clone(),
     ) {
         Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body)) => {
-            streaming.body = body;
+            streaming.body = runtime_gateway_spend_stream_body(
+                body,
+                streaming.request_id,
+                streaming.status,
+                captured,
+                shared,
+                termination,
+            );
             let _ = request.stream(streaming, None);
         }
-        Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason)) => {
+        Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+            reason,
+            consumed_body,
+        }) => {
+            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
+                streaming.request_id,
+                captured,
+                shared,
+                streaming.status,
+                &consumed_body,
+            );
             let _ = request.respond(build_runtime_proxy_json_error_response(
                 403,
                 reason,
                 "gateway guardrail blocked this response",
             ));
         }
-        Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable) => {
+        Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(consumed_body)) => {
+            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
+                streaming.request_id,
+                captured,
+                shared,
+                streaming.status,
+                &consumed_body,
+            );
             let _ = request.respond(runtime_gateway_audit_unavailable_response());
         }
         Err(error) => {
             let request_id = streaming.request_id;
+            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
+                request_id,
+                captured,
+                shared,
+                streaming.status,
+                &[],
+            );
             let _ = request.respond(runtime_local_rewrite_invalid_response(
                 request_id, shared, &error,
             ));
@@ -374,25 +409,17 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) => {
             let mut headers = streaming_response.headers;
             runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-            let body = runtime_gateway_spend_stream_body(
-                streaming_response.body,
-                request_id,
-                streaming_response.status,
-                captured,
-                shared,
-                governance.spend_termination.clone(),
-            );
             let streaming = RuntimeStreamingResponse {
                 status: streaming_response.status,
                 headers,
-                body,
+                body: streaming_response.body,
                 request_id,
                 profile_name: streaming_response.profile_name,
                 log_path: shared.runtime_shared.log_path.clone(),
                 shared: shared.runtime_shared.clone(),
                 _inflight_guard: None,
             };
-            respond_runtime_local_rewrite_stream(request, streaming, shared, governance);
+            respond_runtime_local_rewrite_stream(request, streaming, captured, shared, governance);
         }
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
             emit_runtime_gateway_response_spend_event_for_body(

@@ -12,9 +12,7 @@ use super::super::local_rewrite_rate_limits::{
     runtime_deepseek_codex_rate_limit_headers, runtime_provider_codex_rate_limit_headers,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::{
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
-};
+use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
     runtime_provider_stream_event_conformance_result,
@@ -104,14 +102,6 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         } else {
             Box::new(reader)
         };
-        let body = runtime_gateway_spend_stream_body(
-            body,
-            request_id,
-            status,
-            captured,
-            shared,
-            response_governance.spend_termination.clone(),
-        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -122,7 +112,13 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
+        respond_runtime_local_rewrite_stream(
+            request,
+            streaming,
+            captured,
+            shared,
+            response_governance,
+        );
         return;
     }
 

@@ -26,7 +26,7 @@ available.
 | Session revocation epoch | tested | `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly`; deployed two-gateway chaos remains external evidence |
 | Break-glass retention purge | implemented | Independent approval, one-hour TTL ceiling, explicit revocation, exact retention scope, bounded purge batches and mandatory audit; broader lifecycle acceptance remains external evidence |
 | Low-cardinality metrics | tested | `prometheus_text_aggregates_keys_without_high_cardinality_labels`; live alert/pager/SLO acceptance remains external evidence |
-| Encrypted restore | tested | AES-256-GCM backup/isolated restore drill; final synthetic RPO 2.004 s and RTO 1.442 s with governance links intact |
+| Encrypted restore | tested | AES-256-GCM backup/isolated restore drill; final synthetic RPO 2.076 s and RTO 1.506 s with governance links intact |
 | Performance | implemented | maximum-bound and disabled-path Criterion budgets, fuzz, load and stress passed; external multi-replica soak remains deployment evidence |
 
 ## Declared residuals

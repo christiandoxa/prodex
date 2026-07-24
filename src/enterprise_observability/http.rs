@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use std::fmt;
 use std::sync::{
     Arc, OnceLock,
-    atomic::{AtomicBool, Ordering},
-    mpsc::{SyncSender, sync_channel},
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc::{SyncSender, TrySendError, sync_channel},
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -87,9 +87,26 @@ struct OtlpHttpLogEvent {
     attributes: Vec<OtlpLogAttribute>,
 }
 
+#[derive(Default)]
+struct OtlpHttpLogSinkStats {
+    queue_full: AtomicU64,
+    disconnected: AtomicU64,
+    export_failed: AtomicU64,
+    shutdown_dropped: AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct OtlpHttpLogSinkStatsSnapshot {
+    queue_full: u64,
+    disconnected: u64,
+    export_failed: u64,
+    shutdown_dropped: u64,
+}
+
 pub(crate) struct OtlpHttpLogSink {
     sender: Option<SyncSender<OtlpHttpLogEvent>>,
     shutdown: Arc<AtomicBool>,
+    stats: Arc<OtlpHttpLogSinkStats>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -112,38 +129,83 @@ impl OtlpHttpLogSink {
         let (sender, receiver) = sync_channel::<OtlpHttpLogEvent>(OTLP_HTTP_LOG_QUEUE_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = Arc::clone(&shutdown);
+        let stats = Arc::new(OtlpHttpLogSinkStats::default());
+        let worker_stats = Arc::clone(&stats);
         let worker = std::thread::Builder::new()
             .name("prodex-otlp-log-export".to_string())
             .spawn(move || {
-                while !worker_shutdown.load(Ordering::SeqCst) {
-                    let event = match receiver.recv_timeout(Duration::from_millis(100)) {
-                        Ok(event) => event,
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    };
-                    let _ = export_otlp_http_log(
+                let mut next_queue_full_report = 1;
+                while let Ok(event) = receiver.recv() {
+                    let failed = export_otlp_http_log(
                         &config,
                         service_name,
                         scope_name,
                         event.event_name,
                         event.attributes,
-                    );
+                    )
+                    .is_err();
+                    if failed {
+                        let count = worker_stats.export_failed.fetch_add(1, Ordering::Relaxed) + 1;
+                        if count.is_power_of_two() {
+                            eprintln!(
+                                "prodex_otlp_log_export_degraded reason=exporter_unavailable count={count}"
+                            );
+                        }
+                    }
+                    let queue_full = worker_stats.queue_full.load(Ordering::Relaxed);
+                    if queue_full >= next_queue_full_report {
+                        eprintln!(
+                            "prodex_otlp_log_export_degraded reason=queue_full count={queue_full}"
+                        );
+                        while next_queue_full_report <= queue_full {
+                            let next = next_queue_full_report.saturating_mul(2);
+                            if next == next_queue_full_report {
+                                break;
+                            }
+                            next_queue_full_report = next;
+                        }
+                    }
+                    if failed && worker_shutdown.load(Ordering::Relaxed) {
+                        let dropped = receiver.try_iter().count() as u64;
+                        worker_stats
+                            .shutdown_dropped
+                            .fetch_add(dropped, Ordering::Relaxed);
+                        break;
+                    }
                 }
             })
             .map_err(|err| format!("failed to start OTLP log exporter: {err}"))?;
         Ok(Self {
             sender: Some(sender),
             shutdown,
+            stats,
             worker: Some(worker),
         })
     }
 
     pub(crate) fn try_export(&self, event_name: &'static str, attributes: Vec<OtlpLogAttribute>) {
         if let Some(sender) = self.sender.as_ref() {
-            let _ = sender.try_send(OtlpHttpLogEvent {
+            match sender.try_send(OtlpHttpLogEvent {
                 event_name,
                 attributes,
-            });
+            }) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    self.stats.queue_full.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    self.stats.disconnected.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    fn stats(&self) -> OtlpHttpLogSinkStatsSnapshot {
+        OtlpHttpLogSinkStatsSnapshot {
+            queue_full: self.stats.queue_full.load(Ordering::Relaxed),
+            disconnected: self.stats.disconnected.load(Ordering::Relaxed),
+            export_failed: self.stats.export_failed.load(Ordering::Relaxed),
+            shutdown_dropped: self.stats.shutdown_dropped.load(Ordering::Relaxed),
         }
     }
 }
@@ -154,6 +216,13 @@ impl Drop for OtlpHttpLogSink {
         self.sender.take();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
+        }
+        let stats = self.stats();
+        if stats != OtlpHttpLogSinkStatsSnapshot::default() {
+            eprintln!(
+                "prodex_otlp_log_export_summary queue_full={} disconnected={} export_failed={} shutdown_dropped={}",
+                stats.queue_full, stats.disconnected, stats.export_failed, stats.shutdown_dropped
+            );
         }
     }
 }
@@ -460,5 +529,49 @@ pub(super) fn otlp_any_value(value: Value) -> Value {
         Value::Number(value) if value.is_i64() => json!({ "intValue": value.to_string() }),
         Value::Number(value) => json!({ "doubleValue": value.as_f64().unwrap_or_default() }),
         other => json!({ "stringValue": other.to_string() }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn sink_counts_queue_pressure_and_failed_shutdown_drain() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            accepted_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            drop(stream);
+        });
+        let sink = OtlpHttpLogSink::start(
+            OtlpHttpLogExportConfig {
+                endpoint: format!("http://{addr}/v1/logs"),
+                headers: Vec::new(),
+                timeout: Some(Duration::from_secs(1)),
+            },
+            "prodex-gateway",
+            "prodex.gateway",
+        )
+        .unwrap();
+
+        sink.try_export("gateway.first", Vec::new());
+        accepted_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        for _ in 0..OTLP_HTTP_LOG_QUEUE_CAPACITY + 32 {
+            sink.try_export("gateway.queued", Vec::new());
+        }
+        let stats = Arc::clone(&sink.stats);
+        assert!(stats.queue_full.load(Ordering::Relaxed) > 0);
+
+        release_tx.send(()).unwrap();
+        drop(sink);
+        server.join().unwrap();
+        assert!(stats.export_failed.load(Ordering::Relaxed) > 0);
+        assert!(stats.shutdown_dropped.load(Ordering::Relaxed) > 0);
     }
 }

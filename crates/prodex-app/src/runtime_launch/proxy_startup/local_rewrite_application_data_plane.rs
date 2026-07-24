@@ -809,21 +809,14 @@ fn runtime_gateway_obligation_execution(
         ApplicationResponseTransport::Unary
     };
     let keyword_inspection = !shared.gateway_guardrails.blocked_output_keywords.is_empty();
-    let response_inspection_coverage = if websocket && keyword_inspection {
-        InspectionCoverage::Partial
-    } else if websocket {
-        InspectionCoverage::Unsupported
-    } else if !streaming
-        && (keyword_inspection
-            || shared.gateway_guardrail_webhook.enabled_for("post")
-            || runtime_gateway_buffered_response_is_locally_inspectable(captured))
-    {
-        InspectionCoverage::Full
-    } else if keyword_inspection {
-        InspectionCoverage::Partial
-    } else {
-        InspectionCoverage::Unsupported
-    };
+    let response_inspection_coverage = runtime_gateway_response_inspection_coverage(
+        governance_mode,
+        websocket,
+        streaming,
+        keyword_inspection,
+        runtime_gateway_buffered_response_is_locally_inspectable(captured),
+        shared.gateway_guardrail_webhook.enabled_for("post"),
+    );
     plan_application_obligation_execution(
         &governance.policy,
         ApplicationObligationContext {
@@ -854,6 +847,30 @@ fn runtime_gateway_obligation_execution(
             response_inspection_coverage,
         },
     )
+}
+
+fn runtime_gateway_response_inspection_coverage(
+    governance_mode: prodex_config::GovernanceMode,
+    websocket: bool,
+    streaming: bool,
+    keyword_inspection: bool,
+    locally_inspectable: bool,
+    post_webhook: bool,
+) -> InspectionCoverage {
+    if websocket && keyword_inspection {
+        InspectionCoverage::Partial
+    } else if websocket {
+        InspectionCoverage::Unsupported
+    } else if (!streaming && (keyword_inspection || post_webhook))
+        || (locally_inspectable
+            && (!streaming || governance_mode == prodex_config::GovernanceMode::BankEnforce))
+    {
+        InspectionCoverage::Full
+    } else if keyword_inspection {
+        InspectionCoverage::Partial
+    } else {
+        InspectionCoverage::Unsupported
+    }
 }
 
 fn runtime_gateway_buffered_response_is_locally_inspectable(
@@ -1475,8 +1492,45 @@ mod tests {
         runtime_gateway_application_reconciliation_execution,
         runtime_gateway_application_usage_reconciliation, runtime_gateway_provider_endpoint,
         runtime_gateway_provider_executable_capabilities, runtime_gateway_requested_modalities,
-        runtime_gateway_requested_tools,
+        runtime_gateway_requested_tools, runtime_gateway_response_inspection_coverage,
     };
+
+    #[test]
+    fn bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets() {
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::BankEnforce,
+                false,
+                true,
+                false,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Full,
+        );
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::EnterpriseEnforce,
+                false,
+                true,
+                false,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Unsupported,
+        );
+        assert_eq!(
+            runtime_gateway_response_inspection_coverage(
+                prodex_config::GovernanceMode::BankEnforce,
+                true,
+                true,
+                true,
+                true,
+                false,
+            ),
+            prodex_domain::InspectionCoverage::Partial,
+        );
+    }
     use prodex_domain::{
         CallId, CapabilitySet, DataClassification, DataModality, ModelCapability, PolicyEffect,
         RequestId, ReservationId, ReservationReconciliationReason, ReservationRecord,

@@ -9,9 +9,7 @@ use super::super::local_rewrite_rate_limits::{
     runtime_provider_codex_rate_limit_headers,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::{
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
-};
+use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
 };
@@ -74,14 +72,6 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
                 pending.response_metadata,
                 conversations.clone(),
             ));
-        let body = runtime_gateway_spend_stream_body(
-            body,
-            request_id,
-            status,
-            captured,
-            shared,
-            response_governance.spend_termination.clone(),
-        );
         respond_runtime_local_rewrite_stream(
             request,
             RuntimeStreamingResponse {
@@ -94,6 +84,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
                 shared: shared.runtime_shared.clone(),
                 _inflight_guard: None,
             },
+            captured,
             shared,
             response_governance,
         );

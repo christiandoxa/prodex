@@ -1,6 +1,10 @@
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite::{
+    RuntimeLocalRewriteProxyShared, runtime_gateway_guardrail_webhook_block,
+};
 use super::local_rewrite_response_spend::RuntimeGatewaySpendTermination;
-use crate::RuntimeRotationProxyShared;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeRotationProxyShared, runtime_proxy_log,
+};
 use prodex_application::ApplicationResponseObligationPlan;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::{self, Cursor, Read};
@@ -12,18 +16,48 @@ const RESPONSE_INSPECTION_READ_BYTES: usize = 8 * 1024;
 
 pub(super) enum RuntimeGatewayGuardrailStreamPlan {
     Allowed(Box<dyn Read + Send>),
-    Blocked(&'static str),
-    AuditUnavailable,
+    Blocked {
+        reason: &'static str,
+        consumed_body: Vec<u8>,
+    },
+    AuditUnavailable(Vec<u8>),
+}
+
+fn runtime_gateway_fully_inspect_stream_body(
+    body: &mut dyn Read,
+) -> io::Result<(
+    Vec<u8>,
+    Option<crate::runtime_proxy::presidio::local::RuntimeLocalInspection>,
+)> {
+    let mut buffered = Vec::new();
+    body.take((RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut buffered)?;
+    let inspected = (buffered.len() <= RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES)
+        .then(|| {
+            crate::runtime_proxy::presidio::local::runtime_local_inspect_and_mask(buffered.clone())
+                .ok()
+        })
+        .flatten()
+        .filter(|inspected| inspected.coverage == prodex_domain::InspectionCoverage::Full);
+    Ok((buffered, inspected))
+}
+
+fn runtime_gateway_response_status_is_governed(status: u16) -> bool {
+    (200..300).contains(&status)
 }
 
 pub(super) fn runtime_gateway_guardrail_stream_body(
     mut body: Box<dyn Read + Send>,
     request_id: u64,
+    status: u16,
     shared: &RuntimeLocalRewriteProxyShared,
     obligations: Option<ApplicationResponseObligationPlan>,
     audit_context: Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
     termination: RuntimeGatewaySpendTermination,
 ) -> io::Result<RuntimeGatewayGuardrailStreamPlan> {
+    if !runtime_gateway_response_status_is_governed(status) {
+        return Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body));
+    }
     let inspector =
         RuntimeGatewayIncrementalInspector::new(&shared.gateway_guardrails.blocked_output_keywords);
     let audit = RuntimeGatewayGuardrailAudit {
@@ -33,6 +67,14 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
         shared: shared.clone(),
         context: audit_context,
     };
+    let maximum_bytes = obligations
+        .filter(|plan| plan.enforce)
+        .and_then(|plan| plan.maximum_output_tokens)
+        .map(|tokens| {
+            usize::try_from(tokens)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(4)
+        });
     if obligations.is_some_and(|plan| {
         plan.enforce
             && plan.inspection_required
@@ -49,18 +91,87 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
             .map(|_| "response_inspection_incomplete")
             .unwrap_or("response_inspection_unsupported");
         if audit.block(reason, "precommit", "http").is_err() {
-            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable);
+            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(
+                Vec::new(),
+            ));
         }
-        return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason));
-    }
-    let maximum_bytes = obligations
-        .filter(|plan| plan.enforce)
-        .and_then(|plan| plan.maximum_output_tokens)
-        .map(|tokens| {
-            usize::try_from(tokens)
-                .unwrap_or(usize::MAX)
-                .saturating_mul(4)
+        return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+            reason,
+            consumed_body: Vec::new(),
         });
+    }
+    if obligations.is_some_and(|plan| {
+        plan.enforce
+            && plan.inspection_required
+            && plan.require_full_inspection
+            && plan.inspection_coverage == prodex_domain::InspectionCoverage::Full
+    }) {
+        let (buffered, inspected) = runtime_gateway_fully_inspect_stream_body(body.as_mut())?;
+        let Some(inspected) = inspected else {
+            termination.mark_policy_interrupted();
+            let reason = "response_inspection_incomplete";
+            if audit.block(reason, "precommit", "http").is_err() {
+                return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(
+                    buffered,
+                ));
+            }
+            return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+                reason,
+                consumed_body: buffered,
+            });
+        };
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_response_inspection",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http_stream_buffered"),
+                    runtime_proxy_log_field("coverage", inspected.coverage.as_str()),
+                    runtime_proxy_log_field("finding_count", inspected.findings.len().to_string()),
+                    runtime_proxy_log_field("changed", inspected.changed.to_string()),
+                ],
+            ),
+        );
+        let reason = if maximum_bytes.is_some_and(|limit| buffered.len() > limit) {
+            Some("output_token_limit_exceeded")
+        } else {
+            runtime_proxy_crate::runtime_gateway_response_guardrail_block(
+                &inspected.body,
+                &shared.gateway_guardrails,
+            )
+            .map(|block| block.kind.as_str())
+        };
+        if let Some(reason) = reason {
+            termination.mark_policy_interrupted();
+            if audit.block(reason, "precommit", "http").is_err() {
+                return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(
+                    buffered,
+                ));
+            }
+            return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+                reason,
+                consumed_body: buffered,
+            });
+        }
+        if let Some(block) =
+            runtime_gateway_guardrail_webhook_block("post", request_id, &inspected.body, shared)
+        {
+            termination.mark_policy_interrupted();
+            if audit.block(&block.reason, "precommit", "http").is_err() {
+                return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(
+                    buffered,
+                ));
+            }
+            return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+                reason: "policy_violation",
+                consumed_body: buffered,
+            });
+        }
+        return Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(Box::new(
+            Cursor::new(inspected.body),
+        )));
+    }
     if inspector.is_empty() && maximum_bytes.is_none() {
         return Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body));
     }
@@ -79,9 +190,12 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
     if let Some(reason) = precommit_reason {
         termination.mark_policy_interrupted();
         if audit.block(reason, "precommit", "http").is_err() {
-            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable);
+            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(prefix));
         }
-        return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason));
+        return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
+            reason,
+            consumed_body: prefix,
+        });
     }
 
     let mut held = Vec::new();
@@ -189,7 +303,7 @@ struct RuntimeGatewayGuardrailAudit {
 impl RuntimeGatewayGuardrailAudit {
     fn block(
         &self,
-        reason: &'static str,
+        reason: &str,
         commit_state: &'static str,
         transport: &'static str,
     ) -> Result<(), prodex_storage::GovernanceRepositoryError> {
@@ -314,7 +428,11 @@ impl Read for RuntimeGatewayGuardrailStreamReader {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeGatewayIncrementalInspector, release_safe_bytes};
+    use super::{
+        RuntimeGatewayIncrementalInspector, release_safe_bytes,
+        runtime_gateway_fully_inspect_stream_body, runtime_gateway_response_status_is_governed,
+    };
+    use std::io::Cursor;
 
     #[derive(Clone, Copy)]
     enum ChunkMode {
@@ -507,5 +625,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn full_stream_inspection_buffers_and_masks_before_release() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",",
+            "\"delta\":\"contact user@example.com\"}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut body = Cursor::new(body.as_bytes());
+        let (consumed, inspected) = runtime_gateway_fully_inspect_stream_body(&mut body).unwrap();
+        let inspected = inspected.expect("text SSE should support full local inspection");
+        let rendered = String::from_utf8(inspected.body).unwrap();
+
+        assert_eq!(consumed, body.into_inner());
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("user@example.com"));
+    }
+
+    #[test]
+    fn only_successful_streaming_responses_are_governed() {
+        assert!(runtime_gateway_response_status_is_governed(200));
+        assert!(!runtime_gateway_response_status_is_governed(429));
+        assert!(!runtime_gateway_response_status_is_governed(500));
     }
 }
