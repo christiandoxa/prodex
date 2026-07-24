@@ -41,6 +41,29 @@ fn configures_only_codebase_memory_server() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn codebase_memory_cache_ancestors_are_private() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let home = temp_dir("super-codebase-memory-cache");
+    let optimizer_state = home.join("optimizer-state");
+    let codebase_memory = optimizer_state.join("codebase-memory");
+    let cache_dir = codebase_memory.join("cache");
+    fs::create_dir_all(&cache_dir)?;
+    for path in [&optimizer_state, &codebase_memory, &cache_dir] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o775))?;
+    }
+
+    assert_eq!(prepare_codebase_memory_cache_dir(&home)?, cache_dir);
+    for path in [&optimizer_state, &codebase_memory, &cache_dir] {
+        assert_eq!(fs::metadata(path)?.permissions().mode() & 0o777, 0o700);
+    }
+
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
 #[test]
 fn configures_playwright_default() {
     let mut table = toml::Table::new();

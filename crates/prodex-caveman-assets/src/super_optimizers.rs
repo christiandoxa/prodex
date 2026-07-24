@@ -135,12 +135,13 @@ fn configure_super_mcp_servers(
     if let Some((bridge, bridge_args)) =
         codebase_memory_command.and_then(mcp_jsonl_bridge_command_args)
     {
+        let env_vars = codebase_memory_mcp_env()?;
         configure_stdio_mcp_server(
             &mut table,
             "codebase-memory-mcp",
             bridge,
             &bridge_args,
-            &codebase_memory_mcp_env(),
+            &env_vars,
         );
     }
     if let Some(command) = npx_command {
@@ -234,22 +235,25 @@ fn mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
     }
 }
 
-fn codebase_memory_mcp_env() -> Vec<(&'static str, String)> {
-    let prodex_home = env::var_os(PRODEX_HOME_ENV)
+fn codebase_memory_mcp_env() -> Result<Vec<(&'static str, String)>> {
+    let Some(prodex_home) = env::var_os(PRODEX_HOME_ENV)
         .map(PathBuf::from)
-        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")));
-    prodex_home
-        .map(|home| {
-            vec![(
-                "CBM_CACHE_DIR",
-                home.join("optimizer-state")
-                    .join("codebase-memory")
-                    .join("cache")
-                    .display()
-                    .to_string(),
-            )]
-        })
-        .unwrap_or_default()
+        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))
+    else {
+        return Ok(Vec::new());
+    };
+    let cache_dir = prepare_codebase_memory_cache_dir(&prodex_home)?;
+    Ok(vec![("CBM_CACHE_DIR", cache_dir.display().to_string())])
+}
+
+fn prepare_codebase_memory_cache_dir(prodex_home: &Path) -> Result<PathBuf> {
+    let optimizer_state = prodex_home.join("optimizer-state");
+    let codebase_memory = optimizer_state.join("codebase-memory");
+    let cache_dir = codebase_memory.join("cache");
+    for path in [&optimizer_state, &codebase_memory, &cache_dir] {
+        prodex_shared_codex_fs::create_codex_home_if_missing(path)?;
+    }
+    Ok(cache_dir)
 }
 
 fn find_optimizer_command(
@@ -335,7 +339,12 @@ pub fn super_optimizer_command_ready(command: &str, path: &Path) -> bool {
 }
 
 fn mcp_tools_list_non_empty_jsonl(path: &Path) -> bool {
-    let mut child = match Command::new(path)
+    let Ok(env_vars) = codebase_memory_mcp_env() else {
+        return false;
+    };
+    let mut command = Command::new(path);
+    command.envs(env_vars);
+    let mut child = match command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
