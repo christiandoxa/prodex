@@ -179,13 +179,15 @@ export function validateProductionBoundary(sources) {
     errors,
     websocketDispatch,
     [
-      ".gateway_usage",
-      '"virtual_key_realtime_not_supported"',
-      '"governed_realtime_not_supported"',
       "runtime_gateway_application_provider_dispatch(",
+      '"governed_provider_unavailable"',
+      "RuntimeLocalRewriteProviderOptions::Gemini",
+      "is_runtime_realtime_websocket_path(",
       "handle_runtime_gemini_live_websocket_request(",
+      "request.realtime_accounting",
+      "state.guards.usage.take()",
     ],
-    `${FILES.pipeline}: realtime websocket dispatch must fail closed for virtual-key accounting and use governed provider routing`,
+    `${FILES.websocket}: realtime websocket dispatch must use governed provider routing and transfer reserved accounting and usage state`,
   );
   const captureBody = functionBody(sources.pipeline, "runtime_local_rewrite_capture_body") ?? "";
   requireBefore(
@@ -1519,11 +1521,14 @@ function runSelfTest() {
       acquire_runtime_proxy_active_request_slot_with_wait();
     }`,
     websocket: `fn runtime_local_rewrite_dispatch_websocket() {
-      shared.gateway_usage.request_ids;
-      "virtual_key_realtime_not_supported";
-      "governed_realtime_not_supported";
       runtime_gateway_application_provider_dispatch();
-      handle_runtime_gemini_live_websocket_request();
+      "governed_provider_unavailable";
+      RuntimeLocalRewriteProviderOptions::Gemini;
+      is_runtime_realtime_websocket_path();
+      handle_runtime_gemini_live_websocket_request(
+        request.realtime_accounting,
+        state.guards.usage.take(),
+      );
     }`,
     directRuntime: `async fn handle() {
       try_acquire_gateway_request_permit();
@@ -2141,6 +2146,13 @@ function runSelfTest() {
       admin: `${valid.admin} fn legacy() { let admin_write = (path == keys_path); }`,
     }).some((error) => error.includes("path/method mutation policy")),
     "legacy admin mutation classifier accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      websocket: valid.websocket.replace("request.realtime_accounting,", "None,"),
+    }).some((error) => error.includes("transfer reserved accounting")),
+    "realtime websocket accounting bypass accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
