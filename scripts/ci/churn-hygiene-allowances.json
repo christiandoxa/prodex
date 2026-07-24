@@ -7,7 +7,8 @@
       "chore(release): release 0.343.0",
       "fix(ci): keep runtime log failures non-panicking",
       "fix(ci): align secure logging test contracts",
-      "fix(ci): validate governed realtime dispatch"
+      "fix(ci): validate governed realtime dispatch",
+      "test: stabilize update cache TTL"
     ],
     "caps": {
       "maxFiles": 72,
