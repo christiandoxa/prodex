@@ -72,9 +72,10 @@ export function validateReleaseMalwareGate(contents) {
     `uses: ${action} # v0.20.1`,
     "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
     "Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')",
+    "SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}",
+    "SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}",
     "SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}",
-    "release asset malware scan reported an engine issue",
-    "release asset malware scan did not scan any files",
+    "release asset malware scan scope is empty",
   ]) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: malware gate missing ${marker}`);
@@ -83,6 +84,12 @@ export function validateReleaseMalwareGate(contents) {
   const scanStep = scan >= 0 && requireClean > scan ? job.slice(scan, requireClean) : "";
   if (scanStep.includes("continue-on-error: true")) {
     violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
+  }
+  const requireCleanStep = requireClean >= 0 && publish > requireClean ? job.slice(requireClean, publish) : "";
+  if (requireCleanStep.includes("GITHUB_STEP_SUMMARY")) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: malware gate must use action outputs, not another step's summary file",
+    );
   }
   return violations;
 }

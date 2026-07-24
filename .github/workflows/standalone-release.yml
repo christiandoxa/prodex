@@ -585,7 +585,6 @@ jobs:
             echo "antivirus engine health check did not detect EICAR" >&2
             exit 1
           fi
-          : > "${GITHUB_STEP_SUMMARY}"
 
       - name: Scan release assets for malware
         id: release_malware_scan
@@ -600,22 +599,18 @@ jobs:
 
       - name: Require clean release assets
         env:
+          SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}
           SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}
           SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
+          if [ "${SCAN_OUTCOME}" != "success" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
             echo "release asset malware scan did not finish cleanly" >&2
             exit 1
           fi
-          if grep -q '^## Issues$' "${GITHUB_STEP_SUMMARY}"; then
-            echo "release asset malware scan reported an engine issue" >&2
-            exit 1
-          fi
-          scanned="$(awk -F '|' '$2 ~ /^[[:space:]]*Scan[[:space:]]*$/ { gsub(/[[:space:]]/, "", $3); print $3; exit }' "${GITHUB_STEP_SUMMARY}")"
-          if [[ ! "${scanned}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "release asset malware scan did not scan any files" >&2
+          if ! find release-assets -maxdepth 1 -type f -print -quit | grep -q .; then
+            echo "release asset malware scan scope is empty" >&2
             exit 1
           fi
 

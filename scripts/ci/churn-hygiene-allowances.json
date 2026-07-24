@@ -8,7 +8,8 @@
       "fix(ci): keep runtime log failures non-panicking",
       "fix(ci): align secure logging test contracts",
       "fix(ci): validate governed realtime dispatch",
-      "test: stabilize update cache TTL"
+      "test: stabilize update cache TTL",
+      "fix(ci): validate antivirus action outputs"
     ],
     "caps": {
       "maxFiles": 72,
