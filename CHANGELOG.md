@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.344.0 - 2026-07-24
+
+### Runtime
+
+- Align secure log test fixtures (`32d599f`)
+
 ## 0.343.0 - 2026-07-24
 
 ### Runtime
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Harden quota retry, terminal input, and update freshness (`4ca3c46`)
-
-## 0.332.0 - 2026-07-21
-
-### Runtime
-
-- Harden distributed runtime boundaries (`71f9ea5`)
