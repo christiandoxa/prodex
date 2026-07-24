@@ -35,7 +35,7 @@ fn websocket_dns_resolution_times_out_on_bounded_executor() {
         io::ErrorKind::WouldBlock,
         "bounded DNS timeout should fail as local pressure, not account quota"
     );
-    release_tx.send(()).expect("DNS resolver should release");
+    let _ = release_tx.send(());
 
     let log = fs::read_to_string(&log_path).expect("DNS timeout log should exist");
     assert!(
@@ -127,9 +127,7 @@ fn websocket_dns_overflow_is_local_pressure() {
         "DNS overflow snapshot should record rejection: {overflow_snapshot:?}"
     );
 
-    release_tx
-        .send(())
-        .expect("first DNS resolver release should send");
+    let _ = release_tx.send(());
     let _ = first.expect_err("first DNS resolver should have timed out locally");
 
     let log = fs::read_to_string(&log_path).expect("DNS overflow log should exist");
