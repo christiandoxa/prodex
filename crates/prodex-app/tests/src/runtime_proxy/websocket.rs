@@ -7,11 +7,13 @@ mod precommit_hold;
 
 pub(super) fn websocket_test_log_path(name: &str) -> PathBuf {
     static NEXT_LOG_ID: AtomicU64 = AtomicU64::new(1);
-    std::env::temp_dir().join(format!(
+    let path = std::env::temp_dir().join(format!(
         "prodex-websocket-{name}-{}-{}.log",
         std::process::id(),
         NEXT_LOG_ID.fetch_add(1, Ordering::Relaxed)
-    ))
+    ));
+    prepare_runtime_proxy_test_log_path(&path);
+    path
 }
 
 pub(super) fn read_websocket_test_log_after_marker(log_path: &Path, marker: &str) -> String {

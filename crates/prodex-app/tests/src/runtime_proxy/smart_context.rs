@@ -72,6 +72,11 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
         legacy_shared_codex_root: root.join("shared"),
         root,
     };
+    let log_path = env::temp_dir().join(format!(
+        "prodex-smart-context-{name}-{}-{unique}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
 
     RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
@@ -103,10 +108,7 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
             profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
-        log_path: env::temp_dir().join(format!(
-            "prodex-smart-context-{name}-{}-{unique}.log",
-            std::process::id()
-        )),
+        log_path,
         request_sequence: Arc::new(AtomicU64::new(1)),
         state_save_revision: Arc::new(AtomicU64::new(0)),
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),

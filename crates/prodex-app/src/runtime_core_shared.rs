@@ -230,6 +230,19 @@ pub(crate) fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::Fil
 }
 
 #[cfg(test)]
+pub(crate) fn prepare_runtime_proxy_test_log_path(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create runtime test log directory");
+    }
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => panic!("failed to reset runtime test log: {err}"),
+    }
+    open_runtime_proxy_private_file(path).expect("failed to create private runtime test log");
+}
+
+#[cfg(test)]
 pub(super) fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
     runtime_proxy_long_lived_queue_capacity_default(worker_count)
 }

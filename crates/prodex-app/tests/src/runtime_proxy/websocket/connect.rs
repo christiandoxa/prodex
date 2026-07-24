@@ -357,7 +357,7 @@ fn websocket_proxy_selection_honors_no_proxy_for_upstream_host() {
 #[test]
 fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failure() {
     let shared = websocket_test_shared("local-pressure");
-    let _ = std::fs::remove_file(&shared.log_path);
+    prepare_runtime_proxy_test_log_path(&shared.log_path);
     let cases = [
         (
             RuntimeWebsocketLocalPressureKind::DnsResolveTimeout,

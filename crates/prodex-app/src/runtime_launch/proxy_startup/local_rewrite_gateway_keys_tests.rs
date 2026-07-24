@@ -48,6 +48,7 @@ fn key_store_load_failure_is_fail_closed_and_logs_without_path_details() {
     let key_store_path = root.join("gateway-virtual-keys.json");
     std::fs::create_dir_all(&key_store_path).expect("key store path directory should exist");
     let log_path = root.join("runtime.log");
+    crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
     let state_store = RuntimeGatewayStateStore::File {
         key_store_path: key_store_path.clone(),
         usage_path: root.join("gateway-virtual-key-usage.json"),
@@ -74,6 +75,7 @@ fn key_store_load_filters_malformed_scim_rows_from_active_state() {
     std::fs::create_dir_all(&root).expect("test root should be created");
     let key_store_path = root.join("gateway-virtual-keys.json");
     let log_path = root.join("runtime.log");
+    crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
     let valid = RuntimeGatewayScimUser {
         id: prodex_domain::PrincipalId::new().to_string(),
         user_name: "alice@example.com".to_string(),
