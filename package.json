@@ -51,6 +51,7 @@
     "docs:runtime-policy:check": "node scripts/docs/runtime-policy.mjs --check",
     "docs:smart-context-evidence": "node scripts/docs/smart-context-evidence.mjs --write",
     "docs:smart-context-evidence:check": "node scripts/docs/smart-context-evidence.mjs --check",
+    "bench:smart-context-report": "node scripts/bench/smart-context-performance-report.mjs",
     "smart-context:replay": "cargo run -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict",
     "test": "npm run test:fast --",
     "test:full": "node scripts/ci/full-rust-test.mjs",
