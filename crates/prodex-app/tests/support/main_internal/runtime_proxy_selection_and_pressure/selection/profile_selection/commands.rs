@@ -178,11 +178,12 @@ fn super_command_parses_as_distinct_subcommand_with_safe_access_default() {
     let args = args.into_runtime_tool_args();
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert!(!args.full_access);
+    let tools = args.selected_tool_set();
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
     assert_eq!(
         args.codex_args,
         vec![
-            OsString::from("rtk"),
-            OsString::from("ponytail"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]

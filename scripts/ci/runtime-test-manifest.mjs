@@ -86,9 +86,9 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "claude-launch-root",
       },
       {
-        id: "root-claude-caveman",
-        filter: "main_internal_tests::claude_launch::prepare_runtime_proxy_claude_",
-        label: "claude-caveman-root",
+        id: "root-claude-optional-tool",
+        filter: "main_internal_tests::claude_launch::missing_external_caveman_",
+        label: "claude-optional-tool-root",
       },
     ],
   },
