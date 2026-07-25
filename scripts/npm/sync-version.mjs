@@ -92,7 +92,15 @@ async function updatePackageJson(filePath, version) {
 }
 
 async function updatePackageLock(filePath, version) {
-  const packageLock = await readJsonFile(filePath);
+  let packageLock;
+  try {
+    packageLock = await readJsonFile(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
   let changed = false;
   for (const entry of Object.values(packageLock.packages ?? {})) {
     changed = updatePackageMetadata(entry, version) || changed;
