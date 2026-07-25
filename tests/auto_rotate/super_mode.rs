@@ -81,16 +81,16 @@ fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
         .position(|arg| *arg == "exec")
         .expect("Super should launch Codex exec");
     assert!(
-        args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
-        "Super should still launch Codex with full access, args: {args:?}"
+        !args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
+        "Super should not grant full access by default, args: {args:?}"
     );
     let trust_override = format!(
         "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
         env!("CARGO_MANIFEST_DIR")
     );
     assert!(
-        args.contains(&trust_override.as_str()),
-        "Super should trust its launch directory for this session, args: {args:?}"
+        !args.contains(&trust_override.as_str()),
+        "Super should not trust its launch directory implicitly, args: {args:?}"
     );
     assert_eq!(
         args.last(),

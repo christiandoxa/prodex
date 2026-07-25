@@ -51,18 +51,6 @@ fn smart_context_test_state_snapshot(shared: &RuntimeRotationProxyShared) -> Str
     format!("{state:#?}")
 }
 
-fn smart_context_test_copy_scope(
-    source: &RuntimeRotationProxyShared,
-    target: &RuntimeRotationProxyShared,
-) {
-    let source = source.runtime.lock().unwrap().clone();
-    let mut target = target.runtime.lock().unwrap();
-    target.paths.root = source.paths.root;
-    target.upstream_base_url = source.upstream_base_url;
-    target.current_profile = source.current_profile;
-    target.state.profiles = source.state.profiles;
-}
-
 fn register_persistent_runtime_smart_context_test_state(
     shared: &RuntimeRotationProxyShared,
     model_context_window_tokens: Option<u64>,
