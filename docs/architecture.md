@@ -147,7 +147,7 @@ Key crates:
 - `prodex-shared-codex-fs`: shared Codex home file operations.
 - `prodex-profile-identity`: account identity parsing and profile-name normalization.
 - `prodex-codex-config`: Codex config parsing helpers.
-- `prodex-caveman-assets`: embedded Codex/Claude Caveman plugin assets and home/config preparation.
+- `prodex-optional-tools`: side-effect-free optional-tool discovery and validation plus temporary-overlay activation.
 - `prodex-housekeeping`: cleanup and duplicate-detection helpers.
 - `prodex-context`: context audit and compression helpers.
 

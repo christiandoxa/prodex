@@ -21,7 +21,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - GitHub Copilot CLI (`copilot`) for `prodex s --provider copilot --cli copilot`
 - Kiro CLI (`kiro-cli`) for imported Kiro profiles, the Kiro ACP provider bridge, or `--cli kiro`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
-- Optional: Codebase Memory MCP and a Ponytail checkout for the minimal Super stack; Presidio services when you need PII redaction
+- Optional: externally installed Caveman, Codebase Memory MCP, and the pinned Ponytail release for the Super stack; Presidio services when you need PII redaction
 - Optional: Node.js 18+ with `npx` for `prodex playwright` and the Playwright MCP server added to Codex-based `prodex s` sessions
 
 Standalone Prodex uses the `codex` command on `PATH`; install Codex first and keep it current. To pin a specific Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
@@ -224,11 +224,11 @@ prodex caveman --profile second
 prodex caveman exec "review this repo in caveman mode"
 ```
 
-Prodex launches Caveman from a temporary overlay `CODEX_HOME`; the base profile stays unchanged. `prodex rtk`, `prodex playwright`, and `prodex ponytail` are shortcuts for the matching Caveman prefix.
+Prodex validates an external Caveman installation and activates it in a temporary overlay `CODEX_HOME`; the base profile and installation stay unchanged. See [Optional Tools](./docs/optional-tools.md). `prodex rtk`, `prodex playwright`, and `prodex ponytail` are compatibility aliases for typed tool selections.
 
-`prodex super` and `prodex s` enable Caveman, RTK guidance, Ponytail when installed, Codebase Memory MCP when installed, Playwright MCP when Node.js 18+ and `npx` are available, Smart Context, and launch-time full access. They ask only whether to enable Presidio. Use `--presidio` or `--no-presidio` for non-interactive launches. This MCP default applies to the Codex Super front end; native `--cli gemini`, `--cli kiro`, and `--cli agy` launches keep their own MCP configuration.
+`prodex super` and `prodex s` enable installed, validated Caveman, RTK, Ponytail, Codebase Memory MCP, and Playwright MCP plus Smart Context. Missing tools are skipped; `--require-tool <name>` makes absence fatal. Super preserves Codex approvals, sandboxing, and workspace trust by default; `--full-access` is explicit. Use `--presidio` or `--no-presidio` for non-interactive launches. Native `--cli gemini`, `--cli kiro`, and `--cli agy` launches keep their own MCP configuration.
 
-Use `prodex s doctor --strict` to verify the minimal stack. Add `--presidio` to check the configured Analyzer and Anonymizer services.
+Use `prodex capability super-doctor` to inspect the stack; add `--strict` to require every listed tool. Presidio has its own service doctor.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 Use DeepSeek with the Codex/Super front end:

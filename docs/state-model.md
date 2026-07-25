@@ -74,15 +74,16 @@ Important files:
 `prodex doctor --runtime` summarizes recent logs. When adding runtime markers,
 update the runtime doctor marker registry and tests so diagnostics remain typed.
 
-## Setup And Asset State
+## Setup And Optional-Tool State
 
 `prodex setup` is a local reconciler for install surfaces. It may ensure Prodex
-directories exist and verify embedded Caveman/Super assets. It must not mutate
-profile auth, shared Codex history, or runtime bindings.
+directories exist and validate externally installed optional tools. It must not
+download tools or mutate profile auth, shared Codex history, runtime bindings,
+or user-managed tool installations.
 
-Embedded assets are source-of-truth in `crates/prodex-caveman-assets/`.
-Generated or copied plugin caches must be verifiable from those embedded
-manifests and skill frontmatter.
+Optional-tool activation is limited to the temporary launch overlay. Version,
+source, commit, and digest metadata in each managed installation must match the
+release-vetted metadata compiled into Prodex.
 
 ## Invariants
 

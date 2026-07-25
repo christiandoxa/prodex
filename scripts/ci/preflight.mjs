@@ -140,6 +140,11 @@ export function preflightSteps(args) {
       args: ["scripts/ci/allow-attribute-guard.mjs"],
     },
     {
+      label: "optional-tools-guard",
+      command: "node",
+      args: ["scripts/ci/optional-tools-guard.mjs", "--self-test"],
+    },
+    {
       label: "super-wildcard-guard",
       command: "node",
       args: ["scripts/ci/super-wildcard-guard.mjs"],

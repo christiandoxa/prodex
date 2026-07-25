@@ -101,7 +101,7 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     ) {
         return crate::runtime_gemini_cli::handle_super_native_cli(args, use_presidio);
     }
-    handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
+    handle_runtime_tools(args.into_runtime_tool_args_with_presidio(use_presidio))
 }
 
 pub(super) fn prepare_runtime_launch_with_harness(

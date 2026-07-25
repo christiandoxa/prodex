@@ -75,7 +75,7 @@ pub enum Commands {
     )]
     Doctor(DoctorArgs),
     #[command(
-        about = "Reconcile optional Prodex install surfaces and verify embedded assets.",
+        about = "Reconcile local Prodex directories and verify optional tools.",
         after_help = CLI_SETUP_AFTER_HELP
     )]
     Setup(SetupArgs),
@@ -148,25 +148,25 @@ pub enum Commands {
         about = "Run codex through prodex with Caveman mode active in a temporary Prodex overlay home.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
-    Caveman(CavemanArgs),
+    Caveman(RuntimeToolArgs),
     #[command(
         trailing_var_arg = true,
         about = "Shortcut for `prodex caveman rtk`.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
-    Rtk(CavemanArgs),
+    Rtk(RuntimeToolArgs),
     #[command(
         trailing_var_arg = true,
         about = "Shortcut for `prodex caveman playwright`.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
-    Playwright(CavemanArgs),
+    Playwright(RuntimeToolArgs),
     #[command(
         trailing_var_arg = true,
         about = "Shortcut for `prodex caveman ponytail`.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
-    Ponytail(CavemanArgs),
+    Ponytail(RuntimeToolArgs),
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
@@ -269,7 +269,15 @@ where
     } else {
         raw_args
     };
-    Ok(Cli::try_parse_from(parse_args)?.command)
+    let mut command = Cli::try_parse_from(parse_args)?.command;
+    match &mut command {
+        Commands::Caveman(args)
+        | Commands::Rtk(args)
+        | Commands::Playwright(args)
+        | Commands::Ponytail(args) => args.translate_legacy_leading_tool_prefixes(),
+        _ => {}
+    }
+    Ok(command)
 }
 
 fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {

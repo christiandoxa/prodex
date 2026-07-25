@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn super_external_providers_enable_live_web_search() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
-        let args = parse_super_as_caveman(&[
+        let args = parse_super_as_runtime_tools(&[
             "prodex",
             "s",
             "--provider",
@@ -29,7 +29,7 @@ fn super_external_providers_enable_live_web_search() {
 #[test]
 fn super_external_providers_use_openai_responses_wire_api() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
-        let args = parse_super_as_caveman(&[
+        let args = parse_super_as_runtime_tools(&[
             "prodex",
             "s",
             "--provider",
@@ -68,7 +68,7 @@ fn super_external_providers_use_openai_responses_wire_api() {
 #[test]
 fn super_provider_short_aliases_expand_to_provider_flag() {
     for provider in ["deepseek", "gemini"] {
-        let alias_args = parse_super_as_caveman(&[
+        let alias_args = parse_super_as_runtime_tools(&[
             "prodex",
             "s",
             provider,
@@ -77,7 +77,7 @@ fn super_provider_short_aliases_expand_to_provider_flag() {
             "exec",
             "review",
         ]);
-        let explicit_args = parse_super_as_caveman(&[
+        let explicit_args = parse_super_as_runtime_tools(&[
             "prodex",
             "s",
             "--provider",
@@ -88,13 +88,13 @@ fn super_provider_short_aliases_expand_to_provider_flag() {
             "review",
         ]);
 
-        assert_same_caveman_args(alias_args, explicit_args);
+        assert_same_runtime_tool_args(alias_args, explicit_args);
     }
 }
 
 #[test]
 fn super_command_provider_short_aliases_expand_to_provider_flag() {
-    let args = parse_super_as_caveman(&[
+    let args = parse_super_as_runtime_tools(&[
         "prodex",
         "super",
         "gemini",
@@ -255,7 +255,7 @@ fn gateway_provider_catalog_commands_parse() {
 #[test]
 fn super_gemini_provider_enables_native_image_generation_only_for_gemini() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
-        let args = parse_super_as_caveman(&[
+        let args = parse_super_as_runtime_tools(&[
             "prodex",
             "s",
             "--provider",

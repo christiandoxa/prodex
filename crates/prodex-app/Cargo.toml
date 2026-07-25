@@ -39,7 +39,7 @@ prodex_authn = { workspace = true }
 prodex_authz = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
-prodex_caveman_assets = { workspace = true }
+prodex_optional_tools = { workspace = true }
 prodex_cli = { workspace = true }
 prodex_config = { workspace = true }
 prodex_control_plane = { workspace = true }

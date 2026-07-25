@@ -170,7 +170,7 @@ function workspaceSteps(args) {
         "test",
         "-q",
         "-p",
-        "prodex-caveman-assets",
+        "prodex-optional-tools",
         "--lib",
         "--all-features",
         "rtk::tests::",

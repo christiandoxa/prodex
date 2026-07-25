@@ -180,7 +180,7 @@ Examples:
 pub const CLI_SETUP_AFTER_HELP: &str = "\
 Examples:
   prodex setup --dry-run
-  prodex setup --verify-assets
+  prodex setup --verify-tools
   prodex setup --dry-run --json";
 pub const CLI_CAPABILITY_AFTER_HELP: &str = "\
 Examples:

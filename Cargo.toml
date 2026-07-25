@@ -16,7 +16,7 @@ members = [
     "crates/prodex-application",
     "crates/prodex-authn",
     "crates/prodex-authz",
-    "crates/prodex-caveman-assets",
+    "crates/prodex-optional-tools",
     "crates/prodex-cli",
     "crates/prodex-config",
     "crates/prodex-control-plane",
@@ -114,7 +114,7 @@ prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.
 prodex_app_reports = { package = "prodex-app-reports", path = "crates/prodex-app-reports", version = "0.346.0" }
 prodex_application = { package = "prodex-application", path = "crates/prodex-application", version = "0.346.0" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.346.0" }
-prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets", version = "0.346.0" }
+prodex_optional_tools = { package = "prodex-optional-tools", path = "crates/prodex-optional-tools", version = "0.346.0" }
 prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.346.0" }
 prodex_config = { package = "prodex-config", path = "crates/prodex-config", version = "0.346.0" }
 prodex_control_plane = { package = "prodex-control-plane", path = "crates/prodex-control-plane", version = "0.346.0" }

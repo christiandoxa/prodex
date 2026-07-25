@@ -11,7 +11,6 @@ use redaction::redaction_redact_secret_like_text;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use terminal_ui::{
@@ -38,6 +37,7 @@ fn capability_redacted_detail(value: &str) -> String {
     redaction_redact_secret_like_text(value)
 }
 
+#[cfg(test)]
 fn capability_failed_status(err: &anyhow::Error) -> String {
     format!("fail ({})", capability_redacted_detail(&format!("{err:#}")))
 }
@@ -104,14 +104,10 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         probe_check_row("codebase-memory-mcp"),
     ];
     rows.push((
-        "Caveman assets".to_string(),
-        match prodex_caveman_assets::verify_embedded_caveman_assets() {
-            Ok(report) => format!(
-                "ok (codex files={}, claude files={}, skills={})",
-                report.codex_plugin_files, report.claude_plugin_files, report.skill_files
-            ),
-            Err(err) => capability_failed_status(&err),
-        },
+        "Caveman".to_string(),
+        optional_tool_health_status(&prodex_optional_tools::optional_tool_status(
+            prodex_optional_tools::OptionalToolId::Caveman,
+        )),
     ));
     rows.push(("Prodex home".to_string(), paths.root.display().to_string()));
     rows.push((
@@ -134,39 +130,23 @@ pub(crate) fn collect_super_tool_statuses(
     paths: &AppPaths,
     check_presidio: bool,
 ) -> Vec<SuperToolStatus> {
-    let asset_report = prodex_caveman_assets::verify_embedded_caveman_assets();
-    let mut rows = vec![
-        SuperToolStatus {
-            name: "caveman-assets",
-            check: "embedded-assets",
-            ready: asset_report.is_ok(),
-            status: match asset_report {
-                Ok(report) => format!(
-                    "ok (codex files={}, claude files={}, skills={})",
-                    report.codex_plugin_files, report.claude_plugin_files, report.skill_files
-                ),
-                Err(err) => capability_failed_status(&err),
-            },
-            detail: "Caveman/Super embedded assets are required for the Prodex overlay home"
-                .to_string(),
-        },
-        command_tool_status("rtk", "rtk --version", "rtk", &["--version"]),
-        command_tool_status("rtk-gain", "rtk gain", "rtk", &["gain"]),
-        optimizer_tool_status(
-            "codebase-memory-mcp",
-            "codebase-memory-mcp MCP tools/list",
-            "codebase-memory-mcp",
-        ),
-        playwright_mcp_tool_status(),
-        ponytail_tool_status(paths),
-        SuperToolStatus {
-            name: "smart-context",
-            check: "built-in",
-            ready: true,
-            status: "ok (built-in)".to_string(),
-            detail: "Runtime proxy Smart Context Autopilot is built into Prodex".to_string(),
-        },
-    ];
+    let mut rows = [
+        prodex_optional_tools::OptionalToolId::Caveman,
+        prodex_optional_tools::OptionalToolId::Rtk,
+        prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
+        prodex_optional_tools::OptionalToolId::PlaywrightMcp,
+        prodex_optional_tools::OptionalToolId::Ponytail,
+    ]
+    .into_iter()
+    .map(optional_tool_super_status)
+    .chain([SuperToolStatus {
+        name: "smart-context",
+        check: "built-in",
+        ready: true,
+        status: "ok (built-in)".to_string(),
+        detail: "Runtime proxy Smart Context Autopilot is built into Prodex".to_string(),
+    }])
+    .collect::<Vec<_>>();
 
     rows.push(if check_presidio {
         presidio_tool_status(paths)
@@ -182,12 +162,35 @@ pub(crate) fn collect_super_tool_statuses(
     rows
 }
 
-pub(crate) fn render_super_tool_statuses(statuses: &[SuperToolStatus]) -> String {
-    let mut rendered = String::from("Optimizers:\n");
-    for status in statuses {
-        rendered.push_str(&format!("  {}: {}\n", status.name, status.status));
+fn optional_tool_super_status(id: prodex_optional_tools::OptionalToolId) -> SuperToolStatus {
+    let health = prodex_optional_tools::optional_tool_status(id);
+    SuperToolStatus {
+        name: id.as_str(),
+        check: "optional-tool-registry",
+        ready: health.status == prodex_optional_tools::ToolHealthStatus::Installed,
+        status: optional_tool_health_status(&health),
+        detail: capability_redacted_detail(&health.detail),
     }
-    rendered.trim_end().to_string()
+}
+
+fn optional_tool_health_status(health: &prodex_optional_tools::ToolHealth) -> String {
+    let state = match health.status {
+        prodex_optional_tools::ToolHealthStatus::Installed => "installed",
+        prodex_optional_tools::ToolHealthStatus::Missing => "missing",
+        prodex_optional_tools::ToolHealthStatus::Invalid => "invalid",
+        prodex_optional_tools::ToolHealthStatus::Degraded => "degraded",
+    };
+    let mut fields = vec![state.to_string()];
+    if let Some(version) = &health.version {
+        fields.push(format!("version={version}"));
+    }
+    if let Some(path) = &health.path {
+        fields.push(format!("path={}", path.display()));
+    }
+    if let Some(digest) = &health.digest {
+        fields.push(format!("digest={digest}"));
+    }
+    fields.join(", ")
 }
 
 fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
@@ -232,7 +235,8 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     } else {
         collect_install_check_rows(&paths)
     };
-    let asset_report = prodex_caveman_assets::verify_embedded_caveman_assets();
+    let caveman =
+        prodex_optional_tools::optional_tool_status(prodex_optional_tools::OptionalToolId::Caveman);
 
     if !args.dry_run {
         fs::create_dir_all(&paths.root)
@@ -245,30 +249,23 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     if args.json {
         let value = serde_json::json!({
             "dry_run": args.dry_run,
-            "verify_assets": args.verify_assets,
+            "verify_optional_tools": args.verify_tools,
             "planned_actions": setup_planned_actions(&paths),
             "install_checks": install_rows
                 .iter()
                 .map(|(name, status)| serde_json::json!({ "name": name, "status": status }))
                 .collect::<Vec<_>>(),
-            "asset_verification": match &asset_report {
-                Ok(report) => serde_json::json!({
-                    "status": "ok",
-                    "codex_plugin_files": report.codex_plugin_files,
-                    "claude_plugin_files": report.claude_plugin_files,
-                    "skill_files": report.skill_files,
-                }),
-                Err(err) => serde_json::json!({
-                    "status": "fail",
-                    "error": capability_redacted_detail(&format!("{err:#}")),
-                }),
+            "optional_tool_verification": {
+                "id": "caveman",
+                "status": optional_tool_health_status(&caveman),
+                "detail": capability_redacted_detail(&caveman.detail),
             },
         });
         print_stdout_line(
             &serde_json::to_string_pretty(&value).context("failed to serialize setup report")?,
         )?;
-        if args.verify_assets {
-            asset_report.context("embedded Caveman/Super asset verification failed")?;
+        if args.verify_tools {
+            ensure_optional_tool_installed(&caveman)?;
         }
         return Ok(());
     }
@@ -289,8 +286,8 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
         },
     ])?;
 
-    if args.verify_assets {
-        asset_report.context("embedded Caveman/Super asset verification failed")?;
+    if args.verify_tools {
+        ensure_optional_tool_installed(&caveman)?;
     }
 
     Ok(())
@@ -325,14 +322,10 @@ fn collect_install_check_rows_passive(paths: &AppPaths) -> Vec<(String, String)>
         "not checked (dry-run)".to_string(),
     ));
     rows.push((
-        "Caveman assets".to_string(),
-        match prodex_caveman_assets::verify_embedded_caveman_assets() {
-            Ok(report) => format!(
-                "ok (codex files={}, claude files={}, skills={})",
-                report.codex_plugin_files, report.claude_plugin_files, report.skill_files
-            ),
-            Err(err) => capability_failed_status(&err),
-        },
+        "Caveman".to_string(),
+        optional_tool_health_status(&prodex_optional_tools::optional_tool_status(
+            prodex_optional_tools::OptionalToolId::Caveman,
+        )),
     ));
     rows.push(("Prodex home".to_string(), paths.root.display().to_string()));
     rows.push((
@@ -340,6 +333,19 @@ fn collect_install_check_rows_passive(paths: &AppPaths) -> Vec<(String, String)>
         paths.shared_codex_root.display().to_string(),
     ));
     rows
+}
+
+fn ensure_optional_tool_installed(health: &prodex_optional_tools::ToolHealth) -> Result<()> {
+    if health.status == prodex_optional_tools::ToolHealthStatus::Installed {
+        Ok(())
+    } else {
+        bail!(
+            "optional tool {} is {}: {}",
+            health.id,
+            optional_tool_health_status(health),
+            capability_redacted_detail(&health.detail)
+        )
+    }
 }
 
 fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()> {
@@ -446,8 +452,8 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
             format!("ensure directory {}", paths.managed_profiles_root.display()),
         ),
         (
-            "Caveman assets".to_string(),
-            "verify embedded plugin manifests and skill frontmatter".to_string(),
+            "Optional tools".to_string(),
+            "resolve and validate external tool installations without modifying them".to_string(),
         ),
         (
             "Super tools".to_string(),
@@ -474,34 +480,29 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "Kiro CLI and ACP bridge",
         ),
         capability("antigravity", "runtime", Some(agy_bin()), "Antigravity CLI"),
-        capability(
-            "caveman",
-            "mode-assets",
-            None,
-            "embedded Caveman Codex/Claude plugin assets",
+        optional_tool_capability(
+            prodex_optional_tools::OptionalToolId::Caveman,
+            "optional-plugin",
+            "validated external Caveman installation for Codex and Claude",
         ),
-        capability(
-            "rtk",
+        optional_tool_capability(
+            prodex_optional_tools::OptionalToolId::Rtk,
             "optimizer",
-            Some(OsString::from("rtk")),
             "upstream shell-output token reduction",
         ),
-        capability(
-            "codebase-memory-mcp",
+        optional_tool_capability(
+            prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
             "optimizer",
-            Some(OsString::from("codebase-memory-mcp")),
             "structural codebase graph MCP",
         ),
-        capability(
-            "playwright-mcp",
+        optional_tool_capability(
+            prodex_optional_tools::OptionalToolId::PlaywrightMcp,
             "optimizer",
-            Some(OsString::from("npx")),
             "isolated headless browser automation MCP",
         ),
-        capability(
-            "ponytail",
+        optional_tool_capability(
+            prodex_optional_tools::OptionalToolId::Ponytail,
             "optimizer-plugin",
-            None,
             "managed checkout loaded as a Codex plugin in Prodex overlays",
         ),
         ProdexCapability {
@@ -519,6 +520,21 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             description: "runtime log and pressure diagnostics".to_string(),
         },
     ]
+}
+
+fn optional_tool_capability(
+    id: prodex_optional_tools::OptionalToolId,
+    category: &'static str,
+    description: &'static str,
+) -> ProdexCapability {
+    let health = prodex_optional_tools::optional_tool_status(id);
+    ProdexCapability {
+        name: id.as_str(),
+        category,
+        status: optional_tool_health_status(&health),
+        command: health.path.map(|path| path.display().to_string()),
+        description: description.to_string(),
+    }
 }
 
 fn capability(
@@ -604,227 +620,6 @@ fn probe_check_row(command: &'static str) -> (String, String) {
         command.to_string(),
         command_probe_status(command, command_capability_probe_args(command)),
     )
-}
-
-fn ponytail_tool_status(_paths: &AppPaths) -> SuperToolStatus {
-    let candidates = [
-        env::var_os("PRODEX_OPTIMIZERS_HOME").map(PathBuf::from),
-        env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .map(|path| path.join("prodex-optimizers")),
-        dirs_home_dir().map(|home| home.join(".local").join("share").join("prodex-optimizers")),
-    ];
-    let checkout = candidates
-        .into_iter()
-        .flatten()
-        .map(|root| root.join("ponytail"))
-        .find(|checkout| {
-            checkout.join(".codex-plugin").join("plugin.json").is_file()
-                && checkout
-                    .join("hooks")
-                    .join("claude-codex-hooks.json")
-                    .is_file()
-                && checkout.join("skills").is_dir()
-        });
-    match checkout {
-        Some(path) => SuperToolStatus {
-            name: "ponytail",
-            check: "managed checkout",
-            ready: true,
-            status: format!("ok ({})", path.display()),
-            detail: "Ponytail checkout will be installed into Prodex overlay plugin cache"
-                .to_string(),
-        },
-        None => SuperToolStatus {
-            name: "ponytail",
-            check: "managed checkout",
-            ready: false,
-            status: "missing".to_string(),
-            detail: "expected checkout at $PRODEX_OPTIMIZERS_HOME/ponytail, $XDG_DATA_HOME/prodex-optimizers/ponytail, or ~/.local/share/prodex-optimizers/ponytail; install with `git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail`"
-                .to_string(),
-        },
-    }
-}
-
-fn dirs_home_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
-}
-
-fn command_tool_status(
-    name: &'static str,
-    check: &'static str,
-    command: &str,
-    args: &[&str],
-) -> SuperToolStatus {
-    command_path_tool_status(
-        name,
-        check,
-        PathBuf::from(command),
-        args,
-        format!("{command} was not found on PATH"),
-    )
-}
-
-fn playwright_mcp_tool_status() -> SuperToolStatus {
-    match prodex_caveman_assets::super_playwright_npx_command() {
-        Some(path) => command_path_tool_status(
-            "playwright-mcp",
-            "Node.js 18+ and npx",
-            path,
-            &["--version"],
-            "npx was not executable".to_string(),
-        ),
-        None => SuperToolStatus {
-            name: "playwright-mcp",
-            check: "Node.js 18+ and npx",
-            ready: false,
-            status: "missing".to_string(),
-            detail: "Playwright MCP requires Node.js 18 or newer and npx on PATH".to_string(),
-        },
-    }
-}
-
-fn optimizer_tool_status(
-    name: &'static str,
-    check: &'static str,
-    command: &str,
-) -> SuperToolStatus {
-    match find_optimizer_command_for_super_status(command) {
-        Some(path) => SuperToolStatus {
-            name,
-            check,
-            ready: true,
-            status: format!("ok ({})", path.display()),
-            detail: format!("{command} is invokable from the Super overlay"),
-        },
-        None => SuperToolStatus {
-            name,
-            check,
-            ready: false,
-            status: "missing".to_string(),
-            detail: format!("{command} was not found on PATH or in managed optimizer roots"),
-        },
-    }
-}
-
-fn command_path_tool_status(
-    name: &'static str,
-    check: &'static str,
-    command: PathBuf,
-    args: &[&str],
-    missing_detail: String,
-) -> SuperToolStatus {
-    match Command::new(&command).args(args).output() {
-        Ok(output) if output.status.success() => SuperToolStatus {
-            name,
-            check,
-            ready: true,
-            status: format!("ok ({})", first_output_line(&output).unwrap_or("available")),
-            detail: format!("command={}", command.display()),
-        },
-        Ok(output) => SuperToolStatus {
-            name,
-            check,
-            ready: false,
-            status: format!("fail (exit {})", output.status),
-            detail: first_output_line(&output)
-                .unwrap_or("command exited without diagnostic output")
-                .to_string(),
-        },
-        Err(err) => SuperToolStatus {
-            name,
-            check,
-            ready: false,
-            status: format!("missing ({})", err.kind()),
-            detail: missing_detail,
-        },
-    }
-}
-
-fn first_output_line(output: &std::process::Output) -> Option<&str> {
-    let stdout = std::str::from_utf8(&output.stdout).ok();
-    let stderr = std::str::from_utf8(&output.stderr).ok();
-    stdout
-        .into_iter()
-        .flat_map(str::lines)
-        .chain(stderr.into_iter().flat_map(str::lines))
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-}
-
-fn find_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
-    find_managed_optimizer_command_for_super_status(command)
-        .or_else(|| find_path_optimizer_command_for_super_status(command))
-}
-
-fn find_managed_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
-    managed_optimizer_roots_for_super_status()
-        .into_iter()
-        .flat_map(|root| managed_optimizer_command_candidates_for_super_status(&root, command))
-        .find(|candidate| optimizer_command_ready_for_super_status(command, candidate))
-}
-
-fn find_path_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    for dir in env::split_paths(&path) {
-        let candidate = dir.join(command);
-        if optimizer_command_ready_for_super_status(command, &candidate) {
-            return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            for suffix in [".exe", ".cmd", ".bat"] {
-                let candidate = dir.join(format!("{command}{suffix}"));
-                if optimizer_command_ready_for_super_status(command, &candidate) {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn managed_optimizer_roots_for_super_status() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(path) = env::var_os("PRODEX_OPTIMIZERS_HOME") {
-        push_unique_path(&mut roots, PathBuf::from(path));
-    }
-    if let Some(path) = env::var_os("XDG_DATA_HOME") {
-        push_unique_path(&mut roots, PathBuf::from(path).join("prodex-optimizers"));
-    }
-    if let Some(home) = dirs_home_dir() {
-        push_unique_path(
-            &mut roots,
-            home.join(".local").join("share").join("prodex-optimizers"),
-        );
-    }
-    roots
-}
-
-fn managed_optimizer_command_candidates_for_super_status(
-    root: &Path,
-    command: &str,
-) -> Vec<PathBuf> {
-    let mut candidates = vec![root.join(command)];
-    if command == "codebase-memory-mcp" {
-        let checkout = root.join("codebase-memory-mcp");
-        candidates.push(checkout.join(command));
-        candidates.push(checkout.join("build").join("c").join(command));
-        candidates.push(checkout.join("bin").join(command));
-    }
-    candidates
-}
-
-fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
-    if !paths.iter().any(|existing| existing == &path) {
-        paths.push(path);
-    }
-}
-
-fn optimizer_command_ready_for_super_status(command: &str, path: &Path) -> bool {
-    prodex_caveman_assets::super_optimizer_command_ready(command, path)
 }
 
 fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {

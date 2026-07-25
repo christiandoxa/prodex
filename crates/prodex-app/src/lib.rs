@@ -65,7 +65,6 @@ mod runtime_broker;
 mod runtime_broker_shared;
 mod runtime_capabilities;
 mod runtime_catalog_config;
-mod runtime_caveman;
 mod runtime_claude;
 mod runtime_claude_auth;
 mod runtime_config;
@@ -95,6 +94,7 @@ mod runtime_save_shared;
 mod runtime_secret_backend;
 mod runtime_state_shared;
 mod runtime_store;
+mod runtime_tools;
 mod secret_store_support;
 mod shared_codex_fs;
 mod shared_types;
@@ -133,7 +133,6 @@ use runtime_background::*;
 use runtime_broker::*;
 use runtime_broker_shared::*;
 use runtime_capabilities::*;
-use runtime_caveman::*;
 use runtime_claude::*;
 use runtime_claude_auth::*;
 use runtime_config::*;
@@ -166,6 +165,7 @@ pub use runtime_policy::{
     publish_config_publication_event_to_postgres_transport,
     runtime_config_publication_postgres_transport,
 };
+use runtime_tools::*;
 pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)
 }

@@ -63,13 +63,18 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Gui(args) => handle_gui(args),
         Commands::Dashboard(args) => handle_dashboard(args),
         Commands::Run(args) => handle_run(args),
-        Commands::Caveman(args) => execute_caveman(args),
-        Commands::Rtk(args) => execute_caveman(caveman_args_with_optimizer_prefix(args, "rtk")),
+        Commands::Caveman(mut args) => {
+            args.require_tool(prodex_optional_tools::OptionalToolId::Caveman);
+            execute_tool_launch(args)
+        }
+        Commands::Rtk(args) => {
+            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::Rtk)
+        }
         Commands::Playwright(args) => {
-            execute_caveman(caveman_args_with_optimizer_prefix(args, "playwright"))
+            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::PlaywrightMcp)
         }
         Commands::Ponytail(args) => {
-            execute_caveman(caveman_args_with_optimizer_prefix(args, "ponytail"))
+            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::Ponytail)
         }
         Commands::Super(args) => execute_super(args),
         Commands::Expose(args) => handle_expose(args),
@@ -103,11 +108,20 @@ fn execute_context_command(command: ContextCommands) -> Result<()> {
     }
 }
 
-fn execute_caveman(args: CavemanArgs) -> Result<()> {
+fn execute_optional_tool_alias(
+    mut args: RuntimeToolArgs,
+    tool: prodex_optional_tools::OptionalToolId,
+) -> Result<()> {
+    args.select_tool(prodex_optional_tools::OptionalToolId::Caveman);
+    args.select_tool(tool);
+    execute_tool_launch(args)
+}
+
+fn execute_tool_launch(args: RuntimeToolArgs) -> Result<()> {
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
-        return handle_caveman_dry_run(args);
+        return handle_runtime_tools_dry_run(args);
     }
-    handle_caveman(args)
+    handle_runtime_tools(args)
 }
 
 fn execute_super(mut args: SuperArgs) -> Result<()> {
@@ -134,7 +148,9 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
             bail!("--dry-run is not supported with native external agent CLIs")
         }
         let use_presidio = args.presidio_preference().unwrap_or(false);
-        return handle_caveman_dry_run(args.into_caveman_args_with_presidio(use_presidio));
+        return handle_runtime_tools_dry_run(
+            args.into_runtime_tool_args_with_presidio(use_presidio),
+        );
     }
     handle_super(args)
 }

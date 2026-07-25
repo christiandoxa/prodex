@@ -175,7 +175,7 @@ fn super_command_parses_as_distinct_subcommand_with_safe_access_default() {
     };
     assert_eq!(args.profile.as_deref(), Some("main"));
 
-    let args = args.into_caveman_args();
+    let args = args.into_runtime_tool_args();
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert!(!args.full_access);
     assert_eq!(
@@ -243,7 +243,7 @@ fn super_command_url_keeps_v1_path_when_provided() {
         panic!("expected super command");
     };
 
-    let args = args.into_caveman_args();
+    let args = args.into_runtime_tool_args();
     let rendered = args
         .codex_args
         .iter()
@@ -276,7 +276,7 @@ fn super_command_url_accepts_local_context_overrides() {
         panic!("expected super command");
     };
 
-    let args = args.into_caveman_args();
+    let args = args.into_runtime_tool_args();
     let rendered = args
         .codex_args
         .iter()
@@ -409,7 +409,7 @@ fn launch_commands_accept_no_proxy_flag() {
         panic!("expected super command");
     };
     assert!(args.no_proxy);
-    assert!(args.into_caveman_args().no_proxy);
+    assert!(args.into_runtime_tool_args().no_proxy);
 
     let claude = parse_cli_command_from(["prodex", "claude", "--no-proxy", "--", "-p", "hello"])
         .expect("claude no-proxy should parse");
@@ -438,7 +438,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131"));
     assert_eq!(args.local_model.as_deref(), Some("local/qwen"));
 
-    let args = args.into_caveman_args();
+    let args = args.into_runtime_tool_args();
     assert!(!args.full_access);
     assert!(args.skip_quota_check);
 
@@ -447,8 +447,9 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    assert_eq!(rendered.first().map(String::as_str), Some("rtk"));
-    assert_eq!(rendered.get(1).map(String::as_str), Some("ponytail"));
+    let tools = args.selected_tool_set();
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(
@@ -468,9 +469,8 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         ["exec", "review this repo"]
     );
 
-    let (_, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(
-        codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
+        codex_cli_config_override_value(&args.codex_args, "model_provider").as_deref(),
         Some("prodex-local")
     );
 }

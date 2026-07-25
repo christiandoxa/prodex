@@ -2744,7 +2744,6 @@ dependencies = [
  "prodex-authn",
  "prodex-authz",
  "prodex-bench-support",
- "prodex-caveman-assets",
  "prodex-cli",
  "prodex-codex-config",
  "prodex-config",
@@ -2758,6 +2757,7 @@ dependencies = [
  "prodex-housekeeping",
  "prodex-mcp-stdio",
  "prodex-observability",
+ "prodex-optional-tools",
  "prodex-presidio",
  "prodex-profile-export",
  "prodex-profile-identity",
@@ -2883,21 +2883,11 @@ name = "prodex-bench-support"
 version = "0.346.0"
 
 [[package]]
-name = "prodex-caveman-assets"
-version = "0.346.0"
-dependencies = [
- "anyhow",
- "chrono",
- "prodex-shared-codex-fs",
- "serde_json",
- "toml",
-]
-
-[[package]]
 name = "prodex-cli"
 version = "0.346.0"
 dependencies = [
  "clap",
+ "prodex-optional-tools",
  "prodex-provider-core",
  "serde",
  "url",
@@ -3017,6 +3007,18 @@ name = "prodex-observability"
 version = "0.346.0"
 dependencies = [
  "prodex-domain",
+]
+
+[[package]]
+name = "prodex-optional-tools"
+version = "0.346.0"
+dependencies = [
+ "anyhow",
+ "prodex-shared-codex-fs",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "toml",
 ]
 
 [[package]]

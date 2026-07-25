@@ -60,6 +60,7 @@
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:impact": "node --test scripts/ci/ci-impact.test.mjs",
     "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
+    "ci:optional-tools-guard": "node scripts/ci/optional-tools-guard.mjs --self-test",
     "ci:super-wildcard-guard": "node scripts/ci/super-wildcard-guard.mjs",
     "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
     "ci:secret-boundary-guard": "node scripts/ci/secret-boundary-guard.mjs --self-test",

@@ -482,7 +482,6 @@ function assertNoInternalLeak(output, label) {
     "The user must experience native Codex CLI",
     "Follow the active Codex",
     "Tool discipline for Codex parity",
-    "CAVEMAN MODE ACTIVE",
     "RTK ACTIVE",
     "Step 3: Run `cat gemini-patch-smoke.txt`",
     "Never commit AST summary artifacts",

@@ -170,13 +170,14 @@ npm and Cargo installations are no longer supported. Existing copies from either
 
 Prodex Super keeps a deliberately small optional stack:
 
+- [Caveman](https://github.com/JuliusBrussee/caveman) for an optional response-style plugin.
 - [RTK](https://github.com/rtk-ai/rtk) for noisy shell output.
 - [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp) for structural code navigation.
 - [Playwright MCP](https://github.com/microsoft/playwright-mcp) for browser inspection and automation.
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman and Smart Context are built into Prodex. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
+Caveman is externally installed and validated; Smart Context is built into Prodex. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -215,11 +216,11 @@ Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entr
 Ponytail:
 
 ```bash
-git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail
+prodex capability super-doctor
 prodex ponytail
 ```
 
-Prodex installs Ponytail only into the temporary overlay for that session. The base Codex profile remains unchanged.
+Install the exact vetted Ponytail tree described in [Optional Tools](docs/optional-tools.md). Prodex activates it only in the temporary overlay for that session. The base Codex profile remains unchanged.
 
 Presidio English services:
 
@@ -232,10 +233,11 @@ prodex presidio doctor --json
 
 The standard Analyzer image is English-only. Indonesian detection requires an Analyzer configured with Indonesian NLP models and recognizers before enabling `--language-mode auto --languages en,id`.
 
-Verify the complete stack:
+Verify the optional stack:
 
 ```bash
-prodex s doctor --presidio --strict
+prodex capability super-doctor
+prodex capability super-doctor --strict
 prodex s
 ```
 
@@ -347,7 +349,6 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 - Codebase Memory MCP when installed.
 - Playwright MCP when Node.js 18+ and `npx` are available.
 - Smart Context Autopilot.
-- launch-time full access.
 - optional Presidio redaction.
 
 ```bash
@@ -361,13 +362,14 @@ prodex s expose
 <details>
 <summary>Super launch details</summary>
 
-The effective launch is:
+Select or require tools explicitly when needed:
 
 ```bash
-prodex caveman rtk ponytail --full-access
+prodex super --tool caveman --require-tool rtk
+prodex super --full-access
 ```
 
-Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Full access maps to Codex's sandbox bypass and trusts only the launch directory for that session.
+Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Super does not bypass Codex approvals/sandbox or trust a workspace by default. `--full-access` explicitly maps only to Codex's sandbox-bypass launch option.
 
 `prodex s expose` starts a loopback-only browser terminal with a one-time session URL. Add `--tunnel` to explicitly publish the remote shell through a Cloudflare quick tunnel; the local listener remains bound to loopback.
 
@@ -589,14 +591,14 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add `rtk`, `playwright`, `ponytail`, or `presidio` before Codex args to enable that session surface. The `prodex rtk`, `prodex playwright`, and `prodex ponytail` shortcuts map to `prodex caveman <prefix>`.
+Use `--tool rtk`, `--tool playwright`, or `--tool ponytail` to add a session surface. Use `--presidio` for redaction. The `prodex rtk`, `prodex playwright`, and `prodex ponytail` compatibility shortcuts translate to typed selections; tool-like words inside Codex arguments are not removed.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
 </details>
 
 <details>
-<summary>Super mode — daily Caveman + RTK + optimizer stack</summary>
+<summary>Super mode — daily optional-tool stack</summary>
 
 ```bash
 prodex s
@@ -614,7 +616,7 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex s` is the short alias for `prodex super`. `--dry-run` applies to Codex-fronted launches; native `--cli gemini`, `copilot`, `kiro`, and `agy` selections reject it.
 
-This is my daily mode. It is the path I keep tuning for normal work: Caveman enabled, RTK guidance enabled, full access available, and context handling handled by the runtime proxy.
+This is my daily mode. It enables validated tools that are installed and keeps Codex's normal approval, sandbox, and workspace-trust policy unless `--full-access` is explicit.
 
 Super also enables Smart Context Autopilot in the runtime proxy.
 

@@ -103,7 +103,8 @@ pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
 }
 
 pub(super) fn prepare_runtime_proxy_claude_caveman_plugin_dir(paths: &AppPaths) -> Result<PathBuf> {
-    prodex_caveman_assets::install_claude_caveman_plugin(&paths.root)
+    let _ = paths;
+    prodex_optional_tools::resolve_caveman_claude_plugin_dir()
 }
 
 #[cfg(test)]

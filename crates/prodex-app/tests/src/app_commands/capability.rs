@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(unix)]
 use crate::TestEnvVarGuard;
+use std::path::PathBuf;
 
 #[test]
 fn rtk_capability_probe_uses_version() {
@@ -67,14 +68,6 @@ fn capability_failed_status_redacts_secret_like_chain() {
     assert!(status.contains("capability check failed"));
     assert!(status.contains("Authorization: Bearer <redacted>"));
     assert!(!status.contains("capability-token"));
-}
-
-#[test]
-fn super_status_managed_optimizer_candidates_match_overlay_layouts() {
-    let root = PathBuf::from("/tmp/prodex-optimizers");
-    let candidates =
-        managed_optimizer_command_candidates_for_super_status(&root, "codebase-memory-mcp");
-    assert!(candidates.contains(&root.join("codebase-memory-mcp/build/c/codebase-memory-mcp")));
 }
 
 #[test]

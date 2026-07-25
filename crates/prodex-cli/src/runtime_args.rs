@@ -1,5 +1,6 @@
 use crate::CodexRuntimeFeatureArgs;
 use clap::{ArgGroup, Args, Subcommand};
+use prodex_optional_tools::{OptionalToolId, OptionalToolSet};
 use prodex_provider_core::{ProviderId, ProviderRuntimeMetadata, provider_runtime_metadata};
 use std::ffi::OsString;
 use std::fmt;
@@ -9,8 +10,6 @@ use std::path::PathBuf;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
-
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 1] = ["ponytail"];
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -112,7 +111,7 @@ impl fmt::Debug for ClaudeArgs {
 }
 
 #[derive(Args)]
-pub struct CavemanArgs {
+pub struct RuntimeToolArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
@@ -143,9 +142,15 @@ pub struct CavemanArgs {
     /// Enable Prodex Smart Context Autopilot in the runtime proxy.
     #[arg(skip)]
     pub smart_context: bool,
-    /// Enable Super optimizer tools in the Prodex overlay.
-    #[arg(skip)]
-    pub super_optimizer_overlay: bool,
+    /// Add an optional tool to this launch.
+    #[arg(long = "tool", value_name = "TOOL")]
+    pub tools: Vec<OptionalToolId>,
+    /// Require an optional tool; launch fails before the TUI if it is missing or invalid.
+    #[arg(long = "require-tool", value_name = "TOOL")]
+    pub required_tools: Vec<OptionalToolId>,
+    /// Enable Presidio request redaction for this launch.
+    #[arg(long)]
+    pub presidio: bool,
     /// External provider selected by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider: Option<SuperExternalProvider>,
@@ -161,9 +166,9 @@ pub struct CavemanArgs {
     pub codex_args: Vec<OsString>,
 }
 
-impl fmt::Debug for CavemanArgs {
+impl fmt::Debug for RuntimeToolArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CavemanArgs")
+        f.debug_struct("RuntimeToolArgs")
             .field("profile_configured", &self.profile.is_some())
             .field("auto_rotate", &self.auto_rotate)
             .field("no_auto_rotate", &self.no_auto_rotate)
@@ -174,7 +179,9 @@ impl fmt::Debug for CavemanArgs {
             .field("base_url_configured", &self.base_url.is_some())
             .field("no_proxy", &self.no_proxy)
             .field("smart_context", &self.smart_context)
-            .field("super_optimizer_overlay", &self.super_optimizer_overlay)
+            .field("tools", &self.tools)
+            .field("required_tools", &self.required_tools)
+            .field("presidio", &self.presidio)
             .field("external_provider", &self.external_provider)
             .field("harness", &self.harness)
             .field(
@@ -230,6 +237,12 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
+    /// Add an optional tool to the default Super tool set.
+    #[arg(long = "tool", value_name = "TOOL")]
+    pub tools: Vec<OptionalToolId>,
+    /// Require an optional tool; launch fails before the TUI if it is missing or invalid.
+    #[arg(long = "require-tool", value_name = "TOOL")]
+    pub required_tools: Vec<OptionalToolId>,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(long, value_name = "URL", conflicts_with = "provider")]
     pub url: Option<String>,
@@ -295,6 +308,8 @@ impl fmt::Debug for SuperArgs {
             .field("no_proxy", &self.no_proxy)
             .field("presidio", &self.presidio)
             .field("no_presidio", &self.no_presidio)
+            .field("tools", &self.tools)
+            .field("required_tools", &self.required_tools)
             .field("url_configured", &self.url.is_some())
             .field("provider", &self.provider)
             .field("harness", &self.harness)
@@ -544,14 +559,14 @@ impl SuperArgs {
         }
     }
 
-    pub fn into_caveman_args(self) -> CavemanArgs {
-        self.into_caveman_args_with_presidio(false)
+    pub fn into_runtime_tool_args(self) -> RuntimeToolArgs {
+        self.into_runtime_tool_args_with_presidio(false)
     }
 
-    pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
-        let (prefixed_presidio, passthrough_codex_args) =
+    pub fn into_runtime_tool_args_with_presidio(self, presidio: bool) -> RuntimeToolArgs {
+        let (legacy_tools, passthrough_codex_args) =
             extract_super_leading_launch_prefixes(self.codex_args);
-        let presidio = presidio || prefixed_presidio;
+        let presidio = presidio || legacy_tools.contains(&OptionalToolId::Presidio);
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let external_upstream_base_url = self.provider.map(|provider| {
             self.base_url
@@ -588,16 +603,21 @@ impl SuperArgs {
 
         let feature_overrides = self.codex_features.to_codex_config_args();
         let mut codex_args = Vec::new();
-        codex_args.push(OsString::from("rtk"));
-        codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
-        if presidio {
-            codex_args.push(OsString::from("presidio"));
-        }
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
         codex_args.extend(feature_overrides);
         codex_args.extend(passthrough_codex_args);
-        CavemanArgs {
+        let mut tools = OptionalToolSet::super_defaults();
+        for tool in self.tools.into_iter().chain(legacy_tools) {
+            tools.insert(tool);
+        }
+        if presidio {
+            tools.insert(OptionalToolId::Presidio);
+        }
+        for tool in &self.required_tools {
+            tools.insert(*tool);
+        }
+        RuntimeToolArgs {
             profile: self.profile,
             auto_rotate: self.auto_rotate,
             no_auto_rotate: self.no_auto_rotate,
@@ -610,7 +630,9 @@ impl SuperArgs {
                 .or(self.base_url),
             no_proxy: self.no_proxy,
             smart_context: true,
-            super_optimizer_overlay: true,
+            tools: tools.iter().collect(),
+            required_tools: self.required_tools,
+            presidio,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
             harness: self.harness,
@@ -626,21 +648,26 @@ fn parse_harness_mode(
     value.parse()
 }
 
-fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, Vec<OsString>) {
-    let mut presidio = false;
+fn extract_super_leading_launch_prefixes(
+    args: Vec<OsString>,
+) -> (Vec<OptionalToolId>, Vec<OsString>) {
+    let mut tools = Vec::new();
     let mut consumed = 0;
     for arg in &args {
         let Some(prefix) = arg.to_str() else {
             break;
         };
-        match prefix {
-            "rtk" | "playwright" | "ponytail" => {}
-            "presidio" => presidio = true,
+        let tool = match prefix {
+            "rtk" => OptionalToolId::Rtk,
+            "playwright" => OptionalToolId::PlaywrightMcp,
+            "ponytail" => OptionalToolId::Ponytail,
+            "presidio" => OptionalToolId::Presidio,
             _ => break,
-        }
+        };
+        tools.push(tool);
         consumed += 1;
     }
-    (presidio, args.into_iter().skip(consumed).collect())
+    (tools, args.into_iter().skip(consumed).collect())
 }
 
 impl RunArgs {
@@ -649,9 +676,57 @@ impl RunArgs {
     }
 }
 
-impl CavemanArgs {
+impl RuntimeToolArgs {
     pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
         codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
+    }
+
+    pub fn select_tool(&mut self, tool: OptionalToolId) {
+        if !self.tools.contains(&tool) {
+            self.tools.push(tool);
+        }
+    }
+
+    pub fn require_tool(&mut self, tool: OptionalToolId) {
+        self.select_tool(tool);
+        if !self.required_tools.contains(&tool) {
+            self.required_tools.push(tool);
+        }
+    }
+
+    pub fn selected_tool_set(&self) -> OptionalToolSet {
+        self.tools
+            .iter()
+            .chain(&self.required_tools)
+            .copied()
+            .collect()
+    }
+
+    pub fn required_tool_set(&self) -> OptionalToolSet {
+        self.required_tools.iter().copied().collect()
+    }
+
+    pub fn translate_legacy_leading_tool_prefixes(&mut self) {
+        let mut translated = Vec::new();
+        for arg in &self.codex_args {
+            let Some(prefix) = arg.to_str() else {
+                break;
+            };
+            let tool = match prefix {
+                "caveman" => OptionalToolId::Caveman,
+                "rtk" => OptionalToolId::Rtk,
+                "playwright" => OptionalToolId::PlaywrightMcp,
+                "ponytail" => OptionalToolId::Ponytail,
+                "presidio" => OptionalToolId::Presidio,
+                _ => break,
+            };
+            translated.push(tool);
+        }
+        for tool in &translated {
+            self.select_tool(*tool);
+            self.presidio |= *tool == OptionalToolId::Presidio;
+        }
+        self.codex_args.drain(..translated.len());
     }
 }
 
@@ -669,8 +744,11 @@ fn codex_args_with_feature_overrides(
     args
 }
 
-pub fn caveman_args_with_optimizer_prefix(mut args: CavemanArgs, prefix: &str) -> CavemanArgs {
-    args.codex_args.insert(0, OsString::from(prefix));
+pub fn runtime_tool_args_with_tool(
+    mut args: RuntimeToolArgs,
+    tool: OptionalToolId,
+) -> RuntimeToolArgs {
+    args.select_tool(tool);
     args
 }
 
@@ -963,6 +1041,8 @@ mod tests {
             no_proxy: false,
             presidio: false,
             no_presidio: false,
+            tools: Vec::new(),
+            required_tools: Vec::new(),
             url: None,
             cli: None,
             local_context_window: None,

@@ -159,7 +159,6 @@ pub(super) const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "The user must experience native Codex CLI",
     "Follow the active Codex",
     "Tool discipline for Codex parity",
-    "CAVEMAN MODE ACTIVE",
     "RTK ACTIVE",
     "Step 3: Run `cat gemini-patch-smoke.txt`",
 ];
@@ -187,7 +186,6 @@ pub(super) const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "You are Codex CLI",
     "native Codex CLI",
     "Tool discipline for Codex parity",
-    "CAVEMAN MODE ACTIVE",
     "RTK ACTIVE",
     "Step 3: Run `cat gemini-patch-smoke.txt`",
     "Keep Caveman style",
