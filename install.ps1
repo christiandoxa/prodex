@@ -21,6 +21,7 @@ $RunningExe = $env:PRODEX_RUNNING_EXE
 $NonInteractive = $env:PRODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
 $Migrate = $env:PRODEX_MIGRATE -match "^(?i:1|true|yes)$"
 $NoPathUpdate = $env:PRODEX_NO_PATH_UPDATE -match "^(?i:1|true|yes)$"
+$CodexNpmVersion = "0.145.0"
 
 function Write-Step {
     param([string]$Message)
@@ -180,7 +181,7 @@ function Migrate-InstallManager {
         }
         if ([string]::IsNullOrWhiteSpace($env:PRODEX_CODEX_BIN) -or $env:PRODEX_CODEX_BIN -eq "codex") {
             Write-Step "Preserving Codex as a standalone npm command"
-            Invoke-Native -Command $npm.Source -Arguments @("install", "-g", "@openai/codex@latest")
+            Invoke-Native -Command $npm.Source -Arguments @("install", "-g", "@openai/codex@$CodexNpmVersion")
         }
         Write-Step "Removing npm-managed Prodex"
         Invoke-Native -Command $npm.Source -Arguments @("uninstall", "-g", "@christiandoxa/prodex")

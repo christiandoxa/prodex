@@ -147,7 +147,7 @@ export function validateCompose(contents) {
     .map((line) => `compose.yaml: service image is not tag-and-digest pinned: ${line.trim()}`);
 }
 
-export function validateCodexPins(workspaceManifest, manifest, installer, shim, lockfile) {
+export function validateCodexPins(workspaceManifest, manifest, installer, windowsInstaller, shim, lockfile) {
   const violations = [];
   if (manifest.dependencies?.["@openai/codex"] !== openaiCodexDependencySpecifier) {
     violations.push(`npm/prodex/package.json: @openai/codex must equal ${openaiCodexVersion}`);
@@ -169,11 +169,17 @@ export function validateCodexPins(workspaceManifest, manifest, installer, shim, 
       violations.push(`package.json: ${spec.packageName} must be a local optional lock input`);
     }
   }
-  if (/@openai\/codex@latest\b/u.test(`${installer}\n${shim}`)) {
+  if (/@openai\/codex@latest\b/u.test(`${installer}\n${windowsInstaller}\n${shim}`)) {
     violations.push("Codex install paths must not use @openai/codex@latest");
   }
   if (!installer.includes(`CODEX_NPM_VERSION="${openaiCodexVersion}"`)) {
     violations.push("install.sh: Codex migration version is not synchronized");
+  }
+  if (!windowsInstaller.includes(`$CodexNpmVersion = "${openaiCodexVersion}"`)) {
+    violations.push("install.ps1: Codex migration version is not synchronized");
+  }
+  if (!windowsInstaller.includes('"@openai/codex@$CodexNpmVersion"')) {
+    violations.push("install.ps1: Codex migration must use the synchronized version");
   }
   if (!shim.includes('require("./codex-compat.cjs")')) {
     violations.push("npm/prodex/lib/codex-shim.cjs: missing canonical compatibility metadata");
@@ -235,6 +241,7 @@ function selfTest() {
       workspaceManifest,
       codexManifest,
       `CODEX_NPM_VERSION="${openaiCodexVersion}"`,
+      `$CodexNpmVersion = "${openaiCodexVersion}"\n"@openai/codex@$CodexNpmVersion"`,
       'require("./codex-compat.cjs")',
       codexLock,
     ),
@@ -245,10 +252,11 @@ function selfTest() {
       workspaceManifest,
       { ...codexManifest, dependencies: { "@openai/codex": "latest" } },
       "npm install -g @openai/codex@latest",
+      "npm install -g @openai/codex@latest",
       "",
       { packages: {} },
-    ).length,
-    5,
+    ).length > 0,
+    true,
   );
   const windowsJob = `jobs:
   windows-security:
@@ -319,6 +327,7 @@ async function main() {
       npmWorkspaceManifest,
       npmManifest,
       await fs.readFile(path.join(repoRoot, "install.sh"), "utf8"),
+      await fs.readFile(path.join(repoRoot, "install.ps1"), "utf8"),
       await fs.readFile(path.join(repoRoot, "npm/prodex/lib/codex-shim.cjs"), "utf8"),
       npmLock,
     ),

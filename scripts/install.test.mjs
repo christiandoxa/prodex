@@ -104,6 +104,9 @@ test("install.ps1 verifies Windows release assets", async () => {
   assert.match(source, /x86_64-pc-windows-msvc/);
   assert.match(source, /aarch64-pc-windows-msvc/);
   assert.match(source, /New-Item -ItemType Junction/);
+  assert.match(source, new RegExp(`\\$CodexNpmVersion = "${openaiCodexDependencySpecifier}"`));
+  assert.match(source, /"@openai\/codex@\$CodexNpmVersion"/);
+  assert.doesNotMatch(source, /@openai\/codex@latest\b/);
 });
 
 test("install.ps1 installs the native Windows binary", { skip: process.platform !== "win32" }, async (t) => {
