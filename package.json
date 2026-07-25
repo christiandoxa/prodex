@@ -38,7 +38,7 @@
     "release:cargo-publish": "node scripts/npm/release-run.mjs --cargo-publish publish",
     "docs:lint": "node scripts/docs/lint-markdown.mjs && npm run docs:runtime-policy:self-test && npm run docs:runtime-policy:check",
     "docs:provider-capabilities": "node scripts/catalog/provider-capability-matrix.mjs --write",
-    "docs:provider-capabilities:check": "node scripts/catalog/provider-capability-matrix.mjs",
+    "docs:provider-capabilities:check": "node --test scripts/lib/checked-subprocess.test.mjs && node scripts/catalog/provider-capability-matrix.mjs",
     "docs:runtime-policy": "node scripts/docs/runtime-policy.mjs --write",
     "docs:runtime-policy:self-test": "node scripts/docs/runtime-policy.mjs --self-test",
     "docs:runtime-policy:check": "node scripts/docs/runtime-policy.mjs --check",
