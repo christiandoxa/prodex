@@ -11,6 +11,7 @@ import {
   platformPackages,
   readCargoVersion,
   readJsonFile,
+  repoRoot,
   writeJsonFile,
 } from "./common.mjs";
 
@@ -35,8 +36,7 @@ function parseArgs(argv) {
   return args;
 }
 
-async function updatePackageJson(filePath, version) {
-  const packageJson = await readJsonFile(filePath);
+function updatePackageMetadata(packageJson, version) {
   if (typeof packageJson.name !== "string") {
     return false;
   }
@@ -79,10 +79,27 @@ async function updatePackageJson(filePath, version) {
     }
   }
 
+  return changed;
+}
+
+async function updatePackageJson(filePath, version) {
+  const packageJson = await readJsonFile(filePath);
+  const changed = updatePackageMetadata(packageJson, version);
   if (changed) {
     await writeJsonFile(filePath, packageJson);
   }
+  return changed;
+}
 
+async function updatePackageLock(filePath, version) {
+  const packageLock = await readJsonFile(filePath);
+  let changed = false;
+  for (const entry of Object.values(packageLock.packages ?? {})) {
+    changed = updatePackageMetadata(entry, version) || changed;
+  }
+  if (changed) {
+    await writeJsonFile(filePath, packageLock);
+  }
   return changed;
 }
 
@@ -150,6 +167,10 @@ async function main() {
   const stack = [args.root];
   let changedCount = 0;
   let changedCargoToml = false;
+  const changedPackageLock = await updatePackageLock(
+    path.join(repoRoot, "package-lock.json"),
+    version,
+  );
 
   if (await updateCargoToml(cargoTomlPath, version)) {
     changedCargoToml = true;
@@ -173,7 +194,7 @@ async function main() {
   }
 
   process.stdout.write(
-    `synced ${changedCount} package.json file(s)${changedCargoToml ? " and Cargo.toml" : ""} to ${version}\n`,
+    `synced ${changedCount} package.json file(s)${changedCargoToml ? " and Cargo.toml" : ""}${changedPackageLock ? " and package-lock.json" : ""} to ${version}\n`,
   );
 }
 
