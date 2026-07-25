@@ -233,7 +233,7 @@ pub enum ContextCommands {
     Export(ContextExportArgs),
     /// Deterministically compact prose context files and write .original.md backups.
     Compress(ContextCompressArgs),
-    /// Evaluate a Smart Context replay metrics corpus.
+    /// Execute a Smart Context inputs-only replay corpus.
     #[command(name = "replay-report")]
     ReplayReport(ContextReplayReportArgs),
     /// Compact copied command output from stdin or a file for low-token context sharing.
@@ -279,13 +279,13 @@ pub struct ContextCompressArgs {
 
 #[derive(Args, Debug)]
 pub struct ContextReplayReportArgs {
-    /// Smart Context replay metrics JSON corpus.
+    /// Smart Context inputs-only replay JSON corpus.
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
-    /// Emit machine-readable JSON evaluation output instead of Markdown.
+    /// Emit the generated machine-readable report instead of Markdown.
     #[arg(long)]
     pub json: bool,
-    /// Exit non-zero when the replay corpus fails Smart Context acceptance gates.
+    /// Exit non-zero when deterministic replay invariants fail.
     #[arg(long)]
     pub strict: bool,
 }

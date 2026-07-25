@@ -23,7 +23,7 @@ Context-window selection is ordered as explicit launch configuration, versioned 
 
 ## Rollout
 
-- `PRODEX_SMART_CONTEXT_SHADOW=1` computes Smart Context decisions and telemetry while sending the original request upstream.
+- `PRODEX_SMART_CONTEXT_SHADOW=1` samples rollout eligibility but returns the original bytes without reading or mutating Smart Context state. Read-only analysis is not enabled yet.
 - `PRODEX_SMART_CONTEXT_CANARY_PERCENT=N` applies rewriting only for a deterministic percentage of requests. Canary-out requests pass through unchanged and log `rollout_canary_out`.
 - Explicit exact mode bypasses rollout and remains full pass-through.
 
@@ -40,7 +40,7 @@ Smart Context runtime logs use structured fields and avoid source contents by de
 
 Learning buckets support route, model, profile, provider, context-window band, session-length band, task class, and transform category. Optional dimensions are enforced when present, so low-quality samples from a different window band or transform category do not relax unrelated traffic.
 
-## Replay Benchmark
+## Deterministic Replay
 
 The deterministic corpus is checked in at:
 
@@ -48,48 +48,22 @@ The deterministic corpus is checked in at:
 crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json
 ```
 
-It contains exact/current/optimized comparisons for 12 long-session scenarios and covers the required hard cases: 30+ turn continuation, repeated build/test output, compiler/runtime errors, large diffs, repository navigation, multi-file refactoring, changing static instructions, missing/corrupted artifacts, duplicate tool calls/output, noisy binary-like command output, failure recovery, and 16k/32k/128k/200k context windows.
+The corpus contains request inputs and invariants only. Output token counts, success flags, integrity scores, and latency values are rejected by the schema. The runner invokes the production Smart Context request path, executes exact and configured variants, and generates per-turn validation and timing results.
 
 Run the strict report with:
 
 ```bash
-cargo run -q -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --strict
+PRODEX_GIT_COMMIT=$(git rev-parse HEAD) cargo run -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict
 ```
 
-Current benchmark result:
-
-```text
-eligible_long_sessions: 12
-current_comparison_sessions: 12
-median_input_token_reduction_percent_vs_exact: 45
-current_median_input_token_reduction_percent_vs_exact: 18
-median_additional_input_token_reduction_percent_vs_current: 32
-long_sessions_with_at_least_20_percent_reduction_percent: 100
-exact_median_total_tokens_until_completion: 34000
-current_median_total_tokens_until_completion: 29000
-optimized_median_total_tokens_until_completion: 21000
-exact_success_rate_percent: 100
-current_success_rate_percent: 100
-optimized_success_rate_percent: 100
-optimized_missing_context_recovery_turns: 0
-success_regression_basis_points: 0
-continuation_integrity_percent: 100
-tool_call_integrity_percent: 100
-critical_signal_recall_percent: 100
-unresolved_mandatory_artifact_refs: 0
-corrupted_json_count: 0
-p95_rewrite_overhead_ms: 28
-continuation_fallback_rate_percent: 0
-required_replay_coverage: complete
-passed: true
-```
+The checked corpus currently provides the first executable slice: an HTTP request with repeated compiler output. It verifies exact byte identity, protocol-field preservation, critical-text recovery, positive conservative estimated savings, and absence of unresolved artifact references. It is not yet the required full multi-turn corpus, does not use a provider tokenizer, and does not support a public performance or quality claim.
 
 ## Migration Note
 
-Existing Smart Context users do not need to change configuration. The default behavior remains local and deterministic, with safe fallback preserved. Operators can start with shadow mode, then set a small canary percentage, inspect `smart_context_autopilot` log fields, and increase rollout only after replay and runtime telemetry remain clean.
+Existing Smart Context users do not need to change configuration. Artifact identifiers now emit `sc2:`/`psc2:` SHA-256 identities. Legacy `sc:`/`psc:` references remain readable during migration, and valid legacy stores are rewritten to schema version 2. Exact, canary-out, and shadow traffic never mutates Smart Context state.
 
 ## Remaining Risks
 
-- The replay corpus is deterministic and local; it proves acceptance metrics over representative fixtures, not live model quality across all repositories.
+- Replay coverage is incomplete and token counts are explicitly low-confidence estimates. No live-model quality claim is made.
 - Optional embeddings are not used by default. Candidate selection remains deterministic, local, and metadata-driven.
 - Quality proxy fields are conservative and privacy-safe; they can flag risk and tighten policy, but they are not a substitute for task-specific integration tests.
