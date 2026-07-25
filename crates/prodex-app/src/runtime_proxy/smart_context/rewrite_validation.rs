@@ -143,6 +143,28 @@ pub(super) fn runtime_smart_context_expand_inline_references(
     Some(expanded)
 }
 
+pub(super) fn runtime_smart_context_inline_reference_round_trip_is_exact(
+    original: &serde_json::Value,
+    expanded: &mut serde_json::Value,
+) -> bool {
+    let Some(input) = expanded
+        .get_mut("input")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return false;
+    };
+    let protocol = serde_json::json!({
+        "type": "message",
+        "role": "developer",
+        "content": SMART_CONTEXT_INLINE_REFERENCE_PROTOCOL,
+    });
+    if input.last() != Some(&protocol) {
+        return false;
+    }
+    input.pop();
+    expanded == original
+}
+
 fn runtime_smart_context_expand_inline_references_in_value(
     value: &mut serde_json::Value,
     original_input: &[serde_json::Value],
@@ -218,15 +240,14 @@ pub(super) fn runtime_smart_context_critical_signal_self_check(
 pub(super) fn runtime_smart_context_regression_self_check(
     before: &[u8],
     after: &[u8],
-    quality_after: &[u8],
     before_count: &runtime_proxy_crate::SmartContextTokenCount,
     after_count: &runtime_proxy_crate::SmartContextTokenCount,
+    critical_signal_check: prodex_context::CriticalSignalSelfCheck,
     exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
     missing_rehydrate_refs: Vec<String>,
 ) -> runtime_proxy_crate::SmartContextRegressionSelfCheck {
     let before_text = String::from_utf8_lossy(before);
     let after_text = String::from_utf8_lossy(after);
-    let quality_after_text = String::from_utf8_lossy(quality_after);
     let token_count_source = if before_count.is_proven() && after_count.is_proven() {
         runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted
     } else {
@@ -243,12 +264,8 @@ pub(super) fn runtime_smart_context_regression_self_check(
             future_retrieval_overhead_tokens: 0,
             injected_protocol_overhead_tokens: 0,
             expected_recovery_overhead_tokens: 0,
-            before_critical_signal_count: prodex_context::count_critical_signals(&before_text)
-                .total(),
-            after_critical_signal_count: prodex_context::count_critical_signals(
-                &quality_after_text,
-            )
-            .total(),
+            before_critical_signal_count: critical_signal_check.before.total(),
+            after_critical_signal_count: critical_signal_check.after.total(),
             missing_rehydrate_refs,
             unresolved_rehydrate_refs_are_segment_local: false,
         },
@@ -368,5 +385,37 @@ mod tests {
             {"output": "different tool output".repeat(64)},
         ]});
         assert!(!runtime_smart_context_has_duplicate_input_text(&distinct));
+    }
+
+    #[test]
+    fn inline_reference_round_trip_requires_exact_restoration() {
+        let text = "same exact tool output".repeat(64);
+        let original = serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{"output": text.clone()}, {"output": text}],
+        });
+        let mut candidate = original.clone();
+        let mut stats = RuntimeSmartContextTransformStats::default();
+        runtime_smart_context_dedupe_input_text_within_request(&mut candidate, &mut stats);
+        assert!(runtime_smart_context_append_inline_reference_protocol(
+            &mut candidate,
+            &stats,
+        ));
+
+        let mut expanded =
+            runtime_smart_context_expand_inline_references(&original, &candidate).unwrap();
+        assert!(runtime_smart_context_inline_reference_round_trip_is_exact(
+            &original,
+            &mut expanded,
+        ));
+        assert_eq!(expanded, original);
+
+        let mut tampered =
+            runtime_smart_context_expand_inline_references(&original, &candidate).unwrap();
+        tampered["model"] = serde_json::json!("other-model");
+        assert!(!runtime_smart_context_inline_reference_round_trip_is_exact(
+            &original,
+            &mut tampered,
+        ));
     }
 }
