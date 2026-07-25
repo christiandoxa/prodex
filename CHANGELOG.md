@@ -2,15 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.348.0 - 2026-07-26
+
+### CLI
+
+- Restore prompt-free yolo launches (`b2de2cd`)
+
 ## 0.347.0 - 2026-07-25
 
 ### Docs
 
+- Refresh smart context evidence (`5657092`)
 - Record final hardening validation (`5b4b0e6`)
 - Consolidate hardening guidance (`da1b2ab`)
 
 ### Misc
 
+- Reuse exact round-trip validation (`36c818b`)
 - Close hardening validation regressions (`5cce0a3`)
 - Pin Windows Codex migration (`4eac31d`)
 - Publish Smart Context performance evidence (`04063d3`)
@@ -99,9 +107,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden response enforcement (`c675728`)
-
-## 0.336.0 - 2026-07-22
-
-### Misc
-
-- Harden provider launches and session recovery (`5d6a757`)
