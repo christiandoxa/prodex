@@ -440,7 +440,9 @@ fn with_runtime_smart_context_artifacts<R>(
     shared: &RuntimeRotationProxyShared,
     action: impl FnOnce(&mut RuntimeSmartContextArtifactStore) -> R,
 ) -> Option<R> {
-    with_runtime_smart_context_proxy_state(shared, |state| action(&mut state.artifacts))
+    with_runtime_smart_context_proxy_state(shared, |state| {
+        action(Arc::make_mut(&mut state.artifacts))
+    })
 }
 
 #[cfg(test)]
