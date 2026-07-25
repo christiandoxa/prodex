@@ -69,7 +69,7 @@ fn configure_ponytail_plugin_config(
     let ponytail_marketplace = ensure_child_table(marketplaces, MARKETPLACE_NAME);
     ponytail_marketplace.insert(
         "source_type".to_string(),
-        toml::Value::String("directory".to_string()),
+        toml::Value::String("local".to_string()),
     );
     ponytail_marketplace.insert(
         "source".to_string(),
@@ -141,4 +141,39 @@ fn copy_ponytail_dir(source: &Path, destination: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn ponytail_marketplace_migrates_legacy_directory_source_type() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let codex_home = std::env::temp_dir().join(format!(
+            "prodex-ponytail-config-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(
+            codex_home.join("config.toml"),
+            "[marketplaces.ponytail]\nsource_type = \"directory\"\n",
+        )
+        .unwrap();
+        let checkout = codex_home.join("ponytail");
+
+        configure_ponytail_plugin_config(&codex_home, &checkout, "1.2.3").unwrap();
+
+        let config = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+        let config: toml::Value = toml::from_str(&config).unwrap();
+        assert_eq!(
+            config["marketplaces"][MARKETPLACE_NAME]["source_type"].as_str(),
+            Some("local")
+        );
+        let _ = fs::remove_dir_all(codex_home);
+    }
 }
