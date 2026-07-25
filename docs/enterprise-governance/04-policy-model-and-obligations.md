@@ -6,8 +6,8 @@ The current implementation has policy snapshot, last-known-good, RBAC, request
 inspection, guardrail, and admission primitives. A single production
 `PolicyInput -> PolicyDecision` path and the obligation model below remain
 gaps. Detailed design is in
-[`04-classification-and-obligations.md`](04-classification-and-obligations.md)
-and [`07-policy-approval-and-store.md`](07-policy-approval-and-store.md).
+[`15-classification-contract-and-enforcement.md`](15-classification-contract-and-enforcement.md)
+and [`17-policy-authority-and-revision-store.md`](17-policy-authority-and-revision-store.md).
 
 ## Immutable input
 

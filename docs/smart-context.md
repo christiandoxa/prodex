@@ -1,69 +1,147 @@
 # Smart Context
 
-Smart Context keeps protocol and continuation metadata exact while allowing independent context payload segments to be rewritten, rehydrated, or left untouched according to a local safety envelope. Explicit exact mode remains full request pass-through.
+Smart Context is a conservative request rewrite inside the runtime proxy. It
+preserves protocol and continuation fields and returns the original bytes when
+a rewrite cannot be proved safe and token-positive.
 
-## Safety Model
+## Current Rewrite Contract
 
-- Control-plane fields stay exact: `previous_response_id`, turn state, session identifiers, function/tool-call IDs, ordering, protocol fields, and explicit exact-mode fields.
-- Payload segments are classified independently as protocol exact, continuation exact, critical exact, rehydratable exact, lossless transformable, condensable, or droppable duplicate.
-- Missing artifact references are segment-local failures. The dependent segment is preserved and recorded as unresolved; unrelated segments may still be optimized when validation passes.
-- Hash-backed rehydration requires valid content hashes and requested line ranges.
-- Validation checks JSON structure, continuation/tool integrity, mandatory references, critical-signal recall, nonempty mandatory payloads, duplicated appendices, and segment allocations before the rewritten request can be sent upstream.
-- Whole-request fallback is reserved for explicit exact mode and failures that can affect protocol, continuation, or global structural correctness.
+The active engine currently performs one production rewrite: exact duplicate
+text inside the same supported Responses request. The first occurrence stays
+inline. Later occurrences become versioned inline references, and a
+`developer` message explains deterministic local expansion. Validation expands
+those references and compares the result with the original request before
+commit.
 
-## Budgeting
+Prodex does not emit new persisted-artifact references. Existing legacy
+artifact references are accepted only when their content is durable, digest
+verified, and available in the active scope. A missing mandatory reference
+blocks the request before upstream; unsupported routes stay byte-identical.
 
-Budgeting is model-relative. Pressure is computed as:
+## Fast Pass-Through
 
-```text
-effective_used_tokens / max(1, context_window - output_reserve)
-```
+These paths return the borrowed/original body without serialization:
 
-Context-window selection is ordered as explicit launch configuration, versioned provider/model registry, observed runtime token accounting, then conservative fallback. Runtime telemetry records the pressure band, estimator confidence, usable window, and absolute safety floor so operators can distinguish low-confidence estimates from real context pressure.
+- Smart Context disabled;
+- explicit `x-prodex-smart-context: exact`;
+- canary-out;
+- unsupported route or content type;
+- body below the admission floor with no artifact reference;
+- unsupported tokenizer;
+- no-op, validation failure, or sub-threshold savings.
 
-## Rollout
+Shadow is sampled at 1% of eligible traffic. A sampled shadow request analyzes a
+disposable state snapshot, returns the original bytes, and commits nothing.
+Unsampled shadow requests decline before JSON parsing.
 
-- `PRODEX_SMART_CONTEXT_SHADOW=1` samples rollout eligibility but returns the original bytes without reading or mutating Smart Context state. Read-only analysis is not enabled yet.
-- `PRODEX_SMART_CONTEXT_CANARY_PERCENT=N` applies rewriting only for a deterministic percentage of requests. Canary-out requests pass through unchanged and log `rollout_canary_out`.
-- Explicit exact mode bypasses rollout and remains full pass-through.
+Active work is capped at 256 KiB for HTTP and 96 KiB for WebSocket. A release
+rewrite that reaches 100 ms returns the original bytes instead of committing;
+debug builds use 5 seconds because tokenizer execution is unoptimized. An
+oversized request containing a mandatory artifact reference still enters the
+fail-closed reference check rather than sending an unresolved reference
+upstream.
 
-## Telemetry
+Set `PRODEX_SMART_CONTEXT_CANARY_PERCENT=0` for an immediate pass-through kill
+switch. This setting changes only new pre-commit decisions.
 
-Smart Context runtime logs use structured fields and avoid source contents by default. Important fields include:
+## Plan, Validate, Commit
 
-- Size and token estimates: `body_bytes_before`, `body_bytes_after`, `estimated_tokens_before`, `estimated_tokens_after`, `body_bytes_saved`, `rewrite_ratio_percent`.
-- Budget and pressure: `model_context_window_tokens`, `model_context_window_source`, `observed_context_tokens`, `available_tokens`, `pressure_basis_points`, `pressure_band`, `estimator_confidence`, `effective_usable_context_tokens`, `absolute_safety_floor_tokens`, `budget_mode`, `policy_reasons`.
-- Transform counters: `artifacts_stored`, `tool_outputs_condensed`, `duplicate_texts`, `cross_turn_duplicate_texts`, `repeat_tool_output_refs`, `blob_outputs_condensed`, `rehydrated_refs`, `rehydration_token_cost`, `static_context_deltas`, `repo_state_facts`, `transformed_segment_categories`.
-- Candidate/repair counters: `candidate_count`, `selected_candidate_count`, `rejected_candidate_count`, `selected_candidate_utility_points`, `segment_rollback_count`, `full_request_fallback_count`, `artifact_hash_failures`.
-- Rollout: `rollout_mode`, `rollout_reason`, `rollout_canary_bucket`, `rollout_canary_percent`.
-- Quality proxies: `task_quality_upstream_context_errors`, `task_quality_previous_response_not_found`, `task_quality_invalid_tool_call_continuation`, `task_quality_missing_artifact_requests`, `task_quality_repeated_tool_call_count`, `task_quality_model_reread_requests`, `task_quality_corrective_user_messages`, `task_quality_test_or_build_failed_after_rewrite`, `task_quality_task_completed`, `task_quality_additional_turns_before_completion`, `task_quality_final_total_input_tokens`.
+For an eligible request Prodex:
 
-Learning buckets support route, model, profile, provider, context-window band, session-length band, task class, and transform category. Optional dimensions are enforced when present, so low-quality samples from a different window band or transform category do not relax unrelated traffic.
+1. parses the request once and reads the top-level model;
+2. snapshots the scoped engine state;
+3. builds a rewrite against the snapshot;
+4. serializes and tokenizer-counts the candidate;
+5. expands inline references and validates protocol fields, critical signals,
+   JSON shape, and the safety margin;
+6. returns the original bytes on any failure;
+7. commits the pending state only after all checks pass.
 
-## Deterministic Replay
+Exact, canary-out, shadow, rejected, and fallback requests have zero Smart
+Context state mutations. No lock is held while parsing, scanning, hashing,
+serializing, tokenizing, or doing file I/O.
 
-The deterministic corpus is checked in at:
+## Scope and Persistence
 
-```text
-crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json
-```
+`ContextScopeId` binds tenant/root, profile, provider endpoint, canonical
+workspace, and optional session. Persisted stores are scope-separated,
+AES-256-GCM-SIV encrypted, private-file protected, size bounded, retained for
+30 days, and subject to a 64 MiB global cap. Artifact identity is
+`sc2:<sha256>`; reads verify schema, scope, digest, byte length, and exact
+content.
 
-The corpus contains request inputs and invariants only. Output token counts, success flags, integrity scores, and latency values are rejected by the schema. The runner invokes the production Smart Context request path, executes exact and configured variants, and generates per-turn validation and timing results.
+Corrupt or wrong-scope stores are quarantined and reported as degraded. The
+process lock registry keeps weak entries and removes unused paths. Artifact
+recency uses a persisted order counter with digest tie-breaking, never a
+request ID.
 
-Run the strict report with:
+## Token Policy
+
+Known OpenAI model families use `tiktoken-rs` tokenizer counts over the exact
+serialized request, including the inline protocol. An applied rewrite must save
+more than `max(128 tokens, 3% of the original request)`. Unknown tokenizers and
+low-confidence estimates decline rewriting. Provider-observed usage,
+tokenizer-counted values, and estimates remain separately labeled.
+
+## Deterministic Evidence
+
+The inputs-only corpus is
+[smart_context_replay_corpus.json](../crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json).
+It contains 18 scenarios, including a 31-turn continuation, four context-window
+sizes, HTTP and WebSocket, exact/shadow/canary/active modes, process restart,
+concurrent isolated proxy instances, route rejection, missing artifacts,
+build/runtime failures, large diffs, repository navigation, changing
+instructions, corrective turns, binary-like output, and duplicate tool output.
+
+Run strict machine-readable evidence:
 
 ```bash
-PRODEX_GIT_COMMIT=$(git rev-parse HEAD) cargo run -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict
+npm run smart-context:replay
 ```
 
-The checked corpus currently provides the first executable slice: an HTTP request with repeated compiler output. It verifies exact byte identity, protocol-field preservation, critical-text recovery, positive conservative estimated savings, and absence of unresolved artifact references. It is not yet the required full multi-turn corpus, does not use a provider tokenizer, and does not support a public performance or quality claim.
+Regenerate or verify checked evidence:
 
-## Migration Note
+```bash
+npm run docs:smart-context-evidence
+npm run docs:smart-context-evidence:check
+```
 
-Existing Smart Context users do not need to change configuration. Artifact identifiers now emit `sc2:`/`psc2:` SHA-256 identities. Legacy `sc:`/`psc:` references remain readable during migration, and valid legacy stores are rewritten to schema version 2. Exact, canary-out, and shadow traffic never mutates Smart Context state.
+The current [raw report](generated/smart-context-replay-report.json) and
+[summary](generated/smart-context-replay-report.md) are generated from source
+commit `de60d09`. They record 59,713 exact input tokens, 41,277 optimized input
+tokens, and 18,436 net tokenizer-counted tokens across the whole deterministic
+corpus; all scenarios passed. These figures describe only the checked corpus.
+They are not a universal reduction target, latency claim, or live-model quality
+claim.
+
+Evidence levels are separate:
+
+1. deterministic correctness replay: required in CI;
+2. tokenizer/performance benchmarks: deterministic, machine-sensitive, and
+   reported with provenance;
+3. optional live-model evaluation: non-deterministic and never treated as CI
+   proof.
+
+The generated [performance report](generated/smart-context-performance-report.md)
+contains 50 raw samples per exact, canary-out, disabled, rejected, shadow,
+active, and rehydration case at 4 KiB, 64 KiB, and the 240 KiB HTTP near-limit
+where applicable. It is machine-specific and is not live-model evidence.
+
+## Migration
+
+New identities use `sc2:`/`psc2:` SHA-256. Scoped schema versions 1 and 2
+are validated and rewritten as schema 3 on the next durable save. Legacy
+`sc:` references remain read-only compatibility inputs. A root-level
+unscoped store cannot prove its security boundary, so Prodex quarantines it
+instead of importing it silently.
+
+See [0.346 migration and rollback](migrations/0.346-optional-tools.md).
 
 ## Remaining Risks
 
-- Replay coverage is incomplete and token counts are explicitly low-confidence estimates. No live-model quality claim is made.
-- Optional embeddings are not used by default. Candidate selection remains deterministic, local, and metadata-driven.
-- Quality proxy fields are conservative and privacy-safe; they can flag risk and tighten policy, but they are not a substitute for task-specific integration tests.
+- Deterministic fixtures prove request invariants, not task quality from a live
+  model.
+- Allocation/request, queue-wait, and per-scope lock-wait distributions are not
+  captured by the current benchmark; no no-regression claim is made for them.
+- Persisted-artifact insertion is retained for compatibility and rehydration,
+  but active rewrites intentionally emit only self-contained inline references.

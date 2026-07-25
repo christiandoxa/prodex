@@ -10,7 +10,7 @@ root bearer compatibility identity. Native OIDC/workload JWT validation,
 Rustls client-certificate verification, and JWT certificate binding are
 implemented; managed IdP/PKI rotation and deployed multi-replica validation
 remain environment acceptance work.
-[`10-unified-gateway-and-identity.md`](10-unified-gateway-and-identity.md).
+[`19-unified-gateway-and-identity.md`](19-unified-gateway-and-identity.md).
 
 ## Entry sequence
 

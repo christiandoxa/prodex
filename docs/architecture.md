@@ -21,6 +21,16 @@ Dedicated enterprise flows enter through `prodex-gateway` or `prodex-control-pla
 the gateway/control-plane adapter crates into `prodex-application` and backend-neutral
 `prodex-storage` contracts. Pure policy and identity decisions remain in `prodex-domain`.
 
+Dependency direction is inward:
+
+- domain types do not depend on HTTP, processes, providers, or concrete storage;
+- application use cases depend on ports, not concrete adapters;
+- provider and storage adapters accept validated plans and point toward those ports;
+- `prodex-app` and the dedicated binaries compose concrete adapters but must not
+  duplicate authentication, authorization, admission, accounting, or routing policy;
+- shared DTOs move to an existing inward crate only when multiple real consumers need them;
+- no focused crate may depend back on `prodex-app`.
+
 Key crates and files:
 
 - `prodex-cli`: clap argument model, help text, and default `prodex <args>` to `prodex run <args>` rewrite.

@@ -1,10 +1,12 @@
 # `prodex-app` Dependency Inventory
 
 Baseline: commit `c635d485cf750637512bfacb4e1cefc854ed1bef`, 90 direct normal
-dependencies. `cargo machete --with-metadata --skip-target-dir
-crates/prodex-app` reported no unused dependency. This inventory records why
-the composition crate currently owns each edge; later slices must update the
-table when an implementation moves behind a narrower crate.
+dependencies. Current: 89 direct normal dependencies. Caveman asset ownership
+was replaced by the neutral optional-tool boundary; payload encryption and
+zstd log decoding moved behind `prodex-secret-store` and `prodex-runtime-log`.
+`cargo machete --with-metadata --skip-target-dir crates/prodex-app` reports no
+unused dependency. This inventory records why the composition crate owns each
+remaining edge.
 
 | Dependency | Current app-owned reason |
 | --- | --- |
@@ -30,7 +32,6 @@ table when an implementation moves behind a narrower crate.
 | `prodex-authn` | Wires gateway/control-plane authentication adapters. |
 | `prodex-authz` | Wires gateway/control-plane authorization adapters. |
 | `prodex-bench-support` | Exposes optional production-shaped benchmark fixtures. |
-| `prodex-caveman-assets` | Prepares embedded Caveman/Super overlays; scheduled for deletion. |
 | `prodex-cli` | Owns parsed commands, launch arguments, and help contracts. |
 | `prodex-codex-config` | Reads Codex provider/model/profile configuration. |
 | `prodex-config` | Loads typed enterprise deployment configuration. |
@@ -44,6 +45,7 @@ table when an implementation moves behind a narrower crate.
 | `prodex-housekeeping` | Implements cleanup and duplicate detection commands. |
 | `prodex-mcp-stdio` | Adapts Prodex MCP stdio command transport. |
 | `prodex-observability` | Wires metrics, traces, logs, and export sinks. |
+| `prodex-optional-tools` | Resolves and activates validated external tools through typed launch plans. |
 | `prodex-presidio` | Starts, checks, and applies optional Presidio redaction. |
 | `prodex-profile-export` | Implements encrypted profile import/export orchestration. |
 | `prodex-profile-identity` | Parses account identity and normalizes profile names. |
@@ -97,7 +99,6 @@ table when an implementation moves behind a narrower crate.
 | `tungstenite` | Handles app-owned upstream WebSocket integration. |
 | `uuid` | Creates and validates request, resource, and correlation identifiers. |
 | `zeroize` | Clears app-owned secret buffers. |
-| `zstd` | Compresses bounded persisted/runtime payloads. |
 
 The table describes current ownership, not the desired dependency direction.
 An edge should disappear from `prodex-app` when its final implementation caller

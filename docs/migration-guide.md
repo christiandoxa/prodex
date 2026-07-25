@@ -196,8 +196,9 @@ shipping the contract step.
    live-credential fingerprint; repositories, pools, and Redis executors are
    created only at startup.
 
-Implementation and verification details are recorded in
-`docs/adr/1065-atomic-gateway-secret-rotation.md`.
+Implementation and verification details are covered by the projected-secret
+tests named above and the credential refresh implementation in
+`crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_credentials.rs`.
 
 ## Phase 8: Cutover and Compatibility
 

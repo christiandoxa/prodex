@@ -15,26 +15,18 @@ affinity, and accounting correctness override performance results.
 
 ## Current Repository Evidence
 
-Observed on 2026-07-13:
+Verified hardening evidence from 2026-07-25 is indexed in
+`docs/hardening/results.md`, including controlled build/startup samples and the
+generated Smart Context replay and performance reports. `package-lock.json` is
+present and `npm ci` is part of the reproducible workflow. The repository also
+keeps the mock-upstream load/stress harnesses, storage proof scripts,
+backup/restore drill, boundary guards, and focused identity/storage/security
+tests.
 
-- formatting and locked workspace Clippy with warnings denied passed at the
-  clean baseline recorded in `implementation-ledger.md`;
-- the full locked Rust workspace baseline reached two concurrent cache-stat
-  assertion failures in `prodex-runtime-broker-log`; the affected crate passed
-  when run serially, so the full workspace is not recorded as a clean pass;
-- `npm ci` is blocked by the intentionally absent `package-lock.json`;
-- existing documentation lint, crate-boundary, and deployment-security guards
-  passed at baseline;
-- the repository has one Criterion hot-path benchmark, a mock-upstream runtime
-  load harness, load/stress scripts, storage proof scripts, a backup/restore
-  drill, numerous boundary guards, and focused identity/storage/security tests;
-- `docs/refactor/03-performance-baseline.md` and
-  `docs/refactor/04-performance-results.md` contain five-sample historical
-  evidence for a prior refactor on a documented host and commits.
-
-That historical performance evidence does not measure the new enterprise
-inspection, PDP, approval, governed routing, session, SIEM, Vault, or bank-mode
-paths. A new accepted before/after baseline is required for this program.
+Those measurements do not cover every enterprise inspection, PDP, approval,
+governed routing, session, SIEM, Vault, or bank-mode path. Each such program
+still requires its own accepted before/after baseline; unrelated Smart Context
+or CLI measurements cannot be reused as proof.
 
 ## Required Test Matrix
 
