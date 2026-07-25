@@ -3,8 +3,8 @@ use super::token_calibration::RuntimeSmartContextTokenCalibrationObservation;
 use crate::runtime_state_shared::RuntimeSmartContextArtifactStore;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextPrepareError {
@@ -83,7 +83,7 @@ pub(crate) struct RuntimeSmartContextProxyState {
     pub(super) enabled: bool,
     pub(super) degraded_reason: Option<String>,
     pub(super) model_context_window_tokens: Option<u64>,
-    pub(super) artifacts: RuntimeSmartContextArtifactStore,
+    pub(super) artifacts: Arc<RuntimeSmartContextArtifactStore>,
     pub(super) artifact_path: Option<PathBuf>,
     pub(super) last_token_usage: Option<runtime_proxy_crate::RuntimeTokenUsage>,
     pub(super) token_usage_history: Vec<runtime_proxy_crate::RuntimeTokenUsage>,

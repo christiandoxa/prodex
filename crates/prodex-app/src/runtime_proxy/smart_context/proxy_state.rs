@@ -244,7 +244,7 @@ fn runtime_smart_context_proxy_state_from_path(
         enabled: enabled && degraded_reason.is_none(),
         degraded_reason,
         model_context_window_tokens,
-        artifacts,
+        artifacts: std::sync::Arc::new(artifacts),
         artifact_path,
         last_token_usage: token_usage_history.last().copied(),
         token_usage_history,

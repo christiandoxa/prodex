@@ -1,6 +1,17 @@
 use super::*;
 
 #[test]
+fn smart_context_state_snapshots_share_artifact_content() {
+    let shared = smart_context_test_shared("snapshot-artifact-arc");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+
+    let (_, first) = runtime_smart_context_proxy_state_snapshot(&shared).unwrap();
+    let (_, second) = runtime_smart_context_proxy_state_snapshot(&shared).unwrap();
+
+    assert!(Arc::ptr_eq(&first.artifacts, &second.artifacts));
+}
+
+#[test]
 fn smart_context_prepare_exact_returns_original_bytes_without_state_mutation() {
     let shared = smart_context_test_shared("prepare-minify-exact");
     register_runtime_smart_context_proxy_state(&shared, true, None, None);
