@@ -27,7 +27,7 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     );
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("psc art psc2:"));
     assert!(output.contains("b="));
     assert!(output.contains(&format!("b={}", original_output.len())));
     assert!(!output.contains("prodex-artifact:"));
@@ -78,10 +78,10 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     runtime_smart_context_append_artifact_manifest_if_useful(&mut value, &store, &stats);
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("psc art psc2:"));
     assert!(output.contains(SMART_CONTEXT_LABEL_SUMMARY));
     assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
-    assert!(output.contains("psc:"));
+    assert!(output.contains("psc2:"));
     assert!(output.contains("#L"));
     assert!(output.contains("error[E0425]"));
     assert!(output.contains("runtime_proxy::progressive_output"));
@@ -106,7 +106,7 @@ fn smart_context_progressive_summary_replaces_exact_duplicate_chunks_with_refs()
         .join("\n");
     let original_output = [chunk.as_str(), chunk.as_str(), chunk.as_str()].join("\n");
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(7, &original_output).unwrap();
+    let artifact = store.insert_text(&original_output).unwrap();
     let summary = [chunk.as_str(), chunk.as_str()].join("\n");
 
     let deduped = runtime_smart_context_dedupe_progressive_summary_chunks(

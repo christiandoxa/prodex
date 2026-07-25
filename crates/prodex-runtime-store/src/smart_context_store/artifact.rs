@@ -1,6 +1,19 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub fn runtime_smart_context_artifact_content_hash(content: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(content);
+    let mut hash = String::with_capacity("sha256:".len() + digest.len() * 2);
+    hash.push_str("sha256:");
+    for byte in digest {
+        hash.push(char::from(HEX[usize::from(byte >> 4)]));
+        hash.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    hash
+}
+
+pub(super) fn runtime_smart_context_legacy_artifact_content_hash(content: &[u8]) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in content {
         hash ^= u64::from(*byte);

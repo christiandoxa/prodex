@@ -8,6 +8,7 @@ use super::{
     runtime_smart_context_text_contains_any, runtime_smart_context_tool_call_id,
     runtime_smart_context_tool_call_metadata_by_call_id,
 };
+use std::collections::BTreeSet;
 mod facts;
 mod parser;
 mod rewrite;
@@ -17,10 +18,28 @@ use facts::*;
 use parser::*;
 use rewrite::*;
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
     value: &mut serde_json::Value,
     state: &mut RuntimeSmartContextProxyState,
-    request_id: u64,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    allow_rewrite: bool,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> bool {
+    runtime_smart_context_apply_repo_state_micro_cache_with_durable_artifacts(
+        value,
+        state,
+        None,
+        exactness_guard,
+        allow_rewrite,
+        stats,
+    )
+}
+
+pub(super) fn runtime_smart_context_apply_repo_state_micro_cache_with_durable_artifacts(
+    value: &mut serde_json::Value,
+    state: &mut RuntimeSmartContextProxyState,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
     exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
     allow_rewrite: bool,
     stats: &mut RuntimeSmartContextTransformStats,
@@ -65,7 +84,7 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
                     cache_before: &cache_before,
                     cache_after: &mut cache_after,
                     store: &mut state.artifacts,
-                    request_id,
+                    durable_artifact_ids,
                     allow_rewrite,
                     stats,
                 },
@@ -107,7 +126,7 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
                             cache_before: &cache_before,
                             cache_after: &mut cache_after,
                             store: &mut state.artifacts,
-                            request_id,
+                            durable_artifact_ids,
                             allow_rewrite,
                             stats,
                         },
@@ -132,7 +151,7 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
                         cache_before: &cache_before,
                         cache_after: &mut cache_after,
                         store: &mut state.artifacts,
-                        request_id,
+                        durable_artifact_ids,
                         allow_rewrite,
                         stats,
                     },

@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 
 use crate::{
     RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_QUEUE, RuntimeRotationProxyShared,
-    RuntimeSmartContextArtifactStore, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_persistence_enabled, runtime_proxy_structured_log_message,
+    RuntimeSmartContextArtifactStore, mark_runtime_smart_context_artifacts_durable,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_persistence_enabled,
+    runtime_proxy_structured_log_message,
 };
 
 use super::super::worker_spawn::spawn_runtime_background_worker_or_log;
@@ -40,17 +41,28 @@ pub(crate) fn schedule_runtime_smart_context_artifact_save(
 
     if cfg!(test) {
         match store.save_merged_to_path(&path) {
-            Ok(merged) => runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "smart_context_artifact_save_ok",
-                    [
-                        runtime_proxy_log_field("reason", reason),
-                        runtime_proxy_log_field("lag_ms", "0"),
-                        runtime_proxy_log_field("artifacts", merged.artifact_count().to_string()),
-                    ],
-                ),
-            ),
+            Ok(merged) => {
+                mark_runtime_smart_context_artifacts_durable(
+                    &shared.smart_context_engine,
+                    &path,
+                    &store,
+                    &merged,
+                );
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "smart_context_artifact_save_ok",
+                        [
+                            runtime_proxy_log_field("reason", reason),
+                            runtime_proxy_log_field("lag_ms", "0"),
+                            runtime_proxy_log_field(
+                                "artifacts",
+                                merged.artifact_count().to_string(),
+                            ),
+                        ],
+                    ),
+                )
+            }
             Err(err) => runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -79,6 +91,7 @@ pub(crate) fn schedule_runtime_smart_context_artifact_save(
         RuntimeSmartContextArtifactSaveJob {
             path,
             store,
+            smart_context_engine: Arc::clone(&shared.smart_context_engine),
             log_path: shared.log_path.clone(),
             reason: reason.to_string(),
             queued_at,

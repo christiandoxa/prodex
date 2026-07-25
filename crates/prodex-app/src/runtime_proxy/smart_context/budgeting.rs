@@ -155,7 +155,7 @@ pub(super) fn runtime_smart_context_budget_inputs(
     shared: &RuntimeRotationProxyShared,
     bucket_key: &runtime_proxy_crate::SmartContextTokenCalibrationBucketKey,
 ) -> RuntimeSmartContextBudgetInputs {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+    let Ok(current) = shared.smart_context_engine.state.lock() else {
         return (
             Vec::new(),
             Vec::new(),
@@ -165,18 +165,8 @@ pub(super) fn runtime_smart_context_budget_inputs(
             Vec::new(),
         );
     };
-    let Ok(states) = states.lock() else {
-        return (
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            Default::default(),
-            Vec::new(),
-        );
-    };
-    states
-        .get(&shared.log_path)
+    current
+        .as_ref()
         .map(|state| {
             let calibration_samples = state
                 .token_calibration_history

@@ -1,19 +1,18 @@
 use super::{
-    RUNTIME_SMART_CONTEXT_PROXY_STATES, RuntimeRotationProxyShared,
-    RuntimeSmartContextArtifactStore, RuntimeSmartContextProxyState,
-    RuntimeSmartContextRepoStateFacts, RuntimeSmartContextRewriteSafetyRecord,
-    RuntimeSmartContextTokenCalibrationObservation, RuntimeTokenUsage,
-    SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT, SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS,
-    SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT, SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT,
+    RuntimeRotationProxyShared, RuntimeSmartContextArtifactStore, RuntimeSmartContextEngine,
+    RuntimeSmartContextProxyState, RuntimeSmartContextRepoStateFacts,
+    RuntimeSmartContextRewriteSafetyRecord, RuntimeSmartContextTokenCalibrationObservation,
+    RuntimeTokenUsage, SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT,
+    SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS, SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT,
+    SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT,
     runtime_smart_context_artifact_alias_state_from_persisted,
     runtime_smart_context_load_token_calibration_for_artifact_path,
     runtime_smart_context_static_section_fingerprint_state_from_persisted,
     runtime_smart_context_token_calibration_path, runtime_smart_context_token_calibration_snapshot,
     schedule_runtime_smart_context_token_calibration_save,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 pub(crate) fn runtime_smart_context_unix_secs_now() -> u64 {
     std::time::SystemTime::now()
@@ -31,20 +30,17 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rewrite_saf
 }
 
 pub(crate) fn register_runtime_smart_context_proxy_state(
-    log_path: &Path,
+    shared: &RuntimeRotationProxyShared,
     enabled: bool,
     model_context_window_tokens: Option<u64>,
     artifact_path: Option<PathBuf>,
 ) {
-    let states = RUNTIME_SMART_CONTEXT_PROXY_STATES.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let Ok(mut states) = states.lock() else {
-        return;
-    };
     let artifacts = artifact_path
         .as_deref()
         .filter(|_| enabled)
         .map(RuntimeSmartContextArtifactStore::load_from_path)
         .unwrap_or_default();
+    let durable_artifact_ids = artifacts.artifact_ids();
     let calibration = artifact_path
         .as_deref()
         .filter(|_| enabled)
@@ -88,46 +84,82 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
         runtime_smart_context_static_section_fingerprint_state_from_persisted(
             calibration.static_section_fingerprints,
         );
-    states.insert(
-        log_path.to_path_buf(),
-        RuntimeSmartContextProxyState {
-            enabled,
-            model_context_window_tokens,
-            artifacts,
-            artifact_path,
-            last_token_usage: token_usage_history.last().copied(),
-            token_usage_history,
-            token_calibration_history,
-            rewrite_telemetry_history: Vec::new(),
-            rewrite_safety_history,
-            last_static_context_fingerprints: Vec::new(),
-            last_static_context_prompt_cache_hash: None,
-            last_artifact_manifest_ids: BTreeSet::new(),
-            last_artifact_manifest_emitted_at: None,
-            artifact_aliases,
-            next_artifact_alias_index,
-            static_section_fingerprints,
-            repo_state_facts: RuntimeSmartContextRepoStateFacts::default(),
-        },
-    );
+    let state = RuntimeSmartContextProxyState {
+        generation: 0,
+        enabled,
+        model_context_window_tokens,
+        artifacts,
+        durable_artifact_ids,
+        artifact_path,
+        last_token_usage: token_usage_history.last().copied(),
+        token_usage_history,
+        token_calibration_history,
+        rewrite_telemetry_history: Vec::new(),
+        rewrite_safety_history,
+        last_static_context_fingerprints: Vec::new(),
+        last_static_context_prompt_cache_hash: None,
+        last_artifact_manifest_ids: BTreeSet::new(),
+        last_artifact_manifest_emitted_at: None,
+        artifact_aliases,
+        next_artifact_alias_index,
+        static_section_fingerprints,
+        repo_state_facts: RuntimeSmartContextRepoStateFacts::default(),
+    };
+    if let Ok(mut current) = shared.smart_context_engine.state.lock() {
+        *current = Some(state);
+    }
 }
 
-pub(crate) fn unregister_runtime_smart_context_proxy_state(log_path: &Path) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return;
-    };
-    let Ok(mut states) = states.lock() else {
-        return;
-    };
-    states.remove(log_path);
+pub(super) fn runtime_smart_context_proxy_state_snapshot(
+    shared: &RuntimeRotationProxyShared,
+) -> Option<(u64, RuntimeSmartContextProxyState)> {
+    let state = shared.smart_context_engine.state.lock().ok()?;
+    let state = state.as_ref()?;
+    state.enabled.then(|| (state.generation, state.clone()))
 }
 
-#[cfg(test)]
-pub(crate) fn runtime_smart_context_proxy_state_registered(log_path: &Path) -> bool {
-    RUNTIME_SMART_CONTEXT_PROXY_STATES
-        .get()
-        .and_then(|states| states.lock().ok())
-        .is_some_and(|states| states.contains_key(log_path))
+pub(super) fn commit_runtime_smart_context_proxy_state(
+    shared: &RuntimeRotationProxyShared,
+    expected_generation: u64,
+    mut planned: RuntimeSmartContextProxyState,
+) -> bool {
+    let Ok(mut state) = shared.smart_context_engine.state.lock() else {
+        return false;
+    };
+    let Some(current) = state.as_mut() else {
+        return false;
+    };
+    if !current.enabled || current.generation != expected_generation {
+        return false;
+    }
+    planned.generation = expected_generation.saturating_add(1);
+    *current = planned;
+    true
+}
+
+pub(crate) fn mark_runtime_smart_context_artifacts_durable(
+    engine: &RuntimeSmartContextEngine,
+    artifact_path: &Path,
+    submitted: &RuntimeSmartContextArtifactStore,
+    persisted: &RuntimeSmartContextArtifactStore,
+) {
+    let Ok(mut current) = engine.state.lock() else {
+        return;
+    };
+    let Some(state) = current.as_mut() else {
+        return;
+    };
+    if state.artifact_path.as_deref() != Some(artifact_path) {
+        return;
+    }
+    let ids = state
+        .artifacts
+        .apply_persisted_artifact_ordering(submitted, persisted);
+    if ids.is_empty() {
+        return;
+    }
+    state.durable_artifact_ids.extend(ids);
+    state.generation = state.generation.saturating_add(1);
 }
 
 #[cfg(test)]
@@ -143,16 +175,14 @@ pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
     usage: RuntimeTokenUsage,
     bucket_key: Option<runtime_proxy_crate::SmartContextTokenCalibrationBucketKey>,
 ) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return;
-    };
-    let Ok(mut states) = states.lock() else {
+    let Ok(mut current) = shared.smart_context_engine.state.lock() else {
         return;
     };
     let mut save_job = None;
-    if let Some(state) = states.get_mut(&shared.log_path)
+    if let Some(state) = current.as_mut()
         && state.enabled
     {
+        state.generation = state.generation.saturating_add(1);
         state.last_token_usage = Some(usage);
         state.token_usage_history.push(usage);
         if state.token_usage_history.len() > SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT {
@@ -182,7 +212,7 @@ pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
             )
         });
     }
-    drop(states);
+    drop(current);
     if let Some((path, snapshot)) = save_job {
         schedule_runtime_smart_context_token_calibration_save(
             shared,

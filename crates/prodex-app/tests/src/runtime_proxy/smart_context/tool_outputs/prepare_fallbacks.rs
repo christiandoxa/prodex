@@ -3,7 +3,7 @@ use super::super::*;
 #[test]
 fn smart_context_compact_session_body_does_not_panic() {
     let shared = smart_context_test_shared("compact-session-body");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let tool_output = (0..1600)
         .map(|index| {
@@ -59,7 +59,7 @@ fn smart_context_compact_session_body_does_not_panic() {
 fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
     let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
     let shared = smart_context_test_shared("compact-explicit-fallback");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let body = serde_json::json!({
         "model": "gpt-5.5",
@@ -107,7 +107,7 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
 fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
     let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE", "1");
     let shared = smart_context_test_shared("websocket-panic-fallback");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let request_text = serde_json::json!({
         "type": "response.create",
@@ -169,7 +169,7 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
 #[test]
 fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown() {
     let shared = smart_context_test_shared("websocket-unicode-static-context");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let request_text = serde_json::json!({
         "type": "response.create",

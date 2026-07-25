@@ -1,7 +1,8 @@
 #[test]
 fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     let shared = smart_context_test_shared("rewrite-telemetry");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
         shared: &shared,
         body: br#"{"input":"test"}"#,
@@ -23,15 +24,29 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
             route_kind: RuntimeRouteKind::Responses,
             transport: RuntimeSmartContextTransport::Http,
             tier: "minimal",
-            decision: "self_check_passthrough",
+            decision: "rewritten",
             reasons: "-",
             body_bytes_before: 400 + index,
             body_bytes_after: 300,
             stats: RuntimeSmartContextTransformStats::default(),
             budget: &budget,
-            self_check: "critical_signal_loss",
+            self_check: "ok_saved",
         });
     }
+    runtime_smart_context_log(RuntimeSmartContextLogInput {
+        request_id: 99,
+        shared: &shared,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        tier: "minimal",
+        decision: "self_check_passthrough",
+        reasons: "-",
+        body_bytes_before: 999,
+        body_bytes_after: 999,
+        stats: RuntimeSmartContextTransformStats::default(),
+        budget: &budget,
+        self_check: "critical_signal_loss",
+    });
 
     with_runtime_smart_context_proxy_state(&shared, |state| {
         assert_eq!(
@@ -47,12 +62,9 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
                 last.body_bytes_before
             )
         );
-        assert_eq!(last.rewrite_kind, "self_check_passthrough");
-        assert_eq!(last.status, "critical_signal_loss");
-        assert_eq!(
-            last.fallback_reason.as_deref(),
-            Some("critical_signal_loss")
-        );
+        assert_eq!(last.rewrite_kind, "rewritten");
+        assert_eq!(last.status, "ok_saved");
+        assert_eq!(last.fallback_reason, None);
         assert_eq!(last.pressure_band, "low");
         assert_eq!(last.estimator_confidence, "medium");
         assert_eq!(last.effective_usable_context_tokens, Some(27_904));
@@ -63,6 +75,7 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
 
     let log_text = std::fs::read_to_string(&shared.log_path).unwrap();
     assert!(log_text.contains("estimated_tokens_before="));
+    assert!(log_text.contains("rewrite_kind=rewritten"));
     assert!(log_text.contains("rewrite_kind=self_check_passthrough"));
     assert!(log_text.contains("fallback_reason=critical_signal_loss"));
     assert!(log_text.contains("task_quality_model_reread_requests=0"));
@@ -147,7 +160,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
 fn smart_context_cross_turn_duplicate_uses_artifact_plan_and_exact_guard() {
     let repeated = "cross turn blob ".repeat(120);
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &repeated).unwrap();
+    let artifact = store.insert_text(&repeated).unwrap();
     let mut value = serde_json::json!({
         "input": [{"type": "message", "content": repeated}]
     });
@@ -202,7 +215,7 @@ fn smart_context_cross_turn_duplicate_uses_artifact_plan_and_exact_guard() {
 fn smart_context_auto_rehydrate_plan_defers_over_budget_refs() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, &"large artifact ".repeat(400))
+        .insert_text(&"large artifact ".repeat(400))
         .unwrap();
     let mut value = serde_json::json!({
         "input": [{"type": "message", "content": format!("need prodex-artifact:{}", artifact.id)}]
@@ -233,7 +246,8 @@ fn smart_context_auto_rehydrate_plan_defers_over_budget_refs() {
 #[test]
 fn smart_context_static_context_fingerprint_drives_exact_policy_on_real_change() {
     let shared = smart_context_test_shared("static-context");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let first = serde_json::json!({
         "instructions": "Generated at: 2026-05-04T01:02:03Z\nKeep affinity\n"
     });

@@ -124,7 +124,7 @@ fn static_context_prompt_cache_fingerprint_is_input_order_stable() {
     assert_eq!(left, right);
     assert_eq!(left.items[0].id, "AGENTS.md");
     assert_eq!(left.items[1].id, "README.md");
-    assert!(left.content_hash.starts_with("scpc:"));
+    assert!(left.content_hash.starts_with("scpc2:"));
 }
 
 #[test]

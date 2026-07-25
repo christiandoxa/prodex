@@ -14,6 +14,7 @@ fn test_runtime_probe_refresh_shared() -> RuntimeRotationProxyShared {
     let root =
         std::env::temp_dir().join(format!("prodex-probe-refresh-unit-{}", std::process::id()));
     RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,

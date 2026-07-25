@@ -9,6 +9,7 @@ use crate::runtime_state_shared::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,11 +157,13 @@ pub(super) struct RuntimeSmartContextArtifactIndexes<'a> {
     pub(super) chunk_index: Option<&'a RuntimeSmartContextArtifactChunkIndex>,
 }
 
-#[derive(Debug, Default)]
-pub(super) struct RuntimeSmartContextProxyState {
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RuntimeSmartContextProxyState {
+    pub(super) generation: u64,
     pub(super) enabled: bool,
     pub(super) model_context_window_tokens: Option<u64>,
     pub(super) artifacts: RuntimeSmartContextArtifactStore,
+    pub(super) durable_artifact_ids: BTreeSet<String>,
     pub(super) artifact_path: Option<PathBuf>,
     pub(super) last_token_usage: Option<runtime_proxy_crate::RuntimeTokenUsage>,
     pub(super) token_usage_history: Vec<runtime_proxy_crate::RuntimeTokenUsage>,
@@ -176,6 +179,11 @@ pub(super) struct RuntimeSmartContextProxyState {
     pub(super) static_section_fingerprints:
         BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint>,
     pub(super) repo_state_facts: RuntimeSmartContextRepoStateFacts,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct RuntimeSmartContextEngine {
+    pub(super) state: Mutex<Option<RuntimeSmartContextProxyState>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

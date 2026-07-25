@@ -35,10 +35,31 @@ pub(in crate::runtime_proxy::smart_context) use dedupe::runtime_smart_context_de
 use diff::*;
 pub(in crate::runtime_proxy::smart_context) use metadata::*;
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_condense_tool_outputs(
     value: &mut serde_json::Value,
     store: &mut RuntimeSmartContextArtifactStore,
-    request_id: u64,
+    _request_id: u64,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    inline_limit: usize,
+    intent_signals: &RuntimeSmartContextIntentSignals,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    runtime_smart_context_condense_tool_outputs_with_durable_artifacts(
+        value,
+        store,
+        None,
+        tier,
+        inline_limit,
+        intent_signals,
+        stats,
+    );
+}
+
+pub(super) fn runtime_smart_context_condense_tool_outputs_with_durable_artifacts(
+    value: &mut serde_json::Value,
+    store: &mut RuntimeSmartContextArtifactStore,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
     inline_limit: usize,
     intent_signals: &RuntimeSmartContextIntentSignals,
@@ -78,9 +99,21 @@ pub(super) fn runtime_smart_context_condense_tool_outputs(
                 continue;
             }
             let existing_artifact = store.artifact_ref_for_exact_text(&output);
+            if let Some(durable_artifact_ids) = durable_artifact_ids {
+                match existing_artifact.as_ref() {
+                    Some(artifact) if durable_artifact_ids.contains(&artifact.id) => {}
+                    Some(_) => continue,
+                    None => {
+                        if store.insert_text(&output).is_some() {
+                            stats.artifacts_stored = stats.artifacts_stored.saturating_add(1);
+                        }
+                        continue;
+                    }
+                }
+            }
             let Some(artifact) = existing_artifact
                 .clone()
-                .or_else(|| store.insert_text(request_id, &output))
+                .or_else(|| store.insert_text(&output))
             else {
                 continue;
             };
@@ -122,10 +155,29 @@ pub(super) fn runtime_smart_context_condense_tool_outputs(
     }
 }
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_condense_historical_tool_call_arguments(
     value: &mut serde_json::Value,
     store: &mut RuntimeSmartContextArtifactStore,
-    request_id: u64,
+    _request_id: u64,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    inline_limit: usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    runtime_smart_context_condense_historical_tool_call_arguments_with_durable_artifacts(
+        value,
+        store,
+        None,
+        tier,
+        inline_limit,
+        stats,
+    );
+}
+
+pub(super) fn runtime_smart_context_condense_historical_tool_call_arguments_with_durable_artifacts(
+    value: &mut serde_json::Value,
+    store: &mut RuntimeSmartContextArtifactStore,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
     inline_limit: usize,
     stats: &mut RuntimeSmartContextTransformStats,
@@ -186,9 +238,21 @@ pub(super) fn runtime_smart_context_condense_historical_tool_call_arguments(
                 continue;
             }
             let existing_artifact = store.artifact_ref_for_exact_text(&arguments_text);
+            if let Some(durable_artifact_ids) = durable_artifact_ids {
+                match existing_artifact.as_ref() {
+                    Some(artifact) if durable_artifact_ids.contains(&artifact.id) => {}
+                    Some(_) => continue,
+                    None => {
+                        if store.insert_text(&arguments_text).is_some() {
+                            stats.artifacts_stored = stats.artifacts_stored.saturating_add(1);
+                        }
+                        continue;
+                    }
+                }
+            }
             let Some(artifact) = existing_artifact
                 .clone()
-                .or_else(|| store.insert_text(request_id, &arguments_text))
+                .or_else(|| store.insert_text(&arguments_text))
             else {
                 continue;
             };

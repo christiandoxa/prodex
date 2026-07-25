@@ -166,29 +166,38 @@ pub(crate) fn runtime_smart_context_artifact_save_worker_loop(
             let RuntimeSmartContextArtifactSaveJob {
                 path,
                 store,
+                smart_context_engine,
                 log_path,
                 reason,
                 queued_at,
                 ready_at: _,
             } = job;
             match store.save_merged_to_path(&path) {
-                Ok(merged) => runtime_proxy_log_to_path(
-                    &log_path,
-                    &runtime_proxy_structured_log_message(
-                        "smart_context_artifact_save_ok",
-                        [
-                            runtime_proxy_log_field("reason", reason.as_str()),
-                            runtime_proxy_log_field(
-                                "lag_ms",
-                                queued_at.elapsed().as_millis().to_string(),
-                            ),
-                            runtime_proxy_log_field(
-                                "artifacts",
-                                merged.artifact_count().to_string(),
-                            ),
-                        ],
-                    ),
-                ),
+                Ok(merged) => {
+                    crate::mark_runtime_smart_context_artifacts_durable(
+                        &smart_context_engine,
+                        &path,
+                        &store,
+                        &merged,
+                    );
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        &runtime_proxy_structured_log_message(
+                            "smart_context_artifact_save_ok",
+                            [
+                                runtime_proxy_log_field("reason", reason.as_str()),
+                                runtime_proxy_log_field(
+                                    "lag_ms",
+                                    queued_at.elapsed().as_millis().to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "artifacts",
+                                    merged.artifact_count().to_string(),
+                                ),
+                            ],
+                        ),
+                    )
+                }
                 Err(err) => runtime_proxy_log_to_path(
                     &log_path,
                     &runtime_proxy_structured_log_message(

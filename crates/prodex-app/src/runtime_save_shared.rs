@@ -1,9 +1,10 @@
 use crate::{
     AppPaths, AppState, ProfileEntry, RuntimeContinuationStore, RuntimeProfileBackoffs,
     RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRotationProxyShared,
-    RuntimeSmartContextArtifactStore,
+    RuntimeSmartContextArtifactStore, RuntimeSmartContextEngine,
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(test)]
@@ -73,6 +74,7 @@ pub(crate) type RuntimeSmartContextArtifactSaveQueue =
 pub(crate) struct RuntimeSmartContextArtifactSaveJob {
     pub(crate) path: PathBuf,
     pub(crate) store: RuntimeSmartContextArtifactStore,
+    pub(crate) smart_context_engine: Arc<RuntimeSmartContextEngine>,
     pub(crate) log_path: PathBuf,
     pub(crate) reason: String,
     pub(crate) queued_at: Instant,

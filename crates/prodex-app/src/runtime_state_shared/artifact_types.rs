@@ -10,7 +10,10 @@ pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) byte_len: usize,
     pub(crate) content_hash: String,
     pub(crate) text: String,
-    pub(crate) sequence: u64,
+    #[serde(alias = "sequence")]
+    pub(crate) order: u64,
+    #[serde(skip)]
+    pub(crate) pending_order: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) line_index: Option<RuntimeSmartContextArtifactLineIndex>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

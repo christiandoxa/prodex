@@ -191,6 +191,8 @@ fn smart_context_non_alias_artifact_reference_line_range_count(token: &str) -> O
     let token = smart_context_trim_artifact_ref_token(token);
     let raw = if let Some(raw) = token.strip_prefix("prodex-artifact:") {
         Cow::Borrowed(raw)
+    } else if let Some(raw) = token.strip_prefix("psc2:") {
+        Cow::Owned(format!("sc2:{raw}"))
     } else if let Some(raw) = token.strip_prefix(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX) {
         if raw.starts_with("sc:") {
             Cow::Borrowed(raw)
@@ -201,19 +203,23 @@ fn smart_context_non_alias_artifact_reference_line_range_count(token: &str) -> O
         Cow::Borrowed(token)
     };
     let raw = raw.as_ref();
-    if !raw.starts_with("sc:") {
+    let prefix_len = if raw.starts_with("sc2:") {
+        4
+    } else if raw.starts_with("sc:") {
+        3
+    } else {
         return None;
-    }
+    };
 
-    let mut id_end = 3usize;
-    for (offset, ch) in raw[3..].char_indices() {
+    let mut id_end = prefix_len;
+    for (offset, ch) in raw[prefix_len..].char_indices() {
         if ch.is_ascii_hexdigit() {
-            id_end = 3 + offset + ch.len_utf8();
+            id_end = prefix_len + offset + ch.len_utf8();
         } else {
             break;
         }
     }
-    if id_end == 3 {
+    if id_end == prefix_len {
         return None;
     }
 

@@ -114,7 +114,7 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_apply_stati
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_apply_static_context_persistent_section_dedupe(
     value: &mut serde_json::Value,
-    shared: &RuntimeRotationProxyShared,
+    state: &mut RuntimeSmartContextProxyState,
     exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
@@ -125,40 +125,26 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_apply_stati
     if current.is_empty() {
         return;
     }
-    let Some((replacements, changed)) = with_runtime_smart_context_proxy_state(shared, |state| {
-        let replacements = runtime_smart_context_persistent_static_section_replacements(
-            value,
-            &state.static_section_fingerprints,
-            &current,
-        );
-        let next = current
-            .iter()
-            .cloned()
-            .map(|fingerprint| {
-                (
-                    runtime_smart_context_static_section_fingerprint_key(&fingerprint),
-                    fingerprint,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let changed = state.static_section_fingerprints != next;
-        if changed {
-            state.static_section_fingerprints = next;
-        }
-        (replacements, changed)
-    }) else {
-        return;
-    };
+    let replacements = runtime_smart_context_persistent_static_section_replacements(
+        value,
+        &state.static_section_fingerprints,
+        &current,
+    );
+    let next = current
+        .iter()
+        .cloned()
+        .map(|fingerprint| {
+            (
+                runtime_smart_context_static_section_fingerprint_key(&fingerprint),
+                fingerprint,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    state.static_section_fingerprints = next;
 
     if !replacements.is_empty() {
         stats.static_context_deltas = stats.static_context_deltas.saturating_add(
             runtime_smart_context_replace_static_context_item_texts(value, &replacements),
-        );
-    }
-    if changed {
-        persist_runtime_smart_context_token_calibration_metadata(
-            shared,
-            "smart_context_static_sections",
         );
     }
 }

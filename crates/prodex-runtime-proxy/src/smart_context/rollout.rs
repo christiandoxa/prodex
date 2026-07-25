@@ -1,4 +1,4 @@
-use crate::smart_context::smart_context_hash_text;
+use crate::smart_context::smart_context_sha256_digest;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmartContextRolloutMode {
@@ -20,7 +20,7 @@ pub struct SmartContextRolloutDecisionInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextRolloutDecision {
     pub mode: SmartContextRolloutMode,
-    pub canary_bucket: u8,
+    pub canary_bucket: u16,
     pub canary_percent: u8,
     pub reason: &'static str,
 }
@@ -64,7 +64,7 @@ pub fn smart_context_rollout_decision(
             reason: "shadow",
         };
     }
-    if canary_percent < 100 && canary_bucket >= canary_percent {
+    if canary_percent < 100 && canary_bucket >= u16::from(canary_percent) * 100 {
         return SmartContextRolloutDecision {
             mode: SmartContextRolloutMode::Disabled,
             canary_bucket,
@@ -84,10 +84,10 @@ pub fn smart_context_rollout_decision(
     }
 }
 
-pub fn smart_context_rollout_bucket(stable_key: &str) -> u8 {
-    let hash = smart_context_hash_text(stable_key);
-    let prefix = hash.get(..8).unwrap_or(hash.as_str());
-    u32::from_str_radix(prefix, 16)
-        .map(|value| (value % 100) as u8)
-        .unwrap_or(0)
+pub fn smart_context_rollout_bucket(stable_key: &str) -> u16 {
+    let digest = smart_context_sha256_digest(stable_key.as_bytes());
+    let prefix = u64::from_be_bytes([
+        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
+    ]);
+    (prefix % 10_000) as u16
 }

@@ -8,6 +8,7 @@ use super::{
     runtime_smart_context_repo_state_merge_spans,
     runtime_smart_context_repo_state_text_observation,
 };
+use std::collections::BTreeSet;
 
 pub(super) struct RuntimeSmartContextRepoStateMicroCacheTextInput<'a> {
     pub(super) text: &'a mut String,
@@ -15,7 +16,7 @@ pub(super) struct RuntimeSmartContextRepoStateMicroCacheTextInput<'a> {
     pub(super) cache_before: &'a RuntimeSmartContextRepoStateFacts,
     pub(super) cache_after: &'a mut RuntimeSmartContextRepoStateFacts,
     pub(super) store: &'a mut RuntimeSmartContextArtifactStore,
-    pub(super) request_id: u64,
+    pub(super) durable_artifact_ids: Option<&'a BTreeSet<String>>,
     pub(super) allow_rewrite: bool,
     pub(super) stats: &'a mut RuntimeSmartContextTransformStats,
 }
@@ -29,7 +30,7 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache_to_text(
         cache_before,
         cache_after,
         store,
-        request_id,
+        durable_artifact_ids,
         allow_rewrite,
         stats,
     } = input;
@@ -66,11 +67,19 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache_to_text(
 
     if needs_artifact {
         let existing_artifact = store.artifact_ref_for_exact_text(text.as_str());
-        if existing_artifact.is_none() && store.insert_text(request_id, text.as_str()).is_none() {
+        if existing_artifact.as_ref().is_some_and(|artifact| {
+            durable_artifact_ids.is_some_and(|ids| !ids.contains(&artifact.id))
+        }) {
+            return false;
+        }
+        if existing_artifact.is_none() && store.insert_text(text.as_str()).is_none() {
             return false;
         }
         if existing_artifact.is_none() {
             stats.artifacts_stored = stats.artifacts_stored.saturating_add(1);
+            if durable_artifact_ids.is_some() {
+                return false;
+            }
         }
     }
 

@@ -5,7 +5,7 @@ use std::borrow::Cow;
 fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four")
+        .insert_text("line one\nline two\nline three\nline four")
         .unwrap();
     let refs = (1usize..=10)
         .map(|line| runtime_smart_context_artifact_line_ref(&artifact.id, line.min(4), line.min(4)))
@@ -24,7 +24,7 @@ fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
     assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts(&mut value));
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc a @0=psc:"));
+    assert!(output.contains("psc a @0=psc2:"));
     assert!(output.contains("@0#L1-L1"));
     assert!(output.len() < before);
 }
@@ -54,9 +54,9 @@ fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
 }
 
 #[test]
-fn smart_context_prepare_aliases_existing_generated_paths_without_new_transform() {
+fn smart_context_prepare_does_not_alias_existing_generated_paths_without_new_transform() {
     let shared = smart_context_test_shared("existing-generated-path-aliases");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let repo = "/workspace/prodex";
     let request = smart_context_test_request(serde_json::json!({
         "input": [{
@@ -76,24 +76,16 @@ fn smart_context_prepare_aliases_existing_generated_paths_without_new_transform(
         RuntimeRouteKind::Responses,
     );
 
-    let Cow::Owned(body) = prepared else {
-        panic!("expected generated paths to be aliased");
-    };
-    let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["input"][0]["output"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(body.len() < before_len);
-    assert!(output.contains("psc p $R=/workspace/prodex"));
-    assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
-    assert!(!output.contains("/workspace/prodex/crates/prodex-app/src/runtime_proxy"));
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(prepared.len(), before_len);
 }
 
 #[test]
 fn smart_context_generated_summary_dedupes_existing_alias_legend() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four")
+        .insert_text("line one\nline two\nline three\nline four")
         .unwrap();
     let ref_line = runtime_smart_context_artifact_line_ref(&artifact.id, 1, 1);
     let mut value = serde_json::json!({
@@ -118,12 +110,12 @@ fn smart_context_generated_summary_dedupes_existing_alias_legend() {
 #[test]
 fn smart_context_generated_summary_keeps_stateful_artifact_alias_stable() {
     let shared = smart_context_test_shared("stable-artifact-alias");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let mut store = RuntimeSmartContextArtifactStore::default();
     let first_artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four")
+        .insert_text("line one\nline two\nline three\nline four")
         .unwrap();
-    let second_artifact = store.insert_text(2, "alpha\nbeta\ngamma\ndelta").unwrap();
+    let second_artifact = store.insert_text("alpha\nbeta\ngamma\ndelta").unwrap();
     let first_refs = (1usize..=8)
         .map(|line| {
             runtime_smart_context_artifact_line_ref(&first_artifact.id, line.min(4), line.min(4))
@@ -149,7 +141,7 @@ fn smart_context_generated_summary_keeps_stateful_artifact_alias_stable() {
             first["input"][0]["output"]
                 .as_str()
                 .unwrap()
-                .contains("psc a @0=psc:")
+                .contains("psc a @0=psc2:")
         );
 
         let mut second = serde_json::json!({
@@ -179,14 +171,14 @@ fn smart_context_persists_stateful_artifact_aliases_across_start() {
     let _ = std::fs::remove_file(&artifact_path);
     let _ = std::fs::remove_file(&calibration_path);
     register_runtime_smart_context_proxy_state(
-        &first_shared.log_path,
+        &first_shared,
         true,
         None,
         Some(artifact_path.clone()),
     );
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four")
+        .insert_text("line one\nline two\nline three\nline four")
         .unwrap();
     let refs = (1usize..=8)
         .map(|line| runtime_smart_context_artifact_line_ref(&artifact.id, line.min(4), line.min(4)))
@@ -209,7 +201,7 @@ fn smart_context_persists_stateful_artifact_aliases_across_start() {
 
     let fresh_shared = smart_context_test_shared("stable-artifact-alias-persist-fresh");
     register_runtime_smart_context_proxy_state(
-        &fresh_shared.log_path,
+        &fresh_shared,
         true,
         None,
         Some(artifact_path.clone()),

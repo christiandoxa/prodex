@@ -1,9 +1,27 @@
 use super::*;
+#[cfg(test)]
 use std::borrow::Cow;
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_dedupe_input_text(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    runtime_smart_context_dedupe_input_text_with_durable_artifacts(
+        value,
+        store,
+        None,
+        exactness_guard,
+        stats,
+    );
+}
+
+pub(super) fn runtime_smart_context_dedupe_input_text_with_durable_artifacts(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
     exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
@@ -20,7 +38,13 @@ pub(super) fn runtime_smart_context_dedupe_input_text(
         }
         runtime_smart_context_dedupe_value_text(item, index, &mut seen, stats);
     }
-    runtime_smart_context_replace_cross_turn_duplicate_refs(value, store, exactness_guard, stats);
+    runtime_smart_context_replace_cross_turn_duplicate_refs(
+        value,
+        store,
+        durable_artifact_ids,
+        exactness_guard,
+        stats,
+    );
 }
 
 pub(super) fn runtime_smart_context_dedupe_value_text(
@@ -59,6 +83,7 @@ pub(super) fn runtime_smart_context_dedupe_value_text(
 pub(super) fn runtime_smart_context_replace_cross_turn_duplicate_refs(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
     exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
@@ -66,7 +91,11 @@ pub(super) fn runtime_smart_context_replace_cross_turn_duplicate_refs(
     if items.is_empty() {
         return;
     }
-    let artifacts = runtime_smart_context_available_artifacts_for_text_items(items.iter(), store);
+    let artifacts = runtime_smart_context_available_artifacts_for_text_items(
+        items.iter(),
+        store,
+        durable_artifact_ids,
+    );
     let plan = runtime_proxy_crate::smart_context_cross_turn_duplicate_ref_plan(
         items,
         artifacts,
@@ -106,11 +135,15 @@ pub(super) fn runtime_smart_context_replace_cross_turn_duplicate_refs(
 pub(super) fn runtime_smart_context_available_artifacts_for_text_items<'a>(
     items: impl IntoIterator<Item = &'a runtime_proxy_crate::SmartContextConversationItem>,
     store: &RuntimeSmartContextArtifactStore,
+    durable_artifact_ids: Option<&BTreeSet<String>>,
 ) -> Vec<runtime_proxy_crate::SmartContextArtifactRef> {
     items
         .into_iter()
         .filter_map(|item| {
             let content_hash = runtime_proxy_crate::smart_context_hash_text(&item.text);
+            if durable_artifact_ids.is_some_and(|ids| !ids.contains(&content_hash)) {
+                return None;
+            }
             let artifact_text = store.get_text(&content_hash)?;
             (artifact_text == item.text).then_some(runtime_proxy_crate::SmartContextArtifactRef {
                 id: content_hash.clone(),
@@ -154,6 +187,7 @@ pub(super) fn runtime_smart_context_collect_large_text_items_from_value(
             if text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES
                 && !text.contains("prodex-artifact:")
                 && !text.contains(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX)
+                && !text.contains("psc2:")
                 && !text.contains("prodex smart context artifact")
                 && !text.contains("prodex-sc ") =>
         {
@@ -293,6 +327,9 @@ pub(super) fn runtime_smart_context_regression_self_check(
                 runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(before.len()),
             after_estimated_tokens:
                 runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(after.len()),
+            future_retrieval_overhead_tokens: 0,
+            injected_protocol_overhead_tokens: 0,
+            expected_recovery_overhead_tokens: 0,
             before_critical_signal_count: prodex_context::count_critical_signals(&before_text)
                 .total(),
             after_critical_signal_count: prodex_context::count_critical_signals(&after_text)
@@ -364,11 +401,19 @@ pub(super) fn runtime_smart_context_regression_reason_label(
         )
     }) {
         "empty_after_payload"
+    } else if reasons.iter().any(|reason| {
+        matches!(
+            reason,
+            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::TokenSavingsBelowSafetyMargin
+        )
+    }) {
+        "token_savings_below_safety_margin"
     } else {
         "token_budget_did_not_improve"
     }
 }
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_minified_json_body(
     value: &serde_json::Value,
     original_body: &[u8],
@@ -381,17 +426,7 @@ pub(super) fn runtime_smart_context_minified_json_body(
     runtime_smart_context_validated_minified_json_body(body, original_body)
 }
 
-pub(super) fn runtime_smart_context_minified_json_body_from_original(
-    original_body: &[u8],
-) -> Option<Vec<u8>> {
-    let Cow::Owned(body) =
-        runtime_proxy_crate::smart_context_structural_minify_json_body(original_body)
-    else {
-        return None;
-    };
-    runtime_smart_context_validated_minified_json_body(body, original_body)
-}
-
+#[cfg(test)]
 pub(super) fn runtime_smart_context_validated_minified_json_body(
     body: Vec<u8>,
     original_body: &[u8],

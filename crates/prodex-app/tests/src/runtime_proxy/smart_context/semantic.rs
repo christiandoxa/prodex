@@ -18,7 +18,7 @@ thread 'runtime_proxy::semantic_rehydrate' panicked at 'boom', crates/prodex-app
 test result: FAILED. 0 passed; 1 failed
 unrelated full artifact tail";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -69,7 +69,7 @@ diff --git a/src/diff.rs b/src/diff.rs
 +new diff line
 unrelated tail";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -115,7 +115,7 @@ process exited with exit code 101
 crates/prodex-app/src/runtime_proxy/smart_context.rs:99:1
 unrelated tail";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [
             {
@@ -159,7 +159,7 @@ running 1 test
 thread 'runtime_proxy::metadata_hint' panicked at src/lib.rs:12:1
 test result: FAILED. 0 passed; 1 failed";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let original = format!(
         "summary {}",
         runtime_smart_context_artifact_ref(&artifact.id)
@@ -209,7 +209,7 @@ fn smart_context_selective_rehydrate_semantic_terms_cap_narrow_matches() {
         .collect::<Vec<_>>()
         .join("\n");
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let artifact = store.insert_text(&artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -252,7 +252,7 @@ fn smart_context_selective_rehydrate_semantic_terms_cap_broad_matches() {
         .collect::<Vec<_>>()
         .join("\n");
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let artifact = store.insert_text(&artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -291,7 +291,7 @@ fn smart_context_selective_rehydrate_uses_diverse_candidate_selection() {
     let dependency = "fn target_symbol() -> usize { helper_dependency_call() } ".repeat(12);
     let artifact_text = format!("{long_error_a}\n{long_error_b}\n{dependency}\nunrelated tail");
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let artifact = store.insert_text(&artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -327,7 +327,7 @@ fn smart_context_selective_rehydrate_uses_diverse_candidate_selection() {
 fn smart_context_selective_rehydrate_semantic_terms_respect_exactness_guard() {
     let artifact_text = "error[E0425]: hidden\nsrc/lib.rs:42:13";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let original = format!("summary prodex-artifact:{}", artifact.id);
     let mut value = serde_json::json!({
         "input": [{

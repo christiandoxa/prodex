@@ -62,6 +62,7 @@ pub(super) fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
     };
 
     RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,

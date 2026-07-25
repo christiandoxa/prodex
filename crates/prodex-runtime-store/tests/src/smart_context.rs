@@ -160,6 +160,7 @@ fn smart_context_artifact_helpers_hash_touch_and_extract_line_ranges() {
         artifact.content_hash,
         runtime_smart_context_artifact_content_hash(content.as_bytes())
     );
+    assert!(artifact.content_hash.starts_with("sha256:"));
 
     let artifact =
         runtime_smart_context_upsert_artifact(&mut store, "file:src/lib.rs", content, 120);
@@ -277,6 +278,30 @@ fn smart_context_artifact_json_reads_legacy_object_shape() {
     let store = runtime_smart_context_artifact_store_from_json(&json).unwrap();
     assert_eq!(store.version, RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION);
     assert_eq!(store.artifacts["legacy"].key, "legacy");
+}
+
+#[test]
+fn smart_context_artifact_json_migrates_v1_fnv_hashes() {
+    let json = serde_json::json!({
+        "version": 1,
+        "artifacts": [{
+            "key": "legacy",
+            "content_hash": "fnv1a64:8ac625bb85ed202b",
+            "byte_len": 5,
+            "created_at": 10,
+            "last_accessed_at": 20,
+            "content": "alpha"
+        }]
+    })
+    .to_string();
+
+    let store = runtime_smart_context_artifact_store_from_json(&json).unwrap();
+
+    assert_eq!(store.version, RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION);
+    assert_eq!(
+        store.artifacts["legacy"].content_hash,
+        runtime_smart_context_artifact_content_hash(b"alpha")
+    );
 }
 
 #[test]

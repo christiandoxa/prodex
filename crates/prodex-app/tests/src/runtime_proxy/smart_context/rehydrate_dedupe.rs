@@ -3,9 +3,7 @@ use super::*;
 #[test]
 fn smart_context_rehydrates_short_artifact_refs_and_line_ranges() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store
-        .insert_text(1, "line one\nline two\nline three")
-        .unwrap();
+    let artifact = store.insert_text("line one\nline two\nline three").unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -27,7 +25,7 @@ fn smart_context_rehydrates_short_artifact_refs_and_line_ranges() {
 fn smart_context_rehydrates_legacy_verbose_artifact_marker_summary() {
     let artifact_text = "legacy exact artifact body\nwith second line";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -82,7 +80,7 @@ fn smart_context_dedupes_repeated_input_text() {
 fn smart_context_dedupe_preserves_static_prompt_prefix() {
     let repeated = "static prompt prefix ".repeat(120);
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &repeated).unwrap();
+    let artifact = store.insert_text(&repeated).unwrap();
     let mut value = serde_json::json!({
         "input": [
             {"role": "system", "content": repeated},
@@ -123,7 +121,7 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
 fn smart_context_dedupes_large_exact_text_outside_top_level_input() {
     let repeated = "external exact metadata ".repeat(140);
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &repeated).unwrap();
+    let artifact = store.insert_text(&repeated).unwrap();
     let mut value = serde_json::json!({
         "instructions": repeated.as_str(),
         "metadata": {

@@ -209,7 +209,7 @@ pub fn smart_context_static_context_prompt_cache_fingerprint(
     let payload = smart_context_static_context_prompt_cache_payload(&items);
 
     SmartContextStaticContextPromptCacheFingerprint {
-        content_hash: format!("scpc:{:016x}", smart_context_fnv1a64(payload.as_bytes())),
+        content_hash: smart_context_hash_text(&payload).replacen("sc2:", "scpc2:", 1),
         items,
     }
 }

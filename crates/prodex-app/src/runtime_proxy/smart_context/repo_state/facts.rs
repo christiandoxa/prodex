@@ -53,7 +53,8 @@ pub(super) fn runtime_smart_context_repo_state_insert_fact(
 
 fn runtime_smart_context_short_hash(text: &str, chars: usize) -> String {
     let hash = runtime_proxy_crate::smart_context_hash_text(text);
-    hash.strip_prefix("sc:")
+    hash.strip_prefix("sc2:")
+        .or_else(|| hash.strip_prefix("sc:"))
         .unwrap_or(hash.as_str())
         .chars()
         .take(chars)

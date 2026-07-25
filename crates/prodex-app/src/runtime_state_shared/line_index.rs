@@ -403,8 +403,8 @@ pub(super) fn runtime_smart_context_insert_repo_map_entry(
     entries
         .entry(key)
         .and_modify(|current| {
-            if entry.sequence > current.sequence
-                || entry.sequence == current.sequence && entry.artifact_id < current.artifact_id
+            if entry.order > current.order
+                || entry.order == current.order && entry.artifact_id < current.artifact_id
             {
                 *current = entry.clone();
             }

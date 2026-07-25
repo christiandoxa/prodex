@@ -10,7 +10,7 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
 }
 
 #[test]
-fn default_super_shortcut_starts_smart_context_proxy_that_rewrites_large_tool_output() {
+fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
@@ -73,16 +73,17 @@ fn default_super_shortcut_starts_smart_context_proxy_that_rewrites_large_tool_ou
         runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed
     );
 
-    let response = Client::builder()
+    let client = Client::builder()
         .timeout(ci_timing_upper_bound_ms(5_000, 10_000))
         .build()
-        .expect("client")
+        .expect("client");
+    let response = client
         .post(format!(
             "http://{}/backend-api/codex/responses",
             proxy.listen_addr
         ))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body)
+        .body(body.clone())
         .send()
         .expect("responses request should succeed");
 
@@ -91,12 +92,27 @@ fn default_super_shortcut_starts_smart_context_proxy_that_rewrites_large_tool_ou
         "smart-context request should pass through upstream status: {}",
         response.status()
     );
+    let first_bodies = backend.responses_bodies();
+    let first_body = &first_bodies[0];
+    assert!(first_body.contains("line 1200: repeated command output"));
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .expect("repeated responses request should succeed");
+    assert!(response.status().is_success());
+
     let responses_bodies = backend.responses_bodies();
-    assert_eq!(responses_bodies.len(), 1);
-    assert!(responses_bodies[0].contains("psc art psc:"));
-    assert!(!responses_bodies[0].contains("prodex-artifact:sc:"));
+    assert_eq!(responses_bodies.len(), 2);
+    assert!(responses_bodies[1].contains("psc2:"));
+    assert!(!responses_bodies[1].contains("prodex-artifact:sc:"));
     assert!(
-        !responses_bodies[0].contains("line 1200: repeated command output"),
+        !responses_bodies[1].contains("line 1200: repeated command output"),
         "middle tool-output noise should be artifact-backed, not forwarded inline"
     );
 

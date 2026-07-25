@@ -24,7 +24,8 @@ pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) line: Option<usize>,
     pub(crate) artifact_id: String,
-    pub(crate) sequence: u64,
+    #[serde(alias = "sequence")]
+    pub(crate) order: u64,
     pub(crate) range_start: usize,
     pub(crate) range_end: usize,
 }
@@ -39,9 +40,15 @@ pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
     Error,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifactStore {
+    #[serde(default = "runtime_smart_context_legacy_artifact_store_schema_version")]
+    pub(in crate::runtime_state_shared) schema_version: u32,
+    #[serde(default)]
+    pub(in crate::runtime_state_shared) next_artifact_order: u64,
     pub(in crate::runtime_state_shared) artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(in crate::runtime_state_shared) legacy_artifact_ids: BTreeMap<String, String>,
     pub(in crate::runtime_state_shared) total_bytes: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(in crate::runtime_state_shared) static_context_fingerprints:
@@ -54,6 +61,26 @@ pub(crate) struct RuntimeSmartContextArtifactStore {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::runtime_state_shared) symbol_map_prewarm:
         Option<RuntimeSmartContextArtifactProjectionPrewarm>,
+}
+
+impl Default for RuntimeSmartContextArtifactStore {
+    fn default() -> Self {
+        Self {
+            schema_version: 2,
+            next_artifact_order: 0,
+            artifacts: BTreeMap::new(),
+            legacy_artifact_ids: BTreeMap::new(),
+            total_bytes: 0,
+            static_context_fingerprints: Vec::new(),
+            static_context_prompt_cache_hash: None,
+            repo_map_prewarm: None,
+            symbol_map_prewarm: None,
+        }
+    }
+}
+
+fn runtime_smart_context_legacy_artifact_store_schema_version() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

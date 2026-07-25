@@ -27,7 +27,10 @@ pub fn runtime_smart_context_artifact_store_from_json(
     let document = serde_json::from_str::<RuntimeSmartContextArtifactStoreRead>(input)
         .map_err(|error| RuntimeSmartContextArtifactStoreJsonError::new(error.to_string()))?;
     let version = document.version;
-    if version != crate::RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION {
+    if !matches!(
+        version,
+        1 | crate::RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION
+    ) {
         return Err(RuntimeSmartContextArtifactStoreJsonError::new(format!(
             "unsupported smart-context artifact store version {version}"
         )));
@@ -37,13 +40,13 @@ pub fn runtime_smart_context_artifact_store_from_json(
     match document.artifacts {
         RuntimeSmartContextArtifactsRead::Array(items) => {
             for item in items {
-                let artifact = item.into_artifact(None)?;
+                let artifact = item.into_artifact(None, version)?;
                 artifacts.insert(artifact.key.clone(), artifact);
             }
         }
         RuntimeSmartContextArtifactsRead::Object(entries) => {
             for (key, item) in entries {
-                let artifact = item.into_artifact(Some(&key))?;
+                let artifact = item.into_artifact(Some(&key), version)?;
                 if artifact.key != key {
                     return Err(RuntimeSmartContextArtifactStoreJsonError::new(format!(
                         "artifact key mismatch for {key}"
@@ -54,7 +57,10 @@ pub fn runtime_smart_context_artifact_store_from_json(
         }
     }
 
-    Ok(RuntimeSmartContextArtifactStore { version, artifacts })
+    Ok(RuntimeSmartContextArtifactStore {
+        version: crate::RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION,
+        artifacts,
+    })
 }
 
 #[derive(Serialize)]
@@ -92,8 +98,9 @@ impl RuntimeSmartContextArtifactRead {
     fn into_artifact(
         self,
         key_hint: Option<&str>,
+        store_version: u32,
     ) -> Result<RuntimeSmartContextArtifact, RuntimeSmartContextArtifactStoreJsonError> {
-        let artifact = RuntimeSmartContextArtifact {
+        let mut artifact = RuntimeSmartContextArtifact {
             key: self
                 .key
                 .or_else(|| key_hint.map(str::to_string))
@@ -104,6 +111,21 @@ impl RuntimeSmartContextArtifactRead {
             last_accessed_at: self.last_accessed_at,
             content: self.content,
         };
+        if store_version == 1 {
+            if artifact.byte_len != artifact.content.len()
+                || artifact.content_hash
+                    != runtime_smart_context_legacy_artifact_content_hash(
+                        artifact.content.as_bytes(),
+                    )
+            {
+                return Err(RuntimeSmartContextArtifactStoreJsonError::new(format!(
+                    "artifact {} legacy metadata mismatch",
+                    artifact.key
+                )));
+            }
+            artifact.content_hash =
+                runtime_smart_context_artifact_content_hash(artifact.content.as_bytes());
+        }
         runtime_smart_context_validate_artifact(&artifact)?;
         Ok(artifact)
     }

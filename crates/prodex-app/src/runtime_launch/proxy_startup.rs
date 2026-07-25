@@ -410,6 +410,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,
         auto_redeem_enabled: auto_redeem,
@@ -452,7 +453,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     let marker_guard = RuntimeProxyMarkerGuard::new(&log_path);
     register_runtime_proxy_persistence_mode(&log_path, persistence_enabled);
     register_runtime_smart_context_proxy_state(
-        &log_path,
+        &shared,
         smart_context_enabled,
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),

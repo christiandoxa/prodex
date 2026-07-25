@@ -257,6 +257,7 @@ pub(super) fn runtime_rotation_proxy_shared_with_auto_redeem(
         crate::build_runtime_upstream_async_http_compact_client(false, &runtime_config)
             .expect("compact async client");
     RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config,
         upstream_no_proxy: false,
         auto_redeem_enabled,

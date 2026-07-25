@@ -21,10 +21,12 @@ pub fn smart_context_artifact_reference_marker(artifact: &SmartContextArtifactRe
 }
 
 pub fn smart_context_short_artifact_ref(id: &str) -> String {
-    format!(
-        "{SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX}{}",
-        smart_context_short_artifact_label(id)
-    )
+    let prefix = if id.starts_with("sc2:") {
+        "psc2:"
+    } else {
+        SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX
+    };
+    format!("{prefix}{}", smart_context_short_artifact_label(id))
 }
 
 pub fn smart_context_short_artifact_line_ref(id: &str, start: usize, end: usize) -> String {

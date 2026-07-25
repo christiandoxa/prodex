@@ -11,6 +11,7 @@ pub(super) use appendix::{
     runtime_smart_context_render_scored_exact_appendix,
 };
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_try_surgical_rehydrate_critical_ranges(
     value: &serde_json::Value,
     shared: &RuntimeRotationProxyShared,
@@ -20,35 +21,53 @@ pub(super) fn runtime_smart_context_try_surgical_rehydrate_critical_ranges(
     stats: &RuntimeSmartContextTransformStats,
 ) -> Option<(Vec<u8>, RuntimeSmartContextTransformStats)> {
     with_runtime_smart_context_artifacts(shared, |store| {
-        let mut repaired_value = value.clone();
-        let mut repaired_stats = stats.clone();
-        if runtime_smart_context_rehydrate_lost_critical_ranges(
-            &mut repaired_value,
+        runtime_smart_context_try_surgical_rehydrate_critical_ranges_with_store(
+            value,
             store,
-            &mut repaired_stats,
-        ) == 0
-        {
-            return None;
-        }
-
-        let repaired_body = serde_json::to_vec(&repaired_value).ok()?;
-        let regression_check = runtime_smart_context_regression_self_check(
             request_body,
-            &repaired_body,
-            exactness.clone(),
-            unresolved_rehydrate_refs.to_vec(),
-        );
-        let critical_signal_check =
-            runtime_smart_context_critical_signal_self_check(request_body, &repaired_body);
-        runtime_smart_context_fallback_exact_reason(
-            &regression_check,
-            critical_signal_check,
-            &repaired_stats,
+            exactness,
+            unresolved_rehydrate_refs,
+            stats,
         )
-        .is_none()
-        .then_some((repaired_body, repaired_stats))
     })
     .flatten()
+}
+
+pub(super) fn runtime_smart_context_try_surgical_rehydrate_critical_ranges_with_store(
+    value: &serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    request_body: &[u8],
+    exactness: &runtime_proxy_crate::SmartContextExactnessGuard,
+    unresolved_rehydrate_refs: &[String],
+    stats: &RuntimeSmartContextTransformStats,
+) -> Option<(Vec<u8>, RuntimeSmartContextTransformStats)> {
+    let mut repaired_value = value.clone();
+    let mut repaired_stats = stats.clone();
+    if runtime_smart_context_rehydrate_lost_critical_ranges(
+        &mut repaired_value,
+        store,
+        &mut repaired_stats,
+    ) == 0
+    {
+        return None;
+    }
+
+    let repaired_body = serde_json::to_vec(&repaired_value).ok()?;
+    let regression_check = runtime_smart_context_regression_self_check(
+        request_body,
+        &repaired_body,
+        exactness.clone(),
+        unresolved_rehydrate_refs.to_vec(),
+    );
+    let critical_signal_check =
+        runtime_smart_context_critical_signal_self_check(request_body, &repaired_body);
+    runtime_smart_context_fallback_exact_reason(
+        &regression_check,
+        critical_signal_check,
+        &repaired_stats,
+    )
+    .is_none()
+    .then_some((repaired_body, repaired_stats))
 }
 
 fn runtime_smart_context_rehydrate_lost_critical_ranges(
