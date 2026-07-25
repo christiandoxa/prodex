@@ -5,11 +5,6 @@
     "reason": "Core runtime preparation still owns provider selection, harness resolution, proxy startup, and session entry planning; command-server managed stdio logic lives in its focused module and this cap is ratcheted to the remaining core."
   },
   {
-    "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 901,
-    "reason": "Capability setup and doctor routing keep passive dry-run discovery, platform probes, asset verification, and machine-readable reports together; capped until setup execution splits from capability inspection."
-  },
-  {
     "file": "crates/prodex-app/src/dashboard.rs",
     "maxLines": 1135,
     "reason": "The local control-plane JSON endpoints now surface mutation-audit persistence failures while provider/model catalog assembly and dashboard tests remain capped after HTTP transport moved to dashboard/server.rs."
@@ -91,8 +86,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1188,
-    "reason": "Provider-aware runtime and gateway argument parsing remains capped after Super compatibility validation moved to a focused module."
+    "maxLines": 1162,
+    "reason": "Provider-aware runtime and gateway argument parsing remains capped after typed optional-tool selection moved to a focused module."
   },
   {
     "file": "crates/prodex-quota/tests/src/render.rs",

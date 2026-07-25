@@ -1043,7 +1043,6 @@ fn runtime_local_rewrite_log_path(runtime_config: &RuntimeConfig) -> PathBuf {
     }
     log_path
 }
-
 fn runtime_local_rewrite_server(
     preferred_listen_addr: Option<&str>,
 ) -> Result<(Arc<TinyServer>, std::net::SocketAddr)> {
