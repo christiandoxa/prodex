@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-07-25",
+  "host": {
+    "os": "Linux 7.0.0-28-generic",
+    "cpu": "AMD Ryzen 5 PRO 4650G",
+    "physical_cores": 6,
+    "logical_cpus": 12,
+    "memory_gib": 30,
+    "rust": "1.97.0",
+    "cargo": "1.97.0",
+    "node": "24.18.0",
+    "npm": "12.0.1",
+    "cpu_governor": "performance",
+    "cpu_boost": true
+  },
+  "baseline": {
+    "commit": "c635d485cf750637512bfacb4e1cefc854ed1bef",
+    "clean_release_build": {
+      "command": "/usr/bin/time -v env CARGO_TARGET_DIR=<empty-target> cargo build --release --locked",
+      "sample_count": 1,
+      "wall_seconds": 233.73,
+      "user_seconds": 1646.84,
+      "system_seconds": 97.16,
+      "max_rss_kib": 2928264
+    },
+    "binary": {
+      "bytes": 54153624,
+      "elf_text_bytes": 40328863,
+      "embedded_caveman_instruction": true
+    },
+    "startup": {
+      "sample_count": 100,
+      "first_ms": 5.895,
+      "p50_ms": 3.93551,
+      "p95_ms": 6.128135,
+      "p99_ms": 6.607247,
+      "raw_samples_retained": false
+    },
+    "startup_rss": {
+      "sample_count": 50,
+      "p50_kib": 7480,
+      "p95_kib": 7676,
+      "p99_kib": 7728,
+      "raw_samples_retained": false
+    }
+  },
+  "paired_current_sample": {
+    "commit": "898fd3c2dbe213e09fed29151b1735e1efa46b11",
+    "clean_release_build": {
+      "sample_count": 1,
+      "wall_seconds": 235.86,
+      "user_seconds": 1687.88,
+      "system_seconds": 103.79,
+      "max_rss_kib": 2851952
+    },
+    "binary": {
+      "bytes": 45984896,
+      "elf_text_bytes": 44989451,
+      "embedded_caveman_instruction": false
+    }
+  },
+  "current": {
+    "commit": "375c2579d1dd3f0c6dcf0bbd8e194721bc8c83c7",
+    "clean_release_build": {
+      "command": "/usr/bin/time -v env CARGO_TARGET_DIR=/tmp/prodex-final-target-375c257 cargo build --release --locked",
+      "sample_count": 1,
+      "wall_seconds": 184.72,
+      "user_seconds": 1520.79,
+      "system_seconds": 88.13,
+      "max_rss_kib": 2856224,
+      "cpu_percent": 870,
+      "major_page_faults": 4523,
+      "minor_page_faults": 16389009,
+      "involuntary_context_switches": 898147,
+      "exit_status": 0
+    },
+    "binary": {
+      "bytes": 45992704,
+      "sha256": "f7f0249d74dd828bfcfd7c5a2e17bef871e603bb8c37d34162c2d81f9d4ba161",
+      "elf_text_bytes": 44997479,
+      "elf_data_bytes": 989224,
+      "elf_bss_bytes": 17336,
+      "embedded_caveman_instruction": false
+    },
+    "startup": {
+      "command": "prodex --version",
+      "warmup_runs": 10,
+      "sample_count": 100,
+      "first_ms": 4.342699,
+      "p50_ms": 3.586907,
+      "p95_ms": 4.161458,
+      "p99_ms": 4.332318,
+      "samples_ms": [
+        3.551067, 3.994678, 3.748497, 3.526817, 3.480747, 3.699737, 3.501297,
+        3.834427, 3.459667, 3.639477, 3.698497, 3.583287, 3.477397, 3.560686,
+        3.421077, 3.513827, 3.486667, 3.564417, 3.524657, 3.612827, 3.862597,
+        3.993728, 3.669427, 3.589057, 3.830517, 3.562047, 4.310269, 3.976817,
+        3.625417, 3.613937, 3.586907, 3.685558, 3.923957, 3.572317, 3.739257,
+        3.764948, 3.602557, 3.524236, 3.725988, 3.501377, 4.176788, 3.857477,
+        3.716227, 3.530147, 3.565377, 3.614207, 3.629787, 3.667707, 3.640557,
+        4.161458, 3.745258, 3.584667, 3.600347, 3.504936, 4.102328, 3.938798,
+        3.495667, 3.562307, 3.543417, 3.486156, 4.097318, 3.737158, 3.714887,
+        3.697897, 3.875598, 3.451266, 3.524867, 3.557807, 3.494427, 3.656117,
+        4.231528, 4.332318, 3.575197, 3.453067, 3.478867, 3.522567, 3.466896,
+        3.433997, 3.743957, 3.472737, 3.493507, 3.492567, 3.820937, 3.531307,
+        3.443787, 3.501886, 3.799188, 3.629507, 3.804987, 4.409839, 3.474336,
+        3.537527, 3.631227, 3.452127, 3.531637, 3.433197, 3.644817, 3.472006,
+        3.550527, 3.548557
+      ]
+    },
+    "startup_rss": {
+      "command": "/usr/bin/time -f %M prodex --version",
+      "warmup_runs": 5,
+      "sample_count": 50,
+      "p50_kib": 7864,
+      "p95_kib": 8008,
+      "p99_kib": 8032,
+      "samples_kib": [
+        7980, 7444, 8036, 7840, 7868, 7816, 7456, 7788, 7872, 7728,
+        7692, 7596, 7872, 7828, 7960, 7576, 7836, 7696, 8032, 7776,
+        7940, 7972, 7864, 7616, 7916, 7760, 8024, 7868, 7852, 7780,
+        7876, 7760, 7600, 7992, 7920, 7852, 7912, 7628, 7984, 7888,
+        7796, 8008, 7868, 7868, 7884, 7912, 7748, 7912, 7932, 7504
+      ]
+    }
+  },
+  "runtime_load_smoke": {
+    "source_commit": "5cce0a3974cc4fe9ec9e030dc8e087391e896693",
+    "command": "npm run ci:runtime-load-smoke",
+    "requests": 32,
+    "successes": 32,
+    "failures": 0,
+    "admission_pressure": 0,
+    "ttft_ms": { "p50": 52.71, "p95": 66.77, "p99": 92.88 },
+    "completion_ms": { "p50": 113.02, "p95": 127.2, "p99": 152.98 }
+  },
+  "runtime_hot_path_check": {
+    "source_commit": "aa3f6e5e1167007dd666cf5ec01a783736f55efc",
+    "command": "PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths",
+    "cases": 8,
+    "failures": 0,
+    "smart_context_large_tool_output_rewrite": {
+      "median_ns": 6998241,
+      "p90_ns": 7120861,
+      "threshold_ns": 8000000
+    }
+  },
+  "smart_context_fuzz_smoke": {
+    "source_commit": "375c2579d1dd3f0c6dcf0bbd8e194721bc8c83c7",
+    "command": "cargo +nightly-2026-07-11 fuzz run smart_context_inputs --fuzz-dir fuzz -- -max_total_time=10 -max_len=65536",
+    "runs": 393417,
+    "elapsed_seconds": 11,
+    "crashes": 0,
+    "max_input_bytes": 65536,
+    "sanitizer": "AddressSanitizer"
+  },
+  "limitations": [
+    "Build timings are single samples; the paired current sample and final current sample show substantial machine variance, so no build-speed improvement is claimed.",
+    "Baseline startup raw samples were not retained; only their recorded percentiles are available.",
+    "Allocation/request, Smart Context CPU/request, queue wait, and per-scope lock-wait distributions were not captured.",
+    "No live-model quality evaluation was run."
+  ]
+}

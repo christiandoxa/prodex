@@ -36,6 +36,7 @@ Status values:
 | [Dependency inventory](hardening/prodex-app-dependencies.md) | Application | active | 0.346.0 / 2026-07-25 | Direct dependency ownership |
 | [Deletion manifest](hardening/deletion-manifest.md) | Platform | active | 0.346.0 / 2026-07-25 | Deleted paths, replacements, and evidence |
 | [Hardening results](hardening/results.md) | Platform | active | 0.346.0 / 2026-07-25 | Controlled before/after measurements |
+| [Raw hardening measurements](hardening/raw-measurements.json) | Platform | historical | 0.346.0 / 2026-07-25 | Captured build, startup, load, benchmark, and fuzz samples |
 | [Risk and rollback](hardening/risk-and-rollback.md) | Platform | active | 0.346.0 / 2026-07-25 | Caveman and Smart Context rollback controls |
 | [Backup and restore](backup-restore.md) | Operations | active | 0.346.0 / 2026-07-25 | Recovery contract |
 | [Local control plane](local-control-plane.md) | Control plane | active | 0.346.0 / 2026-07-25 | Local administration boundary |
