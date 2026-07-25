@@ -212,6 +212,9 @@ pub struct SuperArgs {
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub skip_quota_check: bool,
+    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
+    #[arg(long)]
+    pub full_access: bool,
     /// Print resolved launch diagnostics without starting Codex.
     #[arg(long)]
     pub dry_run: bool,
@@ -286,6 +289,7 @@ impl fmt::Debug for SuperArgs {
             .field("no_auto_rotate", &self.no_auto_rotate)
             .field("auto_redeem", &self.auto_redeem)
             .field("skip_quota_check", &self.skip_quota_check)
+            .field("full_access", &self.full_access)
             .field("dry_run", &self.dry_run)
             .field("base_url_configured", &self.base_url.is_some())
             .field("no_proxy", &self.no_proxy)
@@ -599,7 +603,7 @@ impl SuperArgs {
             no_auto_rotate: self.no_auto_rotate,
             auto_redeem: self.auto_redeem,
             skip_quota_check,
-            full_access: true,
+            full_access: self.full_access,
             dry_run: self.dry_run,
             base_url: local_upstream_base_url
                 .or(external_upstream_base_url)
@@ -953,6 +957,7 @@ mod tests {
             no_auto_rotate: false,
             auto_redeem: false,
             skip_quota_check: false,
+            full_access: false,
             dry_run: false,
             base_url: None,
             no_proxy: false,

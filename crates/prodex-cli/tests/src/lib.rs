@@ -263,7 +263,7 @@ fn s_profile_shortcut_selects_profile() {
 #[test]
 fn super_default_keeps_minimal_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
-    assert!(args.full_access);
+    assert!(!args.full_access);
     assert!(args.smart_context);
     assert!(args.super_optimizer_overlay);
     assert_eq!(
@@ -275,6 +275,11 @@ fn super_default_keeps_minimal_super_prefixes() {
             OsString::from("review")
         ]
     );
+}
+#[test]
+fn super_full_access_is_explicit() {
+    let args = parse_super_as_caveman(&["prodex", "super", "--full-access", "exec", "review"]);
+    assert!(args.full_access);
 }
 #[test]
 fn super_and_s_enable_smart_context_autopilot() {
