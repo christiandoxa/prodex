@@ -10,7 +10,7 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
 }
 
 #[test]
-fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
+fn default_super_shortcut_rewrites_same_request_duplicate_losslessly() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
@@ -56,23 +56,13 @@ fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
         .collect::<Vec<_>>()
         .join("\n");
     let body = serde_json::json!({
-        "input": [{
-            "type": "function_call_output",
-            "call_id": "call_big",
-            "output": tool_output,
-        }]
+        "model": "gpt-4o",
+        "input": [
+            {"type": "function_call_output", "call_id": "call_big_1", "output": tool_output},
+            {"type": "function_call_output", "call_id": "call_big_2", "output": tool_output}
+        ]
     })
     .to_string();
-    let estimated_tokens =
-        runtime_proxy_crate::smart_context_estimate_tokens_from_body(body.as_bytes()) as usize;
-    let available_tokens = 32_000usize
-        .saturating_sub(estimated_tokens)
-        .saturating_sub(4_096);
-    assert_eq!(
-        runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed
-    );
-
     let client = Client::builder()
         .timeout(ci_timing_upper_bound_ms(5_000, 10_000))
         .build()
@@ -95,6 +85,9 @@ fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
     let first_bodies = backend.responses_bodies();
     let first_body = &first_bodies[0];
     assert!(first_body.contains("line 1200: repeated command output"));
+    assert!(first_body.contains("prodex-context-ref v=1"));
+    assert!(first_body.contains("\"role\":\"developer\""));
+    assert!(!first_body.contains("psc2:"));
 
     let response = client
         .post(format!(
@@ -109,12 +102,9 @@ fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
 
     let responses_bodies = backend.responses_bodies();
     assert_eq!(responses_bodies.len(), 2);
-    assert!(responses_bodies[1].contains("psc2:"));
+    assert_eq!(responses_bodies[0], responses_bodies[1]);
+    assert!(responses_bodies[1].contains("prodex-context-ref v=1"));
     assert!(!responses_bodies[1].contains("prodex-artifact:sc:"));
-    assert!(
-        !responses_bodies[1].contains("line 1200: repeated command output"),
-        "middle tool-output noise should be artifact-backed, not forwarded inline"
-    );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
@@ -124,11 +114,9 @@ fn default_super_shortcut_persists_then_rewrites_repeated_large_tool_output() {
         20,
     );
     let log_tail = String::from_utf8_lossy(&log_tail);
-    assert!(log_tail.contains("tier=condensed"));
-    assert!(log_tail.contains("budget_mode=artifact_condensed"));
-    assert!(log_tail.contains("policy_reasons=tight_budget"));
-    assert!(log_tail.contains("artifacts_stored=1"));
-    assert!(log_tail.contains("tool_outputs_condensed=1"));
+    assert!(log_tail.contains("token_count_source=tokenizer_counted"));
+    assert!(log_tail.contains("artifacts_stored=0"));
+    assert!(log_tail.contains("duplicate_texts=1"));
 }
 
 #[test]

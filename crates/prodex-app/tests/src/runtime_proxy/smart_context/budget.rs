@@ -411,8 +411,10 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 8_000,
                 body_bytes_after: 3_000,
-                estimated_tokens_before: 2_000,
-                estimated_tokens_after: 750,
+                tokens_before: 2_000,
+                tokens_after: 750,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
@@ -423,8 +425,10 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 7_000,
                 body_bytes_after: 2_800,
-                estimated_tokens_before: 1_750,
-                estimated_tokens_after: 700,
+                tokens_before: 1_750,
+                tokens_after: 700,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
@@ -435,8 +439,10 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 100,
                 body_bytes_after: 100,
-                estimated_tokens_before: 25,
-                estimated_tokens_after: 25,
+                tokens_before: 25,
+                tokens_after: 25,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "pass_through".to_string(),
                 status: "noop".to_string(),
                 fallback_reason: None,
@@ -483,8 +489,10 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 10_000,
                 body_bytes_after: 9_000,
-                estimated_tokens_before: 2_500,
-                estimated_tokens_after: 2_250,
+                tokens_before: 2_500,
+                tokens_after: 2_250,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
@@ -495,8 +503,10 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 8_000,
                 body_bytes_after: 7_200,
-                estimated_tokens_before: 2_000,
-                estimated_tokens_after: 1_800,
+                tokens_before: 2_000,
+                tokens_after: 1_800,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
@@ -529,8 +539,10 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
             .push(RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before: 8_000,
                 body_bytes_after: 3_000,
-                estimated_tokens_before: 2_000,
-                estimated_tokens_after: 750,
+                tokens_before: 2_000,
+                tokens_after: 750,
+                token_count_source:
+                    runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
                 rewrite_kind: "self_check_passthrough".to_string(),
                 status: "critical_signal_loss".to_string(),
                 fallback_reason: Some("critical_signal_loss".to_string()),

@@ -1,42 +1,25 @@
 use super::{
     RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind,
-    RuntimeSmartContextBudgetInput, RuntimeSmartContextLogInput,
+    RuntimeSmartContextBudgetInput, RuntimeSmartContextLogInput, RuntimeSmartContextPrepareError,
     RuntimeSmartContextRewriteSafetyObservation, RuntimeSmartContextTransformStats,
-    RuntimeSmartContextTransport, commit_runtime_smart_context_proxy_state,
-    observe_runtime_smart_context_rewrite_safety_with_state,
-    persist_runtime_smart_context_artifacts,
-    persist_runtime_smart_context_token_calibration_metadata, runtime_request_previous_response_id,
+    RuntimeSmartContextTransport, commit_runtime_smart_context_proxy_state_for_scope,
+    observe_runtime_smart_context_rewrite_safety_with_state, runtime_request_previous_response_id,
     runtime_request_session_id, runtime_request_turn_state,
     runtime_smart_context_affinity_pressure_rewrite_allowed,
     runtime_smart_context_affinity_pressure_rewrite_guard,
-    runtime_smart_context_append_artifact_manifest_delta_if_useful,
-    runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state,
-    runtime_smart_context_apply_path_aliases_to_generated_texts,
-    runtime_smart_context_apply_repo_state_micro_cache_with_durable_artifacts,
-    runtime_smart_context_apply_static_context_chunk_dedupe,
-    runtime_smart_context_apply_static_context_cross_field_dedupe,
-    runtime_smart_context_apply_static_context_delta,
-    runtime_smart_context_apply_static_context_persistent_section_dedupe,
-    runtime_smart_context_apply_static_context_section_dedupe,
-    runtime_smart_context_auto_rehydrate_plan, runtime_smart_context_budget,
-    runtime_smart_context_collect_intent_signals,
+    runtime_smart_context_append_inline_reference_protocol,
+    runtime_smart_context_budget_for_parsed,
     runtime_smart_context_collect_rehydratable_artifact_ref_ids,
-    runtime_smart_context_condense_historical_tool_call_arguments_with_durable_artifacts,
-    runtime_smart_context_condense_tool_outputs_with_durable_artifacts,
     runtime_smart_context_critical_signal_self_check,
-    runtime_smart_context_dedupe_input_text_with_durable_artifacts,
-    runtime_smart_context_deferred_rehydrate_refs, runtime_smart_context_exact_header,
-    runtime_smart_context_fallback_exact_reason, runtime_smart_context_log,
-    runtime_smart_context_log_prepare_fallback,
+    runtime_smart_context_dedupe_input_text_within_request, runtime_smart_context_exact_header,
+    runtime_smart_context_expand_inline_references, runtime_smart_context_fallback_exact_reason,
+    runtime_smart_context_log, runtime_smart_context_log_prepare_fallback,
     runtime_smart_context_missing_artifact_refs_in_store,
-    runtime_smart_context_observe_static_context_with_state,
-    runtime_smart_context_proxy_state_snapshot, runtime_smart_context_reason_labels,
-    runtime_smart_context_regression_self_check, runtime_smart_context_rehydrate_value_with_plan,
-    runtime_smart_context_rewrite_self_check, runtime_smart_context_saved_tokens,
-    runtime_smart_context_selective_rehydrate_budget_aware_ranges,
-    runtime_smart_context_tier_label,
-    runtime_smart_context_try_surgical_rehydrate_critical_ranges_with_store,
-    runtime_smart_context_unsupported_json_shape_reason,
+    runtime_smart_context_normalized_model_name,
+    runtime_smart_context_proxy_state_snapshot_for_scope, runtime_smart_context_reason_labels,
+    runtime_smart_context_regression_self_check, runtime_smart_context_rehydrate_value,
+    runtime_smart_context_rewrite_self_check, runtime_smart_context_scope_id,
+    runtime_smart_context_tier_label, runtime_smart_context_unsupported_json_shape_reason,
 };
 use std::borrow::Cow;
 
@@ -51,7 +34,9 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
-) -> Cow<'a, [u8]> {
+    rollout: &runtime_proxy_crate::SmartContextRolloutDecision,
+    shadow: bool,
+) -> Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
         runtime_smart_context_log_prepare_fallback(
             request_id,
@@ -62,7 +47,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             "invalid_json",
         );
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     };
     if let Some(reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
         runtime_smart_context_log_prepare_fallback(
@@ -74,19 +59,46 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             reason,
         );
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     }
+    let model_name = runtime_smart_context_normalized_model_name(
+        value.get("model").and_then(serde_json::Value::as_str),
+    );
+    let request_token_count = runtime_proxy_crate::smart_context_count_serialized_request(
+        &request.body,
+        model_name.as_deref(),
+    );
+    if !request_token_count.is_proven() {
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "unsupported_tokenizer",
+        );
+        return Ok(Cow::Borrowed(&request.body));
+    }
+    let Some(scope) = runtime_smart_context_scope_id(shared, profile_name) else {
+        return Ok(Cow::Borrowed(&request.body));
+    };
     let original_value = value.clone();
 
     let Some((state_generation, mut planned_state)) =
-        runtime_smart_context_proxy_state_snapshot(shared)
+        runtime_smart_context_proxy_state_snapshot_for_scope(shared, &scope)
     else {
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     };
     let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs_in_store(
         runtime_smart_context_collect_rehydratable_artifact_ref_ids(&value),
         &planned_state.artifacts,
     );
+    if !missing_rehydrate_refs.is_empty() {
+        return Err(RuntimeSmartContextPrepareError {
+            missing_artifact_count: missing_rehydrate_refs.len(),
+        });
+    }
     let exactness = runtime_proxy_crate::smart_context_exactness_guard(
         runtime_proxy_crate::SmartContextExactnessInput {
             exact_mode: runtime_smart_context_exact_header(request),
@@ -97,18 +109,20 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             missing_rehydrate_refs: missing_rehydrate_refs.clone(),
         },
     );
-    let static_observation =
-        runtime_smart_context_observe_static_context_with_state(&mut planned_state, &value);
-    let mut budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
-        shared,
-        body: &request.body,
-        route_kind,
-        transport,
-        profile_name,
-        exactness_guard: exactness.clone(),
-        missing_rehydrate_refs: missing_rehydrate_refs.clone(),
-        static_context_changed: static_observation.changed,
-    });
+    let mut budget = runtime_smart_context_budget_for_parsed(
+        RuntimeSmartContextBudgetInput {
+            shared,
+            body: &request.body,
+            route_kind,
+            transport,
+            profile_name,
+            exactness_guard: exactness.clone(),
+            missing_rehydrate_refs: missing_rehydrate_refs.clone(),
+            static_context_changed: false,
+        },
+        model_name.as_deref(),
+        &request_token_count,
+    );
     let affinity_pressure_rewrite =
         runtime_smart_context_affinity_pressure_rewrite_allowed(&exactness, &budget);
     let transform_exactness = if affinity_pressure_rewrite {
@@ -117,19 +131,22 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         exactness.clone()
     };
     if affinity_pressure_rewrite {
-        budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
-            shared,
-            body: &request.body,
-            route_kind,
-            transport,
-            profile_name,
-            exactness_guard: transform_exactness.clone(),
-            missing_rehydrate_refs: missing_rehydrate_refs.clone(),
-            static_context_changed: static_observation.changed,
-        });
+        budget = runtime_smart_context_budget_for_parsed(
+            RuntimeSmartContextBudgetInput {
+                shared,
+                body: &request.body,
+                route_kind,
+                transport,
+                profile_name,
+                exactness_guard: transform_exactness.clone(),
+                missing_rehydrate_refs: missing_rehydrate_refs.clone(),
+                static_context_changed: false,
+            },
+            model_name.as_deref(),
+            &request_token_count,
+        );
     }
     let tier = budget.tier;
-    let intent_signals = runtime_smart_context_collect_intent_signals(&value);
     let rewrite_reason_label = if affinity_pressure_rewrite {
         "affinity_pressure"
     } else {
@@ -142,6 +159,8 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
+            scope: &scope,
+            rollout,
             route_kind,
             transport,
             tier: runtime_smart_context_tier_label(tier),
@@ -151,73 +170,24 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             body_bytes_after: request.body.len(),
             stats: RuntimeSmartContextTransformStats::default(),
             budget: &budget,
+            token_count_after: &request_token_count,
             self_check: "pass_through_exact",
         });
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     }
 
-    let mut outcome = runtime_smart_context_transform_body(
-        RuntimeSmartContextBodyTransformInput {
-            transform_exactness: &transform_exactness,
-            budget: &budget,
-            tier,
-            intent_signals: &intent_signals,
-        },
+    let outcome = runtime_smart_context_transform_body(
+        RuntimeSmartContextBodyTransformInput { budget: &budget },
         &mut planned_state,
         &mut value,
     );
-    runtime_smart_context_apply_static_context_persistent_section_dedupe(
-        &mut value,
-        &mut planned_state,
-        &transform_exactness,
-        &mut outcome.stats,
-    );
-    runtime_smart_context_apply_static_context_section_dedupe(
-        &mut value,
-        &transform_exactness,
-        &mut outcome.stats,
-    );
-    runtime_smart_context_apply_static_context_cross_field_dedupe(
-        &mut value,
-        &transform_exactness,
-        &mut outcome.stats,
-    );
-    runtime_smart_context_apply_static_context_chunk_dedupe(
-        &mut value,
-        &transform_exactness,
-        &mut outcome.stats,
-    );
-    runtime_smart_context_apply_static_context_delta(
-        &mut value,
-        &static_observation,
-        &transform_exactness,
-        &mut outcome.stats,
-    );
-    let aliases_used = if outcome.stats != RuntimeSmartContextTransformStats::default() {
-        runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
-            &mut value,
-            &mut planned_state,
-        )
-    } else {
-        false
-    };
-    runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
     let mut stats = outcome.stats.clone();
     if value == original_value {
-        if commit_runtime_smart_context_proxy_state(shared, state_generation, planned_state) {
-            if stats.artifacts_stored > 0 || static_observation.item_count > 0 {
-                persist_runtime_smart_context_artifacts(shared);
-            }
-            if static_observation.item_count > 0 {
-                persist_runtime_smart_context_token_calibration_metadata(
-                    shared,
-                    "smart_context_observation",
-                );
-            }
-        }
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
+            scope: &scope,
+            rollout,
             route_kind,
             transport,
             tier: runtime_smart_context_tier_label(tier),
@@ -227,74 +197,37 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             body_bytes_after: request.body.len(),
             stats,
             budget: &budget,
+            token_count_after: &request_token_count,
             self_check: "noop",
         });
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     }
 
     let Ok(body) = serde_json::to_vec(&value) else {
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
     };
+    let body_token_count =
+        runtime_proxy_crate::smart_context_count_serialized_request(&body, model_name.as_deref());
     let self_check =
         runtime_smart_context_rewrite_self_check(request.body.len(), body.len(), &stats);
     let mut unresolved_rehydrate_refs = missing_rehydrate_refs;
-    unresolved_rehydrate_refs.extend(outcome.deferred_rehydrate_refs);
+    let quality_body = runtime_smart_context_expand_inline_references(&original_value, &value)
+        .and_then(|expanded| serde_json::to_vec(&expanded).ok());
+    if quality_body.is_none() && stats.duplicate_texts > 0 {
+        unresolved_rehydrate_refs.push("invalid_inline_reference".to_string());
+    }
+    let quality_body = quality_body.as_deref().unwrap_or(&body);
     let regression_check = runtime_smart_context_regression_self_check(
         &request.body,
         &body,
+        quality_body,
+        &request_token_count,
+        &body_token_count,
         transform_exactness.clone(),
         unresolved_rehydrate_refs.clone(),
     );
     let critical_signal_check =
-        runtime_smart_context_critical_signal_self_check(&request.body, &body);
-    if critical_signal_check.has_loss()
-        && let Some((repaired_body, mut repaired_stats)) =
-            runtime_smart_context_try_surgical_rehydrate_critical_ranges_with_store(
-                &value,
-                &planned_state.artifacts,
-                &request.body,
-                &transform_exactness,
-                &unresolved_rehydrate_refs,
-                &stats,
-            )
-    {
-        repaired_stats.segment_rollback_count =
-            repaired_stats.segment_rollback_count.saturating_add(1);
-        observe_runtime_smart_context_rewrite_safety_with_state(
-            &mut planned_state,
-            RuntimeSmartContextRewriteSafetyObservation {
-                safe: true,
-                saved_tokens: runtime_smart_context_saved_tokens(
-                    request.body.len(),
-                    repaired_body.len(),
-                ),
-            },
-        );
-        if !commit_runtime_smart_context_proxy_state(shared, state_generation, planned_state) {
-            return Cow::Borrowed(&request.body);
-        }
-        persist_runtime_smart_context_artifacts(shared);
-        persist_runtime_smart_context_token_calibration_metadata(shared, "smart_context_commit");
-        runtime_smart_context_log(RuntimeSmartContextLogInput {
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            tier: runtime_smart_context_tier_label(tier),
-            decision: "rewritten",
-            reasons: if affinity_pressure_rewrite {
-                "affinity_pressure,surgical_rehydrate"
-            } else {
-                "surgical_rehydrate"
-            },
-            body_bytes_before: request.body.len(),
-            body_bytes_after: repaired_body.len(),
-            stats: repaired_stats,
-            budget: &budget,
-            self_check: "ok_surgical_rehydrate",
-        });
-        return Cow::Owned(repaired_body);
-    }
+        runtime_smart_context_critical_signal_self_check(&request.body, quality_body);
     if let Some(fallback_reason) = runtime_smart_context_fallback_exact_reason(
         &regression_check,
         critical_signal_check,
@@ -304,6 +237,8 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
+            scope: &scope,
+            rollout,
             route_kind,
             transport,
             tier: runtime_smart_context_tier_label(tier),
@@ -313,9 +248,30 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             body_bytes_after: request.body.len(),
             stats,
             budget: &budget,
+            token_count_after: &request_token_count,
             self_check: fallback_reason,
         });
-        return Cow::Borrowed(&request.body);
+        return Ok(Cow::Borrowed(&request.body));
+    }
+    if shadow {
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
+            request_id,
+            shared,
+            scope: &scope,
+            rollout,
+            route_kind,
+            transport,
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "shadow_rewrite",
+            reasons: rewrite_reason_label,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: body.len(),
+            stats,
+            budget: &budget,
+            token_count_after: &body_token_count,
+            self_check,
+        });
+        return Ok(Cow::Borrowed(&request.body));
     }
     observe_runtime_smart_context_rewrite_safety_with_state(
         &mut planned_state,
@@ -324,18 +280,19 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             saved_tokens: regression_check.saved_tokens,
         },
     );
-    if !commit_runtime_smart_context_proxy_state(shared, state_generation, planned_state) {
-        return Cow::Borrowed(&request.body);
-    }
-    if stats.artifacts_stored > 0 || static_observation.item_count > 0 {
-        persist_runtime_smart_context_artifacts(shared);
-    }
-    if aliases_used || static_observation.item_count > 0 {
-        persist_runtime_smart_context_token_calibration_metadata(shared, "smart_context_commit");
+    if !commit_runtime_smart_context_proxy_state_for_scope(
+        shared,
+        &scope,
+        state_generation,
+        planned_state,
+    ) {
+        return Ok(Cow::Borrowed(&request.body));
     }
     runtime_smart_context_log(RuntimeSmartContextLogInput {
         request_id,
         shared,
+        scope: &scope,
+        rollout,
         route_kind,
         transport,
         tier: runtime_smart_context_tier_label(tier),
@@ -345,7 +302,8 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         body_bytes_after: body.len(),
         stats,
         budget: &budget,
+        token_count_after: &body_token_count,
         self_check,
     });
-    Cow::Owned(body)
+    Ok(Cow::Owned(body))
 }

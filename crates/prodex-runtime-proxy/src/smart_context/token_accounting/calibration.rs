@@ -6,6 +6,7 @@ pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERA
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR: u64 = 8;
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS: u64 = 64;
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT: usize = 4;
+pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MAX_INFLATION: u64 = 2;
 
 pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estimate(
     body_bytes: usize,
@@ -36,7 +37,13 @@ pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estima
         / SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR;
     let observed_with_margin =
         observed_with_margin.saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS);
-    baseline_estimate.min(observed_with_margin.max(raw_floor_with_margin))
+    let calibrated = observed_with_margin.max(raw_floor_with_margin);
+    if calibrated > baseline_estimate.saturating_mul(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MAX_INFLATION)
+    {
+        baseline_estimate
+    } else {
+        calibrated
+    }
 }
 
 pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration(

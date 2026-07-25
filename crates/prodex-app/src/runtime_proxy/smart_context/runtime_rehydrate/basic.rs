@@ -73,19 +73,6 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_r
         .ok()
 }
 
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_deferred_rehydrate_refs(
-    plan: &runtime_proxy_crate::SmartContextRehydratePlan,
-) -> Vec<String> {
-    plan.actions
-        .iter()
-        .filter_map(|action| match action {
-            runtime_proxy_crate::SmartContextRehydrateAction::Defer { id, .. } => Some(id.clone()),
-            runtime_proxy_crate::SmartContextRehydrateAction::Rehydrate { .. } => None,
-        })
-        .collect()
-}
-
-#[cfg(test)]
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_value(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,

@@ -44,6 +44,8 @@ pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
 pub(crate) struct RuntimeSmartContextArtifactStore {
     #[serde(default = "runtime_smart_context_legacy_artifact_store_schema_version")]
     pub(in crate::runtime_state_shared) schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::runtime_state_shared) scope_id: Option<runtime_proxy_crate::ContextScopeId>,
     #[serde(default)]
     pub(in crate::runtime_state_shared) next_artifact_order: u64,
     pub(in crate::runtime_state_shared) artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
@@ -66,7 +68,8 @@ pub(crate) struct RuntimeSmartContextArtifactStore {
 impl Default for RuntimeSmartContextArtifactStore {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
+            scope_id: None,
             next_artifact_order: 0,
             artifacts: BTreeMap::new(),
             legacy_artifact_ids: BTreeMap::new(),

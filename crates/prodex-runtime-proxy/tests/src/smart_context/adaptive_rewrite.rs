@@ -84,14 +84,15 @@ fn smart_context_test_transform_score(
 fn smart_context_test_rewrite_telemetry_sample(
     body_bytes_before: usize,
     body_bytes_after: usize,
-    estimated_tokens_before: u64,
-    estimated_tokens_after: u64,
+    tokens_before: u64,
+    tokens_after: u64,
 ) -> SmartContextRewriteTelemetrySample {
     SmartContextRewriteTelemetrySample {
         body_bytes_before,
         body_bytes_after,
-        estimated_tokens_before,
-        estimated_tokens_after,
+        tokens_before,
+        tokens_after,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
         safe: true,
         fallback: false,
         upstream_context_errors: 0,

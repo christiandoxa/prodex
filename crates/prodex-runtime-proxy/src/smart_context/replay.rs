@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub const SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION: u32 = 1;
-pub const SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION: u32 = 1;
+pub const SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -59,9 +59,9 @@ pub struct SmartContextReplayProvenance {
     pub commit_sha: Option<String>,
     pub os: &'static str,
     pub architecture: &'static str,
+    pub rust_toolchain: Option<String>,
     pub tokenizer_source: &'static str,
     pub token_measurement: &'static str,
-    pub estimator_confidence: &'static str,
     pub command: &'static str,
 }
 
@@ -70,9 +70,13 @@ pub struct SmartContextReplayTurnResult {
     pub turn: usize,
     pub exact_body_bytes: usize,
     pub optimized_body_bytes: usize,
-    pub exact_estimated_input_tokens: u64,
-    pub optimized_estimated_input_tokens: u64,
-    pub estimated_net_saved_tokens: i64,
+    pub exact_input_tokens: u64,
+    pub optimized_input_tokens: u64,
+    pub net_saved_tokens: i64,
+    pub token_count_source: &'static str,
+    pub tokenizer_family: &'static str,
+    pub token_confidence_basis_points: u16,
+    pub token_error_bound_tokens: u64,
     pub rewrite_applied: bool,
     pub exact_byte_identity: bool,
     pub valid_json: bool,
@@ -96,9 +100,9 @@ pub struct SmartContextReplayScenarioResult {
     pub model: String,
     pub context_window_tokens: u64,
     pub mode: SmartContextReplayMode,
-    pub exact_estimated_input_tokens: u64,
-    pub optimized_estimated_input_tokens: u64,
-    pub estimated_net_saved_tokens: i64,
+    pub exact_input_tokens: u64,
+    pub optimized_input_tokens: u64,
+    pub net_saved_tokens: i64,
     pub turns: Vec<SmartContextReplayTurnResult>,
     pub passed: bool,
 }
@@ -110,9 +114,9 @@ pub struct SmartContextReplayReport {
     pub evidence_level: &'static str,
     pub provenance: SmartContextReplayProvenance,
     pub scenarios: Vec<SmartContextReplayScenarioResult>,
-    pub exact_estimated_input_tokens: u64,
-    pub optimized_estimated_input_tokens: u64,
-    pub estimated_net_saved_tokens: i64,
+    pub exact_input_tokens: u64,
+    pub optimized_input_tokens: u64,
+    pub net_saved_tokens: i64,
     pub passed: bool,
     pub failures: Vec<String>,
 }

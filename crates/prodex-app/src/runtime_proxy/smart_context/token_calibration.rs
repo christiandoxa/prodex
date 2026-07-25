@@ -25,11 +25,6 @@ pub(super) struct RuntimeSmartContextPersistedTokenCalibration {
         Vec<RuntimeSmartContextPersistedTokenCalibrationObservation>,
     #[serde(default)]
     pub(super) rewrite_safety_history: Vec<RuntimeSmartContextPersistedRewriteSafetyObservation>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) artifact_aliases: Vec<RuntimeSmartContextPersistedArtifactAlias>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) static_section_fingerprints:
-        Vec<RuntimeSmartContextPersistedStaticSectionFingerprint>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,28 +55,6 @@ pub(super) struct RuntimeSmartContextPersistedRewriteSafetyObservation {
     saved_tokens: u64,
     #[serde(default)]
     observed_at_unix_secs: u64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct RuntimeSmartContextPersistedArtifactAlias {
-    #[serde(default)]
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) alias: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct RuntimeSmartContextPersistedStaticSectionFingerprint {
-    #[serde(default)]
-    item_id: String,
-    #[serde(default)]
-    heading: String,
-    #[serde(default)]
-    ordinal: usize,
-    #[serde(default)]
-    content_hash: String,
-    #[serde(default)]
-    byte_len: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -192,34 +165,6 @@ impl From<RuntimeSmartContextRewriteSafetyRecord>
     }
 }
 
-impl From<RuntimeSmartContextStaticSectionFingerprint>
-    for RuntimeSmartContextPersistedStaticSectionFingerprint
-{
-    fn from(value: RuntimeSmartContextStaticSectionFingerprint) -> Self {
-        Self {
-            item_id: value.item_id,
-            heading: value.heading,
-            ordinal: value.ordinal,
-            content_hash: value.content_hash,
-            byte_len: value.byte_len,
-        }
-    }
-}
-
-impl From<RuntimeSmartContextPersistedStaticSectionFingerprint>
-    for RuntimeSmartContextStaticSectionFingerprint
-{
-    fn from(value: RuntimeSmartContextPersistedStaticSectionFingerprint) -> Self {
-        Self {
-            item_id: value.item_id,
-            heading: value.heading,
-            ordinal: value.ordinal,
-            content_hash: value.content_hash,
-            byte_len: value.byte_len,
-        }
-    }
-}
-
 pub(super) fn runtime_smart_context_token_calibration_path(artifact_path: &Path) -> PathBuf {
     let mut path = artifact_path.to_path_buf();
     let file_name = artifact_path
@@ -261,14 +206,6 @@ pub(super) fn runtime_smart_context_token_calibration_snapshot(
             .copied()
             .filter(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now))
             .map(RuntimeSmartContextPersistedRewriteSafetyObservation::from)
-            .collect(),
-        artifact_aliases: runtime_smart_context_persisted_artifact_aliases(state),
-        static_section_fingerprints: state
-            .static_section_fingerprints
-            .values()
-            .take(SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT)
-            .cloned()
-            .map(RuntimeSmartContextPersistedStaticSectionFingerprint::from)
             .collect(),
     }
 }
@@ -426,15 +363,6 @@ fn runtime_smart_context_merge_persisted_token_calibration(
         SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT,
     );
 
-    existing.artifact_aliases = runtime_smart_context_merge_persisted_artifact_aliases(
-        existing.artifact_aliases,
-        incoming.artifact_aliases,
-    );
-    existing.static_section_fingerprints =
-        runtime_smart_context_merge_persisted_static_section_fingerprints(
-            existing.static_section_fingerprints,
-            incoming.static_section_fingerprints,
-        );
     existing
 }
 

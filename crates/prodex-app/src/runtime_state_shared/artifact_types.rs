@@ -132,16 +132,3 @@ pub(crate) struct RuntimeSmartContextArtifactChunkOccurrence {
     pub(crate) end: usize,
     pub(crate) kind: String,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RuntimeSmartContextArtifactManifestEntry {
-    pub(crate) id: String,
-    pub(crate) byte_len: usize,
-    pub(crate) content_hash: String,
-    pub(crate) critical_range_count: usize,
-    pub(crate) file_location_range_count: usize,
-    pub(crate) diff_hunk_range_count: usize,
-    pub(crate) test_failure_range_count: usize,
-    pub(crate) error_range_count: usize,
-    pub(crate) command_kind: Option<String>,
-}

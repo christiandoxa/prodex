@@ -140,7 +140,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         request,
         &shared.runtime_shared,
         route_kind,
-    )
+    )?
     .into_owned();
     let body = match runtime_harness_shape_request(
         request_id, request, shared, provider, endpoint, body,

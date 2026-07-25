@@ -1,4 +1,4 @@
-use super::super::*;
+use super::*;
 
 #[test]
 fn smart_context_compact_session_body_does_not_panic() {
@@ -48,11 +48,13 @@ fn smart_context_compact_session_body_does_not_panic() {
         &shared,
         RuntimeRouteKind::Compact,
         Some("main"),
-    );
+    )
+    .expect("smart context prepare");
 
     assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains("smart_context_autopilot"));
+    assert!(log.contains("smart_context_prepare_fallback"));
+    assert!(log.contains("reason=unsupported_route"));
 }
 
 #[test]
@@ -86,7 +88,8 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
         &shared,
         RuntimeRouteKind::Compact,
         Some("main"),
-    );
+    )
+    .expect("smart context prepare");
     drop(fault);
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
@@ -135,7 +138,8 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
         &handshake_request,
         &shared,
         "main",
-    );
+    )
+    .expect("smart context prepare");
     drop(fault);
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE"
@@ -159,7 +163,8 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
         &handshake_request,
         &shared,
         "main",
-    );
+    )
+    .expect("smart context prepare");
     assert!(matches!(rewritten_after_panic, Cow::Borrowed(_)));
     assert_eq!(rewritten_after_panic.as_ref(), request_text.as_str());
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
@@ -210,7 +215,8 @@ fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown(
         &handshake_request,
         &shared,
         "main",
-    );
+    )
+    .expect("smart context prepare");
 
     assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");

@@ -98,7 +98,7 @@ fn smart_context_prompt_cache_key_derivation_does_not_mutate_upstream_payload() 
 
     let key = runtime_smart_context_effective_prompt_cache_key(&request, &shared, true);
     let prepared =
-        prepare_runtime_smart_context_http_body(88, &request, &shared, RuntimeRouteKind::Responses);
+        prepare_runtime_smart_context_http_body(88, &request, &shared, RuntimeRouteKind::Responses).expect("smart context prepare");
 
     assert!(key.as_deref().is_some_and(|key| key.starts_with("scpc2:")));
     assert_eq!(request.body, before);

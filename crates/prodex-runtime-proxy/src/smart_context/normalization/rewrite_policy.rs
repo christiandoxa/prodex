@@ -105,8 +105,9 @@ pub(in crate::smart_context) fn smart_context_rewrite_telemetry_sample_safe_save
     sample: &SmartContextRewriteTelemetrySample,
 ) -> bool {
     sample.safe
+        && sample.token_count_source == SmartContextTokenCountSource::TokenizerCounted
         && !smart_context_rewrite_telemetry_sample_quality_risk(sample)
-        && sample.estimated_tokens_after < sample.estimated_tokens_before
+        && sample.tokens_after < sample.tokens_before
         && sample.body_bytes_after < sample.body_bytes_before
 }
 
@@ -128,11 +129,7 @@ pub(in crate::smart_context) fn smart_context_rewrite_telemetry_saved_tokens(
     samples: &[SmartContextRewriteTelemetrySample],
 ) -> u64 {
     samples.iter().fold(0u64, |total, sample| {
-        total.saturating_add(
-            sample
-                .estimated_tokens_before
-                .saturating_sub(sample.estimated_tokens_after),
-        )
+        total.saturating_add(sample.tokens_before.saturating_sub(sample.tokens_after))
     })
 }
 

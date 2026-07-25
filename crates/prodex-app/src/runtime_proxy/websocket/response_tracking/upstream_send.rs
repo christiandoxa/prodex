@@ -50,7 +50,7 @@ pub(super) fn send_runtime_websocket_upstream_request(
         handshake_request,
         shared,
         profile_name,
-    );
+    )?;
     log_runtime_upstream_payload_snapshot(
         shared,
         request_id,

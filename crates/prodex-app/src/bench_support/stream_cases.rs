@@ -263,6 +263,7 @@ impl RuntimeProxySmartContextRewriteBenchCase {
             RuntimeRouteKind::Responses,
             Some("main"),
         )
+        .expect("benchmark request must not contain unresolved artifact references")
         .len()
     }
 }
