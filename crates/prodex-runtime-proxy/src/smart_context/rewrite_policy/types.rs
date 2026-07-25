@@ -1,4 +1,4 @@
-use crate::smart_context::SmartContextTokenCalibrationBucketKey;
+use crate::smart_context::{SmartContextTokenCalibrationBucketKey, SmartContextTokenCountSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmartContextBudgetMode {
@@ -80,8 +80,9 @@ pub enum SmartContextRewriteBudgetDecision {
 pub struct SmartContextRewriteTelemetrySample {
     pub body_bytes_before: usize,
     pub body_bytes_after: usize,
-    pub estimated_tokens_before: u64,
-    pub estimated_tokens_after: u64,
+    pub tokens_before: u64,
+    pub tokens_after: u64,
+    pub token_count_source: SmartContextTokenCountSource,
     pub safe: bool,
     pub fallback: bool,
     pub upstream_context_errors: u16,

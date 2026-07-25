@@ -13,8 +13,9 @@ use labels::{
 pub(super) struct RuntimeSmartContextRewriteTelemetryRecord {
     pub(super) body_bytes_before: usize,
     pub(super) body_bytes_after: usize,
-    pub(super) estimated_tokens_before: u64,
-    pub(super) estimated_tokens_after: u64,
+    pub(super) tokens_before: u64,
+    pub(super) tokens_after: u64,
+    pub(super) token_count_source: runtime_proxy_crate::SmartContextTokenCountSource,
     pub(super) rewrite_kind: String,
     pub(super) status: String,
     pub(super) fallback_reason: Option<String>,
@@ -60,8 +61,9 @@ fn runtime_smart_context_rewrite_telemetry_sample(
     Some(runtime_proxy_crate::SmartContextRewriteTelemetrySample {
         body_bytes_before: record.body_bytes_before,
         body_bytes_after: record.body_bytes_after,
-        estimated_tokens_before: record.estimated_tokens_before,
-        estimated_tokens_after: record.estimated_tokens_after,
+        tokens_before: record.tokens_before,
+        tokens_after: record.tokens_after,
+        token_count_source: record.token_count_source,
         safe: runtime_smart_context_rewrite_telemetry_record_safe_saved(record),
         fallback,
         upstream_context_errors: record.upstream_context_errors,
@@ -88,7 +90,7 @@ fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
             record.status.as_str(),
             "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
         )
-        && record.estimated_tokens_after < record.estimated_tokens_before
+        && record.tokens_after < record.tokens_before
 }
 
 fn runtime_smart_context_rewrite_telemetry_record_quality_risk(
@@ -108,6 +110,8 @@ fn runtime_smart_context_rewrite_telemetry_record_quality_risk(
 pub(super) struct RuntimeSmartContextLogInput<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) scope: &'a runtime_proxy_crate::ContextScopeId,
+    pub(super) rollout: &'a runtime_proxy_crate::SmartContextRolloutDecision,
     pub(super) route_kind: RuntimeRouteKind,
     pub(super) transport: RuntimeSmartContextTransport,
     pub(super) tier: &'a str,
@@ -117,6 +121,7 @@ pub(super) struct RuntimeSmartContextLogInput<'a> {
     pub(super) body_bytes_after: usize,
     pub(super) stats: RuntimeSmartContextTransformStats,
     pub(super) budget: &'a RuntimeSmartContextBudget,
+    pub(super) token_count_after: &'a runtime_proxy_crate::SmartContextTokenCount,
     pub(super) self_check: &'static str,
 }
 
@@ -124,6 +129,8 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
     let RuntimeSmartContextLogInput {
         request_id,
         shared,
+        scope,
+        rollout,
         route_kind,
         transport,
         tier,
@@ -133,31 +140,25 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
         body_bytes_after,
         stats,
         budget,
+        token_count_after,
         self_check,
     } = input;
-    let rollout = runtime_proxy_crate::smart_context_rollout_decision(
-        runtime_proxy_crate::SmartContextRolloutDecisionInput {
-            enabled: true,
-            explicit_exact_mode: false,
-            shadow_mode: shared.runtime_config.smart_context_shadow,
-            canary_percent: shared.runtime_config.smart_context_canary_percent,
-            stable_key: "profile=-:session=-".to_string(),
-        },
-    );
+    let token_count_source =
+        if budget.request_token_count.is_proven() && token_count_after.is_proven() {
+            runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted
+        } else {
+            runtime_proxy_crate::SmartContextTokenCountSource::Estimated
+        };
     if decision == "rewritten" {
         runtime_smart_context_record_rewrite_telemetry(
             shared,
+            scope,
             RuntimeSmartContextRewriteTelemetryRecord {
                 body_bytes_before,
                 body_bytes_after,
-                estimated_tokens_before:
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
-                        body_bytes_before,
-                    ),
-                estimated_tokens_after:
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
-                        body_bytes_after,
-                    ),
+                tokens_before: budget.request_token_count.tokens,
+                tokens_after: token_count_after.tokens,
+                token_count_source,
                 rewrite_kind: decision.to_string(),
                 status: self_check.to_string(),
                 fallback_reason: runtime_smart_context_telemetry_fallback_reason(
@@ -219,18 +220,41 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
                 runtime_proxy_log_field("body_bytes_before", body_bytes_before.to_string()),
                 runtime_proxy_log_field("body_bytes_after", body_bytes_after.to_string()),
                 runtime_proxy_log_field(
-                    "estimated_tokens_before",
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
-                        body_bytes_before,
-                    )
-                    .to_string(),
+                    "tokens_before",
+                    budget.request_token_count.tokens.to_string(),
+                ),
+                runtime_proxy_log_field("tokens_after", token_count_after.tokens.to_string()),
+                runtime_proxy_log_field(
+                    "token_count_source",
+                    match token_count_source {
+                        runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted => {
+                            "tokenizer_counted"
+                        }
+                        runtime_proxy_crate::SmartContextTokenCountSource::Estimated => "estimated",
+                    },
                 ),
                 runtime_proxy_log_field(
-                    "estimated_tokens_after",
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
-                        body_bytes_after,
-                    )
-                    .to_string(),
+                    "tokenizer_family",
+                    budget
+                        .request_token_count
+                        .tokenizer_family
+                        .unwrap_or("unknown"),
+                ),
+                runtime_proxy_log_field(
+                    "token_confidence_basis_points",
+                    budget
+                        .request_token_count
+                        .confidence_basis_points
+                        .min(token_count_after.confidence_basis_points)
+                        .to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "token_error_bound_tokens",
+                    budget
+                        .request_token_count
+                        .error_bound_tokens
+                        .max(token_count_after.error_bound_tokens)
+                        .to_string(),
                 ),
                 runtime_proxy_log_field(
                     "body_bytes_saved",
@@ -386,12 +410,13 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
 
 fn runtime_smart_context_record_rewrite_telemetry(
     shared: &RuntimeRotationProxyShared,
+    scope: &runtime_proxy_crate::ContextScopeId,
     record: RuntimeSmartContextRewriteTelemetryRecord,
 ) {
-    let Ok(mut current) = shared.smart_context_engine.state.lock() else {
+    let Ok(mut states) = shared.smart_context_engine.states.write() else {
         return;
     };
-    let Some(state) = current.as_mut() else {
+    let Some(state) = states.get_mut(scope) else {
         return;
     };
     if !state.enabled {
@@ -437,16 +462,6 @@ pub(super) fn runtime_smart_context_rewrite_self_check(
     } else {
         "growth"
     }
-}
-
-pub(super) fn runtime_smart_context_saved_tokens(
-    body_bytes_before: usize,
-    body_bytes_after: usize,
-) -> u64 {
-    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(body_bytes_before)
-        .saturating_sub(
-            runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(body_bytes_after),
-        )
 }
 
 fn runtime_smart_context_rewrite_ratio_percent(

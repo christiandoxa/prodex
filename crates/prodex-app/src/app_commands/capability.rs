@@ -1,4 +1,7 @@
-use crate::{agy_bin, claude_bin, codex_bin, copilot_bin, gemini_bin, kiro_bin};
+use crate::{
+    agy_bin, claude_bin, codex_bin, copilot_bin, gemini_bin, kiro_bin,
+    runtime_smart_context_offline_self_test,
+};
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
@@ -139,13 +142,7 @@ pub(crate) fn collect_super_tool_statuses(
     ]
     .into_iter()
     .map(optional_tool_super_status)
-    .chain([SuperToolStatus {
-        name: "smart-context",
-        check: "built-in",
-        ready: true,
-        status: "ok (built-in)".to_string(),
-        detail: "Runtime proxy Smart Context Autopilot is built into Prodex".to_string(),
-    }])
+    .chain([smart_context_super_status()])
     .collect::<Vec<_>>();
 
     rows.push(if check_presidio {
@@ -160,6 +157,25 @@ pub(crate) fn collect_super_tool_statuses(
         }
     });
     rows
+}
+
+fn smart_context_super_status() -> SuperToolStatus {
+    match runtime_smart_context_offline_self_test() {
+        Ok(result) => SuperToolStatus {
+            name: "smart-context",
+            check: "offline-self-test",
+            ready: true,
+            status: format!("ok (tokenizer={})", result.tokenizer_family),
+            detail: result.detail,
+        },
+        Err(error) => SuperToolStatus {
+            name: "smart-context",
+            check: "offline-self-test",
+            ready: false,
+            status: "degraded".to_string(),
+            detail: capability_redacted_detail(&format!("{error:#}")),
+        },
+    }
 }
 
 fn optional_tool_super_status(id: prodex_optional_tools::OptionalToolId) -> SuperToolStatus {
@@ -505,13 +521,7 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "optimizer-plugin",
             "managed checkout loaded as a Codex plugin in Prodex overlays",
         ),
-        ProdexCapability {
-            name: "smart-context",
-            category: "runtime",
-            status: "built-in".to_string(),
-            command: None,
-            description: "runtime proxy context compaction and rehydration".to_string(),
-        },
+        smart_context_capability(),
         ProdexCapability {
             name: "runtime-doctor",
             category: "diagnostics",
@@ -520,6 +530,25 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             description: "runtime log and pressure diagnostics".to_string(),
         },
     ]
+}
+
+fn smart_context_capability() -> ProdexCapability {
+    match runtime_smart_context_offline_self_test() {
+        Ok(result) => ProdexCapability {
+            name: "smart-context",
+            category: "runtime",
+            status: format!("available ({})", result.tokenizer_family),
+            command: None,
+            description: result.detail,
+        },
+        Err(error) => ProdexCapability {
+            name: "smart-context",
+            category: "runtime",
+            status: "degraded".to_string(),
+            command: None,
+            description: capability_redacted_detail(&format!("{error:#}")),
+        },
+    }
 }
 
 fn optional_tool_capability(

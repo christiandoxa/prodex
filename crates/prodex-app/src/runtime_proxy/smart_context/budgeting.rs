@@ -11,15 +11,32 @@ pub(super) struct RuntimeSmartContextBudgetInput<'a> {
     pub(super) static_context_changed: bool,
 }
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_budget(
     input: RuntimeSmartContextBudgetInput<'_>,
 ) -> RuntimeSmartContextBudget {
     let model_name = runtime_smart_context_model_name_from_body(input.body);
+    let current_request_token_count = runtime_proxy_crate::smart_context_count_serialized_request(
+        input.body,
+        model_name.as_deref(),
+    );
+    runtime_smart_context_budget_for_parsed(
+        input,
+        model_name.as_deref(),
+        &current_request_token_count,
+    )
+}
+
+pub(super) fn runtime_smart_context_budget_for_parsed(
+    input: RuntimeSmartContextBudgetInput<'_>,
+    model_name: Option<&str>,
+    current_request_token_count: &runtime_proxy_crate::SmartContextTokenCount,
+) -> RuntimeSmartContextBudget {
     let bucket_key = runtime_smart_context_token_calibration_bucket_key_with_model(
         input.route_kind,
         input.transport,
         input.profile_name,
-        model_name.as_deref(),
+        model_name,
     );
     let (
         global_history,
@@ -35,7 +52,7 @@ pub(super) fn runtime_smart_context_budget(
         bucket_history
     };
     let registry_context_window =
-        runtime_proxy_crate::smart_context_model_context_window(model_name.as_deref());
+        runtime_proxy_crate::smart_context_model_context_window(model_name);
     let (model_context_window_tokens, model_context_window_source) =
         if let Some(configured_context_window_tokens) = configured_context_window_tokens {
             (configured_context_window_tokens, "launch_config")
@@ -60,9 +77,7 @@ pub(super) fn runtime_smart_context_budget(
                 reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
                 current_input_tokens,
                 current_request_body_bytes: input.body.len(),
-                current_request_estimated_tokens: Some(
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body(input.body),
-                ),
+                current_request_estimated_tokens: Some(current_request_token_count.tokens),
                 observed_usage: history,
             },
             calibration_bucket_key: Some(bucket_key),
@@ -105,9 +120,12 @@ pub(super) fn runtime_smart_context_budget(
         observed_context_tokens,
         token_usage_source: if observed_context_tokens.is_some() {
             "runtime_usage"
+        } else if current_request_token_count.is_proven() {
+            "tokenizer_counted"
         } else {
             "estimated_body"
         },
+        request_token_count: current_request_token_count.clone(),
         pressure,
     }
 }
@@ -155,7 +173,7 @@ pub(super) fn runtime_smart_context_budget_inputs(
     shared: &RuntimeRotationProxyShared,
     bucket_key: &runtime_proxy_crate::SmartContextTokenCalibrationBucketKey,
 ) -> RuntimeSmartContextBudgetInputs {
-    let Ok(current) = shared.smart_context_engine.state.lock() else {
+    let Some(scope) = runtime_smart_context_scope_id(shared, bucket_key.profile.as_deref()) else {
         return (
             Vec::new(),
             Vec::new(),
@@ -165,8 +183,18 @@ pub(super) fn runtime_smart_context_budget_inputs(
             Vec::new(),
         );
     };
-    current
-        .as_ref()
+    let Ok(states) = shared.smart_context_engine.states.read() else {
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            Default::default(),
+            Vec::new(),
+        );
+    };
+    states
+        .get(&scope)
         .map(|state| {
             let calibration_samples = state
                 .token_calibration_history

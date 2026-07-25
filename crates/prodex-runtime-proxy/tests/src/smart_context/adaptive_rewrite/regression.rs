@@ -9,8 +9,9 @@ fn regression_self_check_falls_back_on_quality_risks() {
         }),
         before_hash: smart_context_hash_text("before"),
         after_hash: smart_context_hash_text("after"),
-        before_estimated_tokens: 100,
-        after_estimated_tokens: 100,
+        before_tokens: 100,
+        after_tokens: 100,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
         future_retrieval_overhead_tokens: 0,
         injected_protocol_overhead_tokens: 0,
         expected_recovery_overhead_tokens: 0,
@@ -42,8 +43,9 @@ fn regression_self_check_passes_when_condense_saves_and_signals_preserved() {
         exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
         before_hash: smart_context_hash_text("long before"),
         after_hash: smart_context_hash_text("short after"),
-        before_estimated_tokens: 400,
-        after_estimated_tokens: 100,
+        before_tokens: 400,
+        after_tokens: 100,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
         future_retrieval_overhead_tokens: 0,
         injected_protocol_overhead_tokens: 0,
         expected_recovery_overhead_tokens: 0,
@@ -67,8 +69,9 @@ fn regression_self_check_rejects_subthreshold_net_savings() {
         exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
         before_hash: smart_context_hash_text("before"),
         after_hash: smart_context_hash_text("after"),
-        before_estimated_tokens: 1_000,
-        after_estimated_tokens: 800,
+        before_tokens: 1_000,
+        after_tokens: 800,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
         future_retrieval_overhead_tokens: 80,
         injected_protocol_overhead_tokens: 0,
         expected_recovery_overhead_tokens: 0,
@@ -95,8 +98,9 @@ fn regression_self_check_allows_segment_local_unresolved_rehydrate_refs() {
         exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
         before_hash: smart_context_hash_text("large payload with psc:missing"),
         after_hash: smart_context_hash_text("small payload with psc:missing"),
-        before_estimated_tokens: 400,
-        after_estimated_tokens: 100,
+        before_tokens: 400,
+        after_tokens: 100,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
         future_retrieval_overhead_tokens: 0,
         injected_protocol_overhead_tokens: 0,
         expected_recovery_overhead_tokens: 0,
@@ -111,4 +115,33 @@ fn regression_self_check_allows_segment_local_unresolved_rehydrate_refs() {
         SmartContextRegressionSelfCheckDecision::Pass
     );
     assert!(check.reasons.is_empty());
+}
+
+#[test]
+fn regression_self_check_rejects_estimated_token_savings() {
+    let check = smart_context_regression_self_check(SmartContextRegressionSelfCheckInput {
+        exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+        before_hash: smart_context_hash_text("long before"),
+        after_hash: smart_context_hash_text("short after"),
+        before_tokens: 1_000,
+        after_tokens: 100,
+        token_count_source: SmartContextTokenCountSource::Estimated,
+        future_retrieval_overhead_tokens: 0,
+        injected_protocol_overhead_tokens: 0,
+        expected_recovery_overhead_tokens: 0,
+        before_critical_signal_count: 1,
+        after_critical_signal_count: 1,
+        missing_rehydrate_refs: Vec::new(),
+        unresolved_rehydrate_refs_are_segment_local: false,
+    });
+
+    assert_eq!(
+        check.decision,
+        SmartContextRegressionSelfCheckDecision::FallbackExact
+    );
+    assert!(
+        check
+            .reasons
+            .contains(&SmartContextRegressionSelfCheckReason::TokenizerEstimateNotEligible)
+    );
 }

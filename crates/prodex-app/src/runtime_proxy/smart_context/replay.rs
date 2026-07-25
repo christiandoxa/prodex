@@ -26,37 +26,34 @@ pub(crate) fn run_runtime_smart_context_replay_json(
         scenario_results.push(result);
     }
 
-    let exact_estimated_input_tokens = scenario_results
+    let exact_input_tokens = scenario_results
         .iter()
-        .map(|scenario| scenario.exact_estimated_input_tokens)
+        .map(|scenario| scenario.exact_input_tokens)
         .sum();
-    let optimized_estimated_input_tokens = scenario_results
+    let optimized_input_tokens = scenario_results
         .iter()
-        .map(|scenario| scenario.optimized_estimated_input_tokens)
+        .map(|scenario| scenario.optimized_input_tokens)
         .sum();
-    let estimated_net_saved_tokens = replay_token_difference(
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
-    );
+    let net_saved_tokens = replay_token_difference(exact_input_tokens, optimized_input_tokens);
 
     Ok(runtime_proxy_crate::SmartContextReplayReport {
         schema_version: runtime_proxy_crate::SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION,
         corpus_schema_version: corpus.schema_version,
-        evidence_level: "deterministic_correctness_with_estimated_tokens",
+        evidence_level: "deterministic_correctness_with_tokenizer_counts",
         provenance: runtime_proxy_crate::SmartContextReplayProvenance {
             package_version: env!("CARGO_PKG_VERSION"),
             commit_sha: replay_commit_sha(),
             os: std::env::consts::OS,
             architecture: std::env::consts::ARCH,
-            tokenizer_source: "prodex_conservative_body_estimator_v1",
-            token_measurement: "estimated",
-            estimator_confidence: "low",
+            rust_toolchain: std::env::var("RUSTUP_TOOLCHAIN").ok(),
+            tokenizer_source: "tiktoken-rs@0.12.0",
+            token_measurement: "tokenizer_counted",
             command: "cargo run -q --bin prodex -- context replay-report <corpus.json> --json --strict",
         },
         scenarios: scenario_results,
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
-        estimated_net_saved_tokens,
+        exact_input_tokens,
+        optimized_input_tokens,
+        net_saved_tokens,
         passed: failures.is_empty(),
         failures,
     })
@@ -69,29 +66,29 @@ pub(crate) fn render_runtime_smart_context_replay_markdown(
     output.push_str(&format!("- evidence_level: {}\n", report.evidence_level));
     output.push_str(&format!(
         "- token_measurement: {} ({})\n",
-        report.provenance.token_measurement, report.provenance.estimator_confidence
+        report.provenance.token_measurement, report.provenance.tokenizer_source
     ));
     output.push_str(&format!(
-        "- exact_estimated_input_tokens: {}\n",
-        report.exact_estimated_input_tokens
+        "- exact_input_tokens: {}\n",
+        report.exact_input_tokens
     ));
     output.push_str(&format!(
-        "- optimized_estimated_input_tokens: {}\n",
-        report.optimized_estimated_input_tokens
+        "- optimized_input_tokens: {}\n",
+        report.optimized_input_tokens
     ));
     output.push_str(&format!(
-        "- estimated_net_saved_tokens: {}\n",
-        report.estimated_net_saved_tokens
+        "- net_saved_tokens: {}\n",
+        report.net_saved_tokens
     ));
     output.push_str(&format!("- passed: {}\n", report.passed));
     output.push_str("\n## Scenarios\n\n");
     for scenario in &report.scenarios {
         output.push_str(&format!(
-            "- {}: passed={}, turns={}, estimated_net_saved_tokens={}\n",
+            "- {}: passed={}, turns={}, net_saved_tokens={}\n",
             scenario.id,
             scenario.passed,
             scenario.turns.len(),
-            scenario.estimated_net_saved_tokens
+            scenario.net_saved_tokens
         ));
         for turn in &scenario.turns {
             if !turn.failures.is_empty() {
@@ -140,20 +137,11 @@ fn run_runtime_smart_context_replay_scenario(
     remove_runtime_smart_context_replay_root(&exact_root)?;
     remove_runtime_smart_context_replay_root(&optimized_root)?;
 
-    let exact_estimated_input_tokens = turns
-        .iter()
-        .map(|turn| turn.exact_estimated_input_tokens)
-        .sum();
-    let optimized_estimated_input_tokens = turns
-        .iter()
-        .map(|turn| turn.optimized_estimated_input_tokens)
-        .sum();
-    let estimated_net_saved_tokens = replay_token_difference(
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
-    );
+    let exact_input_tokens = turns.iter().map(|turn| turn.exact_input_tokens).sum();
+    let optimized_input_tokens = turns.iter().map(|turn| turn.optimized_input_tokens).sum();
+    let net_saved_tokens = replay_token_difference(exact_input_tokens, optimized_input_tokens);
     let passed = turns.iter().all(|turn| turn.failures.is_empty())
-        && optimized_estimated_input_tokens <= exact_estimated_input_tokens;
+        && optimized_input_tokens <= exact_input_tokens;
 
     Ok(runtime_proxy_crate::SmartContextReplayScenarioResult {
         id: scenario.id.clone(),
@@ -162,9 +150,9 @@ fn run_runtime_smart_context_replay_scenario(
         model: scenario.model.clone(),
         context_window_tokens: scenario.context_window_tokens,
         mode: scenario.mode,
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
-        estimated_net_saved_tokens,
+        exact_input_tokens,
+        optimized_input_tokens,
+        net_saved_tokens,
         turns,
         passed,
     })
@@ -197,14 +185,23 @@ fn run_runtime_smart_context_replay_turn(
     let optimized_state_mutations =
         replay_state_generation(optimized)?.saturating_sub(optimized_generation_before);
 
-    let exact_estimated_input_tokens =
-        runtime_proxy_crate::smart_context_estimate_tokens_from_body(&exact_body);
-    let optimized_estimated_input_tokens =
-        runtime_proxy_crate::smart_context_estimate_tokens_from_body(&optimized_body);
-    let estimated_net_saved_tokens = replay_token_difference(
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
+    let exact_count = runtime_proxy_crate::smart_context_count_serialized_request(
+        &exact_body,
+        Some(&scenario.model),
     );
+    let optimized_count = runtime_proxy_crate::smart_context_count_serialized_request(
+        &optimized_body,
+        Some(&scenario.model),
+    );
+    if !exact_count.is_proven() || !optimized_count.is_proven() {
+        bail!(
+            "model {} has no supported tokenizer; deterministic replay cannot claim token savings",
+            scenario.model
+        );
+    }
+    let exact_input_tokens = exact_count.tokens;
+    let optimized_input_tokens = optimized_count.tokens;
+    let net_saved_tokens = replay_token_difference(exact_input_tokens, optimized_input_tokens);
     let optimized_value = serde_json::from_slice::<serde_json::Value>(&optimized_body).ok();
     let valid_json = optimized_value.is_some();
     let required_text_preserved = optimized_value.as_ref().is_some_and(|value| {
@@ -260,10 +257,10 @@ fn run_runtime_smart_context_replay_turn(
     if turn.expect_rewrite != rewrite_applied {
         failures.push("rewrite_expectation_mismatch".to_string());
     }
-    if rewrite_applied && estimated_net_saved_tokens <= 0 {
+    if rewrite_applied && net_saved_tokens <= 0 {
         failures.push("rewrite_not_token_positive".to_string());
     }
-    if optimized_estimated_input_tokens > exact_estimated_input_tokens {
+    if optimized_input_tokens > exact_input_tokens {
         failures.push("aggregate_input_tokens_increased".to_string());
     }
 
@@ -271,9 +268,13 @@ fn run_runtime_smart_context_replay_turn(
         turn: turn_index,
         exact_body_bytes: exact_body.len(),
         optimized_body_bytes: optimized_body.len(),
-        exact_estimated_input_tokens,
-        optimized_estimated_input_tokens,
-        estimated_net_saved_tokens,
+        exact_input_tokens,
+        optimized_input_tokens,
+        net_saved_tokens,
+        token_count_source: optimized_count.source.as_str(),
+        tokenizer_family: optimized_count.tokenizer_family.unwrap_or("unknown"),
+        token_confidence_basis_points: optimized_count.confidence_basis_points,
+        token_error_bound_tokens: optimized_count.error_bound_tokens,
         rewrite_applied,
         exact_byte_identity,
         valid_json,
@@ -326,7 +327,7 @@ fn replay_prepare_body(
                 shared,
                 RuntimeRouteKind::Responses,
                 Some("replay"),
-            )
+            )?
             .into_owned())
         }
         runtime_proxy_crate::SmartContextReplayTransport::Websocket => {
@@ -337,7 +338,7 @@ fn replay_prepare_body(
                 &request,
                 shared,
                 "replay",
-            )
+            )?
             .into_owned()
             .into_bytes())
         }
@@ -463,12 +464,7 @@ fn runtime_smart_context_replay_shared(
 }
 
 fn replay_state_generation(shared: &RuntimeRotationProxyShared) -> Result<u64> {
-    let state = shared
-        .smart_context_engine
-        .state
-        .lock()
-        .map_err(|_| anyhow!("Smart Context replay state lock is poisoned"))?;
-    Ok(state.as_ref().map_or(0, |state| state.generation))
+    Ok(runtime_smart_context_proxy_state_snapshot(shared).map_or(0, |(generation, _)| generation))
 }
 
 fn replay_value_contains_text(value: &serde_json::Value, required: &str) -> bool {
@@ -487,17 +483,8 @@ fn replay_value_contains_text(value: &serde_json::Value, required: &str) -> bool
 fn replay_selected_transforms(body: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(body);
     let mut transforms = Vec::new();
-    if text.contains("[psc dup ") {
+    if text.contains("[prodex-context-ref v=1 ") {
         transforms.push("within_request_duplicate".to_string());
-    }
-    if text.contains("psc2:") || text.contains("psc:") {
-        transforms.push("artifact_reference".to_string());
-    }
-    if text.contains("psc static ") {
-        transforms.push("static_context".to_string());
-    }
-    if text.contains("[psc path ") {
-        transforms.push("path_alias".to_string());
     }
     transforms
 }

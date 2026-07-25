@@ -1,4 +1,5 @@
 use super::constants::SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX;
+use super::runtime_smart_context_artifact_id_valid;
 use super::static_context::{
     runtime_smart_context_static_prompt_field_key,
     runtime_smart_context_value_is_static_context_item,
@@ -283,10 +284,14 @@ pub(super) fn runtime_smart_context_parse_non_alias_artifact_reference(
     if id_end == prefix_len {
         return None;
     }
+    let id = &raw[..id_end];
+    if !runtime_smart_context_artifact_id_valid(id) {
+        return None;
+    }
 
     let line_ranges = runtime_smart_context_parse_line_ranges(&raw[id_end..]);
     Some(RuntimeSmartContextArtifactReference {
-        id: raw[..id_end].to_string(),
+        id: id.to_string(),
         marker: token.to_string(),
         line_range: line_ranges.first().copied(),
         line_ranges,

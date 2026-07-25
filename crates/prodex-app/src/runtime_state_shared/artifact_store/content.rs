@@ -1,21 +1,21 @@
 use super::super::{
     RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES, RuntimeSmartContextArtifact,
-    RuntimeSmartContextArtifactChunkIndex, RuntimeSmartContextArtifactLineIndex,
-    RuntimeSmartContextArtifactManifestEntry, runtime_smart_context_artifact_chunk_index,
-    runtime_smart_context_artifact_line_index,
+    runtime_smart_context_artifact_chunk_index, runtime_smart_context_artifact_line_index,
     runtime_smart_context_artifact_line_index_needs_refresh,
 };
-use super::{RuntimeSmartContextArtifactStore, RuntimeSmartContextStaticFingerprintMetadata};
+#[cfg(test)]
+use super::super::{RuntimeSmartContextArtifactChunkIndex, RuntimeSmartContextArtifactLineIndex};
+use super::RuntimeSmartContextArtifactStore;
+#[cfg(test)]
+use super::RuntimeSmartContextStaticFingerprintMetadata;
 
 impl RuntimeSmartContextArtifactStore {
+    #[cfg(test)]
     pub(crate) fn artifact_count(&self) -> usize {
         self.artifacts.len()
     }
 
-    pub(crate) fn artifact_ids(&self) -> std::collections::BTreeSet<String> {
-        self.artifacts.keys().cloned().collect()
-    }
-
+    #[cfg(test)]
     pub(crate) fn set_static_context_fingerprints(
         &mut self,
         prompt_cache_hash: Option<String>,
@@ -55,43 +55,6 @@ impl RuntimeSmartContextArtifactStore {
     #[cfg(test)]
     pub(crate) fn static_context_prompt_cache_hash(&self) -> Option<&str> {
         self.static_context_prompt_cache_hash.as_deref()
-    }
-
-    pub(crate) fn artifact_manifest_entries(
-        &self,
-        limit: usize,
-    ) -> Vec<RuntimeSmartContextArtifactManifestEntry> {
-        if limit == 0 {
-            return Vec::new();
-        }
-        let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
-        artifacts.sort_by(|left, right| {
-            right
-                .order
-                .cmp(&left.order)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        artifacts
-            .into_iter()
-            .take(limit)
-            .map(|artifact| {
-                let line_index = artifact.line_index.as_ref();
-                RuntimeSmartContextArtifactManifestEntry {
-                    id: artifact.id.clone(),
-                    byte_len: artifact.byte_len,
-                    content_hash: artifact.content_hash.clone(),
-                    critical_range_count: line_index.map_or(0, |index| index.critical_ranges.len()),
-                    file_location_range_count: line_index
-                        .map_or(0, |index| index.file_location_ranges.len()),
-                    diff_hunk_range_count: line_index
-                        .map_or(0, |index| index.diff_hunk_ranges.len()),
-                    test_failure_range_count: line_index
-                        .map_or(0, |index| index.test_failure_ranges.len()),
-                    error_range_count: line_index.map_or(0, |index| index.error_ranges.len()),
-                    command_kind: line_index.and_then(|index| index.command_kind.clone()),
-                }
-            })
-            .collect()
     }
 
     pub(crate) fn insert_text(
@@ -177,18 +140,21 @@ impl RuntimeSmartContextArtifactStore {
             .map(|artifact| artifact.text.clone())
     }
 
+    #[cfg(test)]
     pub(crate) fn line_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactLineIndex> {
         self.artifacts
             .get(self.resolve_artifact_id(id))
             .and_then(|artifact| artifact.line_index.as_ref())
     }
 
+    #[cfg(test)]
     pub(crate) fn chunk_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactChunkIndex> {
         self.artifacts
             .get(self.resolve_artifact_id(id))
             .and_then(|artifact| artifact.chunk_index.as_ref())
     }
 
+    #[cfg(test)]
     pub(crate) fn artifact_ref_for_exact_text(
         &self,
         text: &str,

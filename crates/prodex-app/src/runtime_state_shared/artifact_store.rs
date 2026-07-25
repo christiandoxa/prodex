@@ -8,8 +8,9 @@ mod projection;
 mod types;
 
 pub(in crate::runtime_state_shared) use self::types::RuntimeSmartContextArtifactProjectionPrewarm;
+#[cfg(test)]
+pub(crate) use self::types::RuntimeSmartContextStaticFingerprintMetadata;
 pub(crate) use self::types::{
     RuntimeSmartContextArtifactRepoMap, RuntimeSmartContextArtifactRepoMapEntry,
     RuntimeSmartContextArtifactRepoMapEntryKind, RuntimeSmartContextArtifactStore,
-    RuntimeSmartContextStaticFingerprintMetadata,
 };

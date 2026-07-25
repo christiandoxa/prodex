@@ -1,14 +1,10 @@
 use super::*;
 use redaction::redaction_redact_secret_like_text;
 
-const RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_DELAY_MS: u64 = if cfg!(test) { 0 } else { 25 };
-
-mod artifact_save;
 mod continuation_journal;
 mod queues;
 mod workers;
 
-pub(crate) use artifact_save::*;
 pub(crate) use continuation_journal::*;
 pub(crate) use queues::*;
 pub(crate) use workers::*;

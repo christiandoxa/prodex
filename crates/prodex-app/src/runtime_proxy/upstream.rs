@@ -108,7 +108,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
         shared,
         events.route_kind,
         Some(profile_name),
-    );
+    )?;
     log_runtime_upstream_payload_snapshot(
         shared,
         request_id,

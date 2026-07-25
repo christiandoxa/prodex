@@ -9,6 +9,7 @@ pub enum SmartContextRegressionSelfCheckDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SmartContextRegressionSelfCheckReason {
     ExactnessRequiredButPayloadChanged,
+    TokenizerEstimateNotEligible,
     TokenBudgetDidNotImprove,
     TokenSavingsBelowSafetyMargin,
     CriticalSignalDropped,
@@ -21,8 +22,9 @@ pub struct SmartContextRegressionSelfCheckInput {
     pub exactness_guard: SmartContextExactnessGuard,
     pub before_hash: String,
     pub after_hash: String,
-    pub before_estimated_tokens: u64,
-    pub after_estimated_tokens: u64,
+    pub before_tokens: u64,
+    pub after_tokens: u64,
+    pub token_count_source: SmartContextTokenCountSource,
     pub future_retrieval_overhead_tokens: u64,
     pub injected_protocol_overhead_tokens: u64,
     pub expected_recovery_overhead_tokens: u64,
@@ -37,6 +39,9 @@ pub struct SmartContextRegressionSelfCheck {
     pub decision: SmartContextRegressionSelfCheckDecision,
     pub reasons: Vec<SmartContextRegressionSelfCheckReason>,
     pub saved_tokens: u64,
+    pub before_tokens: u64,
+    pub after_tokens: u64,
+    pub token_count_source: SmartContextTokenCountSource,
     pub before_hash: String,
     pub after_hash: String,
 }
@@ -46,28 +51,25 @@ pub fn smart_context_regression_self_check(
 ) -> SmartContextRegressionSelfCheck {
     let mut reasons = Vec::new();
     let payload_changed = input.before_hash != input.after_hash;
-    let gross_saved_tokens = input
-        .before_estimated_tokens
-        .saturating_sub(input.after_estimated_tokens);
+    let gross_saved_tokens = input.before_tokens.saturating_sub(input.after_tokens);
     let overhead_tokens = input
         .future_retrieval_overhead_tokens
         .saturating_add(input.injected_protocol_overhead_tokens)
         .saturating_add(input.expected_recovery_overhead_tokens);
     let net_saved_tokens = gross_saved_tokens.saturating_sub(overhead_tokens);
-    let required_saved_tokens = 128.max(
-        input
-            .before_estimated_tokens
-            .saturating_mul(3)
-            .saturating_add(99)
-            / 100,
-    );
+    let required_saved_tokens =
+        128.max(input.before_tokens.saturating_mul(3).saturating_add(99) / 100);
 
     if input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact
         && payload_changed
     {
         reasons.push(SmartContextRegressionSelfCheckReason::ExactnessRequiredButPayloadChanged);
     }
-    if payload_changed && input.after_estimated_tokens >= input.before_estimated_tokens {
+    if payload_changed && input.token_count_source != SmartContextTokenCountSource::TokenizerCounted
+    {
+        reasons.push(SmartContextRegressionSelfCheckReason::TokenizerEstimateNotEligible);
+    }
+    if payload_changed && input.after_tokens >= input.before_tokens {
         reasons.push(SmartContextRegressionSelfCheckReason::TokenBudgetDidNotImprove);
     } else if payload_changed && net_saved_tokens < required_saved_tokens {
         reasons.push(SmartContextRegressionSelfCheckReason::TokenSavingsBelowSafetyMargin);
@@ -83,7 +85,7 @@ pub fn smart_context_regression_self_check(
     {
         reasons.push(SmartContextRegressionSelfCheckReason::MissingRehydrateRefs);
     }
-    if input.before_estimated_tokens > 0 && input.after_estimated_tokens == 0 {
+    if input.before_tokens > 0 && input.after_tokens == 0 {
         reasons.push(SmartContextRegressionSelfCheckReason::EmptyAfterPayload);
     }
 
@@ -95,6 +97,9 @@ pub fn smart_context_regression_self_check(
         },
         reasons,
         saved_tokens: net_saved_tokens,
+        before_tokens: input.before_tokens,
+        after_tokens: input.after_tokens,
+        token_count_source: input.token_count_source,
         before_hash: input.before_hash,
         after_hash: input.after_hash,
     }

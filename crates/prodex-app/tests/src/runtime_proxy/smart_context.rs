@@ -1,23 +1,5 @@
 use super::*;
 use std::borrow::Cow;
-use std::collections::BTreeSet;
-
-#[path = "smart_context/intent.rs"]
-mod intent;
-#[path = "smart_context/tool_outputs.rs"]
-mod tool_outputs;
-
-#[path = "smart_context/manifest.rs"]
-mod manifest;
-
-#[path = "smart_context/rehydration.rs"]
-mod rehydration;
-
-#[path = "smart_context/aliases.rs"]
-mod aliases;
-
-#[path = "smart_context/semantic.rs"]
-mod semantic;
 
 #[path = "smart_context/budget.rs"]
 mod budget;
@@ -28,16 +10,21 @@ mod rehydrate_dedupe;
 #[path = "smart_context/prepare.rs"]
 mod prepare;
 
+#[path = "smart_context/tool_outputs/prepare_fallbacks.rs"]
+mod prepare_fallbacks;
+
 #[path = "smart_context/static_context_extra.rs"]
 mod static_context_extra;
-
-#[path = "smart_context/repo_artifacts.rs"]
-mod repo_artifacts;
 
 #[path = "smart_context/exactness.rs"]
 mod exactness;
 
-fn smart_context_test_request(body: serde_json::Value) -> RuntimeProxyRequest {
+fn smart_context_test_request(mut body: serde_json::Value) -> RuntimeProxyRequest {
+    if let Some(object) = body.as_object_mut() {
+        object
+            .entry("model")
+            .or_insert_with(|| serde_json::Value::String("gpt-4o".to_string()));
+    }
     RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/v1/responses".to_string(),
@@ -64,6 +51,18 @@ fn smart_context_test_state_snapshot(shared: &RuntimeRotationProxyShared) -> Str
     format!("{state:#?}")
 }
 
+fn smart_context_test_copy_scope(
+    source: &RuntimeRotationProxyShared,
+    target: &RuntimeRotationProxyShared,
+) {
+    let source = source.runtime.lock().unwrap().clone();
+    let mut target = target.runtime.lock().unwrap();
+    target.paths.root = source.paths.root;
+    target.upstream_base_url = source.upstream_base_url;
+    target.current_profile = source.current_profile;
+    target.state.profiles = source.state.profiles;
+}
+
 fn register_persistent_runtime_smart_context_test_state(
     shared: &RuntimeRotationProxyShared,
     model_context_window_tokens: Option<u64>,
@@ -77,18 +76,6 @@ fn register_persistent_runtime_smart_context_test_state(
         Some(artifact_path.clone()),
     );
     artifact_path
-}
-
-fn smart_context_test_insert_durable_artifact(
-    shared: &RuntimeRotationProxyShared,
-    text: &str,
-) -> runtime_proxy_crate::SmartContextArtifactRef {
-    with_runtime_smart_context_proxy_state(shared, |state| {
-        let artifact = state.artifacts.insert_text(text).expect("test artifact");
-        state.durable_artifact_ids.insert(artifact.id.clone());
-        artifact
-    })
-    .expect("smart-context state should be registered")
 }
 
 fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {

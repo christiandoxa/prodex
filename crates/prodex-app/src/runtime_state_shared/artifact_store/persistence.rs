@@ -4,34 +4,89 @@ use super::super::{
     runtime_smart_context_artifact_line_index_needs_refresh,
 };
 use super::RuntimeSmartContextArtifactStore;
+use aes_gcm_siv::aead::{Aead, KeyInit, Payload};
+use aes_gcm_siv::{Aes256GcmSiv, Nonce};
+use anyhow::{Context, bail};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
+use zeroize::Zeroizing;
 
 const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES: usize = 32;
+const RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES: usize = 12;
+const RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC: &[u8] = b"PSCA1\0";
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>>,
 > = OnceLock::new();
 
 impl RuntimeSmartContextArtifactStore {
-    pub(crate) fn load_from_path(path: &Path) -> Self {
-        let Some(raw) = runtime_smart_context_read_artifact_store(path) else {
-            return Self::default();
-        };
-        let Ok(mut store) = serde_json::from_str::<Self>(&raw) else {
-            return Self::default();
-        };
-        if !matches!(store.schema_version, 1 | 2) {
-            return Self::default();
+    pub(crate) fn for_scope(scope: runtime_proxy_crate::ContextScopeId) -> Self {
+        Self {
+            scope_id: Some(scope),
+            ..Self::default()
         }
-        store.validate_loaded_metadata();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_scope(&mut self, scope: runtime_proxy_crate::ContextScopeId) {
+        self.scope_id = Some(scope);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn load_from_path(path: &Path) -> Self {
+        Self::load_validated_from_path(path, None).unwrap_or_default()
+    }
+
+    pub(crate) fn load_scoped_from_path(
+        path: &Path,
+        scope: &runtime_proxy_crate::ContextScopeId,
+    ) -> anyhow::Result<Self> {
+        Self::load_validated_from_path(path, Some(scope))
+    }
+
+    fn load_validated_from_path(
+        path: &Path,
+        expected_scope: Option<&runtime_proxy_crate::ContextScopeId>,
+    ) -> anyhow::Result<Self> {
+        let Some(raw) = runtime_smart_context_read_artifact_store(path, expected_scope)? else {
+            let mut store = Self::default();
+            store.scope_id = expected_scope.cloned();
+            return Ok(store);
+        };
+        let mut store = serde_json::from_slice::<Self>(&raw).with_context(|| {
+            format!("invalid Smart Context artifact JSON at {}", path.display())
+        })?;
+        if !matches!(store.schema_version, 1 | 2 | 3) {
+            bail!(
+                "unsupported Smart Context artifact schema at {}",
+                path.display()
+            );
+        }
+        if store.schema_version == 3
+            && expected_scope.is_some()
+            && store.scope_id.as_ref() != expected_scope
+        {
+            bail!(
+                "Smart Context artifact scope mismatch at {}",
+                path.display()
+            );
+        }
+        if !store.validate_loaded_metadata() {
+            bail!(
+                "invalid Smart Context artifact metadata at {}",
+                path.display()
+            );
+        }
+        store.scope_id = expected_scope.cloned().or(store.scope_id);
+        store.schema_version = 3;
         store.recompute_total_bytes();
         store.enforce_limits();
         store.refresh_prewarmed_projections();
-        store
+        Ok(store)
     }
 
     #[cfg(test)]
@@ -40,7 +95,9 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     pub(crate) fn save_merged_to_path(&self, path: &Path) -> anyhow::Result<Self> {
-        if let Some(parent) = path
+        if runtime_smart_context_artifact_key_path(path).is_some() {
+            runtime_smart_context_prepare_scoped_directories(path)?;
+        } else if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
@@ -51,7 +108,7 @@ impl RuntimeSmartContextArtifactStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
-        let mut merged = Self::load_from_path(path);
+        let mut merged = Self::load_validated_from_path(path, self.scope_id.as_ref())?;
         merged.merge_from(self);
         merged.write_to_path_unlocked(path)?;
         Ok(merged)
@@ -100,7 +157,8 @@ impl RuntimeSmartContextArtifactStore {
             .extend(incoming.legacy_artifact_ids.clone());
         self.legacy_artifact_ids
             .retain(|_, id| self.artifacts.contains_key(id));
-        self.schema_version = 2;
+        self.schema_version = 3;
+        self.scope_id = incoming.scope_id.clone().or(self.scope_id.clone());
         if !incoming.static_context_fingerprints.is_empty()
             || incoming.static_context_prompt_cache_hash.is_some()
         {
@@ -113,6 +171,7 @@ impl RuntimeSmartContextArtifactStore {
         self.refresh_prewarmed_projections();
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_persisted_artifact_ordering(
         &mut self,
         submitted: &Self,
@@ -151,9 +210,14 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
-        let raw = serde_json::to_vec(self)?;
+        let raw = Zeroizing::new(serde_json::to_vec(self)?);
+        let encoded = runtime_smart_context_encrypt_artifact_store(
+            path,
+            self.scope_id.as_ref(),
+            raw.as_slice(),
+        )?;
         let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
-        runtime_smart_context_write_private_file(&temp_path, &raw)?;
+        runtime_smart_context_write_private_file(&temp_path, &encoded)?;
         if let Err(err) = fs::rename(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
             return Err(err.into());
@@ -169,7 +233,8 @@ impl RuntimeSmartContextArtifactStore {
             .sum();
     }
 
-    fn validate_loaded_metadata(&mut self) {
+    fn validate_loaded_metadata(&mut self) -> bool {
+        let mut valid = true;
         let mut validated = BTreeMap::new();
         for (stored_id, mut artifact) in std::mem::take(&mut self.artifacts) {
             if stored_id != artifact.id
@@ -180,6 +245,7 @@ impl RuntimeSmartContextArtifactStore {
                     &artifact.text,
                 )
             {
+                valid = false;
                 continue;
             }
             let strong_id = runtime_proxy_crate::smart_context_hash_text(&artifact.text);
@@ -201,7 +267,7 @@ impl RuntimeSmartContextArtifactStore {
                 .or_insert(artifact);
         }
         self.artifacts = validated;
-        self.schema_version = 2;
+        self.schema_version = 3;
 
         for artifact in self.artifacts.values_mut() {
             let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
@@ -227,9 +293,11 @@ impl RuntimeSmartContextArtifactStore {
             }
         }
 
+        let fingerprint_count = self.static_context_fingerprints.len();
         self.static_context_fingerprints.retain(|fingerprint| {
             !fingerprint.id.trim().is_empty() && fingerprint.content_hash.starts_with("sc2:")
         });
+        valid &= self.static_context_fingerprints.len() == fingerprint_count;
         self.legacy_artifact_ids
             .retain(|legacy, id| legacy.starts_with("sc:") && self.artifacts.contains_key(id));
         self.next_artifact_order = self.next_artifact_order.max(
@@ -239,6 +307,7 @@ impl RuntimeSmartContextArtifactStore {
                 .max()
                 .unwrap_or(0),
         );
+        valid
     }
 
     pub(in crate::runtime_state_shared::artifact_store) fn enforce_limits(&mut self) {
@@ -264,32 +333,181 @@ impl RuntimeSmartContextArtifactStore {
     }
 }
 
-fn runtime_smart_context_read_artifact_store(path: &Path) -> Option<String> {
-    let metadata = fs::symlink_metadata(path).ok()?;
+fn runtime_smart_context_read_artifact_store(
+    path: &Path,
+    expected_scope: Option<&runtime_proxy_crate::ContextScopeId>,
+) -> anyhow::Result<Option<Zeroizing<Vec<u8>>>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     if !metadata.file_type().is_file()
         || metadata.len() > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES
     {
-        return None;
+        bail!(
+            "unsafe Smart Context artifact store path {}",
+            path.display()
+        );
     }
 
-    let file = fs::File::open(path).ok()?;
-    let opened_metadata = file.metadata().ok()?;
+    let file = fs::File::open(path)?;
+    let opened_metadata = file.metadata()?;
     if !runtime_smart_context_same_artifact_store_file(&metadata, &opened_metadata) {
-        return None;
+        bail!(
+            "Smart Context artifact store changed while opening {}",
+            path.display()
+        );
     }
 
-    let mut raw = String::new();
-    if file
-        .take(RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES.saturating_add(1))
-        .read_to_string(&mut raw)
-        .is_err()
-    {
-        return None;
-    }
+    let mut raw = Zeroizing::new(Vec::with_capacity(metadata.len() as usize));
+    file.take(RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES.saturating_add(1))
+        .read_to_end(&mut raw)
+        .with_context(|| {
+            format!(
+                "failed to read Smart Context artifacts at {}",
+                path.display()
+            )
+        })?;
     if raw.len() as u64 > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES {
-        return None;
+        bail!(
+            "Smart Context artifact store exceeds size limit at {}",
+            path.display()
+        );
     }
-    Some(raw)
+    if raw.starts_with(RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC) {
+        return runtime_smart_context_decrypt_artifact_store(path, expected_scope, &raw).map(Some);
+    }
+    Ok(Some(raw))
+}
+
+fn runtime_smart_context_encrypt_artifact_store(
+    path: &Path,
+    scope: Option<&runtime_proxy_crate::ContextScopeId>,
+    plaintext: &[u8],
+) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    let Some(key_path) = runtime_smart_context_artifact_key_path(path) else {
+        return Ok(Zeroizing::new(plaintext.to_vec()));
+    };
+    let scope = scope.context("scoped Smart Context artifact store is missing its scope ID")?;
+    let key = runtime_smart_context_artifact_key(&key_path, true)?;
+    let cipher = Aes256GcmSiv::new_from_slice(key.as_slice())
+        .map_err(|_| anyhow::anyhow!("failed to initialize Smart Context artifact cipher"))?;
+    let mut nonce = [0_u8; RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES];
+    getrandom::fill(&mut nonce)
+        .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact nonce"))?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad: scope.as_str().as_bytes(),
+            },
+        )
+        .map_err(|_| anyhow::anyhow!("failed to encrypt Smart Context artifacts"))?;
+    let mut encoded = Zeroizing::new(Vec::with_capacity(
+        RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len() + nonce.len() + ciphertext.len(),
+    ));
+    encoded.extend_from_slice(RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC);
+    encoded.extend_from_slice(&nonce);
+    encoded.extend_from_slice(&ciphertext);
+    Ok(encoded)
+}
+
+fn runtime_smart_context_decrypt_artifact_store(
+    path: &Path,
+    scope: Option<&runtime_proxy_crate::ContextScopeId>,
+    encoded: &[u8],
+) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    let key_path = runtime_smart_context_artifact_key_path(path)
+        .context("encrypted Smart Context artifact path is outside the scoped store")?;
+    let scope = scope.context("encrypted Smart Context artifact store has no expected scope")?;
+    let nonce_start = RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len();
+    let ciphertext_start = nonce_start + RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES;
+    if encoded.len() <= ciphertext_start {
+        bail!("truncated Smart Context artifact ciphertext");
+    }
+    let key = runtime_smart_context_artifact_key(&key_path, false)?;
+    let cipher = Aes256GcmSiv::new_from_slice(key.as_slice())
+        .map_err(|_| anyhow::anyhow!("failed to initialize Smart Context artifact cipher"))?;
+    cipher
+        .decrypt(
+            Nonce::from_slice(&encoded[nonce_start..ciphertext_start]),
+            Payload {
+                msg: &encoded[ciphertext_start..],
+                aad: scope.as_str().as_bytes(),
+            },
+        )
+        .map(Zeroizing::new)
+        .map_err(|_| anyhow::anyhow!("failed to decrypt Smart Context artifacts"))
+}
+
+fn runtime_smart_context_artifact_key_path(path: &Path) -> Option<PathBuf> {
+    let scope_dir = path.parent()?;
+    let scopes_dir = scope_dir.parent()?;
+    let smart_context_dir = scopes_dir.parent()?;
+    (path.file_name()?.to_str()? == "artifacts.json"
+        && scopes_dir.file_name()?.to_str()? == "scopes"
+        && smart_context_dir.file_name()?.to_str()? == "smart-context")
+        .then(|| smart_context_dir.join("artifact-store.key"))
+}
+
+fn runtime_smart_context_prepare_scoped_directories(path: &Path) -> std::io::Result<()> {
+    let scope_dir = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "missing artifact scope directory",
+        )
+    })?;
+    let scopes_dir = scope_dir.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "missing artifact scopes directory",
+        )
+    })?;
+    let smart_context_dir = scopes_dir.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "missing Smart Context directory",
+        )
+    })?;
+    let root = smart_context_dir.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "missing Prodex state directory",
+        )
+    })?;
+    for directory in [root, smart_context_dir, scopes_dir, scope_dir] {
+        secret_store::ensure_private_directory(directory)?;
+    }
+    Ok(())
+}
+
+fn runtime_smart_context_artifact_key(
+    path: &Path,
+    create: bool,
+) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    if let Some(parent) = path.parent() {
+        secret_store::ensure_private_directory(parent)?;
+    }
+    let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
+    if let Some(key) = secret_store::read_private_file_bounded(
+        path,
+        RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES as u64,
+    )? {
+        if key.len() != RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES {
+            bail!("invalid Smart Context artifact encryption key length");
+        }
+        return Ok(key);
+    }
+    if !create {
+        bail!("Smart Context artifact encryption key is unavailable");
+    }
+    let mut key = Zeroizing::new(vec![0_u8; RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES]);
+    getrandom::fill(key.as_mut_slice())
+        .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact key"))?;
+    secret_store::write_private_file_atomic(path, &key)?;
+    Ok(key)
 }
 
 #[cfg(unix)]

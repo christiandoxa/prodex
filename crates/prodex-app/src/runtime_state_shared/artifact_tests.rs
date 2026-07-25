@@ -15,6 +15,52 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn runtime_smart_context_scoped_artifacts_are_encrypted_and_scope_bound() {
+        let root = smart_context_artifact_temp_path("encrypted-scope").with_extension("");
+        let scope = runtime_proxy_crate::ContextScopeId::new(
+            "tenant",
+            "profile",
+            "provider",
+            "/workspace",
+            None,
+        );
+        let path = root
+            .join("smart-context")
+            .join("scopes")
+            .join(scope.path_component())
+            .join("artifacts.json");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.bind_scope(scope.clone());
+        let artifact = store.insert_text("sensitive scoped context").unwrap();
+        store.save_to_path(&path).unwrap();
+
+        let raw = fs::read(&path).unwrap();
+        assert!(raw.starts_with(b"PSCA1\0"));
+        assert!(
+            !raw.windows(b"sensitive scoped context".len())
+                .any(|window| { window == b"sensitive scoped context" })
+        );
+        let loaded =
+            RuntimeSmartContextArtifactStore::load_scoped_from_path(&path, &scope).unwrap();
+        assert_eq!(
+            loaded.get_text(&artifact.id).as_deref(),
+            Some("sensitive scoped context")
+        );
+        let wrong_scope = runtime_proxy_crate::ContextScopeId::new(
+            "tenant",
+            "other-profile",
+            "provider",
+            "/workspace",
+            None,
+        );
+        assert!(
+            RuntimeSmartContextArtifactStore::load_scoped_from_path(&path, &wrong_scope).is_err()
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_save_merges_existing_file() {
         let path = smart_context_artifact_temp_path("merge-save");
         remove_smart_context_artifact_temp_files(&path);
@@ -81,7 +127,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn runtime_smart_context_artifact_save_replaces_symlink_without_reading_target() {
+    fn runtime_smart_context_artifact_save_rejects_symlink_without_reading_target() {
         let path = smart_context_artifact_temp_path("symlink-save");
         remove_smart_context_artifact_temp_files(&path);
         let target = path.with_file_name("outside-artifacts.json");
@@ -90,24 +136,21 @@ mod tests {
 
         let mut store = RuntimeSmartContextArtifactStore::default();
         let artifact = store.insert_text("safe artifact").unwrap();
-        store.save_to_path(&path).expect("store saved");
+        assert!(store.save_to_path(&path).is_err());
 
         assert_eq!(
             fs::read_to_string(&target).unwrap(),
             r#"{"artifacts":{},"total_bytes":0}"#
         );
         assert!(
-            !fs::symlink_metadata(&path)
+            fs::symlink_metadata(&path)
                 .unwrap()
                 .file_type()
                 .is_symlink()
         );
         let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert_eq!(loaded.artifact_count(), 1);
-        assert_eq!(
-            loaded.get_text(&artifact.id).as_deref(),
-            Some("safe artifact")
-        );
+        assert_eq!(loaded.artifact_count(), 0);
+        assert!(loaded.get_text(&artifact.id).is_none());
 
         remove_smart_context_artifact_temp_files(&path);
         let _ = fs::remove_file(target);
@@ -768,7 +811,7 @@ error[E0001]: repeated failure";
         let store = RuntimeSmartContextArtifactStore::load_from_path(&path);
         let strong_id = runtime_proxy_crate::smart_context_hash_text("alpha");
 
-        assert_eq!(store.schema_version, 2);
+        assert_eq!(store.schema_version, 3);
         assert_eq!(store.get_text(&strong_id).as_deref(), Some("alpha"));
         assert_eq!(store.get_text(legacy_id).as_deref(), Some("alpha"));
         assert!(!store.artifacts.contains_key(legacy_id));

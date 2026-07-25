@@ -242,7 +242,7 @@ fn observed_token_accounting_calibrates_separately_by_bucket() {
     );
 
     assert_eq!(responses.estimated_current_request_tokens, 10_064);
-    assert_eq!(compact.estimated_current_request_tokens, 20_000);
+    assert_eq!(compact.estimated_current_request_tokens, 33_814);
 }
 
 #[test]
@@ -446,10 +446,10 @@ fn observed_token_accounting_uses_recent_high_water_mark_for_calibration_safety(
         });
 
     assert_eq!(
-        accounting.estimated_current_request_tokens, 20_000,
-        "recent high-water usage should prevent unsafe over-shrink"
+        accounting.estimated_current_request_tokens, 20_314,
+        "recent measured usage must raise an underestimated baseline"
     );
-    assert_eq!(accounting.available_context_tokens, Some(40_000));
+    assert_eq!(accounting.available_context_tokens, Some(39_686));
 }
 
 #[test]
