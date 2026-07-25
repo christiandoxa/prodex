@@ -2,6 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.347.0 - 2026-07-25
+
+### Docs
+
+- Record final hardening validation (`5b4b0e6`)
+- Consolidate hardening guidance (`da1b2ab`)
+
+### Misc
+
+- Close hardening validation regressions (`5cce0a3`)
+- Pin Windows Codex migration (`4eac31d`)
+- Publish Smart Context performance evidence (`04063d3`)
+- Bound rewrite work (`de60d09`)
+- Reject no-op before tokenization (`08f3fb1`)
+- Pin Codex npm artifacts (`fcd6d78`)
+- Share artifact snapshots (`160a269`)
+- Validate checked subprocess output (`55a816c`)
+- Make super least privilege by default (`6e2d44f`)
+- Execute smart context replay corpus (`8fd3d53`)
+- Make smart context rewrites transactional (`a6b376c`)
+
 ## 0.346.0 - 2026-07-24
 
 ### Runtime
@@ -84,9 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden provider launches and session recovery (`5d6a757`)
-
-## 0.335.0 - 2026-07-21
-
-### Misc
-
-- Harden process reporting and internal helpers (`7cb9042`)
