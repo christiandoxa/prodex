@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const codexCompatibility = require("../../npm/prodex/lib/codex-compat.cjs");
 
 export const repoRoot = process.env.PRODEX_REPO_ROOT
   ? path.resolve(process.env.PRODEX_REPO_ROOT)
@@ -11,7 +14,8 @@ export const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 export const npmScope = "@christiandoxa";
 export const mainPackageName = `${npmScope}/prodex`;
 export const gatewaySdkPackageName = `${npmScope}/prodex-gateway-sdk`;
-export const openaiCodexDependencySpecifier = "latest";
+export const openaiCodexVersion = codexCompatibility.version;
+export const openaiCodexDependencySpecifier = codexCompatibility.version;
 export const packageVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 export const platformPackages = [
@@ -87,7 +91,7 @@ export const openaiCodexPlatformPackages = [
 ];
 
 export function openaiCodexPlatformDependencySpecifier(spec) {
-  return `npm:@openai/codex@${spec.distTag}`;
+  return codexCompatibility.platformSpecifier(spec.distTag);
 }
 
 export function packageSlug(packageName) {

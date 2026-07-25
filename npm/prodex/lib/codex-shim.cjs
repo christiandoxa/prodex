@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { createRequire } = require("node:module");
+const CODEX_COMPATIBILITY = require("./codex-compat.cjs");
 
 const requireFromHere = createRequire(__filename);
 
@@ -287,12 +288,12 @@ function installExternalCodexWithNpm() {
   process.stderr.write(
     [
       "No executable external codex was found; attempting npm install because PRODEX_CODEX_AUTO_INSTALL=1.",
-      "Running: npm install -g @openai/codex@latest",
+      `Running: npm install -g ${CODEX_COMPATIBILITY.packageSpecifier}`,
       "",
     ].join("\n"),
   );
 
-  const result = spawnSync(npmCommand.command, ["install", "-g", "@openai/codex@latest"], {
+  const result = spawnSync(npmCommand.command, ["install", "-g", CODEX_COMPATIBILITY.packageSpecifier], {
     stdio: "inherit",
     env: process.env,
   });
@@ -310,7 +311,27 @@ function installExternalCodexWithNpm() {
     };
   }
 
-  return resolveExternalCodexCommand();
+  const installed = resolveExternalCodexCommand();
+  if (!installed.ok) {
+    return installed;
+  }
+  const version = spawnSync(installed.command, ["--version"], {
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 64 * 1024,
+    timeout: 10_000,
+  });
+  if (version.error || version.status !== 0) {
+    return { ok: false, reason: "installed Codex version check failed" };
+  }
+  const observed = `${version.stdout || ""}\n${version.stderr || ""}`.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/)?.[1];
+  if (observed !== CODEX_COMPATIBILITY.version) {
+    return {
+      ok: false,
+      reason: `installed Codex version mismatch: expected ${CODEX_COMPATIBILITY.version}, found ${observed || "unknown"}`,
+    };
+  }
+  return installed;
 }
 
 function resolveCodexCommand() {
@@ -349,7 +370,7 @@ function resolveCodexCommand() {
   process.stderr.write(
     [
       nativeCommand.reason || "Unable to locate bundled Codex native package for this platform.",
-      "Reinstall @christiandoxa/prodex with optional dependencies enabled, set PRODEX_CODEX_BIN to an existing Codex CLI, or set PRODEX_CODEX_AUTO_INSTALL=1 to let Prodex run npm install -g @openai/codex@latest.",
+      `Reinstall @christiandoxa/prodex with optional dependencies enabled, set PRODEX_CODEX_BIN to an existing Codex CLI, or set PRODEX_CODEX_AUTO_INSTALL=1 to let Prodex install ${CODEX_COMPATIBILITY.packageSpecifier}.`,
       "Prodex does not fall back to @openai/codex/bin/codex.js because npm/Node version skew can make Codex load the wrong optional native package.",
       externalCommand.reason,
       "",
@@ -394,7 +415,7 @@ function spawnCodex(codexCommand, retriedExternalFallback = false) {
 
     if (error && error.code === "EACCES") {
       process.stderr.write(
-        `${error.message}\nSet PRODEX_CODEX_BIN to an existing Codex CLI, set PRODEX_CODEX_AUTO_INSTALL=1 to let Prodex run npm install -g @openai/codex@latest, or reinstall @christiandoxa/prodex.\n`,
+        `${error.message}\nSet PRODEX_CODEX_BIN to an existing Codex CLI, set PRODEX_CODEX_AUTO_INSTALL=1 to let Prodex install ${CODEX_COMPATIBILITY.packageSpecifier}, or reinstall @christiandoxa/prodex.\n`,
       );
       process.exit(126);
       return;

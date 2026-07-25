@@ -2,7 +2,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { repoRoot } from "../npm/common.mjs";
+import {
+  openaiCodexDependencySpecifier,
+  openaiCodexPlatformDependencySpecifier,
+  openaiCodexPlatformPackages,
+  openaiCodexVersion,
+  platformPackages,
+  repoRoot,
+} from "../npm/common.mjs";
 
 const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
@@ -140,6 +147,46 @@ export function validateCompose(contents) {
     .map((line) => `compose.yaml: service image is not tag-and-digest pinned: ${line.trim()}`);
 }
 
+export function validateCodexPins(workspaceManifest, manifest, installer, shim, lockfile) {
+  const violations = [];
+  if (manifest.dependencies?.["@openai/codex"] !== openaiCodexDependencySpecifier) {
+    violations.push(`npm/prodex/package.json: @openai/codex must equal ${openaiCodexVersion}`);
+  }
+  for (const spec of openaiCodexPlatformPackages) {
+    if (
+      manifest.optionalDependencies?.[spec.packageName] !==
+      openaiCodexPlatformDependencySpecifier(spec)
+    ) {
+      violations.push(`npm/prodex/package.json: ${spec.packageName} is not exact-version pinned`);
+    }
+  }
+  for (const spec of platformPackages) {
+    const directory = spec.packageName.replace("@christiandoxa/prodex-", "");
+    if (
+      workspaceManifest.optionalDependencies?.[spec.packageName] !==
+      `file:npm/platforms/${directory}`
+    ) {
+      violations.push(`package.json: ${spec.packageName} must be a local optional lock input`);
+    }
+  }
+  if (/@openai\/codex@latest\b/u.test(`${installer}\n${shim}`)) {
+    violations.push("Codex install paths must not use @openai/codex@latest");
+  }
+  if (!installer.includes(`CODEX_NPM_VERSION="${openaiCodexVersion}"`)) {
+    violations.push("install.sh: Codex migration version is not synchronized");
+  }
+  if (!shim.includes('require("./codex-compat.cjs")')) {
+    violations.push("npm/prodex/lib/codex-shim.cjs: missing canonical compatibility metadata");
+  }
+  if (
+    lockfile.packages?.["npm/prodex"]?.dependencies?.["@openai/codex"] !==
+    openaiCodexDependencySpecifier
+  ) {
+    violations.push("package-lock.json: Prodex Codex dependency is not exact-version locked");
+  }
+  return violations;
+}
+
 function selfTest() {
   assert.deepEqual(
     validateWorkflow("safe.yml", "uses: owner/action@0123456789abcdef0123456789abcdef01234567 # v1\n"),
@@ -161,6 +208,48 @@ function selfTest() {
     [],
   );
   assert.equal(validateCompose("services:\n  db:\n    image: postgres:16\n").length, 1);
+  const codexManifest = {
+    dependencies: { "@openai/codex": openaiCodexDependencySpecifier },
+    optionalDependencies: Object.fromEntries(
+      openaiCodexPlatformPackages.map((spec) => [
+        spec.packageName,
+        openaiCodexPlatformDependencySpecifier(spec),
+      ]),
+    ),
+  };
+  const codexLock = {
+    packages: {
+      "npm/prodex": { dependencies: { "@openai/codex": openaiCodexDependencySpecifier } },
+    },
+  };
+  const workspaceManifest = {
+    optionalDependencies: Object.fromEntries(
+      platformPackages.map((spec) => [
+        spec.packageName,
+        `file:npm/platforms/${spec.packageName.replace("@christiandoxa/prodex-", "")}`,
+      ]),
+    ),
+  };
+  assert.deepEqual(
+    validateCodexPins(
+      workspaceManifest,
+      codexManifest,
+      `CODEX_NPM_VERSION="${openaiCodexVersion}"`,
+      'require("./codex-compat.cjs")',
+      codexLock,
+    ),
+    [],
+  );
+  assert.equal(
+    validateCodexPins(
+      workspaceManifest,
+      { ...codexManifest, dependencies: { "@openai/codex": "latest" } },
+      "npm install -g @openai/codex@latest",
+      "",
+      { packages: {} },
+    ).length,
+    5,
+  );
   const windowsJob = `jobs:
   windows-security:
     runs-on: windows-latest
@@ -218,6 +307,22 @@ async function main() {
     if (!toolchain.includes(marker)) violations.push(`rust-toolchain.toml: missing ${marker}`);
   }
   await fs.access(path.join(repoRoot, "Cargo.lock"));
+  const npmManifest = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "npm/prodex/package.json"), "utf8"),
+  );
+  const npmWorkspaceManifest = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "package.json"), "utf8"),
+  );
+  const npmLock = JSON.parse(await fs.readFile(path.join(repoRoot, "package-lock.json"), "utf8"));
+  violations.push(
+    ...validateCodexPins(
+      npmWorkspaceManifest,
+      npmManifest,
+      await fs.readFile(path.join(repoRoot, "install.sh"), "utf8"),
+      await fs.readFile(path.join(repoRoot, "npm/prodex/lib/codex-shim.cjs"), "utf8"),
+      npmLock,
+    ),
+  );
 
   if (violations.length === 0) {
     process.stdout.write("supply-chain guard: ok\n");

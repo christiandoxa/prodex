@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { openaiCodexDependencySpecifier } from "./npm/common.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const installerPath = path.join(repoRoot, "install.sh");
@@ -181,7 +182,7 @@ test("updater migrates npm Prodex and preserves Codex", async (t) => {
   });
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual((await fs.readFile(state.managerLog, "utf8")).trim().split("\n"), [
-    "install -g @openai/codex@latest",
+    `install -g @openai/codex@${openaiCodexDependencySpecifier}`,
     "uninstall -g @christiandoxa/prodex",
   ]);
 });
