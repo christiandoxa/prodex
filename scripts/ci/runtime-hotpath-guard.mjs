@@ -492,6 +492,32 @@ const ALLOWLIST = Object.freeze([
       "exactly worker_count plus long_lived_worker_count threads are created once during proxy startup",
   },
   {
+    name: "smart-context-startup-retention-io",
+    file: "crates/prodex-app/src/runtime_proxy/smart_context/proxy_state.rs",
+    id: "blocking-disk-io",
+    pattern:
+      /\bstd::fs::(?:rename\(path, quarantine\)|read_dir\(scopes_root\)|symlink_metadata\(&path\)|remove_file\(candidate\)|remove_dir\(parent\))/,
+    maxHits: 5,
+    reason:
+      "bounded scope quarantine and retention run once during Smart Context proxy registration, before request handling",
+  },
+  {
+    name: "smart-context-offline-replay-io",
+    file: "crates/prodex-app/src/runtime_proxy/smart_context/replay.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::(?:remove_dir_all\(&self\.root\)|create_dir_all\(root\))/,
+    maxHits: 2,
+    reason: "explicit offline replay creates and removes only its isolated temporary harness root",
+  },
+  {
+    name: "smart-context-offline-doctor-io",
+    file: "crates/prodex-app/src/runtime_proxy/smart_context/self_test.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::(?:read|write|remove_dir_all)\s*\(/,
+    maxHits: 3,
+    reason: "explicit bounded offline doctor self-test verifies encrypted persistence and corruption handling",
+  },
+  {
     name: "local-rewrite-transport-split-log-dir-create",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
     id: "blocking-disk-io",

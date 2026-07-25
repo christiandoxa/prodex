@@ -66,7 +66,10 @@ export function validateSmartContext(sources) {
   if (!constants.includes("SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES") || !constants.includes("SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES") || !constants.includes("SMART_CONTEXT_REWRITE_DEADLINE_MS")) {
     errors.push("Smart Context must enforce body and wall-clock rewrite budgets");
   }
-  const shadowIndex = body.indexOf("if shadow {");
+  const shadowIndex = Math.max(
+    body.indexOf("if shadow {"),
+    body.indexOf("if rollout.computes_shadow() {"),
+  );
   const observeIndex = body.lastIndexOf("observe_runtime_smart_context_rewrite_safety_with_state(");
   const commitIndex = body.lastIndexOf("commit_runtime_smart_context_proxy_state_for_scope(");
   const fallbackIndex = body.lastIndexOf("runtime_smart_context_fallback_exact_reason(");
