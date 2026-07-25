@@ -160,7 +160,7 @@ fn optimizer_shortcuts_parse_as_dedicated_commands() {
 }
 
 #[test]
-fn super_command_parses_as_distinct_subcommand_with_safe_access_default() {
+fn super_command_parses_as_distinct_subcommand_with_yolo_access_default() {
     let command = parse_cli_command_from([
         "prodex",
         "super",
@@ -177,7 +177,7 @@ fn super_command_parses_as_distinct_subcommand_with_safe_access_default() {
 
     let args = args.into_runtime_tool_args();
     assert_eq!(args.profile.as_deref(), Some("main"));
-    assert!(!args.full_access);
+    assert!(args.full_access);
     let tools = args.selected_tool_set();
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
@@ -440,7 +440,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(args.local_model.as_deref(), Some("local/qwen"));
 
     let args = args.into_runtime_tool_args();
-    assert!(!args.full_access);
+    assert!(args.full_access);
     assert!(args.skip_quota_check);
 
     let rendered = args

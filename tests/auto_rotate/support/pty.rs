@@ -2,7 +2,7 @@ use super::{Fixture, chatgpt_id_token};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,59 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
     prompt: &str,
     answer: &str,
 ) -> PtyRunOutput {
+    let (child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
+    let mut tty_output = String::new();
+    read_until_prompt(&mut master, prompt, &mut tty_output);
+    master
+        .write_all(answer.as_bytes())
+        .expect("failed to write prompt answer to pty");
+    master
+        .flush()
+        .expect("failed to flush prompt answer to pty");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for prodex output");
+    read_available(&mut master, &mut tty_output);
+    PtyRunOutput { output, tty_output }
+}
+
+pub(crate) fn run_prodex_with_pty(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> PtyRunOutput {
+    let (mut child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
+    let mut tty_output = String::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        read_available(&mut master, &mut tty_output);
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "timed out waiting for prodex to enter Codex without input; tty output was {tty_output:?}"
+                );
+            }
+            Err(err) => panic!("failed to poll prodex launched with pty: {err}"),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to collect prodex output");
+    read_available(&mut master, &mut tty_output);
+    PtyRunOutput { output, tty_output }
+}
+
+fn spawn_prodex_with_pty(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> (Child, File) {
     let login_id_token = chatgpt_id_token("main@example.com");
     let (master, slave) = open_pty();
     let slave_file = unsafe { File::from_raw_fd(slave) };
@@ -51,22 +104,7 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
         .spawn()
         .expect("failed to spawn prodex with pty");
     drop(slave_file);
-
-    let mut master = master;
-    let mut tty_output = String::new();
-    read_until_prompt(&mut master, prompt, &mut tty_output);
-    master
-        .write_all(answer.as_bytes())
-        .expect("failed to write prompt answer to pty");
-    master
-        .flush()
-        .expect("failed to flush prompt answer to pty");
-
-    let output = child
-        .wait_with_output()
-        .expect("failed to wait for prodex output");
-    read_available(&mut master, &mut tty_output);
-    PtyRunOutput { output, tty_output }
+    (child, master)
 }
 
 fn open_pty() -> (File, RawFd) {

@@ -91,10 +91,12 @@ explicit service selection and is checked by its existing doctor path.
 
 ## Security And Launch Semantics
 
-Tool selection is independent of provider, Smart Context, workspace trust,
-sandbox, and approvals. `prodex super` does not add dangerous bypass flags or
-mark a workspace trusted. `--full-access` is the only launch option that asks
-Codex for its sandbox bypass; workspace trust remains user-managed.
+Tool selection remains independent of provider and permissions for the
+individual `caveman`, `rtk`, `playwright`, and `ponytail` commands. The
+`prodex s` / `prodex super` shortcut is intentionally different: it is the YOLO
+entrypoint, adds Codex's approval/sandbox and hook-trust bypass flags, and marks
+the current workspace trusted only for that invocation. It does not persist the
+trust override. Presidio remains disabled unless `--presidio` is explicit.
 
 The compatibility aliases `prodex caveman`, `prodex rtk`, `prodex playwright`,
 `prodex ponytail`, and `prodex s` translate to typed tool selections. Legacy

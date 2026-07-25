@@ -1,6 +1,6 @@
 use crate::CodexRuntimeFeatureArgs;
 use clap::{ArgGroup, Args, Subcommand};
-use prodex_optional_tools::{OptionalToolId, OptionalToolSet};
+use prodex_optional_tools::OptionalToolId;
 use prodex_provider_core::{ProviderId, ProviderRuntimeMetadata, provider_runtime_metadata};
 use std::ffi::OsString;
 use std::fmt;
@@ -12,7 +12,6 @@ mod optional_tools;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
-use optional_tools::extract_super_leading_launch_prefixes;
 pub use optional_tools::runtime_tool_args_with_tool;
 
 #[derive(Args)]
@@ -146,6 +145,9 @@ pub struct RuntimeToolArgs {
     /// Enable Prodex Smart Context Autopilot in the runtime proxy.
     #[arg(skip)]
     pub smart_context: bool,
+    /// Apply the invocation-local workspace and hook trust required by Super/YOLO mode.
+    #[arg(skip)]
+    pub super_mode: bool,
     /// Add an optional tool to this launch.
     #[arg(long = "tool", value_name = "TOOL")]
     pub tools: Vec<OptionalToolId>,
@@ -192,7 +194,7 @@ pub struct SuperArgs {
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub skip_quota_check: bool,
-    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
+    /// Compatibility flag. Super already starts Codex with launch-time full access.
     #[arg(long)]
     pub full_access: bool,
     /// Print resolved launch diagnostics without starting Codex.
@@ -207,7 +209,7 @@ pub struct SuperArgs {
     /// Enable Presidio request-body and WebSocket text redaction without prompting. Unsupported by native Kiro and Antigravity CLIs.
     #[arg(long, conflicts_with = "no_presidio")]
     pub presidio: bool,
-    /// Disable Presidio redaction and skip the interactive opt-in prompt.
+    /// Disable Presidio redaction. Presidio is disabled by default.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
     /// Add an optional tool to the default Super tool set.
@@ -275,7 +277,8 @@ impl fmt::Debug for SuperArgs {
             .field("no_auto_rotate", &self.no_auto_rotate)
             .field("auto_redeem", &self.auto_redeem)
             .field("skip_quota_check", &self.skip_quota_check)
-            .field("full_access", &self.full_access)
+            .field("full_access", &true)
+            .field("full_access_flag_present", &self.full_access)
             .field("dry_run", &self.dry_run)
             .field("base_url_configured", &self.base_url.is_some())
             .field("no_proxy", &self.no_proxy)
@@ -520,98 +523,6 @@ impl SuperArgs {
             parse_super_local_url(url)?;
         }
         Ok(())
-    }
-
-    pub fn presidio_preference(&self) -> Option<bool> {
-        if self.presidio {
-            Some(true)
-        } else if self.no_presidio {
-            Some(false)
-        } else {
-            None
-        }
-    }
-
-    pub fn into_runtime_tool_args(self) -> RuntimeToolArgs {
-        self.into_runtime_tool_args_with_presidio(false)
-    }
-
-    pub fn into_runtime_tool_args_with_presidio(self, presidio: bool) -> RuntimeToolArgs {
-        let (legacy_tools, passthrough_codex_args) =
-            extract_super_leading_launch_prefixes(self.codex_args);
-        let presidio = presidio || legacy_tools.contains(&OptionalToolId::Presidio);
-        let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
-        let external_upstream_base_url = self.provider.map(|provider| {
-            self.base_url
-                .as_deref()
-                .map(super_external_provider_base_url)
-                .unwrap_or_else(|| provider.default_base_url().to_string())
-        });
-        let local_provider_args = self
-            .url
-            .as_deref()
-            .map(|url| {
-                super_local_provider_codex_args(
-                    url,
-                    self.local_model.as_deref(),
-                    self.local_context_window,
-                    self.local_auto_compact_token_limit,
-                )
-            })
-            .unwrap_or_default();
-        let external_provider_args = self
-            .provider
-            .map(|provider| {
-                super_external_provider_codex_args(
-                    provider,
-                    external_upstream_base_url.as_deref().unwrap_or_default(),
-                    self.local_model.as_deref(),
-                    self.local_context_window,
-                    self.local_auto_compact_token_limit,
-                )
-            })
-            .unwrap_or_default();
-        let local_mode = self.url.is_some() || self.provider.is_some();
-        let skip_quota_check = self.skip_quota_check || local_mode;
-
-        let feature_overrides = self.codex_features.to_codex_config_args();
-        let mut codex_args = Vec::new();
-        codex_args.extend(local_provider_args);
-        codex_args.extend(external_provider_args);
-        codex_args.extend(feature_overrides);
-        codex_args.extend(passthrough_codex_args);
-        let mut tools = OptionalToolSet::super_defaults();
-        for tool in self.tools.into_iter().chain(legacy_tools) {
-            tools.insert(tool);
-        }
-        if presidio {
-            tools.insert(OptionalToolId::Presidio);
-        }
-        for tool in &self.required_tools {
-            tools.insert(*tool);
-        }
-        RuntimeToolArgs {
-            profile: self.profile,
-            auto_rotate: self.auto_rotate,
-            no_auto_rotate: self.no_auto_rotate,
-            auto_redeem: self.auto_redeem,
-            skip_quota_check,
-            full_access: self.full_access,
-            dry_run: self.dry_run,
-            base_url: local_upstream_base_url
-                .or(external_upstream_base_url)
-                .or(self.base_url),
-            no_proxy: self.no_proxy,
-            smart_context: true,
-            tools: tools.iter().collect(),
-            required_tools: self.required_tools,
-            presidio,
-            external_provider: self.provider,
-            external_provider_api_key: self.api_key,
-            harness: self.harness,
-            codex_features: CodexRuntimeFeatureArgs::default(),
-            codex_args,
-        }
     }
 }
 

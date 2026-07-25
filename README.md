@@ -120,20 +120,22 @@ replay an ambiguous chain on another account.
 
 ## Super and optional tools
 
-`prodex s` and `prodex super` use typed optional-tool selection. Super does not
-grant full filesystem access, bypass approvals, bypass hook trust, or mark a
-workspace trusted by default.
+`prodex s` and `prodex super` are the explicit Super/YOLO entrypoints. They use
+typed optional-tool selection, launch Codex with approval and sandbox bypass,
+bypass hook-trust confirmation, and trust the current workspace for that
+invocation without changing the user's persisted Codex config.
 
 ```bash
 prodex s --dry-run
 prodex super --tool rtk --tool ponytail
 prodex super --require-tool caveman
-prodex super --full-access
+prodex super --presidio
 prodex capability super-doctor
 ```
 
-`--full-access` is explicit. Workspace trust remains user-managed and is never
-inferred from tool selection.
+Super does not show a Presidio opt-in prompt; redaction stays disabled unless
+`--presidio` is passed. Use `prodex run` instead when approval prompts and the
+normal Codex workspace-trust flow are desired.
 
 Supported optional-tool identities include Caveman, RTK, Codebase Memory MCP,
 Playwright MCP, Ponytail, and Presidio. Resolution is side-effect-free;

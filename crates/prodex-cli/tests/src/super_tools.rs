@@ -65,9 +65,9 @@ fn s_profile_shortcut_selects_profile() {
 }
 
 #[test]
-fn super_default_keeps_minimal_super_prefixes() {
+fn super_defaults_to_yolo_access_with_minimal_super_prefixes() {
     let args = parse_super_as_runtime_tools(&["prodex", "super", "exec", "review"]);
-    assert!(!args.full_access);
+    assert!(args.full_access);
     assert!(args.smart_context);
     let tools = args.selected_tool_set();
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Caveman));
@@ -77,10 +77,13 @@ fn super_default_keeps_minimal_super_prefixes() {
 }
 
 #[test]
-fn super_full_access_is_explicit() {
-    let args =
-        parse_super_as_runtime_tools(&["prodex", "super", "--full-access", "exec", "review"]);
-    assert!(args.full_access);
+fn super_full_access_flag_remains_compatible_with_yolo_default() {
+    for args in [
+        parse_super_as_runtime_tools(&["prodex", "super", "exec", "review"]),
+        parse_super_as_runtime_tools(&["prodex", "super", "--full-access", "exec", "review"]),
+    ] {
+        assert!(args.full_access);
+    }
 }
 
 #[test]
@@ -103,7 +106,7 @@ fn super_and_s_enable_typed_optional_tool_set() {
 }
 
 #[test]
-fn super_omits_presidio_prefix_until_prompt_opt_in() {
+fn super_omits_presidio_unless_explicitly_enabled() {
     let command = parse_cli_command_from(["prodex", "super", "exec", "hello"])
         .expect("super command should parse");
     let Commands::Super(args) = command else {

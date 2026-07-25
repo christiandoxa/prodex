@@ -48,6 +48,7 @@ fn assert_same_runtime_tool_args(left: RuntimeToolArgs, right: RuntimeToolArgs) 
     assert_eq!(left.base_url, right.base_url);
     assert_eq!(left.no_proxy, right.no_proxy);
     assert_eq!(left.smart_context, right.smart_context);
+    assert_eq!(left.super_mode, right.super_mode);
     assert_eq!(left.tools, right.tools);
     assert_eq!(left.required_tools, right.required_tools);
     assert_eq!(left.presidio, right.presidio);

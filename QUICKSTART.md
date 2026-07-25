@@ -85,7 +85,7 @@ prodex run --profile second
 Prodex preserves continuation affinity and rotates only before commit. It does
 not move a live continuation or rotate after streamed output begins.
 
-## 5. Use Super safely
+## 5. Use Super/YOLO mode
 
 Inspect the plan first:
 
@@ -100,12 +100,17 @@ Then launch:
 prodex s
 ```
 
-Super does not bypass approvals/sandbox, bypass hook trust, or trust the
-workspace by default. Request full access only when intended:
+Super is the explicit YOLO path: it bypasses approvals and the sandbox, bypasses
+hook-trust confirmation, and trusts the current workspace for that invocation.
+It enters Codex without a permission or Presidio prompt. Enable Presidio only
+when wanted:
 
 ```bash
-prodex s --full-access
+prodex s --presidio
 ```
+
+Use `prodex run` when normal Codex approvals and workspace-trust prompts are
+preferred.
 
 Optional tools are typed and session-local:
 

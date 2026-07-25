@@ -3,6 +3,9 @@ use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
     prepare_desktop_overlay_home, prepare_runtime_overlay_home, repair_desktop_thread_index,
 };
+#[path = "runtime_tools/super_trust.rs"]
+mod super_trust;
+pub(crate) use super_trust::trusted_workspace_codex_args;
 const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
 
 pub(crate) struct RuntimeToolLaunchStrategy {
@@ -143,7 +146,11 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args = self.codex_args.clone();
+        let codex_args = if self.args.super_mode {
+            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
+        } else {
+            self.codex_args.clone()
+        };
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args)?;
@@ -326,16 +333,12 @@ mod tests {
                 .contains(prodex_optional_tools::OptionalToolId::Ponytail)
         );
         assert!(strategy.args.smart_context);
+        assert!(strategy.args.super_mode);
         assert!(strategy.runtime_request().smart_context_enabled);
-        assert!(!strategy.args.full_access);
-        assert!(!strategy.codex_args.contains(&OsString::from(
+        assert!(strategy.args.full_access);
+        assert!(strategy.codex_args.contains(&OsString::from(
             "--dangerously-bypass-approvals-and-sandbox"
         )));
-        assert!(
-            !strategy
-                .codex_args
-                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
-        );
         for extracted_prefix in ["rtk", "ponytail", "presidio"] {
             assert!(
                 !strategy
@@ -347,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn super_default_enables_optimizer_stack_without_dangerous_flags() {
+    fn super_default_enables_optimizer_stack_with_yolo_access() {
         let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
             "prodex", "super", "exec", "hi",
         ]));
@@ -362,7 +365,11 @@ mod tests {
         );
         assert_eq!(
             strategy.codex_args,
-            vec![OsString::from("exec"), OsString::from("hi")]
+            vec![
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("exec"),
+                OsString::from("hi")
+            ]
         );
     }
 
@@ -385,29 +392,26 @@ mod tests {
     }
 
     #[test]
-    fn super_explicit_full_access_adds_only_the_sandbox_bypass() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "super",
-            "--full-access",
-            "exec",
-            "hi",
-        ]));
-
-        assert!(strategy.args.full_access);
-        assert!(strategy.codex_args.contains(&OsString::from(
-            "--dangerously-bypass-approvals-and-sandbox"
-        )));
-        assert!(
-            !strategy
-                .codex_args
-                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
+    fn super_trusts_workspace_and_hooks_without_persisting_config() {
+        let args = trusted_workspace_codex_args(
+            Path::new("/tmp/project"),
+            &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
         );
-        assert!(
-            !strategy
-                .codex_args
-                .iter()
-                .any(|arg| arg.to_string_lossy().contains("trust_level"))
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("-c"),
+                OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
+                OsString::from("--dangerously-bypass-hook-trust"),
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            ]
+        );
+        let config: toml::Value =
+            toml::from_str(args[1].to_str().expect("config override should be UTF-8"))
+                .expect("config override should be valid TOML");
+        assert_eq!(
+            config["projects"]["/tmp/project"]["trust_level"].as_str(),
+            Some("trusted")
         );
     }
 
