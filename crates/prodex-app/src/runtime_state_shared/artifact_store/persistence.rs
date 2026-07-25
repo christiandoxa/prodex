@@ -50,14 +50,15 @@ impl RuntimeSmartContextArtifactStore {
         expected_scope: Option<&runtime_proxy_crate::ContextScopeId>,
     ) -> anyhow::Result<Self> {
         let Some(raw) = runtime_smart_context_read_artifact_store(path, expected_scope)? else {
-            let mut store = Self::default();
-            store.scope_id = expected_scope.cloned();
-            return Ok(store);
+            return Ok(expected_scope
+                .cloned()
+                .map(Self::for_scope)
+                .unwrap_or_default());
         };
         let mut store = serde_json::from_slice::<Self>(&raw).with_context(|| {
             format!("invalid Smart Context artifact JSON at {}", path.display())
         })?;
-        if !matches!(store.schema_version, 1 | 2 | 3) {
+        if !matches!(store.schema_version, 1..=3) {
             bail!(
                 "unsupported Smart Context artifact schema at {}",
                 path.display()
@@ -166,44 +167,6 @@ impl RuntimeSmartContextArtifactStore {
         self.recompute_total_bytes();
         self.enforce_limits();
         self.refresh_prewarmed_projections();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn apply_persisted_artifact_ordering(
-        &mut self,
-        submitted: &Self,
-        persisted: &Self,
-    ) -> Vec<String> {
-        let mut projection_dirty = false;
-        let mut durable_ids = Vec::new();
-        for (id, persisted_artifact) in &persisted.artifacts {
-            let Some(current) = self.artifacts.get_mut(id) else {
-                continue;
-            };
-            if current.content_hash != persisted_artifact.content_hash
-                || current.byte_len != persisted_artifact.byte_len
-                || current.text != persisted_artifact.text
-            {
-                continue;
-            }
-            durable_ids.push(id.clone());
-            let Some(submitted_artifact) = submitted.artifacts.get(id) else {
-                continue;
-            };
-            if current.pending_order
-                && submitted_artifact.pending_order
-                && current.order == submitted_artifact.order
-            {
-                projection_dirty |= current.order != persisted_artifact.order;
-                current.order = persisted_artifact.order;
-                current.pending_order = false;
-            }
-        }
-        self.next_artifact_order = self.next_artifact_order.max(persisted.next_artifact_order);
-        if projection_dirty {
-            self.invalidate_prewarmed_projections();
-        }
-        durable_ids
     }
 
     fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {

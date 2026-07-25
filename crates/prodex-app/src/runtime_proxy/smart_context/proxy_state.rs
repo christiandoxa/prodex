@@ -70,22 +70,21 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
         })
         .and_then(Path::parent)
         .map(|parent| parent.join("smart-context").join("scopes"))
-    {
-        if let Ok(removed) = runtime_smart_context_prune_scope_stores(
+        && let Ok(removed) = runtime_smart_context_prune_scope_stores(
             &scopes_root,
             SystemTime::now(),
             SMART_CONTEXT_SCOPE_RETENTION,
             SMART_CONTEXT_GLOBAL_DISK_CAP_BYTES,
-        ) && removed > 0
-        {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "smart_context_retention_pruned",
-                    [runtime_proxy_log_field("stores", removed.to_string())],
-                ),
-            );
-        }
+        )
+        && removed > 0
+    {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "smart_context_retention_pruned",
+                [runtime_proxy_log_field("stores", removed.to_string())],
+            ),
+        );
     }
 
     if let Some(legacy_path) = artifact_path.as_deref().filter(|path| {

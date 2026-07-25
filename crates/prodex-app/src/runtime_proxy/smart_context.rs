@@ -374,7 +374,6 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             transport,
             profile_name,
             &rollout,
-            shadow,
         )
     });
 
@@ -433,7 +432,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
 fn runtime_smart_context_exact_passthrough<'a>(
     request: &'a RuntimeProxyRequest,
 ) -> Option<Cow<'a, [u8]>> {
-    runtime_smart_context_exact_header(request).then(|| Cow::Borrowed(request.body.as_slice()))
+    runtime_smart_context_exact_header(request).then_some(Cow::Borrowed(request.body.as_slice()))
 }
 
 fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {

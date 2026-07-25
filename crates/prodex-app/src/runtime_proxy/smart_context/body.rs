@@ -38,7 +38,6 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
     rollout: &runtime_proxy_crate::SmartContextRolloutDecision,
-    shadow: bool,
 ) -> Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
     let started_at = Instant::now();
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
@@ -291,7 +290,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         });
         return Ok(Cow::Borrowed(&request.body));
     }
-    if shadow {
+    if rollout.computes_shadow() {
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,

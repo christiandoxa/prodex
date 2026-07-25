@@ -131,7 +131,7 @@ Notes:
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
   Add prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `playwright`, `ponytail`, `presidio`.
   Top-level shortcuts `prodex rtk`, `prodex playwright`, and `prodex ponytail` map to `prodex caveman <prefix>`.
-  Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
+  Caveman must be installed externally as a validated, versioned optional tool; Prodex never downloads it during launch.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super
@@ -151,10 +151,11 @@ Examples:
   prodex super --rollout-budget-tokens 100000
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman rtk ponytail --full-access`, with an interactive Presidio opt-in prompt before launch.
-  It enables Caveman mode, Smart Context, launch-time full access, and the available Super optimizer tools in the Prodex overlay.
+  `prodex super` enables Smart Context and the available typed optimizer tools in the temporary Prodex overlay.
+  Missing optional tools are skipped unless named with `--require-tool`; use `prodex super doctor` to inspect readiness.
+  Super does not grant full access or trust the workspace by default; use `--full-access` only when intended.
   Codex runtime feature overrides from `prodex run` also work here; explicit `--web-search` overrides Super provider defaults.
-  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk ponytail presidio --full-access`.
+  Empty input or `n` keeps Presidio disabled; answer `y` to enable Presidio for this launch.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
   Use `prodex super doctor` or `prodex s doctor` to inspect local optimizer readiness without launching Codex.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
