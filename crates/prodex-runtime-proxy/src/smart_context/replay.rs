@@ -1,148 +1,196 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+pub const SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION: u32 = 1;
+pub const SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SmartContextReplayVariant {
+pub enum SmartContextReplayTransport {
+    Http,
+    Websocket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartContextReplayMode {
+    Active,
     Exact,
-    Current,
-    Optimized,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SmartContextReplayScenarioMetrics {
-    pub scenario_id: String,
-    pub variant: SmartContextReplayVariant,
-    #[serde(default)]
-    pub scenario_tags: Vec<String>,
-    #[serde(default)]
-    pub context_window_tokens: Option<u64>,
-    pub eligible: bool,
-    pub turns: usize,
-    pub input_tokens: u64,
-    pub total_tokens_until_completion: u64,
-    pub completion_success: bool,
-    pub test_or_build_passed: bool,
-    pub critical_signal_recall_percent: u8,
-    pub continuation_integrity_percent: u8,
-    pub tool_call_integrity_percent: u8,
-    pub missing_context_recovery_turns: u16,
-    pub full_request_fallback: bool,
-    pub unresolved_mandatory_artifact_refs: u16,
-    pub corrupted_json: bool,
-    pub rewrite_overhead_ms: u64,
-    pub explicit_exact_mode: bool,
-    pub unsafe_request: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct SmartContextReplayEvaluation {
-    pub acceptance_thresholds: SmartContextReplayAcceptanceThresholds,
-    pub eligible_long_sessions: usize,
-    pub current_comparison_sessions: usize,
-    pub median_input_token_reduction_percent_vs_exact: u8,
-    pub current_median_input_token_reduction_percent_vs_exact: u8,
-    pub median_additional_input_token_reduction_percent_vs_current: u8,
-    pub long_sessions_with_at_least_20_percent_reduction_percent: u8,
-    pub exact_median_total_tokens_until_completion: u64,
-    pub current_median_total_tokens_until_completion: u64,
-    pub optimized_median_total_tokens_until_completion: u64,
-    pub exact_success_rate_percent: u8,
-    pub current_success_rate_percent: u8,
-    pub optimized_success_rate_percent: u8,
-    pub optimized_missing_context_recovery_turns: u64,
-    pub success_regression_basis_points: i16,
-    pub continuation_integrity_percent: u8,
-    pub tool_call_integrity_percent: u8,
-    pub critical_signal_recall_percent: u8,
-    pub unresolved_mandatory_artifact_refs: u64,
-    pub corrupted_json_count: usize,
-    pub p95_rewrite_overhead_ms: u64,
-    pub continuation_fallback_rate_percent: u8,
-    pub missing_required_coverage: Vec<String>,
-    pub passed: bool,
-    pub failures: Vec<SmartContextReplayAcceptanceFailure>,
-    pub scenario_failures: Vec<SmartContextReplayScenarioFailure>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct SmartContextReplayAcceptanceThresholds {
-    pub min_median_input_token_reduction_percent_vs_exact: u8,
-    pub min_long_sessions_with_at_least_20_percent_reduction_percent: u8,
-    pub max_success_regression_basis_points: i16,
-    pub min_continuation_integrity_percent: u8,
-    pub min_tool_call_integrity_percent: u8,
-    pub min_critical_signal_recall_percent: u8,
-    pub max_unresolved_mandatory_artifact_refs: u64,
-    pub max_corrupted_json_count: usize,
-    pub max_p95_rewrite_overhead_ms: u64,
-    pub max_continuation_fallback_rate_percent: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SmartContextReplayAcceptanceFailure {
-    pub criterion: &'static str,
-    pub actual: String,
-    pub expected: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SmartContextReplayScenarioFailure {
-    pub scenario_id: String,
-    pub criteria: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SmartContextReplayCorpus {
-    pub metrics: Vec<SmartContextReplayScenarioMetrics>,
+    Shadow,
+    CanaryOut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-enum SmartContextReplayCorpusInput {
-    Metrics(Vec<SmartContextReplayScenarioMetrics>),
-    Corpus(SmartContextReplayCorpus),
+#[serde(deny_unknown_fields)]
+pub struct SmartContextReplayTurnInput {
+    pub request: serde_json::Value,
+    #[serde(default)]
+    pub required_text: Vec<String>,
+    #[serde(default)]
+    pub preserve_json_pointers: Vec<String>,
+    #[serde(default)]
+    pub expect_rewrite: bool,
 }
 
-mod evaluation;
-mod markdown;
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SmartContextReplayScenarioInput {
+    pub id: String,
+    pub transport: SmartContextReplayTransport,
+    pub provider: String,
+    pub model: String,
+    pub context_window_tokens: u64,
+    #[serde(default)]
+    pub observed_context_tokens: Option<u64>,
+    pub mode: SmartContextReplayMode,
+    pub turns: Vec<SmartContextReplayTurnInput>,
+}
 
-pub use evaluation::smart_context_evaluate_replay_corpus;
-pub use markdown::{
-    smart_context_render_replay_corpus_markdown, smart_context_render_replay_evaluation_markdown,
-};
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SmartContextReplayCorpus {
+    pub schema_version: u32,
+    pub scenarios: Vec<SmartContextReplayScenarioInput>,
+}
 
-pub const SMART_CONTEXT_REPLAY_ACCEPTANCE_THRESHOLDS: SmartContextReplayAcceptanceThresholds =
-    SmartContextReplayAcceptanceThresholds {
-        min_median_input_token_reduction_percent_vs_exact: 35,
-        min_long_sessions_with_at_least_20_percent_reduction_percent: 80,
-        max_success_regression_basis_points: 100,
-        min_continuation_integrity_percent: 100,
-        min_tool_call_integrity_percent: 100,
-        min_critical_signal_recall_percent: 100,
-        max_unresolved_mandatory_artifact_refs: 0,
-        max_corrupted_json_count: 0,
-        max_p95_rewrite_overhead_ms: 30,
-        max_continuation_fallback_rate_percent: 19,
-    };
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SmartContextReplayProvenance {
+    pub package_version: &'static str,
+    pub commit_sha: Option<String>,
+    pub os: &'static str,
+    pub architecture: &'static str,
+    pub tokenizer_source: &'static str,
+    pub token_measurement: &'static str,
+    pub estimator_confidence: &'static str,
+    pub command: &'static str,
+}
 
-impl Default for SmartContextReplayAcceptanceThresholds {
-    fn default() -> Self {
-        SMART_CONTEXT_REPLAY_ACCEPTANCE_THRESHOLDS
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SmartContextReplayTurnResult {
+    pub turn: usize,
+    pub exact_body_bytes: usize,
+    pub optimized_body_bytes: usize,
+    pub exact_estimated_input_tokens: u64,
+    pub optimized_estimated_input_tokens: u64,
+    pub estimated_net_saved_tokens: i64,
+    pub rewrite_applied: bool,
+    pub exact_byte_identity: bool,
+    pub valid_json: bool,
+    pub required_text_preserved: bool,
+    pub protocol_fields_preserved: bool,
+    pub unresolved_artifact_references: Vec<String>,
+    pub selected_transforms: Vec<String>,
+    pub exact_state_mutations: u64,
+    pub optimized_state_mutations: u64,
+    pub rewrite_duration_ns: u64,
+    pub exact_body_sha256: String,
+    pub optimized_body_sha256: String,
+    pub failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SmartContextReplayScenarioResult {
+    pub id: String,
+    pub transport: SmartContextReplayTransport,
+    pub provider: String,
+    pub model: String,
+    pub context_window_tokens: u64,
+    pub mode: SmartContextReplayMode,
+    pub exact_estimated_input_tokens: u64,
+    pub optimized_estimated_input_tokens: u64,
+    pub estimated_net_saved_tokens: i64,
+    pub turns: Vec<SmartContextReplayTurnResult>,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SmartContextReplayReport {
+    pub schema_version: u32,
+    pub corpus_schema_version: u32,
+    pub evidence_level: &'static str,
+    pub provenance: SmartContextReplayProvenance,
+    pub scenarios: Vec<SmartContextReplayScenarioResult>,
+    pub exact_estimated_input_tokens: u64,
+    pub optimized_estimated_input_tokens: u64,
+    pub estimated_net_saved_tokens: i64,
+    pub passed: bool,
+    pub failures: Vec<String>,
 }
 
 pub fn smart_context_parse_replay_corpus_json(
     text: &str,
-) -> Result<SmartContextReplayCorpus, serde_json::Error> {
-    match serde_json::from_str::<SmartContextReplayCorpusInput>(text)? {
-        SmartContextReplayCorpusInput::Metrics(metrics) => Ok(SmartContextReplayCorpus { metrics }),
-        SmartContextReplayCorpusInput::Corpus(corpus) => Ok(corpus),
-    }
+) -> Result<SmartContextReplayCorpus, String> {
+    let corpus = serde_json::from_str::<SmartContextReplayCorpus>(text)
+        .map_err(|error| error.to_string())?;
+    smart_context_validate_replay_corpus(&corpus)?;
+    Ok(corpus)
 }
 
-pub fn smart_context_evaluate_replay_corpus_json(
-    text: &str,
-) -> Result<SmartContextReplayEvaluation, serde_json::Error> {
-    let corpus = smart_context_parse_replay_corpus_json(text)?;
-    Ok(smart_context_evaluate_replay_corpus(&corpus.metrics))
+fn smart_context_validate_replay_corpus(corpus: &SmartContextReplayCorpus) -> Result<(), String> {
+    if corpus.schema_version != SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported Smart Context replay corpus schema {}, expected {}",
+            corpus.schema_version, SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION
+        ));
+    }
+    if corpus.scenarios.is_empty() {
+        return Err("Smart Context replay corpus has no scenarios".to_string());
+    }
+    let mut ids = BTreeSet::new();
+    for scenario in &corpus.scenarios {
+        if scenario.id.trim().is_empty() {
+            return Err("Smart Context replay scenario id is empty".to_string());
+        }
+        if !ids.insert(scenario.id.as_str()) {
+            return Err(format!(
+                "duplicate Smart Context replay scenario id {}",
+                scenario.id
+            ));
+        }
+        if scenario.provider.trim().is_empty() || scenario.model.trim().is_empty() {
+            return Err(format!(
+                "Smart Context replay scenario {} has empty provider or model",
+                scenario.id
+            ));
+        }
+        if scenario.context_window_tokens == 0 || scenario.turns.is_empty() {
+            return Err(format!(
+                "Smart Context replay scenario {} needs a context window and at least one turn",
+                scenario.id
+            ));
+        }
+        for (index, turn) in scenario.turns.iter().enumerate() {
+            if !turn.request.is_object() {
+                return Err(format!(
+                    "Smart Context replay scenario {} turn {} request must be a JSON object",
+                    scenario.id,
+                    index + 1
+                ));
+            }
+            if turn
+                .request
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                != Some(scenario.model.as_str())
+            {
+                return Err(format!(
+                    "Smart Context replay scenario {} turn {} model does not match scenario model",
+                    scenario.id,
+                    index + 1
+                ));
+            }
+            if turn
+                .preserve_json_pointers
+                .iter()
+                .any(|pointer| !pointer.starts_with('/'))
+            {
+                return Err(format!(
+                    "Smart Context replay scenario {} turn {} has an invalid JSON pointer",
+                    scenario.id,
+                    index + 1
+                ));
+            }
+        }
+    }
+    Ok(())
 }

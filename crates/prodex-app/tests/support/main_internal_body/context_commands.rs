@@ -104,12 +104,13 @@ fn context_replay_report_fixture_renders_markdown() {
         "../../../../prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json"
     );
 
-    let report = runtime_proxy_crate::smart_context_render_replay_corpus_markdown(corpus_text)
-        .expect("replay corpus should render");
+    let replay = run_runtime_smart_context_replay_json(corpus_text)
+        .expect("replay corpus should execute");
+    let report = render_runtime_smart_context_replay_markdown(&replay);
 
-    assert!(report.contains("# Smart Context Replay Evaluation"));
+    assert!(report.contains("# Smart Context Deterministic Replay"));
     assert!(report.contains("- passed: true"));
-    assert!(report.contains("- eligible_long_sessions: 12"));
+    assert!(report.contains("within-request-duplicate-build-output"));
 }
 
 #[test]
@@ -119,48 +120,19 @@ fn context_replay_report_strict_rejects_failed_corpus() {
     fs::write(
         &corpus_path,
         r#"{
-  "metrics": [
-    {
-      "scenario_id": "failed",
-      "variant": "exact",
-      "eligible": true,
-      "turns": 30,
-      "input_tokens": 10000,
-      "total_tokens_until_completion": 11000,
-      "completion_success": true,
-      "test_or_build_passed": true,
-      "critical_signal_recall_percent": 100,
-      "continuation_integrity_percent": 100,
-      "tool_call_integrity_percent": 100,
-      "missing_context_recovery_turns": 0,
-      "full_request_fallback": false,
-      "unresolved_mandatory_artifact_refs": 0,
-      "corrupted_json": false,
-      "rewrite_overhead_ms": 0,
-      "explicit_exact_mode": false,
-      "unsafe_request": false
-    },
-    {
-      "scenario_id": "failed",
-      "variant": "optimized",
-      "eligible": true,
-      "turns": 30,
-      "input_tokens": 9800,
-      "total_tokens_until_completion": 10800,
-      "completion_success": false,
-      "test_or_build_passed": false,
-      "critical_signal_recall_percent": 99,
-      "continuation_integrity_percent": 100,
-      "tool_call_integrity_percent": 100,
-      "missing_context_recovery_turns": 1,
-      "full_request_fallback": true,
-      "unresolved_mandatory_artifact_refs": 0,
-      "corrupted_json": false,
-      "rewrite_overhead_ms": 12,
-      "explicit_exact_mode": false,
-      "unsafe_request": false
-    }
-  ]
+  "schema_version": 1,
+  "scenarios": [{
+    "id": "failed",
+    "transport": "http",
+    "provider": "openai",
+    "model": "gpt-5.1-codex",
+    "context_window_tokens": 16384,
+    "mode": "exact",
+    "turns": [{
+      "request": {"model": "gpt-5.1-codex", "input": []},
+      "expect_rewrite": true
+    }]
+  }]
 }"#,
     )
     .expect("failed corpus should be written");
