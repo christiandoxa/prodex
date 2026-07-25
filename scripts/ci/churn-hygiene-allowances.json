@@ -1,5 +1,20 @@
 [
   {
+    "id": "smart-context-evidence-release-0.347.0",
+    "requiredSubjects": [
+      "perf(smart-context): reuse exact round-trip validation",
+      "docs: refresh smart context evidence",
+      "chore(ci): record reviewed 0.347.0 evidence churn"
+    ],
+    "caps": {
+      "maxFiles": 9,
+      "maxBehaviorFiles": 5,
+      "maxLines": 2600,
+      "maxFileLines": 2290
+    },
+    "reason": "Reviewed the bounded Smart Context exact-round-trip optimization and its regenerated replay and performance evidence. The large file churn is the provenance-bearing machine-generated performance report; verified with the focused Smart Context suite, strict evidence and Smart Context guards, and the CI-scaled and full-sample runtime hot-path benchmarks."
+  },
+  {
     "id": "audited-runtime-and-release-hardening-0.343.0",
     "requiredSubjects": [
       "fix: harden runtime and release pipeline",
