@@ -358,6 +358,9 @@ jobs:
       - name: Enforce Rust allow attribute guard
         run: npm run ci:allow-guard
 
+      - name: Enforce optional-tool decoupling guard
+        run: npm run ci:optional-tools-guard
+
       - name: Enforce Rust super wildcard guard
         run: npm run ci:super-wildcard-guard
 

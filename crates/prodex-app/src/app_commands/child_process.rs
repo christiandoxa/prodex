@@ -16,15 +16,13 @@ use terminal_ui::{
     tui_title_style,
 };
 
-use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
-    CavemanArgs, ChildProcessPlan, ProdexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
-    prepare_runtime_launch_dry_run, preview_deepseek_provider_codex_args,
-    preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
-    preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
-    runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
-    runtime_launch_cli_gemini_thinking_budget_tokens,
+    ChildProcessPlan, ProdexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
+    RuntimeToolArgs, SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value,
+    codex_cli_profile_v2_name, prepare_runtime_launch_dry_run,
+    preview_deepseek_provider_codex_args, preview_external_provider_catalog_codex_args,
+    preview_gemini_provider_codex_args, preview_local_provider_catalog_codex_args,
+    profile_openai_compatible_codex_args, runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
     validate_credential_free_http_url,
 };
@@ -366,13 +364,35 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
-pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
+pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
-    let (rtk_enabled, super_optimizer_overlay, codex_args) =
-        runtime_caveman_extract_launch_prefixes(&args.codex_args);
-    let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
+    let selected_tools = args.selected_tool_set();
+    let required_tools = args.required_tool_set();
+    let presidio_enabled =
+        args.presidio || selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
+    let selected = selected_tools
+        .iter()
+        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
+        .collect();
+    let required = required_tools
+        .iter()
+        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
+        .collect();
+    let tool_plan = prodex_optional_tools::resolve_optional_tools(&selected, &required);
+    if let Some(unavailable) = tool_plan
+        .unavailable
+        .iter()
+        .find(|health| required.contains(health.id))
+    {
+        anyhow::bail!(
+            "required optional tool {} is unavailable: {}; run `prodex capability super-doctor`",
+            unavailable.id,
+            redaction::redaction_redact_secret_like_text(&unavailable.detail)
+        );
+    }
+    let codex_args = args.codex_args_with_feature_overrides();
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);
@@ -402,23 +422,36 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
-    let mut extra_report = format!(
-        "Prodex overlay: rtk={}; super={}",
-        if rtk_enabled { "enabled" } else { "disabled" },
-        if super_optimizer_overlay {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
-    if super_optimizer_overlay {
-        let paths = crate::AppPaths::discover()?;
-        let statuses = collect_super_tool_statuses(&paths, presidio_enabled);
-        extra_report.push('\n');
-        extra_report.push_str(&render_super_tool_statuses(&statuses));
+    let mut extra_report = String::from("Optional tools:");
+    for activation in &tool_plan.activations {
+        extra_report.push_str(&format!(
+            "\n  {}: active ({})",
+            activation.tool.descriptor.id,
+            activation.tool.path.as_deref().map_or_else(
+                || "local service".to_string(),
+                |path| path.display().to_string()
+            )
+        ));
+    }
+    for unavailable in &tool_plan.unavailable {
+        extra_report.push_str(&format!(
+            "\n  {}: skipped ({})",
+            unavailable.id,
+            redaction::redaction_redact_secret_like_text(&unavailable.detail)
+        ));
+    }
+    if selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio) {
+        extra_report.push_str(&format!(
+            "\n  presidio: {}",
+            if presidio_enabled {
+                "requested"
+            } else {
+                "disabled"
+            }
+        ));
     }
     print_runtime_launch_dry_run(
-        "caveman",
+        "optional-tools",
         request,
         RuntimeLaunchDryRunChild::Caveman { codex_args },
         Some(resolved_harness),

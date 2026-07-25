@@ -89,7 +89,7 @@ fn rollout_budget_uses_valid_default_reminder_thresholds() {
 
 #[test]
 fn super_web_search_override_wins_after_provider_defaults() {
-    let args = parse_super_as_caveman(&[
+    let args = parse_super_as_runtime_tools(&[
         "prodex",
         "s",
         "--provider",

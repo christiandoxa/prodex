@@ -20,7 +20,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-authn/`: enterprise authentication boundary
 - `crates/prodex-authz/`: enterprise authorization boundary
 - `crates/prodex-bench-support/`: benchmark support helpers
-- `crates/prodex-caveman-assets/`: embedded Codex/Claude Caveman plugin assets and Caveman home/config preparation
+- `crates/prodex-optional-tools/`: optional-tool discovery, validation, health, and temporary-overlay activation
 - `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
 - `crates/prodex-config/`: typed enterprise deployment configuration

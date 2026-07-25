@@ -24,6 +24,8 @@ fn native_cli_super_args() -> SuperArgs {
         no_proxy: false,
         presidio: false,
         no_presidio: false,
+        tools: Vec::new(),
+        required_tools: Vec::new(),
         url: None,
         provider: None,
         harness: None,

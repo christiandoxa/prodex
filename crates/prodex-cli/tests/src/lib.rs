@@ -13,31 +13,31 @@ mod runtime_features;
 mod session_tail;
 mod shortcuts;
 mod status;
-fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
+fn parse_super_as_runtime_tools(args: &[&str]) -> RuntimeToolArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-    args.into_caveman_args()
+    args.into_runtime_tool_args()
 }
-fn parse_super_as_caveman_with_presidio_preference(args: &[&str]) -> CavemanArgs {
+fn parse_super_as_runtime_tools_with_presidio_preference(args: &[&str]) -> RuntimeToolArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
     let use_presidio = args.presidio_preference().unwrap_or(false);
-    args.into_caveman_args_with_presidio(use_presidio)
+    args.into_runtime_tool_args_with_presidio(use_presidio)
 }
 fn os_args(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
 }
-fn rendered_codex_args(args: &CavemanArgs) -> Vec<String> {
+fn rendered_codex_args(args: &RuntimeToolArgs) -> Vec<String> {
     args.codex_args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
 }
-fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
+fn assert_same_runtime_tool_args(left: RuntimeToolArgs, right: RuntimeToolArgs) {
     assert_eq!(left.profile, right.profile);
     assert_eq!(left.auto_rotate, right.auto_rotate);
     assert_eq!(left.no_auto_rotate, right.no_auto_rotate);
@@ -47,7 +47,9 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.base_url, right.base_url);
     assert_eq!(left.no_proxy, right.no_proxy);
     assert_eq!(left.smart_context, right.smart_context);
-    assert_eq!(left.super_optimizer_overlay, right.super_optimizer_overlay);
+    assert_eq!(left.tools, right.tools);
+    assert_eq!(left.required_tools, right.required_tools);
+    assert_eq!(left.presidio, right.presidio);
     assert_eq!(left.external_provider, right.external_provider);
     assert_eq!(left.harness, right.harness);
     assert_eq!(
@@ -146,7 +148,10 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
     let Commands::Super(super_args) = super_command else {
         panic!("expected super command");
     };
-    let caveman_debug = format!("{:?}", Commands::Caveman(super_args.into_caveman_args()));
+    let runtime_tools_debug = format!(
+        "{:?}",
+        Commands::Caveman(super_args.into_runtime_tool_args())
+    );
 
     let gateway_debug = format!(
         "{:?}",
@@ -163,7 +168,7 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
         .expect("gateway command should parse")
     );
 
-    for rendered in [super_debug, caveman_debug, gateway_debug] {
+    for rendered in [super_debug, runtime_tools_debug, gateway_debug] {
         assert!(rendered.contains("<redacted>"), "{rendered}");
         for secret in [API_KEY, AUTH_TOKEN, BASE_URL, CODEX_ARG] {
             assert!(!rendered.contains(secret), "{rendered}");
@@ -179,7 +184,7 @@ fn setup_parse_as_top_level_command() {
         panic!("expected setup command");
     };
     assert!(args.dry_run);
-    assert!(args.verify_assets);
+    assert!(args.verify_tools);
     assert!(args.json);
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex", "setup",
@@ -200,13 +205,13 @@ fn capability_list_parse_as_top_level_command() {
 }
 #[test]
 fn super_and_s_parse_to_same_default_super_behavior() {
-    let super_args = parse_super_as_caveman(&["prodex", "super"]);
-    let alias_args = parse_super_as_caveman(&["prodex", "s"]);
-    assert_same_caveman_args(super_args, alias_args);
+    let super_args = parse_super_as_runtime_tools(&["prodex", "super"]);
+    let alias_args = parse_super_as_runtime_tools(&["prodex", "s"]);
+    assert_same_runtime_tool_args(super_args, alias_args);
 }
 #[test]
 fn super_and_s_parse_to_same_super_behavior_with_options() {
-    let super_args = parse_super_as_caveman(&[
+    let super_args = parse_super_as_runtime_tools(&[
         "prodex",
         "super",
         "--profile",
@@ -227,7 +232,7 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
         "review",
         "--dangerously-bypass-approvals-and-sandbox",
     ]);
-    let alias_args = parse_super_as_caveman(&[
+    let alias_args = parse_super_as_runtime_tools(&[
         "prodex",
         "s",
         "--profile",
@@ -248,7 +253,7 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
         "review",
         "--dangerously-bypass-approvals-and-sandbox",
     ]);
-    assert_same_caveman_args(super_args, alias_args);
+    assert_same_runtime_tool_args(super_args, alias_args);
 }
 
 #[test]
@@ -262,34 +267,37 @@ fn s_profile_shortcut_selects_profile() {
 }
 #[test]
 fn super_default_keeps_minimal_super_prefixes() {
-    let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
+    let args = parse_super_as_runtime_tools(&["prodex", "super", "exec", "review"]);
     assert!(!args.full_access);
     assert!(args.smart_context);
-    assert!(args.super_optimizer_overlay);
-    assert_eq!(
-        args.codex_args,
-        vec![
-            OsString::from("rtk"),
-            OsString::from("ponytail"),
-            OsString::from("exec"),
-            OsString::from("review")
-        ]
-    );
+    let tools = args.selected_tool_set();
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Caveman));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
+    assert_eq!(args.codex_args, os_args(&["exec", "review"]));
 }
 #[test]
 fn super_full_access_is_explicit() {
-    let args = parse_super_as_caveman(&["prodex", "super", "--full-access", "exec", "review"]);
+    let args =
+        parse_super_as_runtime_tools(&["prodex", "super", "--full-access", "exec", "review"]);
     assert!(args.full_access);
 }
 #[test]
 fn super_and_s_enable_smart_context_autopilot() {
-    assert!(parse_super_as_caveman(&["prodex", "super"]).smart_context);
-    assert!(parse_super_as_caveman(&["prodex", "s"]).smart_context);
+    assert!(parse_super_as_runtime_tools(&["prodex", "super"]).smart_context);
+    assert!(parse_super_as_runtime_tools(&["prodex", "s"]).smart_context);
 }
 #[test]
-fn super_and_s_enable_super_optimizer_overlay() {
-    assert!(parse_super_as_caveman(&["prodex", "super"]).super_optimizer_overlay);
-    assert!(parse_super_as_caveman(&["prodex", "s"]).super_optimizer_overlay);
+fn super_and_s_enable_typed_optional_tool_set() {
+    for args in [
+        parse_super_as_runtime_tools(&["prodex", "super"]),
+        parse_super_as_runtime_tools(&["prodex", "s"]),
+    ] {
+        assert!(
+            args.selected_tool_set()
+                .contains(prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp)
+        );
+    }
 }
 #[test]
 fn super_omits_presidio_prefix_until_prompt_opt_in() {
@@ -299,8 +307,8 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
         panic!("expected super command");
     };
     assert_eq!(
-        args.into_caveman_args().codex_args,
-        os_args(&["rtk", "ponytail", "exec", "hello"])
+        args.into_runtime_tool_args().codex_args,
+        os_args(&["exec", "hello"])
     );
 }
 #[test]
@@ -311,63 +319,57 @@ fn super_includes_presidio_prefix_when_opted_in() {
         panic!("expected super command");
     };
     assert_eq!(
-        args.into_caveman_args_with_presidio(true).codex_args,
-        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
+        args.into_runtime_tool_args_with_presidio(true).codex_args,
+        os_args(&["exec", "hello"])
     );
 }
 #[test]
 fn super_presidio_flag_enables_presidio_without_prompt() {
-    let args = parse_super_as_caveman_with_presidio_preference(&[
+    let args = parse_super_as_runtime_tools_with_presidio_preference(&[
         "prodex",
         "super",
         "--presidio",
         "exec",
         "hello",
     ]);
-    assert_eq!(
-        args.codex_args,
-        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
-    );
+    assert!(args.presidio);
+    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
 }
 #[test]
 fn s_presidio_flag_matches_super_presidio_flag() {
-    let super_args = parse_super_as_caveman_with_presidio_preference(&[
+    let super_args = parse_super_as_runtime_tools_with_presidio_preference(&[
         "prodex",
         "super",
         "--presidio",
         "exec",
         "hello",
     ]);
-    let alias_args = parse_super_as_caveman_with_presidio_preference(&[
+    let alias_args = parse_super_as_runtime_tools_with_presidio_preference(&[
         "prodex",
         "s",
         "--presidio",
         "exec",
         "hello",
     ]);
-    assert_same_caveman_args(super_args, alias_args);
+    assert_same_runtime_tool_args(super_args, alias_args);
 }
 #[test]
 fn super_no_presidio_flag_disables_presidio_without_prompt() {
-    let args = parse_super_as_caveman_with_presidio_preference(&[
+    let args = parse_super_as_runtime_tools_with_presidio_preference(&[
         "prodex",
         "super",
         "--no-presidio",
         "exec",
         "hello",
     ]);
-    assert_eq!(
-        args.codex_args,
-        os_args(&["rtk", "ponytail", "exec", "hello"])
-    );
+    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
 }
 #[test]
 fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
-    let args = parse_super_as_caveman(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
-    assert_eq!(
-        args.codex_args,
-        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
-    );
+    let args =
+        parse_super_as_runtime_tools(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
+    assert!(args.presidio);
+    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
 }
 #[test]
 fn super_presidio_flags_conflict() {
@@ -392,12 +394,12 @@ fn quota_rejects_conflicting_output_and_scope_flags() {
 }
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
-    let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
+    let args = parse_super_as_runtime_tools(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8131/v1"));
 }
 #[test]
 fn super_url_local_provider_uses_openai_responses_wire_api() {
-    let args = parse_super_as_caveman(&[
+    let args = parse_super_as_runtime_tools(&[
         "prodex",
         "super",
         "--url",
@@ -415,7 +417,7 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
 }
 #[test]
 fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
-    let args = parse_super_as_caveman(&[
+    let args = parse_super_as_runtime_tools(&[
         "prodex",
         "s",
         "--provider",
@@ -452,7 +454,7 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
 }
 #[test]
 fn super_gemini_provider_expands_to_local_responses_adapter_config() {
-    let args = parse_super_as_caveman(&[
+    let args = parse_super_as_runtime_tools(&[
         "prodex",
         "s",
         "--provider",
@@ -502,14 +504,17 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
         panic!("expected caveman command");
     };
     assert!(!args.smart_context);
-    assert!(!args.super_optimizer_overlay);
+    assert!(args.tools.is_empty());
 }
 #[test]
 fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
     for (command_name, expected) in [
-        ("rtk", "rtk"),
-        ("playwright", "playwright"),
-        ("ponytail", "ponytail"),
+        ("rtk", prodex_optional_tools::OptionalToolId::Rtk),
+        (
+            "playwright",
+            prodex_optional_tools::OptionalToolId::PlaywrightMcp,
+        ),
+        ("ponytail", prodex_optional_tools::OptionalToolId::Ponytail),
     ] {
         assert!(!should_default_cli_invocation_to_run(&os_args(&[
             "prodex",
@@ -522,10 +527,9 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };
         assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
-        assert_eq!(
-            caveman_args_with_optimizer_prefix(args, expected).codex_args,
-            os_args(&[expected, "exec", "hello"])
-        );
+        let args = runtime_tool_args_with_tool(args, expected);
+        assert!(args.selected_tool_set().contains(expected));
+        assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
     }
 }
 

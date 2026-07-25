@@ -1,0 +1,22 @@
+[package]
+name = "prodex-optional-tools"
+version.workspace = true
+edition.workspace = true
+description = "Validated optional-tool discovery and overlay activation for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_optional_tools"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+prodex_shared_codex_fs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+toml = { workspace = true }
+
+[lints]
+workspace = true
