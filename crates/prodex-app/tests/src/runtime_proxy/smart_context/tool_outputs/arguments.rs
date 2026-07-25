@@ -34,7 +34,7 @@ fn smart_context_condenses_completed_tool_call_arguments() {
     );
 
     let replacement = value["input"][0]["arguments"].as_str().unwrap();
-    assert!(replacement.starts_with("psc args psc:"));
+    assert!(replacement.starts_with("psc args psc2:"));
     assert!(replacement.contains("b="));
     assert!(replacement.contains("p:"));
     assert!(replacement.len().saturating_mul(4) < argument_text.len());
@@ -88,8 +88,8 @@ fn smart_context_repeated_tool_call_arguments_use_short_repeat_ref() {
 
     let first = value["input"][0]["arguments"].as_str().unwrap();
     let second = value["input"][2]["arguments"].as_str().unwrap();
-    assert!(first.starts_with("psc args psc:"));
-    assert!(second.starts_with("psc args rep psc:"));
+    assert!(first.starts_with("psc args psc2:"));
+    assert!(second.starts_with("psc args rep psc2:"));
     assert!(!second.contains("same repeated historical argument"));
     assert!(second.len() < first.len());
     assert!(store.artifact_ref_for_exact_text(&argument_text).is_some());
@@ -151,12 +151,12 @@ fn smart_context_similar_tool_call_arguments_use_delta_ref() {
 
     let first = value["input"][0]["arguments"].as_str().unwrap();
     let second = value["input"][2]["arguments"].as_str().unwrap();
-    assert!(first.starts_with("psc args psc:"));
-    assert!(second.starts_with("psc args d psc:"));
-    assert!(second.contains(" base=psc:"));
+    assert!(first.starts_with("psc args psc2:"));
+    assert!(second.starts_with("psc args d psc2:"));
+    assert!(second.contains(" base=psc2:"));
     assert!(second.contains(" pre="));
     assert!(second.contains(" suf="));
-    assert!(second.contains(" ih=sc:"));
+    assert!(second.contains(" ih=sc2:"));
     assert!(!second.contains(&common_prefix));
     assert!(!second.contains(&common_suffix));
     assert!(second.len().saturating_mul(4) < second_text.len());

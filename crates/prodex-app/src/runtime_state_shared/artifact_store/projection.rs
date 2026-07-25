@@ -81,8 +81,8 @@ impl RuntimeSmartContextArtifactStore {
         let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
         artifacts.sort_by(|left, right| {
             right
-                .sequence
-                .cmp(&left.sequence)
+                .order
+                .cmp(&left.order)
                 .then_with(|| left.id.cmp(&right.id))
         });
 
@@ -111,7 +111,7 @@ impl RuntimeSmartContextArtifactStore {
                             }),
                             path: Some(path),
                             artifact_id: artifact.id.clone(),
-                            sequence: artifact.sequence,
+                            order: artifact.order,
                             range_start: first_path_range.map_or(0, |range| range.start),
                             range_end: first_path_range.map_or(0, |range| range.end),
                         },
@@ -140,7 +140,7 @@ impl RuntimeSmartContextArtifactStore {
                         line: range.line,
                         path,
                         artifact_id: artifact.id.clone(),
-                        sequence: artifact.sequence,
+                        order: artifact.order,
                         range_start: range.start,
                         range_end: range.end,
                     },
@@ -165,7 +165,7 @@ impl RuntimeSmartContextArtifactStore {
                         line: Some(range.start),
                         path,
                         artifact_id: artifact.id.clone(),
-                        sequence: artifact.sequence,
+                        order: artifact.order,
                         range_start: range.start,
                         range_end: range.end,
                     },
@@ -249,7 +249,7 @@ impl RuntimeSmartContextArtifactStore {
             let _ = writeln!(
                 source,
                 "artifact\t{}\t{}\t{}\t{}",
-                artifact.id, artifact.content_hash, artifact.byte_len, artifact.sequence
+                artifact.id, artifact.content_hash, artifact.byte_len, artifact.order
             );
             let Some(line_index) = artifact.line_index.as_ref() else {
                 source.push_str("line_index\tmissing\n");

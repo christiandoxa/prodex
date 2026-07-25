@@ -12,6 +12,10 @@ impl RuntimeSmartContextArtifactStore {
         self.artifacts.len()
     }
 
+    pub(crate) fn artifact_ids(&self) -> std::collections::BTreeSet<String> {
+        self.artifacts.keys().cloned().collect()
+    }
+
     pub(crate) fn set_static_context_fingerprints(
         &mut self,
         prompt_cache_hash: Option<String>,
@@ -63,8 +67,8 @@ impl RuntimeSmartContextArtifactStore {
         let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
         artifacts.sort_by(|left, right| {
             right
-                .sequence
-                .cmp(&left.sequence)
+                .order
+                .cmp(&left.order)
                 .then_with(|| left.id.cmp(&right.id))
         });
         artifacts
@@ -92,12 +96,13 @@ impl RuntimeSmartContextArtifactStore {
 
     pub(crate) fn insert_text(
         &mut self,
-        sequence: u64,
         text: &str,
     ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
         if text.len() > RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES {
             return None;
         }
+        let order = self.next_artifact_order.saturating_add(1);
+        self.next_artifact_order = order;
         let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
         let id = content_hash.clone();
         if self.artifacts.contains_key(&id) {
@@ -106,8 +111,9 @@ impl RuntimeSmartContextArtifactStore {
                 if !Self::artifact_matches_text(existing, text, &content_hash) {
                     return None;
                 }
-                let mut projection_dirty = existing.sequence != sequence;
-                existing.sequence = sequence;
+                let mut projection_dirty = existing.order != order;
+                existing.order = order;
+                existing.pending_order = true;
                 let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
                     existing.line_index.as_ref(),
                 );
@@ -149,7 +155,8 @@ impl RuntimeSmartContextArtifactStore {
                 byte_len,
                 content_hash: content_hash.clone(),
                 text: text.to_string(),
-                sequence,
+                order,
+                pending_order: true,
                 line_index: Some(line_index),
                 chunk_index: Some(chunk_index),
             },
@@ -165,18 +172,20 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     pub(crate) fn get_text(&self, id: &str) -> Option<String> {
-        self.artifacts.get(id).map(|artifact| artifact.text.clone())
+        self.artifacts
+            .get(self.resolve_artifact_id(id))
+            .map(|artifact| artifact.text.clone())
     }
 
     pub(crate) fn line_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactLineIndex> {
         self.artifacts
-            .get(id)
+            .get(self.resolve_artifact_id(id))
             .and_then(|artifact| artifact.line_index.as_ref())
     }
 
     pub(crate) fn chunk_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactChunkIndex> {
         self.artifacts
-            .get(id)
+            .get(self.resolve_artifact_id(id))
             .and_then(|artifact| artifact.chunk_index.as_ref())
     }
 
@@ -191,7 +200,14 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     pub(crate) fn contains(&self, id: &str) -> bool {
-        self.artifacts.contains_key(id)
+        self.artifacts.contains_key(self.resolve_artifact_id(id))
+    }
+
+    fn resolve_artifact_id<'a>(&'a self, id: &'a str) -> &'a str {
+        self.legacy_artifact_ids
+            .get(id)
+            .map(String::as_str)
+            .unwrap_or(id)
     }
 
     pub(in crate::runtime_state_shared::artifact_store) fn artifact_matches_text(

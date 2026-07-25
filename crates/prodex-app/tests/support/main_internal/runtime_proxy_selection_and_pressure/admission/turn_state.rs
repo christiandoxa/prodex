@@ -66,6 +66,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
@@ -179,6 +180,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,

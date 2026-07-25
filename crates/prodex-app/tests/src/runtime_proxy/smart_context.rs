@@ -58,6 +58,39 @@ fn smart_context_observe_minimal_budget(shared: &RuntimeRotationProxyShared) {
     );
 }
 
+fn smart_context_test_state_snapshot(shared: &RuntimeRotationProxyShared) -> String {
+    let (_, state) = runtime_smart_context_proxy_state_snapshot(shared)
+        .expect("smart-context state should be registered");
+    format!("{state:#?}")
+}
+
+fn register_persistent_runtime_smart_context_test_state(
+    shared: &RuntimeRotationProxyShared,
+    model_context_window_tokens: Option<u64>,
+) -> PathBuf {
+    let artifact_path = shared.log_path.with_extension("artifacts.json");
+    let _ = std::fs::remove_file(&artifact_path);
+    register_runtime_smart_context_proxy_state(
+        shared,
+        true,
+        model_context_window_tokens,
+        Some(artifact_path.clone()),
+    );
+    artifact_path
+}
+
+fn smart_context_test_insert_durable_artifact(
+    shared: &RuntimeRotationProxyShared,
+    text: &str,
+) -> runtime_proxy_crate::SmartContextArtifactRef {
+    with_runtime_smart_context_proxy_state(shared, |state| {
+        let artifact = state.artifacts.insert_text(text).expect("test artifact");
+        state.durable_artifact_ids.insert(artifact.id.clone());
+        artifact
+    })
+    .expect("smart-context state should be registered")
+}
+
 fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
     static NEXT_LOG_ID: AtomicU64 = AtomicU64::new(1);
     let unique = NEXT_LOG_ID.fetch_add(1, Ordering::Relaxed);
@@ -79,6 +112,7 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
     prepare_runtime_proxy_test_log_path(&log_path);
 
     RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,

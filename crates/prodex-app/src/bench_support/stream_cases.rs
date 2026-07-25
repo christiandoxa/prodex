@@ -218,7 +218,7 @@ impl RuntimeProxySmartContextRewriteBenchCase {
             profile_health: BTreeMap::new(),
         };
         let shared = bench_runtime_shared("smart-context-rewrite", state, 8);
-        register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(18_000), None);
+        register_runtime_smart_context_proxy_state(&shared, true, Some(18_000), None);
 
         let output = (0..tool_line_count)
             .map(|index| {

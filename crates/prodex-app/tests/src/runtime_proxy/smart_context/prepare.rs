@@ -35,12 +35,13 @@ fn smart_context_tool_preview_lines_follow_budget_tier_and_limit() {
 #[test]
 fn smart_context_prepare_rewrites_when_savings_and_critical_signals_preserved() {
     let shared = smart_context_test_shared("rewrite-savings");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let output = std::iter::once("error: failed at src/main.rs:10:5".to_string())
         .chain((0..500).map(|index| format!("line {index}: noisy build output")))
         .collect::<Vec<_>>()
         .join("\n");
+    smart_context_test_insert_durable_artifact(&shared, &output);
     let request = smart_context_test_request(serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -58,19 +59,56 @@ fn smart_context_prepare_rewrites_when_savings_and_critical_signals_preserved() 
     };
     assert!(body.len() < before_len);
     let text = String::from_utf8(body).unwrap();
-    assert!(text.contains("psc:"));
+    assert!(text.contains("psc2:"));
     assert!(text.contains("error: failed at src/main.rs:10:5"));
+}
+
+#[test]
+fn smart_context_first_artifact_occurrence_stays_inline_until_durable() {
+    let shared = smart_context_test_shared("durable-before-reference");
+    let artifact_path = register_persistent_runtime_smart_context_test_state(&shared, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = std::iter::once("error: durable reference at src/main.rs:10:5".to_string())
+        .chain((0..500).map(|index| format!("line {index}: durable build output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_durable",
+            "output": output
+        }]
+    }));
+
+    let first =
+        prepare_runtime_smart_context_http_body(40, &request, &shared, RuntimeRouteKind::Responses);
+    assert!(matches!(first, Cow::Borrowed(_)));
+    assert_eq!(first.as_ref(), request.body.as_slice());
+    assert!(
+        RuntimeSmartContextArtifactStore::load_from_path(&artifact_path)
+            .artifact_ref_for_exact_text(&output)
+            .is_some()
+    );
+
+    let second =
+        prepare_runtime_smart_context_http_body(41, &request, &shared, RuntimeRouteKind::Responses);
+    let Cow::Owned(second) = second else {
+        panic!("confirmed durable artifact should be referenceable");
+    };
+    assert!(String::from_utf8_lossy(&second).contains("psc2:"));
+    assert!(!String::from_utf8_lossy(&second).contains("line 250: durable build output"));
 }
 
 #[test]
 fn smart_context_http_prepare_rewritten_body_remains_valid_json() {
     let shared = smart_context_test_shared("rewrite-valid-json");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let output = std::iter::once("error[E0425]: missing symbol at src/lib.rs:42:13".to_string())
         .chain((0..650).map(|index| format!("line {index}: noisy build output")))
         .collect::<Vec<_>>()
         .join("\n");
+    smart_context_test_insert_durable_artifact(&shared, &output);
     let request = smart_context_test_request(serde_json::json!({
         "model": "gpt-5.5",
         "input": [{
@@ -94,21 +132,21 @@ fn smart_context_http_prepare_rewritten_body_remains_valid_json() {
         .expect("rewritten prepare body must remain valid JSON");
     assert_eq!(value["model"].as_str(), Some("gpt-5.5"));
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc:"));
+    assert!(output.contains("psc2:"));
     assert!(output.contains("error[E0425]: missing symbol at src/lib.rs:42:13"));
 }
 
 #[test]
 fn smart_context_prepare_explicit_line_ref_rehydrates_exact_critical_content() {
     let shared = smart_context_test_shared("prepare-explicit-ref-exact");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     let artifact_text = "\
 setup line
 panic: exact hidden failure
 src/runtime.rs:88:13
 tail line";
     let artifact = with_runtime_smart_context_artifacts(&shared, |store| {
-        store.insert_text(1, artifact_text).unwrap()
+        store.insert_text(artifact_text).unwrap()
     })
     .unwrap();
     let request = smart_context_test_request(serde_json::json!({
@@ -190,7 +228,7 @@ fn smart_context_prepare_affinity_does_not_force_global_exact_passthrough() {
         ),
     ] {
         let shared = smart_context_test_shared(&format!("affinity-exact-{name}"));
-        register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+        register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
         let original = serde_json::from_slice::<serde_json::Value>(&request.body).unwrap();
 
         let prepared = prepare_runtime_smart_context_http_body(
@@ -219,25 +257,28 @@ fn smart_context_prepare_affinity_does_not_force_global_exact_passthrough() {
 
 #[test]
 fn smart_context_http_and_websocket_prepare_match_for_same_payload_class() {
+    let output = std::iter::once("error: parity failure at src/lib.rs:12:5".to_string())
+        .chain((0..620).map(|index| format!("line {index}: shared noisy output")))
+        .collect::<Vec<_>>()
+        .join("\n");
     let body = serde_json::json!({
         "type": "response.create",
         "model": "gpt-5.5",
         "input": [{
             "type": "function_call_output",
             "call_id": "call_parity",
-            "output": std::iter::once("error: parity failure at src/lib.rs:12:5".to_string())
-                .chain((0..620).map(|index| format!("line {index}: shared noisy output")))
-                .collect::<Vec<_>>()
-                .join("\n")
+            "output": output
         }]
     })
     .to_string();
     let http_shared = smart_context_test_shared("prepare-http-parity");
     let ws_shared = smart_context_test_shared("prepare-ws-parity");
-    register_runtime_smart_context_proxy_state(&http_shared.log_path, true, None, None);
-    register_runtime_smart_context_proxy_state(&ws_shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&http_shared, true, None, None);
+    register_runtime_smart_context_proxy_state(&ws_shared, true, None, None);
     smart_context_observe_minimal_budget(&http_shared);
     smart_context_observe_minimal_budget(&ws_shared);
+    smart_context_test_insert_durable_artifact(&http_shared, &output);
+    smart_context_test_insert_durable_artifact(&ws_shared, &output);
     let http_request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/v1/responses".to_string(),
@@ -278,9 +319,9 @@ fn smart_context_http_and_websocket_prepare_match_for_same_payload_class() {
 }
 
 #[test]
-fn smart_context_large_websocket_payload_minifies_without_rewrite_panic() {
+fn smart_context_large_websocket_payload_returns_original_bytes() {
     let shared = smart_context_test_shared("large-websocket-minify");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let output = (0..4200)
         .map(|index| format!("line {index}: noisy resumed goal output with src/main.rs:{index}:1"))
@@ -314,6 +355,8 @@ fn smart_context_large_websocket_payload_minifies_without_rewrite_panic() {
         "main",
     );
 
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), body);
     let prepared_text = prepared.as_ref();
     let value = serde_json::from_str::<serde_json::Value>(prepared_text).unwrap();
     assert_eq!(
@@ -334,7 +377,7 @@ fn smart_context_large_websocket_payload_minifies_without_rewrite_panic() {
 #[test]
 fn smart_context_websocket_generate_false_prewarm_skips_rewrite() {
     let shared = smart_context_test_shared("websocket-generate-false");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let tool_description = "large prewarm tool schema ".repeat(2200);
     let body = serde_json::to_string_pretty(&serde_json::json!({
@@ -375,6 +418,8 @@ fn smart_context_websocket_generate_false_prewarm_skips_rewrite() {
         "main",
     );
 
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), body);
     let value = serde_json::from_str::<serde_json::Value>(prepared.as_ref()).unwrap();
     assert_eq!(value["generate"].as_bool(), Some(false));
     assert_eq!(value["type"].as_str(), Some("response.create"));
@@ -391,12 +436,13 @@ fn smart_context_websocket_generate_false_prewarm_skips_rewrite() {
 #[test]
 fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure() {
     let shared = smart_context_test_shared("rewrite-affinity-pressure");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let output = std::iter::once("error: failed at src/main.rs:10:5".to_string())
         .chain((0..600).map(|index| format!("line {index}: noisy continuation output")))
         .collect::<Vec<_>>()
         .join("\n");
+    smart_context_test_insert_durable_artifact(&shared, &output);
     let mut request = smart_context_test_request(serde_json::json!({
         "previous_response_id": "resp_owned",
         "session_id": "sess_owned",
@@ -423,7 +469,7 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
     assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
     assert_eq!(value["session_id"].as_str(), Some("sess_owned"));
     let rewritten_output = value["input"][0]["output"].as_str().unwrap();
-    assert!(rewritten_output.contains("psc:"));
+    assert!(rewritten_output.contains("psc2:"));
     assert!(rewritten_output.contains("error: failed at src/main.rs:10:5"));
     assert!(
         prodex_context::critical_signal_self_check(
@@ -442,12 +488,13 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
 #[test]
 fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressure() {
     let shared = smart_context_test_shared("rewrite-turn-state-affinity-pressure");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let output = std::iter::once("error: turn state owner failed at src/lib.rs:44:9".to_string())
         .chain((0..600).map(|index| format!("line {index}: noisy turn state continuation output")))
         .collect::<Vec<_>>()
         .join("\n");
+    smart_context_test_insert_durable_artifact(&shared, &output);
     let mut request = smart_context_test_request(serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -471,7 +518,7 @@ fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressu
     assert!(value.get("previous_response_id").is_none());
     assert!(value.get("session_id").is_none());
     let rewritten_output = value["input"][0]["output"].as_str().unwrap();
-    assert!(rewritten_output.contains("psc:"));
+    assert!(rewritten_output.contains("psc2:"));
     assert!(rewritten_output.contains("error: turn state owner failed at src/lib.rs:44:9"));
     assert!(
         prodex_context::critical_signal_self_check(
@@ -489,7 +536,7 @@ fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressu
 #[test]
 fn smart_context_prepare_missing_rehydrate_ref_allows_affinity_pressure_rewrite() {
     let shared = smart_context_test_shared("rewrite-affinity-missing-rehydrate");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let missing_ref = "prodex-artifact:sc:feedface";
     let request = smart_context_test_request(serde_json::json!({
@@ -521,15 +568,18 @@ fn smart_context_prepare_missing_rehydrate_ref_allows_affinity_pressure_rewrite(
 #[test]
 fn smart_context_prepare_changed_static_context_blocks_affinity_pressure_rewrite() {
     let shared = smart_context_test_shared("rewrite-affinity-static-changed");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
+    let stable_rules = "Stable workspace rule. ".repeat(80);
+    let first_instructions = format!("Use repo rules.\nKeep account affinity.\n{stable_rules}");
+    let changed_instructions = format!("Use repo rules.\nAllow account rotation.\n{stable_rules}");
     let first = smart_context_test_request(serde_json::json!({
-        "instructions": "Use repo rules.\nKeep account affinity.",
+        "instructions": first_instructions,
         "input": [{"role": "user", "content": "first request"}]
     }));
     let changed = smart_context_test_request(serde_json::json!({
         "previous_response_id": "resp_owned",
-        "instructions": "Use repo rules.\nAllow account rotation.",
+        "instructions": changed_instructions,
         "input": [{
             "type": "function_call_output",
             "call_id": "call_1",
@@ -546,7 +596,7 @@ fn smart_context_prepare_changed_static_context_blocks_affinity_pressure_rewrite
     assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
     assert_eq!(
         value["instructions"].as_str(),
-        Some("Use repo rules.\nAllow account rotation.")
+        Some(changed_instructions.as_str())
     );
     assert!(
         value["input"][0]["output"]
@@ -564,7 +614,7 @@ fn smart_context_prepare_changed_static_context_blocks_affinity_pressure_rewrite
 #[test]
 fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
     let shared = smart_context_test_shared("rewrite-static-prefix");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let instructions = "Generated at: 2026-05-04T01:02:03Z\nKeep exact static prefix.  ";
     let system = "System prefix line one.\n\nSystem prefix line two.  ";
@@ -574,6 +624,7 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
         .chain((0..500).map(|index| format!("line {index}: noisy build output")))
         .collect::<Vec<_>>()
         .join("\n");
+    smart_context_test_insert_durable_artifact(&shared, &output);
     let request = smart_context_test_request(serde_json::json!({
         "instructions": instructions,
         "system": system,
@@ -606,7 +657,7 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
         value["input"][1]["output"]
             .as_str()
             .unwrap()
-            .contains("psc:")
+            .contains("psc2:")
     );
 }
 
@@ -615,7 +666,7 @@ fn smart_context_prepare_canary_out_returns_original_body() {
     let _canary = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_CANARY_PERCENT", "0");
     let _shadow = TestEnvVarGuard::unset("PRODEX_SMART_CONTEXT_SHADOW");
     let shared = smart_context_test_shared("rewrite-rollout-canary-out");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let request = smart_context_test_request(serde_json::json!({
         "input": [{
@@ -635,11 +686,11 @@ fn smart_context_prepare_canary_out_returns_original_body() {
 }
 
 #[test]
-fn smart_context_prepare_shadow_computes_but_returns_original_body() {
+fn smart_context_prepare_shadow_returns_original_without_live_state_mutation() {
     let _shadow = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_SHADOW", "1");
     let _canary = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_CANARY_PERCENT", "100");
     let shared = smart_context_test_shared("rewrite-rollout-shadow");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let request = smart_context_test_request(serde_json::json!({
         "input": [{
@@ -648,13 +699,14 @@ fn smart_context_prepare_shadow_computes_but_returns_original_body() {
             "output": "error: shadow path src/lib.rs:1:1\n".repeat(500)
         }]
     }));
+    let before_state = smart_context_test_state_snapshot(&shared);
 
     let prepared =
         prepare_runtime_smart_context_http_body(89, &request, &shared, RuntimeRouteKind::Responses);
 
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains("rollout_mode=shadow"));
-    assert!(log.contains("decision=rewritten"));
+    assert!(log.contains("reason=rollout_shadow"));
 }

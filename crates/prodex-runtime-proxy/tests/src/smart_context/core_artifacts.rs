@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn correctness_hash_uses_a_versioned_sha256_digest() {
+    let hash = smart_context_hash_text("correctness-critical artifact");
+
+    assert!(hash.starts_with("sc2:"), "unexpected digest scheme: {hash}");
+    assert_eq!(hash.len(), 4 + 64);
+    assert!(
+        hash[4..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    );
+}
+
+#[test]
 fn structural_minify_json_body_removes_json_whitespace_only() {
     let body = br#"{
         "message": " keep  spaces \n and { braces } ",

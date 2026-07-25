@@ -43,14 +43,10 @@ use safety::*;
 use static_context::*;
 use static_observation::*;
 use std::borrow::Cow;
-use std::path::PathBuf;
 use token_calibration::*;
 use tool_outputs::*;
+pub(crate) use types::RuntimeSmartContextEngine;
 use types::*;
-
-static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
-    Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
-> = OnceLock::new();
 
 pub(crate) fn runtime_smart_context_effective_prompt_cache_key(
     request: &RuntimeProxyRequest,
@@ -84,37 +80,20 @@ pub(super) fn runtime_smart_context_effective_websocket_prompt_cache_key(
     runtime_smart_context_static_prompt_cache_key_from_body(request_text.as_bytes())
 }
 
+#[cfg(test)]
 fn observe_runtime_smart_context_rewrite_safety(
     shared: &RuntimeRotationProxyShared,
     observation: RuntimeSmartContextRewriteSafetyObservation,
 ) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return;
-    };
-    let Ok(mut states) = states.lock() else {
+    let Ok(mut current) = shared.smart_context_engine.state.lock() else {
         return;
     };
     let mut save_job = None;
-    if let Some(state) = states.get_mut(&shared.log_path)
+    if let Some(state) = current.as_mut()
         && state.enabled
     {
-        let now = runtime_smart_context_unix_secs_now();
-        state
-            .rewrite_safety_history
-            .retain(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now));
-        state
-            .rewrite_safety_history
-            .push(RuntimeSmartContextRewriteSafetyRecord {
-                observation,
-                observed_at_unix_secs: now,
-            });
-        if state.rewrite_safety_history.len() > SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT {
-            let overflow = state
-                .rewrite_safety_history
-                .len()
-                .saturating_sub(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT);
-            state.rewrite_safety_history.drain(0..overflow);
-        }
+        state.generation = state.generation.saturating_add(1);
+        observe_runtime_smart_context_rewrite_safety_with_state(state, observation);
         save_job = state.artifact_path.as_deref().map(|artifact_path| {
             (
                 runtime_smart_context_token_calibration_path(artifact_path),
@@ -122,7 +101,7 @@ fn observe_runtime_smart_context_rewrite_safety(
             )
         });
     }
-    drop(states);
+    drop(current);
     if let Some((path, snapshot)) = save_job {
         schedule_runtime_smart_context_token_calibration_save(
             shared,
@@ -133,17 +112,37 @@ fn observe_runtime_smart_context_rewrite_safety(
     }
 }
 
+fn observe_runtime_smart_context_rewrite_safety_with_state(
+    state: &mut RuntimeSmartContextProxyState,
+    observation: RuntimeSmartContextRewriteSafetyObservation,
+) {
+    let now = runtime_smart_context_unix_secs_now();
+    state
+        .rewrite_safety_history
+        .retain(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now));
+    state
+        .rewrite_safety_history
+        .push(RuntimeSmartContextRewriteSafetyRecord {
+            observation,
+            observed_at_unix_secs: now,
+        });
+    if state.rewrite_safety_history.len() > SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT {
+        let overflow = state
+            .rewrite_safety_history
+            .len()
+            .saturating_sub(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT);
+        state.rewrite_safety_history.drain(0..overflow);
+    }
+}
+
 fn persist_runtime_smart_context_token_calibration_metadata(
     shared: &RuntimeRotationProxyShared,
     reason: &str,
 ) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+    let Ok(current) = shared.smart_context_engine.state.lock() else {
         return;
     };
-    let Ok(states) = states.lock() else {
-        return;
-    };
-    let Some(state) = states.get(&shared.log_path) else {
+    let Some(state) = current.as_ref() else {
         return;
     };
     if !state.enabled {
@@ -156,7 +155,7 @@ fn persist_runtime_smart_context_token_calibration_metadata(
         runtime_smart_context_token_calibration_path(artifact_path),
         runtime_smart_context_token_calibration_snapshot(state),
     );
-    drop(states);
+    drop(current);
     schedule_runtime_smart_context_token_calibration_save(shared, save_job.0, save_job.1, reason);
 }
 
@@ -228,6 +227,9 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
 ) -> Cow<'a, [u8]> {
+    if runtime_smart_context_exact_header(request) {
+        return Cow::Borrowed(&request.body);
+    }
     if !runtime_smart_context_enabled(shared) {
         return Cow::Borrowed(&request.body);
     }
@@ -262,51 +264,6 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
-    if transport == RuntimeSmartContextTransport::Websocket
-        && runtime_smart_context_websocket_generate_false_request(&request.body)
-    {
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "websocket_generate_false",
-        );
-        if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
-            return Cow::Owned(body);
-        }
-        return Cow::Borrowed(&request.body);
-    }
-
-    if transport == RuntimeSmartContextTransport::Websocket
-        && request.body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
-    {
-        if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
-            runtime_smart_context_log_prepare_fallback(
-                request_id,
-                shared,
-                route_kind,
-                transport,
-                profile_name,
-                request.body.len(),
-                "websocket_large_payload",
-            );
-            return Cow::Owned(body);
-        }
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "websocket_large_payload",
-        );
-        return Cow::Borrowed(&request.body);
-    }
-
     let rollout = runtime_smart_context_rollout_decision(
         request_id,
         request,
@@ -315,9 +272,12 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         transport,
         profile_name,
     );
-    if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Disabled
-        && rollout.reason == "canary_out"
-    {
+    if rollout.mode != runtime_proxy_crate::SmartContextRolloutMode::Apply {
+        let reason = match rollout.mode {
+            runtime_proxy_crate::SmartContextRolloutMode::Shadow => "rollout_shadow",
+            runtime_proxy_crate::SmartContextRolloutMode::Disabled => "rollout_canary_out",
+            runtime_proxy_crate::SmartContextRolloutMode::Apply => unreachable!(),
+        };
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -325,7 +285,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             transport,
             profile_name,
             request.body.len(),
-            "rollout_canary_out",
+            reason,
         );
         return Cow::Borrowed(&request.body);
     }
@@ -336,6 +296,48 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             shared.runtime_config.fault_smart_context_unwind_once,
         ) {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
+        }
+        if request.body.len() < SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES
+            && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
+        {
+            runtime_smart_context_log_prepare_fallback(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                "below_minimum_body",
+            );
+            return Cow::Borrowed(request.body.as_slice());
+        }
+        if transport == RuntimeSmartContextTransport::Websocket
+            && runtime_smart_context_websocket_generate_false_request(&request.body)
+        {
+            runtime_smart_context_log_prepare_fallback(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                "websocket_generate_false",
+            );
+            return Cow::Borrowed(request.body.as_slice());
+        }
+        if transport == RuntimeSmartContextTransport::Websocket
+            && request.body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
+        {
+            runtime_smart_context_log_prepare_fallback(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                "websocket_large_payload",
+            );
+            return Cow::Borrowed(request.body.as_slice());
         }
         prepare_runtime_smart_context_body(
             request_id,
@@ -348,13 +350,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     });
 
     match result {
-        Ok(body) => {
-            if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Shadow {
-                Cow::Borrowed(&request.body)
-            } else {
-                body
-            }
-        }
+        Ok(body) => body,
         Err(panic) => {
             let disabled_until = runtime_smart_context_disable_temporarily(shared, now);
             runtime_smart_context_log_panic(
@@ -393,18 +389,21 @@ fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {
         && value.get("generate").and_then(serde_json::Value::as_bool) == Some(false)
 }
 
-fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return false;
-    };
-    let Ok(states) = states.lock() else {
-        return false;
-    };
-    states
-        .get(&shared.log_path)
-        .is_some_and(|state| state.enabled)
+fn runtime_smart_context_body_may_contain_artifact_ref(body: &[u8]) -> bool {
+    std::str::from_utf8(body).is_ok_and(|text| {
+        text.contains("psc:") || text.contains("psc2:") || text.contains("prodex-artifact:")
+    })
 }
 
+fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
+    shared
+        .smart_context_engine
+        .state
+        .lock()
+        .is_ok_and(|state| state.as_ref().is_some_and(|state| state.enabled))
+}
+
+#[cfg(test)]
 fn with_runtime_smart_context_artifacts<R>(
     shared: &RuntimeRotationProxyShared,
     action: impl FnOnce(&mut RuntimeSmartContextArtifactStore) -> R,
@@ -412,24 +411,26 @@ fn with_runtime_smart_context_artifacts<R>(
     with_runtime_smart_context_proxy_state(shared, |state| action(&mut state.artifacts))
 }
 
+#[cfg(test)]
 fn with_runtime_smart_context_proxy_state<R>(
     shared: &RuntimeRotationProxyShared,
     action: impl FnOnce(&mut RuntimeSmartContextProxyState) -> R,
 ) -> Option<R> {
-    let states = RUNTIME_SMART_CONTEXT_PROXY_STATES.get()?;
-    let mut states = states.lock().ok()?;
-    let state = states.get_mut(&shared.log_path)?;
-    state.enabled.then(|| action(state))
+    let mut current = shared.smart_context_engine.state.lock().ok()?;
+    let state = current.as_mut()?;
+    if !state.enabled {
+        return None;
+    }
+    let result = action(state);
+    state.generation = state.generation.saturating_add(1);
+    Some(result)
 }
 
 fn persist_runtime_smart_context_artifacts(shared: &RuntimeRotationProxyShared) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+    let Ok(current) = shared.smart_context_engine.state.lock() else {
         return;
     };
-    let Ok(states) = states.lock() else {
-        return;
-    };
-    let Some(state) = states.get(&shared.log_path) else {
+    let Some(state) = current.as_ref() else {
         return;
     };
     if !state.enabled {
@@ -439,6 +440,7 @@ fn persist_runtime_smart_context_artifacts(shared: &RuntimeRotationProxyShared) 
         return;
     };
     let store = state.artifacts.clone();
+    drop(current);
     schedule_runtime_smart_context_artifact_save(shared, path, store, "smart_context_artifacts");
 }
 

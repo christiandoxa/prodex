@@ -151,7 +151,7 @@ fn smart_context_persisted_static_section_fingerprints_dedupe_fresh_start() {
         .join("\n");
     let instructions = format!("# Stable Section\n{body}\n");
     register_runtime_smart_context_proxy_state(
-        &first_shared.log_path,
+        &first_shared,
         true,
         None,
         Some(artifact_path.clone()),
@@ -180,7 +180,7 @@ fn smart_context_persisted_static_section_fingerprints_dedupe_fresh_start() {
 
     let fresh_shared = smart_context_test_shared("static-section-persist-fresh");
     register_runtime_smart_context_proxy_state(
-        &fresh_shared.log_path,
+        &fresh_shared,
         true,
         None,
         Some(artifact_path.clone()),

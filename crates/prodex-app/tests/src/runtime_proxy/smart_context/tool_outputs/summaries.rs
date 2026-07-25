@@ -35,7 +35,7 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("psc art psc2:"));
     assert!(output.contains("sum: search matches=1, files=1"));
     assert!(output.contains("src/lib.rs (1 matches):"));
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -145,7 +145,7 @@ fn smart_context_uses_success_summary_for_long_success_tool_output() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("psc art psc2:"));
     assert!(output.contains("pcs: success cmd"));
     assert!(output.contains("command: npm install && npm run build && find src -type f"));
     assert!(output.contains("exit: (unknown)"));
@@ -201,7 +201,7 @@ fn smart_context_keeps_failure_output_on_critical_preserving_path() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("psc art psc2:"));
     assert!(!output.contains("successful command output"));
     assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(output.contains("error: build script failed"));

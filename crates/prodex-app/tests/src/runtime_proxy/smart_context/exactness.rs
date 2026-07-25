@@ -168,9 +168,9 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
         .collect::<Vec<_>>()
         .join("\n");
     let shared = smart_context_test_shared("surgical-critical");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let artifact = with_runtime_smart_context_artifacts(&shared, |store| {
-        store.insert_text(1, &artifact_text).unwrap()
+        store.insert_text(&artifact_text).unwrap()
     })
     .unwrap();
     let original = serde_json::to_vec(&serde_json::json!({
@@ -234,7 +234,7 @@ error: hidden indexed failure
 src/main.rs:22:5
 noise";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let line_index = store
         .line_index(&artifact.id)
         .expect("inserted artifact should have line index");
@@ -301,9 +301,9 @@ fn smart_context_minifies_structural_json_without_touching_strings() {
 }
 
 #[test]
-fn smart_context_prepare_minifies_exact_json_without_changing_payload() {
+fn smart_context_prepare_exact_returns_original_bytes_without_state_mutation() {
     let shared = smart_context_test_shared("prepare-minify-exact");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/v1/responses".to_string(),
@@ -312,33 +312,82 @@ fn smart_context_prepare_minifies_exact_json_without_changing_payload() {
           "input": [
             {
               "type": "message",
+              "role": "developer",
               "content": "keep  spaces\ninside string"
             }
           ]
         }"#
         .to_vec(),
     };
-    let before = serde_json::from_slice::<serde_json::Value>(&request.body).unwrap();
+    let before_state = smart_context_test_state_snapshot(&shared);
 
     let prepared =
         prepare_runtime_smart_context_http_body(77, &request, &shared, RuntimeRouteKind::Responses);
 
-    let Cow::Owned(body) = prepared else {
-        panic!("expected minified body");
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
+}
+
+#[test]
+fn smart_context_prepare_noop_returns_original_bytes() {
+    let shared = smart_context_test_shared("prepare-noop-exact-bytes");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{
+          "model": "gpt-5.5",
+          "input": [{"type":"message","role":"user","content":"short request"}]
+        }"#
+        .to_vec(),
     };
-    let after = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-    assert!(body.len() < request.body.len());
-    assert_eq!(after, before);
-    assert_eq!(
-        after["input"][0]["content"].as_str(),
-        Some("keep  spaces\ninside string")
+    let before_state = smart_context_test_state_snapshot(&shared);
+
+    let prepared = prepare_runtime_smart_context_http_body(
+        770,
+        &request,
+        &shared,
+        RuntimeRouteKind::Responses,
     );
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
+}
+
+#[test]
+fn smart_context_subthreshold_rewrite_discards_planned_state() {
+    let shared = smart_context_test_shared("subthreshold-plan-discard");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    let instructions = format!("Stable instructions\n{}", "rule ".repeat(100));
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions,
+        "input": [{"role": "user", "content": "first"}]
+    }));
+    let second = smart_context_test_request(serde_json::json!({
+        "instructions": instructions,
+        "input": [{"role": "user", "content": "second"}]
+    }));
+
+    let _ =
+        prepare_runtime_smart_context_http_body(80, &first, &shared, RuntimeRouteKind::Responses);
+    let before = smart_context_test_state_snapshot(&shared);
+    let prepared =
+        prepare_runtime_smart_context_http_body(81, &second, &shared, RuntimeRouteKind::Responses);
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), second.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before);
+    let log = fs::read_to_string(&shared.log_path).unwrap();
+    assert!(log.contains("self_check=token_savings_below_safety_margin"));
 }
 
 #[test]
 fn smart_context_prepare_passes_invalid_json_unchanged() {
     let shared = smart_context_test_shared("prepare-invalid-json");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/v1/responses".to_string(),
@@ -356,7 +405,7 @@ fn smart_context_prepare_passes_invalid_json_unchanged() {
 #[test]
 fn smart_context_prepare_passes_too_deep_json_unchanged_without_panic_fallback() {
     let shared = smart_context_test_shared("prepare-too-deep-json");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
     let mut nested = serde_json::Value::String("leaf".to_string());
     for _ in 0..RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH {
         nested = serde_json::json!({ "nested": nested });
@@ -384,8 +433,9 @@ fn smart_context_prepare_passes_too_deep_json_unchanged_without_panic_fallback()
     assert!(matches!(&prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains("decision=unsupported_json_shape"));
-    assert!(log.contains("reasons=json_depth_limit"));
+    assert!(log.contains("smart_context_prepare_fallback"));
+    assert!(log.contains("reason=json_depth_limit"));
+    assert!(log.contains("decision=pass_through"));
     assert!(!log.contains("smart_context_panic"));
 }
 

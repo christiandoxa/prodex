@@ -7,7 +7,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
         "running 1 test\n---- tests::hidden_case stdout ----\nthread 'tests::hidden_case' panicked at src/lib.rs:7:3:\nerror[E0425]: cannot find value\n --> src/lib.rs:7:3\n{secret_line}\ntest result: FAILED. 0 passed; 1 failed"
     );
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(7, &artifact_text).unwrap();
+    let artifact = store.insert_text(&artifact_text).unwrap();
 
     let manifest =
         runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
@@ -28,7 +28,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
 fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     store
-        .insert_text(1, "error: compacted output\nsrc/lib.rs:1:1")
+        .insert_text("error: compacted output\nsrc/lib.rs:1:1")
         .unwrap();
     let mut value = serde_json::json!({
         "input": [{
@@ -56,16 +56,29 @@ fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
     ));
     let input = value["input"].as_array().unwrap();
     assert_eq!(input.len(), 2);
+    assert_eq!(input[1]["role"].as_str(), Some("developer"));
     let manifest = input[1]["content"].as_str().unwrap();
-    assert!(manifest.contains("psc:"));
+    assert!(manifest.contains("psc2:"));
     assert!(!manifest.contains("error: compacted output"));
+}
+
+#[test]
+fn smart_context_artifact_manifest_orders_by_insertion_not_caller_sequence() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let first = store.insert_text("first artifact").unwrap();
+    let second = store.insert_text("second artifact").unwrap();
+
+    let entries = store.artifact_manifest_entries(2);
+
+    assert_eq!(entries[0].id, second.id);
+    assert_eq!(entries[1].id, first.id);
 }
 
 #[test]
 fn smart_context_manifest_skips_refs_already_visible_in_payload() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "error: compacted output\nsrc/lib.rs:1:1")
+        .insert_text("error: compacted output\nsrc/lib.rs:1:1")
         .unwrap();
     let mut value = serde_json::json!({
         "input": [{
@@ -91,7 +104,7 @@ fn smart_context_manifest_skips_refs_already_visible_in_payload() {
 fn smart_context_manifest_default_omits_detail_fields_until_requested() {
     let artifact_text = "error[E0425]: cannot find value\nsrc/lib.rs:7:3";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    store.insert_text(1, artifact_text).unwrap();
+    store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{"type": "message", "role": "user", "content": "existing prompt"}]
     });
@@ -116,7 +129,7 @@ fn smart_context_manifest_default_omits_detail_fields_until_requested() {
 #[test]
 fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
     let shared = smart_context_test_shared("manifest-delta");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let useful_stats = RuntimeSmartContextTransformStats {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
@@ -129,8 +142,9 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
     with_runtime_smart_context_proxy_state(&shared, |state| {
         state
             .artifacts
-            .insert_text(1, "first artifact\nerror: one")
+            .insert_text("first artifact\nerror: one")
             .unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut first = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "first"}]
         });
@@ -162,8 +176,9 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         );
         state
             .artifacts
-            .insert_text(2, "second artifact\nerror: two")
+            .insert_text("second artifact\nerror: two")
             .unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut changed = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "third"}]
         });
@@ -180,7 +195,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         assert!(!changed_manifest.contains(" set="));
         assert!(!changed_manifest.contains("first artifact"));
         assert!(changed_manifest.contains("same=1"));
-        assert_eq!(changed_manifest.matches("psc:").count(), 1);
+        assert_eq!(changed_manifest.matches("psc2:").count(), 1);
     })
     .unwrap();
 }
@@ -188,7 +203,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
 #[test]
 fn smart_context_explicit_manifest_request_keeps_full_manifest() {
     let shared = smart_context_test_shared("manifest-delta-explicit-full");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let useful_stats = RuntimeSmartContextTransformStats {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
@@ -199,7 +214,8 @@ fn smart_context_explicit_manifest_request_keeps_full_manifest() {
     };
 
     with_runtime_smart_context_proxy_state(&shared, |state| {
-        state.artifacts.insert_text(1, "first artifact").unwrap();
+        state.artifacts.insert_text("first artifact").unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut first = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "manifest"}]
         });
@@ -212,7 +228,8 @@ fn smart_context_explicit_manifest_request_keeps_full_manifest() {
             )
         );
 
-        state.artifacts.insert_text(2, "second artifact").unwrap();
+        state.artifacts.insert_text("second artifact").unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut second = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "manifest"}]
         });
@@ -226,7 +243,7 @@ fn smart_context_explicit_manifest_request_keeps_full_manifest() {
         );
         let manifest = second["input"][1]["content"].as_str().unwrap();
         assert!(manifest.contains("same=1"));
-        assert_eq!(manifest.matches("psc:").count(), 2);
+        assert_eq!(manifest.matches("psc2:").count(), 2);
     })
     .unwrap();
 }
@@ -234,14 +251,15 @@ fn smart_context_explicit_manifest_request_keeps_full_manifest() {
 #[test]
 fn smart_context_manifest_delta_suppressed_for_resolved_explicit_ref() {
     let shared = smart_context_test_shared("manifest-delta-explicit-ref");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let useful_stats = RuntimeSmartContextTransformStats {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
     };
 
     with_runtime_smart_context_proxy_state(&shared, |state| {
-        let artifact = state.artifacts.insert_text(1, "first artifact").unwrap();
+        let artifact = state.artifacts.insert_text("first artifact").unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let reference = runtime_smart_context_artifact_ref(&artifact.id);
         let intent = RuntimeSmartContextIntentSignals {
             artifact_refs: vec![RuntimeSmartContextArtifactReference {
@@ -271,14 +289,15 @@ fn smart_context_manifest_delta_suppressed_for_resolved_explicit_ref() {
 #[test]
 fn smart_context_manifest_delta_kept_for_missing_explicit_ref() {
     let shared = smart_context_test_shared("manifest-delta-missing-ref");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let useful_stats = RuntimeSmartContextTransformStats {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
     };
 
     with_runtime_smart_context_proxy_state(&shared, |state| {
-        state.artifacts.insert_text(1, "first artifact").unwrap();
+        state.artifacts.insert_text("first artifact").unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let intent = RuntimeSmartContextIntentSignals {
             artifact_refs: vec![RuntimeSmartContextArtifactReference {
                 id: "sc:missing".to_string(),
@@ -308,7 +327,7 @@ fn smart_context_manifest_delta_kept_for_missing_explicit_ref() {
 #[test]
 fn smart_context_manifest_delta_requires_manifest_or_relevant_intent() {
     let shared = smart_context_test_shared("manifest-delta-gated");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let useful_stats = RuntimeSmartContextTransformStats {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
@@ -317,8 +336,9 @@ fn smart_context_manifest_delta_requires_manifest_or_relevant_intent() {
     with_runtime_smart_context_proxy_state(&shared, |state| {
         state
             .artifacts
-            .insert_text(1, "first artifact\nerror: one")
+            .insert_text("first artifact\nerror: one")
             .unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut unrequested = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "continue"}]
         });
@@ -351,8 +371,9 @@ fn smart_context_manifest_delta_requires_manifest_or_relevant_intent() {
 
         state
             .artifacts
-            .insert_text(2, "second artifact\nerror: two")
+            .insert_text("second artifact\nerror: two")
             .unwrap();
+        state.durable_artifact_ids = state.artifacts.artifact_ids();
         let mut cooled_down = serde_json::json!({
             "input": [{"type": "message", "role": "user", "content": "continue"}]
         });

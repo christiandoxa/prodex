@@ -7,7 +7,6 @@ use crate::{
     RuntimeBrokerMetadata, RuntimeRotationProxyShared,
     clear_runtime_proxy_continuity_failure_reason_metrics,
     unregister_runtime_presidio_redaction_proxy_state,
-    unregister_runtime_smart_context_proxy_state,
 };
 
 pub(crate) struct RuntimeProxyMarkerGuard {
@@ -27,7 +26,6 @@ impl Drop for RuntimeProxyMarkerGuard {
         clear_runtime_proxy_continuity_failure_reason_metrics(&self.log_path);
         unregister_runtime_proxy_persistence_mode(&self.log_path);
         unregister_runtime_broker_metadata(&self.log_path);
-        unregister_runtime_smart_context_proxy_state(&self.log_path);
         unregister_runtime_presidio_redaction_proxy_state(&self.log_path);
     }
 }
@@ -95,13 +93,10 @@ pub(crate) fn runtime_broker_metadata_for_log_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        register_runtime_smart_context_proxy_state, runtime_smart_context_proxy_state_registered,
-    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn runtime_proxy_marker_guard_removes_registered_state() {
+    fn runtime_proxy_marker_guard_removes_registered_persistence_mode() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -109,14 +104,11 @@ mod tests {
         let log_path = PathBuf::from(format!("/tmp/prodex-marker-{suffix}.log"));
         let guard = RuntimeProxyMarkerGuard::new(&log_path);
         register_runtime_proxy_persistence_mode(&log_path, false);
-        register_runtime_smart_context_proxy_state(&log_path, false, None, None);
 
         assert!(!runtime_proxy_persistence_enabled_for_log_path(&log_path));
-        assert!(runtime_smart_context_proxy_state_registered(&log_path));
 
         drop(guard);
 
         assert!(runtime_proxy_persistence_enabled_for_log_path(&log_path));
-        assert!(!runtime_smart_context_proxy_state_registered(&log_path));
     }
 }

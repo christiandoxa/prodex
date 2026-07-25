@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn smart_context_budget_uses_runtime_token_usage_observation() {
     let shared = smart_context_test_shared("budget");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {
@@ -49,7 +49,7 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
 #[test]
 fn smart_context_budget_uses_configured_model_context_window() {
     let shared = smart_context_test_shared("budget-custom-window");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {
@@ -85,7 +85,7 @@ fn smart_context_budget_uses_configured_model_context_window() {
 #[test]
 fn smart_context_budget_uses_model_registry_window_when_unconfigured() {
     let shared = smart_context_test_shared("budget-model-registry-window");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
 
     let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
         shared: &shared,
@@ -111,7 +111,7 @@ fn smart_context_budget_uses_model_registry_window_when_unconfigured() {
 #[test]
 fn smart_context_budget_prefers_configured_window_over_model_registry() {
     let shared = smart_context_test_shared("budget-config-over-registry");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
 
     let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
         shared: &shared,
@@ -133,7 +133,7 @@ fn smart_context_budget_prefers_configured_window_over_model_registry() {
 #[test]
 fn smart_context_budget_uses_matching_token_calibration_bucket() {
     let shared = smart_context_test_shared("budget-bucket");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage_for_bucket(
         &shared,
         RuntimeTokenUsage {
@@ -199,7 +199,7 @@ fn smart_context_budget_uses_matching_token_calibration_bucket() {
 #[test]
 fn smart_context_budget_uses_model_specific_token_calibration_bucket() {
     let shared = smart_context_test_shared("budget-model-bucket");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage_for_bucket(
         &shared,
         RuntimeTokenUsage {
@@ -270,7 +270,7 @@ fn smart_context_budget_uses_model_specific_token_calibration_bucket() {
 #[test]
 fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
     let shared = smart_context_test_shared("budget-recent-safe");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {
@@ -336,7 +336,7 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
     let _ = std::fs::remove_file(&artifact_path);
     let _ = std::fs::remove_file(&calibration_path);
     register_runtime_smart_context_proxy_state(
-        &first_shared.log_path,
+        &first_shared,
         true,
         Some(64_000),
         Some(artifact_path.clone()),
@@ -360,7 +360,7 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
 
     let fresh_shared = smart_context_test_shared("budget-persisted-recent-safe-fresh");
     register_runtime_smart_context_proxy_state(
-        &fresh_shared.log_path,
+        &fresh_shared,
         true,
         Some(64_000),
         Some(artifact_path.clone()),
@@ -397,7 +397,7 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
 #[test]
 fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
     let shared = smart_context_test_shared("budget-telemetry-relax");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {
@@ -469,7 +469,7 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
 #[test]
 fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
     let shared = smart_context_test_shared("budget-telemetry-tighten");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    register_runtime_smart_context_proxy_state(&shared, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {

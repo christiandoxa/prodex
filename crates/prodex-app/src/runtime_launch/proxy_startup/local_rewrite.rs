@@ -467,6 +467,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             .context("failed to build runtime local rewrite async runtime")?,
     );
     let runtime_shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,
         auto_redeem_enabled: false,
@@ -528,7 +529,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     let marker_guard = RuntimeProxyMarkerGuard::new(&log_path);
     register_runtime_proxy_persistence_mode(&log_path, true);
     register_runtime_smart_context_proxy_state(
-        &log_path,
+        &runtime_shared,
         smart_context_enabled,
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),

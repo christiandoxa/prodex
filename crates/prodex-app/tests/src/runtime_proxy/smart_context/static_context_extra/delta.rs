@@ -1,7 +1,8 @@
 #[test]
 fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
     let shared = smart_context_test_shared("static-context-delta");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let instructions = format!(
         "Use repo rules.\nKeep account affinity.\n{}",
         "Static instruction line. ".repeat(80)
@@ -39,7 +40,7 @@ fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
         panic!("expected static context delta body");
     };
     let text = String::from_utf8(body.clone()).unwrap();
-    assert!(text.contains("psc static scpc:"));
+    assert!(text.contains("psc static scpc2:"));
     assert!(!text.contains("prodex static context unchanged scpc:"));
     assert!(!text.contains(&instructions));
     assert!(!text.contains(&input_system));
@@ -53,7 +54,8 @@ fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
 #[test]
 fn smart_context_delta_preserves_exact_static_context() {
     let shared = smart_context_test_shared("static-context-delta-exact");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let instructions = "Use repo rules.\nKeep exact static content.";
     let first = smart_context_test_request(serde_json::json!({
         "instructions": instructions,
@@ -86,8 +88,9 @@ fn smart_context_delta_preserves_exact_static_context() {
 #[test]
 fn smart_context_delta_preserves_changed_static_context() {
     let shared = smart_context_test_shared("static-context-delta-changed");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
-    let stable_system = format!("Stable system prefix\n{}", "stable ".repeat(80));
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
+    let stable_system = format!("Stable system prefix\n{}", "stable ".repeat(160));
     let first = smart_context_test_request(serde_json::json!({
         "instructions": "Use repo rules.\nKeep account affinity.",
         "input": [
@@ -114,7 +117,7 @@ fn smart_context_delta_preserves_changed_static_context() {
         Some("Use repo rules.\nAllow account rotation.")
     );
     let text = String::from_utf8_lossy(prepared.as_ref());
-    assert!(text.contains("psc static scpc:"));
+    assert!(text.contains("psc static scpc2:"));
     assert!(!text.contains(stable_system.as_str()));
 }
 
@@ -126,7 +129,7 @@ fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start(
         .with_file_name("static-persist-artifacts.json");
     let _ = std::fs::remove_file(&artifact_path);
     register_runtime_smart_context_proxy_state(
-        &first_shared.log_path,
+        &first_shared,
         true,
         None,
         Some(artifact_path.clone()),
@@ -147,13 +150,13 @@ fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start(
     assert!(
         loaded
             .static_context_prompt_cache_hash()
-            .is_some_and(|hash| hash.starts_with("scpc:"))
+            .is_some_and(|hash| hash.starts_with("scpc2:"))
     );
     assert_eq!(loaded.static_context_fingerprints().len(), 1);
 
     let fresh_shared = smart_context_test_shared("static-persist-fresh");
     register_runtime_smart_context_proxy_state(
-        &fresh_shared.log_path,
+        &fresh_shared,
         true,
         None,
         Some(artifact_path.clone()),
@@ -182,7 +185,7 @@ fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start(
         &fresh_shared,
         RuntimeRouteKind::Responses,
     );
-    assert!(String::from_utf8_lossy(second_prepared.as_ref()).contains("psc static scpc:"));
+    assert!(String::from_utf8_lossy(second_prepared.as_ref()).contains("psc static scpc2:"));
 
     let _ = std::fs::remove_file(&artifact_path);
     let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));

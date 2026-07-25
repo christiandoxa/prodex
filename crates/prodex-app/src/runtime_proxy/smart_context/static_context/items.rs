@@ -38,7 +38,10 @@ fn runtime_smart_context_static_context_delta_marker_hash(text: &str) -> Option<
     trimmed
         .strip_prefix(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
         .or_else(|| trimmed.strip_prefix(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY))
-        .filter(|hash| hash.starts_with("scpc:") && !hash.chars().any(char::is_whitespace))
+        .filter(|hash| {
+            (hash.starts_with("scpc2:") || hash.starts_with("scpc:"))
+                && !hash.chars().any(char::is_whitespace)
+        })
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_static_context_delta_prompt_cache_hash(

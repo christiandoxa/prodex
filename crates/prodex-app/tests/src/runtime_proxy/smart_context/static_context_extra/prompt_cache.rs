@@ -1,7 +1,8 @@
 #[test]
 fn smart_context_static_delta_prompt_cache_key_accepts_short_and_legacy_markers() {
     let shared = smart_context_test_shared("static-marker-compat");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let short = smart_context_test_request(serde_json::json!({
         "instructions": "psc static scpc:short123"
     }));
@@ -22,7 +23,8 @@ fn smart_context_static_delta_prompt_cache_key_accepts_short_and_legacy_markers(
 #[test]
 fn smart_context_prompt_cache_key_prefers_explicit_request_key() {
     let shared = smart_context_test_shared("prompt-cache-explicit");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let request = smart_context_test_request(serde_json::json!({
         "prompt_cache_key": " explicit-cache-key ",
         "instructions": "Static instructions"
@@ -36,7 +38,8 @@ fn smart_context_prompt_cache_key_prefers_explicit_request_key() {
 #[test]
 fn smart_context_prompt_cache_key_is_stable_for_same_static_context() {
     let shared = smart_context_test_shared("prompt-cache-stable");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let first = smart_context_test_request(serde_json::json!({
         "instructions": "Generated at: 2026-05-04T01:02:03Z\nUse repo rules",
         "input": [{"type": "message", "content": "first user message"}]
@@ -52,7 +55,7 @@ fn smart_context_prompt_cache_key_is_stable_for_same_static_context() {
     assert!(
         first_key
             .as_deref()
-            .is_some_and(|key| key.starts_with("scpc:"))
+            .is_some_and(|key| key.starts_with("scpc2:"))
     );
     assert_eq!(first_key, second_key);
 }
@@ -60,7 +63,8 @@ fn smart_context_prompt_cache_key_is_stable_for_same_static_context() {
 #[test]
 fn smart_context_prompt_cache_key_absent_when_disabled_or_no_static_context() {
     let disabled = smart_context_test_shared("prompt-cache-disabled");
-    register_runtime_smart_context_proxy_state(&disabled.log_path, false, None, None);
+    register_runtime_smart_context_proxy_state(
+        &disabled, false, None, None);
     let static_request = smart_context_test_request(serde_json::json!({
         "instructions": "Static instructions"
     }));
@@ -70,7 +74,8 @@ fn smart_context_prompt_cache_key_absent_when_disabled_or_no_static_context() {
     );
 
     let enabled = smart_context_test_shared("prompt-cache-no-static");
-    register_runtime_smart_context_proxy_state(&enabled.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &enabled, true, None, None);
     let dynamic_only_request = smart_context_test_request(serde_json::json!({
         "input": [{"type": "message", "content": "user-only context"}]
     }));
@@ -83,7 +88,8 @@ fn smart_context_prompt_cache_key_absent_when_disabled_or_no_static_context() {
 #[test]
 fn smart_context_prompt_cache_key_derivation_does_not_mutate_upstream_payload() {
     let shared = smart_context_test_shared("prompt-cache-payload");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(
+        &shared, true, None, None);
     let request = smart_context_test_request(serde_json::json!({
         "instructions": "Static instructions",
         "input": [{"type": "message", "content": "hello"}]
@@ -94,7 +100,7 @@ fn smart_context_prompt_cache_key_derivation_does_not_mutate_upstream_payload() 
     let prepared =
         prepare_runtime_smart_context_http_body(88, &request, &shared, RuntimeRouteKind::Responses);
 
-    assert!(key.as_deref().is_some_and(|key| key.starts_with("scpc:")));
+    assert!(key.as_deref().is_some_and(|key| key.starts_with("scpc2:")));
     assert_eq!(request.body, before);
     assert_eq!(prepared.as_ref(), before.as_slice());
     let upstream = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();

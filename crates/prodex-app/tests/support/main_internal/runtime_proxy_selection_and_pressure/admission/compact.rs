@@ -64,6 +64,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
     };
     let pressure_until = Local::now().timestamp().saturating_add(60).max(0) as u64;
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
@@ -129,7 +130,7 @@ fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
     .upstream_base_url(backend.base_url())
     .build();
     let shared = harness.shared();
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(shared, true, Some(32_000), None);
     let body = serde_json::json!({
         "input": [
             {

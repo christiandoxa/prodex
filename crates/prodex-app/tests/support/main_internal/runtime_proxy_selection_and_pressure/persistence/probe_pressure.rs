@@ -77,6 +77,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
@@ -286,6 +287,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,

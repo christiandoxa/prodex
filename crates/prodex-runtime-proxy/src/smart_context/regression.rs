@@ -10,6 +10,7 @@ pub enum SmartContextRegressionSelfCheckDecision {
 pub enum SmartContextRegressionSelfCheckReason {
     ExactnessRequiredButPayloadChanged,
     TokenBudgetDidNotImprove,
+    TokenSavingsBelowSafetyMargin,
     CriticalSignalDropped,
     MissingRehydrateRefs,
     EmptyAfterPayload,
@@ -22,6 +23,9 @@ pub struct SmartContextRegressionSelfCheckInput {
     pub after_hash: String,
     pub before_estimated_tokens: u64,
     pub after_estimated_tokens: u64,
+    pub future_retrieval_overhead_tokens: u64,
+    pub injected_protocol_overhead_tokens: u64,
+    pub expected_recovery_overhead_tokens: u64,
     pub before_critical_signal_count: usize,
     pub after_critical_signal_count: usize,
     pub missing_rehydrate_refs: Vec<String>,
@@ -42,6 +46,21 @@ pub fn smart_context_regression_self_check(
 ) -> SmartContextRegressionSelfCheck {
     let mut reasons = Vec::new();
     let payload_changed = input.before_hash != input.after_hash;
+    let gross_saved_tokens = input
+        .before_estimated_tokens
+        .saturating_sub(input.after_estimated_tokens);
+    let overhead_tokens = input
+        .future_retrieval_overhead_tokens
+        .saturating_add(input.injected_protocol_overhead_tokens)
+        .saturating_add(input.expected_recovery_overhead_tokens);
+    let net_saved_tokens = gross_saved_tokens.saturating_sub(overhead_tokens);
+    let required_saved_tokens = 128.max(
+        input
+            .before_estimated_tokens
+            .saturating_mul(3)
+            .saturating_add(99)
+            / 100,
+    );
 
     if input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact
         && payload_changed
@@ -50,6 +69,8 @@ pub fn smart_context_regression_self_check(
     }
     if payload_changed && input.after_estimated_tokens >= input.before_estimated_tokens {
         reasons.push(SmartContextRegressionSelfCheckReason::TokenBudgetDidNotImprove);
+    } else if payload_changed && net_saved_tokens < required_saved_tokens {
+        reasons.push(SmartContextRegressionSelfCheckReason::TokenSavingsBelowSafetyMargin);
     }
     if input.after_critical_signal_count < input.before_critical_signal_count {
         reasons.push(SmartContextRegressionSelfCheckReason::CriticalSignalDropped);
@@ -73,9 +94,7 @@ pub fn smart_context_regression_self_check(
             SmartContextRegressionSelfCheckDecision::FallbackExact
         },
         reasons,
-        saved_tokens: input
-            .before_estimated_tokens
-            .saturating_sub(input.after_estimated_tokens),
+        saved_tokens: net_saved_tokens,
         before_hash: input.before_hash,
         after_hash: input.after_hash,
     }

@@ -238,6 +238,7 @@ pub(super) mod test_support {
         crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
 
         RuntimeRotationProxyShared {
+            smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
             runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
             upstream_no_proxy: false,
             auto_redeem_enabled: false,

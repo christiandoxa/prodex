@@ -28,13 +28,19 @@ pub(super) fn runtime_smart_context_artifact_line_ref(
 }
 
 pub(super) fn runtime_smart_context_artifact_ref(id: &str) -> String {
+    if let Some(short_id) = id.strip_prefix("sc2:") {
+        return format!("psc2:{short_id}");
+    }
     let short_id = id.strip_prefix("sc:").unwrap_or(id);
     format!("{SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX}{short_id}")
 }
 
 pub(super) fn runtime_smart_context_artifact_id_valid(id: &str) -> bool {
-    id.strip_prefix("sc:")
-        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_hexdigit()))
+    id.strip_prefix("sc2:")
+        .is_some_and(|rest| rest.len() == 64 && rest.chars().all(|ch| ch.is_ascii_hexdigit()))
+        || id
+            .strip_prefix("sc:")
+            .is_some_and(|rest| rest.len() == 16 && rest.chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
 pub(super) fn runtime_smart_context_text_is_generated_summary_or_manifest(text: &str) -> bool {
@@ -73,6 +79,7 @@ pub(super) fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
     let mut entries = state
         .artifacts
         .artifact_manifest_entries(SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES);
+    entries.retain(|entry| state.durable_artifact_ids.contains(&entry.id));
     runtime_smart_context_filter_manifest_entries(value, intent_signals, &mut entries);
     let ids = entries
         .iter()
@@ -325,7 +332,7 @@ pub(super) fn runtime_smart_context_append_input_manifest(
     };
     input.push(serde_json::json!({
         "type": "message",
-        "role": "user",
+        "role": "developer",
         "content": manifest,
     }));
     true

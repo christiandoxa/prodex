@@ -141,52 +141,54 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
             explicit_exact_mode: false,
             shadow_mode: shared.runtime_config.smart_context_shadow,
             canary_percent: shared.runtime_config.smart_context_canary_percent,
-            stable_key: format!(
-                "{}:{}:{}:{}",
-                shared.log_path.display(),
-                runtime_route_kind_label(route_kind),
-                transport.label(),
-                request_id
-            ),
+            stable_key: "profile=-:session=-".to_string(),
         },
     );
-    runtime_smart_context_record_rewrite_telemetry(
-        shared,
-        RuntimeSmartContextRewriteTelemetryRecord {
-            body_bytes_before,
-            body_bytes_after,
-            estimated_tokens_before:
-                runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
-                    body_bytes_before,
-                ),
-            estimated_tokens_after:
-                runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(body_bytes_after),
-            rewrite_kind: decision.to_string(),
-            status: self_check.to_string(),
-            fallback_reason: runtime_smart_context_telemetry_fallback_reason(decision, self_check)
+    if decision == "rewritten" {
+        runtime_smart_context_record_rewrite_telemetry(
+            shared,
+            RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before,
+                body_bytes_after,
+                estimated_tokens_before:
+                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
+                        body_bytes_before,
+                    ),
+                estimated_tokens_after:
+                    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
+                        body_bytes_after,
+                    ),
+                rewrite_kind: decision.to_string(),
+                status: self_check.to_string(),
+                fallback_reason: runtime_smart_context_telemetry_fallback_reason(
+                    decision, self_check,
+                )
                 .map(str::to_string),
-            upstream_context_errors: 0,
-            previous_response_not_found: false,
-            invalid_tool_call_continuation: false,
-            missing_artifact_requests: 0,
-            repeated_tool_call_count: 0,
-            model_reread_requests: 0,
-            corrective_user_messages: 0,
-            test_or_build_failed_after_rewrite: false,
-            task_completed: None,
-            additional_turns_before_task_completion: None,
-            final_total_input_tokens: None,
-            pressure_basis_points: budget.pressure.pressure_basis_points,
-            pressure_band: runtime_smart_context_pressure_band_label(budget.pressure.pressure_band)
+                upstream_context_errors: 0,
+                previous_response_not_found: false,
+                invalid_tool_call_continuation: false,
+                missing_artifact_requests: 0,
+                repeated_tool_call_count: 0,
+                model_reread_requests: 0,
+                corrective_user_messages: 0,
+                test_or_build_failed_after_rewrite: false,
+                task_completed: None,
+                additional_turns_before_task_completion: None,
+                final_total_input_tokens: None,
+                pressure_basis_points: budget.pressure.pressure_basis_points,
+                pressure_band: runtime_smart_context_pressure_band_label(
+                    budget.pressure.pressure_band,
+                )
                 .to_string(),
-            estimator_confidence: runtime_smart_context_estimator_confidence_label(
-                budget.pressure.estimator_confidence,
-            )
-            .to_string(),
-            effective_usable_context_tokens: budget.pressure.effective_usable_context_tokens,
-            absolute_safety_floor_tokens: budget.pressure.absolute_safety_floor_tokens,
-        },
-    );
+                estimator_confidence: runtime_smart_context_estimator_confidence_label(
+                    budget.pressure.estimator_confidence,
+                )
+                .to_string(),
+                effective_usable_context_tokens: budget.pressure.effective_usable_context_tokens,
+                absolute_safety_floor_tokens: budget.pressure.absolute_safety_floor_tokens,
+            },
+        );
+    }
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -386,18 +388,16 @@ fn runtime_smart_context_record_rewrite_telemetry(
     shared: &RuntimeRotationProxyShared,
     record: RuntimeSmartContextRewriteTelemetryRecord,
 ) {
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+    let Ok(mut current) = shared.smart_context_engine.state.lock() else {
         return;
     };
-    let Ok(mut states) = states.lock() else {
-        return;
-    };
-    let Some(state) = states.get_mut(&shared.log_path) else {
+    let Some(state) = current.as_mut() else {
         return;
     };
     if !state.enabled {
         return;
     }
+    state.generation = state.generation.saturating_add(1);
     state.rewrite_telemetry_history.push(record);
     if state.rewrite_telemetry_history.len() > SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT {
         let overflow = state

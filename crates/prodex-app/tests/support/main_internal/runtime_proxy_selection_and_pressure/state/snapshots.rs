@@ -142,6 +142,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         ),
     ]);
     let shared = RuntimeRotationProxyShared {
+        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,

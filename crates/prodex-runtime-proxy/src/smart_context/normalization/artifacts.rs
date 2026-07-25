@@ -1,9 +1,19 @@
 use super::*;
+use sha2::{Digest as _, Sha256};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 pub fn smart_context_hash_text(text: &str) -> String {
-    format!("sc:{:016x}", smart_context_fnv1a64(text.as_bytes()))
+    format!("sc2:{}", smart_context_sha256_hex(text.as_bytes()))
+}
+
+pub fn smart_context_hash_matches_text(hash: &str, text: &str) -> bool {
+    if hash.starts_with("sc2:") {
+        return hash == smart_context_hash_text(text);
+    }
+    hash.strip_prefix("sc:")
+        .is_some_and(|value| value == format!("{:016x}", smart_context_fnv1a64(text.as_bytes())))
 }
 
 pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
@@ -78,7 +88,9 @@ pub(in crate::smart_context) fn smart_context_artifact_marker_line(
 }
 
 pub(in crate::smart_context) fn smart_context_short_artifact_label(id: &str) -> &str {
-    id.strip_prefix("sc:").unwrap_or(id)
+    id.strip_prefix("sc2:")
+        .or_else(|| id.strip_prefix("sc:"))
+        .unwrap_or(id)
 }
 
 pub(in crate::smart_context) fn smart_context_capsule_order(
@@ -100,6 +112,19 @@ pub(in crate::smart_context) fn smart_context_fnv1a64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+pub(in crate::smart_context) fn smart_context_sha256_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+fn smart_context_sha256_hex(bytes: &[u8]) -> String {
+    let digest = smart_context_sha256_digest(bytes);
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
 }
 
 pub(in crate::smart_context) fn non_empty(value: &str) -> bool {

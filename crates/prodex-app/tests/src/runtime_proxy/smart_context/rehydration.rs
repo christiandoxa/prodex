@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 #[test]
 fn smart_context_rehydrates_known_artifact_refs() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, "exact artifact text").unwrap();
+    let artifact = store.insert_text("exact artifact text").unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -22,7 +22,7 @@ fn smart_context_rehydrates_known_artifact_refs() {
 #[test]
 fn smart_context_rehydrate_preserves_static_prompt_prefix() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, "exact artifact text").unwrap();
+    let artifact = store.insert_text("exact artifact text").unwrap();
     let static_ref = format!("keep prodex-artifact:{}", artifact.id);
     let mut value = serde_json::json!({
         "instructions": static_ref,
@@ -75,7 +75,7 @@ fn smart_context_rehydrate_preserves_static_prompt_prefix() {
 fn smart_context_rehydrates_artifact_line_ranges() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four")
+        .insert_text("line one\nline two\nline three\nline four")
         .unwrap();
     let mut value = serde_json::json!({
         "input": [{
@@ -95,7 +95,7 @@ fn smart_context_rehydrates_artifact_line_ranges() {
 fn smart_context_rehydrates_compact_multi_line_ranges() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
-        .insert_text(1, "line one\nline two\nline three\nline four\nline five")
+        .insert_text("line one\nline two\nline three\nline four\nline five")
         .unwrap();
     let mut value = serde_json::json!({
         "input": [{
@@ -138,7 +138,7 @@ diagnostic context line
 FULL_ARTIFACT_TAIL_SHOULD_NOT_REHYDRATE"
     );
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let artifact = store.insert_text(&artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -193,7 +193,7 @@ FULL_ARTIFACT_TAIL_SHOULD_NOT_REHYDRATE"
 fn smart_context_budget_available_rehydrates_full_artifact_without_read_plan() {
     let artifact_text = "fn target_symbol() -> usize { 1 }\nFULL_ARTIFACT_TAIL_REHYDRATED";
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let artifact = store.insert_text(artifact_text).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -269,9 +269,7 @@ fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
 #[test]
 fn smart_context_alias_parser_rehydrates_alias_refs_when_legend_present() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store
-        .insert_text(1, "line one\nline two\nline three")
-        .unwrap();
+    let artifact = store.insert_text("line one\nline two\nline three").unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "message",
@@ -299,9 +297,7 @@ fn smart_context_alias_parser_rehydrates_alias_refs_when_legend_present() {
 #[test]
 fn smart_context_alias_parser_ignores_alias_refs_without_legend() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    store
-        .insert_text(1, "line one\nline two\nline three")
-        .unwrap();
+    store.insert_text("line one\nline two\nline three").unwrap();
     let mut value = serde_json::json!({
         "input": [{"type": "message", "content": "need @0#L2-L3"}]
     });

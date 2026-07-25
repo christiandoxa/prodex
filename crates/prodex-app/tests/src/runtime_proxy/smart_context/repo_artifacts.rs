@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn smart_context_repo_state_micro_cache_collapses_repeated_tool_output_facts() {
+fn smart_context_repo_state_micro_cache_declines_subthreshold_tool_output() {
     let shared = smart_context_test_shared("repo-state-tool-repeat");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let output = "\
 Branch: feature/repo-cache
@@ -28,30 +28,25 @@ Main test command: cargo test -q smart_context";
         }]
     }));
 
-    let _ =
+    let before = smart_context_test_state_snapshot(&shared);
+    let first_prepared =
         prepare_runtime_smart_context_http_body(130, &first, &shared, RuntimeRouteKind::Responses);
-    let prepared =
+    let second_prepared =
         prepare_runtime_smart_context_http_body(131, &second, &shared, RuntimeRouteKind::Responses);
 
-    let Cow::Owned(body) = prepared else {
-        panic!("expected repeated repo-state facts to rewrite");
-    };
-    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-    let rewritten = value["input"][0]["output"].as_str().unwrap();
-    assert!(rewritten.starts_with("psc repo repeat"));
-    assert!(rewritten.contains("branch=feature/repo-cache"));
-    assert!(rewritten.contains("dirty=1"));
-    assert!(rewritten.contains("recent=1"));
-    assert!(rewritten.contains("pm=cargo"));
-    assert!(rewritten.contains("cargo test -q smart_context"));
-    assert!(!rewritten.contains("crates/prodex-app/src/runtime_proxy/smart_context.rs"));
-    assert!(!rewritten.contains("crates/prodex-app/tests/src/runtime_proxy/smart_context.rs"));
+    assert!(matches!(first_prepared, Cow::Borrowed(_)));
+    assert!(matches!(second_prepared, Cow::Borrowed(_)));
+    assert_eq!(first_prepared.as_ref(), first.body.as_slice());
+    assert_eq!(second_prepared.as_ref(), second.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before);
+    let log = fs::read_to_string(&shared.log_path).unwrap();
+    assert!(log.contains("reason=below_minimum_body"));
 }
 
 #[test]
 fn smart_context_repo_state_micro_cache_preserves_changed_tool_output_facts() {
     let shared = smart_context_test_shared("repo-state-tool-changed");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
     let first_output = "\
 Branch: feature/repo-cache
@@ -104,7 +99,7 @@ Main test command: cargo test -q smart_context";
 #[test]
 fn smart_context_repo_state_micro_cache_collapses_repeated_static_facts() {
     let shared = smart_context_test_shared("repo-state-static-repeat");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let exactness = runtime_proxy_crate::smart_context_exactness_guard(
         runtime_proxy_crate::SmartContextExactnessInput::default(),
     );
@@ -124,7 +119,6 @@ Main test command: cargo test -q smart_context";
         assert!(!runtime_smart_context_apply_repo_state_micro_cache(
             &mut first,
             state,
-            134,
             &exactness,
             true,
             &mut first_stats,
@@ -137,7 +131,6 @@ Main test command: cargo test -q smart_context";
         assert!(runtime_smart_context_apply_repo_state_micro_cache(
             &mut second,
             state,
-            135,
             &exactness,
             true,
             &mut second_stats,
@@ -157,7 +150,7 @@ Main test command: cargo test -q smart_context";
 fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
     let output = "repeat tool output ".repeat(200);
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &output).unwrap();
+    let artifact = store.insert_text(&output).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -194,7 +187,7 @@ fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
 fn smart_context_reuses_existing_critical_tool_output_with_cache_summary() {
     let output = "error: repeated failure\nsrc/lib.rs:10:5\n".repeat(160);
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store.insert_text(1, &output).unwrap();
+    let artifact = store.insert_text(&output).unwrap();
     let mut value = serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -239,14 +232,9 @@ fn smart_context_reuses_hash_guarded_persisted_artifact_after_restart() {
     let _ = std::fs::remove_file(&artifact_path);
     let output = "persisted exact tool output ".repeat(160);
     let mut persisted = RuntimeSmartContextArtifactStore::default();
-    let artifact = persisted.insert_text(1, &output).unwrap();
+    let artifact = persisted.insert_text(&output).unwrap();
     persisted.save_to_path(&artifact_path).unwrap();
-    register_runtime_smart_context_proxy_state(
-        &shared.log_path,
-        true,
-        None,
-        Some(artifact_path.clone()),
-    );
+    register_runtime_smart_context_proxy_state(&shared, true, None, Some(artifact_path.clone()));
     let mut value = serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -285,12 +273,7 @@ fn smart_context_persists_prewarmed_repo_and_symbol_maps_for_condensed_outputs()
     let shared = smart_context_test_shared("artifact-map-prewarm");
     let artifact_path = shared.log_path.with_file_name("artifact-map-prewarm.json");
     let _ = std::fs::remove_file(&artifact_path);
-    register_runtime_smart_context_proxy_state(
-        &shared.log_path,
-        true,
-        None,
-        Some(artifact_path.clone()),
-    );
+    register_runtime_smart_context_proxy_state(&shared, true, None, Some(artifact_path.clone()));
     let hidden_tail = "FULL_ARTIFACT_TAIL_SHOULD_NOT_BE_SENT";
     let output = std::iter::once("error[E0425]: cannot find value `missing`".to_string())
         .chain(std::iter::once(" --> src/runtime.rs:7:3".to_string()))
@@ -326,7 +309,7 @@ fn smart_context_persists_prewarmed_repo_and_symbol_maps_for_condensed_outputs()
     persist_runtime_smart_context_artifacts(&shared);
 
     let body = value["input"][0]["output"].as_str().unwrap();
-    assert!(body.contains("psc art psc:"));
+    assert!(body.contains("psc art psc2:"));
     assert!(!body.contains(hidden_tail));
     assert_eq!(stats.artifacts_stored, 1);
     let raw = std::fs::read_to_string(&artifact_path).expect("artifact store should be persisted");

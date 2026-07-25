@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::runtime_state_shared::{
-        RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES, RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
+        RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES, RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS,
+        RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
         RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
         RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES, RuntimeSmartContextArtifactLineIndex,
         RuntimeSmartContextArtifactRepoMapEntryKind, RuntimeSmartContextArtifactStore,
@@ -19,17 +20,61 @@ mod tests {
         remove_smart_context_artifact_temp_files(&path);
 
         let mut first = RuntimeSmartContextArtifactStore::default();
-        let alpha = first.insert_text(1, "alpha").expect("alpha artifact");
+        let alpha = first.insert_text("alpha").expect("alpha artifact");
         first.save_to_path(&path).expect("first store saved");
 
         let mut second = RuntimeSmartContextArtifactStore::default();
-        let beta = second.insert_text(2, "beta").expect("beta artifact");
+        let beta = second.insert_text("beta").expect("beta artifact");
         second.save_to_path(&path).expect("second store saved");
 
         let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
         assert_eq!(loaded.artifact_count(), 2);
         assert_eq!(loaded.get_text(&alpha.id).as_deref(), Some("alpha"));
         assert_eq!(loaded.get_text(&beta.id).as_deref(), Some("beta"));
+
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_save_assigns_global_persisted_order() {
+        let path = smart_context_artifact_temp_path("global-order");
+        remove_smart_context_artifact_temp_files(&path);
+
+        let mut first = RuntimeSmartContextArtifactStore::default();
+        let alpha = first.insert_text("alpha").unwrap();
+        first.save_to_path(&path).unwrap();
+
+        let mut second = RuntimeSmartContextArtifactStore::default();
+        let beta = second.insert_text("beta").unwrap();
+        second.save_to_path(&path).unwrap();
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        assert!(loaded.artifacts[&alpha.id].order < loaded.artifacts[&beta.id].order);
+        assert_eq!(loaded.next_artifact_order, loaded.artifacts[&beta.id].order);
+
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_merge_evicts_globally_oldest() {
+        let path = smart_context_artifact_temp_path("global-order-eviction");
+        remove_smart_context_artifact_temp_files(&path);
+
+        let mut first = RuntimeSmartContextArtifactStore::default();
+        let oldest = first.insert_text("oldest").unwrap();
+        first.save_to_path(&path).unwrap();
+
+        let mut incoming = RuntimeSmartContextArtifactStore::default();
+        let newest = (0..RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS)
+            .filter_map(|index| incoming.insert_text(&format!("new-{index}")))
+            .last()
+            .unwrap();
+        incoming.save_to_path(&path).unwrap();
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        assert_eq!(loaded.artifact_count(), RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS);
+        assert!(!loaded.artifacts.contains_key(&oldest.id));
+        assert!(loaded.artifacts.contains_key(&newest.id));
 
         remove_smart_context_artifact_temp_files(&path);
     }
@@ -44,7 +89,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &path).unwrap();
 
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, "safe artifact").unwrap();
+        let artifact = store.insert_text("safe artifact").unwrap();
         store.save_to_path(&path).expect("store saved");
 
         assert_eq!(
@@ -94,7 +139,7 @@ mod tests {
             vec![runtime_proxy_crate::SmartContextFingerprint {
                 id: "instructions".to_string(),
                 kind: runtime_proxy_crate::SmartContextFingerprintKind::StaticContext,
-                content_hash: "hash-a".to_string(),
+                content_hash: runtime_proxy_crate::smart_context_hash_text("static instructions"),
                 byte_len: 42,
             }],
         );
@@ -112,7 +157,7 @@ mod tests {
     fn runtime_smart_context_artifact_ref_for_exact_text_requires_exact_hash_match() {
         let mut store = RuntimeSmartContextArtifactStore::default();
         let artifact = store
-            .insert_text(1, "repeatable command output")
+            .insert_text("repeatable command output")
             .expect("artifact inserted");
 
         let found = store
@@ -149,7 +194,7 @@ src/main.rs:22:5
 test result: FAILED. 0 passed; 1 failed
 tail";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, text).expect("artifact inserted");
+        let artifact = store.insert_text(text).expect("artifact inserted");
 
         let index = store
             .line_index(&artifact.id)
@@ -198,7 +243,7 @@ error[E0277]: trait bound failed
 +new
 test result: FAILED. 0 passed; 1 failed";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, text).expect("artifact inserted");
+        let artifact = store.insert_text(text).expect("artifact inserted");
 
         let index = store
             .line_index(&artifact.id)
@@ -253,7 +298,7 @@ test result: FAILED. 0 passed; 1 failed";
             .collect::<Vec<_>>()
             .join("\n");
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+        let artifact = store.insert_text(&text).expect("artifact inserted");
 
         let index = store
             .line_index(&artifact.id)
@@ -298,13 +343,11 @@ def test_launch_super():
 async def load_profile():
     pass";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        store.insert_text(1, rust).expect("rust artifact inserted");
+        store.insert_text(rust).expect("rust artifact inserted");
         store
-            .insert_text(2, typescript)
+            .insert_text(typescript)
             .expect("typescript artifact inserted");
-        store
-            .insert_text(3, python)
-            .expect("python artifact inserted");
+        store.insert_text(python).expect("python artifact inserted");
 
         let repo_map = store.repo_map_projection(64);
 
@@ -366,7 +409,7 @@ fn target_symbol() {
 fn target_test() {
 }";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        store.insert_text(1, text).expect("artifact inserted");
+        store.insert_text(text).expect("artifact inserted");
 
         let repo_map = store.repo_map_projection(64);
         assert!(repo_map.entries.iter().any(|entry| {
@@ -412,7 +455,7 @@ fn target_test() {
             .collect::<Vec<_>>()
             .join("\n");
         let mut store = RuntimeSmartContextArtifactStore::default();
-        store.insert_text(1, &text).expect("artifact inserted");
+        store.insert_text(&text).expect("artifact inserted");
 
         let first = store.repo_map_projection(16);
         let second = store.repo_map_projection(16);
@@ -441,7 +484,7 @@ pub mod runtime {
 fn launch_super() {
 }";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        store.insert_text(1, text).expect("artifact inserted");
+        store.insert_text(text).expect("artifact inserted");
         store.save_to_path(&path).expect("store saved");
 
         let raw = std::fs::read_to_string(&path).expect("store json should exist");
@@ -483,7 +526,7 @@ error[E0277]: trait bound failed
 +new
 test result: FAILED. 0 passed; 1 failed";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, text).expect("artifact inserted");
+        let artifact = store.insert_text(text).expect("artifact inserted");
 
         let chunk_index = store
             .chunk_index(&artifact.id)
@@ -535,7 +578,7 @@ test result: FAILED. 0 passed; 1 failed";
             .collect::<Vec<_>>()
             .join("\n");
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+        let artifact = store.insert_text(&text).expect("artifact inserted");
 
         let chunk_index = store
             .chunk_index(&artifact.id)
@@ -555,7 +598,7 @@ test result: FAILED. 0 passed; 1 failed";
             .collect::<Vec<_>>()
             .join("\n");
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+        let artifact = store.insert_text(&text).expect("artifact inserted");
 
         let chunk_index = store
             .chunk_index(&artifact.id)
@@ -590,7 +633,7 @@ error[E0001]: repeated failure
 ok
 error[E0001]: repeated failure";
         let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text(1, text).expect("artifact inserted");
+        let artifact = store.insert_text(text).expect("artifact inserted");
 
         let chunk_index = store
             .chunk_index(&artifact.id)
@@ -682,7 +725,7 @@ error[E0001]: repeated failure";
         assert!(store.chunk_index(&content_hash).is_none());
 
         store
-            .insert_text(2, text)
+            .insert_text(text)
             .expect("matching legacy artifact should refresh metadata");
 
         assert!(
@@ -699,6 +742,40 @@ error[E0001]: repeated failure";
     }
 
     #[test]
+    fn runtime_smart_context_artifact_store_migrates_legacy_fnv_identity() {
+        let path = smart_context_artifact_temp_path("legacy-fnv-migration");
+        remove_smart_context_artifact_temp_files(&path);
+        let legacy_id = "sc:8ac625bb85ed202b";
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": 1,
+                "artifacts": {
+                    (legacy_id): {
+                        "id": legacy_id,
+                        "byte_len": 5,
+                        "content_hash": legacy_id,
+                        "text": "alpha",
+                        "sequence": 7
+                    }
+                },
+                "total_bytes": 5
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let store = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        let strong_id = runtime_proxy_crate::smart_context_hash_text("alpha");
+
+        assert_eq!(store.schema_version, 2);
+        assert_eq!(store.get_text(&strong_id).as_deref(), Some("alpha"));
+        assert_eq!(store.get_text(legacy_id).as_deref(), Some("alpha"));
+        assert!(!store.artifacts.contains_key(legacy_id));
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_concurrent_saves_keep_all_artifacts() {
         let path = Arc::new(smart_context_artifact_temp_path("concurrent-merge-save"));
         remove_smart_context_artifact_temp_files(path.as_ref());
@@ -712,9 +789,7 @@ error[E0001]: repeated failure";
                 thread::spawn(move || {
                     let text = format!("artifact-{index}");
                     let mut store = RuntimeSmartContextArtifactStore::default();
-                    let artifact = store
-                        .insert_text(index as u64 + 1, &text)
-                        .expect("artifact inserted");
+                    let artifact = store.insert_text(&text).expect("artifact inserted");
                     barrier.wait();
                     store.save_to_path(path.as_ref()).expect("store saved");
                     (artifact.id, text)
@@ -729,6 +804,13 @@ error[E0001]: repeated failure";
 
         let loaded = RuntimeSmartContextArtifactStore::load_from_path(path.as_ref());
         assert_eq!(loaded.artifact_count(), thread_count);
+        let mut orders = loaded
+            .artifacts
+            .values()
+            .map(|artifact| artifact.order)
+            .collect::<Vec<_>>();
+        orders.sort_unstable();
+        assert_eq!(orders, (1..=thread_count as u64).collect::<Vec<_>>());
         for (id, text) in expected {
             assert_eq!(loaded.get_text(&id).as_deref(), Some(text.as_str()));
         }

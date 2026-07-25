@@ -8,12 +8,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
-    Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
+    Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>>,
 > = OnceLock::new();
 
 impl RuntimeSmartContextArtifactStore {
@@ -24,6 +24,9 @@ impl RuntimeSmartContextArtifactStore {
         let Ok(mut store) = serde_json::from_str::<Self>(&raw) else {
             return Self::default();
         };
+        if !matches!(store.schema_version, 1 | 2) {
+            return Self::default();
+        }
         store.validate_loaded_metadata();
         store.recompute_total_bytes();
         store.enforce_limits();
@@ -55,16 +58,49 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     fn merge_from(&mut self, incoming: &Self) {
-        for (id, incoming_artifact) in &incoming.artifacts {
+        self.next_artifact_order = self.next_artifact_order.max(
+            self.artifacts
+                .values()
+                .map(|artifact| artifact.order)
+                .max()
+                .unwrap_or(0),
+        );
+        for (id, incoming_artifact) in incoming
+            .artifacts
+            .iter()
+            .filter(|(_, artifact)| !artifact.pending_order)
+        {
             self.artifacts
                 .entry(id.clone())
                 .and_modify(|current| {
-                    if incoming_artifact.sequence >= current.sequence {
+                    if incoming_artifact.order >= current.order {
                         *current = incoming_artifact.clone();
                     }
                 })
                 .or_insert_with(|| incoming_artifact.clone());
         }
+        let mut pending = incoming
+            .artifacts
+            .values()
+            .filter(|artifact| artifact.pending_order)
+            .cloned()
+            .collect::<Vec<_>>();
+        pending.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        for mut artifact in pending {
+            self.next_artifact_order = self.next_artifact_order.saturating_add(1);
+            artifact.order = self.next_artifact_order;
+            artifact.pending_order = false;
+            self.artifacts.insert(artifact.id.clone(), artifact);
+        }
+        self.legacy_artifact_ids
+            .extend(incoming.legacy_artifact_ids.clone());
+        self.legacy_artifact_ids
+            .retain(|_, id| self.artifacts.contains_key(id));
+        self.schema_version = 2;
         if !incoming.static_context_fingerprints.is_empty()
             || incoming.static_context_prompt_cache_hash.is_some()
         {
@@ -75,6 +111,43 @@ impl RuntimeSmartContextArtifactStore {
         self.recompute_total_bytes();
         self.enforce_limits();
         self.refresh_prewarmed_projections();
+    }
+
+    pub(crate) fn apply_persisted_artifact_ordering(
+        &mut self,
+        submitted: &Self,
+        persisted: &Self,
+    ) -> Vec<String> {
+        let mut projection_dirty = false;
+        let mut durable_ids = Vec::new();
+        for (id, persisted_artifact) in &persisted.artifacts {
+            let Some(current) = self.artifacts.get_mut(id) else {
+                continue;
+            };
+            if current.content_hash != persisted_artifact.content_hash
+                || current.byte_len != persisted_artifact.byte_len
+                || current.text != persisted_artifact.text
+            {
+                continue;
+            }
+            durable_ids.push(id.clone());
+            let Some(submitted_artifact) = submitted.artifacts.get(id) else {
+                continue;
+            };
+            if current.pending_order
+                && submitted_artifact.pending_order
+                && current.order == submitted_artifact.order
+            {
+                projection_dirty |= current.order != persisted_artifact.order;
+                current.order = persisted_artifact.order;
+                current.pending_order = false;
+            }
+        }
+        self.next_artifact_order = self.next_artifact_order.max(persisted.next_artifact_order);
+        if projection_dirty {
+            self.invalidate_prewarmed_projections();
+        }
+        durable_ids
     }
 
     fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
@@ -97,14 +170,38 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     fn validate_loaded_metadata(&mut self) {
-        self.artifacts.retain(|id, artifact| {
-            id == &artifact.content_hash
-                && Self::artifact_matches_text(
-                    artifact,
+        let mut validated = BTreeMap::new();
+        for (stored_id, mut artifact) in std::mem::take(&mut self.artifacts) {
+            if stored_id != artifact.id
+                || artifact.id != artifact.content_hash
+                || artifact.byte_len != artifact.text.len()
+                || !runtime_proxy_crate::smart_context_hash_matches_text(
+                    &artifact.content_hash,
                     &artifact.text,
-                    &runtime_proxy_crate::smart_context_hash_text(&artifact.text),
                 )
-        });
+            {
+                continue;
+            }
+            let strong_id = runtime_proxy_crate::smart_context_hash_text(&artifact.text);
+            if artifact.id != strong_id {
+                self.legacy_artifact_ids
+                    .insert(artifact.id.clone(), strong_id.clone());
+                artifact.id = strong_id.clone();
+                artifact.content_hash = strong_id.clone();
+                artifact.line_index = None;
+                artifact.chunk_index = None;
+            }
+            validated
+                .entry(strong_id)
+                .and_modify(|current: &mut super::super::RuntimeSmartContextArtifact| {
+                    if artifact.order >= current.order {
+                        *current = artifact.clone();
+                    }
+                })
+                .or_insert(artifact);
+        }
+        self.artifacts = validated;
+        self.schema_version = 2;
 
         for artifact in self.artifacts.values_mut() {
             let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
@@ -131,8 +228,17 @@ impl RuntimeSmartContextArtifactStore {
         }
 
         self.static_context_fingerprints.retain(|fingerprint| {
-            !fingerprint.id.trim().is_empty() && !fingerprint.content_hash.trim().is_empty()
+            !fingerprint.id.trim().is_empty() && fingerprint.content_hash.starts_with("sc2:")
         });
+        self.legacy_artifact_ids
+            .retain(|legacy, id| legacy.starts_with("sc:") && self.artifacts.contains_key(id));
+        self.next_artifact_order = self.next_artifact_order.max(
+            self.artifacts
+                .values()
+                .map(|artifact| artifact.order)
+                .max()
+                .unwrap_or(0),
+        );
     }
 
     pub(in crate::runtime_state_shared::artifact_store) fn enforce_limits(&mut self) {
@@ -142,7 +248,11 @@ impl RuntimeSmartContextArtifactStore {
             let Some(oldest_id) = self
                 .artifacts
                 .values()
-                .min_by_key(|artifact| artifact.sequence)
+                .min_by(|left, right| {
+                    left.order
+                        .cmp(&right.order)
+                        .then_with(|| left.id.cmp(&right.id))
+                })
                 .map(|artifact| artifact.id.clone())
             else {
                 break;
@@ -229,9 +339,11 @@ fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
     let mut locks = locks
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(
-        locks
-            .entry(path.to_path_buf())
-            .or_insert_with(|| Arc::new(Mutex::new(()))),
-    )
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
 }
