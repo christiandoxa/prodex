@@ -86,8 +86,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1162,
-    "reason": "Provider-aware runtime and gateway argument parsing remains capped after typed optional-tool selection moved to a focused module."
+    "maxLines": 1073,
+    "reason": "Provider-aware runtime and gateway argument parsing remains capped after typed optional-tool selection and Super launch conversion moved to a focused module."
   },
   {
     "file": "crates/prodex-quota/tests/src/render.rs",

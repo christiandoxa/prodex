@@ -153,10 +153,10 @@ Examples:
 Notes:
   `prodex super` enables Smart Context and the available typed optimizer tools in the temporary Prodex overlay.
   Missing optional tools are skipped unless named with `--require-tool`; use `prodex super doctor` to inspect readiness.
-  Super does not grant full access or trust the workspace by default; use `--full-access` only when intended.
+  Super is the explicit YOLO path: it bypasses approvals and the sandbox, bypasses hook-trust confirmation, and trusts the current workspace for this invocation.
   Codex runtime feature overrides from `prodex run` also work here; explicit `--web-search` overrides Super provider defaults.
-  Empty input or `n` keeps Presidio disabled; answer `y` to enable Presidio for this launch.
-  Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
+  Super does not prompt for Presidio; use `--presidio` to enable it explicitly. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
+  Use `prodex run` instead when normal Codex approvals and workspace-trust prompts are desired.
   Use `prodex super doctor` or `prodex s doctor` to inspect local optimizer readiness without launching Codex.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.

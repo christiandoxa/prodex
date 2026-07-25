@@ -24,7 +24,7 @@ use crate::{
     preview_gemini_provider_codex_args, preview_local_provider_catalog_codex_args,
     profile_openai_compatible_codex_args, runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
-    validate_credential_free_http_url,
+    trusted_workspace_codex_args, validate_credential_free_http_url,
 };
 pub(crate) use prodex_runtime_launch::{
     RuntimeLaunchDryRunChild, extract_prodex_dry_run_flag, prepare_codex_launch_args,
@@ -396,6 +396,11 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);
+    let codex_args = if args.super_mode {
+        trusted_workspace_codex_args(&std::env::current_dir()?, &codex_args)
+    } else {
+        codex_args
+    };
     let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
     let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
     let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);

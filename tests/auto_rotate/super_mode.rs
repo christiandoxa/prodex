@@ -28,6 +28,16 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
         stdout.contains("Presidio redaction: enabled"),
         "dry-run should report Presidio redaction, stdout: {stdout}"
     );
+    for expected in [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "trust_level",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "Super dry-run should expose {expected}, stdout: {stdout}"
+        );
+    }
     assert!(
         !stderr.contains("Use Presidio for data safety?"),
         "explicit --presidio should skip prompt, stderr: {stderr}"
@@ -36,7 +46,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
+fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
@@ -48,16 +58,14 @@ fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
     fs::create_dir_all(&runtime_log_dir).expect("failed to create runtime log dir");
     let runtime_log_dir_arg = runtime_log_dir.display().to_string();
 
-    let run = run_prodex_with_pty_prompt_answer(
+    let run = run_prodex_with_pty(
         &fixture,
-        &["super", "--skip-quota-check", "exec", "hello"],
+        &["s", "--skip-quota-check", "exec", "hello"],
         &[
             ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
             ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
             ("PRODEX_PRESIDIO_AUTO_START", "0"),
         ],
-        "Use Presidio for data safety?",
-        "\r",
     );
 
     assert!(
@@ -68,8 +76,8 @@ fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert!(
-        run.tty_output.contains("Use Presidio for data safety?"),
-        "PTY prompt output missing prompt: {}",
+        !run.tty_output.contains("Use Presidio for data safety?"),
+        "Super should not ask for Presidio permission: {}",
         run.tty_output
     );
 
@@ -81,16 +89,20 @@ fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
         .position(|arg| *arg == "exec")
         .expect("Super should launch Codex exec");
     assert!(
-        !args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
-        "Super should not grant full access by default, args: {args:?}"
+        args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
+        "Super should launch Codex with full access by default, args: {args:?}"
+    );
+    assert!(
+        args[..exec_index].contains(&"--dangerously-bypass-hook-trust"),
+        "Super should bypass the hook trust prompt, args: {args:?}"
     );
     let trust_override = format!(
         "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
         env!("CARGO_MANIFEST_DIR")
     );
     assert!(
-        !args.contains(&trust_override.as_str()),
-        "Super should not trust its launch directory implicitly, args: {args:?}"
+        args.contains(&trust_override.as_str()),
+        "Super should trust its launch directory for this session, args: {args:?}"
     );
     assert_eq!(
         args.last(),
@@ -116,6 +128,6 @@ fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
     let log = fs::read_to_string(latest_log).expect("failed to read runtime log");
     assert!(
         log.contains("presidio_redaction_enabled=false"),
-        "enter should keep runtime Presidio redaction disabled, log: {log}"
+        "Super should keep Presidio disabled unless explicitly requested, log: {log}"
     );
 }

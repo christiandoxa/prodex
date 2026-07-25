@@ -170,7 +170,7 @@ pub enum Commands {
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Daily shortcut for the minimal Super tool stack and opt-in Presidio.",
+        about = "YOLO shortcut for the Super tool stack with opt-in Presidio.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
