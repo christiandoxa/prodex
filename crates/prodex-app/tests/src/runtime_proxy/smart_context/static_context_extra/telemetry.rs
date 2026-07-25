@@ -163,9 +163,9 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
     let regression = runtime_smart_context_regression_self_check(
         before,
         after,
-        after,
         &before_count,
         &after_count,
+        runtime_smart_context_critical_signal_self_check(before, after),
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),

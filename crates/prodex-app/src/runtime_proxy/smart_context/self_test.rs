@@ -104,9 +104,12 @@ fn runtime_smart_context_self_test_transform() -> anyhow::Result<&'static str> {
     let check = runtime_smart_context_regression_self_check(
         &original_body,
         &candidate_body,
-        &serde_json::to_vec(&expanded)?,
         &before,
         &after,
+        runtime_smart_context_critical_signal_self_check(
+            &original_body,
+            &serde_json::to_vec(&expanded)?,
+        ),
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),

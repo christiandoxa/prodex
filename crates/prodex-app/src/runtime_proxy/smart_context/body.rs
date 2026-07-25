@@ -14,7 +14,8 @@ use super::{
     runtime_smart_context_critical_signal_self_check,
     runtime_smart_context_dedupe_input_text_within_request, runtime_smart_context_exact_header,
     runtime_smart_context_expand_inline_references, runtime_smart_context_fallback_exact_reason,
-    runtime_smart_context_has_duplicate_input_text, runtime_smart_context_log,
+    runtime_smart_context_has_duplicate_input_text,
+    runtime_smart_context_inline_reference_round_trip_is_exact, runtime_smart_context_log,
     runtime_smart_context_log_prepare_fallback,
     runtime_smart_context_missing_artifact_refs_in_store,
     runtime_smart_context_normalized_model_name,
@@ -228,23 +229,46 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     let self_check =
         runtime_smart_context_rewrite_self_check(request.body.len(), body.len(), &stats);
     let mut unresolved_rehydrate_refs = missing_rehydrate_refs;
-    let quality_body = runtime_smart_context_expand_inline_references(&original_value, &value)
-        .and_then(|expanded| serde_json::to_vec(&expanded).ok());
-    if quality_body.is_none() && stats.duplicate_texts > 0 {
+    let mut expanded = runtime_smart_context_expand_inline_references(&original_value, &value);
+    let exact_inline_round_trip = stats.duplicate_texts > 0
+        && stats.rehydrated_refs == 0
+        && expanded.as_mut().is_some_and(|expanded| {
+            runtime_smart_context_inline_reference_round_trip_is_exact(&original_value, expanded)
+        });
+    if expanded.is_none() && stats.duplicate_texts > 0 {
         unresolved_rehydrate_refs.push("invalid_inline_reference".to_string());
     }
-    let quality_body = quality_body.as_deref().unwrap_or(&body);
+    let quality_body = (!exact_inline_round_trip)
+        .then(|| {
+            expanded
+                .as_ref()
+                .and_then(|value| serde_json::to_vec(value).ok())
+        })
+        .flatten();
+    let critical_signal_check = if exact_inline_round_trip {
+        let counts =
+            prodex_context::count_critical_signals(&String::from_utf8_lossy(&request.body));
+        prodex_context::CriticalSignalSelfCheck {
+            before: counts,
+            after: counts,
+            lost: Default::default(),
+            gained: Default::default(),
+        }
+    } else {
+        runtime_smart_context_critical_signal_self_check(
+            &request.body,
+            quality_body.as_deref().unwrap_or(&body),
+        )
+    };
     let regression_check = runtime_smart_context_regression_self_check(
         &request.body,
         &body,
-        quality_body,
         &request_token_count,
         &body_token_count,
+        critical_signal_check,
         transform_exactness.clone(),
         unresolved_rehydrate_refs.clone(),
     );
-    let critical_signal_check =
-        runtime_smart_context_critical_signal_self_check(&request.body, quality_body);
     if let Some(fallback_reason) = runtime_smart_context_fallback_exact_reason(
         &regression_check,
         critical_signal_check,
