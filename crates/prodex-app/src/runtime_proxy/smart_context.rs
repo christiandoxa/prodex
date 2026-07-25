@@ -343,8 +343,13 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             );
             return Ok(Cow::Borrowed(request.body.as_slice()));
         }
-        if transport == RuntimeSmartContextTransport::Websocket
-            && request.body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
+        let rewrite_max_bytes = if transport == RuntimeSmartContextTransport::Websocket {
+            SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
+        } else {
+            SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES
+        };
+        if request.body.len() > rewrite_max_bytes
+            && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
         {
             runtime_smart_context_log_prepare_fallback(
                 request_id,
@@ -353,7 +358,11 @@ fn prepare_runtime_smart_context_body_safely<'a>(
                 transport,
                 profile_name,
                 request.body.len(),
-                "websocket_large_payload",
+                if transport == RuntimeSmartContextTransport::Websocket {
+                    "websocket_large_payload"
+                } else {
+                    "body_too_large"
+                },
             );
             return Ok(Cow::Borrowed(request.body.as_slice()));
         }

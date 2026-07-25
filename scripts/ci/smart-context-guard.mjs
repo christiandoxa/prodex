@@ -11,6 +11,7 @@ const paths = {
   sticky: "crates/prodex-app/src/runtime_proxy/smart_context/rollout.rs",
   body: "crates/prodex-app/src/runtime_proxy/smart_context/body.rs",
   transform: "crates/prodex-app/src/runtime_proxy/smart_context/body/transform.rs",
+  constants: "crates/prodex-app/src/runtime_proxy/smart_context/constants.rs",
   artifact: "crates/prodex-app/src/runtime_state_shared/artifact_store/content.rs",
   manifest: "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   corpus: "crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json",
@@ -61,6 +62,10 @@ export function validateSmartContext(sources) {
   }
 
   const body = sources[paths.body] ?? "";
+  const constants = sources[paths.constants] ?? "";
+  if (!constants.includes("SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES") || !constants.includes("SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES") || !constants.includes("SMART_CONTEXT_REWRITE_DEADLINE_MS")) {
+    errors.push("Smart Context must enforce body and wall-clock rewrite budgets");
+  }
   const shadowIndex = body.indexOf("if shadow {");
   const observeIndex = body.lastIndexOf("observe_runtime_smart_context_rewrite_safety_with_state(");
   const commitIndex = body.lastIndexOf("commit_runtime_smart_context_proxy_state_for_scope(");

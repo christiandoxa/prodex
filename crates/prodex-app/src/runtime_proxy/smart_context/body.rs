@@ -2,7 +2,8 @@ use super::{
     RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind,
     RuntimeSmartContextBudgetInput, RuntimeSmartContextLogInput, RuntimeSmartContextPrepareError,
     RuntimeSmartContextRewriteSafetyObservation, RuntimeSmartContextTransformStats,
-    RuntimeSmartContextTransport, commit_runtime_smart_context_proxy_state_for_scope,
+    RuntimeSmartContextTransport, SMART_CONTEXT_REWRITE_DEADLINE_MS,
+    commit_runtime_smart_context_proxy_state_for_scope,
     observe_runtime_smart_context_rewrite_safety_with_state, runtime_request_previous_response_id,
     runtime_request_session_id, runtime_request_turn_state,
     runtime_smart_context_affinity_pressure_rewrite_allowed,
@@ -23,6 +24,7 @@ use super::{
     runtime_smart_context_tier_label, runtime_smart_context_unsupported_json_shape_reason,
 };
 use std::borrow::Cow;
+use std::time::{Duration, Instant};
 
 mod transform;
 
@@ -38,6 +40,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     rollout: &runtime_proxy_crate::SmartContextRolloutDecision,
     shadow: bool,
 ) -> Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
+    let started_at = Instant::now();
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
         runtime_smart_context_log_prepare_fallback(
             request_id,
@@ -265,6 +268,26 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             budget: &budget,
             token_count_after: &request_token_count,
             self_check: fallback_reason,
+        });
+        return Ok(Cow::Borrowed(&request.body));
+    }
+    if started_at.elapsed() > Duration::from_millis(SMART_CONTEXT_REWRITE_DEADLINE_MS) {
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
+            request_id,
+            shared,
+            scope: &scope,
+            rollout,
+            route_kind,
+            transport,
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "deadline_passthrough",
+            reasons: "deadline_exceeded",
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats,
+            budget: &budget,
+            token_count_after: &request_token_count,
+            self_check: "pass_through_exact",
         });
         return Ok(Cow::Borrowed(&request.body));
     }
