@@ -6,10 +6,14 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 
+#[path = "runtime_args/optional_tools.rs"]
+mod optional_tools;
 #[path = "runtime_args/super_tail_extract.rs"]
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
+use optional_tools::extract_super_leading_launch_prefixes;
+pub use optional_tools::runtime_tool_args_with_tool;
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -164,37 +168,6 @@ pub struct RuntimeToolArgs {
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
-}
-
-impl fmt::Debug for RuntimeToolArgs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RuntimeToolArgs")
-            .field("profile_configured", &self.profile.is_some())
-            .field("auto_rotate", &self.auto_rotate)
-            .field("no_auto_rotate", &self.no_auto_rotate)
-            .field("auto_redeem", &self.auto_redeem)
-            .field("skip_quota_check", &self.skip_quota_check)
-            .field("full_access", &self.full_access)
-            .field("dry_run", &self.dry_run)
-            .field("base_url_configured", &self.base_url.is_some())
-            .field("no_proxy", &self.no_proxy)
-            .field("smart_context", &self.smart_context)
-            .field("tools", &self.tools)
-            .field("required_tools", &self.required_tools)
-            .field("presidio", &self.presidio)
-            .field("external_provider", &self.external_provider)
-            .field("harness", &self.harness)
-            .field(
-                "external_provider_api_key",
-                &self
-                    .external_provider_api_key
-                    .as_ref()
-                    .map(|_| "<redacted>"),
-            )
-            .field("codex_features", &self.codex_features)
-            .field("codex_args_count", &self.codex_args.len())
-            .finish()
-    }
 }
 
 #[derive(Args)]
@@ -648,85 +621,9 @@ fn parse_harness_mode(
     value.parse()
 }
 
-fn extract_super_leading_launch_prefixes(
-    args: Vec<OsString>,
-) -> (Vec<OptionalToolId>, Vec<OsString>) {
-    let mut tools = Vec::new();
-    let mut consumed = 0;
-    for arg in &args {
-        let Some(prefix) = arg.to_str() else {
-            break;
-        };
-        let tool = match prefix {
-            "rtk" => OptionalToolId::Rtk,
-            "playwright" => OptionalToolId::PlaywrightMcp,
-            "ponytail" => OptionalToolId::Ponytail,
-            "presidio" => OptionalToolId::Presidio,
-            _ => break,
-        };
-        tools.push(tool);
-        consumed += 1;
-    }
-    (tools, args.into_iter().skip(consumed).collect())
-}
-
 impl RunArgs {
     pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
         codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
-    }
-}
-
-impl RuntimeToolArgs {
-    pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
-        codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
-    }
-
-    pub fn select_tool(&mut self, tool: OptionalToolId) {
-        if !self.tools.contains(&tool) {
-            self.tools.push(tool);
-        }
-    }
-
-    pub fn require_tool(&mut self, tool: OptionalToolId) {
-        self.select_tool(tool);
-        if !self.required_tools.contains(&tool) {
-            self.required_tools.push(tool);
-        }
-    }
-
-    pub fn selected_tool_set(&self) -> OptionalToolSet {
-        self.tools
-            .iter()
-            .chain(&self.required_tools)
-            .copied()
-            .collect()
-    }
-
-    pub fn required_tool_set(&self) -> OptionalToolSet {
-        self.required_tools.iter().copied().collect()
-    }
-
-    pub fn translate_legacy_leading_tool_prefixes(&mut self) {
-        let mut translated = Vec::new();
-        for arg in &self.codex_args {
-            let Some(prefix) = arg.to_str() else {
-                break;
-            };
-            let tool = match prefix {
-                "caveman" => OptionalToolId::Caveman,
-                "rtk" => OptionalToolId::Rtk,
-                "playwright" => OptionalToolId::PlaywrightMcp,
-                "ponytail" => OptionalToolId::Ponytail,
-                "presidio" => OptionalToolId::Presidio,
-                _ => break,
-            };
-            translated.push(tool);
-        }
-        for tool in &translated {
-            self.select_tool(*tool);
-            self.presidio |= *tool == OptionalToolId::Presidio;
-        }
-        self.codex_args.drain(..translated.len());
     }
 }
 
@@ -741,14 +638,6 @@ fn codex_args_with_feature_overrides(
     let mut args = Vec::with_capacity(codex_args.len() + overrides.len());
     args.extend(codex_args.iter().cloned());
     args.extend(overrides);
-    args
-}
-
-pub fn runtime_tool_args_with_tool(
-    mut args: RuntimeToolArgs,
-    tool: OptionalToolId,
-) -> RuntimeToolArgs {
-    args.select_tool(tool);
     args
 }
 

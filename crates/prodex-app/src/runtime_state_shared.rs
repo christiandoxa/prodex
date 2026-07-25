@@ -9,6 +9,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime as TokioRuntime;
 
+#[cfg(test)]
+#[path = "runtime_state_shared/artifact_migration_tests.rs"]
+mod artifact_migration_tests;
 #[path = "runtime_state_shared/artifact_store.rs"]
 mod artifact_store;
 #[cfg(test)]
