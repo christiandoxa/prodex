@@ -2,30 +2,24 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { runCheckedJson } from "../lib/checked-subprocess.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const write = process.argv.includes("--write");
 const outPath = resolve(root, "docs/provider-capabilities.md");
 const conformancePath = resolve(root, "crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json");
 const conformance = JSON.parse(readFileSync(conformancePath, "utf8"));
-const contractCatalog = JSON.parse(
-  spawnSync(
-    "cargo",
-    ["run", "-q", "-p", "prodex-provider-core", "--example", "provider-contract-matrix"],
-    {
-      cwd: root,
-      encoding: "utf8",
-    },
-  ).stdout,
+const contractCatalog = runCheckedJson(
+  "cargo",
+  ["run", "-q", "-p", "prodex-provider-core", "--example", "provider-contract-matrix"],
+  { cwd: root, timeoutMs: 120_000 },
 );
 const contracts = contractCatalog.providers;
 const harnessModes = contractCatalog.harness_modes;
-const catalog = JSON.parse(
-  spawnSync(process.execPath, ["scripts/catalog/provider-catalog-check.mjs", "--json"], {
-    cwd: root,
-    encoding: "utf8",
-  }).stdout,
+const catalog = runCheckedJson(
+  process.execPath,
+  ["scripts/catalog/provider-catalog-check.mjs", "--json"],
+  { cwd: root },
 );
 
 const endpointColumns = [
