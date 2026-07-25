@@ -2,28 +2,133 @@ use super::*;
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 static SMART_CONTEXT_REPLAY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+struct RuntimeSmartContextReplayHarness {
+    shared: Option<RuntimeRotationProxyShared>,
+    marker: Option<crate::RuntimeProxyMarkerGuard>,
+    root: PathBuf,
+    mode: runtime_proxy_crate::SmartContextReplayMode,
+}
+
+impl RuntimeSmartContextReplayHarness {
+    fn new(
+        scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
+        mode: runtime_proxy_crate::SmartContextReplayMode,
+    ) -> Result<Self> {
+        let sequence = SMART_CONTEXT_REPLAY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "prodex-smart-context-replay-{}-{sequence}",
+            std::process::id()
+        ));
+        let (shared, marker) = runtime_smart_context_replay_shared_at_root(scenario, mode, &root)?;
+        Ok(Self {
+            shared: Some(shared),
+            marker: Some(marker),
+            root,
+            mode,
+        })
+    }
+
+    fn restart(
+        &mut self,
+        scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
+    ) -> Result<()> {
+        self.shared.take();
+        self.marker.take();
+        let (shared, marker) =
+            runtime_smart_context_replay_shared_at_root(scenario, self.mode, &self.root)?;
+        self.shared = Some(shared);
+        self.marker = Some(marker);
+        Ok(())
+    }
+
+    fn shared(&self) -> Result<&RuntimeRotationProxyShared> {
+        self.shared
+            .as_ref()
+            .context("replay harness has no shared runtime")
+    }
+}
+
+impl Drop for RuntimeSmartContextReplayHarness {
+    fn drop(&mut self) {
+        self.shared.take();
+        self.marker.take();
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+enum RuntimeSmartContextReplayPreparedBody {
+    Body(Vec<u8>),
+    MissingArtifact(usize),
+}
+
 pub(crate) fn run_runtime_smart_context_replay_json(
     text: &str,
 ) -> Result<runtime_proxy_crate::SmartContextReplayReport> {
     let corpus = runtime_proxy_crate::smart_context_parse_replay_corpus_json(text)
         .map_err(|error| anyhow!(error))?;
-    let mut scenario_results = Vec::with_capacity(corpus.scenarios.len());
-    let mut failures = Vec::new();
-
-    for scenario in &corpus.scenarios {
-        let result = run_runtime_smart_context_replay_scenario(scenario)
-            .with_context(|| format!("failed Smart Context replay scenario {}", scenario.id))?;
-        if !result.passed {
-            failures.push(scenario.id.clone());
+    let mut scenario_results = vec![None; corpus.scenarios.len()];
+    let mut concurrent_groups = BTreeMap::<&str, Vec<usize>>::new();
+    for (index, scenario) in corpus.scenarios.iter().enumerate() {
+        if let Some(group) = scenario.concurrent_group.as_deref() {
+            concurrent_groups.entry(group).or_default().push(index);
+        } else {
+            scenario_results[index] = Some(
+                run_runtime_smart_context_replay_scenario(scenario).with_context(|| {
+                    format!("failed Smart Context replay scenario {}", scenario.id)
+                })?,
+            );
         }
-        scenario_results.push(result);
+    }
+    for indexes in concurrent_groups.values() {
+        let results = std::thread::scope(|scope| {
+            let handles = indexes
+                .iter()
+                .map(|index| {
+                    let scenario = &corpus.scenarios[*index];
+                    (
+                        *index,
+                        scope.spawn(move || run_runtime_smart_context_replay_scenario(scenario)),
+                    )
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|(index, handle)| {
+                    let result = handle
+                        .join()
+                        .map_err(|_| anyhow!("Smart Context replay worker panicked"))??;
+                    Ok((index, result))
+                })
+                .collect::<Result<Vec<_>>>()
+        })?;
+        for (index, result) in results {
+            scenario_results[index] = Some(result);
+        }
+    }
+    let scenario_results = scenario_results
+        .into_iter()
+        .enumerate()
+        .map(|(index, result)| {
+            result.with_context(|| {
+                format!(
+                    "missing Smart Context replay result for {}",
+                    corpus.scenarios[index].id
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut failures = Vec::new();
+    for result in &scenario_results {
+        if !result.passed {
+            failures.push(result.id.clone());
+        }
     }
 
     let exact_input_tokens = scenario_results
@@ -45,7 +150,9 @@ pub(crate) fn run_runtime_smart_context_replay_json(
             commit_sha: replay_commit_sha(),
             os: std::env::consts::OS,
             architecture: std::env::consts::ARCH,
-            rust_toolchain: std::env::var("RUSTUP_TOOLCHAIN").ok(),
+            rust_toolchain: std::env::var("PRODEX_RUST_TOOLCHAIN")
+                .or_else(|_| std::env::var("RUSTUP_TOOLCHAIN"))
+                .ok(),
             tokenizer_source: "tiktoken-rs@0.12.0",
             token_measurement: "tokenizer_counted",
             command: "cargo run -q --bin prodex -- context replay-report <corpus.json> --json --strict",
@@ -112,30 +219,27 @@ fn run_runtime_smart_context_replay_scenario(
             scenario.provider
         );
     }
-    let (exact, exact_marker, exact_root) = runtime_smart_context_replay_shared(
+    let mut exact = RuntimeSmartContextReplayHarness::new(
         scenario,
         runtime_proxy_crate::SmartContextReplayMode::Exact,
     )?;
-    let (optimized, optimized_marker, optimized_root) =
-        runtime_smart_context_replay_shared(scenario, scenario.mode)?;
+    let mut optimized = RuntimeSmartContextReplayHarness::new(scenario, scenario.mode)?;
     let mut turns = Vec::with_capacity(scenario.turns.len());
 
     for (index, turn) in scenario.turns.iter().enumerate() {
+        let turn_index = index + 1;
+        if scenario.restart_before_turns.contains(&turn_index) {
+            exact.restart(scenario)?;
+            optimized.restart(scenario)?;
+        }
         turns.push(run_runtime_smart_context_replay_turn(
             scenario,
             turn,
-            index + 1,
-            &exact,
-            &optimized,
+            turn_index,
+            exact.shared()?,
+            optimized.shared()?,
         )?);
     }
-
-    drop(exact);
-    drop(optimized);
-    drop(exact_marker);
-    drop(optimized_marker);
-    remove_runtime_smart_context_replay_root(&exact_root)?;
-    remove_runtime_smart_context_replay_root(&optimized_root)?;
 
     let exact_input_tokens = turns.iter().map(|turn| turn.exact_input_tokens).sum();
     let optimized_input_tokens = turns.iter().map(|turn| turn.optimized_input_tokens).sum();
@@ -146,10 +250,13 @@ fn run_runtime_smart_context_replay_scenario(
     Ok(runtime_proxy_crate::SmartContextReplayScenarioResult {
         id: scenario.id.clone(),
         transport: scenario.transport,
+        route: scenario.route,
         provider: scenario.provider.clone(),
         model: scenario.model.clone(),
         context_window_tokens: scenario.context_window_tokens,
         mode: scenario.mode,
+        tags: scenario.tags.clone(),
+        concurrent_group: scenario.concurrent_group.clone(),
         exact_input_tokens,
         optimized_input_tokens,
         net_saved_tokens,
@@ -167,23 +274,35 @@ fn run_runtime_smart_context_replay_turn(
 ) -> Result<runtime_proxy_crate::SmartContextReplayTurnResult> {
     let body = serde_json::to_vec(&turn.request).context("failed to serialize replay request")?;
     let exact_generation_before = replay_state_generation(exact)?;
-    let exact_body = replay_prepare_body(
+    let exact_body = match replay_prepare_body(
         scenario,
         runtime_proxy_crate::SmartContextReplayMode::Exact,
         turn_index,
         &body,
         exact,
-    )?;
+    )? {
+        RuntimeSmartContextReplayPreparedBody::Body(body) => body,
+        RuntimeSmartContextReplayPreparedBody::MissingArtifact(count) => {
+            bail!("exact replay was blocked by {count} missing artifact(s)")
+        }
+    };
     let exact_state_mutations =
         replay_state_generation(exact)?.saturating_sub(exact_generation_before);
 
     let optimized_generation_before = replay_state_generation(optimized)?;
     let started_at = Instant::now();
-    let optimized_body =
+    let optimized_prepared =
         replay_prepare_body(scenario, scenario.mode, turn_index, &body, optimized)?;
     let rewrite_duration_ns = u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let optimized_state_mutations =
         replay_state_generation(optimized)?.saturating_sub(optimized_generation_before);
+    let (optimized_body, blocked_before_upstream, missing_artifact_count) = match optimized_prepared
+    {
+        RuntimeSmartContextReplayPreparedBody::Body(body) => (body, false, 0),
+        RuntimeSmartContextReplayPreparedBody::MissingArtifact(count) => {
+            (body.clone(), true, count)
+        }
+    };
 
     let exact_count = runtime_proxy_crate::smart_context_count_serialized_request(
         &exact_body,
@@ -214,15 +333,19 @@ fn run_runtime_smart_context_replay_turn(
             .iter()
             .all(|pointer| turn.request.pointer(pointer) == value.pointer(pointer))
     });
-    let unresolved_artifact_references = optimized_value
-        .as_ref()
-        .map(runtime_smart_context_collect_artifact_refs)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|reference| reference.id)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+    let unresolved_artifact_references = if blocked_before_upstream {
+        Vec::new()
+    } else {
+        optimized_value
+            .as_ref()
+            .map(runtime_smart_context_collect_artifact_refs)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|reference| reference.id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+    };
     let rewrite_applied = optimized_body != body;
     let exact_byte_identity = exact_body == body;
     let selected_transforms = replay_selected_transforms(&optimized_body);
@@ -254,8 +377,21 @@ fn run_runtime_smart_context_replay_turn(
     if !unresolved_artifact_references.is_empty() {
         failures.push("unresolved_artifact_reference".to_string());
     }
-    if turn.expect_rewrite != rewrite_applied {
-        failures.push("rewrite_expectation_mismatch".to_string());
+    match turn.expected_outcome {
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::Rewrite if !rewrite_applied => {
+            failures.push("expected_rewrite_not_applied".to_string());
+        }
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::PassThrough
+            if rewrite_applied || blocked_before_upstream =>
+        {
+            failures.push("expected_pass_through_not_observed".to_string());
+        }
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::MissingArtifactFailure
+            if !blocked_before_upstream =>
+        {
+            failures.push("expected_missing_artifact_failure_not_observed".to_string());
+        }
+        _ => {}
     }
     if rewrite_applied && net_saved_tokens <= 0 {
         failures.push("rewrite_not_token_positive".to_string());
@@ -263,6 +399,25 @@ fn run_runtime_smart_context_replay_turn(
     if optimized_input_tokens > exact_input_tokens {
         failures.push("aggregate_input_tokens_increased".to_string());
     }
+
+    let validation_passed = failures.is_empty();
+    let fallback_reason = if blocked_before_upstream {
+        Some("missing_artifact")
+    } else if rewrite_applied {
+        None
+    } else {
+        Some(match scenario.mode {
+            runtime_proxy_crate::SmartContextReplayMode::Exact => "explicit_exact",
+            runtime_proxy_crate::SmartContextReplayMode::Shadow => "shadow",
+            runtime_proxy_crate::SmartContextReplayMode::CanaryOut => "canary_out",
+            runtime_proxy_crate::SmartContextReplayMode::Active => match scenario.route {
+                runtime_proxy_crate::SmartContextReplayRoute::Responses
+                | runtime_proxy_crate::SmartContextReplayRoute::Websocket => "no_op",
+                runtime_proxy_crate::SmartContextReplayRoute::Compact
+                | runtime_proxy_crate::SmartContextReplayRoute::Standard => "unsupported_route",
+            },
+        })
+    };
 
     Ok(runtime_proxy_crate::SmartContextReplayTurnResult {
         turn: turn_index,
@@ -284,6 +439,11 @@ fn run_runtime_smart_context_replay_turn(
         selected_transforms,
         exact_state_mutations,
         optimized_state_mutations,
+        blocked_before_upstream,
+        missing_artifact_count,
+        validation_passed,
+        fallback_reason,
+        allocation_bytes: None,
         rewrite_duration_ns,
         exact_body_sha256: replay_body_sha256(&exact_body),
         optimized_body_sha256: replay_body_sha256(&optimized_body),
@@ -297,7 +457,7 @@ fn replay_prepare_body(
     turn_index: usize,
     body: &[u8],
     shared: &RuntimeRotationProxyShared,
-) -> Result<Vec<u8>> {
+) -> Result<RuntimeSmartContextReplayPreparedBody> {
     let mut headers = vec![
         ("session_id".to_string(), format!("replay-{}", scenario.id)),
         (
@@ -312,58 +472,77 @@ fn replay_prepare_body(
     if mode == runtime_proxy_crate::SmartContextReplayMode::Exact {
         headers.push(("x-prodex-smart-context".to_string(), "exact".to_string()));
     }
+    let (path_and_query, route_kind) = match scenario.route {
+        runtime_proxy_crate::SmartContextReplayRoute::Responses => {
+            ("/responses", RuntimeRouteKind::Responses)
+        }
+        runtime_proxy_crate::SmartContextReplayRoute::Compact => {
+            ("/responses/compact", RuntimeRouteKind::Compact)
+        }
+        runtime_proxy_crate::SmartContextReplayRoute::Standard => {
+            ("/v1/chat/completions", RuntimeRouteKind::Standard)
+        }
+        runtime_proxy_crate::SmartContextReplayRoute::Websocket => {
+            ("/responses", RuntimeRouteKind::Websocket)
+        }
+    };
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
-        path_and_query: "/responses".to_string(),
+        path_and_query: path_and_query.to_string(),
         headers,
         body: body.to_vec(),
     };
     let request_id = u64::try_from(turn_index).unwrap_or(u64::MAX);
     match scenario.transport {
         runtime_proxy_crate::SmartContextReplayTransport::Http => {
-            Ok(prepare_runtime_smart_context_http_body_for_profile(
+            match prepare_runtime_smart_context_http_body_for_profile(
                 request_id,
                 &request,
                 shared,
-                RuntimeRouteKind::Responses,
+                route_kind,
                 Some("replay"),
-            )?
-            .into_owned())
+            ) {
+                Ok(body) => Ok(RuntimeSmartContextReplayPreparedBody::Body(
+                    body.into_owned(),
+                )),
+                Err(error) => Ok(RuntimeSmartContextReplayPreparedBody::MissingArtifact(
+                    error.missing_artifact_count,
+                )),
+            }
         }
         runtime_proxy_crate::SmartContextReplayTransport::Websocket => {
             let request_text = std::str::from_utf8(body).context("replay request is not UTF-8")?;
-            Ok(prepare_runtime_smart_context_websocket_text(
+            match prepare_runtime_smart_context_websocket_text(
                 request_id,
                 request_text,
                 &request,
                 shared,
                 "replay",
-            )?
-            .into_owned()
-            .into_bytes())
+            ) {
+                Ok(body) => Ok(RuntimeSmartContextReplayPreparedBody::Body(
+                    body.into_owned().into_bytes(),
+                )),
+                Err(error) => Ok(RuntimeSmartContextReplayPreparedBody::MissingArtifact(
+                    error.missing_artifact_count,
+                )),
+            }
         }
     }
 }
 
-fn runtime_smart_context_replay_shared(
+fn runtime_smart_context_replay_shared_at_root(
     scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
     mode: runtime_proxy_crate::SmartContextReplayMode,
-) -> Result<(
-    RuntimeRotationProxyShared,
-    crate::RuntimeProxyMarkerGuard,
-    PathBuf,
-)> {
-    let sequence = SMART_CONTEXT_REPLAY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!(
-        "prodex-smart-context-replay-{}-{sequence}",
-        std::process::id()
-    ));
+    root: &Path,
+) -> Result<(RuntimeRotationProxyShared, crate::RuntimeProxyMarkerGuard)> {
+    fs::create_dir_all(root)
+        .with_context(|| format!("failed to create replay root {}", root.display()))?;
     let paths = AppPaths {
         state_file: root.join("state.json"),
         managed_profiles_root: root.join("profiles"),
         shared_codex_root: root.join("shared"),
         legacy_shared_codex_root: root.join("legacy-shared"),
-        root: root.clone(),
+        root: root.to_path_buf(),
     };
     let profile_name = "replay".to_string();
     let state = RuntimeRotationState {
@@ -446,7 +625,7 @@ fn runtime_smart_context_replay_shared(
         &shared,
         true,
         Some(scenario.context_window_tokens),
-        None,
+        Some(root.join("runtime-smart-context-artifacts.json")),
     );
     if let Some(observed_context_tokens) = scenario.observed_context_tokens {
         observe_runtime_smart_context_token_usage_for_bucket(
@@ -460,7 +639,7 @@ fn runtime_smart_context_replay_shared(
             None,
         );
     }
-    Ok((shared, marker, root))
+    Ok((shared, marker))
 }
 
 fn replay_state_generation(shared: &RuntimeRotationProxyShared) -> Result<u64> {
@@ -509,12 +688,4 @@ fn replay_commit_sha() -> Option<String> {
         .find(|value| {
             (7..=64).contains(&value.len()) && value.chars().all(|ch| ch.is_ascii_hexdigit())
         })
-}
-
-fn remove_runtime_smart_context_replay_root(root: &PathBuf) -> Result<()> {
-    if root.exists() {
-        fs::remove_dir_all(root)
-            .with_context(|| format!("failed to remove replay workspace {}", root.display()))?;
-    }
-    Ok(())
 }

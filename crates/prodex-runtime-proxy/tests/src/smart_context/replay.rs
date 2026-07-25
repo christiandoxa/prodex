@@ -9,24 +9,39 @@ fn replay_corpus_fixture_contains_inputs_only() {
         corpus.schema_version,
         SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION
     );
-    assert_eq!(corpus.scenarios.len(), 1);
-    assert_eq!(corpus.scenarios[0].turns.len(), 1);
+    assert!(corpus.scenarios.len() >= 10);
+    assert!(
+        corpus
+            .scenarios
+            .iter()
+            .any(|scenario| scenario.turns.len() >= 30)
+    );
+    assert!(
+        [16_384, 32_768, 131_072, 200_000]
+            .into_iter()
+            .all(|window| corpus
+                .scenarios
+                .iter()
+                .any(|scenario| scenario.context_window_tokens == window))
+    );
 }
 
 #[test]
 fn replay_corpus_rejects_prefilled_output_metrics() {
     let error = smart_context_parse_replay_corpus_json(
         r#"{
-            "schema_version": 1,
+            "schema_version": 2,
             "scenarios": [{
                 "id": "self-asserted",
                 "transport": "http",
+                "route": "responses",
                 "provider": "openai",
                 "model": "gpt-5.1-codex",
                 "context_window_tokens": 16384,
                 "mode": "active",
                 "turns": [{
                     "request": {"model": "gpt-5.1-codex", "input": []},
+                    "expected_outcome": "pass_through",
                     "input_tokens": 1000
                 }]
             }]
@@ -41,25 +56,33 @@ fn replay_corpus_rejects_prefilled_output_metrics() {
 fn replay_corpus_rejects_duplicate_scenario_ids() {
     let error = smart_context_parse_replay_corpus_json(
         r#"{
-            "schema_version": 1,
+            "schema_version": 2,
             "scenarios": [
                 {
                     "id": "duplicate",
                     "transport": "http",
+                    "route": "responses",
                     "provider": "openai",
                     "model": "gpt-5.1-codex",
                     "context_window_tokens": 16384,
                     "mode": "exact",
-                    "turns": [{"request": {"model": "gpt-5.1-codex"}}]
+                    "turns": [{
+                        "request": {"model": "gpt-5.1-codex"},
+                        "expected_outcome": "pass_through"
+                    }]
                 },
                 {
                     "id": "duplicate",
                     "transport": "websocket",
+                    "route": "websocket",
                     "provider": "openai",
                     "model": "gpt-5.1-codex",
                     "context_window_tokens": 16384,
                     "mode": "shadow",
-                    "turns": [{"request": {"model": "gpt-5.1-codex"}}]
+                    "turns": [{
+                        "request": {"model": "gpt-5.1-codex"},
+                        "expected_outcome": "pass_through"
+                    }]
                 }
             ]
         }"#,
