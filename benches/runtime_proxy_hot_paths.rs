@@ -62,7 +62,7 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
     for (size, body_bytes) in [
         ("4k", 4 * 1024),
         ("64k", 64 * 1024),
-        ("near_limit", 96 * 1024),
+        ("near_limit", 240 * 1024),
     ] {
         let disabled = RuntimeProxySmartContextRewriteBenchCase::disabled(body_bytes);
         c.bench_function(&format!("runtime_smart_context_disabled_{size}"), |b| {

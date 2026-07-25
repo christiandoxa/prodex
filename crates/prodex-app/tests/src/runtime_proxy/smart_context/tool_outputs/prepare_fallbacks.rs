@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn smart_context_large_http_body_declines_before_transform() {
+    let shared = smart_context_test_shared("large-http-body");
+    register_runtime_smart_context_proxy_state(&shared, true, Some(200_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let repeated = "bounded large request output ".repeat(5_000);
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [
+            {"type": "function_call_output", "call_id": "call_1", "output": repeated},
+            {"type": "function_call_output", "call_id": "call_2", "output": repeated},
+        ]
+    }));
+    assert!(request.body.len() > SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES);
+    let before = smart_context_test_state_snapshot(&shared);
+
+    let prepared = prepare_runtime_smart_context_http_body_for_profile(
+        41,
+        &request,
+        &shared,
+        RuntimeRouteKind::Responses,
+        Some("main"),
+    )
+    .expect("smart context prepare");
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("reason=body_too_large"));
+}
+
+#[test]
 fn smart_context_compact_session_body_does_not_panic() {
     let shared = smart_context_test_shared("compact-session-body");
     register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
