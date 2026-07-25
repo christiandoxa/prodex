@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.349.0 - 2026-07-26
+
+### CLI
+
+- Use local Ponytail marketplace source (`91c8e75`)
+
 ## 0.348.0 - 2026-07-26
 
 ### CLI
@@ -101,9 +107,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Close audited runtime and governance gaps (`014ce83`)
-
-## 0.337.0 - 2026-07-22
-
-### Misc
-
-- Harden response enforcement (`c675728`)
