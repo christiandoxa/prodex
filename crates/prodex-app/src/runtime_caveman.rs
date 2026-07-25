@@ -119,11 +119,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args = if self.args.super_optimizer_overlay {
-            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
-        } else {
-            self.codex_args.clone()
-        };
+        let codex_args = self.codex_args.clone();
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args)?;
@@ -182,19 +178,6 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
-}
-
-fn trusted_workspace_codex_args(workspace: &Path, codex_args: &[OsString]) -> Vec<OsString> {
-    let workspace = serde_json::to_string(&workspace.to_string_lossy())
-        .expect("workspace path should serialize as a TOML-compatible string");
-    let mut args = Vec::with_capacity(codex_args.len() + 3);
-    args.push(OsString::from("-c"));
-    args.push(OsString::from(format!(
-        "projects={{{workspace}={{trust_level=\"trusted\"}}}}"
-    )));
-    args.push(OsString::from("--dangerously-bypass-hook-trust"));
-    args.extend(codex_args.iter().cloned());
-    args
 }
 
 impl CavemanLaunchStrategy {
@@ -366,8 +349,8 @@ mod tests {
         assert!(strategy.args.super_optimizer_overlay);
         assert!(strategy.args.smart_context);
         assert!(strategy.runtime_request().smart_context_enabled);
-        assert!(strategy.args.full_access);
-        assert!(strategy.codex_args.contains(&OsString::from(
+        assert!(!strategy.args.full_access);
+        assert!(!strategy.codex_args.contains(&OsString::from(
             "--dangerously-bypass-approvals-and-sandbox"
         )));
         assert!(
@@ -386,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn super_default_enables_optimizer_stack() {
+    fn super_default_enables_optimizer_stack_without_dangerous_flags() {
         let strategy =
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "super", "exec", "hi"]));
 
@@ -395,11 +378,7 @@ mod tests {
         assert!(strategy.args.super_optimizer_overlay);
         assert_eq!(
             strategy.codex_args,
-            vec![
-                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
-                OsString::from("exec"),
-                OsString::from("hi")
-            ]
+            vec![OsString::from("exec"), OsString::from("hi")]
         );
     }
 
@@ -422,26 +401,29 @@ mod tests {
     }
 
     #[test]
-    fn super_trusts_workspace_without_persisting_config() {
-        let args = trusted_workspace_codex_args(
-            Path::new("/tmp/project"),
-            &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
+    fn super_explicit_full_access_adds_only_the_sandbox_bypass() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "super",
+            "--full-access",
+            "exec",
+            "hi",
+        ]));
+
+        assert!(strategy.args.full_access);
+        assert!(strategy.codex_args.contains(&OsString::from(
+            "--dangerously-bypass-approvals-and-sandbox"
+        )));
+        assert!(
+            !strategy
+                .codex_args
+                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
         );
-        assert_eq!(
-            args,
-            vec![
-                OsString::from("-c"),
-                OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
-                OsString::from("--dangerously-bypass-hook-trust"),
-                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
-            ]
-        );
-        let config: toml::Value =
-            toml::from_str(args[1].to_str().expect("config override should be UTF-8"))
-                .expect("config override should be valid TOML");
-        assert_eq!(
-            config["projects"]["/tmp/project"]["trust_level"].as_str(),
-            Some("trusted")
+        assert!(
+            !strategy
+                .codex_args
+                .iter()
+                .any(|arg| arg.to_string_lossy().contains("trust_level"))
         );
     }
 

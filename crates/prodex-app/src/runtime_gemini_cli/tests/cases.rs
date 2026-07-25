@@ -18,6 +18,7 @@ fn native_cli_super_args() -> SuperArgs {
         no_auto_rotate: false,
         auto_redeem: false,
         skip_quota_check: false,
+        full_access: false,
         dry_run: false,
         base_url: None,
         no_proxy: false,
