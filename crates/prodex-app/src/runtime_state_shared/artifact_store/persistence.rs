@@ -4,8 +4,6 @@ use super::super::{
     runtime_smart_context_artifact_line_index_needs_refresh,
 };
 use super::RuntimeSmartContextArtifactStore;
-use aes_gcm_siv::aead::{Aead, KeyInit, Payload};
-use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 use anyhow::{Context, bail};
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,7 +14,6 @@ use zeroize::Zeroizing;
 
 const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES: usize = 32;
-const RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES: usize = 12;
 const RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC: &[u8] = b"PSCA1\0";
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
@@ -391,25 +388,15 @@ fn runtime_smart_context_encrypt_artifact_store(
     };
     let scope = scope.context("scoped Smart Context artifact store is missing its scope ID")?;
     let key = runtime_smart_context_artifact_key(&key_path, true)?;
-    let cipher = Aes256GcmSiv::new_from_slice(key.as_slice())
-        .map_err(|_| anyhow::anyhow!("failed to initialize Smart Context artifact cipher"))?;
-    let mut nonce = [0_u8; RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES];
-    getrandom::fill(&mut nonce)
-        .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact nonce"))?;
-    let ciphertext = cipher
-        .encrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: plaintext,
-                aad: scope.as_str().as_bytes(),
-            },
-        )
-        .map_err(|_| anyhow::anyhow!("failed to encrypt Smart Context artifacts"))?;
+    let ciphertext = secret_store::encrypt_private_payload(
+        key.as_slice(),
+        scope.as_str().as_bytes(),
+        plaintext,
+    )?;
     let mut encoded = Zeroizing::new(Vec::with_capacity(
-        RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len() + nonce.len() + ciphertext.len(),
+        RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len() + ciphertext.len(),
     ));
     encoded.extend_from_slice(RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC);
-    encoded.extend_from_slice(&nonce);
     encoded.extend_from_slice(&ciphertext);
     Ok(encoded)
 }
@@ -422,24 +409,14 @@ fn runtime_smart_context_decrypt_artifact_store(
     let key_path = runtime_smart_context_artifact_key_path(path)
         .context("encrypted Smart Context artifact path is outside the scoped store")?;
     let scope = scope.context("encrypted Smart Context artifact store has no expected scope")?;
-    let nonce_start = RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len();
-    let ciphertext_start = nonce_start + RUNTIME_SMART_CONTEXT_ARTIFACT_NONCE_BYTES;
-    if encoded.len() <= ciphertext_start {
-        bail!("truncated Smart Context artifact ciphertext");
-    }
+    let ciphertext_start = RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len();
     let key = runtime_smart_context_artifact_key(&key_path, false)?;
-    let cipher = Aes256GcmSiv::new_from_slice(key.as_slice())
-        .map_err(|_| anyhow::anyhow!("failed to initialize Smart Context artifact cipher"))?;
-    cipher
-        .decrypt(
-            Nonce::from_slice(&encoded[nonce_start..ciphertext_start]),
-            Payload {
-                msg: &encoded[ciphertext_start..],
-                aad: scope.as_str().as_bytes(),
-            },
-        )
-        .map(Zeroizing::new)
-        .map_err(|_| anyhow::anyhow!("failed to decrypt Smart Context artifacts"))
+    secret_store::decrypt_private_payload(
+        key.as_slice(),
+        scope.as_str().as_bytes(),
+        &encoded[ciphertext_start..],
+    )
+    .map_err(Into::into)
 }
 
 fn runtime_smart_context_artifact_key_path(path: &Path) -> Option<PathBuf> {

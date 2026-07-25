@@ -1,9 +1,14 @@
 use std::io;
 use std::path::Path;
 
+use aes_gcm_siv::aead::{Aead, KeyInit, Payload};
+use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 use zeroize::Zeroizing;
 
 use crate::secure_file::{self, FileSecurity};
+
+const PRIVATE_PAYLOAD_KEY_BYTES: usize = 32;
+const PRIVATE_PAYLOAD_NONCE_BYTES: usize = 12;
 
 /// Creates or tightens a directory for current-user-private secret storage.
 pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
@@ -26,4 +31,76 @@ pub fn read_private_file_bounded(
 /// Atomically replaces `path` with a flushed current-user-private regular file.
 pub fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     secure_file::write_private_atomic(path, bytes)
+}
+
+/// Encrypts a private payload with a random nonce prepended to the ciphertext.
+pub fn encrypt_private_payload(
+    key: &[u8],
+    associated_data: &[u8],
+    plaintext: &[u8],
+) -> io::Result<Zeroizing<Vec<u8>>> {
+    if key.len() != PRIVATE_PAYLOAD_KEY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid private payload key length",
+        ));
+    }
+    let cipher = Aes256GcmSiv::new_from_slice(key).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "failed to initialize private payload cipher",
+        )
+    })?;
+    let mut nonce = [0_u8; PRIVATE_PAYLOAD_NONCE_BYTES];
+    getrandom::fill(&mut nonce)
+        .map_err(|_| io::Error::other("failed to generate private payload nonce"))?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad: associated_data,
+            },
+        )
+        .map_err(|_| io::Error::other("failed to encrypt private payload"))?;
+    let mut encoded = Zeroizing::new(Vec::with_capacity(nonce.len() + ciphertext.len()));
+    encoded.extend_from_slice(&nonce);
+    encoded.extend_from_slice(&ciphertext);
+    Ok(encoded)
+}
+
+/// Decrypts a nonce-prefixed private payload and authenticates its associated data.
+pub fn decrypt_private_payload(
+    key: &[u8],
+    associated_data: &[u8],
+    encoded: &[u8],
+) -> io::Result<Zeroizing<Vec<u8>>> {
+    if key.len() != PRIVATE_PAYLOAD_KEY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid private payload key length",
+        ));
+    }
+    if encoded.len() <= PRIVATE_PAYLOAD_NONCE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "truncated private payload",
+        ));
+    }
+    let cipher = Aes256GcmSiv::new_from_slice(key).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "failed to initialize private payload cipher",
+        )
+    })?;
+    cipher
+        .decrypt(
+            Nonce::from_slice(&encoded[..PRIVATE_PAYLOAD_NONCE_BYTES]),
+            Payload {
+                msg: &encoded[PRIVATE_PAYLOAD_NONCE_BYTES..],
+                aad: associated_data,
+            },
+        )
+        .map(Zeroizing::new)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid private payload"))
 }

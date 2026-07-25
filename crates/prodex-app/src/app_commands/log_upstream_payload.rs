@@ -78,7 +78,7 @@ fn readable_upstream_payload(payload_bytes: &[u8], fields: &BTreeMap<String, Str
     }
     if payload_bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
         && let Ok(decoded) =
-            zstd::bulk::decompress(payload_bytes, MAX_DECODED_UPSTREAM_PAYLOAD_BYTES)
+            runtime_log::decode_zstd_bounded(payload_bytes, MAX_DECODED_UPSTREAM_PAYLOAD_BYTES)
         && let Ok(payload) = String::from_utf8(decoded)
         && upstream_payload_is_readable_text(&payload)
     {

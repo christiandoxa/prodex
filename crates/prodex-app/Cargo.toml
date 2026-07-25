@@ -19,7 +19,6 @@ allocation-bench-support = ["dep:prodex_bench_support"]
 
 [dependencies]
 anyhow = { workspace = true }
-aes-gcm-siv = { workspace = true }
 arc-swap = { workspace = true }
 base64 = { workspace = true }
 aws-lc-rs = { workspace = true }
@@ -107,8 +106,10 @@ tiny_http = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
-zstd = "0.13.3"
 jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+
+[dev-dependencies]
+zstd = { workspace = true }
 
 [lints]
 workspace = true

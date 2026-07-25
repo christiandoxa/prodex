@@ -13,6 +13,10 @@ const RUNTIME_LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const RUNTIME_ASYNC_LOG_DROPPED_EVENT: &str = "runtime_proxy_async_log_dropped";
 
+pub fn decode_zstd_bounded(payload: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
+    zstd::bulk::decompress(payload, max_bytes)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLogFormat {
     Text,

@@ -2759,7 +2759,6 @@ dependencies = [
 name = "prodex-app"
 version = "0.346.0"
 dependencies = [
- "aes-gcm-siv",
  "anyhow",
  "arc-swap",
  "aws-lc-rs",
@@ -3256,6 +3255,7 @@ dependencies = [
  "libc",
  "prodex-runtime-proxy",
  "serde_json",
+ "zstd",
 ]
 
 [[package]]
@@ -3334,6 +3334,8 @@ version = "0.346.0"
 name = "prodex-secret-store"
 version = "0.346.0"
 dependencies = [
+ "aes-gcm-siv",
+ "getrandom 0.4.3",
  "keyring",
  "libc",
  "prodex-domain",

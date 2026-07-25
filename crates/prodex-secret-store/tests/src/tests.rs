@@ -3,8 +3,9 @@ use crate::{
     RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
     SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
     SecretStoreErrorStatus, SecretValue, auth_json_location, auth_json_path,
-    ensure_private_directory, plan_refresh_lease_error_response, plan_secret_error_response,
-    read_private_file_bounded, write_private_file_atomic,
+    decrypt_private_payload, encrypt_private_payload, ensure_private_directory,
+    plan_refresh_lease_error_response, plan_secret_error_response, read_private_file_bounded,
+    write_private_file_atomic,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -12,6 +13,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod keyring;
 mod refresh_lease;
+
+#[test]
+fn private_payload_encryption_authenticates_scope_and_content() {
+    let key = [7_u8; 32];
+    let encrypted = encrypt_private_payload(&key, b"scope-a", b"sensitive context").unwrap();
+    assert_eq!(
+        decrypt_private_payload(&key, b"scope-a", &encrypted)
+            .unwrap()
+            .as_slice(),
+        b"sensitive context"
+    );
+    assert!(decrypt_private_payload(&key, b"scope-b", &encrypted).is_err());
+
+    let mut corrupted = encrypted.to_vec();
+    *corrupted.last_mut().unwrap() ^= 1;
+    assert!(decrypt_private_payload(&key, b"scope-a", &corrupted).is_err());
+}
 
 fn temp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
