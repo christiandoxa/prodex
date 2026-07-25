@@ -60,6 +60,8 @@ pub(crate) use self::responses::attempt_runtime_responses_request;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
+#[cfg(feature = "bench-support")]
+pub(crate) use self::smart_context::runtime_smart_context_rehydrate_for_benchmark;
 use self::smart_context::*;
 pub(crate) use self::smart_context::{
     RuntimeSmartContextEngine, observe_runtime_smart_context_token_usage_for_bucket,

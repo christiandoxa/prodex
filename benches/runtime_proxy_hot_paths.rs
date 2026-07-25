@@ -3,8 +3,9 @@ use prodex::bench_support::{
     RuntimeProxyCompactSessionSelectionBenchCase, RuntimeProxyHotPathBenchCheckConfig,
     RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
     RuntimeProxyPreviousResponseBenchCase, RuntimeProxyQuotaFallbackBenchCase,
-    RuntimeProxySmartContextRewriteBenchCase, RuntimeProxySseInspectBenchCase,
-    RuntimeProxyWebsocketStaleReuseBenchCase, run_runtime_proxy_hot_path_bench_check,
+    RuntimeProxySmartContextRehydrateBenchCase, RuntimeProxySmartContextRewriteBenchCase,
+    RuntimeProxySseInspectBenchCase, RuntimeProxyWebsocketStaleReuseBenchCase,
+    run_runtime_proxy_hot_path_bench_check,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -56,6 +57,43 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
     let smart_context_rewrite = RuntimeProxySmartContextRewriteBenchCase::new(96);
     c.bench_function("runtime_smart_context_large_tool_output_rewrite", |b| {
         b.iter(|| black_box(smart_context_rewrite.rewrite_large_tool_output()))
+    });
+
+    for (size, body_bytes) in [
+        ("4k", 4 * 1024),
+        ("64k", 64 * 1024),
+        ("near_limit", 96 * 1024),
+    ] {
+        let disabled = RuntimeProxySmartContextRewriteBenchCase::disabled(body_bytes);
+        c.bench_function(&format!("runtime_smart_context_disabled_{size}"), |b| {
+            b.iter(|| black_box(disabled.prepare()))
+        });
+        let exact = RuntimeProxySmartContextRewriteBenchCase::exact(body_bytes);
+        c.bench_function(&format!("runtime_smart_context_exact_{size}"), |b| {
+            b.iter(|| black_box(exact.prepare()))
+        });
+        let canary_out = RuntimeProxySmartContextRewriteBenchCase::canary_out(body_bytes);
+        c.bench_function(&format!("runtime_smart_context_canary_out_{size}"), |b| {
+            b.iter(|| black_box(canary_out.prepare()))
+        });
+        let rejected = RuntimeProxySmartContextRewriteBenchCase::rejected_noop(body_bytes);
+        c.bench_function(
+            &format!("runtime_smart_context_rejected_noop_{size}"),
+            |b| b.iter(|| black_box(rejected.prepare())),
+        );
+        let shadow = RuntimeProxySmartContextRewriteBenchCase::shadow(body_bytes);
+        c.bench_function(&format!("runtime_smart_context_shadow_{size}"), |b| {
+            b.iter(|| black_box(shadow.prepare()))
+        });
+        let active = RuntimeProxySmartContextRewriteBenchCase::active(body_bytes);
+        c.bench_function(&format!("runtime_smart_context_active_{size}"), |b| {
+            b.iter(|| black_box(active.prepare()))
+        });
+    }
+
+    let rehydrate = RuntimeProxySmartContextRehydrateBenchCase::new(2_048);
+    c.bench_function("runtime_smart_context_rehydrate", |b| {
+        b.iter(|| black_box(rehydrate.rehydrate()))
     });
 }
 

@@ -8,12 +8,13 @@ use super::{
     runtime_smart_context_affinity_pressure_rewrite_allowed,
     runtime_smart_context_affinity_pressure_rewrite_guard,
     runtime_smart_context_append_inline_reference_protocol,
-    runtime_smart_context_budget_for_parsed,
+    runtime_smart_context_body_may_contain_artifact_ref, runtime_smart_context_budget_for_parsed,
     runtime_smart_context_collect_rehydratable_artifact_ref_ids,
     runtime_smart_context_critical_signal_self_check,
     runtime_smart_context_dedupe_input_text_within_request, runtime_smart_context_exact_header,
     runtime_smart_context_expand_inline_references, runtime_smart_context_fallback_exact_reason,
-    runtime_smart_context_log, runtime_smart_context_log_prepare_fallback,
+    runtime_smart_context_has_duplicate_input_text, runtime_smart_context_log,
+    runtime_smart_context_log_prepare_fallback,
     runtime_smart_context_missing_artifact_refs_in_store,
     runtime_smart_context_normalized_model_name,
     runtime_smart_context_proxy_state_snapshot_for_scope, runtime_smart_context_reason_labels,
@@ -58,6 +59,20 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             profile_name,
             request.body.len(),
             reason,
+        );
+        return Ok(Cow::Borrowed(&request.body));
+    }
+    if !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
+        && !runtime_smart_context_has_duplicate_input_text(&value)
+    {
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "no_duplicate_candidate",
         );
         return Ok(Cow::Borrowed(&request.body));
     }

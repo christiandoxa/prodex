@@ -185,10 +185,82 @@ pub struct RuntimeProxySmartContextRewriteBenchCase {
     request: RuntimeProxyRequest,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RuntimeProxySmartContextBenchMode {
+    Active,
+    CanaryOut,
+    Disabled,
+    Exact,
+    Shadow,
+}
+
 impl RuntimeProxySmartContextRewriteBenchCase {
     pub fn new(tool_line_count: usize) -> Self {
         let tool_line_count = tool_line_count.max(32);
-        let paths = bench_paths("smart-context-rewrite");
+        let output = (0..tool_line_count)
+            .map(|index| {
+                format!(
+                    "line {index:04}: /repo/prodex/crates/prodex-app/src/runtime_proxy/smart_context.rs token-heavy-tool-output repeated-context payload={}",
+                    "abcdef0123456789".repeat(8)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Self::from_body(
+            runtime_smart_context_bench_duplicate_body(&output),
+            RuntimeProxySmartContextBenchMode::Active,
+        )
+    }
+
+    pub fn active(body_bytes: usize) -> Self {
+        let output = "cargo test runtime_proxy_affinity ... ok; repeated exact output\n"
+            .repeat(body_bytes.saturating_sub(512).saturating_div(128).max(16));
+        Self::from_body(
+            runtime_smart_context_bench_duplicate_body(&output),
+            RuntimeProxySmartContextBenchMode::Active,
+        )
+    }
+
+    pub fn canary_out(body_bytes: usize) -> Self {
+        Self::pass_through(body_bytes, RuntimeProxySmartContextBenchMode::CanaryOut)
+    }
+
+    pub fn disabled(body_bytes: usize) -> Self {
+        Self::pass_through(body_bytes, RuntimeProxySmartContextBenchMode::Disabled)
+    }
+
+    pub fn exact(body_bytes: usize) -> Self {
+        Self::pass_through(body_bytes, RuntimeProxySmartContextBenchMode::Exact)
+    }
+
+    pub fn rejected_noop(body_bytes: usize) -> Self {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gpt-5.1-codex",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "x".repeat(body_bytes.saturating_sub(128)),
+            }],
+        }))
+        .expect("benchmark no-op request body should serialize");
+        Self::from_body(body, RuntimeProxySmartContextBenchMode::Active)
+    }
+
+    pub fn shadow(body_bytes: usize) -> Self {
+        let output = "cargo test runtime_proxy_affinity ... ok; shadow repeated exact output\n"
+            .repeat(body_bytes.saturating_sub(512).saturating_div(144).max(16));
+        Self::from_body(
+            runtime_smart_context_bench_duplicate_body(&output),
+            RuntimeProxySmartContextBenchMode::Shadow,
+        )
+    }
+
+    fn pass_through(body_bytes: usize, mode: RuntimeProxySmartContextBenchMode) -> Self {
+        Self::from_body(vec![b'x'; body_bytes.max(1)], mode)
+    }
+
+    fn from_body(body: Vec<u8>, mode: RuntimeProxySmartContextBenchMode) -> Self {
+        let paths = bench_paths("smart-context");
         let profile_name = "main".to_string();
         let state = RuntimeRotationState {
             paths: paths.clone(),
@@ -217,45 +289,37 @@ impl RuntimeProxySmartContextRewriteBenchCase {
             profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
-        let shared = bench_runtime_shared("smart-context-rewrite", state, 8);
-        register_runtime_smart_context_proxy_state(&shared, true, Some(18_000), None);
-
-        let output = (0..tool_line_count)
-            .map(|index| {
-                format!(
-                    "line {index:04}: /repo/prodex/crates/prodex-app/src/runtime_proxy/smart_context.rs token-heavy-tool-output repeated-context payload={}",
-                    "abcdef0123456789".repeat(8)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let body = serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.1-codex",
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": "Summarize the failing runtime proxy tool output and keep artifact references."
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_bench_large_tool_output",
-                    "output": output
-                }
-            ]
-        }))
-        .expect("benchmark smart-context request body should serialize");
+        let mut shared = bench_runtime_shared("smart-context", state, 8);
+        let config = Arc::get_mut(&mut shared.runtime_config)
+            .expect("benchmark runtime config must be uniquely owned");
+        config.smart_context_canary_percent =
+            if mode == RuntimeProxySmartContextBenchMode::CanaryOut {
+                0
+            } else {
+                100
+            };
+        config.smart_context_shadow = mode == RuntimeProxySmartContextBenchMode::Shadow;
+        if mode != RuntimeProxySmartContextBenchMode::Disabled {
+            register_runtime_smart_context_proxy_state(&shared, true, Some(18_000), None);
+        }
+        let mut headers = Vec::new();
+        if mode == RuntimeProxySmartContextBenchMode::Exact {
+            headers.push(("x-prodex-smart-context".to_string(), "exact".to_string()));
+        }
+        if mode == RuntimeProxySmartContextBenchMode::Shadow {
+            headers.push(("session_id".to_string(), "bench-4".to_string()));
+        }
         let request = RuntimeProxyRequest {
             method: "POST".to_string(),
             path_and_query: "/responses".to_string(),
-            headers: Vec::new(),
+            headers,
             body,
         };
 
         Self { shared, request }
     }
 
-    pub fn rewrite_large_tool_output(&self) -> usize {
+    pub fn prepare(&self) -> usize {
         prepare_runtime_smart_context_http_body_for_profile(
             bench_case_id(),
             &self.request,
@@ -265,5 +329,82 @@ impl RuntimeProxySmartContextRewriteBenchCase {
         )
         .expect("benchmark request must not contain unresolved artifact references")
         .len()
+    }
+
+    pub fn rewrite_large_tool_output(&self) -> usize {
+        self.prepare()
+    }
+}
+
+fn runtime_smart_context_bench_duplicate_body(output: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "model": "gpt-5.1-codex",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Summarize the failing runtime proxy tool output and keep references."
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_bench_first",
+                "output": output
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_bench_second",
+                "output": output
+            }
+        ]
+    }))
+    .expect("benchmark Smart Context request body should serialize")
+}
+
+#[doc(hidden)]
+pub struct RuntimeProxySmartContextRehydrateBenchCase {
+    store: RuntimeSmartContextArtifactStore,
+    value: serde_json::Value,
+}
+
+impl RuntimeProxySmartContextRehydrateBenchCase {
+    pub fn new(line_count: usize) -> Self {
+        let text = (0..line_count.max(32))
+            .map(|index| format!("rehydrated compiler output line {index:04}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store
+            .insert_text(&text)
+            .expect("benchmark artifact should fit store limits");
+        let value = serde_json::json!({"output": format!("prodex-artifact:{}", artifact.id)});
+        Self { store, value }
+    }
+
+    pub fn rehydrate(&self) -> usize {
+        runtime_smart_context_rehydrate_for_benchmark(self.value.clone(), &self.store)
+    }
+}
+
+#[cfg(test)]
+mod smart_context_bench_tests {
+    use super::*;
+
+    #[test]
+    fn smart_context_bench_cases_exercise_their_named_paths() {
+        for case in [
+            RuntimeProxySmartContextRewriteBenchCase::disabled(4 * 1024),
+            RuntimeProxySmartContextRewriteBenchCase::exact(4 * 1024),
+            RuntimeProxySmartContextRewriteBenchCase::canary_out(4 * 1024),
+            RuntimeProxySmartContextRewriteBenchCase::rejected_noop(4 * 1024),
+            RuntimeProxySmartContextRewriteBenchCase::shadow(4 * 1024),
+        ] {
+            assert_eq!(case.prepare(), case.request.body.len());
+        }
+
+        let active = RuntimeProxySmartContextRewriteBenchCase::active(4 * 1024);
+        assert!(active.prepare() < active.request.body.len());
+
+        let rehydrate = RuntimeProxySmartContextRehydrateBenchCase::new(64);
+        assert!(rehydrate.rehydrate() > rehydrate.value.to_string().len());
     }
 }
