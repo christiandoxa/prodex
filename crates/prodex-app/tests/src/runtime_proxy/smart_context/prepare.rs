@@ -148,7 +148,7 @@ tail line";
 }
 
 #[test]
-fn smart_context_prepare_affinity_does_not_force_global_exact_passthrough() {
+fn smart_context_prepare_affinity_without_candidate_is_exact_noop() {
     for (name, request) in [
         (
             "previous",
@@ -226,8 +226,8 @@ fn smart_context_prepare_affinity_does_not_force_global_exact_passthrough() {
         );
         let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
         assert!(
-            log.contains("reasons=affinity_pressure"),
-            "{name} affinity payload path should be eligible: {log}"
+            log.contains("reason=no_duplicate_candidate"),
+            "{name} affinity payload should decline without a rewrite candidate: {log}"
         );
         assert!(
             !log.contains("decision=require_exact"),
@@ -605,7 +605,7 @@ fn smart_context_prepare_changed_static_context_stays_exact_without_learning() {
     );
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     assert!(log.contains("decision=pass_through"));
-    assert!(log.contains("reasons=affinity_pressure"));
+    assert!(log.contains("reason=no_duplicate_candidate"));
     assert!(!log.contains("static_context_changed"));
 }
 

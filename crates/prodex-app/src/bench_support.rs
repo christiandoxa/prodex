@@ -19,8 +19,8 @@ pub use selection_cases::{
     RuntimeProxyWebsocketStaleReuseBenchCase,
 };
 pub use stream_cases::{
-    RuntimeProxyLineageCleanupBenchCase, RuntimeProxySmartContextRewriteBenchCase,
-    RuntimeProxySseInspectBenchCase,
+    RuntimeProxyLineageCleanupBenchCase, RuntimeProxySmartContextRehydrateBenchCase,
+    RuntimeProxySmartContextRewriteBenchCase, RuntimeProxySseInspectBenchCase,
 };
 
 use self::common::*;

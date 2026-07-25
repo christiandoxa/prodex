@@ -19,6 +19,61 @@ pub(super) fn runtime_smart_context_dedupe_input_text_within_request(
     }
 }
 
+pub(super) fn runtime_smart_context_has_duplicate_input_text(value: &serde_json::Value) -> bool {
+    let Some(input) = value.get("input").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    let mut seen = BTreeMap::<String, Vec<(usize, &str)>>::new();
+    let mut candidate_count = 0usize;
+    for (index, item) in input.iter().enumerate() {
+        if runtime_smart_context_value_is_static_context_item(item) {
+            continue;
+        }
+        if runtime_smart_context_value_has_duplicate_text(
+            item,
+            index,
+            &mut seen,
+            &mut candidate_count,
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
+fn runtime_smart_context_value_has_duplicate_text<'a>(
+    value: &'a serde_json::Value,
+    item_index: usize,
+    seen: &mut BTreeMap<String, Vec<(usize, &'a str)>>,
+    candidate_count: &mut usize,
+) -> bool {
+    match value {
+        serde_json::Value::String(text) if text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES => {
+            *candidate_count = candidate_count.saturating_add(1);
+            if *candidate_count > 256 {
+                return true;
+            }
+            let hash = runtime_proxy_crate::smart_context_hash_text(text);
+            let entries = seen.entry(hash).or_default();
+            if entries
+                .iter()
+                .any(|(first_index, first)| *first_index != item_index && *first == text)
+            {
+                return true;
+            }
+            entries.push((item_index, text));
+            false
+        }
+        serde_json::Value::Array(items) => items.iter().any(|item| {
+            runtime_smart_context_value_has_duplicate_text(item, item_index, seen, candidate_count)
+        }),
+        serde_json::Value::Object(object) => object.values().any(|item| {
+            runtime_smart_context_value_has_duplicate_text(item, item_index, seen, candidate_count)
+        }),
+        _ => false,
+    }
+}
+
 pub(super) fn runtime_smart_context_dedupe_value_text(
     value: &mut serde_json::Value,
     item_index: usize,
@@ -288,5 +343,30 @@ pub(super) fn runtime_smart_context_tier_label(
         runtime_proxy_crate::SmartContextTokenBudgetTier::Large => "large",
         runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed => "condensed",
         runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal => "minimal",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_admission_requires_exact_text_in_distinct_input_items() {
+        let text = "same exact tool output".repeat(64);
+        let duplicate = serde_json::json!({"input": [
+            {"output": text.clone()},
+            {"output": text.clone()},
+        ]});
+        assert!(runtime_smart_context_has_duplicate_input_text(&duplicate));
+
+        let same_item =
+            serde_json::json!({"input": [{"first": text.clone(), "second": text.clone()}]});
+        assert!(!runtime_smart_context_has_duplicate_input_text(&same_item));
+
+        let distinct = serde_json::json!({"input": [
+            {"output": text},
+            {"output": "different tool output".repeat(64)},
+        ]});
+        assert!(!runtime_smart_context_has_duplicate_input_text(&distinct));
     }
 }

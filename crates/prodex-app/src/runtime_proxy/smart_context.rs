@@ -160,6 +160,16 @@ pub(crate) fn prepare_runtime_smart_context_http_body_for_profile<'a>(
     )
 }
 
+#[cfg(feature = "bench-support")]
+pub(crate) fn runtime_smart_context_rehydrate_for_benchmark(
+    mut value: serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+) -> usize {
+    let mut stats = RuntimeSmartContextTransformStats::default();
+    runtime_smart_context_rehydrate_value(&mut value, store, &mut stats);
+    serde_json::to_vec(&value).map_or(0, |body| body.len())
+}
+
 pub(super) fn prepare_runtime_smart_context_websocket_text<'a>(
     request_id: u64,
     request_text: &'a str,
