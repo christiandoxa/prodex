@@ -9,10 +9,13 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    env::temp_dir().join(format!(
-        "prodex-optional-tools-{name}-{}-{stamp}",
-        std::process::id()
-    ))
+    env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory should resolve")
+        .join(format!(
+            "prodex-optional-tools-{name}-{}-{stamp}",
+            std::process::id()
+        ))
 }
 
 #[test]
