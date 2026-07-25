@@ -81,6 +81,9 @@ license = "Apache-2.0"
 repository = "https://github.com/christiandoxa/prodex"
 rust-version = "1.97.0"
 
+[profile.release]
+strip = "symbols"
+
 [workspace.dependencies]
 aes-gcm-siv = "0.11.1"
 anyhow = "1.0.102"

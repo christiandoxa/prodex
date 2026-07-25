@@ -39,17 +39,14 @@ pub fn smart_context_count_serialized_request(
     let Some(text) = std::str::from_utf8(body).ok() else {
         return estimated_count(body);
     };
-    let Some(tokenizer) = model.and_then(get_tokenizer) else {
+    let Some(Tokenizer::O200kBase) = model.and_then(get_tokenizer) else {
         return estimated_count(body);
     };
-    let family = tokenizer_family(tokenizer);
-    let Ok(bpe) = tiktoken_rs::bpe_for_tokenizer(tokenizer) else {
-        return estimated_count(body);
-    };
+    let bpe = tiktoken_rs::o200k_base_singleton();
     SmartContextTokenCount {
         tokens: bpe.encode_with_special_tokens(text).len() as u64,
         source: SmartContextTokenCountSource::TokenizerCounted,
-        tokenizer_family: Some(family),
+        tokenizer_family: Some("o200k_base"),
         confidence_basis_points: 10_000,
         error_bound_tokens: 0,
     }
@@ -66,18 +63,6 @@ fn estimated_count(body: &[u8]) -> SmartContextTokenCount {
     }
 }
 
-fn tokenizer_family(tokenizer: Tokenizer) -> &'static str {
-    match tokenizer {
-        Tokenizer::O200kHarmony => "o200k_harmony",
-        Tokenizer::O200kBase => "o200k_base",
-        Tokenizer::Cl100kBase => "cl100k_base",
-        Tokenizer::P50kBase => "p50k_base",
-        Tokenizer::R50kBase => "r50k_base",
-        Tokenizer::P50kEdit => "p50k_edit",
-        Tokenizer::Gpt2 => "gpt2",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +74,10 @@ mod tests {
         assert!(counted.is_proven());
         assert_eq!(counted.tokenizer_family, Some("o200k_base"));
         assert_eq!(counted.error_bound_tokens, 0);
+
+        let unsupported_family =
+            smart_context_count_serialized_request(b"hello world", Some("gpt-4"));
+        assert!(!unsupported_family.is_proven());
 
         let estimated =
             smart_context_count_serialized_request(b"hello world", Some("unknown-model"));
