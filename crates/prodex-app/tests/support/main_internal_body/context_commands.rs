@@ -120,17 +120,18 @@ fn context_replay_report_strict_rejects_failed_corpus() {
     fs::write(
         &corpus_path,
         r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "scenarios": [{
     "id": "failed",
     "transport": "http",
+    "route": "responses",
     "provider": "openai",
     "model": "gpt-5.1-codex",
     "context_window_tokens": 16384,
     "mode": "exact",
     "turns": [{
       "request": {"model": "gpt-5.1-codex", "input": []},
-      "expect_rewrite": true
+      "expected_outcome": "rewrite"
     }]
   }]
 }"#,
