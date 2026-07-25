@@ -685,6 +685,27 @@ mod tests {
     }
 
     #[test]
+    fn rtk_alias_launch_keeps_approval_bypass_explicit() {
+        let command = parse_cli_command_from(["prodex", "rtk", "exec", "review"])
+            .expect("rtk shortcut should parse");
+        let Commands::Rtk(args) = command else {
+            panic!("expected rtk shortcut");
+        };
+        let strategy = CavemanLaunchStrategy::new(caveman_args_with_optimizer_prefix(args, "rtk"));
+
+        assert!(strategy.rtk_enabled);
+        assert!(!strategy.args.full_access);
+        assert!(!strategy.codex_args.contains(&OsString::from(
+            "--dangerously-bypass-approvals-and-sandbox"
+        )));
+        assert!(
+            !strategy
+                .codex_args
+                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
+        );
+    }
+
+    #[test]
     fn caveman_launch_extracts_presidio_prefix_after_super_optimizers() {
         let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[

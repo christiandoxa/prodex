@@ -523,6 +523,38 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         );
     }
 }
+
+#[test]
+fn legacy_optimizer_aliases_preserve_access_choice_and_passthrough() {
+    for command_name in ["rtk", "playwright", "ponytail"] {
+        let command = parse_cli_command_from([
+            "prodex",
+            command_name,
+            "exec",
+            "presidio",
+            "--literal-passthrough",
+        ])
+        .expect("legacy optimizer alias should parse");
+        let args = match command {
+            Commands::Rtk(args) | Commands::Playwright(args) | Commands::Ponytail(args) => args,
+            other => panic!("expected optimizer shortcut command, got {other:?}"),
+        };
+
+        assert!(!args.full_access);
+        assert_eq!(
+            args.codex_args,
+            os_args(&["exec", "presidio", "--literal-passthrough"])
+        );
+    }
+
+    let Commands::Rtk(args) =
+        parse_cli_command_from(["prodex", "rtk", "--full-access", "exec", "review"])
+            .expect("explicit full access should parse")
+    else {
+        panic!("expected rtk shortcut");
+    };
+    assert!(args.full_access);
+}
 #[test]
 fn codex_remote_control_defaults_to_managed_run_passthrough() {
     assert!(should_default_cli_invocation_to_run(&os_args(&[
