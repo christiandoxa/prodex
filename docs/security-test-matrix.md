@@ -1,5 +1,7 @@
 # Security Test Matrix
 
+This is the canonical control-to-test map for current production behavior.
+
 Status meanings:
 
 - `pass`: authoritative current test evidence proves the control;
@@ -12,7 +14,7 @@ Status meanings:
 | Threat | Required control | Test/evidence | File(s) | Current status |
 | --- | --- | --- | --- | --- |
 | Remote shell exposed implicitly | tunnel opt-in, loopback-only local server, prominent warning | CLI default/limit tests; `expose_connection_flood_keeps_fixed_worker_count` | `crates/prodex-cli/tests/src/expose.rs`; `crates/prodex-app/src/expose/tests.rs` | pass |
-| Capability leaks through URL/logs | one-time fragment bootstrap; header exchange; opaque redacted session | URL, status, `Debug`, and tunnel-error sentinels | `crates/prodex-app/src/expose/tests.rs`; `docs/adr/1068-expose-session-tunnel-model.md` | pass |
+| Capability leaks through URL/logs | one-time fragment bootstrap; header exchange; opaque redacted session | URL, status, `Debug`, and tunnel-error sentinels | `crates/prodex-app/src/expose/tests.rs` | pass |
 | Bootstrap replay or stale sessions | single use, short TTL, rotation/revocation, secure cookie attributes | expiry/replay, cookie, rotation, revoke, and idle tests | `crates/prodex-app/src/expose/tests.rs` | pass |
 | Cross-origin shell mutation | strict Origin/Host plus session-bound CSRF policy | missing/foreign Origin, duplicate header, Host, and mutation negatives | `crates/prodex-app/src/expose/tests.rs` | pass |
 | Expose resource exhaustion | bounded workers, clients, queues, input rate/body, idle timeout, shutdown | slow-socket flood, queue saturation, max-client, and PTY join tests | `crates/prodex-app/src/expose/tests.rs` | pass |

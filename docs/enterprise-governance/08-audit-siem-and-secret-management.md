@@ -6,7 +6,7 @@ transactional outbox. Secrets are references resolved from an approved secret
 manager, never policy values. The implementation includes append-only hash-chain
 audit, transactional governance audit/outbox storage, bounded SIEM delivery and
 an external-secret provider boundary. Detailed design is in
-[`08-audit-siem-and-evidence.md`](08-audit-siem-and-evidence.md).
+[`18-audit-siem-and-evidence.md`](18-audit-siem-and-evidence.md).
 
 ## Audit event
 

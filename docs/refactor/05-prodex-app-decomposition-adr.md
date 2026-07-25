@@ -1,6 +1,6 @@
 # ADR: Incremental `prodex-app` Decomposition
 
-- Status: Proposed
+- Status: Accepted; incremental implementation
 - Date: 2026-07-15
 - Owners: Prodex maintainers
 - Scope: dependency and ownership changes only; no runtime behavior rewrite
@@ -8,7 +8,7 @@
 ## Context
 
 `prodex-app` is the workspace composition root, but it also owns several vertical implementations.
-The current source tree contains 666 Rust files and 189,288 physical Rust source lines. Its
+The current source tree contains 697 Rust files and 198,182 physical Rust source lines. Its
 manifest has 89 direct dependencies. Existing crate and production-boundary guards pass, so crate
 count alone is not the problem. The problem is that unrelated edits share one compilation,
 review, and release boundary.
@@ -59,6 +59,8 @@ focused crate back to `prodex-app`.
 | `prodex-control-plane-cli` | Control-plane command handlers, command-facing request/response DTO conversion, JSON/human result models, and application port calls. Rendering primitives remain in report/UI crates. | `prodex-cli`, `prodex-application`, `prodex-control-plane`, `prodex-app-reports`, `prodex-terminal-ui`, shared DTO/domain crates. | `prodex-app`, provider transports, runtime proxy internals, database drivers, direct HTTP listeners, secret material. |
 
 The candidate names are ownership targets, not authorization to create all five crates at once.
+The workspace package count must remain flat: a new vertical crate requires deleting or merging
+another crate in the same change.
 An extraction proceeds only when it removes a coherent implementation from `prodex-app` and its
 new manifest is materially narrower than the source manifest.
 
@@ -142,8 +144,8 @@ Tests move to the narrowest owning crate; integration tests remain above the bou
 Current structural baseline:
 
 - 89 direct `prodex-app` dependencies;
-- 666 Rust source files;
-- 189,288 physical Rust source lines.
+- 697 Rust source files;
+- 198,182 physical Rust source lines.
 
 Completion targets:
 

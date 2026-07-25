@@ -8,7 +8,7 @@ bounded break-glass approval/activate/revoke path. Retention purge accepts only
 an independently approved active grant with exact tenant and audit-retention
 scope, a maximum one-hour lifetime, bounded purge batches, and mandatory audit.
 The fuller persistence design is in
-[`07-policy-approval-and-store.md`](07-policy-approval-and-store.md).
+[`17-policy-authority-and-revision-store.md`](17-policy-authority-and-revision-store.md).
 
 ## Policy revision workflow
 

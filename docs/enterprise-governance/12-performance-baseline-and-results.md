@@ -2,7 +2,7 @@
 
 This records the release-candidate governance and compatibility measurements.
 Detailed methodology is in
-[`12-testing-performance-and-evidence.md`](12-testing-performance-and-evidence.md).
+[`21-testing-performance-and-evidence.md`](21-testing-performance-and-evidence.md).
 
 ## Acceptance budgets
 

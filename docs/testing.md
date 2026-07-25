@@ -221,6 +221,38 @@ Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtu
 
 Use `npm run compat:capture -- --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
+## Smart Context Evidence
+
+Run the production engine against the inputs-only deterministic corpus:
+
+```bash
+npm run smart-context:replay
+npm run docs:smart-context-evidence:check
+```
+
+Regenerate checked JSON and Markdown only after reviewing corpus or engine
+changes:
+
+```bash
+npm run docs:smart-context-evidence
+```
+
+Collect 50 machine-specific performance samples per case and render the raw
+JSON/Markdown report:
+
+```bash
+cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths -- \
+  runtime_smart_context_ --noplot --warm-up-time 1 --measurement-time 2 --sample-size 50
+npm run bench:smart-context-report
+```
+
+CI runs the correctness guard and evidence check. The raw report separates
+tokenizer-counted values from estimates, includes per-turn transformations,
+validation, reference blocking, state mutations, hashes, and duration, and
+records `allocation_bytes: null` until allocation instrumentation is available.
+Live-model evaluation is optional non-deterministic evidence and must not be
+reported as deterministic CI proof.
+
 Compat capture input should usually be JSONL, one record per line. Supported record `type` values are `request`, `response`, `event`, `websocket_message`, and `sse_stream`. Request records may include `method`, `url` or `path_and_query`, `headers`, and `body`. Response and event records may include `status`, `headers`, `body`, `payload`, or `data`. WebSocket records may include `direction` and `message`. SSE records may include `stream`, `text`, `body`, or `data`.
 
 Example JSONL request record:

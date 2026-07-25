@@ -3,32 +3,42 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
-const defaultFiles = [
-  "README.md",
-  "QUICKSTART.md",
-  "docs/testing.md",
-  "docs/runtime-policy.md",
-  "docs/architecture.md",
-];
-
 async function defaultMarkdownFiles() {
-  const governanceRoot = path.join(repoRoot, "docs", "enterprise-governance");
-  const governanceFiles = [];
+  const markdownFiles = [];
+  const ignoredDirectories = new Set([".git", "node_modules", "target"]);
   async function collect(directory) {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && ignoredDirectories.has(entry.name)) {
+        continue;
+      }
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         await collect(absolute);
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        governanceFiles.push(path.relative(repoRoot, absolute));
+        markdownFiles.push(path.relative(repoRoot, absolute));
       }
     }
   }
-  await collect(governanceRoot).catch((error) => {
-    if (error?.code !== "ENOENT") throw error;
-  });
-  governanceFiles.sort();
-  return [...defaultFiles, ...governanceFiles];
+  await collect(repoRoot);
+  return markdownFiles.sort();
+}
+
+async function duplicateGovernancePrefixes() {
+  const root = path.join(repoRoot, "docs", "enterprise-governance");
+  const files = await fs.readdir(root, { withFileTypes: true });
+  const byPrefix = new Map();
+  for (const entry of files) {
+    const match = entry.isFile() && entry.name.match(/^(\d{2})-.*\.md$/u);
+    if (!match) continue;
+    const names = byPrefix.get(match[1]) ?? [];
+    names.push(entry.name);
+    byPrefix.set(match[1], names);
+  }
+  return [...byPrefix.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) =>
+      `docs/enterprise-governance: duplicate numeric prefix ${prefix}: ${names.sort().join(", ")}`,
+    );
 }
 
 function parseArgs(argv) {
@@ -153,6 +163,9 @@ async function main() {
   const errors = [];
   for (const relativePath of files) {
     errors.push(...(await lintFile(relativePath)));
+  }
+  if (args.files.length === 0) {
+    errors.push(...(await duplicateGovernancePrefixes()));
   }
 
   if (errors.length > 0) {

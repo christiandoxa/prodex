@@ -3,7 +3,7 @@
 Governance ships as independently observable capabilities behind typed,
 versioned modes. Existing behavior remains the compatibility reference until
 shadow parity and phase exit gates pass. Detailed sequencing is in
-[`13-rollout-rollback-and-deprecation.md`](13-rollout-rollback-and-deprecation.md).
+[`22-rollout-rollback-and-deprecation.md`](22-rollout-rollback-and-deprecation.md).
 
 ## Modes
 

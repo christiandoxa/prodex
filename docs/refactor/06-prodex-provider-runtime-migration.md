@@ -1,7 +1,10 @@
-# Provider Runtime Follow-on
+# ADR: Provider Runtime Boundary
 
-Status: design note for the next PR-sized migration. This document does not authorize runtime
-changes in the provider implementation registry PR.
+- Status: Accepted boundary; implementation pending
+- Date: 2026-07-25
+- Owners: Provider platform maintainers
+
+This decision does not authorize a big-bang migration or a workspace crate-count increase.
 
 ## Boundary
 

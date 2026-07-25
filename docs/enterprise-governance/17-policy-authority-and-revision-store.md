@@ -1,4 +1,4 @@
-# Policy, Approval, and Revision Store
+# Policy Authority and Revision Store
 
 ## Status and Scope
 
