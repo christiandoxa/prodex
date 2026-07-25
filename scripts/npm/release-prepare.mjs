@@ -257,6 +257,7 @@ function packageNameForLockEntry(lockPath, entry) {
 }
 
 function validateNpmLockEntry(relativePath, packageName, entry, version, errors) {
+  if (entry?.link === true && entry.version === undefined) return;
   if (packageName === mainPackageName || platformPackages.some((spec) => spec.packageName === packageName)) {
     expectEqual(errors, `${relativePath} ${packageName} lock version`, entry.version, version);
   }

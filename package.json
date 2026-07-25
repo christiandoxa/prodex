@@ -4,9 +4,16 @@
   "packageManager": "npm@11.12.1",
   "workspaces": [
     "npm/prodex",
-    "npm/prodex-gateway-sdk",
-    "npm/platforms/*"
+    "npm/prodex-gateway-sdk"
   ],
+  "optionalDependencies": {
+    "@christiandoxa/prodex-darwin-arm64": "file:npm/platforms/darwin-arm64",
+    "@christiandoxa/prodex-darwin-x64": "file:npm/platforms/darwin-x64",
+    "@christiandoxa/prodex-linux-arm64": "file:npm/platforms/linux-arm64",
+    "@christiandoxa/prodex-linux-x64": "file:npm/platforms/linux-x64",
+    "@christiandoxa/prodex-win32-arm64": "file:npm/platforms/win32-arm64",
+    "@christiandoxa/prodex-win32-x64": "file:npm/platforms/win32-x64"
+  },
   "scripts": {
     "npm:version": "node scripts/npm/version.mjs",
     "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm && node scripts/npm/sync-docs-version.mjs",

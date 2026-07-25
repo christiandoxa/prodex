@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   mainPackageName,
+  openaiCodexDependencySpecifier,
   openaiCodexPlatformDependencySpecifier,
   openaiCodexPlatformPackages,
   platformPackages,
@@ -213,7 +214,7 @@ async function assertVersionSynced(fixtureRoot, version) {
   const mainManifest = await readJson(fixtureRoot, "npm/prodex/package.json");
   assert(mainManifest.version === version, `npm/prodex/package.json version mismatch: ${mainManifest.version}`);
   assert(
-    mainManifest.dependencies?.["@openai/codex"] === "latest",
+    mainManifest.dependencies?.["@openai/codex"] === openaiCodexDependencySpecifier,
     "npm/prodex/package.json @openai/codex dependency was not normalized",
   );
   for (const spec of platformPackages) {

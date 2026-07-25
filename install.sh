@@ -9,6 +9,7 @@ MIGRATE="${PRODEX_MIGRATE:-false}"
 RUNNING_EXE="${PRODEX_RUNNING_EXE:-}"
 BASE_URL_OVERRIDE="${PRODEX_RELEASE_BASE_URL:-}"
 NO_PATH_UPDATE="${PRODEX_NO_PATH_UPDATE:-false}"
+CODEX_NPM_VERSION="0.145.0"
 
 if [ -n "${PRODEX_INSTALL_DIR:-}" ]; then
   BIN_DIR="$PRODEX_INSTALL_DIR"
@@ -170,7 +171,7 @@ migrate_manager() {
       require_command npm
       if [ "${PRODEX_CODEX_BIN:-codex}" = "codex" ]; then
         step "Preserving Codex as a standalone npm command"
-        npm install -g @openai/codex@latest
+        npm install -g "@openai/codex@$CODEX_NPM_VERSION"
       fi
       step "Removing npm-managed Prodex"
       npm uninstall -g @christiandoxa/prodex

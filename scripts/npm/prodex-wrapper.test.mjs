@@ -8,6 +8,8 @@ import {
   copyRepoFile,
   ensureDir,
   mainPackageManifest,
+  openaiCodexDependencySpecifier,
+  openaiCodexVersion,
   platformPackages,
   platformPackageManifest,
   writeJsonFile,
@@ -75,6 +77,16 @@ async function writeExecutable(filePath, contents) {
   await fs.chmod(filePath, 0o755);
 }
 
+async function copyCodexShim(directory) {
+  await ensureDir(directory);
+  for (const name of ["codex-shim.cjs", "codex-compat.cjs"]) {
+    await copyRepoFile(`npm/prodex/lib/${name}`, path.join(directory, name));
+  }
+  const shimPath = path.join(directory, "codex-shim.cjs");
+  await fs.chmod(shimPath, 0o755);
+  return shimPath;
+}
+
 async function stageCodexShimInstall() {
   if (process.platform === "win32") {
     return null;
@@ -86,11 +98,7 @@ async function stageCodexShimInstall() {
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-test-"));
   const mainPackageDir = packageInstallDir(root, "@christiandoxa/prodex");
-  await ensureDir(path.join(mainPackageDir, "lib"));
-  await copyRepoFile(
-    "npm/prodex/lib/codex-shim.cjs",
-    path.join(mainPackageDir, "lib", "codex-shim.cjs"),
-  );
+  const shimPath = await copyCodexShim(path.join(mainPackageDir, "lib"));
 
   const openAiCodexDir = packageInstallDir(root, "@openai/codex");
   await ensureDir(path.join(openAiCodexDir, "bin"));
@@ -135,7 +143,7 @@ async function stageCodexShimInstall() {
 
   return {
     root,
-    shimPath: path.join(mainPackageDir, "lib", "codex-shim.cjs"),
+    shimPath,
     nativeBinaryPath,
     platformPackageDir,
     openAiCodexDir,
@@ -154,14 +162,9 @@ async function stageWrapperInstall(version) {
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-wrapper-test-"));
   const mainPackageDir = packageInstallDir(root, "@christiandoxa/prodex");
-  await ensureDir(path.join(mainPackageDir, "lib"));
+  await copyCodexShim(path.join(mainPackageDir, "lib"));
   await copyRepoFile("npm/prodex/prodex", path.join(mainPackageDir, "prodex"));
-  await copyRepoFile(
-    "npm/prodex/lib/codex-shim.cjs",
-    path.join(mainPackageDir, "lib", "codex-shim.cjs"),
-  );
   await fs.chmod(path.join(mainPackageDir, "prodex"), 0o755);
-  await fs.chmod(path.join(mainPackageDir, "lib", "codex-shim.cjs"), 0o755);
   await writeJsonFile(path.join(mainPackageDir, "package.json"), mainPackageManifest(version));
 
   const platformPackageDir = packageInstallDir(root, spec.packageName);
@@ -341,9 +344,7 @@ test("codex shim falls back to external codex when bundled native binary is unus
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-fallback-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
-  const shimPath = path.join(root, "codex-shim.cjs");
-  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
-  await fs.chmod(shimPath, 0o755);
+  const shimPath = await copyCodexShim(root);
 
   const packageRoot = path.join(root, "node_modules", ...packageName.split("/"));
   await fs.mkdir(packageRoot, { recursive: true });
@@ -420,9 +421,7 @@ test("codex shim resolves nvm-style global codex symlink after skipping Prodex s
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-nvm-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
-  const shimPath = path.join(root, "codex-shim.cjs");
-  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
-  await fs.chmod(shimPath, 0o755);
+  const shimPath = await copyCodexShim(root);
 
   const packageRoot = path.join(root, "node_modules", ...packageName.split("/"));
   await fs.mkdir(packageRoot, { recursive: true });
@@ -478,18 +477,16 @@ test("codex shim resolves nvm-style global codex symlink after skipping Prodex s
   assert.match(result.stdout, /nvm codex --version/);
 });
 
-test("codex shim can opt into npm installing external codex when none is found", async (t) => {
+async function runCodexAutoInstall(t, installedVersion) {
   if (process.platform === "win32") {
     t.skip("npm auto-install fixture is only implemented for POSIX runners");
-    return;
+    return null;
   }
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-autoinstall-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
-  const shimPath = path.join(root, "codex-shim.cjs");
-  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
-  await fs.chmod(shimPath, 0o755);
+  const shimPath = await copyCodexShim(root);
 
   const binDir = path.join(root, "bin");
   await ensureDir(binDir);
@@ -500,19 +497,19 @@ test("codex shim can opt into npm installing external codex when none is found",
       `#!${process.execPath}`,
       "const fs = require('node:fs');",
       "const path = require('node:path');",
-      "const expected = ['install', '-g', '@openai/codex@latest'];",
+      `const expected = ${JSON.stringify(["install", "-g", `@openai/codex@${openaiCodexDependencySpecifier}`])};`,
       "if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) {",
       "  console.error('unexpected npm args: ' + process.argv.slice(2).join(' '));",
       "  process.exit(17);",
       "}",
       "const codex = path.join(process.env.PRODEX_TEST_NPM_INSTALL_BIN, 'codex');",
-      "fs.writeFileSync(codex, '#!/bin/sh\\necho npm-installed codex \"$@\"\\n');",
+      `fs.writeFileSync(codex, '#!/bin/sh\\necho npm-installed codex-cli ${installedVersion} "$@"\\n');`,
       "fs.chmodSync(codex, 0o755);",
       "",
     ].join("\n"),
   );
 
-  const result = spawnSync(process.execPath, [shimPath, "--version"], {
+  return spawnSync(process.execPath, [shimPath, "--version"], {
     encoding: "utf8",
     env: cleanEnv({
       PATH: binDir,
@@ -520,9 +517,27 @@ test("codex shim can opt into npm installing external codex when none is found",
       PRODEX_TEST_NPM_INSTALL_BIN: binDir,
     }),
   });
+}
+
+test("codex shim can opt into npm installing external codex when none is found", async (t) => {
+  const result = await runCodexAutoInstall(t, openaiCodexVersion);
+  if (!result) return;
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stderr, /attempting npm install because PRODEX_CODEX_AUTO_INSTALL=1/);
   assert.match(result.stderr, /falling back to external codex from PATH/);
-  assert.match(result.stdout, /npm-installed codex --version/);
+  assert.equal(result.stdout.trim(), `npm-installed codex-cli ${openaiCodexVersion} --version`);
+});
+
+test("codex shim rejects an auto-installed Codex version mismatch", async (t) => {
+  const result = await runCodexAutoInstall(t, "9.9.9");
+  if (!result) return;
+
+  assert.equal(result.status, 1);
+  assert.ok(
+    result.stderr.includes(
+      `installed Codex version mismatch: expected ${openaiCodexVersion}, found 9.9.9`,
+    ),
+    result.stderr,
+  );
 });
