@@ -11,6 +11,8 @@ name = "secret_store"
 path = "src/lib.rs"
 
 [dependencies]
+aes-gcm-siv = { workspace = true }
+getrandom = { workspace = true }
 keyring = { workspace = true }
 libc = { workspace = true }
 prodex_domain = { workspace = true }
