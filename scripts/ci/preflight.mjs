@@ -145,6 +145,11 @@ export function preflightSteps(args) {
       args: ["scripts/ci/optional-tools-guard.mjs", "--self-test"],
     },
     {
+      label: "smart-context-guard",
+      command: "node",
+      args: ["scripts/ci/smart-context-guard.mjs", "--self-test"],
+    },
+    {
       label: "super-wildcard-guard",
       command: "node",
       args: ["scripts/ci/super-wildcard-guard.mjs"],

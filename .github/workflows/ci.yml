@@ -361,6 +361,12 @@ jobs:
       - name: Enforce optional-tool decoupling guard
         run: npm run ci:optional-tools-guard
 
+      - name: Enforce Smart Context correctness guard
+        run: npm run ci:smart-context-guard
+
+      - name: Check generated Smart Context evidence
+        run: npm run docs:smart-context-evidence:check
+
       - name: Enforce Rust super wildcard guard
         run: npm run ci:super-wildcard-guard
 
