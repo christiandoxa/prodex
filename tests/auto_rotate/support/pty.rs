@@ -35,37 +35,6 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
     PtyRunOutput { output, tty_output }
 }
 
-pub(crate) fn run_prodex_with_pty(
-    fixture: &Fixture,
-    args: &[&str],
-    extra_env: &[(&str, &str)],
-) -> PtyRunOutput {
-    let (mut child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
-    let mut tty_output = String::new();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        read_available(&mut master, &mut tty_output);
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!(
-                    "timed out waiting for prodex to enter Codex without input; tty output was {tty_output:?}"
-                );
-            }
-            Err(err) => panic!("failed to poll prodex launched with pty: {err}"),
-        }
-    }
-
-    let output = child
-        .wait_with_output()
-        .expect("failed to collect prodex output");
-    read_available(&mut master, &mut tty_output);
-    PtyRunOutput { output, tty_output }
-}
-
 fn spawn_prodex_with_pty(
     fixture: &Fixture,
     args: &[&str],
