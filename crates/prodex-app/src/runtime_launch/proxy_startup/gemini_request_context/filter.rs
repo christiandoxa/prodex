@@ -1,11 +1,11 @@
 //! Gemini local context ignore/filter rules, including gitignore and geminiignore handling.
 
 use super::super::super::gemini_request_io::runtime_gemini_read_text_limited;
-use super::RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT;
 use super::path_match::{
     runtime_gemini_context_match_path, runtime_gemini_glob_matches,
     runtime_gemini_glob_segment_matches,
 };
+use super::{RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT};
 use prodex_provider_core::{
     gemini_provider_core_collect_string_values, gemini_provider_core_skip_context_path_name,
 };
@@ -93,6 +93,7 @@ impl RuntimeGeminiContextFilter {
             true,
             &mut project_rules,
             &mut 0,
+            0,
         );
         runtime_gemini_load_ignore_rules(
             &project_root.join(".geminiignore"),
@@ -156,6 +157,7 @@ impl RuntimeGeminiContextFilter {
                 use_default_excludes,
                 &mut project_rules,
                 &mut 0,
+                0,
             );
         }
         if respect_gemini_ignore {
@@ -247,8 +249,10 @@ fn runtime_gemini_load_nested_gitignore_rules(
     use_default_excludes: bool,
     rules: &mut Vec<RuntimeGeminiIgnoreRule>,
     scanned: &mut usize,
+    depth: usize,
 ) {
-    if *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT {
+    if depth >= RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT || *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT
+    {
         return;
     }
     let Ok(entries) = fs::read_dir(directory) else {
@@ -285,6 +289,7 @@ fn runtime_gemini_load_nested_gitignore_rules(
             use_default_excludes,
             rules,
             scanned,
+            depth.saturating_add(1),
         );
     }
 }
@@ -409,6 +414,7 @@ mod tests {
             false,
             &mut rules,
             &mut scanned,
+            0,
         );
         let filter = RuntimeGeminiContextFilter {
             project_root: Some(directory.clone()),
@@ -460,6 +466,7 @@ mod tests {
             false,
             &mut rules,
             &mut scanned,
+            0,
         );
 
         assert_eq!(scanned, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT);
@@ -488,9 +495,40 @@ mod tests {
             false,
             &mut rules,
             &mut scanned,
+            0,
         );
 
         assert_eq!(scanned, 1);
+        assert!(rules.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_context_filter_caps_nested_gitignore_depth() {
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-gemini-ignore-depth-limit-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        let mut nested = directory.clone();
+        for index in 0..=RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT {
+            nested.push(format!("d{index}"));
+        }
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join(".gitignore"), "too-deep.secret\n").unwrap();
+
+        let mut rules = Vec::new();
+        let mut scanned = 0;
+        runtime_gemini_load_nested_gitignore_rules(
+            &directory,
+            &directory,
+            false,
+            &mut rules,
+            &mut scanned,
+            0,
+        );
+
+        assert_eq!(scanned, RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT);
         assert!(rules.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }

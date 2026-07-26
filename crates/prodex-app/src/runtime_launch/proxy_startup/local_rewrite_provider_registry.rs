@@ -25,6 +25,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod validation;
+use validation::runtime_gateway_model_costs_are_authoritative;
+
 const RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION: u32 = 2;
 const RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION: u32 = 1;
 const RUNTIME_GATEWAY_ROUTING_SCORES_SCHEMA_VERSION: u32 = 1;
@@ -884,25 +887,6 @@ fn runtime_gateway_provider_catalog_has_pricing(provider: ProviderId) -> bool {
         model.input_cost_per_million_microusd.is_some()
             || model.output_cost_per_million_microusd.is_some()
     })
-}
-
-fn runtime_gateway_model_costs_are_authoritative(
-    model_costs: &BTreeMap<String, RuntimeGatewayProviderModelCostArtifact>,
-) -> bool {
-    !model_costs.is_empty()
-        && model_costs.contains_key("*")
-        && model_costs.iter().all(|(model, cost)| {
-            !model.trim().is_empty()
-                && model.len() <= 128
-                && (cost.input_cost_per_million_microusd.is_some()
-                    || cost.output_cost_per_million_microusd.is_some())
-        })
-        && !model_costs.keys().enumerate().any(|(index, model)| {
-            model_costs
-                .keys()
-                .take(index)
-                .any(|previous| previous.eq_ignore_ascii_case(model))
-        })
 }
 
 fn runtime_gateway_builtin_model_costs(
