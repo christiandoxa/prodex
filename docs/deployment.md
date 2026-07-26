@@ -224,10 +224,10 @@ baseline with:
 - a namespace-wide `prodex-default-deny` NetworkPolicy, so new pods in the
   `prodex` namespace start with no ingress or egress until a workload-specific
   allow policy is added.
-- immutable image digest references that operators must replace with the
-  published 64-character `sha256` image digest for the release they deploy;
-  malformed and all-zero digest placeholders are rejected by the deployment
-  security guard.
+- an intentionally non-deployable `PRODEX_IMAGE_DIGEST` source placeholder.
+  Every standalone release publishes a rendered `prodex-gateway-<version>.yaml`
+  asset whose three workload references use the exact attested GHCR image
+  digest; deploy that release asset rather than the source template.
 
 The gateway workload mounts `prodex-gateway-secrets`, which contains the
 gateway bearer token, provider API key references, PostgreSQL, and Redis

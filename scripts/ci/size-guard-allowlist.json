@@ -230,14 +230,9 @@
     "reason": "SQLite governance integration coverage proves lifecycle, bounded durable tenant discovery, approval idempotency and denial audit, session revisions/revocation, audit integrity, export, and SIEM outbox behavior."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 1021,
-    "reason": "Gateway virtual-key admission carries trusted scope into the governed PIP and now owns the bounded Gemini Live reservation, accounting, and policy enforcement that share the same admitted key context."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1393,
-    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; capped until adapter projection splits out."
+    "maxLines": 1377,
+    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; authoritative pricing validation is split out and this cap is ratcheted until adapter projection moves."
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",

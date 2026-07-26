@@ -5,6 +5,9 @@ WORKDIR /workspace
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY crates ./crates
+COPY examples ./examples
+COPY benches ./benches
+COPY install.sh install.ps1 THIRD_PARTY_NOTICES.md ./
 
 RUN cargo build --locked --release
 

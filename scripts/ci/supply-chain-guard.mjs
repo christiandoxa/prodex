@@ -101,6 +101,41 @@ export function validateReleaseMalwareGate(contents) {
   return violations;
 }
 
+export function validateReleaseContainerPublication(contents) {
+  const container = workflowJob(contents, "publish-container");
+  const release = workflowJob(contents, "publish-github-release");
+  if (!container || !release) {
+    return [".github/workflows/standalone-release.yml: missing container or release publish job"];
+  }
+  const violations = [];
+  for (const marker of [
+    "- build",
+    "packages: write",
+    "docker push",
+    "docker.io/aquasec/trivy:0.72.0@sha256:",
+    "--severity HIGH,CRITICAL --exit-code 1 --format json",
+    "prodex-container-vulnerability-${VERSION}.json",
+    "subject-digest: ${{ steps.image.outputs.digest }}",
+    "push-to-registry: true",
+    "sed \"s/PRODEX_IMAGE_DIGEST/",
+    "name: kubernetes-manifest",
+  ]) {
+    if (!container.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: container publication missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    "- publish-container",
+    "name: kubernetes-manifest",
+    "cp artifacts/kubernetes-manifest/prodex-* release-assets/",
+  ]) {
+    if (!release.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release publication missing ${marker}`);
+    }
+  }
+  return violations;
+}
+
 export function validateWorkflow(filePath, contents) {
   const violations = [];
   let rustActions = 0;
@@ -290,6 +325,7 @@ function selfTest() {
   assert.deepEqual(validateProcessGuard(processJob), []);
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
   assert.equal(validateReleaseMalwareGate("jobs:\n  other:\n").length, 1);
+  assert.equal(validateReleaseContainerPublication("jobs:\n  other:\n").length, 1);
 }
 
 async function main() {
@@ -304,7 +340,10 @@ async function main() {
       violations.push(...validateWindowsSecurityJob(contents), ...validateProcessGuard(contents));
     }
     if (fileName === "standalone-release.yml") {
-      violations.push(...validateReleaseMalwareGate(contents));
+      violations.push(
+        ...validateReleaseMalwareGate(contents),
+        ...validateReleaseContainerPublication(contents),
+      );
     }
   }
   violations.push(...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8")));

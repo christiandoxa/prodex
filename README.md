@@ -182,15 +182,45 @@ Caveman is externally installed and validated; Smart Context is built into Prode
 <details>
 <summary>Install and verify the Super tools</summary>
 
+Caveman (Prodex-vetted `1.9.1` checkout):
+
+```bash
+export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
+install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
+git clone --no-checkout https://github.com/JuliusBrussee/caveman \
+  "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1" checkout --detach \
+  0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1/prodex-tool.json" <<'JSON'
+{
+  "schema_version": 1,
+  "id": "caveman",
+  "version": "1.9.1",
+  "source": "https://github.com/JuliusBrussee/caveman",
+  "commit": "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0",
+  "tree_sha256": "863d1a6965ed47f9e130312c8e943617e224cc08f8162296d7e06b8b63d54476"
+}
+JSON
+
+prodex capability super-doctor --json
+prodex caveman --dry-run
+```
+
+The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman.
+
 RTK:
 
 ```bash
-brew install rtk-ai/tap/rtk
+brew install rtk
 # or
-cargo install --git https://github.com/rtk-ai/rtk rtk
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+# or
+cargo install --git https://github.com/rtk-ai/rtk
 
 rtk --version
 rtk gain
+prodex capability super-doctor
 ```
 
 Codebase Memory MCP:
@@ -198,6 +228,7 @@ Codebase Memory MCP:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --skip-config
 codebase-memory-mcp --help
+prodex capability super-doctor
 ```
 
 Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
@@ -205,28 +236,48 @@ Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
 ```bash
 node --version
 npx --version
+npx -y @playwright/mcp@0.0.78 install-browser chrome
 npx -y @playwright/mcp@0.0.78 --version
-prodex playwright
+prodex capability super-doctor
+prodex playwright --dry-run
 ```
 
-Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It requires a browser usable by Playwright and prompts before tools marked as writes. Playwright MCP is not a security boundary.
+The browser install command above installs the Chrome channel used by Prodex's default MCP configuration. On Linux hosts missing browser system libraries, rerun it with `--with-deps`. Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It prompts before tools marked as writes. Playwright MCP is not a security boundary.
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail:
+Ponytail (Prodex-vetted `4.8.4` checkout):
 
 ```bash
-prodex capability super-doctor
-prodex ponytail
+export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
+install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
+git clone --no-checkout https://github.com/DietrichGebert/ponytail \
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4" checkout --detach \
+  16f29800fd2681bdf24f3eb4ccffe38be3baec6b
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4/prodex-tool.json" <<'JSON'
+{
+  "schema_version": 1,
+  "id": "ponytail",
+  "version": "4.8.4",
+  "source": "https://github.com/DietrichGebert/ponytail",
+  "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
+  "tree_sha256": "727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d"
+}
+JSON
+
+prodex capability super-doctor --json
+prodex ponytail --dry-run
 ```
 
-Install the exact vetted Ponytail tree described in [Optional Tools](docs/optional-tools.md). Prodex activates it only in the temporary overlay for that session. The base Codex profile remains unchanged.
+The target directory must not already exist. Prodex validates the commit metadata and complete tree digest, then activates Ponytail only in the temporary overlay for that session. The base Codex profile remains unchanged.
 
 Presidio English services:
 
 ```bash
-docker run -d --name presidio-analyzer -p 5002:3000 mcr.microsoft.com/presidio-analyzer:latest
-docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
+docker run -d --name presidio-analyzer -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
+docker run -d --name presidio-anonymizer -p 5001:3000 ghcr.io/data-privacy-stack/presidio-anonymizer:latest
 prodex presidio enable --language-mode fixed --languages en
 prodex presidio doctor --json
 ```
@@ -236,9 +287,9 @@ The standard Analyzer image is English-only. Indonesian detection requires an An
 Verify the optional stack:
 
 ```bash
-prodex capability super-doctor
-prodex capability super-doctor --strict
-prodex s
+prodex capability super-doctor --presidio --strict
+prodex s --no-presidio --dry-run
+prodex s --presidio --dry-run
 ```
 
 </details>

@@ -332,6 +332,135 @@ jobs:
           fi
           grep -q -- "--presidio is unsupported" "${RUNNER_TEMP}/presidio-error.txt"
 
+  publish-container:
+    name: Publish container and deployment manifest
+    runs-on: ubuntu-latest
+    needs:
+      - verify-ci
+      - build
+    timeout-minutes: 45
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          if [ "${GITHUB_REPOSITORY,,}" != "christiandoxa/prodex" ]; then
+            echo "container publication is restricted to christiandoxa/prodex" >&2
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "${version}" ]; then
+            echo "release ref ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build, scan, and push container
+        id: image
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build --pull \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --tag "${image}:${VERSION}" \
+            .
+
+          trivy_image="docker.io/aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
+          mkdir -p dist "${RUNNER_TEMP}/trivy-cache" "${RUNNER_TEMP}/trivy-input"
+          docker save "${image}:${VERSION}" --output "${RUNNER_TEMP}/trivy-input/image.tar"
+          docker run --rm \
+            -v "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            -v "${RUNNER_TEMP}/trivy-input:/input:ro" \
+            -v "${PWD}/dist:/output" \
+            "${trivy_image}" \
+            image --input /input/image.tar --scanners vuln --ignore-unfixed \
+            --severity HIGH,CRITICAL --exit-code 1 --format json \
+            --output "/output/prodex-container-vulnerability-${VERSION}.json"
+          rm -f "${RUNNER_TEMP}/trivy-input/image.tar"
+
+          docker push "${image}:${VERSION}"
+          repository_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${image}:${VERSION}")"
+          digest="${repository_digest#*@}"
+          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "registry returned an invalid image digest" >&2
+            exit 1
+          fi
+          {
+            echo "name=${image}"
+            echo "digest=${digest}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Attest container provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Render immutable Kubernetes manifest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          digest_hex="${IMAGE_DIGEST#sha256:}"
+          output="dist/prodex-gateway-${VERSION}.yaml"
+          sed "s/PRODEX_IMAGE_DIGEST/${digest_hex}/g" deploy/kubernetes/prodex-gateway.yaml > "${output}"
+          if grep -q 'PRODEX_IMAGE_DIGEST' "${output}"; then
+            echo "rendered Kubernetes manifest still contains an image placeholder" >&2
+            exit 1
+          fi
+          if [ "$(grep -c "@${IMAGE_DIGEST}" "${output}")" -ne 3 ]; then
+            echo "rendered Kubernetes manifest does not pin all Prodex workloads" >&2
+            exit 1
+          fi
+
+      - name: Attest deployment artifacts provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        with:
+          subject-path: |
+            dist/prodex-gateway-${{ steps.release.outputs.version }}.yaml
+            dist/prodex-container-vulnerability-${{ steps.release.outputs.version }}.json
+
+      - name: Upload Kubernetes manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kubernetes-manifest
+          path: |
+            dist/prodex-gateway-${{ steps.release.outputs.version }}.yaml
+            dist/prodex-container-vulnerability-${{ steps.release.outputs.version }}.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   prepare-release:
     name: Prepare release SBOM
     runs-on: ubuntu-latest
@@ -466,6 +595,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare-release
+      - publish-container
     permissions:
       attestations: write
       contents: write
@@ -522,6 +652,12 @@ jobs:
           name: release-sbom
           path: artifacts/release-sbom
 
+      - name: Download Kubernetes manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: kubernetes-manifest
+          path: artifacts/kubernetes-manifest
+
       - name: Prepare release assets
         shell: bash
         run: |
@@ -539,6 +675,7 @@ jobs:
             cp "${file}" "release-assets/${stem}-${parent}${ext}"
           done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
           cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
+          cp artifacts/kubernetes-manifest/prodex-* release-assets/
           cp install.sh release-assets/install.sh
           cp install.ps1 release-assets/install.ps1
           chmod 0755 release-assets/install.sh
@@ -658,6 +795,9 @@ jobs:
           \`\`\`
 
           Update future releases with \`prodex update\`.
+
+          Container: \`ghcr.io/christiandoxa/prodex:${version}\`
+          Kubernetes: \`prodex-gateway-${version}.yaml\` (pinned to the attested container digest).
 
           All published assets passed the release malware gate.
           EOF

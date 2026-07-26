@@ -88,7 +88,7 @@ fail-open behavior, or missing suite coverage.
 | --- | --- | --- | --- |
 | Immutable GitHub Actions | full-SHA pins with readable tag comments and guard | `.github/workflows`; `scripts/ci/supply-chain-guard.mjs` | pass |
 | Exact Rust/MSRV | manifests, workflows, Docker builder, and components use 1.97.0 | `Cargo.toml`; `rust-toolchain.toml`; `Dockerfile` | pass |
-| Immutable container inputs | verified image digests and Docker/Compose checks | `Dockerfile`; `compose.yaml`; `deploy/kubernetes/prodex-gateway.yaml` | pass |
+| Immutable container inputs | pinned base/service inputs plus an attested GHCR release image and digest-rendered Kubernetes release asset | `Dockerfile`; `compose.yaml`; `deploy/kubernetes/prodex-gateway.yaml`; `.github/workflows/standalone-release.yml` | pass |
 | License and dependency policy | audit plus deny advisories/bans/licenses/sources | `deny.toml`; `.github/workflows/ci.yml` | pass |
 | Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata` | `.github/workflows/ci.yml` | pass |
 | Release integrity | SPDX SBOM, attestations, verified `SHA256SUMS`, EICAR engine proof, and ClamAV scan of every final asset before publish | `.github/workflows/standalone-release.yml`; `scripts/ci/supply-chain-guard.mjs` | pass |
