@@ -154,10 +154,13 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let codex_home = std::env::temp_dir().join(format!(
-            "prodex-ponytail-config-{}-{stamp}",
-            std::process::id()
-        ));
+        let codex_home = std::env::temp_dir()
+            .canonicalize()
+            .expect("temp dir should resolve")
+            .join(format!(
+                "prodex-ponytail-config-{}-{stamp}",
+                std::process::id()
+            ));
         fs::create_dir_all(&codex_home).unwrap();
         fs::write(
             codex_home.join("config.toml"),
