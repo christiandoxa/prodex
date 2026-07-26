@@ -1,4 +1,5 @@
 use super::*;
+use std::io::IsTerminal;
 
 mod app_server_broker;
 mod audit;
@@ -75,7 +76,10 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     let use_presidio = if matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
         false
     } else {
-        args.presidio_preference().unwrap_or(false)
+        match args.presidio_preference() {
+            Some(use_presidio) => use_presidio,
+            None => prompt_super_presidio_opt_in()?,
+        }
     };
     if matches!(
         args.cli,
@@ -110,4 +114,20 @@ pub(crate) fn resolve_runtime_launch_profile_name(
     requested: Option<&str>,
 ) -> Result<String> {
     runtime_launch::resolve_runtime_launch_profile_name(state, requested)
+}
+
+pub(super) fn prompt_super_presidio_opt_in() -> Result<bool> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Ok(false);
+    }
+
+    print_stderr_prompt("Use Presidio for data safety? [y/N] ")?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .context("failed to read Presidio prompt answer")?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }

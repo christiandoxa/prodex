@@ -46,7 +46,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
+fn s_pty_launch_prompts_for_presidio_and_enters_codex_in_yolo_mode() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
@@ -58,7 +58,7 @@ fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
     fs::create_dir_all(&runtime_log_dir).expect("failed to create runtime log dir");
     let runtime_log_dir_arg = runtime_log_dir.display().to_string();
 
-    let run = run_prodex_with_pty(
+    let run = run_prodex_with_pty_prompt_answer(
         &fixture,
         &["s", "--skip-quota-check", "exec", "hello"],
         &[
@@ -66,6 +66,8 @@ fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
             ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
             ("PRODEX_PRESIDIO_AUTO_START", "0"),
         ],
+        "Use Presidio for data safety?",
+        "\r",
     );
 
     assert!(
@@ -76,8 +78,8 @@ fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert!(
-        !run.tty_output.contains("Use Presidio for data safety?"),
-        "Super should not ask for Presidio permission: {}",
+        run.tty_output.contains("Use Presidio for data safety?"),
+        "Super should ask for Presidio permission: {}",
         run.tty_output
     );
 
@@ -128,6 +130,6 @@ fn s_pty_launch_skips_permission_prompts_and_enters_codex_in_yolo_mode() {
     let log = fs::read_to_string(latest_log).expect("failed to read runtime log");
     assert!(
         log.contains("presidio_redaction_enabled=false"),
-        "Super should keep Presidio disabled unless explicitly requested, log: {log}"
+        "enter should keep runtime Presidio redaction disabled, log: {log}"
     );
 }

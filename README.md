@@ -133,9 +133,9 @@ prodex super --presidio
 prodex capability super-doctor
 ```
 
-Super does not show a Presidio opt-in prompt; redaction stays disabled unless
-`--presidio` is passed. Use `prodex run` instead when approval prompts and the
-normal Codex workspace-trust flow are desired.
+Interactive Super launches ask whether to enable Presidio. Pass `--presidio` or
+`--no-presidio` to answer non-interactively. Use `prodex run` instead when Codex
+approval prompts and the normal workspace-trust flow are desired.
 
 Supported optional-tool identities include Caveman, RTK, Codebase Memory MCP,
 Playwright MCP, Ponytail, and Presidio. Resolution is side-effect-free;
