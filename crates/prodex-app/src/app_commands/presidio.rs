@@ -34,8 +34,8 @@ const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
 const PRESIDIO_AUTO_START_ENV: &str = "PRODEX_PRESIDIO_AUTO_START";
 const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
-const PRESIDIO_ANALYZER_IMAGE: &str = "mcr.microsoft.com/presidio-analyzer:latest";
-const PRESIDIO_ANONYMIZER_IMAGE: &str = "mcr.microsoft.com/presidio-anonymizer:latest";
+const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:latest";
+const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:latest";
 
 #[derive(Debug, Clone)]
 struct PresidioPanel {

@@ -1,11 +1,22 @@
 use super::local_rewrite_application_boundary::runtime_gateway_stable_id;
-use super::local_rewrite_application_data_plane::RuntimeGatewayApplicationAdmission;
-use prodex_domain::{ApprovalId, ApprovalState, TenantId};
+use super::local_rewrite_application_data_plane::{
+    RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError,
+    runtime_gateway_application_data_plane_admission,
+};
+use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
+use crate::{RuntimeProxyRequest, runtime_proxy_log};
+use prodex_application::ApplicationInspectionPlan;
+use prodex_domain::{
+    ApprovalId, ApprovalState, BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey,
+    PrincipalPolicyAttributes, ReservationRequest, TenantId, UsageAmount,
+};
 use prodex_provider_core::ProviderModelCost;
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
 pub(super) const RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS: u64 = 32_768;
 pub(super) const RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS: u64 = 5 * 60 * 1_000;
 pub(super) const RUNTIME_GATEWAY_REALTIME_FRAME_MAX_BYTES: usize = 32 * 1_024;
+pub(super) const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
 
 #[derive(Clone)]
 pub(super) struct RuntimeGatewayRealtimeAccountingPlan {
@@ -60,4 +71,145 @@ impl From<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection>
             approval: None,
         }
     }
+}
+
+pub(super) fn runtime_gateway_application_admission_rejection(
+    error: RuntimeGatewayApplicationDataPlaneError,
+) -> RuntimeGatewayVirtualKeyAdmissionFailure {
+    match error {
+        RuntimeGatewayApplicationDataPlaneError::GovernanceDenied => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied.into()
+        }
+        RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired {
+            approval_id,
+            state,
+        } => RuntimeGatewayVirtualKeyAdmissionFailure {
+            rejection:
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired,
+            approval: Some((approval_id, state)),
+        },
+        RuntimeGatewayApplicationDataPlaneError::GovernanceSessionRequired => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceSessionRequired.into()
+        }
+        RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider.into()
+        }
+        RuntimeGatewayApplicationDataPlaneError::Execution(_)
+        | RuntimeGatewayApplicationDataPlaneError::MissingPrincipal
+        | RuntimeGatewayApplicationDataPlaneError::RouteUnavailable
+        | RuntimeGatewayApplicationDataPlaneError::ProviderRoute(_)
+        | RuntimeGatewayApplicationDataPlaneError::TraceContext(_)
+        | RuntimeGatewayApplicationDataPlaneError::Admission(_)
+        | RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into()
+        }
+    }
+}
+
+pub(super) fn runtime_gateway_application_admission_without_virtual_key(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &super::local_rewrite::RuntimeLocalRewriteProxyShared,
+    network_zone: prodex_domain::NetworkZone,
+    authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
+    inspection: &ApplicationInspectionPlan,
+) -> Result<RuntimeGatewayVirtualKeyAdmissionOutcome, RuntimeGatewayVirtualKeyAdmissionFailure> {
+    let realtime_accounting = runtime_proxy_crate::is_runtime_realtime_websocket_path(
+        runtime_proxy_crate::path_without_query(&captured.path_and_query),
+    )
+    .then(|| RuntimeGatewayRealtimeAccountingPlan {
+        token_limit: RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
+        model: shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone()
+            .unwrap_or_else(|| {
+                super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
+            }),
+        cost: ProviderModelCost::default(),
+    });
+    let Some(tenant) = authorized.tenant_context() else {
+        return Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
+            namespace: None,
+            application: RuntimeGatewayApplicationAdmission::compatibility_anonymous(
+                authorized.request().route(),
+                captured,
+                shared,
+                inspection.clone(),
+            )
+            .map_err(|_| {
+                RuntimeGatewayVirtualKeyAdmissionFailure::from(
+                    runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
+                )
+            })?,
+            realtime_accounting,
+        });
+    };
+    let call_id = CallId::new();
+    let reservation_id = prodex_domain::ReservationId::new();
+    let estimate = UsageAmount::new(
+        realtime_accounting
+            .as_ref()
+            .map(|accounting| accounting.token_limit)
+            .unwrap_or_else(|| {
+                runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body).max(1)
+            }),
+        0,
+    );
+    let command = prodex_storage::AtomicReservationCommand {
+        storage_key: prodex_storage::TenantStorageKey::tenant(tenant.tenant_id),
+        idempotency_key: IdempotencyKey::from_call_reservation(call_id, reservation_id),
+        snapshot: BudgetSnapshot::default(),
+        limit: BudgetLimit::new(u64::MAX, u64::MAX),
+        request: ReservationRequest {
+            tenant_id: tenant.tenant_id,
+            call_id,
+            reservation_id,
+            estimate,
+        },
+        created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
+        ttl_ms: if realtime_accounting.is_some() {
+            RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS
+        } else {
+            RUNTIME_GATEWAY_RESERVATION_TTL_MS
+        },
+    };
+    let application = runtime_gateway_application_data_plane_admission(
+        authorized,
+        captured,
+        shared,
+        network_zone,
+        PrincipalPolicyAttributes::default(),
+        command,
+        inspection.clone(),
+    )
+    .map_err(|error| {
+        let rejection = runtime_gateway_application_admission_rejection(error);
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_application_admission_failed",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("reason", rejection.rejection.code()),
+                ],
+            ),
+        );
+        rejection
+    })?;
+    let principal_id = authorized
+        .principal()
+        .map(|principal| principal.id.to_string())
+        .unwrap_or_default();
+    Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
+        namespace: Some(runtime_gateway_conversation_namespace(
+            &tenant.tenant_id,
+            "principal",
+            &principal_id,
+        )),
+        application,
+        realtime_accounting,
+    })
 }
