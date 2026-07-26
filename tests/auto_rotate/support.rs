@@ -24,7 +24,7 @@ pub(super) use process::{
     run_prodex_with_env, run_prodex_with_env_and_stdin, spawn_prodex_with_env,
 };
 #[cfg(unix)]
-pub(super) use pty::{run_prodex_with_pty, run_prodex_with_pty_prompt_answer};
+pub(super) use pty::run_prodex_with_pty_prompt_answer;
 pub(super) use state::{
     active_profile, add_managed_profile, read_access_token, read_state,
     wait_for_runtime_broker_registry_path,

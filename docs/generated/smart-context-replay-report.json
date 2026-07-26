@@ -3,8 +3,8 @@
   "corpus_schema_version": 2,
   "evidence_level": "deterministic_correctness_with_tokenizer_counts",
   "provenance": {
-    "package_version": "0.349.0",
-    "commit_sha": "002fdee4bf97089e4ee2abecd0e980caf9718d8b",
+    "package_version": "0.350.0",
+    "commit_sha": "891554ff7551d823979d29594ec2fa0b86b35234",
     "os": "linux",
     "architecture": "x86_64",
     "rust_toolchain": "rustc 1.97.0 (2d8144b78 2026-07-07)",
@@ -58,7 +58,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 742766819,
+          "rewrite_duration_ns": 734004214,
           "exact_body_sha256": "4310758b7915c8bdd2cdde102dab35a0631e4b8816bf5cce6c6bf279658c8357",
           "optimized_body_sha256": "e3abde633ea5169dff98115c3e933ecb301344e81af564dadd362252b4ed13a6",
           "failures": []
@@ -111,7 +111,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 23317282,
+          "rewrite_duration_ns": 22793327,
           "exact_body_sha256": "28f669bf26062a16bbdae9006d69619563d803ee24ae317cb4a7a259471d5c3e",
           "optimized_body_sha256": "5f571ff34d24427df541b9e165b661728f10480e4184665e4309145f5a9efc01",
           "failures": []
@@ -163,7 +163,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 44071844,
+          "rewrite_duration_ns": 43364371,
           "exact_body_sha256": "21db334b65b05272cdd4325b66af8bdad7944fc92bb0479af613c119030dbd66",
           "optimized_body_sha256": "152434cf093d965b1521bcea3ed82765ce635220a2d3993aa199127217f27050",
           "failures": []
@@ -216,7 +216,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 40117112,
+          "rewrite_duration_ns": 39984469,
           "exact_body_sha256": "bd89da82c0fed2477a1041826339e21cd4104e88dc4798f101f01c0f0531b69d",
           "optimized_body_sha256": "44c1f88ba6eec437dfb53dd3b7df4b00859d6a06b2a2050c6a72fb1ea9ec2553",
           "failures": []
@@ -266,7 +266,7 @@
           "validation_passed": true,
           "fallback_reason": "shadow",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 123417,
+          "rewrite_duration_ns": 139720,
           "exact_body_sha256": "d230a23938256ccf5e6b5c46bf17c0a8f9100a838c786b26488415a971329f86",
           "optimized_body_sha256": "d230a23938256ccf5e6b5c46bf17c0a8f9100a838c786b26488415a971329f86",
           "failures": []
@@ -317,7 +317,7 @@
           "validation_passed": true,
           "fallback_reason": "canary_out",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 215536,
+          "rewrite_duration_ns": 116940,
           "exact_body_sha256": "0bd2e2d17eaf0f4e68f45c37b63180fbd9dcf254ba618f21c5dda49bb11d1a66",
           "optimized_body_sha256": "0bd2e2d17eaf0f4e68f45c37b63180fbd9dcf254ba618f21c5dda49bb11d1a66",
           "failures": []
@@ -368,7 +368,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 10009,
+          "rewrite_duration_ns": 12120,
           "exact_body_sha256": "45954919d9c59af0244bbda376453864fe4a63689df5c810b87c9a995e9b7e01",
           "optimized_body_sha256": "45954919d9c59af0244bbda376453864fe4a63689df5c810b87c9a995e9b7e01",
           "failures": []
@@ -419,7 +419,7 @@
           "validation_passed": true,
           "fallback_reason": "unsupported_route",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 68469,
+          "rewrite_duration_ns": 77670,
           "exact_body_sha256": "1920ce759bff4ebc58807a432968f96b210062328a9866f2be092372bc8c02a4",
           "optimized_body_sha256": "1920ce759bff4ebc58807a432968f96b210062328a9866f2be092372bc8c02a4",
           "failures": []
@@ -470,7 +470,7 @@
           "validation_passed": true,
           "fallback_reason": "unsupported_route",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 69879,
+          "rewrite_duration_ns": 83261,
           "exact_body_sha256": "73ddf0e0098b85f49c1b36031ac88478f9b2837e2dfb3da4ca4b1ccddb7d752f",
           "optimized_body_sha256": "73ddf0e0098b85f49c1b36031ac88478f9b2837e2dfb3da4ca4b1ccddb7d752f",
           "failures": []
@@ -521,7 +521,7 @@
           "validation_passed": true,
           "fallback_reason": "missing_artifact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 578649,
+          "rewrite_duration_ns": 532010,
           "exact_body_sha256": "7894e46b141fa5429c965810c0997dc2e43f093ebff66c2b2652d628028016ea",
           "optimized_body_sha256": "7894e46b141fa5429c965810c0997dc2e43f093ebff66c2b2652d628028016ea",
           "failures": []
@@ -572,7 +572,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 143558,
+          "rewrite_duration_ns": 140041,
           "exact_body_sha256": "760397c38c762f7ad6fabf46a21d85b7e41437a2fad60cf5c49b63d77cb613a6",
           "optimized_body_sha256": "760397c38c762f7ad6fabf46a21d85b7e41437a2fad60cf5c49b63d77cb613a6",
           "failures": []
@@ -602,7 +602,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 110637,
+          "rewrite_duration_ns": 185970,
           "exact_body_sha256": "834d6d5d83798fbcd201876802c7d98e6b219831ecc1868238420429abf38f74",
           "optimized_body_sha256": "834d6d5d83798fbcd201876802c7d98e6b219831ecc1868238420429abf38f74",
           "failures": []
@@ -632,7 +632,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 106598,
+          "rewrite_duration_ns": 166860,
           "exact_body_sha256": "45c6b3986fdc293748175088c28dfca92338ac783625d6f8095c1d060473cac4",
           "optimized_body_sha256": "45c6b3986fdc293748175088c28dfca92338ac783625d6f8095c1d060473cac4",
           "failures": []
@@ -683,7 +683,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 137307,
+          "rewrite_duration_ns": 147350,
           "exact_body_sha256": "21d4bfa7a248bd6deaaa044ac3b35b56130e021006eb82633cb783a3915ff870",
           "optimized_body_sha256": "21d4bfa7a248bd6deaaa044ac3b35b56130e021006eb82633cb783a3915ff870",
           "failures": []
@@ -713,7 +713,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 114197,
+          "rewrite_duration_ns": 149470,
           "exact_body_sha256": "4e8060df39aea9054df7879fcbedef8886d70f90c0cdd7243763cc90724293c2",
           "optimized_body_sha256": "4e8060df39aea9054df7879fcbedef8886d70f90c0cdd7243763cc90724293c2",
           "failures": []
@@ -743,7 +743,7 @@
           "validation_passed": true,
           "fallback_reason": "no_op",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 104828,
+          "rewrite_duration_ns": 116780,
           "exact_body_sha256": "00a2a17864fc273ded9f4157e91e1ec9c339a1bff0d0cd7a56ade7986dde2632",
           "optimized_body_sha256": "00a2a17864fc273ded9f4157e91e1ec9c339a1bff0d0cd7a56ade7986dde2632",
           "failures": []
@@ -795,7 +795,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7910,
+          "rewrite_duration_ns": 7690,
           "exact_body_sha256": "b2436a6515041df0f179da5af19f6ed0fc8fdbf498d16a23a880d12d71af193a",
           "optimized_body_sha256": "b2436a6515041df0f179da5af19f6ed0fc8fdbf498d16a23a880d12d71af193a",
           "failures": []
@@ -825,7 +825,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7939,
+          "rewrite_duration_ns": 7550,
           "exact_body_sha256": "ecb8cd60334b0b943ed855c23ab7101c5480e1de800d25552234757e7d8c9dd3",
           "optimized_body_sha256": "ecb8cd60334b0b943ed855c23ab7101c5480e1de800d25552234757e7d8c9dd3",
           "failures": []
@@ -855,7 +855,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7300,
+          "rewrite_duration_ns": 7400,
           "exact_body_sha256": "e1646e89ff041bf6014de4679413327ebb626ae92286bbc54bf196cf02f44656",
           "optimized_body_sha256": "e1646e89ff041bf6014de4679413327ebb626ae92286bbc54bf196cf02f44656",
           "failures": []
@@ -885,7 +885,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7420,
+          "rewrite_duration_ns": 7330,
           "exact_body_sha256": "98ea90f998250a6e3a59deeb6cf7124b2e8ad1bc6d6a7b236c0006b7130633fe",
           "optimized_body_sha256": "98ea90f998250a6e3a59deeb6cf7124b2e8ad1bc6d6a7b236c0006b7130633fe",
           "failures": []
@@ -915,7 +915,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7380,
+          "rewrite_duration_ns": 7210,
           "exact_body_sha256": "e50ee4154faffa2e156781cb355d317259c190723465b3fb647a6bfe40368030",
           "optimized_body_sha256": "e50ee4154faffa2e156781cb355d317259c190723465b3fb647a6bfe40368030",
           "failures": []
@@ -945,7 +945,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7420,
+          "rewrite_duration_ns": 7300,
           "exact_body_sha256": "59eb7a13715c60558834185609e8111ae6a5ed5668384708de90ca51ffcc1750",
           "optimized_body_sha256": "59eb7a13715c60558834185609e8111ae6a5ed5668384708de90ca51ffcc1750",
           "failures": []
@@ -975,7 +975,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7430,
+          "rewrite_duration_ns": 7190,
           "exact_body_sha256": "1b500bc39a077f8d783429f8c6593da8f3e7a70561029fcbfe42f00457bba342",
           "optimized_body_sha256": "1b500bc39a077f8d783429f8c6593da8f3e7a70561029fcbfe42f00457bba342",
           "failures": []
@@ -1005,7 +1005,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7350,
+          "rewrite_duration_ns": 7270,
           "exact_body_sha256": "2202de9d8eda3435d2a964c5ffd17ab92dbc5a9c2f4f859ff06ecae2250804b9",
           "optimized_body_sha256": "2202de9d8eda3435d2a964c5ffd17ab92dbc5a9c2f4f859ff06ecae2250804b9",
           "failures": []
@@ -1035,7 +1035,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7340,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "cafb4381f28f9c87ba689784e10e2afb8b8a4ae54e7ce78d51e9fd5943f9d7f8",
           "optimized_body_sha256": "cafb4381f28f9c87ba689784e10e2afb8b8a4ae54e7ce78d51e9fd5943f9d7f8",
           "failures": []
@@ -1065,7 +1065,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7379,
+          "rewrite_duration_ns": 7310,
           "exact_body_sha256": "94f9af28df4bb66d93a7e4b101fc636c7853d6a18cca7a658bec4e710534f375",
           "optimized_body_sha256": "94f9af28df4bb66d93a7e4b101fc636c7853d6a18cca7a658bec4e710534f375",
           "failures": []
@@ -1095,7 +1095,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7430,
+          "rewrite_duration_ns": 7190,
           "exact_body_sha256": "b2a2d5a005615f705d6811eed52ca15b230342693c614fcf26a41aa030064352",
           "optimized_body_sha256": "b2a2d5a005615f705d6811eed52ca15b230342693c614fcf26a41aa030064352",
           "failures": []
@@ -1125,7 +1125,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7420,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "753aeb0274eeb66c184415f8660da1f2a0365417724972952242c0a624ea729c",
           "optimized_body_sha256": "753aeb0274eeb66c184415f8660da1f2a0365417724972952242c0a624ea729c",
           "failures": []
@@ -1155,7 +1155,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7360,
+          "rewrite_duration_ns": 7140,
           "exact_body_sha256": "2feae6529e92993fcaed55ffaeec897543b2a511dbb7b925cbf145a851127fd0",
           "optimized_body_sha256": "2feae6529e92993fcaed55ffaeec897543b2a511dbb7b925cbf145a851127fd0",
           "failures": []
@@ -1185,7 +1185,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7400,
+          "rewrite_duration_ns": 7220,
           "exact_body_sha256": "4e4f912d472c0741321d836ba9ba27500d642bb1ad842c9c76b0d85433737708",
           "optimized_body_sha256": "4e4f912d472c0741321d836ba9ba27500d642bb1ad842c9c76b0d85433737708",
           "failures": []
@@ -1215,7 +1215,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7369,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "d072746d33a286677e4161e8677d078e469d941035e422bfb22bb553024686fb",
           "optimized_body_sha256": "d072746d33a286677e4161e8677d078e469d941035e422bfb22bb553024686fb",
           "failures": []
@@ -1245,7 +1245,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 13560,
+          "rewrite_duration_ns": 9530,
           "exact_body_sha256": "0ae700f22b981c5018b4c0ffe237ccdced6f17e268bbfcb72d5d799eb9e38484",
           "optimized_body_sha256": "0ae700f22b981c5018b4c0ffe237ccdced6f17e268bbfcb72d5d799eb9e38484",
           "failures": []
@@ -1305,7 +1305,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7340,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "91dc8eb615cb3d9f4588949db8c901f8d09a9c135383e22a8d527d7ec7f67fd2",
           "optimized_body_sha256": "91dc8eb615cb3d9f4588949db8c901f8d09a9c135383e22a8d527d7ec7f67fd2",
           "failures": []
@@ -1335,7 +1335,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7420,
+          "rewrite_duration_ns": 7180,
           "exact_body_sha256": "95fd3f0c8fe43980930bfa3072ef948eb47f2098d9bd20425f8b0ff6dc5b2813",
           "optimized_body_sha256": "95fd3f0c8fe43980930bfa3072ef948eb47f2098d9bd20425f8b0ff6dc5b2813",
           "failures": []
@@ -1365,7 +1365,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7329,
+          "rewrite_duration_ns": 7190,
           "exact_body_sha256": "b5ed05afcd2a6ee03d33df1c60a03265360e0aafede9dc989924d8b5b22f0119",
           "optimized_body_sha256": "b5ed05afcd2a6ee03d33df1c60a03265360e0aafede9dc989924d8b5b22f0119",
           "failures": []
@@ -1395,7 +1395,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7300,
+          "rewrite_duration_ns": 7160,
           "exact_body_sha256": "0c40e3b673213ee179764415f5ed440537201ef2c37bd8c64d05fcadfa920e63",
           "optimized_body_sha256": "0c40e3b673213ee179764415f5ed440537201ef2c37bd8c64d05fcadfa920e63",
           "failures": []
@@ -1425,7 +1425,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7360,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "f5baab6704fbc589d9ab434cb7d53bf58ea928758674f615f7df192b8ee8bd0c",
           "optimized_body_sha256": "f5baab6704fbc589d9ab434cb7d53bf58ea928758674f615f7df192b8ee8bd0c",
           "failures": []
@@ -1455,7 +1455,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7390,
+          "rewrite_duration_ns": 7170,
           "exact_body_sha256": "a56524c510cf83141924d4d2454994b0e380e55d3c26de1ee9ef2eca2bf9df56",
           "optimized_body_sha256": "a56524c510cf83141924d4d2454994b0e380e55d3c26de1ee9ef2eca2bf9df56",
           "failures": []
@@ -1485,7 +1485,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7379,
+          "rewrite_duration_ns": 7200,
           "exact_body_sha256": "a5d42b4fdd301ade14a592f9b719f41127c44cca771014c1fb8e6acec21896aa",
           "optimized_body_sha256": "a5d42b4fdd301ade14a592f9b719f41127c44cca771014c1fb8e6acec21896aa",
           "failures": []
@@ -1515,7 +1515,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7360,
+          "rewrite_duration_ns": 7240,
           "exact_body_sha256": "78680d3690bcd82d1ea59fd19cfa66e8eebd5ae7a4fed3af1185c6b394e4cfda",
           "optimized_body_sha256": "78680d3690bcd82d1ea59fd19cfa66e8eebd5ae7a4fed3af1185c6b394e4cfda",
           "failures": []
@@ -1545,7 +1545,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7360,
+          "rewrite_duration_ns": 8320,
           "exact_body_sha256": "d560b984b05badf1df53e8518a2623076a63e540128fbcb2698bce6e0db9755b",
           "optimized_body_sha256": "d560b984b05badf1df53e8518a2623076a63e540128fbcb2698bce6e0db9755b",
           "failures": []
@@ -1575,7 +1575,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7370,
+          "rewrite_duration_ns": 9520,
           "exact_body_sha256": "0e16cbf259954f08fc4eae7be61ba0c02cd9d3d2daebb5a60a55db528608720f",
           "optimized_body_sha256": "0e16cbf259954f08fc4eae7be61ba0c02cd9d3d2daebb5a60a55db528608720f",
           "failures": []
@@ -1605,7 +1605,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7280,
+          "rewrite_duration_ns": 9860,
           "exact_body_sha256": "ac42422ffdd83c870757e83c2bb99a0cd594976518ac116f924717ee19ee79e0",
           "optimized_body_sha256": "ac42422ffdd83c870757e83c2bb99a0cd594976518ac116f924717ee19ee79e0",
           "failures": []
@@ -1635,7 +1635,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7410,
+          "rewrite_duration_ns": 7340,
           "exact_body_sha256": "2d9584f13093871e402184bb3acd79548e6a36d84f79c5bce7d2561199ee09e8",
           "optimized_body_sha256": "2d9584f13093871e402184bb3acd79548e6a36d84f79c5bce7d2561199ee09e8",
           "failures": []
@@ -1665,7 +1665,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7369,
+          "rewrite_duration_ns": 7230,
           "exact_body_sha256": "80a68a6699576c0891dee00da36ceacf72b2ea2c3f1485371c9e8876d36c4c3d",
           "optimized_body_sha256": "80a68a6699576c0891dee00da36ceacf72b2ea2c3f1485371c9e8876d36c4c3d",
           "failures": []
@@ -1695,7 +1695,7 @@
           "validation_passed": true,
           "fallback_reason": "explicit_exact",
           "allocation_bytes": null,
-          "rewrite_duration_ns": 7460,
+          "rewrite_duration_ns": 7310,
           "exact_body_sha256": "c6d4a940309848d8829876c16b90af8d6f42a8b1bcc156a103484ee9d1a6e8bd",
           "optimized_body_sha256": "c6d4a940309848d8829876c16b90af8d6f42a8b1bcc156a103484ee9d1a6e8bd",
           "failures": []
@@ -1748,7 +1748,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 24705596,
+          "rewrite_duration_ns": 25191339,
           "exact_body_sha256": "86520e9c8035cee4acec8b31959dedd9af9789cd9c207d8282efcdaf1514c018",
           "optimized_body_sha256": "255b01cfbf077e863ee6965286cd1e6267474162f77ded90fb85bff192b13626",
           "failures": []
@@ -1780,7 +1780,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 24531430,
+          "rewrite_duration_ns": 26607600,
           "exact_body_sha256": "af39828378a13bae1fcca286c8fe646ae1e97fe98ef685bd9f01b3f3ba5af4ec",
           "optimized_body_sha256": "b46f691a23e8e15eece7da28bcc10481d5d279e1d293de75ab4b0f4fd2bdfbe2",
           "failures": []
@@ -1812,7 +1812,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 25093709,
+          "rewrite_duration_ns": 24284318,
           "exact_body_sha256": "267e1cbf30ea404a4fe9e90feec04ac5a617c1c127bd6a068a549b926a12432b",
           "optimized_body_sha256": "0edca4e580674f88b12337eb3e9ee2f16c335ef1cf302ff0ecfe4f893fdaa4a8",
           "failures": []
@@ -1865,7 +1865,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 44857292,
+          "rewrite_duration_ns": 50817477,
           "exact_body_sha256": "cffeb52dea0d69b1c1ab541ce095b1b042d8786d336416617d7bb5f91658285f",
           "optimized_body_sha256": "7107fcedb12442867448df6ddb20d7e6205514260f92a009854bedff27535f9e",
           "failures": []
@@ -1918,7 +1918,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 25894863,
+          "rewrite_duration_ns": 26376230,
           "exact_body_sha256": "2f29edf6be2096b4b7731fc465445e9a355bb51e5aa28b0d8d10cf8c610e886b",
           "optimized_body_sha256": "79967aa0b97e4574766dc6d55b7445d8398f04f7e9e26c4d84054d99acd954ec",
           "failures": []
@@ -1971,7 +1971,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 36538324,
+          "rewrite_duration_ns": 36225336,
           "exact_body_sha256": "6ecd8f16dd6ba7926cea17bb68546e6b3ecc80978b3646823abb19463e493ced",
           "optimized_body_sha256": "39ef10c8c147f861800e1a87320106f9ed802df3234ec79a21d8c1833dbfcd4a",
           "failures": []
@@ -2024,7 +2024,7 @@
           "validation_passed": true,
           "fallback_reason": null,
           "allocation_bytes": null,
-          "rewrite_duration_ns": 30511613,
+          "rewrite_duration_ns": 29284641,
           "exact_body_sha256": "abd7aa13be1f4d7254b873a9056bc9fade6e35eb38a436c3a022b6b817fdc2ce",
           "optimized_body_sha256": "a063e919708b6f923f5b72a9c9080c03d517e67c6547be6e125f283c9b3f33f1",
           "failures": []
