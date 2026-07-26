@@ -232,6 +232,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1283,7 +1289,7 @@ dependencies = [
  "aes-gcm-siv",
  "anyhow",
  "argon2",
- "base64",
+ "base64 0.23.0",
  "getrandom 0.4.3",
  "pbkdf2",
  "prodex-secret-store",
@@ -1297,7 +1303,7 @@ dependencies = [
 name = "prodex-provider-core"
 version = "0.354.0"
 dependencies = [
- "base64",
+ "base64 0.23.0",
  "serde",
  "serde_json",
 ]
@@ -1336,7 +1342,7 @@ dependencies = [
 name = "prodex-runtime-proxy"
 version = "0.354.0"
 dependencies = [
- "base64",
+ "base64 0.23.0",
  "prodex-gateway-core",
  "prodex-provider-core",
  "prodex-redaction",
@@ -1552,9 +1558,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
@@ -1718,7 +1724,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "027853bbf8c7763b77c5c595f1c271c7d536ced7d6f83452911b944621e57fc2"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.1",
  "bstr",
  "fancy-regex",
  "lazy_static",
