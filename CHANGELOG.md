@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.354.0 - 2026-07-26
+
+### Runtime
+
+- Close runtime governance gaps (`0c5e2ce`)
+
 ## 0.353.0 - 2026-07-26
 
 ### Docs
@@ -92,9 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Sync runtime test manifest (`dde40db`)
 - Harden runtime and release pipeline (`e9ed1e0`)
-
-## 0.342.0 - 2026-07-24
-
-### Misc
-
-- Secure optimizer cache state (`9efa10b`)
