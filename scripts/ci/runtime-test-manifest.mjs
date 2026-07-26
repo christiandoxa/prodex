@@ -514,10 +514,6 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     weightSeconds: 8,
   },
   {
-    name: "next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidate_is_auth_failed",
-    weightSeconds: 4,
-  },
-  {
     name: "previous_response_negative_cache_boundary_matrix_respects_threshold_and_expiry",
     weightSeconds: 5,
   },
@@ -623,15 +619,11 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "responses_and_websocket_sync_probe_cold_start_under_background_probe_queue_pressure",
+    name: "cold_start_candidate_probe_is_queued_without_blocking_selection",
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "compact_and_standard_defer_sync_probe_cold_start_under_background_probe_queue_pressure",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_mode",
+    name: "sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure",
     tags: SERIALIZED_TAGS,
   },
   {

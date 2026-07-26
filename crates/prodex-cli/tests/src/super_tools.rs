@@ -176,11 +176,14 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
 }
 
 #[test]
-fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
+fn super_leading_tool_words_are_passed_through_to_codex() {
     let args =
         parse_super_as_runtime_tools(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
-    assert!(args.presidio);
-    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
+    assert!(!args.presidio);
+    assert_eq!(
+        args.codex_args,
+        os_args(&["ponytail", "presidio", "exec", "hello"])
+    );
 }
 
 #[test]

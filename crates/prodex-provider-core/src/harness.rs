@@ -10,7 +10,6 @@ const RESPONSES_ROUTE: &[ProviderEndpoint] = &[ProviderEndpoint::Responses];
 #[serde(rename_all = "lowercase")]
 pub enum HarnessMode {
     #[default]
-    Auto,
     Native,
     Minimal,
     Evaluated,
@@ -19,7 +18,6 @@ pub enum HarnessMode {
 impl HarnessMode {
     pub const fn id(self) -> &'static str {
         match self {
-            Self::Auto => "auto",
             Self::Native => "native",
             Self::Minimal => "minimal",
             Self::Evaluated => "evaluated",
@@ -49,7 +47,6 @@ impl FromStr for HarnessMode {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Ok(Self::Auto),
             "native" => Ok(Self::Native),
             "minimal" => Ok(Self::Minimal),
             "evaluated" => Ok(Self::Evaluated),
@@ -116,11 +113,9 @@ pub struct ResolvedHarnessMode {
 
 impl ResolvedHarnessMode {
     pub const fn reason_code(&self) -> &'static str {
-        match self.requested {
-            HarnessMode::Auto => "v1-conservative-auto-default",
-            HarnessMode::Native | HarnessMode::Minimal | HarnessMode::Evaluated => {
-                "explicit-selection"
-            }
+        match self.source {
+            HarnessResolutionSource::Default => "default-native",
+            HarnessResolutionSource::Cli | HarnessResolutionSource::Config => "explicit-selection",
         }
     }
 }
@@ -129,7 +124,7 @@ pub fn resolve_harness_mode(
     cli: Option<HarnessMode>,
     config: Option<HarnessMode>,
 ) -> ResolvedHarnessMode {
-    let (requested, source, selection_reason) = if let Some(mode) = cli {
+    let (requested, source, reason) = if let Some(mode) = cli {
         (mode, HarnessResolutionSource::Cli, "explicit CLI selection")
     } else if let Some(mode) = config {
         (
@@ -139,26 +134,21 @@ pub fn resolve_harness_mode(
         )
     } else {
         (
-            HarnessMode::Auto,
+            HarnessMode::Native,
             HarnessResolutionSource::Default,
-            "v1 conservative auto default",
+            "native default",
         )
     };
     let effective = match requested {
-        HarnessMode::Auto | HarnessMode::Native => EffectiveHarnessMode::Native,
+        HarnessMode::Native => EffectiveHarnessMode::Native,
         HarnessMode::Minimal => EffectiveHarnessMode::Minimal,
         HarnessMode::Evaluated => EffectiveHarnessMode::Evaluated,
-    };
-    let reason = if requested == HarnessMode::Auto && source != HarnessResolutionSource::Default {
-        format!("{selection_reason}; v1 conservative auto default")
-    } else {
-        selection_reason.to_string()
     };
     ResolvedHarnessMode {
         requested,
         effective,
         source,
-        reason,
+        reason: reason.to_string(),
     }
 }
 
@@ -177,18 +167,6 @@ pub struct HarnessModeSpec {
 }
 
 pub const HARNESS_MODE_CATALOG: &[HarnessModeSpec] = &[
-    HarnessModeSpec {
-        mode: HarnessMode::Auto,
-        id: "auto",
-        display_label: "Auto",
-        description: "Conservative automatic selection; resolves to Native in v1.",
-        selectable: true,
-        default_effective_mode: EffectiveHarnessMode::Native,
-        supported_canonical_request_routes: ALL_PROVIDER_ENDPOINTS,
-        request_shaping: false,
-        response_shaping: false,
-        stream_shaping: false,
-    },
     HarnessModeSpec {
         mode: HarnessMode::Native,
         id: "native",
@@ -334,7 +312,6 @@ mod tests {
     #[test]
     fn modes_parse_display_serialize_and_reject_unknown_values() {
         for (text, mode) in [
-            ("auto", HarnessMode::Auto),
             ("native", HarnessMode::Native),
             ("minimal", HarnessMode::Minimal),
             ("evaluated", HarnessMode::Evaluated),
@@ -355,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_is_conservative_and_cli_wins() {
+    fn resolution_defaults_to_native_and_cli_wins() {
         let native = resolve_harness_mode(Some(HarnessMode::Native), None);
         assert_eq!(native.effective, EffectiveHarnessMode::Native);
         assert_eq!(native.source, HarnessResolutionSource::Cli);
@@ -364,10 +341,10 @@ mod tests {
         assert_eq!(minimal.source, HarnessResolutionSource::Config);
         let evaluated = resolve_harness_mode(Some(HarnessMode::Evaluated), None);
         assert_eq!(evaluated.effective, EffectiveHarnessMode::Evaluated);
-        let auto = resolve_harness_mode(None, None);
-        assert_eq!(auto.requested, HarnessMode::Auto);
-        assert_eq!(auto.effective, EffectiveHarnessMode::Native);
-        assert_eq!(auto.reason_code(), "v1-conservative-auto-default");
+        let default = resolve_harness_mode(None, None);
+        assert_eq!(default.requested, HarnessMode::Native);
+        assert_eq!(default.effective, EffectiveHarnessMode::Native);
+        assert_eq!(default.reason_code(), "default-native");
         assert_eq!(HarnessResolutionSource::Cli.id(), "cli");
         assert_eq!(HarnessResolutionSource::Config.to_string(), "config");
         assert_eq!(HarnessResolutionSource::Default.id(), "default");
@@ -478,7 +455,7 @@ mod tests {
                 .iter()
                 .map(|spec| spec.id)
                 .collect::<Vec<_>>(),
-            ["auto", "native", "minimal", "evaluated"]
+            ["native", "minimal", "evaluated"]
         );
         assert!(harness_mode_catalog().iter().all(|spec| spec.selectable));
         assert!(

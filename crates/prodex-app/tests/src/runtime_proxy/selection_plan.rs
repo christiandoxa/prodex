@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn probe_plan_marks_pressure_skip_for_request_probe_jobs() {
+fn probe_plan_queues_cold_profiles_for_background_refresh() {
     let now = Local::now().timestamp();
     let state = RuntimeRouteSelectionCatalog {
         current_profile: "main".to_string(),
@@ -28,22 +28,16 @@ fn probe_plan_marks_pressure_skip_for_request_probe_jobs() {
         &state,
         &BTreeSet::new(),
         RuntimeRouteKind::Responses,
-        false,
-        true,
-        1,
         now,
     );
 
     assert_eq!(
-        plan.sync_probe_jobs
+        plan.cold_start_probe_jobs
             .iter()
             .map(|job| job.name.as_str())
             .collect::<Vec<_>>(),
         vec!["second"]
     );
-    assert!(!plan.should_sync_probe_cold_start);
-    assert_eq!(plan.sync_probe_skip_jobs_count, Some(1));
-    assert_eq!(plan.sync_probe_skip_profiles_count, Some(1));
 }
 
 #[test]

@@ -40,7 +40,7 @@ fn write_preview_stream<R: BufRead, W: Write, D: Write>(
     mut diagnostics_writer: D,
     mode: &'static str,
 ) -> anyhow::Result<Value> {
-    let log_path = initialize_runtime_proxy_log_path();
+    let log_path = initialize_runtime_proxy_log_path()?;
     let mut session = PreviewSession::default();
     let mut raw_line = String::new();
     let mut line_index = 0usize;

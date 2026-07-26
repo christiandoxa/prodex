@@ -624,6 +624,14 @@ fn control_plane_operation_from_gateway_route(
         GatewayControlPlaneOperation::VirtualKeyRotateSecret => {
             ControlPlaneOperation::VirtualKeyRotateSecret
         }
+        GatewayControlPlaneOperation::PolicyRead => ControlPlaneOperation::PolicyRead,
+        GatewayControlPlaneOperation::PolicyCreate => ControlPlaneOperation::PolicyCreate,
+        GatewayControlPlaneOperation::PolicyValidate => ControlPlaneOperation::PolicyValidate,
+        GatewayControlPlaneOperation::PolicySubmit => ControlPlaneOperation::PolicySubmit,
+        GatewayControlPlaneOperation::PolicyVote => ControlPlaneOperation::PolicyVote,
+        GatewayControlPlaneOperation::PolicyActivate => ControlPlaneOperation::PolicyActivate,
+        GatewayControlPlaneOperation::PolicyRollback => ControlPlaneOperation::PolicyRollback,
+        GatewayControlPlaneOperation::PolicyRevoke => ControlPlaneOperation::PolicyRevoke,
         GatewayControlPlaneOperation::PolicyPublish => ControlPlaneOperation::PolicyPublish,
         GatewayControlPlaneOperation::ProviderCredentialRotate => {
             ControlPlaneOperation::ProviderCredentialRotate
@@ -675,7 +683,26 @@ fn control_plane_operations_share_route_family(
             )
             | (ProviderCredentialRotate, ProviderCredentialRotate)
             | (BudgetUpdate, BudgetUpdate)
-            | (PolicyPublish, PolicyPublish)
+            | (
+                PolicyRead
+                    | PolicyCreate
+                    | PolicyValidate
+                    | PolicySubmit
+                    | PolicyVote
+                    | PolicyActivate
+                    | PolicyRollback
+                    | PolicyRevoke
+                    | PolicyPublish,
+                PolicyRead
+                    | PolicyCreate
+                    | PolicyValidate
+                    | PolicySubmit
+                    | PolicyVote
+                    | PolicyActivate
+                    | PolicyRollback
+                    | PolicyRevoke
+                    | PolicyPublish
+            )
             | (ConfigurationPublish, ConfigurationPublish)
             | (BillingRead, BillingRead)
             | (
@@ -725,6 +752,14 @@ fn gateway_operation_from_control_plane_action(
         ControlPlaneOperation::VirtualKeyRotateSecret => {
             GatewayControlPlaneOperation::VirtualKeyRotateSecret
         }
+        ControlPlaneOperation::PolicyRead => GatewayControlPlaneOperation::PolicyRead,
+        ControlPlaneOperation::PolicyCreate => GatewayControlPlaneOperation::PolicyCreate,
+        ControlPlaneOperation::PolicyValidate => GatewayControlPlaneOperation::PolicyValidate,
+        ControlPlaneOperation::PolicySubmit => GatewayControlPlaneOperation::PolicySubmit,
+        ControlPlaneOperation::PolicyVote => GatewayControlPlaneOperation::PolicyVote,
+        ControlPlaneOperation::PolicyActivate => GatewayControlPlaneOperation::PolicyActivate,
+        ControlPlaneOperation::PolicyRollback => GatewayControlPlaneOperation::PolicyRollback,
+        ControlPlaneOperation::PolicyRevoke => GatewayControlPlaneOperation::PolicyRevoke,
         ControlPlaneOperation::ProviderCredentialRotate => {
             GatewayControlPlaneOperation::ProviderCredentialRotate
         }
@@ -751,6 +786,7 @@ fn control_plane_operation_allows_http_method(
         ControlPlaneOperation::GatewayAdminRead
         | ControlPlaneOperation::ScimUserRead
         | ControlPlaneOperation::VirtualKeyRead
+        | ControlPlaneOperation::PolicyRead
         | ControlPlaneOperation::BillingRead => method == Get,
         ControlPlaneOperation::RouteExplain
         | ControlPlaneOperation::TenantCreate
@@ -763,6 +799,13 @@ fn control_plane_operation_allows_http_method(
         | ControlPlaneOperation::ProviderCredentialRotate
         | ControlPlaneOperation::ConfigurationPublish
         | ControlPlaneOperation::AuditExport => method == Post,
+        ControlPlaneOperation::PolicyValidate
+        | ControlPlaneOperation::PolicyCreate
+        | ControlPlaneOperation::PolicySubmit
+        | ControlPlaneOperation::PolicyVote
+        | ControlPlaneOperation::PolicyActivate
+        | ControlPlaneOperation::PolicyRollback
+        | ControlPlaneOperation::PolicyRevoke => method == Post,
         ControlPlaneOperation::PolicyPublish => matches!(method, Get | Post),
         ControlPlaneOperation::TenantUpdate
         | ControlPlaneOperation::VirtualKeyUpdate

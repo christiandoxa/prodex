@@ -192,7 +192,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         providers["supported_harness_modes"],
         serde_json::json!(["auto", "native", "minimal", "evaluated"])
     );
-    assert_eq!(providers["default_harness_mode"], "auto");
+    assert_eq!(providers["default_harness_mode"], "native");
     assert_eq!(providers["resolved_harness_mode"], "native");
     assert_eq!(providers["harness_modes"][2]["id"], "minimal");
     assert_eq!(providers["harness_modes"][2]["request_shaping"], true);

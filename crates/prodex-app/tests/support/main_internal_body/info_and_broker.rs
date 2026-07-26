@@ -449,7 +449,7 @@ fn runtime_proxy_log_paths_remain_unique_under_parallel_generation() {
         workers.push(thread::spawn(move || {
             barrier.wait();
             let paths = (0..paths_per_worker)
-                .map(|_| create_runtime_proxy_log_path())
+                .map(|_| create_runtime_proxy_log_path().unwrap())
                 .collect::<Vec<_>>();
             sender
                 .send(paths)

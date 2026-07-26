@@ -67,6 +67,30 @@ fn control_plane_mutation_requires_control_plane_admin_and_emits_success_audit()
 }
 
 #[test]
+fn policy_reads_allow_viewers_but_policy_mutations_do_not() {
+    let tenant_id = TenantId::new();
+    let viewer = principal(tenant_id, Role::Viewer, CredentialScope::ControlPlane);
+    assert!(matches!(
+        decide_control_plane_action(request(
+            tenant_id,
+            viewer.clone(),
+            ControlPlaneOperation::PolicyRead,
+            ResourceKind::Policy,
+        )),
+        ControlPlaneDecision::Authorized(_)
+    ));
+    assert!(matches!(
+        decide_control_plane_action(request(
+            tenant_id,
+            viewer,
+            ControlPlaneOperation::PolicyActivate,
+            ResourceKind::Policy,
+        )),
+        ControlPlaneDecision::Denied { .. }
+    ));
+}
+
+#[test]
 fn data_plane_credential_cannot_call_control_plane_and_denial_is_audited() {
     let tenant_id = TenantId::new();
     let decision = decide_control_plane_action(request(
@@ -170,6 +194,12 @@ fn audit_retention_purge_requires_admin_delete_and_emits_audit() {
 #[test]
 fn mutating_control_plane_operations_require_idempotency() {
     assert!(ControlPlaneOperation::AuditRetentionPurge.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicyCreate.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicySubmit.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicyVote.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicyActivate.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicyRollback.requires_idempotency());
+    assert!(ControlPlaneOperation::PolicyRevoke.requires_idempotency());
     assert!(ControlPlaneOperation::PolicyPublish.requires_idempotency());
     assert!(ControlPlaneOperation::ConfigurationPublish.requires_idempotency());
     assert!(ControlPlaneOperation::ScimUserCreate.requires_idempotency());
@@ -183,13 +213,15 @@ fn mutating_control_plane_operations_require_idempotency() {
     assert!(!ControlPlaneOperation::RouteExplain.requires_idempotency());
     assert!(!ControlPlaneOperation::ScimUserRead.requires_idempotency());
     assert!(!ControlPlaneOperation::VirtualKeyRead.requires_idempotency());
+    assert!(!ControlPlaneOperation::PolicyRead.requires_idempotency());
+    assert!(!ControlPlaneOperation::PolicyValidate.requires_idempotency());
     assert!(!ControlPlaneOperation::BillingRead.requires_idempotency());
     assert!(!ControlPlaneOperation::AuditExport.requires_idempotency());
 }
 
 #[test]
 fn all_control_plane_operations_require_immutable_audit_on_success_and_denial() {
-    assert_eq!(ControlPlaneOperation::ALL.len(), 24);
+    assert_eq!(ControlPlaneOperation::ALL.len(), 32);
     for operation in ControlPlaneOperation::ALL {
         let audit = operation.audit_requirement();
         assert_eq!(audit.operation, operation);
@@ -307,6 +339,54 @@ fn all_control_plane_operations_have_explicit_lifecycle_requirements() {
             ControlPlaneOperation::VirtualKeyRotateSecret,
             ResourceKind::VirtualKey,
             ResourceAction::RotateSecret,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyRead,
+            ResourceKind::Policy,
+            ResourceAction::Read,
+            Role::Viewer,
+        ),
+        (
+            ControlPlaneOperation::PolicyCreate,
+            ResourceKind::Policy,
+            ResourceAction::Create,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyValidate,
+            ResourceKind::Policy,
+            ResourceAction::Read,
+            Role::Viewer,
+        ),
+        (
+            ControlPlaneOperation::PolicySubmit,
+            ResourceKind::Policy,
+            ResourceAction::PublishRevision,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyVote,
+            ResourceKind::Policy,
+            ResourceAction::Update,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyActivate,
+            ResourceKind::Policy,
+            ResourceAction::PublishRevision,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyRollback,
+            ResourceKind::Policy,
+            ResourceAction::Update,
+            Role::Admin,
+        ),
+        (
+            ControlPlaneOperation::PolicyRevoke,
+            ResourceKind::Policy,
+            ResourceAction::Delete,
             Role::Admin,
         ),
         (

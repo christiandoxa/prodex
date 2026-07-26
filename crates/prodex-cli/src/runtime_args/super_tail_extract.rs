@@ -88,7 +88,7 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
     if let Some(scanned) = scan_value(args, index, &["--harness"]) {
         let value = scanned
             .value
-            .ok_or_else(|| "--harness requires auto, native, or minimal".to_string())?
+            .ok_or_else(|| "--harness requires native, minimal, or evaluated".to_string())?
             .parse()
             .map_err(|err: prodex_provider_core::ParseHarnessModeError| err.to_string())?;
         return Ok(apply(scanned.consumed_count, SuperOverride::Harness(value)));

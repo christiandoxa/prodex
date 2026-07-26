@@ -176,9 +176,9 @@ fn public_contract_catalog_exposes_typed_harness_metadata() {
     let catalog = provider_contract_catalog(EffectiveHarnessMode::Minimal);
     assert_eq!(
         catalog.supported_harness_modes,
-        ["auto", "native", "minimal", "evaluated"]
+        ["native", "minimal", "evaluated"]
     );
-    assert_eq!(catalog.default_harness_mode, "auto");
+    assert_eq!(catalog.default_harness_mode, "native");
     assert_eq!(catalog.resolved_harness_mode, "minimal");
     assert_eq!(
         catalog
@@ -198,10 +198,10 @@ fn public_contract_catalog_exposes_typed_harness_metadata() {
     );
 
     let json = serde_json::to_value(&catalog).expect("contract catalog should serialize");
-    assert_eq!(json["default_harness_mode"], "auto");
+    assert_eq!(json["default_harness_mode"], "native");
     assert_eq!(json["resolved_harness_mode"], "minimal");
     assert_eq!(
-        json["harness_modes"][2]["supported_canonical_request_routes"][0],
+        json["harness_modes"][1]["supported_canonical_request_routes"][0],
         "responses"
     );
 }

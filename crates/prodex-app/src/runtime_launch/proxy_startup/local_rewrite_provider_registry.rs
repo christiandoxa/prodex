@@ -602,12 +602,6 @@ fn runtime_gateway_attached_provider_registry_context(
         .filter(|endpoint| {
             runtime_gateway_provider_capability_is_executable(adapter.capability_status(*endpoint))
         })
-        .filter(|endpoint| {
-            !matches!(
-                provider_options,
-                RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. }
-            ) || *endpoint == ProviderEndpoint::Embeddings
-        })
         .collect();
     RuntimeGatewayAttachedProviderRegistryContext {
         provider,

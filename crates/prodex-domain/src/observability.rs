@@ -1,8 +1,10 @@
 use std::fmt;
+use std::ops::Deref;
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
-use crate::TenantId;
+use crate::{AuditEventId, CallId, RequestId, TenantId, TraceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,11 +29,73 @@ pub enum TelemetryAttributeScope {
     RedactedTraceOnly,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A telemetry attribute whose trace values can only be created from typed identifiers.
+///
+/// ```compile_fail
+/// use prodex_domain::TelemetryAttribute;
+/// let _ = TelemetryAttribute::trace_only("prompt", "secret material");
+/// ```
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct TelemetryAttribute {
     pub key: String,
-    pub value: String,
+    pub value: TelemetryAttributeValue,
     pub scope: TelemetryAttributeScope,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TelemetryAttributeValue(Arc<str>);
+
+impl TelemetryAttributeValue {
+    fn new(value: impl Into<String>) -> Self {
+        Self(Arc::from(value.into()))
+    }
+}
+
+impl Deref for TelemetryAttributeValue {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+impl AsRef<str> for TelemetryAttributeValue {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl PartialEq<&str> for TelemetryAttributeValue {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_ref() == *other
+    }
+}
+
+impl PartialEq<String> for TelemetryAttributeValue {
+    fn eq(&self, other: &String) -> bool {
+        self.as_ref() == other
+    }
+}
+
+impl fmt::Display for TelemetryAttributeValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_ref())
+    }
+}
+
+impl fmt::Debug for TelemetryAttributeValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl Serialize for TelemetryAttributeValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
 }
 
 impl fmt::Debug for TelemetryAttribute {
@@ -48,25 +112,57 @@ impl TelemetryAttribute {
     pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             key: key.into(),
-            value: value.into(),
+            value: TelemetryAttributeValue::new(value),
             scope: TelemetryAttributeScope::MetricLabel,
         }
     }
 
-    pub fn trace_only(key: impl Into<String>, value: impl Into<String>) -> Self {
+    fn identifier(key: &'static str, value: impl Into<String>) -> Self {
         Self {
-            key: key.into(),
-            value: value.into(),
+            key: key.to_string(),
+            value: TelemetryAttributeValue::new(value),
             scope: TelemetryAttributeScope::TraceOnly,
         }
     }
 
-    pub fn redacted_trace_only(key: impl Into<String>) -> Self {
+    pub fn request_id(value: RequestId) -> Self {
+        Self::identifier("request_id", value.to_string())
+    }
+
+    pub fn call_id(value: CallId) -> Self {
+        Self::identifier("call_id", value.to_string())
+    }
+
+    pub fn trace_id(value: &TraceId) -> Self {
+        Self::identifier("trace_id", value.as_str())
+    }
+
+    pub fn tenant_id(value: TenantId) -> Self {
+        Self::identifier("tenant_id", value.to_string())
+    }
+
+    pub fn audit_event_id(value: AuditEventId) -> Self {
+        Self::identifier("audit_event_id", value.to_string())
+    }
+
+    pub fn redacted_trace_only(key: &'static str) -> Self {
         Self {
-            key: key.into(),
-            value: "<redacted>".to_string(),
+            key: key.to_string(),
+            value: TelemetryAttributeValue::new("<redacted>"),
             scope: TelemetryAttributeScope::RedactedTraceOnly,
         }
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn value(&self) -> &str {
+        self.value.as_ref()
+    }
+
+    pub const fn scope(&self) -> TelemetryAttributeScope {
+        self.scope
     }
 
     pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError> {
@@ -81,7 +177,7 @@ impl TelemetryAttribute {
                 length: self.key.len(),
             });
         }
-        if metric_label_value_is_forbidden(&self.value) {
+        if metric_label_value_is_forbidden(self.value.as_ref()) {
             return Err(TelemetryAttributeError::ForbiddenMetricLabelValue);
         }
         if self.value.len() > 128 {
@@ -89,15 +185,15 @@ impl TelemetryAttribute {
                 length: self.value.len(),
             });
         }
-        Ok((self.key.as_str(), self.value.as_str()))
+        Ok((self.key.as_str(), self.value.as_ref()))
     }
 }
 
 pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute {
-    TelemetryAttribute::trace_only("tenant_id", tenant_id.to_string())
+    TelemetryAttribute::tenant_id(tenant_id)
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct GatewaySpanDescriptor {
     pub kind: GatewaySpanKind,
     pub name: String,

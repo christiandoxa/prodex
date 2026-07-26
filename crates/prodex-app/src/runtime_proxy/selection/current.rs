@@ -28,7 +28,6 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let (
         current_profile,
-        codex_home,
         in_selection_backoff,
         circuit_open_until,
         inflight_count,
@@ -49,12 +48,15 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
             return Ok(None);
         }
 
-        let Some(profile) = runtime.state.profiles.get(&runtime.current_profile) else {
+        if !runtime
+            .state
+            .profiles
+            .contains_key(&runtime.current_profile)
+        {
             return Ok(None);
-        };
+        }
         (
             runtime.current_profile.clone(),
-            profile.codex_home.clone(),
             runtime_profile_in_selection_backoff(
                 &runtime,
                 &runtime.current_profile,
@@ -91,29 +93,17 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
                 .cloned(),
         )
     };
-    let has_alternative_quota_compatible_profile = runtime_has_route_eligible_quota_fallback(
+    let has_alternative_quota_compatible_profile = runtime_has_route_ready_quota_fallback(
         shared,
         &current_profile,
         excluded_profiles,
         route_kind,
     )?;
-    let allow_disk_auth_fallback =
-        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let current_profile_quota_compatible = runtime_profile_cached_auth_summary_for_selection(
         cached_usage_auth_entry,
         probe_cache_entry,
     )
-    .unwrap_or_else(|| {
-        if allow_disk_auth_fallback {
-            read_auth_summary(&codex_home)
-        } else {
-            AuthSummary {
-                label: "uncached-auth".to_string(),
-                quota_compatible: false,
-            }
-        }
-    })
-    .quota_compatible;
+    .is_some_and(|summary| summary.quota_compatible);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
     let inflight_soft_limit =

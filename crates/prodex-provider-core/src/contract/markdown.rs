@@ -93,7 +93,7 @@ pub fn provider_capabilities_markdown() -> String {
     markdown.push_str("## Harness modes\n\n");
     let _ = writeln!(
         markdown,
-        "Default requested mode: `{}`. V1 default resolution: `{}`.\n",
+        "Default mode: `{}`. Resolved mode for this catalog: `{}`.\n",
         catalog.default_harness_mode, catalog.resolved_harness_mode
     );
     markdown.push_str("| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |\n");

@@ -129,10 +129,6 @@ pub(super) fn runtime_gateway_admin_policy_response(
                     .then_some((resource, resource_path))
             })?;
     let suffix = path.strip_prefix(&(resource_path.clone() + "/"));
-    let repository = match repository(shared) {
-        Ok(repository) => repository,
-        Err(response) => return Some(response),
-    };
     let tenant_id = base_action.tenant.tenant_id;
     let method = captured.method.to_ascii_uppercase();
     let segments = suffix
@@ -143,9 +139,14 @@ pub(super) fn runtime_gateway_admin_policy_response(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-
+    if method == "POST" && segments.as_slice() == ["validate"] {
+        return Some(validate_response(captured, shared, tenant_id, resource));
+    }
+    let repository = match repository(shared) {
+        Ok(repository) => repository,
+        Err(response) => return Some(response),
+    };
     Some(match (method.as_str(), segments.as_slice()) {
-        ("POST", ["validate"]) => validate_response(captured, shared, tenant_id, resource),
         ("POST", []) => create_response(
             captured,
             path,
@@ -631,9 +632,8 @@ impl ApplicationGovernanceRepository for RuntimeGovernanceRepository<'_> {
 pub(super) fn repository(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeGovernanceRepository<'_>, tiny_http::ResponseBox> {
-    runtime_governance_repository(shared).map_err(|_| storage_unavailable())
+    runtime_governance_repository(shared).map_err(repository_error)
 }
-
 pub(super) fn runtime_governance_repository(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeGovernanceRepository<'_>, GovernanceRepositoryError> {
@@ -2287,7 +2287,7 @@ fn execution(
     runtime_gateway_admin_control_plane_action_for_operation(
         &http,
         admin_auth,
-        ControlPlaneOperation::PolicyPublish,
+        base_action.operation,
     )
     .ok_or_else(invalid_request)?;
     runtime_gateway_admin_mutation_execution(
@@ -2295,7 +2295,7 @@ fn execution(
         path,
         admin_auth,
         base_action,
-        ControlPlaneOperation::PolicyPublish,
+        base_action.operation,
     )
 }
 

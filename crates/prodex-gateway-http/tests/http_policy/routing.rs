@@ -421,38 +421,44 @@ fn control_plane_route_planner_maps_admin_paths_to_explicit_operations() {
         ),
         (
             GatewayHttpMethod::Post,
+            "/admin/policies",
+            GatewayControlPlaneOperation::PolicyCreate,
+            true,
+        ),
+        (
+            GatewayHttpMethod::Get,
+            "/admin/policies/status",
+            GatewayControlPlaneOperation::PolicyRead,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Post,
             "/admin/policies/revisions",
             GatewayControlPlaneOperation::PolicyPublish,
             true,
         ),
         (
             GatewayHttpMethod::Get,
-            "/admin/policies/status",
-            GatewayControlPlaneOperation::PolicyPublish,
-            false,
-        ),
-        (
-            GatewayHttpMethod::Get,
             "/prodex/gateway/execution-approvals",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyRead,
             false,
         ),
         (
             GatewayHttpMethod::Post,
             "/prodex/gateway/execution-approvals/approval-1/votes",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyVote,
             true,
         ),
         (
             GatewayHttpMethod::Get,
             "/prodex/gateway/governance/outbox",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyRead,
             false,
         ),
         (
             GatewayHttpMethod::Get,
             "/prodex/gateway/governance/audit/integrity",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyRead,
             false,
         ),
         (
@@ -464,13 +470,13 @@ fn control_plane_route_planner_maps_admin_paths_to_explicit_operations() {
         (
             GatewayHttpMethod::Post,
             "/prodex/gateway/sessions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/revoke",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyRevoke,
             true,
         ),
         (
             GatewayHttpMethod::Post,
             "/prodex/gateway/sessions/current/revoke",
-            GatewayControlPlaneOperation::PolicyPublish,
+            GatewayControlPlaneOperation::PolicyRevoke,
             true,
         ),
         (

@@ -5,7 +5,8 @@ mod prepare;
 
 use candidates::{
     RuntimeResponseCandidatePass, record_runtime_response_candidates,
-    select_runtime_auto_redeem_candidate, select_runtime_response_candidate,
+    select_runtime_auto_redeem_candidate, select_runtime_cold_start_candidate,
+    select_runtime_response_candidate,
 };
 use prepare::{log_runtime_response_selection_plan, prepare_runtime_response_selection};
 
@@ -78,13 +79,39 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     )? {
         return Ok(Some(candidate));
     }
-    select_runtime_auto_redeem_candidate(
+    if let Some(candidate) = select_runtime_auto_redeem_candidate(
         shared,
         excluded_profiles,
         route_kind,
         candidate_record_count,
         trace,
-    )
+    )? {
+        return Ok(Some(candidate));
+    }
+    if let Some(candidate) = select_runtime_cold_start_candidate(
+        shared,
+        &prepared.selection_state,
+        excluded_profiles,
+        route_kind,
+        prepared.inflight_soft_limit,
+        candidate_record_count,
+        trace,
+    )? {
+        return Ok(Some(candidate));
+    }
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "selection_pick",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("profile", "none"),
+                runtime_proxy_log_field("mode", "exhausted"),
+                runtime_proxy_log_field("excluded_count", excluded_profiles.len().to_string()),
+            ],
+        ),
+    );
+    Ok(None)
 }
 
 pub(crate) fn runtime_quota_last_chance_profile_for_route(
@@ -128,6 +155,38 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
             continue;
         }
         return Ok(Some(candidate.name));
+    }
+    for name in active_profile_selection_order_with_view(
+        runtime_route_selection_view(&prepared.selection_state),
+        &prepared.selection_state.current_profile,
+    ) {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = prepared.selection_state.entry(&name) else {
+            continue;
+        };
+        if !entry.supports_codex_runtime()
+            || !entry
+                .cached_auth_summary
+                .as_ref()
+                .is_some_and(|auth| auth.quota_compatible)
+            || entry
+                .cached_probe_entry
+                .as_ref()
+                .is_some_and(|probe| probe.result.is_ok())
+            || entry.cached_usage_snapshot.is_some()
+            || entry.auth_failure_active
+            || !matches!(entry.backoff_sort_key.0, 0 | 1 | 2 | 4)
+            || runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                &name,
+                runtime_route_kind_inflight_context(route_kind),
+            )?
+        {
+            continue;
+        }
+        return Ok(Some(name));
     }
     Ok(None)
 }

@@ -74,7 +74,6 @@ pub(super) use self::transport_failure::*;
 pub(crate) use self::upstream::*;
 pub(crate) use self::upstream_payload_log::*;
 pub(crate) use self::websocket::*;
-use self::websocket_message::runtime_profile_uncached_auth_summary_for_selection;
 use self::websocket_message::{
     RuntimeWebsocketTextMessageInput, proxy_runtime_websocket_text_message,
 };

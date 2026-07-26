@@ -229,7 +229,6 @@ include `login`, `profile`, `run`, `exec`, `quota`, `session`, `super`,
 - [Runtime policy](docs/runtime-policy.md)
 - [Testing and benchmarks](docs/testing.md)
 - [Supply chain](docs/supply-chain.md)
-- [Migration notes](docs/migrations/0.346-optional-tools.md)
 - [Local model setup](LOCAL.md)
 
 ## Development

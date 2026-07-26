@@ -228,7 +228,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     {
         bail!("enterprise governance modes require the authenticated unified gateway data plane");
     }
-    let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
+    let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config)?;
     for key in runtime_config.compatibility_defaults() {
         runtime_proxy_log_to_path(
             &log_path,

@@ -180,7 +180,7 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
 #[test]
 fn setup_parse_as_top_level_command() {
     let command =
-        parse_cli_command_from(["prodex", "setup", "--dry-run", "--verify-assets", "--json"])
+        parse_cli_command_from(["prodex", "setup", "--dry-run", "--verify-tools", "--json"])
             .expect("setup should parse");
     let Commands::Setup(args) = command else {
         panic!("expected setup command");
@@ -191,6 +191,7 @@ fn setup_parse_as_top_level_command() {
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex", "setup",
     ])));
+    assert!(parse_cli_command_from(["prodex", "setup", "--verify-assets"]).is_err());
 }
 #[test]
 fn capability_list_parse_as_top_level_command() {

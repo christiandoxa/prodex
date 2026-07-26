@@ -100,6 +100,14 @@ pub enum GatewayControlPlaneOperation {
     VirtualKeyUpdate,
     VirtualKeyDelete,
     VirtualKeyRotateSecret,
+    PolicyRead,
+    PolicyCreate,
+    PolicyValidate,
+    PolicySubmit,
+    PolicyVote,
+    PolicyActivate,
+    PolicyRollback,
+    PolicyRevoke,
     PolicyPublish,
     ProviderCredentialRotate,
     BudgetUpdate,
@@ -117,6 +125,8 @@ impl GatewayControlPlaneOperation {
                 | Self::RouteExplain
                 | Self::ScimUserRead
                 | Self::VirtualKeyRead
+                | Self::PolicyRead
+                | Self::PolicyValidate
                 | Self::BillingRead
                 | Self::AuditExport
         )
@@ -342,6 +352,13 @@ fn control_plane_operation_for_path(
     }
     let admin_path = strip_control_plane_mount(path, "/admin")
         .or_else(|| strip_control_plane_mount(path, "/v1/admin"))?;
+    if normalized_segments(admin_path).as_slice() == ["policies", "revisions"] {
+        return Some(GatewayControlPlaneOperation::PolicyPublish);
+    }
+    let canonical_admin_path = format!("/prodex/gateway/{admin_path}");
+    if let Some(route) = parse_gateway_admin_route("", &canonical_admin_path) {
+        return route.operation(method);
+    }
     admin_operation_for_path(admin_path, method)
 }
 
@@ -404,18 +421,6 @@ fn admin_operation_for_path(
             Some(GatewayControlPlaneOperation::ProviderCredentialRotate)
         }
         ["budgets", ..] => Some(GatewayControlPlaneOperation::BudgetUpdate),
-        [
-            "policies"
-            | "classification-rules"
-            | "provider-registries"
-            | "routing-scores"
-            | "execution-approvals"
-            | "break-glass-approvals",
-            ..,
-        ] => Some(GatewayControlPlaneOperation::PolicyPublish),
-        ["sessions", _, "revoke"] => Some(GatewayControlPlaneOperation::PolicyPublish),
-        ["governance", "outbox", ..] => Some(GatewayControlPlaneOperation::PolicyPublish),
-        ["governance", "audit", "integrity"] => Some(GatewayControlPlaneOperation::PolicyPublish),
         ["configuration", ..] | ["config", ..] => {
             Some(GatewayControlPlaneOperation::ConfigurationPublish)
         }
@@ -425,10 +430,6 @@ fn admin_operation_for_path(
         }
         ["audit", "exports"] | ["audit", "exports", ..] => {
             Some(GatewayControlPlaneOperation::AuditExport)
-        }
-        ["audit", "retention", "holds"] => Some(GatewayControlPlaneOperation::PolicyPublish),
-        ["audit", "retention", "holds", ..] if method == GatewayHttpMethod::Delete => {
-            Some(GatewayControlPlaneOperation::AuditRetentionPurge)
         }
         ["audit", "retention"] | ["audit", "retention", ..] => {
             Some(GatewayControlPlaneOperation::AuditRetentionPurge)
@@ -492,6 +493,7 @@ fn control_plane_operation_allows_method(
         GatewayControlPlaneOperation::GatewayAdminRead
         | GatewayControlPlaneOperation::ScimUserRead
         | GatewayControlPlaneOperation::VirtualKeyRead
+        | GatewayControlPlaneOperation::PolicyRead
         | GatewayControlPlaneOperation::BillingRead => method == GatewayHttpMethod::Get,
         GatewayControlPlaneOperation::RouteExplain
         | GatewayControlPlaneOperation::TenantCreate
@@ -504,6 +506,13 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::ProviderCredentialRotate
         | GatewayControlPlaneOperation::ConfigurationPublish
         | GatewayControlPlaneOperation::AuditExport => method == GatewayHttpMethod::Post,
+        GatewayControlPlaneOperation::PolicyValidate
+        | GatewayControlPlaneOperation::PolicyCreate
+        | GatewayControlPlaneOperation::PolicySubmit
+        | GatewayControlPlaneOperation::PolicyVote
+        | GatewayControlPlaneOperation::PolicyActivate
+        | GatewayControlPlaneOperation::PolicyRollback
+        | GatewayControlPlaneOperation::PolicyRevoke => method == GatewayHttpMethod::Post,
         GatewayControlPlaneOperation::PolicyPublish => {
             matches!(method, GatewayHttpMethod::Get | GatewayHttpMethod::Post)
         }

@@ -152,7 +152,7 @@ const REQUIRED_CONTROL_PLANE_HTTP_BINDING_SNIPPETS = Object.freeze([
     "audit emission span planner must carry tenant id as trace-only telemetry",
   ],
   [
-    'TelemetryAttribute::trace_only("audit_event_id"',
+    "TelemetryAttribute::audit_event_id(audit_event_id)",
     "audit emission span planner must carry audit event id as trace-only telemetry",
   ],
   [
@@ -412,7 +412,7 @@ pub fn plan_application_control_plane_audit_emission_span() {
         None,
         vec![
             tenant_trace_attribute(tenant_id),
-            TelemetryAttribute::trace_only("audit_event_id", audit_event_id.to_string()),
+            TelemetryAttribute::audit_event_id(audit_event_id),
         ],
     );
 }
@@ -427,7 +427,7 @@ pub fn plan_application_control_plane_audit_persistence_span() {
         vec![
             TelemetryAttribute::metric_label("storage_backend", storage_backend),
             tenant_trace_attribute(tenant_id),
-            TelemetryAttribute::trace_only("audit_event_id", audit_event_id.to_string()),
+            TelemetryAttribute::audit_event_id(audit_event_id),
         ],
     );
 }

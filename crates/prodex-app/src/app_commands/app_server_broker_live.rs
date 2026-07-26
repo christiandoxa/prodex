@@ -51,7 +51,7 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
         .take()
         .context("failed to capture Codex app-server stdout")?;
 
-    let validator = AppServerBrokerLiveValidator::new();
+    let validator = AppServerBrokerLiveValidator::new()?;
     let diagnostics = Arc::new(Mutex::new(std::io::stderr()));
     let (completion_tx, completion_rx) = mpsc::channel();
 

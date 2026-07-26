@@ -19,15 +19,19 @@ fn runtime_proxy_async_logger_pause_writes() -> bool {
     runtime_log::runtime_async_logger_writes_are_paused_for_test()
 }
 
-fn runtime_proxy_async_logger() -> &'static runtime_log::RuntimeAsyncLogger {
-    static LOGGER: OnceLock<runtime_log::RuntimeAsyncLogger> = OnceLock::new();
-    LOGGER.get_or_init(|| {
+fn runtime_proxy_async_logger() -> io::Result<&'static runtime_log::RuntimeAsyncLogger> {
+    static LOGGER: OnceLock<Result<runtime_log::RuntimeAsyncLogger, (io::ErrorKind, String)>> =
+        OnceLock::new();
+    match LOGGER.get_or_init(|| {
         runtime_log::RuntimeAsyncLogger::new(
             runtime_proxy_log_queue_capacity(),
             runtime_proxy_format_dropped_log_marker,
         )
-        .expect("failed to start runtime log writer")
-    })
+        .map_err(|error| (error.kind(), error.to_string()))
+    }) {
+        Ok(logger) => Ok(logger),
+        Err((kind, message)) => Err(io::Error::new(*kind, message.clone())),
+    }
 }
 
 pub(super) fn runtime_proxy_log_dir() -> PathBuf {
@@ -63,12 +67,13 @@ fn set_runtime_proxy_log_format(format: RuntimeLogFormat) {
     );
 }
 
-pub(super) fn create_runtime_proxy_log_path() -> PathBuf {
+pub(super) fn create_runtime_proxy_log_path() -> Result<PathBuf> {
     create_runtime_proxy_log_path_in_dir(&runtime_proxy_log_dir())
 }
 
-fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> PathBuf {
-    fs::create_dir_all(dir).expect("failed to create runtime log directory");
+fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create runtime log directory {}", dir.display()))?;
     for _ in 0..128 {
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -80,12 +85,19 @@ fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> PathBuf {
             std::process::id()
         ));
         match open_runtime_proxy_private_file(&path) {
-            Ok(_) => return path,
+            Ok(_) => return Ok(path),
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(err) => panic!("failed to create private runtime log: {err}"),
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to create private runtime log {}", path.display())
+                });
+            }
         }
     }
-    panic!("failed to allocate a unique runtime log path")
+    bail!(
+        "failed to allocate a unique runtime log path under {}",
+        dir.display()
+    )
 }
 
 pub(super) fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
@@ -126,44 +138,48 @@ pub(crate) fn runtime_proxy_latest_log_path_from_pointer_text(
     }
 }
 
-pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
+pub(super) fn initialize_runtime_proxy_log_path() -> Result<PathBuf> {
     let format = runtime_proxy_log_format();
     set_runtime_proxy_log_format(format);
-    let log_path = create_runtime_proxy_log_path();
+    let log_path = create_runtime_proxy_log_path()?;
     write_runtime_proxy_latest_log_pointer(&log_path)
-        .expect("failed to update latest runtime log pointer");
-    initialize_runtime_proxy_log_contents(&log_path);
-    log_path
+        .context("failed to update latest runtime log pointer")?;
+    initialize_runtime_proxy_log_contents(&log_path)?;
+    Ok(log_path)
 }
 
-pub(super) fn initialize_runtime_proxy_log_path_from_config(config: &RuntimeConfig) -> PathBuf {
+pub(super) fn initialize_runtime_proxy_log_path_from_config(
+    config: &RuntimeConfig,
+) -> Result<PathBuf> {
     set_runtime_proxy_log_format(config.log_format);
-    let log_path = create_runtime_proxy_log_path_in_dir(&config.log_dir);
+    let log_path = create_runtime_proxy_log_path_in_dir(&config.log_dir)?;
     write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir)
-        .expect("failed to update latest runtime log pointer");
-    initialize_runtime_proxy_log_contents(&log_path);
-    log_path
+        .context("failed to update latest runtime log pointer")?;
+    initialize_runtime_proxy_log_contents(&log_path)?;
+    Ok(log_path)
 }
 
-fn initialize_runtime_proxy_log_contents(log_path: &Path) {
+fn initialize_runtime_proxy_log_contents(log_path: &Path) -> Result<()> {
     let (executable_path, executable_sha256) = runtime_current_binary_identity();
-    runtime_proxy_log_to_path(
-        log_path,
-        &format!(
-            "runtime proxy log initialized pid={} cwd={} prodex_version={} executable_path={} executable_sha256={}",
-            std::process::id(),
-            std::env::current_dir()
-                .ok()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "<unknown>".to_string()),
-            runtime_current_prodex_version(),
-            executable_path.unwrap_or_else(|| "-".to_string()),
-            executable_sha256.unwrap_or_else(|| "-".to_string())
-        ),
+    let message = format!(
+        "runtime proxy log initialized pid={} cwd={} prodex_version={} executable_path={} executable_sha256={}",
+        std::process::id(),
+        std::env::current_dir()
+            .ok()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        runtime_current_prodex_version(),
+        executable_path.unwrap_or_else(|| "-".to_string()),
+        executable_sha256.unwrap_or_else(|| "-".to_string())
     );
-    runtime_proxy_async_logger()
+    let logger = runtime_proxy_async_logger().context("failed to start runtime log writer")?;
+    logger.try_enqueue(
+        log_path,
+        runtime_proxy_format_log_line(&message, runtime_proxy_log_format()),
+    );
+    logger
         .flush_path(log_path)
-        .expect("failed to initialize runtime log");
+        .context("failed to initialize runtime log")
 }
 
 fn write_runtime_proxy_latest_log_pointer(log_path: &Path) -> io::Result<()> {
@@ -372,7 +388,9 @@ fn runtime_proxy_format_dropped_log_marker(marker: runtime_log::RuntimeDroppedLo
 }
 
 pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
-    let logger = runtime_proxy_async_logger();
+    let Ok(logger) = runtime_proxy_async_logger() else {
+        return;
+    };
     let line = runtime_proxy_format_log_line(message, runtime_proxy_log_format());
     logger.try_enqueue(log_path, line);
     #[cfg(test)]
@@ -382,7 +400,7 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
 }
 
 pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) -> io::Result<()> {
-    runtime_proxy_async_logger().flush_path(log_path)
+    runtime_proxy_async_logger()?.flush_path(log_path)
 }
 
 #[derive(Debug)]

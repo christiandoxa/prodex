@@ -3,7 +3,7 @@ use super::super::{
     runtime_proxy_allows_direct_current_profile_fallback,
     runtime_proxy_direct_current_fallback_profile, runtime_proxy_log,
     runtime_proxy_precommit_budget_exhausted_for_route,
-    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_sync_probe_pressure_pause,
+    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_selection_trace_log_direct,
     runtime_smart_context_model_name_from_body,
 };
@@ -144,7 +144,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     self.request_id, self.session_id, remaining_cold_start_profiles
                 ),
             );
-            runtime_proxy_sync_probe_pressure_pause(self.shared, RuntimeRouteKind::Websocket);
+            runtime_proxy_probe_refresh_pause(self.shared, RuntimeRouteKind::Websocket);
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         if let Some(action) = self.try_direct_current_profile_fallback(

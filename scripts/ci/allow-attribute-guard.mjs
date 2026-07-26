@@ -6,7 +6,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 2,
+  dead_code: 0,
   "unused_imports": 5,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
@@ -14,11 +14,9 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 24;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 23;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
-  "dead_code|crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection(",
-  "dead_code|crates/prodex-app/src/lib.rs|mod runtime_kiro_acp;",
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use queue::note_runtime_probe_refresh_progress;",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use startup::runtime_profiles_needing_startup_probe_refresh;",
@@ -81,7 +79,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn runtime_candidate_no_rotate_affinity(",
   "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn runtime_quota_blocked_affinity_release_policy(",
   "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) struct RuntimeQuotaBlockedAffinityReleaseRequest<'a> {",
-  "crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection_with_policy(",
   "crates/prodex-app/src/runtime_store/backoffs.rs|pub(crate) fn save_runtime_profile_backoffs(",
   "crates/prodex-app/src/runtime_store/scores.rs|pub(crate) fn save_runtime_profile_scores(",
   "crates/prodex-app/src/runtime_store/usage_snapshots.rs|pub(crate) fn save_runtime_usage_snapshots(",

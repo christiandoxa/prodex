@@ -117,7 +117,7 @@ pub(super) fn runtime_gateway_admin_session_response(
         path,
         admin_auth,
         base_action,
-        ControlPlaneOperation::PolicyPublish,
+        ControlPlaneOperation::PolicyRevoke,
     ) {
         Ok(execution) => execution,
         Err(response) => return Some(response),

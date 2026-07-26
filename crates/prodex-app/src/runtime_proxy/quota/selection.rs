@@ -5,19 +5,18 @@ pub(crate) fn runtime_proxy_direct_current_fallback_profile(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (profile_name, codex_home, auth_failure_active, cached_usage_auth_entry, probe_cache_entry) = {
+    let (profile_name, auth_failure_active, cached_usage_auth_entry, probe_cache_entry) = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         let profile_name = runtime.current_profile.clone();
-        let Some(profile) = runtime.state.profiles.get(&profile_name) else {
+        if !runtime.state.profiles.contains_key(&profile_name) {
             return Ok(None);
-        };
+        }
         let now = Local::now().timestamp();
         (
             profile_name.clone(),
-            profile.codex_home.clone(),
             runtime_profile_auth_failure_active(&runtime, &profile_name, now),
             runtime.profile_usage_auth.get(&profile_name).cloned(),
             runtime.profile_probe_cache.get(&profile_name).cloned(),
@@ -37,23 +36,11 @@ pub(crate) fn runtime_proxy_direct_current_fallback_profile(
         );
         return Ok(None);
     }
-    let allow_disk_auth_fallback =
-        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     if !runtime_profile_cached_auth_summary_for_selection(
         cached_usage_auth_entry,
         probe_cache_entry,
     )
-    .unwrap_or_else(|| {
-        if allow_disk_auth_fallback {
-            read_auth_summary(&codex_home)
-        } else {
-            AuthSummary {
-                label: "uncached-auth".to_string(),
-                quota_compatible: false,
-            }
-        }
-    })
-    .quota_compatible
+    .is_some_and(|summary| summary.quota_compatible)
     {
         return Ok(None);
     }

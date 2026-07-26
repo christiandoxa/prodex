@@ -42,7 +42,7 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
 ]);
 const REQUIRED_OBSERVABILITY_SNIPPETS = Object.freeze([
   "pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute",
-  "TelemetryAttribute::trace_only(\"tenant_id\", tenant_id.to_string())",
+  "TelemetryAttribute::tenant_id(tenant_id)",
 ]);
 const REQUIRED_HEALTH_SNIPPETS = Object.freeze([
   "pub active_policy_revision: Option<PolicyRevisionId>",
@@ -199,7 +199,7 @@ serde_json = { workspace = true }
     validateDomainRequiredContracts(
       `
 pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute {
-    TelemetryAttribute::trace_only("tenant_id", tenant_id.to_string())
+    TelemetryAttribute::tenant_id(tenant_id)
 }
 `,
       DOMAIN_OBSERVABILITY,
@@ -208,7 +208,7 @@ pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute {
   );
   assertSelfTest(
     validateDomainRequiredContracts("pub fn tenant_trace_attribute() {}", DOMAIN_OBSERVABILITY).some((error) =>
-      error.includes("trace_only"),
+      error.includes("tenant_id"),
     ),
     "missing tenant trace-only contract accepted",
   );

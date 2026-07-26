@@ -169,8 +169,8 @@ pub struct SetupArgs {
     /// Preview planned setup/repair actions without writing files.
     #[arg(long)]
     pub dry_run: bool,
-    /// Verify externally installed optional tools; `--verify-assets` is a one-release alias.
-    #[arg(long = "verify-tools", visible_alias = "verify-assets")]
+    /// Verify externally installed optional tools.
+    #[arg(long = "verify-tools")]
     pub verify_tools: bool,
     /// Emit machine-readable JSON output.
     #[arg(long)]

@@ -60,14 +60,14 @@ impl RuntimeGatewayCredentialRefreshPlan {
 
 pub(super) struct RuntimeGatewayCredentialSnapshot {
     pub(super) fingerprint: [u8; 32],
-    pub(super) provider: RuntimeLocalRewriteProviderOptions,
+    pub(super) provider: Arc<RuntimeLocalRewriteProviderOptions>,
     pub(super) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(super) auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(super) sso: RuntimeGatewaySsoConfig,
     pub(super) virtual_keys: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyEntry>>>,
-    pub(super) guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
-    pub(super) observability: RuntimeGatewayObservabilityConfig,
+    pub(super) guardrail_webhook: Arc<RuntimeGatewayGuardrailWebhookConfig>,
+    pub(super) observability: Arc<RuntimeGatewayObservabilityConfig>,
 }
 
 #[derive(Clone)]
@@ -91,14 +91,14 @@ pub(super) fn runtime_gateway_initial_credential_snapshot(
 ) -> RuntimeGatewayCredentialSnapshot {
     RuntimeGatewayCredentialSnapshot {
         fingerprint: candidate.fingerprint,
-        provider: candidate.provider,
+        provider: Arc::new(candidate.provider),
         provider_credential: candidate.provider_credential,
         auth_token_hash: candidate.auth_token_hash,
         admin_tokens: candidate.admin_tokens,
         sso: candidate.sso,
         virtual_keys,
-        guardrail_webhook: candidate.guardrail_webhook,
-        observability: candidate.observability,
+        guardrail_webhook: Arc::new(candidate.guardrail_webhook),
+        observability: Arc::new(candidate.observability),
     }
 }
 
@@ -227,14 +227,14 @@ fn runtime_gateway_apply_secret_refresh_with_scim_loader(
         .current
         .store(Arc::new(RuntimeGatewayCredentialSnapshot {
             fingerprint: candidate.fingerprint,
-            provider: candidate.provider,
+            provider: Arc::new(candidate.provider),
             provider_credential: candidate.provider_credential,
             auth_token_hash: candidate.auth_token_hash,
             admin_tokens: candidate.admin_tokens,
             sso: candidate.sso,
             virtual_keys: Arc::new(Mutex::new(virtual_keys)),
-            guardrail_webhook: candidate.guardrail_webhook,
-            observability: candidate.observability,
+            guardrail_webhook: Arc::new(candidate.guardrail_webhook),
+            observability: Arc::new(candidate.observability),
         }));
     Ok(true)
 }
@@ -348,7 +348,8 @@ mod tests {
     }
 
     fn provider_api_key(snapshot: &super::RuntimeGatewayCredentialSnapshot) -> &str {
-        let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } = &snapshot.provider
+        let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } =
+            snapshot.provider.as_ref()
         else {
             panic!("expected OpenAI provider")
         };

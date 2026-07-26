@@ -141,7 +141,7 @@ fn sanitize_codex_user_agent(candidate: String, fallback: &str) -> String {
 fn codex_terminal_user_agent() -> String {
     static TERMINAL_INFO: OnceLock<TerminalInfo> = OnceLock::new();
     TERMINAL_INFO
-        .get_or_init(|| detect_terminal_info(&ProcessEnvironment))
+        .get_or_init(detect_terminal_info)
         .user_agent_token()
 }
 
@@ -252,92 +252,92 @@ impl TerminalInfo {
     }
 }
 
-trait TerminalEnvironment {
-    fn var(&self, name: &str) -> Option<String>;
-
-    fn has(&self, name: &str) -> bool {
-        self.var(name).is_some()
-    }
-
-    fn var_non_empty(&self, name: &str) -> Option<String> {
-        self.var(name).and_then(none_if_whitespace)
-    }
-
-    fn has_non_empty(&self, name: &str) -> bool {
-        self.var_non_empty(name).is_some()
-    }
-
-    fn tmux_client_info(&self) -> TmuxClientInfo;
-}
-
-struct ProcessEnvironment;
-
-impl TerminalEnvironment for ProcessEnvironment {
-    fn var(&self, name: &str) -> Option<String> {
-        env::var(name).ok()
-    }
-
-    fn tmux_client_info(&self) -> TmuxClientInfo {
-        TmuxClientInfo {
-            termtype: tmux_display_message("#{client_termtype}"),
-            termname: tmux_display_message("#{client_termname}"),
-        }
-    }
-}
-
-fn detect_terminal_info(env: &dyn TerminalEnvironment) -> TerminalInfo {
-    let tmux = env.has_non_empty("TMUX") || env.has_non_empty("TMUX_PANE");
-    if let Some(term_program) = env.var_non_empty("TERM_PROGRAM") {
+fn detect_terminal_info() -> TerminalInfo {
+    let tmux = terminal_env_has_non_empty("TMUX") || terminal_env_has_non_empty("TMUX_PANE");
+    if let Some(term_program) = terminal_env_var_non_empty("TERM_PROGRAM") {
         if term_program.eq_ignore_ascii_case("tmux")
             && tmux
-            && let Some(terminal) = terminal_from_tmux_client_info(env.tmux_client_info())
+            && let Some(terminal) = terminal_from_tmux_client_info(tmux_client_info())
         {
             return terminal;
         }
 
-        let version = env.var_non_empty("TERM_PROGRAM_VERSION");
+        let version = terminal_env_var_non_empty("TERM_PROGRAM_VERSION");
         let name = terminal_name_from_term_program(&term_program).unwrap_or(TerminalName::Unknown);
         return TerminalInfo::from_term_program(name, term_program, version);
     }
 
-    if env.has("WEZTERM_VERSION") {
+    if terminal_env_has("WEZTERM_VERSION") {
         return TerminalInfo::from_name(
             TerminalName::WezTerm,
-            env.var_non_empty("WEZTERM_VERSION"),
+            terminal_env_var_non_empty("WEZTERM_VERSION"),
         );
     }
-    if env.has("ITERM_SESSION_ID") || env.has("ITERM_PROFILE") || env.has("ITERM_PROFILE_NAME") {
+    if terminal_env_has("ITERM_SESSION_ID")
+        || terminal_env_has("ITERM_PROFILE")
+        || terminal_env_has("ITERM_PROFILE_NAME")
+    {
         return TerminalInfo::from_name(TerminalName::Iterm2, None);
     }
-    if env.has("TERM_SESSION_ID") {
+    if terminal_env_has("TERM_SESSION_ID") {
         return TerminalInfo::from_name(TerminalName::AppleTerminal, None);
     }
-    if env.has("KITTY_WINDOW_ID") || env.var("TERM").is_some_and(|term| term.contains("kitty")) {
+    if terminal_env_has("KITTY_WINDOW_ID")
+        || terminal_env_var("TERM").is_some_and(|term| term.contains("kitty"))
+    {
         return TerminalInfo::from_name(TerminalName::Kitty, None);
     }
-    if env.has("ALACRITTY_SOCKET") || env.var("TERM").is_some_and(|term| term == "alacritty") {
+    if terminal_env_has("ALACRITTY_SOCKET")
+        || terminal_env_var("TERM").is_some_and(|term| term == "alacritty")
+    {
         return TerminalInfo::from_name(TerminalName::Alacritty, None);
     }
-    if env.has("KONSOLE_VERSION") {
+    if terminal_env_has("KONSOLE_VERSION") {
         return TerminalInfo::from_name(
             TerminalName::Konsole,
-            env.var_non_empty("KONSOLE_VERSION"),
+            terminal_env_var_non_empty("KONSOLE_VERSION"),
         );
     }
-    if env.has("GNOME_TERMINAL_SCREEN") {
+    if terminal_env_has("GNOME_TERMINAL_SCREEN") {
         return TerminalInfo::from_name(TerminalName::GnomeTerminal, None);
     }
-    if env.has("VTE_VERSION") {
-        return TerminalInfo::from_name(TerminalName::Vte, env.var_non_empty("VTE_VERSION"));
+    if terminal_env_has("VTE_VERSION") {
+        return TerminalInfo::from_name(
+            TerminalName::Vte,
+            terminal_env_var_non_empty("VTE_VERSION"),
+        );
     }
-    if env.has("WT_SESSION") {
+    if terminal_env_has("WT_SESSION") {
         return TerminalInfo::from_name(TerminalName::WindowsTerminal, None);
     }
-    if let Some(term) = env.var_non_empty("TERM") {
+    if let Some(term) = terminal_env_var_non_empty("TERM") {
         return TerminalInfo::from_term(term);
     }
 
     TerminalInfo::unknown()
+}
+
+fn terminal_env_var(name: &str) -> Option<String> {
+    env::var(name).ok()
+}
+
+fn terminal_env_has(name: &str) -> bool {
+    terminal_env_var(name).is_some()
+}
+
+fn terminal_env_var_non_empty(name: &str) -> Option<String> {
+    terminal_env_var(name).and_then(none_if_whitespace)
+}
+
+fn terminal_env_has_non_empty(name: &str) -> bool {
+    terminal_env_var_non_empty(name).is_some()
+}
+
+fn tmux_client_info() -> TmuxClientInfo {
+    TmuxClientInfo {
+        termtype: tmux_display_message("#{client_termtype}"),
+        termname: tmux_display_message("#{client_termname}"),
+    }
 }
 
 fn terminal_from_tmux_client_info(client_info: TmuxClientInfo) -> Option<TerminalInfo> {

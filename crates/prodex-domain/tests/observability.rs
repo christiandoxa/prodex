@@ -110,11 +110,11 @@ fn metric_label_guard_preserves_closed_domain_surface_labels() {
 #[test]
 fn trace_only_and_redacted_attributes_do_not_become_metric_labels() {
     assert_eq!(
-        TelemetryAttribute::trace_only("tenant_id", "tenant-a").as_metric_label(),
+        tenant_trace_attribute(TenantId::new()).as_metric_label(),
         Err(TelemetryAttributeError::TraceOnlyAttribute)
     );
     let redacted = TelemetryAttribute::redacted_trace_only("prompt");
-    assert_eq!(redacted.value, "<redacted>");
+    assert_eq!(redacted.value(), "<redacted>");
     assert_eq!(
         redacted.as_metric_label(),
         Err(TelemetryAttributeError::TraceOnlyAttribute)
@@ -126,9 +126,9 @@ fn tenant_trace_attribute_keeps_raw_tenant_id_out_of_metric_labels() {
     let tenant_id = TenantId::new();
     let attribute = tenant_trace_attribute(tenant_id);
 
-    assert_eq!(attribute.key, "tenant_id");
-    assert_eq!(attribute.value, tenant_id.to_string());
-    assert_eq!(attribute.scope, TelemetryAttributeScope::TraceOnly);
+    assert_eq!(attribute.key(), "tenant_id");
+    assert_eq!(attribute.value(), tenant_id.to_string());
+    assert_eq!(attribute.scope(), TelemetryAttributeScope::TraceOnly);
     assert_eq!(
         attribute.as_metric_label(),
         Err(TelemetryAttributeError::TraceOnlyAttribute)

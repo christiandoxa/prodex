@@ -449,7 +449,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     } = options;
     validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let (provider, provider_credential) = provider.into_runtime_parts();
-    let log_path = runtime_local_rewrite_log_path(&runtime_config);
+    let log_path = runtime_local_rewrite_log_path(&runtime_config)?;
     initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);
     let worker_count = runtime_config.tuning.worker_count;
     let active_request_limit = runtime_config.tuning.active_request_limit;
@@ -625,6 +625,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             },
             Arc::clone(&gateway_virtual_keys),
         ));
+    let initial_gateway_credentials = gateway_credentials.current.load_full();
     let process = Arc::new(RuntimeLocalRewriteProcessServices {
         runtime_shared: runtime_shared.clone(),
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
@@ -677,15 +678,15 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     let shared = RuntimeLocalRewriteRequestContext {
         process,
         upstream_base_url,
-        provider,
-        provider_credential,
+        provider: Arc::clone(&initial_gateway_credentials.provider),
+        provider_credential: initial_gateway_credentials.provider_credential.clone(),
         governed_pricing: None,
-        gateway_auth_token_hash,
-        gateway_admin_tokens,
-        gateway_sso,
-        gateway_virtual_keys,
-        gateway_guardrail_webhook,
-        gateway_observability,
+        gateway_auth_token_hash: initial_gateway_credentials.auth_token_hash.clone(),
+        gateway_admin_tokens: initial_gateway_credentials.admin_tokens.clone(),
+        gateway_sso: initial_gateway_credentials.sso.clone(),
+        gateway_virtual_keys: Arc::clone(&initial_gateway_credentials.virtual_keys),
+        gateway_guardrail_webhook: Arc::clone(&initial_gateway_credentials.guardrail_webhook),
+        gateway_observability: Arc::clone(&initial_gateway_credentials.observability),
     };
     Ok(RuntimeLocalRewritePrepared {
         runtime_config,
@@ -1029,9 +1030,8 @@ fn runtime_local_rewrite_usage_state(
         durable_reservations: Arc::new(Mutex::new(BTreeMap::new())),
     }
 }
-
-fn runtime_local_rewrite_log_path(runtime_config: &RuntimeConfig) -> PathBuf {
-    let log_path = initialize_runtime_proxy_log_path_from_config(runtime_config);
+fn runtime_local_rewrite_log_path(runtime_config: &RuntimeConfig) -> Result<PathBuf> {
+    let log_path = initialize_runtime_proxy_log_path_from_config(runtime_config)?;
     for key in runtime_config.compatibility_defaults() {
         runtime_proxy_log_to_path(
             &log_path,
@@ -1041,7 +1041,7 @@ fn runtime_local_rewrite_log_path(runtime_config: &RuntimeConfig) -> PathBuf {
             ),
         );
     }
-    log_path
+    Ok(log_path)
 }
 fn runtime_local_rewrite_server(
     preferred_listen_addr: Option<&str>,
@@ -1429,7 +1429,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
             .mode
             .allows_anonymous_compatibility()
         && matches!(
-            &shared.provider,
+            shared.provider.as_ref(),
             RuntimeLocalRewriteProviderOptions::Gemini { .. }
         ) {
         Some(spawn_runtime_gemini_live_sidecar(

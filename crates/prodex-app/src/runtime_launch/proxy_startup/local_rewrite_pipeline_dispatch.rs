@@ -56,7 +56,9 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
             }
         };
     let selected_shared = provider_dispatch.selected_shared(shared);
-    if let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &selected_shared.provider {
+    if let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } =
+        selected_shared.provider.as_ref()
+    {
         let response = runtime_gemini_compact_response(
             request.state.request_id,
             &request.captured,
@@ -65,7 +67,7 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
         );
         return Err(request.state.respond(response));
     }
-    if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &selected_shared.provider {
+    if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = selected_shared.provider.as_ref() {
         let parts = runtime_kiro_compact_response_parts(
             request.state.request_id,
             &request.captured.body,
@@ -80,7 +82,7 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
         return Err(request.state.respond(response));
     }
     if matches!(
-        selected_shared.provider,
+        selected_shared.provider.as_ref(),
         RuntimeLocalRewriteProviderOptions::Copilot { .. }
     ) {
         return Ok(request);
@@ -117,7 +119,7 @@ fn runtime_local_rewrite_builtin_models_response(
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Option<tiny_http::ResponseBox> {
-    if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &shared.provider
+    if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = shared.provider.as_ref()
         && let Some(parts) =
             runtime_kiro_models_buffered_response(auth, &request.method, &request.path_and_query)
     {

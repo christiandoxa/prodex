@@ -21,15 +21,15 @@ struct AppServerBrokerLiveValidationState {
 }
 
 impl AppServerBrokerLiveValidator {
-    pub(crate) fn new() -> Self {
-        Self {
+    pub(crate) fn new() -> anyhow::Result<Self> {
+        Ok(Self {
             state: Arc::new(Mutex::new(AppServerBrokerLiveValidationState {
                 session: PreviewSession::default(),
                 line_index: 0,
                 finished: false,
-                log_path: initialize_runtime_proxy_log_path(),
+                log_path: initialize_runtime_proxy_log_path()?,
             })),
-        }
+        })
     }
 
     fn validate_line<D: Write>(
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn duplex_live_validation_tracks_requests_across_directions() {
-        let validator = AppServerBrokerLiveValidator::new();
+        let validator = AppServerBrokerLiveValidator::new().unwrap();
         let diagnostics = Arc::new(Mutex::new(Vec::new()));
         let request = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"custom/ping\",\"params\":{}}\n";
         let response = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n";
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn duplex_live_validation_rejects_before_forwarding() {
-        let validator = AppServerBrokerLiveValidator::new();
+        let validator = AppServerBrokerLiveValidator::new().unwrap();
         let diagnostics = Arc::new(Mutex::new(Vec::new()));
         let mut forwarded = Vec::new();
         let error = app_server_broker_pump_live_stream(

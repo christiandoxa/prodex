@@ -2,8 +2,8 @@ use super::super::{
     RuntimeResponseCandidateSelection, runtime_compact_route_followup_bound_profile,
     runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_precommit_budget_exhausted_for_route,
-    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_should_shed_fresh_compact_request,
-    runtime_proxy_sync_probe_pressure_pause,
+    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
+    runtime_proxy_should_shed_fresh_compact_request,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_request_session_id,
     runtime_request_turn_state, runtime_session_bound_profile,
     runtime_smart_context_model_name_from_body,
@@ -177,7 +177,7 @@ pub(super) fn proxy_runtime_compact_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Compact);
+                runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Compact);
                 continue;
             }
             return finish_runtime_proxy_compact_selection_exhausted(

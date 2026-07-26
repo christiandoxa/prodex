@@ -385,7 +385,7 @@ export function validateProductionBoundary(sources) {
       "let provider = dispatch.provider();",
       "let endpoint = dispatch.endpoint();",
       "let stream_mode = dispatch.stream_mode();",
-      "match (provider, &shared.provider)",
+      "match (provider, shared.provider.as_ref())",
     ],
     `${FILES.providerSender}: sender must select the configured adapter from the application provider, endpoint, and stream plan`,
   );
@@ -1568,7 +1568,7 @@ function runSelfTest() {
       let endpoint = dispatch.endpoint();
       let stream_mode = dispatch.stream_mode();
       runtime_gateway_application_provider_retry_precommit();
-      match (provider, &shared.provider) {}
+      match (provider, shared.provider.as_ref()) {}
     }`,
     providerErrorPolicy: "",
     providerAnthropic: "runtime_gateway_application_provider_retry_precommit();",

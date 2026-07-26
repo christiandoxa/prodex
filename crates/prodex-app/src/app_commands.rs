@@ -126,8 +126,22 @@ pub(super) fn prompt_super_presidio_opt_in() -> Result<bool> {
     io::stdin()
         .read_line(&mut answer)
         .context("failed to read Presidio prompt answer")?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    Ok(super_presidio_opt_in_answer(&answer))
+}
+
+fn super_presidio_opt_in_answer(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+#[cfg(test)]
+mod presidio_prompt_tests {
+    use super::super_presidio_opt_in_answer;
+
+    #[test]
+    fn presidio_prompt_is_opt_in_and_accepts_yes_case_insensitively() {
+        assert!(super_presidio_opt_in_answer("y\n"));
+        assert!(super_presidio_opt_in_answer(" YES \n"));
+        assert!(!super_presidio_opt_in_answer("\n"));
+        assert!(!super_presidio_opt_in_answer("no\n"));
+    }
 }

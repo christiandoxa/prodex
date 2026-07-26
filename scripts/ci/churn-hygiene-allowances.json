@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-production-paths-feature-0.351.0",
+    "requiredSubjects": [
+      "fix: complete audited production paths"
+    ],
+    "caps": {
+      "maxFiles": 110,
+      "maxBehaviorFiles": 100,
+      "maxLines": 3200,
+      "maxFileLines": 450
+    },
+    "reason": "Reviewed the whole-repository audit fixes for the interactive Presidio opt-in contract, non-panicking runtime log initialization, background-only cold quota probes, exact governance permissions and routing, request-pinned gateway credentials, typed telemetry attributes, optional-tool parsing, dead compatibility removal, and synchronized documentation; verified with focused regressions, 491 runtime proxy tests, the full locked all-features suite, strict Clippy, complete boundary, hot-path, security, size, and dependency guards, an optimized locked build, and tracked-diff secret, PII, and identifier review."
+  },
+  {
+    "id": "audited-production-paths-release-0.351.0",
+    "requiredSubjects": [
+      "fix: complete audited production paths",
+      "chore(release): release 0.351.0"
+    ],
+    "caps": {
+      "maxFiles": 180,
+      "maxBehaviorFiles": 105,
+      "maxLines": 6000,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the complete 0.351.0 production-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata after release preparation; verified with focused regressions, 491 runtime proxy tests, the full locked all-features suite, strict Clippy, complete boundary, hot-path, security, size, and dependency guards, an optimized locked build, and tracked-diff secret, PII, and identifier review."
+  },
+  {
     "id": "smart-context-evidence-release-0.347.0",
     "requiredSubjects": [
       "perf(smart-context): reuse exact round-trip validation",

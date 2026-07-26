@@ -2197,13 +2197,13 @@ fn application_control_plane_audit_emission_span_uses_trace_only_correlation_att
     assert!(plan.span.trace_context.is_none());
     assert!(plan.span.descriptor.metric_labels().unwrap().is_empty());
     assert!(plan.span.descriptor.attributes.iter().any(|attribute| {
-        attribute.key == "tenant_id"
-            && attribute.value == tenant_id.to_string()
-            && attribute.scope == prodex_domain::TelemetryAttributeScope::TraceOnly
+        attribute.key() == "tenant_id"
+            && attribute.value() == tenant_id.to_string()
+            && attribute.scope() == prodex_domain::TelemetryAttributeScope::TraceOnly
     }));
     assert!(plan.span.descriptor.attributes.iter().any(|attribute| {
-        attribute.key == "audit_event_id"
-            && attribute.scope == prodex_domain::TelemetryAttributeScope::TraceOnly
+        attribute.key() == "audit_event_id"
+            && attribute.scope() == prodex_domain::TelemetryAttributeScope::TraceOnly
     }));
 
     let mut missing_audit_event = correlation;
@@ -2278,13 +2278,13 @@ fn application_control_plane_audit_persistence_span_uses_low_cardinality_storage
     );
     assert_eq!(plan.span.correlation, correlation);
     assert!(plan.span.descriptor.attributes.iter().any(|attribute| {
-        attribute.key == "tenant_id"
-            && attribute.value == tenant_id.to_string()
-            && attribute.scope == prodex_domain::TelemetryAttributeScope::TraceOnly
+        attribute.key() == "tenant_id"
+            && attribute.value() == tenant_id.to_string()
+            && attribute.scope() == prodex_domain::TelemetryAttributeScope::TraceOnly
     }));
     assert!(plan.span.descriptor.attributes.iter().any(|attribute| {
-        attribute.key == "audit_event_id"
-            && attribute.scope == prodex_domain::TelemetryAttributeScope::TraceOnly
+        attribute.key() == "audit_event_id"
+            && attribute.scope() == prodex_domain::TelemetryAttributeScope::TraceOnly
     }));
 
     let missing_tenant = prodex_domain::CorrelationContext::new(RequestId::new());
@@ -2900,10 +2900,10 @@ fn application_control_plane_idempotency_from_http_digest_builds_canonical_finge
     let action = control_plane_action(
         tenant_id,
         principal,
-        ControlPlaneOperation::PolicyPublish,
+        ControlPlaneOperation::PolicyCreate,
         ResourceKind::Policy,
     );
-    let mut http = control_plane_http_request("/admin/policies/revision-1");
+    let mut http = control_plane_http_request("/admin/policies");
     http.headers.push(GatewayHttpHeader::new(
         "Idempotency-Key",
         "policy-publish-http-1",
@@ -2926,7 +2926,7 @@ fn application_control_plane_idempotency_from_http_digest_builds_canonical_finge
     );
     assert_eq!(
         operation.request_fingerprint,
-        "http:post:path:/admin/policies/revision-1:body:sha256:policy-body"
+        "http:post:path:/admin/policies:body:sha256:policy-body"
     );
 }
 
@@ -3057,10 +3057,10 @@ fn application_control_plane_idempotency_from_http_digest_errors_are_redacted() 
     let action = control_plane_action(
         tenant_id,
         control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
-        ControlPlaneOperation::PolicyPublish,
+        ControlPlaneOperation::PolicyCreate,
         ResourceKind::Policy,
     );
-    let mut http = control_plane_http_request("/admin/policies/revision-1");
+    let mut http = control_plane_http_request("/admin/policies");
     http.headers.push(GatewayHttpHeader::new(
         "Idempotency-Key",
         "policy-publish-http-1",

@@ -480,24 +480,12 @@ fn ponytail_tool_status() -> ToolHealth {
     let id = OptionalToolId::Ponytail;
     for root in managed_optimizer_roots() {
         let versioned = root.join("ponytail").join(crate::PONYTAIL_VETTED_VERSION);
-        let compatibility = root.join("ponytail");
         let versioned_exists = match crate::tree::path_exists(&versioned) {
             Ok(exists) => exists,
             Err(error) => return invalid_tool(id, error),
         };
-        let compatibility_exists = match crate::tree::path_exists(&compatibility) {
-            Ok(exists) => exists,
-            Err(error) => return invalid_tool(id, error),
-        };
-        let candidate = if versioned_exists {
-            Some(versioned)
-        } else if compatibility_exists {
-            Some(compatibility)
-        } else {
-            None
-        };
-        if let Some(candidate) = candidate {
-            return validate_ponytail_install(&root, &candidate)
+        if versioned_exists {
+            return validate_ponytail_install(&root, &versioned)
                 .map(ToolHealth::installed)
                 .unwrap_or_else(|error| invalid_tool(id, error));
         }

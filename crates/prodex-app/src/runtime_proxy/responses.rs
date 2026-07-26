@@ -243,7 +243,7 @@ pub(crate) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Responses);
+                runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Responses);
                 continue;
             }
             if let Some(action) = try_runtime_responses_direct_current_profile_fallback(

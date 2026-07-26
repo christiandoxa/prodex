@@ -29,7 +29,7 @@ Status meanings:
 | Runtime configuration changes under active requests | one typed startup snapshot; no tuning reads on hot paths | loader count/error/listener-order, gateway refresh-parity, URL-redaction tests, and hot-path guards | `crates/prodex-app/src/runtime_config`; `crates/prodex-app/src/app_commands/runtime_launch/gateway_config.rs`; `crates/prodex-app/tests/src/runtime_config.rs`; `scripts/ci/config-boundary-guard.mjs` | pass: gateway provider, base URL, provider compatibility, auth fallback, state fallback, and Gemini model settings are captured before secret resolution and binding; projected-secret refresh reuses non-secret state and resolves only credential material |
 | Broker secret visible in argv/env | bounded versioned inherited IPC bootstrap | command-plan snapshot and malformed/truncated/oversized bootstrap tests | `crates/prodex-runtime-broker/src/process.rs`; `crates/prodex-runtime-broker/tests/src/process.rs` | pass |
 | Broker secret leaks via formatting | redacted wrapper, no raw `Display`, zeroize on drop | formatting, error, log, audit, header, and process-plan sentinels | `crates/prodex-runtime-broker/src/admin.rs`; `crates/prodex-runtime-broker/tests/src/lib.rs` | pass |
-| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | registry/backup/health snapshots, rotation, native Windows gate | `crates/prodex-app/src/runtime_broker/registry/store.rs`; `.github/workflows/ci.yml` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | registry/backup/health snapshots, rotation, native Windows gate | `crates/prodex-app/src/runtime_broker/registry/store.rs`; `.github/workflows/ci.yml` | pass on Unix and Windows; CI run `30182486464` completed both native Windows security and full-workspace jobs successfully |
 | Timing oracle in bearer comparison | one constant-time comparison helper | centralized caller inventory and functional tests | `crates/prodex-runtime-broker/src/admin.rs`; `crates/prodex-app/src/runtime_broker/admin.rs` | pass |
 
 The original focused baseline passed 65 boundary cases across ten suites, seven expose tests, and
@@ -62,12 +62,12 @@ HTTP metadata that can reach a valid typed runtime snapshot.
 
 | Threat | Required control | Test/evidence | File(s) | Current status |
 | --- | --- | --- | --- | --- |
-| Final or parent link redirects a secret operation | handle-relative traversal, no-follow opens, reparse rejection, identity checks | Unix link/replacement/refresh-lock tests and native Windows gate | `crates/prodex-secret-store/src/secure_file`; `crates/prodex-secret-store/tests/src/tests.rs`; `.github/workflows/ci.yml` | pass on Unix; Windows native gate configured, first CI execution pending |
-| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600`, trusted parents, projected `0440`, private Windows DACL | mode/owner/parent/projected and malicious-group-ACE tests | `crates/prodex-secret-store/src/secure_file/windows.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Final or parent link redirects a secret operation | handle-relative traversal, no-follow opens, reparse rejection, identity checks | Unix link/replacement/refresh-lock tests and native Windows gate | `crates/prodex-secret-store/src/secure_file`; `crates/prodex-secret-store/tests/src/tests.rs`; `.github/workflows/ci.yml` | pass on Unix and Windows; CI run `30182486464` completed the native Windows security job successfully |
+| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600`, trusted parents, projected `0440`, private Windows DACL | mode/owner/parent/projected and malicious-group-ACE tests | `crates/prodex-secret-store/src/secure_file/windows.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix and Windows; CI run `30182486464` completed the native Windows security job successfully |
 | Partial or oversized secret file is consumed | metadata precheck and bounded read with overflow sentinel | backend/provider/refresh custom-bound tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/src/projected_provider.rs` | pass |
-| Secret write publishes partial or public content | private temporary, flush, atomic replace, directory flush/write-through, identity check | atomic replacement, `0600`, residue, and symlink-target tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
-| Kubernetes rotation mixes generations | pin and validate one `..data` generation | rotation, anchoring, escape, nested-target, and reparse tests | `crates/prodex-secret-store/src/projected_provider.rs`; `crates/prodex-secret-store/tests/projected_secret_provider.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
-| Secret material survives or escapes generic APIs | zeroize-on-drop, no material `Clone`/serde, closure-scoped exposure | compile-fail doctests and zeroize/redaction tests | `crates/prodex-domain/src/secrets.rs`; `crates/prodex-domain/tests/secrets.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/projected_provider.rs` | partial: the core type and production provider adapter are scoped; telemetry/webhook snapshots still retain cloneable raw strings |
+| Secret write publishes partial or public content | private temporary, flush, atomic replace, directory flush/write-through, identity check | atomic replacement, `0600`, residue, and symlink-target tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix and Windows; CI run `30182486464` completed the native Windows security job successfully |
+| Kubernetes rotation mixes generations | pin and validate one `..data` generation | rotation, anchoring, escape, nested-target, and reparse tests | `crates/prodex-secret-store/src/projected_provider.rs`; `crates/prodex-secret-store/tests/projected_secret_provider.rs` | pass on Unix and Windows; CI run `30182486464` completed the native Windows security job successfully |
+| Secret material survives or escapes generic APIs | zeroize-on-drop, no material `Clone`/serde, closure-scoped exposure | compile-fail doctests, typed telemetry identifiers, shared immutable credential snapshots, and zeroize/redaction tests | `crates/prodex-domain/src/secrets.rs`; `crates/prodex-domain/src/observability.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_credentials.rs`; `crates/prodex-domain/tests/secrets.rs` | pass: secret material remains closure-scoped; provider, webhook, and observability credentials are shared through immutable `Arc` snapshots; generic raw trace-value construction is unavailable |
 | Keyring operations fall back to plaintext or leak backend errors | OS-native credential store, tagged text/binary envelope, bounded values, redacted errors | selection, envelope, location, and error-path tests | `crates/prodex-secret-store/src/keyring_backend.rs`; `crates/prodex-secret-store/tests/src/keyring.rs` | pass |
 
 Compatibility note: `SecretMaterial::expose_secret`, its generic serde implementations, and its
@@ -76,11 +76,11 @@ The keyring selection remains source-compatible and now performs native credenti
 Codex-managed profile `auth.json` files remain on the existing hardened file path until their
 callers deliberately migrate to the backend-neutral location API.
 
-Windows evidence: `.github/workflows/ci.yml` now runs the secret-store, runtime-broker,
+Windows evidence: `.github/workflows/ci.yml` runs the secret-store, runtime-broker,
 profile-export, and application broker-capability tests natively on `windows-latest` with Rust
-1.97.0. The supply-chain guard rejects removal, unlocked commands, fail-open behavior, or missing
-suite coverage. This local Linux host cannot execute that native job, so the matrix makes no
-Windows runtime-pass claim until its first successful CI run.
+1.97.0. CI run `30182486464` completed both the native Windows security job and the full Windows
+workspace suite successfully. The supply-chain guard rejects removal, unlocked commands,
+fail-open behavior, or missing suite coverage.
 
 ## Phase 7 Supply-Chain Evidence
 

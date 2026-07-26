@@ -35,7 +35,7 @@ pub(super) fn runtime_local_rewrite_dispatch_websocket<'target>(
             }
         };
     if matches!(
-        &selected_shared.provider,
+        selected_shared.provider.as_ref(),
         RuntimeLocalRewriteProviderOptions::Gemini { .. }
     ) && is_runtime_realtime_websocket_path(&state.path)
     {

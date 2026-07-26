@@ -57,31 +57,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
-    let shared = RuntimeRotationProxyShared {
-        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
-        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
-        auto_redeem_enabled: false,
-        upstream_no_proxy: false,
-        compact_client: reqwest::Client::new(),
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        runtime_state_lock_wait_counters:
-            RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate_for_route(
@@ -151,31 +127,7 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
         profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
-    let shared = RuntimeRotationProxyShared {
-        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
-        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
-        auto_redeem_enabled: false,
-        upstream_no_proxy: false,
-        compact_client: reqwest::Client::new(),
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        runtime_state_lock_wait_counters:
-            RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate_for_route(
@@ -326,31 +278,7 @@ fn optimistic_current_candidate_skips_route_performance_penalty() {
             },
         )]),
     };
-    let shared = RuntimeRotationProxyShared {
-        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
-        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
-        auto_redeem_enabled: false,
-        upstream_no_proxy: false,
-        compact_client: reqwest::Client::new(),
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        runtime_state_lock_wait_counters:
-            RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate_for_route(
@@ -500,31 +428,7 @@ fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_cha
             },
         )]),
     };
-    let shared = RuntimeRotationProxyShared {
-        smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
-        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
-        auto_redeem_enabled: false,
-        upstream_no_proxy: false,
-        compact_client: reqwest::Client::new(),
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        runtime_state_lock_wait_counters:
-            RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate_for_route(

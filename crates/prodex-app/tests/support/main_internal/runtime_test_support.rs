@@ -247,10 +247,13 @@ pub(super) fn runtime_rotation_proxy_shared(
 
 pub(super) fn runtime_rotation_proxy_shared_with_auto_redeem(
     temp_dir: &TestDir,
-    runtime: RuntimeRotationState,
+    mut runtime: RuntimeRotationState,
     active_request_limit: usize,
     auto_redeem_enabled: bool,
 ) -> RuntimeRotationProxyShared {
+    for (name, entry) in load_runtime_profile_usage_auth_cache(&runtime.state) {
+        runtime.profile_usage_auth.entry(name).or_insert(entry);
+    }
     let active_request_limit = active_request_limit.max(1);
     let runtime_config = Arc::new(crate::RuntimeConfig::compatibility_current());
     let compact_client =

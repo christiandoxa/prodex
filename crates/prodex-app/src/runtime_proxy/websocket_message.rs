@@ -25,13 +25,10 @@ use std::collections::BTreeSet;
 #[cfg(test)]
 use super::acquire_test_runtime_lock;
 
-mod auth;
 mod continuation_handling;
 mod failure_handling;
 mod loop_control;
 mod setup;
-
-pub(super) use self::auth::*;
 
 fn runtime_websocket_should_promote_committed_profile(
     previous_response_id: Option<&str>,

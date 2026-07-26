@@ -115,13 +115,6 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     OpenAiResponses {
         api_keys: Vec<String>,
     },
-    #[allow(
-        dead_code,
-        reason = "retained for local embeddings compatibility and its regression tests"
-    )]
-    LocalEmbeddingsOnly {
-        embedding_model: String,
-    },
     DeepSeek {
         api_keys: Vec<String>,
         strict_tools: bool,
@@ -175,8 +168,7 @@ impl RuntimeLocalRewriteProviderOptions {
             RuntimeLocalRewriteProviderOptions::Copilot { .. } => {
                 RuntimeProviderBridgeKind::Copilot
             }
-            RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. }
-            | RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => {
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
             RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => {
