@@ -59,6 +59,7 @@ function renderMarkdown(value) {
 
 function normalizedReport(value) {
   const normalized = structuredClone(value);
+  normalized.provenance.package_version = "<package-version>";
   normalized.provenance.commit_sha = "<source-commit>";
   normalized.provenance.rust_toolchain = "<toolchain>";
   for (const scenario of normalized.scenarios) {

@@ -73,6 +73,27 @@ function run(command, args, options = {}) {
   });
 }
 
+async function retry(action, attempts = 3, delayMs = 5000) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await action();
+    } catch (error) {
+      if (attempt === attempts) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+async function ensureDockerImage(image) {
+  try {
+    await run("docker", ["image", "inspect", image], { capture: true });
+  } catch {
+    await retry(() => run("docker", ["pull", image], { capture: true }));
+  }
+}
+
 async function commandExists(command, args = ["--version"]) {
   try {
     await run(command, args, { capture: true });
@@ -162,6 +183,8 @@ async function runWithManagedPostgres() {
     psqlAvailable: await commandExists("psql"),
     opensslAvailable: await commandExists("openssl", ["version"]),
   });
+  await ensureDockerImage(postgresImage);
+  await ensureDockerImage(redisImage);
 
   const tlsParent = path.join(repoRoot, "target", "ci");
   await fs.mkdir(tlsParent, { recursive: true });
@@ -273,7 +296,7 @@ async function runWithManagedPostgres() {
   }
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   assertSelfTest(
     selectProofMode({
       postgresUrl: "postgres://example",
@@ -307,11 +330,23 @@ function runSelfTest() {
     missingDependencyError?.includes(MISSING_DEPENDENCY_MESSAGE),
     "missing local dependencies must fail with the stable helper message",
   );
+  let retryAttempts = 0;
+  await retry(
+    async () => {
+      retryAttempts += 1;
+      if (retryAttempts < 3) {
+        throw new Error("transient");
+      }
+    },
+    3,
+    0,
+  );
+  assertSelfTest(retryAttempts === 3, "transient image pulls must use the bounded retry budget");
 }
 
 export async function main() {
   if (process.argv.includes("--self-test")) {
-    runSelfTest();
+    await runSelfTest();
     return;
   }
   if (process.env.PRODEX_TEST_POSTGRES_URL) {
