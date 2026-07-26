@@ -3470,6 +3470,7 @@ version = "0.352.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "libc",
  "ratatui",
  "unicode-width",
 ]
