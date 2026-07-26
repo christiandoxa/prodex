@@ -8,6 +8,7 @@ fn runtime_probe_refresh_queue_with_worker_count(
     Arc::clone(RUNTIME_PROBE_REFRESH_QUEUE.get_or_init(|| {
         let queue = Arc::new(RuntimeProbeRefreshQueue {
             pending: Mutex::new(BTreeMap::new()),
+            scheduled: Mutex::new(BTreeSet::new()),
             wake: Condvar::new(),
             active: Arc::new(AtomicUsize::new(0)),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
@@ -99,16 +100,22 @@ pub(crate) fn schedule_runtime_probe_refresh(
     }
 
     let queue = runtime_probe_refresh_queue();
+    let key = (state_file.clone(), profile_name.to_string());
+    if !queue
+        .scheduled
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key.clone())
+    {
+        return;
+    }
     let mut pending = queue
         .pending
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if pending.contains_key(&(state_file.clone(), profile_name.to_string())) {
-        return;
-    }
     let queued_at = Instant::now();
     pending.insert(
-        (state_file.clone(), profile_name.to_string()),
+        key,
         RuntimeProbeRefreshJob {
             shared: shared.clone(),
             profile_name: profile_name.to_string(),

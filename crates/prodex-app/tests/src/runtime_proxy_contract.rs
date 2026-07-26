@@ -35,7 +35,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
             files: &["README.md", "docs/runtime-policy.md"],
             required: &[
                 "Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.",
-                "If you only use one Codex account and do not need quota rotation, you probably do not need `prodex`.",
+                "If one Codex account already meets your needs, direct Codex is simpler.",
             ],
         },
         ContractEvidence {
@@ -68,7 +68,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
             files: &[
                 "crates/prodex-app/src/runtime_background/scheduled_save.rs",
                 "crates/prodex-app/src/runtime_background/scheduled_save/queues.rs",
-                "README.md",
+                "docs/runtime-policy.md",
             ],
             required: &[
                 "state_save_queued",

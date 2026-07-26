@@ -5,7 +5,7 @@ use super::attempt::{RuntimeProbeExecutionMode, RuntimeProbeRefreshAttempt};
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_probe_refresh_take_next_job(
     queue: &RuntimeProbeRefreshQueue,
-) -> RuntimeProbeRefreshJob {
+) -> ((PathBuf, String), RuntimeProbeRefreshJob) {
     let mut pending = queue
         .pending
         .lock()
@@ -13,7 +13,7 @@ pub(crate) fn runtime_probe_refresh_take_next_job(
     loop {
         if let Some(key) = pending.keys().next().cloned() {
             if let Some(job) = pending.remove(&key) {
-                return job;
+                return (key, job);
             }
             continue;
         }
@@ -26,12 +26,17 @@ pub(crate) fn runtime_probe_refresh_take_next_job(
 
 pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
     loop {
-        let job = runtime_probe_refresh_take_next_job(&queue);
+        let (key, job) = runtime_probe_refresh_take_next_job(&queue);
         queue.active.fetch_add(1, Ordering::SeqCst);
         let log_path = job.shared.log_path.clone();
         let panic_result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
             execute_runtime_probe_refresh_job(job)
         });
+        queue
+            .scheduled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&key);
         queue.active.fetch_sub(1, Ordering::SeqCst);
         if let Err(panic_payload) = panic_result {
             let panic_message =

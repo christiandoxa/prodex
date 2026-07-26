@@ -82,6 +82,14 @@ fn missing_external_caveman_fails_before_claude_launch() {
         prodex_optional_tools::PRODEX_OPTIMIZERS_HOME_ENV,
         tools.path.to_str().expect("temporary path should be UTF-8"),
     );
+    let _xdg_guard = TestEnvVarGuard::set(
+        "XDG_DATA_HOME",
+        tools.path.to_str().expect("temporary path should be UTF-8"),
+    );
+    let _home_guard = TestEnvVarGuard::set(
+        "HOME",
+        tools.path.to_str().expect("temporary path should be UTF-8"),
+    );
     let paths = AppPaths {
         root: tools.path.clone(),
         state_file: tools.path.join("state.json"),

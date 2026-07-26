@@ -102,11 +102,12 @@ function printHelp() {
       "Runs the full workspace Rust suite in faster partitions.",
       "",
       "Partitions:",
-      "  - prebuild all all-features workspace test binaries once",
+      "  - prebuild all all-features workspace and prodex-app lib test binaries once",
       "  - run workspace-safe all-features tests with parallel libtest threads",
       "  - run global-cache broker-log metrics tests serial",
       "  - run temp-executable rtk wrapper tests serial",
       "  - run auto_rotate integration tests as parallel serial shards",
+      "  - run every prodex-app lib test serially (the crate disables implicit workspace tests)",
     ].join("\n") + "\n",
   );
 }
@@ -128,6 +129,11 @@ function prebuildSteps() {
       label: "prebuild:workspace-all-features",
       command: "cargo",
       args: ["test", "--workspace", "--all-features", "--no-run"],
+    },
+    {
+      label: "prebuild:prodex-app-lib-all-features",
+      command: "cargo",
+      args: ["test", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
     },
   ];
 }
@@ -197,6 +203,24 @@ function autoRotateStep(args) {
   };
 }
 
+function prodexAppStep() {
+  return {
+    label: "prodex-app:all-lib-tests-serial",
+    command: "cargo",
+    args: [
+      "test",
+      "-q",
+      "-p",
+      "prodex-app",
+      "--lib",
+      "--all-features",
+      "--",
+      "--test-threads=1",
+    ],
+    failOnZeroTests: true,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -219,6 +243,12 @@ async function main() {
       dryRun: args.dryRun,
       jobs: 3,
       timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
+    })),
+  );
+  completed.push(
+    ...(await runStepsSerial([prodexAppStep()], {
+      dryRun: args.dryRun,
+      timingSummary: timingSummary(args, "full-rust-test:prodex-app"),
     })),
   );
 
