@@ -565,6 +565,21 @@ async function assertCleanWorktree() {
   }
 }
 
+async function assertPublishedReleaseBase(remote, branch) {
+  const head = await currentHead();
+  const remoteOutput = await runCommand(
+    "git",
+    ["ls-remote", "--exit-code", remote, `refs/heads/${branch}`],
+    { capture: true },
+  );
+  const remoteHead = remoteOutput.trim().split(/\s+/u, 1)[0];
+  if (head !== remoteHead) {
+    throw new Error(
+      `HEAD ${head} does not match ${remote}/${branch} ${remoteHead}; push and verify source CI before release-run so source and release metadata are not bundled in one push`,
+    );
+  }
+}
+
 async function bumpVersion(version, dryRun) {
   if (!version) {
     process.stdout.write(`bump: no --version provided; current version ${await readCargoVersion()}\n`);
@@ -812,6 +827,7 @@ export async function main(argv = process.argv) {
     dryRun: args.dryRun,
   })) {
     await assertCleanWorktree();
+    await assertPublishedReleaseBase(args.remote, args.branch);
   }
   const repo = shouldResolveGithubRepo({
     steps: args.steps,

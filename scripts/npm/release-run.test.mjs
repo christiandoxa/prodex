@@ -363,3 +363,41 @@ test("release-run dry-run resume skips completed steps without changing state", 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("release-run requires metadata changes to start from the published branch head", async () => {
+  const root = await createReleaseRunFixture();
+  const remote = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-run-remote-"));
+  try {
+    await git(remote, ["init", "--bare", "-q"]);
+    await git(root, ["remote", "set-url", "origin", remote]);
+    await git(root, ["push", "-q", "origin", "HEAD:main"]);
+
+    await runReleaseRun(root, [
+      "--only",
+      "bump",
+      "--version",
+      "0.2.0",
+      "--state-file",
+      path.join(remote, "first-state.json"),
+    ]);
+    assert.match(await fs.readFile(path.join(root, "Cargo.toml"), "utf8"), /version = "0\.2\.0"/);
+
+    await git(root, ["add", "Cargo.toml"]);
+    await git(root, ["commit", "-m", "chore: local source change"]);
+    await assert.rejects(
+      runReleaseRun(root, [
+        "--only",
+        "bump",
+        "--version",
+        "0.3.0",
+        "--state-file",
+        path.join(remote, "second-state.json"),
+      ]),
+      /push and verify source CI before release-run/,
+    );
+    assert.match(await fs.readFile(path.join(root, "Cargo.toml"), "utf8"), /version = "0\.2\.0"/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(remote, { recursive: true, force: true });
+  }
+});
