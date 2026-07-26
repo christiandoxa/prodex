@@ -107,12 +107,10 @@ npm run docs:smart-context-evidence:check
 ```
 
 The current [raw report](generated/smart-context-replay-report.json) and
-[summary](generated/smart-context-replay-report.md) are generated from source
-commit `de60d09`. They record 59,713 exact input tokens, 41,277 optimized input
-tokens, and 18,436 net tokenizer-counted tokens across the whole deterministic
-corpus; all scenarios passed. These figures describe only the checked corpus.
-They are not a universal reduction target, latency claim, or live-model quality
-claim.
+[summary](generated/smart-context-replay-report.md) carry their source commit,
+toolchain, tokenizer, token counts, and scenario outcomes as generated
+provenance. Those figures describe only the checked corpus. They are not a
+universal reduction target, latency claim, or live-model quality claim.
 
 Evidence levels are separate:
 

@@ -2,10 +2,14 @@
 
 ## Status and Scope
 
-This document defines the Phase 3 target for policy administration, approval,
+This document defines the Phase 3 contract for policy administration, approval,
 publication, evaluation, activation, rollback, and last-known-good operation.
-It is a design and migration contract. It does not claim that the target policy
-decision point, maker-checker workflow, or policy store is implemented.
+The repository implements the durable SQLite/PostgreSQL lifecycle, HTTP admin
+surface, maker-checker approvals, activation, rollback, snapshots, and audit
+outbox. A complete policy grammar/compiler/PDP and deployment-specific
+operational evidence remain outside the implemented core. HTTP/OpenAPI is the
+canonical administration surface; a duplicate CLI lifecycle is not part of the
+current product contract.
 
 The target extends existing Prodex domain, control-plane, configuration, and
 storage boundaries. It does not turn `policy.toml`, a provider adapter, a route
@@ -20,17 +24,16 @@ normative in this document.
 
 | Area | Existing repository primitive | Gap against the target |
 | --- | --- | --- |
-| Snapshot integrity | `prodex-domain` has generic `PolicySnapshot`, digest and signature metadata, validation results, stable activation errors, refresh windows, cache status, and `PolicyActivationState` with active/LKG concepts. | The caller currently supplies integrity-validation results. There is no governance policy grammar, compiler, verifier key lifecycle, typed PDP input/decision, or production evaluator. The target LKG promotion semantics also need to distinguish a merely activated revision from one successfully verified and loaded. |
-| Configuration publication | `prodex-config` has tenant-bound revisions, monotonic revision checks, cache windows, activation plans, and invalidation event plans. | Configuration publication is not a policy draft/review/approval store and does not establish maker-checker or quorum. |
+| Snapshot integrity | `prodex-domain` and `prodex-storage` model immutable revisions, digests, activation state, active/LKG pointers, approval records, quorum, and stable repository errors. | Artifact validation is supplied through a bounded callback. A complete governance grammar/compiler, verifier-key lifecycle, and general PDP remain future work. |
+| Configuration publication | `prodex-application` provides policy governance services over tenant-bound revision, approval, activation, rollback, revoke, and snapshot repository operations. | Runtime operational configuration remains separate from governance policy authority. |
 | Runtime policy | `prodex-runtime-policy` parses, validates, caches, reloads, and invalidates the local runtime policy file. | The runtime file remains operational configuration. It is not the revisioned tenant policy store or the sole PDP source. |
-| Control-plane authorization | `prodex-control-plane` enforces tenant, role, resource, and credential-scope checks. `PolicyPublish` is an admin operation; mutations can require idempotency and append-only audit planning. | The operation is coarse. There are no distinct draft, submit, approve, reject, activate, rollback, or inspect permissions and no production policy lifecycle implementation. |
-| Break glass | `BreakGlassAuthorization` requires a non-empty bounded reason, future expiry, `BreakGlass` credential scope, normal tenant checks, role checks, and an audit plan. | It is an authorization primitive, not a durable grant with approved scope, issuer, reviewer, revocation, maximum lifetime, use count, or post-use review. It cannot bypass maker-checker by itself. |
-| Durable storage | PostgreSQL and SQLite have explicit migration catalogs, tenant-aware plans, idempotency tables, an audit table, and PostgreSQL RLS. | There are no policy draft/revision/artifact, approval, activation-history, active/LKG pointer, execution-approval, or policy-invalidation tables or execution adapters for them. |
-| API and CLI | The HTTP route classifier recognizes `/admin/policies/...` as `PolicyPublish`, and the gateway serves a checked OpenAPI document. | The checked OpenAPI document and CLI do not expose the complete policy lifecycle. Route classification alone is not an implemented API. |
+| Control-plane authorization | `prodex-control-plane` and the application layer enforce tenant, role, credential scope, idempotency, maker-checker separation, and append-only audit planning for lifecycle mutations. | Deployment-specific role and identity mappings remain operator-owned. |
+| Break glass | Durable approval records enforce reason, scope, expiry, quorum, maker-checker separation, revocation, and bounded consumption through the governance repositories. | Environment-owned review and incident procedures remain deployment responsibilities. |
+| Durable storage | SQLite and PostgreSQL repositories implement revisions, approvals, votes, activation history, active/LKG snapshots, execution approvals, audit chaining, and SIEM outbox state. | File and Redis are intentionally unsupported governance authorities; production PostgreSQL HA remains deployment evidence. |
+| Administration API | Authenticated gateway HTTP routes and checked OpenAPI expose revision, validation, submission, voting, activation, rollback, revoke, status, and inspection operations. | HTTP/OpenAPI is canonical; a duplicate first-class CLI is intentionally out of scope. |
 
-Existing primitives should be reused where their semantics match. They must not
-be described as a complete PDP or approval service until the production path,
-durable adapters, and required tests exist.
+Implemented lifecycle primitives should be reused where their semantics match.
+They must not be described as a complete general PDP or as deployment evidence.
 
 ## Policy Authority Boundaries
 

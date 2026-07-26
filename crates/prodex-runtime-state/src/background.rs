@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -632,6 +632,7 @@ where
 #[derive(Debug)]
 pub struct RuntimeProbeRefreshQueue<J> {
     pub pending: Mutex<BTreeMap<(PathBuf, String), J>>,
+    pub scheduled: Mutex<BTreeSet<(PathBuf, String)>>,
     pub wake: Condvar,
     pub active: Arc<AtomicUsize>,
     pub wait: Arc<(Mutex<()>, Condvar)>,

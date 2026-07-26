@@ -46,7 +46,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_launch_prompts_for_presidio_and_enters_codex_in_yolo_mode() {
+fn s_pty_launch_uses_presidio_tui_and_enters_codex_in_yolo_mode() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
@@ -80,6 +80,11 @@ fn s_pty_launch_prompts_for_presidio_and_enters_codex_in_yolo_mode() {
     assert!(
         run.tty_output.contains("Use Presidio for data safety?"),
         "Super should ask for Presidio permission: {}",
+        run.tty_output
+    );
+    assert!(
+        run.tty_output.contains("Presidio opt-in"),
+        "Super should render the Presidio prompt as a TUI: {}",
         run.tty_output
     );
 

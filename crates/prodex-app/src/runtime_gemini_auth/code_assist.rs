@@ -247,13 +247,23 @@ fn wait_for_gemini_code_assist_operation(
         if remaining.is_zero() {
             bail!("Gemini Code Assist onboarding timed out");
         }
-        operation = request_gemini_code_assist_operation(
+        operation = match request_gemini_code_assist_operation(
             client,
             secret,
             code_assist_endpoint,
             name,
             remaining,
-        )?;
+        ) {
+            Ok(operation) => operation,
+            Err(error)
+                if error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout) =>
+            {
+                bail!("Gemini Code Assist onboarding timed out");
+            }
+            Err(error) => return Err(error),
+        };
     }
     Ok(operation)
 }
@@ -557,11 +567,10 @@ mod tests {
         let secret = test_gemini_secret(None);
         let handle = thread::spawn(move || {
             while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(50)) {
-                request
-                    .respond(TinyResponse::from_string(
-                        r#"{"name":"operations/pending","done":false}"#,
-                    ))
-                    .expect("pending operation response should send");
+                thread::sleep(Duration::from_millis(50));
+                let _ = request.respond(TinyResponse::from_string(
+                    r#"{"name":"operations/pending","done":false}"#,
+                ));
             }
         });
         let client = Client::builder()

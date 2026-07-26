@@ -181,7 +181,11 @@ Once this layer is stable, future PRs can incrementally add:
 
 ## App-server broker integration (design note)
 
-The Codex app-server protocol carries structured messages between the CLI and backend: HTTP SSE responses, websocket frames, compact requests, and turn-state propagation. Prodex currently has `app_server_broker` as a skeleton that intercepts these paths selectively.
+The Codex app-server protocol carries structured messages between the CLI and
+backend: HTTP SSE responses, websocket frames, compact requests, and turn-state
+propagation. Prodex provides a bounded compatibility broker that parses and
+validates lifecycle frames, preserves stdio passthrough, and reports protocol
+drift. It is not a second model/provider router.
 
 Once v1 is stable, the provider conformance layer provides the foundation for reasoning about every incoming app-server message:
 
@@ -220,4 +224,9 @@ The conformance fixture set acts as a canary. When Codex adds a new parameter to
 2. If a translator silently drops it, the conformance case should fail or report `degraded`
 3. The capability matrix regenerates, making drift visible in `docs/provider-capabilities.md`
 
-The opt-in live broker now launches `codex app-server` and applies this validation bidirectionally with one shared lifecycle state before forwarding each frame. Default `prodex app-server` still passes stdio frames through unchanged, while model HTTP traffic receives the normal silent runtime-proxy preparation. The live broker does not invent provider routing or weaken continuation affinity.
+`prodex app-server-broker --experimental-stdio-live` launches `codex app-server`
+and applies this validation bidirectionally with one shared lifecycle state
+before forwarding each frame. Default Codex app-server traffic remains
+pass-through, while model HTTP traffic receives normal silent runtime-proxy
+preparation. The broker does not invent provider routing or weaken continuation
+affinity.

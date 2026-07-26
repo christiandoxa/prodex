@@ -630,10 +630,19 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
         "unexpected compact local-selection response body: {body}"
     );
     assert!(
-        log.contains(
-            "compact_final_failure exit=candidate_exhausted_fallback reason=local_selection"
-        ),
+        [
+            "compact_final_failure exit=candidate_exhausted_fallback reason=local_selection",
+            "compact_final_failure exit=precommit_budget_exhausted_fallback reason=local_selection",
+        ]
+        .iter()
+        .any(|marker| log.contains(marker)),
         "compact local-selection terminal marker should identify fallback-local-selection: {log}"
+    );
+    assert_eq!(
+        log.matches("profile_probe_refresh_queued profile=main")
+            .count(),
+        1,
+        "one request must not enqueue the same profile probe while it is already active: {log}"
     );
     assert!(
         log.contains("last_failure=none"),

@@ -3,6 +3,7 @@ use super::*;
 fn test_runtime_probe_refresh_queue() -> RuntimeProbeRefreshQueue {
     RuntimeProbeRefreshQueue {
         pending: Mutex::new(BTreeMap::new()),
+        scheduled: Mutex::new(BTreeSet::new()),
         wake: Condvar::new(),
         active: Arc::new(AtomicUsize::new(0)),
         wait: Arc::new((Mutex::new(()), Condvar::new())),
@@ -103,7 +104,7 @@ fn runtime_probe_refresh_state_update_error_redacts_secret_like_chain() {
 }
 
 #[test]
-fn runtime_probe_refresh_take_next_job_leaves_remaining_backlog_for_other_workers() {
+fn runtime_probe_refresh_take_next_job_keeps_active_key_reserved_and_leaves_backlog() {
     let shared = test_runtime_probe_refresh_shared();
     let queue = test_runtime_probe_refresh_queue();
     {
@@ -120,9 +121,26 @@ fn runtime_probe_refresh_take_next_job_leaves_remaining_backlog_for_other_worker
             test_runtime_probe_refresh_job(&shared, "beta"),
         );
     }
+    queue
+        .scheduled
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .extend([
+            (PathBuf::from("/tmp/state.json"), "alpha".to_string()),
+            (PathBuf::from("/tmp/state.json"), "beta".to_string()),
+        ]);
 
-    let first = runtime_probe_refresh_take_next_job(&queue);
+    let (first_key, first) = runtime_probe_refresh_take_next_job(&queue);
+    assert_eq!(first_key.1, "alpha");
     assert_eq!(first.profile_name, "alpha");
+    assert!(
+        !queue
+            .scheduled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(first_key),
+        "an active profile probe must remain reserved until its worker finishes"
+    );
     assert_eq!(
         queue
             .pending
@@ -133,7 +151,8 @@ fn runtime_probe_refresh_take_next_job_leaves_remaining_backlog_for_other_worker
         "one dequeue should leave the rest of the backlog available to other workers"
     );
 
-    let second = runtime_probe_refresh_take_next_job(&queue);
+    let (second_key, second) = runtime_probe_refresh_take_next_job(&queue);
+    assert_eq!(second_key.1, "beta");
     assert_eq!(second.profile_name, "beta");
     assert!(
         queue

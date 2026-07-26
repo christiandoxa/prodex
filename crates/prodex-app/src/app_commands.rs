@@ -1,5 +1,14 @@
 use super::*;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::Modifier;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::io::IsTerminal;
+use terminal_ui::{
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_detail_style,
+    tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
+};
 
 mod app_server_broker;
 mod audit;
@@ -121,27 +130,73 @@ pub(super) fn prompt_super_presidio_opt_in() -> Result<bool> {
         return Ok(false);
     }
 
-    print_stderr_prompt("Use Presidio for data safety? [y/N] ")?;
-    let mut answer = String::new();
-    io::stdin()
-        .read_line(&mut answer)
-        .context("failed to read Presidio prompt answer")?;
-    Ok(super_presidio_opt_in_answer(&answer))
-}
+    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Presidio prompt TUI")?;
+    loop {
+        tui.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(4),
+                    Constraint::Length(3),
+                ])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled("Prodex Super", tui_title_style()),
+                Span::raw("  "),
+                Span::styled("Presidio opt-in", tui_detail_style()),
+            ]))
+            .block(tui_connected_header_block(tui_border_style()));
+            frame.render_widget(header, chunks[0]);
 
-fn super_presidio_opt_in_answer(answer: &str) -> bool {
-    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
+            let body = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Use Presidio for data safety?",
+                    tui_primary_style().add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    "Detected sensitive data is redacted from request bodies before upstream delivery.",
+                    tui_secondary_style(),
+                )),
+            ])
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT)
+                    .border_style(tui_border_style()),
+            )
+            .wrap(Wrap { trim: false });
+            frame.render_widget(body, chunks[1]);
 
-#[cfg(test)]
-mod presidio_prompt_tests {
-    use super::super_presidio_opt_in_answer;
+            let footer = Paragraph::new(Line::from(vec![
+                Span::styled("y", tui_success_style()),
+                Span::raw(" enable  "),
+                Span::styled("n", tui_hint_style()),
+                Span::raw(" skip  "),
+                Span::styled("enter", tui_hint_style()),
+                Span::raw(" skip  "),
+                Span::styled("esc", tui_hint_style()),
+                Span::raw(" skip"),
+            ]))
+            .block(tui_connected_footer_block(tui_border_style()));
+            frame.render_widget(footer, chunks[2]);
+        })?;
 
-    #[test]
-    fn presidio_prompt_is_opt_in_and_accepts_yes_case_insensitively() {
-        assert!(super_presidio_opt_in_answer("y\n"));
-        assert!(super_presidio_opt_in_answer(" YES \n"));
-        assert!(!super_presidio_opt_in_answer("\n"));
-        assert!(!super_presidio_opt_in_answer("no\n"));
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                    return Ok(false);
+                }
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    bail!("Presidio prompt cancelled");
+                }
+                _ => {}
+            }
+        }
     }
 }
