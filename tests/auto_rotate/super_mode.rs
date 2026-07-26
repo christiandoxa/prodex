@@ -46,29 +46,25 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_renders_presidio_tui_before_launch_validation() {
+fn s_pty_renders_presidio_tui_and_handles_cancel() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
         "enabled = true\n",
     )
     .expect("failed to seed enabled Presidio config");
-    write_json(
-        &fixture.prodex_home.join("state.json"),
-        &json!({ "profiles": {} }),
-    );
 
     let run = run_prodex_with_pty_prompt_answer(
         &fixture,
         &["s", "--skip-quota-check", "exec", "hello"],
-        &[("PRODEX_PRESIDIO_AUTO_START", "0")],
+        &[],
         "Use Presidio for data safety?",
-        "n\n",
+        "\u{3}",
     );
 
     assert!(
         !run.output.status.success(),
-        "profile validation should stop the test launch: tty={} stdout={} stderr={}",
+        "cancelling should stop the test launch: tty={} stdout={} stderr={}",
         run.tty_output,
         String::from_utf8_lossy(&run.output.stdout),
         String::from_utf8_lossy(&run.output.stderr)
