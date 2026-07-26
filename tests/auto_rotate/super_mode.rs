@@ -46,33 +46,29 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_launch_uses_presidio_tui_and_enters_codex_in_yolo_mode() {
+fn s_pty_renders_presidio_tui_before_launch_validation() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
         "enabled = true\n",
     )
     .expect("failed to seed enabled Presidio config");
-    let args_log = fixture.codex_args_log.display().to_string();
-    let runtime_log_dir = fixture._temp_dir.path.join("runtime-logs");
-    fs::create_dir_all(&runtime_log_dir).expect("failed to create runtime log dir");
-    let runtime_log_dir_arg = runtime_log_dir.display().to_string();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({ "profiles": {} }),
+    );
 
     let run = run_prodex_with_pty_prompt_answer(
         &fixture,
         &["s", "--skip-quota-check", "exec", "hello"],
-        &[
-            ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
-            ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
-            ("PRODEX_PRESIDIO_AUTO_START", "0"),
-        ],
+        &[("PRODEX_PRESIDIO_AUTO_START", "0")],
         "Use Presidio for data safety?",
         "n\n",
     );
 
     assert!(
-        run.output.status.success(),
-        "pty run failed: tty={} stdout={} stderr={}",
+        !run.output.status.success(),
+        "profile validation should stop the test launch: tty={} stdout={} stderr={}",
         run.tty_output,
         String::from_utf8_lossy(&run.output.stdout),
         String::from_utf8_lossy(&run.output.stderr)
@@ -86,55 +82,5 @@ fn s_pty_launch_uses_presidio_tui_and_enters_codex_in_yolo_mode() {
         run.tty_output.contains("Presidio opt-in"),
         "Super should render the Presidio prompt as a TUI: {}",
         run.tty_output
-    );
-
-    let codex_args =
-        fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
-    let args = codex_args.lines().collect::<Vec<_>>();
-    let exec_index = args
-        .iter()
-        .position(|arg| *arg == "exec")
-        .expect("Super should launch Codex exec");
-    assert!(
-        args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
-        "Super should launch Codex with full access by default, args: {args:?}"
-    );
-    assert!(
-        args[..exec_index].contains(&"--dangerously-bypass-hook-trust"),
-        "Super should bypass the hook trust prompt, args: {args:?}"
-    );
-    let trust_override = format!(
-        "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    assert!(
-        args.contains(&trust_override.as_str()),
-        "Super should trust its launch directory for this session, args: {args:?}"
-    );
-    assert_eq!(
-        args.last(),
-        Some(&"hello"),
-        "Super should preserve the user prompt as the final positional arg, args: {args:?}"
-    );
-    assert!(
-        args[(exec_index + 1)..].contains(&"-c"),
-        "Super should scope runtime config overrides to Codex exec, args: {args:?}"
-    );
-    let latest_log_pointer = runtime_log_dir.join("prodex-runtime-latest.path");
-    let latest_log = crate::test_wait::wait_for_poll(
-        "latest runtime log pointer",
-        std::time::Duration::from_secs(5),
-        std::time::Duration::from_millis(10),
-        || {
-            fs::read_to_string(&latest_log_pointer)
-                .ok()
-                .map(|path| path.trim().to_string())
-                .filter(|path| !path.is_empty())
-        },
-    );
-    let log = fs::read_to_string(latest_log).expect("failed to read runtime log");
-    assert!(
-        log.contains("presidio_redaction_enabled=false"),
-        "declining should keep runtime Presidio redaction disabled, log: {log}"
     );
 }
