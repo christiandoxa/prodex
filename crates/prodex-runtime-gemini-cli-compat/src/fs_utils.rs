@@ -107,12 +107,12 @@ fn copy_file_limited(source: &Path, target: &Path, metadata: &fs::Metadata) -> R
     if metadata.len() > crate::GEMINI_COMPAT_FILE_LIMIT as u64 {
         return Ok(());
     }
-    let file =
-        fs::File::open(source).with_context(|| format!("failed to open {}", source.display()))?;
+    let file = prodex_core::open_regular_file_no_follow(source)
+        .with_context(|| format!("failed to open {}", source.display()))?;
     let opened_metadata = file
         .metadata()
         .with_context(|| format!("failed to stat {}", source.display()))?;
-    if !same_file_metadata(metadata, &opened_metadata) {
+    if !prodex_core::opened_file_matches_path(metadata, source, &file)? {
         return Ok(());
     }
     let mut bytes = Vec::new();
@@ -136,9 +136,8 @@ pub(crate) fn read_text_limited(path: &Path, limit: usize) -> Option<String> {
     if !metadata.is_file() || metadata.len() as usize > limit {
         return None;
     }
-    let file = fs::File::open(path).ok()?;
-    let opened_metadata = file.metadata().ok()?;
-    if !same_file_metadata(&metadata, &opened_metadata) {
+    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file).ok()? {
         return None;
     }
     let mut bytes = Vec::new();
@@ -163,17 +162,6 @@ pub(crate) fn path_has_symlink_component(path: &Path) -> bool {
         }
     }
     false
-}
-
-#[cfg(unix)]
-fn same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub(super) fn write_executable_script(path: &Path, script: &str) -> Result<()> {

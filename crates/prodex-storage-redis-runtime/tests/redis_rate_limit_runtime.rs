@@ -7,14 +7,10 @@ use prodex_storage_redis_runtime::{RedisRateLimitExecutor, RedisRuntimeConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PRODEX_TEST_REDIS_URL"]
 async fn independent_executors_share_atomic_allowance_without_overshoot() {
-    let Some(url) = std::env::var("PRODEX_TEST_REDIS_URL").ok() else {
-        eprintln!(
-            "skipping independent_executors_share_atomic_allowance_without_overshoot: \
-             PRODEX_TEST_REDIS_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_REDIS_URL")
+        .expect("PRODEX_TEST_REDIS_URL must point to the test Redis instance");
     let config = RedisRuntimeConfig::new(url).expect("test Redis URL should be valid");
     let executor = RedisRateLimitExecutor::connect(&config)
         .await
@@ -68,14 +64,10 @@ async fn independent_executors_share_atomic_allowance_without_overshoot() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PRODEX_TEST_REDIS_URL"]
 async fn independent_executors_enforce_dual_limits_all_or_nothing() {
-    let Some(url) = std::env::var("PRODEX_TEST_REDIS_URL").ok() else {
-        eprintln!(
-            "skipping independent_executors_enforce_dual_limits_all_or_nothing: \
-             PRODEX_TEST_REDIS_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_REDIS_URL")
+        .expect("PRODEX_TEST_REDIS_URL must point to the test Redis instance");
     let config = RedisRuntimeConfig::new(url).expect("test Redis URL should be valid");
     let executor = RedisRateLimitExecutor::connect(&config)
         .await

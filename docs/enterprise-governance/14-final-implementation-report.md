@@ -173,10 +173,9 @@ original eligible set.
     tenant, subject, and scope. With `mtls_required`, the direct Rustls listener
     verifies the client chain and requires JWT `cnf.x5t#S256` binding to the
     peer leaf certificate. Managed issuer/CA rotation remains acceptance work.
-12. `npm ci` is not an executable gate in this workspace: no lockfile is
-    tracked, and a generated lockfile rejects the root's intentionally
-    cross-platform workspace packages on one host. `npm test` is the supported
-    repository gate.
+12. The tracked root `package-lock.json` is the reproducible npm install input.
+    `npm ci` validates that lock, and `npm test` runs the repository's Rust and
+    Node.js test gates.
 
 ## Prior Release and Full-Gate Record
 

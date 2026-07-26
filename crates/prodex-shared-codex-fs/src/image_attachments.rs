@@ -84,11 +84,11 @@ fn read_codex_session_attachment_file(path: &Path) -> Result<Option<String>> {
     if metadata.len() > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
         return Ok(None);
     }
-    let file = fs::File::open(path).context("failed to read codex session file")?;
-    let opened_metadata = file
-        .metadata()
-        .context("failed to read codex session file metadata")?;
-    if !codex_session_same_file_metadata(&metadata, &opened_metadata) {
+    let file = prodex_core::open_regular_file_no_follow(path)
+        .context("failed to read codex session file")?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)
+        .context("failed to read codex session file metadata")?
+    {
         bail!("codex session file changed while opening");
     }
     let mut bytes = Vec::new();
@@ -143,17 +143,6 @@ fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()
         .and_then(|directory| directory.sync_all())
         .context("failed to sync codex session directory")?;
     Ok(())
-}
-
-#[cfg(unix)]
-fn codex_session_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn codex_session_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
 }
 
 pub(crate) fn codex_session_image_attachments_are_stable(

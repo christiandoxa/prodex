@@ -99,8 +99,8 @@ fn read_runtime_broker_registry_bytes(path: &Path) -> Option<Vec<u8>> {
     if !metadata.file_type().is_file() || metadata.len() > RUNTIME_BROKER_REGISTRY_MAX_BYTES {
         return None;
     }
-    let file = fs::File::open(path).ok()?;
-    if !runtime_broker_same_file_metadata(&metadata, &file.metadata().ok()?) {
+    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file).ok()? {
         return None;
     }
     let mut bytes = Vec::new();
@@ -108,17 +108,6 @@ fn read_runtime_broker_registry_bytes(path: &Path) -> Option<Vec<u8>> {
         .read_to_end(&mut bytes)
         .ok()?;
     (bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES).then_some(bytes)
-}
-
-#[cfg(unix)]
-fn runtime_broker_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_broker_same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub(crate) fn save_runtime_broker_registry(

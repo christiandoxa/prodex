@@ -13,6 +13,8 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 dirs = { workspace = true }
+libc = { workspace = true }
+same-file = { workspace = true }
 
 [lints]
 workspace = true

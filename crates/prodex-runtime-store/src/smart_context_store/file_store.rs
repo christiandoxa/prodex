@@ -280,13 +280,12 @@ fn runtime_smart_context_read_artifact_store(path: &Path) -> io::Result<Option<S
         return Ok(None);
     }
 
-    let file = match fs::File::open(path) {
+    let file = match prodex_core::open_regular_file_no_follow(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let opened_metadata = file.metadata()?;
-    if !runtime_smart_context_same_artifact_store_file(&metadata, &opened_metadata) {
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         return Ok(None);
     }
 
@@ -297,23 +296,6 @@ fn runtime_smart_context_read_artifact_store(path: &Path) -> io::Result<Option<S
         return Ok(None);
     }
     Ok(Some(content))
-}
-
-#[cfg(unix)]
-fn runtime_smart_context_same_artifact_store_file(
-    before: &fs::Metadata,
-    after: &fs::Metadata,
-) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_smart_context_same_artifact_store_file(
-    _before: &fs::Metadata,
-    _after: &fs::Metadata,
-) -> bool {
-    true
 }
 
 pub(super) fn runtime_smart_context_artifact_store_temp_path(path: &Path) -> PathBuf {

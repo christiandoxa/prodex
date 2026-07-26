@@ -393,8 +393,8 @@ pub(crate) fn read_json_file_to_string(path: &Path) -> io::Result<String> {
         )));
     }
 
-    let file = fs::File::open(path)?;
-    if !runtime_store_same_file_metadata(&metadata, &file.metadata()?) {
+    let file = prodex_core::open_regular_file_no_follow(path)?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         return Err(io::Error::other(format!(
             "json path changed while opening {}",
             path.display()
@@ -411,17 +411,6 @@ pub(crate) fn read_json_file_to_string(path: &Path) -> io::Result<String> {
         )));
     }
     String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
-}
-
-#[cfg(unix)]
-fn runtime_store_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_store_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
 }
 
 pub(crate) fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {

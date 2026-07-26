@@ -381,9 +381,6 @@ jobs:
       - name: Enforce Rust file size guard
         run: npm run ci:size-guard
 
-      - name: Check Rust file size guard fixtures
-        run: npm run ci:size-guard-fixtures
-
       - name: Enforce Rust allow attribute guard
         run: npm run ci:allow-guard
 
@@ -439,14 +436,47 @@ jobs:
       - name: Enforce dependency duplicate budget
         run: npm run ci:dependency-duplicates
 
-      - name: Check dependency duplicate budget fixtures
-        run: npm run ci:dependency-duplicates-fixtures
+      - name: Run all Node.js tests
+        run: npm run test:node
 
-      - name: Check CI impact classifier
-        run: npm run ci:impact
+  redis-integration:
+    name: Redis atomic integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      PRODEX_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      RUSTC_WRAPPER: sccache
+    services:
+      redis:
+        image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-      - name: Check CI duration telemetry
-        run: node --test scripts/ci/github-job-durations.test.mjs
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+
+      - name: Run Redis-backed atomicity tests
+        run: cargo test --locked -q -p prodex-storage-redis-runtime --test redis_rate_limit_runtime -- --ignored --test-threads=1
 
   backup-restore-drill:
     needs: changes

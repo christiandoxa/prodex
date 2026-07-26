@@ -44,6 +44,7 @@ Current CI building blocks include:
 
 ```bash
 npm test
+npm run test:node
 npm run test:fast
 npm run test:fast:timings
 npm run test:serial
@@ -101,6 +102,20 @@ node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
+`npm run test:node` discovers every checked-in `*.test.mjs` module under the
+repository scripts and gateway SDK. The fast lane and CI process guard both run
+this command, so adding a test file cannot leave it outside the default gate.
+
+The Redis atomicity tests are explicitly ignored when no disposable Redis URL
+is supplied. CI starts a pinned Redis service and runs them as a required gate.
+The equivalent local command is:
+
+```bash
+PRODEX_TEST_REDIS_URL=redis://127.0.0.1:6379/0 \
+  cargo test --locked -q -p prodex-storage-redis-runtime \
+  --test redis_rate_limit_runtime -- --ignored --test-threads=1
+```
+
 `npm run ci:storage-postgres-proof` is the repeatable local helper for the
 database-backed storage race proof. It first verifies its branch-selection
 logic without starting Docker, then uses `PRODEX_TEST_POSTGRES_URL` when
@@ -120,7 +135,8 @@ fingerprints, and writes redacted evidence to
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
-`npm test` is a convenience alias for `npm run test:fast`. It runs the fast lane, not full serial coverage.
+`npm test` is a convenience alias for `npm run test:fast`. It includes every
+Node.js test module and the safe Rust shards, but not full serial Rust coverage.
 
 Use `npm run test:fast:timings` or `npm run test:serial:timings -- --suite runtime` when tuning local or CI shard balance. The timing mode preserves the existing process split and `--test-threads=1` safety, then prints the slowest completed steps at the end of each runner phase. Add `-- --timings-json` to either runner when you need a single-line JSON payload that can be pasted into notes or compared across CI runs. Use `-- --timings-limit <n>` to show more or fewer slow steps.
 

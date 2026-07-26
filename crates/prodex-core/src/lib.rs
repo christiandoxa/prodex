@@ -96,6 +96,107 @@ pub fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path_for_compare(left) == normalize_path_for_compare(right)
 }
 
+pub fn open_regular_file_no_follow(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    open_regular_file_with_options_no_follow(path, &mut options)
+}
+
+#[cfg(unix)]
+pub fn open_regular_file_with_options_no_follow(
+    path: &Path,
+    options: &mut fs::OpenOptions,
+) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let file = options.custom_flags(libc::O_NOFOLLOW).open(path)?;
+    ensure_opened_regular_file(&file)?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+pub fn open_regular_file_with_options_no_follow(
+    path: &Path,
+    options: &mut fs::OpenOptions,
+) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x20_0000;
+
+    let file = options
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "file path must not be a reparse point",
+        ));
+    }
+    ensure_opened_regular_file(&file)?;
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn open_regular_file_with_options_no_follow(
+    _path: &Path,
+    _options: &mut fs::OpenOptions,
+) -> std::io::Result<fs::File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "no-follow file opening is unsupported on this platform",
+    ))
+}
+
+fn ensure_opened_regular_file(file: &fs::File) -> std::io::Result<()> {
+    if file.metadata()?.file_type().is_file() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "path is not a regular file",
+    ))
+}
+
+pub fn opened_file_matches_path(
+    before: &fs::Metadata,
+    path: &Path,
+    file: &fs::File,
+) -> std::io::Result<bool> {
+    let opened = file.metadata()?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let _ = path;
+        Ok(before.dev() == opened.dev() && before.ino() == opened.ino())
+    }
+
+    #[cfg(windows)]
+    {
+        use same_file::Handle;
+        use std::os::windows::fs::MetadataExt;
+
+        let current = fs::symlink_metadata(path)?;
+        if !current.file_type().is_file()
+            || before.file_attributes() != opened.file_attributes()
+            || before.creation_time() != opened.creation_time()
+            || before.last_write_time() != opened.last_write_time()
+            || before.file_size() != opened.file_size()
+        {
+            return Ok(false);
+        }
+        Ok(Handle::from_path(path)? == Handle::from_file(file.try_clone()?)?)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (before, path, opened);
+        Ok(false)
+    }
+}
+
 pub fn normalize_path_for_compare(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| normalize_missing_path_for_compare(path))
 }

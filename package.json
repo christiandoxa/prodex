@@ -54,6 +54,7 @@
     "bench:smart-context-report": "node scripts/bench/smart-context-performance-report.mjs",
     "smart-context:replay": "cargo run -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict",
     "test": "npm run test:fast --",
+    "test:node": "node --test scripts/**/*.test.mjs scripts/*.test.mjs npm/prodex-gateway-sdk/test/*.test.mjs",
     "test:full": "node scripts/ci/full-rust-test.mjs",
     "test:changed": "node scripts/ci/changed-tests.mjs",
     "test:fast": "node scripts/ci/test-fast.mjs",

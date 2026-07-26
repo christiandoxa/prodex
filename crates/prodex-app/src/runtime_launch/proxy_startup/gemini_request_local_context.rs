@@ -153,9 +153,8 @@ fn runtime_gemini_read_local_context_file(
     metadata: &fs::Metadata,
     max_bytes: usize,
 ) -> Option<Vec<u8>> {
-    let file = fs::File::open(path).ok()?;
-    let opened_metadata = file.metadata().ok()?;
-    if !runtime_gemini_same_local_context_file(metadata, &opened_metadata) {
+    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
+    if !prodex_core::opened_file_matches_path(metadata, path, &file).ok()? {
         return None;
     }
 
@@ -164,17 +163,6 @@ fn runtime_gemini_read_local_context_file(
         .read_to_end(&mut data)
         .ok()?;
     (data.len() <= max_bytes).then_some(data)
-}
-
-#[cfg(unix)]
-fn runtime_gemini_same_local_context_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_gemini_same_local_context_file(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub(super) fn runtime_gemini_resolve_local_path(path: &Path) -> Option<PathBuf> {

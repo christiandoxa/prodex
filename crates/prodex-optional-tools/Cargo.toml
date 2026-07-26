@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+prodex_core = { workspace = true }
 prodex_shared_codex_fs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
