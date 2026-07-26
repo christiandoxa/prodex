@@ -96,7 +96,8 @@ individual `caveman`, `rtk`, `playwright`, and `ponytail` commands. The
 `prodex s` / `prodex super` shortcut is intentionally different: it is the YOLO
 entrypoint, adds Codex's approval/sandbox and hook-trust bypass flags, and marks
 the current workspace trusted only for that invocation. It does not persist the
-trust override. Presidio remains disabled unless `--presidio` is explicit.
+trust override. Interactive launches ask about Presidio unless `--presidio` or
+`--no-presidio` supplies the choice.
 
 The compatibility aliases `prodex caveman`, `prodex rtk`, `prodex playwright`,
 `prodex ponytail`, and `prodex s` translate to typed tool selections. Legacy

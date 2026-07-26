@@ -38,7 +38,10 @@ pub(crate) fn handle_super_gui(args: SuperArgs) -> Result<()> {
     if !matches!(args.cli, None | Some(SuperCliAgent::Codex)) {
         bail!("`prodex s gui` supports only the Codex desktop app")
     }
-    let use_presidio = args.presidio_preference().unwrap_or(false);
+    let use_presidio = match args.presidio_preference() {
+        Some(use_presidio) => use_presidio,
+        None => super::prompt_super_presidio_opt_in()?,
+    };
     handle_desktop_gui(
         args.into_runtime_tool_args_with_presidio(use_presidio),
         true,

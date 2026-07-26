@@ -155,7 +155,7 @@ Notes:
   Missing optional tools are skipped unless named with `--require-tool`; use `prodex super doctor` to inspect readiness.
   Super is the explicit YOLO path: it bypasses approvals and the sandbox, bypasses hook-trust confirmation, and trusts the current workspace for this invocation.
   Codex runtime feature overrides from `prodex run` also work here; explicit `--web-search` overrides Super provider defaults.
-  Super does not prompt for Presidio; use `--presidio` to enable it explicitly. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
+  Interactive Super launches ask whether to enable Presidio. Use `--presidio` or `--no-presidio` to answer non-interactively. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
   Use `prodex run` instead when normal Codex approvals and workspace-trust prompts are desired.
   Use `prodex super doctor` or `prodex s doctor` to inspect local optimizer readiness without launching Codex.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.

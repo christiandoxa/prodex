@@ -209,7 +209,7 @@ pub struct SuperArgs {
     /// Enable Presidio request-body and WebSocket text redaction without prompting. Unsupported by native Kiro and Antigravity CLIs.
     #[arg(long, conflicts_with = "no_presidio")]
     pub presidio: bool,
-    /// Disable Presidio redaction. Presidio is disabled by default.
+    /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
     /// Add an optional tool to the default Super tool set.

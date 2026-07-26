@@ -102,11 +102,12 @@ prodex s
 
 Super is the explicit YOLO path: it bypasses approvals and the sandbox, bypasses
 hook-trust confirmation, and trusts the current workspace for that invocation.
-It enters Codex without a permission or Presidio prompt. Enable Presidio only
-when wanted:
+It asks whether to enable Presidio before an interactive launch. Answer without
+a prompt when wanted:
 
 ```bash
 prodex s --presidio
+prodex s --no-presidio
 ```
 
 Use `prodex run` when normal Codex approvals and workspace-trust prompts are
