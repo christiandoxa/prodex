@@ -2,6 +2,7 @@ use super::{Fixture, chatgpt_id_token};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -50,7 +51,8 @@ fn spawn_prodex_with_pty(
         .try_clone()
         .expect("failed to clone pty slave for stderr");
 
-    let child = Command::new(env!("CARGO_BIN_EXE_prodex"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_prodex"));
+    command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("PRODEX_HOME", &fixture.prodex_home)
         .env("PRODEX_SHARED_CODEX_HOME", &fixture.shared_codex_home)
@@ -69,9 +71,19 @@ fn spawn_prodex_with_pty(
         .args(args)
         .stdin(Stdio::from(stdin_slave))
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(stderr_slave))
+        .stderr(Stdio::from(stderr_slave));
+    // SAFETY: `setsid` is async-signal-safe and does not access parent-process memory.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = command
         .spawn()
-        .expect("failed to spawn prodex with pty");
+        .expect("failed to spawn prodex with detached pty");
     drop(slave_file);
     (child, master)
 }

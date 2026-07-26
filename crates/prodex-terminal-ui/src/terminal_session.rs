@@ -5,6 +5,8 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::{TerminalOptions, Viewport};
 use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
 
@@ -99,8 +101,17 @@ impl AlternateScreenTerminal<io::Stderr> {
 impl<W: Write> AlternateScreenTerminal<W> {
     fn new(writer: W, output: TerminalOutput, label: &str) -> Result<Self> {
         let session = TerminalSessionGuard::enter(label, output)?;
-        let terminal = Terminal::new(CrosstermBackend::new(writer))
-            .with_context(|| format!("failed to initialize {label} terminal"))?;
+        let backend = CrosstermBackend::new(writer);
+        let terminal = match output {
+            TerminalOutput::Stdout => Terminal::new(backend),
+            TerminalOutput::Stderr => Terminal::with_options(
+                backend,
+                TerminalOptions {
+                    viewport: Viewport::Fixed(stderr_terminal_area()),
+                },
+            ),
+        }
+        .with_context(|| format!("failed to initialize {label} terminal"))?;
         Ok(Self {
             terminal,
             _session: session,
@@ -142,6 +153,31 @@ fn leave_alternate_screen(output: TerminalOutput) -> io::Result<()> {
             crossterm::execute!(io::stderr(), Show, LeaveAlternateScreen)
         }
     }
+}
+
+fn stderr_terminal_area() -> Rect {
+    let (width, height) = stderr_terminal_size().unwrap_or((80, 24));
+    Rect::new(0, 0, width.max(1), height.max(1))
+}
+
+#[cfg(unix)]
+fn stderr_terminal_size() -> Option<(u16, u16)> {
+    let mut size = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: stderr is a process-owned descriptor and `size` is valid writable storage.
+    let result = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut size) };
+    (result == 0 && size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
+}
+
+#[cfg(not(unix))]
+fn stderr_terminal_size() -> Option<(u16, u16)> {
+    crossterm::terminal::size()
+        .ok()
+        .filter(|(width, height)| *width > 0 && *height > 0)
 }
 
 #[cfg(test)]
