@@ -96,6 +96,35 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+  prodex-app-lib:
+    name: prodex-app full library tests
+    needs: changes
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+
+      - name: Run every prodex-app library test
+        run: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1
+
   fuzz-build:
     needs: changes
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -247,7 +276,7 @@ jobs:
       - name: Run full Windows Rust suite
         env:
           RUST_BACKTRACE: "1"
-        run: npm run test:full -- --jobs 2 --test-threads 2
+        run: npm run test:full -- --jobs 2 --test-threads 2 --no-prodex-app-lib
 
   macos-workspace:
     name: macOS full workspace tests
@@ -284,7 +313,7 @@ jobs:
       - name: Run full macOS Rust suite
         env:
           RUST_BACKTRACE: "1"
-        run: npm run test:full -- --jobs 2 --test-threads 2
+        run: npm run test:full -- --jobs 2 --test-threads 2 --no-prodex-app-lib
 
   process-guard:
     runs-on: ubuntu-latest

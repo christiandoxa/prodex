@@ -14,4 +14,12 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
     result.stdout,
     /prodex-app:all-lib-tests-serial: cargo test -q -p prodex-app --lib --all-features -- --test-threads=1/,
   );
+
+  const platformResult = spawnSync(
+    process.execPath,
+    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--no-prodex-app-lib"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.equal(platformResult.status, 0, platformResult.stderr);
+  assert.doesNotMatch(platformResult.stdout, /prodex-app.*lib/);
 });
