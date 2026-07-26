@@ -46,7 +46,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_renders_presidio_tui_and_handles_cancel() {
+fn s_pty_renders_presidio_tui_before_profile_validation() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
@@ -56,15 +56,22 @@ fn s_pty_renders_presidio_tui_and_handles_cancel() {
 
     let run = run_prodex_with_pty_prompt_answer(
         &fixture,
-        &["s", "--skip-quota-check", "exec", "hello"],
+        &[
+            "s",
+            "--profile",
+            "missing-profile",
+            "--skip-quota-check",
+            "exec",
+            "hello",
+        ],
         &[],
         "Use Presidio for data safety?",
-        "\u{3}",
+        "n\n",
     );
 
     assert!(
         !run.output.status.success(),
-        "cancelling should stop the test launch: tty={} stdout={} stderr={}",
+        "profile validation should stop the test launch: tty={} stdout={} stderr={}",
         run.tty_output,
         String::from_utf8_lossy(&run.output.stdout),
         String::from_utf8_lossy(&run.output.stderr)
