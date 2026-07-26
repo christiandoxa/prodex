@@ -184,7 +184,7 @@ pub use migration::{
 pub use observability::{
     GatewaySpanDescriptor, GatewaySpanKind, TelemetryAttribute, TelemetryAttributeError,
     TelemetryAttributeErrorResponsePlan, TelemetryAttributeErrorStatus, TelemetryAttributeScope,
-    plan_telemetry_attribute_error_response, tenant_trace_attribute,
+    TelemetryAttributeValue, plan_telemetry_attribute_error_response, tenant_trace_attribute,
 };
 
 pub use backup::{

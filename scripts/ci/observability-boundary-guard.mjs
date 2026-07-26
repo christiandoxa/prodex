@@ -56,11 +56,11 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "trace_propagation_result_label(result)",
   "pub struct StructuredLogCorrelationPlan",
   "pub fn plan_structured_log_correlation(",
-  "\"request_id\"",
-  "\"call_id\"",
-  "\"trace_id\"",
-  "\"tenant_id\"",
-  "\"audit_event_id\"",
+  "TelemetryAttribute::request_id(correlation.request_id)",
+  "TelemetryAttribute::call_id(call_id)",
+  "TelemetryAttribute::trace_id(trace_id)",
+  "TelemetryAttribute::tenant_id(tenant_id)",
+  "TelemetryAttribute::audit_event_id(audit_event_id)",
   "pub enum EnterpriseIdKind",
   "pub enum EnterpriseIdResult",
   "pub struct EnterpriseIdMetricPlan",
@@ -1091,11 +1091,11 @@ pub fn plan_trace_propagation_metric() {
 fn trace_propagation_carrier_label(carrier: TracePropagationCarrier) {}
 fn trace_propagation_result_label(result: TracePropagationResult) {}
 pub fn plan_structured_log_correlation() {
-    TelemetryAttribute::trace_only("request_id", request_id);
-    TelemetryAttribute::trace_only("call_id", call_id);
-    TelemetryAttribute::trace_only("trace_id", trace_id);
-    TelemetryAttribute::trace_only("tenant_id", tenant_id);
-    TelemetryAttribute::trace_only("audit_event_id", audit_event_id);
+    TelemetryAttribute::request_id(correlation.request_id);
+    TelemetryAttribute::call_id(call_id);
+    TelemetryAttribute::trace_id(trace_id);
+    TelemetryAttribute::tenant_id(tenant_id);
+    TelemetryAttribute::audit_event_id(audit_event_id);
 }
 pub fn plan_enterprise_id_metric() {
     let kind = TelemetryAttribute::metric_label("enterprise_id_kind", enterprise_id_kind_label(kind));

@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3699,
+    "maxLines": 3629,
     "reason": "Local rewrite cross-provider regression coverage remains capped after harness-mode cases and governance-failure behavior moved to focused sibling modules; provider-specific cases continue to split from the shared harness."
   },
   {
@@ -236,7 +236,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1399,
+    "maxLines": 1393,
     "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; capped until adapter projection splits out."
   },
   {

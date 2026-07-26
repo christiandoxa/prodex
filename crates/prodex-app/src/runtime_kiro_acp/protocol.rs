@@ -48,6 +48,7 @@ impl RuntimeKiroAcpEnvelope {
         .context("failed to parse Kiro ACP session/new result")
     }
 
+    #[cfg(test)]
     pub(crate) fn parse_prompt_response(&self) -> Result<RuntimeKiroAcpPromptResponse> {
         serde_json::from_value(
             self.result
@@ -142,6 +143,7 @@ pub(crate) struct RuntimeKiroAcpNewSessionResult {
 }
 
 impl RuntimeKiroAcpNewSessionResult {
+    #[cfg(test)]
     pub(crate) fn model_ids(&self) -> Vec<&str> {
         self.models
             .as_ref()
@@ -158,6 +160,7 @@ impl RuntimeKiroAcpNewSessionResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(test)]
 pub(crate) struct RuntimeKiroAcpPromptResponse {
     #[serde(alias = "stop_reason")]
     pub(crate) stop_reason: String,

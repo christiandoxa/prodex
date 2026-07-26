@@ -5,8 +5,6 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<usize> {
-    let allow_disk_auth_fallback =
-        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let now = Local::now().timestamp();
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
@@ -27,11 +25,9 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
         state.entry(name).is_some_and(|entry| {
             entry
                 .cached_auth_summary
-                .clone()
-                .or_else(|| {
-                    allow_disk_auth_fallback.then(|| read_auth_summary(&entry.profile.codex_home))
-                })
-                .is_some_and(|summary| summary.quota_compatible)
+                .as_ref()
+                .is_none_or(|summary| summary.quota_compatible)
+                && entry.supports_codex_runtime()
         })
     })
     .filter(|name| {

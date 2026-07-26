@@ -327,7 +327,7 @@ fn span_plan_accepts_trace_context_and_low_cardinality_metric_labels() {
         Some(trace_context),
         vec![
             TelemetryAttribute::metric_label("provider", "openai"),
-            TelemetryAttribute::trace_only("request_id", "not-a-label"),
+            TelemetryAttribute::request_id(RequestId::new()),
         ],
     )
     .unwrap();

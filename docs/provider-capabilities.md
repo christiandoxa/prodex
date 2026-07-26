@@ -18,11 +18,10 @@ Fixture summary counts are `request/response/stream-event` conformance cases per
 
 ## Harness modes
 
-Default requested mode: `auto`. V1 default resolution: `native`.
+Default mode: `native`. Resolved mode for this catalog: `native`.
 
 | Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |
 |---|---|---|---|---|---|---|---|---|
-| auto | Auto | true | native | responses, responses/compact, chat-completions, messages, models, embeddings, images, audio, batches, rerank, a2a | false | false | false | Conservative automatic selection; resolves to Native in v1. |
 | native | Native | true | native | responses, responses/compact, chat-completions, messages, models, embeddings, images, audio, batches, rerank, a2a | false | false | false | Preserves existing bridge behavior without harness shaping. |
 | minimal | Minimal | true | minimal | responses | true | false | false | Prepends the minimal/v1 instruction block to canonical Responses requests. |
 | evaluated | Evaluated | true | evaluated | responses | true | true | true | Applies only provider/model policies backed by the versioned evaluation catalog. |

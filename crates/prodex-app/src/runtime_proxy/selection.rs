@@ -90,13 +90,10 @@ fn runtime_selection_log_fields_with_quota<'a>(
     fields
 }
 
-pub(crate) fn runtime_proxy_sync_probe_pressure_pause(
+pub(crate) fn runtime_proxy_probe_refresh_pause(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
 ) {
-    if !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind) {
-        return;
-    }
     let pause_ms = shared.runtime_config.sync_probe_pressure_pause_ms;
     let observed_revision = runtime_probe_refresh_revision();
     let started_at = Instant::now();
@@ -107,7 +104,7 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_pause(
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
-            "runtime_proxy_sync_probe_pressure_pause",
+            "runtime_proxy_probe_refresh_pause",
             [
                 runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
                 runtime_proxy_log_field("pause_ms", pause_ms.to_string()),

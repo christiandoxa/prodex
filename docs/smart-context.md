@@ -135,7 +135,8 @@ are validated and rewritten as schema 3 on the next durable save. Legacy
 unscoped store cannot prove its security boundary, so Prodex quarantines it
 instead of importing it silently.
 
-See [0.346 migration and rollback](migrations/0.346-optional-tools.md).
+Rollback and corruption handling are documented in
+[Hardening risk and rollback](hardening/risk-and-rollback.md).
 
 ## Remaining Risks
 

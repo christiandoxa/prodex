@@ -318,6 +318,7 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
         }
         let audit_outbox = self.authorize(
             action,
+            ControlPlaneOperation::PolicyCreate,
             audit,
             "governance.policy.revision.write",
             Some(revision.revision_id.clone()),
@@ -340,6 +341,7 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
         }
         let audit_outbox = self.authorize(
             action,
+            ControlPlaneOperation::PolicySubmit,
             audit,
             "governance.policy.approval.create",
             Some(approval.id.as_str().to_string()),
@@ -395,6 +397,7 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
             .ok_or(ApplicationGovernanceLifecycleError::InvalidAction)?;
         request.audit_outbox = self.authorize(
             action,
+            ControlPlaneOperation::PolicyVote,
             audit,
             audit_action,
             Some(request.approval_id.as_str().to_string()),
@@ -423,6 +426,10 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
         request.actor = action.principal.clone();
         request.audit_outbox = self.authorize(
             action,
+            match request.action {
+                GovernanceActivationAction::Activate => ControlPlaneOperation::PolicyActivate,
+                GovernanceActivationAction::Rollback => ControlPlaneOperation::PolicyRollback,
+            },
             audit,
             audit_action,
             Some(request.revision_id.clone()),
@@ -436,13 +443,12 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
     fn authorize(
         &self,
         action: ControlPlaneActionRequest,
+        expected_operation: ControlPlaneOperation,
         audit: ApplicationGovernanceAuditLink,
         audit_action: &'static str,
         resource_id: Option<String>,
     ) -> Result<AuditOutboxWriteCommand, ApplicationGovernanceLifecycleError> {
-        if action.operation != ControlPlaneOperation::PolicyPublish
-            || action.resource.kind != ResourceKind::Policy
-        {
+        if action.operation != expected_operation || action.resource.kind != ResourceKind::Policy {
             return Err(ApplicationGovernanceLifecycleError::InvalidAction);
         }
         match decide_control_plane_action(action) {

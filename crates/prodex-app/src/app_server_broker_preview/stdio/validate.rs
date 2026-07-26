@@ -72,7 +72,7 @@ fn write_validate_diagnostic_stream<R: BufRead, W: Write>(
     mut diagnostics_writer: W,
     mode: &'static str,
 ) -> anyhow::Result<ValidationSummary> {
-    let log_path = initialize_runtime_proxy_log_path();
+    let log_path = initialize_runtime_proxy_log_path()?;
     let mut session = PreviewSession::default();
     let mut lifecycle_failure = None;
     let mut request_response_failure = None;

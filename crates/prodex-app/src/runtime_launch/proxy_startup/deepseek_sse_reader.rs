@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::deepseek_sse::RuntimeDeepSeekSseState;
 use super::provider_bridge::RuntimeProviderBridgeKind;
@@ -31,6 +29,7 @@ impl<R: Read> RuntimeChatCompatibleSseReader<R> {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn new_with_observer(
         reader: R,
         request_id: u64,
@@ -103,4 +102,5 @@ impl<R: Read> Read for RuntimeChatCompatibleSseReader<R> {
     }
 }
 
+#[cfg(test)]
 pub(super) type RuntimeDeepSeekChatSseReader<R> = RuntimeChatCompatibleSseReader<R>;

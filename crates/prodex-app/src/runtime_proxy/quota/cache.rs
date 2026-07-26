@@ -73,17 +73,11 @@ pub(crate) fn runtime_profile_cached_auth_summary_for_selection(
     usage_auth_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
     probe_entry: Option<RuntimeProfileProbeCacheEntry>,
 ) -> Option<AuthSummary> {
-    if let Some(entry) = usage_auth_entry {
-        match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
-            RuntimeProfileUsageAuthCacheFreshness::Fresh => {
-                return Some(AuthSummary {
-                    label: "chatgpt".to_string(),
-                    quota_compatible: true,
-                });
-            }
-            RuntimeProfileUsageAuthCacheFreshness::Stale
-            | RuntimeProfileUsageAuthCacheFreshness::Unknown => {}
-        }
+    if usage_auth_entry.is_some() {
+        return Some(AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        });
     }
     probe_entry.map(|entry| entry.auth)
 }
@@ -93,10 +87,7 @@ pub(crate) fn runtime_profile_cached_auth_summary_from_maps_for_selection(
     profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
     profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
 ) -> Option<AuthSummary> {
-    if profile_usage_auth.get(profile_name).is_some_and(|entry| {
-        runtime_profile_usage_auth_cache_entry_freshness(entry)
-            == RuntimeProfileUsageAuthCacheFreshness::Fresh
-    }) {
+    if profile_usage_auth.contains_key(profile_name) {
         return Some(AuthSummary {
             label: "chatgpt".to_string(),
             quota_compatible: true,

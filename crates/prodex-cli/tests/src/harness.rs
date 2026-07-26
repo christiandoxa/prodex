@@ -69,14 +69,14 @@ fn harness_help_lists_all_modes() {
     let error = parse_cli_command_from(["prodex", "s", "--help"]).unwrap_err();
     let help = error.to_string();
     assert!(
-        help.contains("--harness <auto|native|minimal|evaluated>"),
+        help.contains("--harness <native|minimal|evaluated>"),
         "{help}"
     );
 
     let error = parse_cli_command_from(["prodex", "gateway", "--help"]).unwrap_err();
     let help = error.to_string();
     assert!(
-        help.contains("--harness <auto|native|minimal|evaluated>"),
+        help.contains("--harness <native|minimal|evaluated>"),
         "{help}"
     );
 }

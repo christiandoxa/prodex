@@ -130,10 +130,6 @@ fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
         if path_exists(&versioned)? {
             return Ok(Some((root, versioned)));
         }
-        let compatibility = root.join("caveman");
-        if path_exists(&compatibility)? {
-            return Ok(Some((root, compatibility)));
-        }
     }
     Ok(None)
 }

@@ -39,6 +39,14 @@ pub enum ControlPlaneOperation {
     VirtualKeyUpdate,
     VirtualKeyDelete,
     VirtualKeyRotateSecret,
+    PolicyRead,
+    PolicyCreate,
+    PolicyValidate,
+    PolicySubmit,
+    PolicyVote,
+    PolicyActivate,
+    PolicyRollback,
+    PolicyRevoke,
     PolicyPublish,
     ProviderCredentialRotate,
     BudgetUpdate,
@@ -49,7 +57,7 @@ pub enum ControlPlaneOperation {
 }
 
 impl ControlPlaneOperation {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 32] = [
         Self::GatewayAdminRead,
         Self::RouteExplain,
         Self::TenantCreate,
@@ -67,6 +75,14 @@ impl ControlPlaneOperation {
         Self::VirtualKeyUpdate,
         Self::VirtualKeyDelete,
         Self::VirtualKeyRotateSecret,
+        Self::PolicyRead,
+        Self::PolicyCreate,
+        Self::PolicyValidate,
+        Self::PolicySubmit,
+        Self::PolicyVote,
+        Self::PolicyActivate,
+        Self::PolicyRollback,
+        Self::PolicyRevoke,
         Self::PolicyPublish,
         Self::ProviderCredentialRotate,
         Self::BudgetUpdate,
@@ -131,6 +147,22 @@ impl ControlPlaneOperation {
                 ResourceKind::VirtualKey,
                 ResourceAction::RotateSecret,
             ),
+            Self::PolicyRead | Self::PolicyValidate => {
+                ControlPlaneRequirement::viewer(ResourceKind::Policy, ResourceAction::Read)
+            }
+            Self::PolicyCreate => {
+                ControlPlaneRequirement::admin(ResourceKind::Policy, ResourceAction::Create)
+            }
+            Self::PolicySubmit | Self::PolicyActivate => ControlPlaneRequirement::admin(
+                ResourceKind::Policy,
+                ResourceAction::PublishRevision,
+            ),
+            Self::PolicyVote | Self::PolicyRollback => {
+                ControlPlaneRequirement::admin(ResourceKind::Policy, ResourceAction::Update)
+            }
+            Self::PolicyRevoke => {
+                ControlPlaneRequirement::admin(ResourceKind::Policy, ResourceAction::Delete)
+            }
             Self::PolicyPublish => ControlPlaneRequirement::admin(
                 ResourceKind::Policy,
                 ResourceAction::PublishRevision,
@@ -177,6 +209,14 @@ impl ControlPlaneOperation {
             Self::VirtualKeyUpdate => "control_plane.virtual_key.update",
             Self::VirtualKeyDelete => "control_plane.virtual_key.delete",
             Self::VirtualKeyRotateSecret => "control_plane.virtual_key.rotate_secret",
+            Self::PolicyRead => "control_plane.policy.read",
+            Self::PolicyCreate => "control_plane.policy.create",
+            Self::PolicyValidate => "control_plane.policy.validate",
+            Self::PolicySubmit => "control_plane.policy.submit",
+            Self::PolicyVote => "control_plane.policy.vote",
+            Self::PolicyActivate => "control_plane.policy.activate",
+            Self::PolicyRollback => "control_plane.policy.rollback",
+            Self::PolicyRevoke => "control_plane.policy.revoke",
             Self::PolicyPublish => "control_plane.policy.publish",
             Self::ProviderCredentialRotate => "control_plane.provider_credential.rotate_secret",
             Self::BudgetUpdate => "control_plane.budget.update",
@@ -194,6 +234,8 @@ impl ControlPlaneOperation {
                 | Self::RouteExplain
                 | Self::ScimUserRead
                 | Self::VirtualKeyRead
+                | Self::PolicyRead
+                | Self::PolicyValidate
                 | Self::BillingRead
                 | Self::AuditExport
         )

@@ -15,21 +15,20 @@ Three separate concepts are involved:
 The harness is resolved once when a bridge starts. Account selection, retry, and rotation do not
 change it, and a continuation cannot switch harnesses mid-stream.
 
-Standalone gateways may set `harness = "auto" | "native" | "minimal" | "evaluated"` under
+Standalone gateways may set `harness = "native" | "minimal" | "evaluated"` under
 `[gateway]` in `policy.toml`; an explicit `prodex gateway --harness ...` value takes precedence.
 
 ## Modes
 
 | Mode | Resolution | Request shaping | Response or stream shaping |
 |---|---|---|---|
-| `auto` | Conservatively resolves to `native`. | None after resolution. | None. |
 | `native` | Native. | None; preserves existing request bytes and headers. | None. |
 | `minimal` | Minimal. | Prepends the versioned Prodex instruction to ordinary `/v1/responses` inference requests. | None. |
 | `evaluated` | Explicit opt-in only. | Applies only a versioned policy matched from the already-selected provider/model. | Applies only the matched policy's bounded response and stream transforms. |
 
 An explicit CLI or configuration value wins. Unknown values are rejected. Omitting `--harness`
-selects `auto`, so existing behavior remains unchanged. `auto` never resolves to `evaluated`, and
-`evaluated` does not also apply the Minimal instruction block.
+selects `native`, so existing behavior remains unchanged. `evaluated` does not also apply the
+Minimal instruction block.
 
 Minimal changes only the top-level `instructions` field. It preserves the model, input, tools, tool
 schemas, tool choice, parallel-tool setting, reasoning, streaming flag, metadata, continuation IDs,

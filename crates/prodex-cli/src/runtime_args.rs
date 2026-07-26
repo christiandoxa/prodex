@@ -224,10 +224,10 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
-    /// Model-facing harness policy for local --provider or --url bridges. Defaults to auto.
+    /// Model-facing harness policy for local --provider or --url bridges. Defaults to native.
     #[arg(
         long,
-        value_name = "auto|native|minimal|evaluated",
+        value_name = "native|minimal|evaluated",
         value_parser = parse_harness_mode,
         requires = "provider_or_url"
     )]
@@ -433,10 +433,10 @@ pub struct GatewayArgs {
     /// External provider preset for the gateway. Omit for an OpenAI-compatible upstream.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
-    /// Model-facing harness policy. Defaults to policy.toml or auto.
+    /// Model-facing harness policy. Defaults to policy.toml or native.
     #[arg(
         long,
-        value_name = "auto|native|minimal|evaluated",
+        value_name = "native|minimal|evaluated",
         value_parser = parse_harness_mode
     )]
     pub harness: Option<prodex_provider_core::HarnessMode>,

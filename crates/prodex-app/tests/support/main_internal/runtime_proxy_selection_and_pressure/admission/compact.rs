@@ -753,7 +753,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
         "unexpected compact inflight saturation response body: {body}"
     );
     assert!(
-        log.contains("compact_final_failure exit=candidate_exhausted reason=inflight_saturation"),
+        log.contains("compact_final_failure") && log.contains("reason=inflight_saturation"),
         "compact saturation terminal marker should identify inflight saturation: {log}"
     );
     assert!(

@@ -181,6 +181,79 @@ fn log_runtime_response_candidate_pick(
     );
 }
 
+pub(super) fn select_runtime_cold_start_candidate(
+    shared: &RuntimeRotationProxyShared,
+    selection_state: &RuntimeRouteSelectionCatalog,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    inflight_soft_limit: usize,
+    candidate_record_count: usize,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
+) -> Result<Option<String>> {
+    for name in active_profile_selection_order_with_view(
+        runtime_route_selection_view(selection_state),
+        &selection_state.current_profile,
+    ) {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = selection_state.entry(&name) else {
+            continue;
+        };
+        if !entry.supports_codex_runtime()
+            || !entry
+                .cached_auth_summary
+                .as_ref()
+                .is_some_and(|auth| auth.quota_compatible)
+            || entry
+                .cached_probe_entry
+                .as_ref()
+                .is_some_and(|probe| probe.result.is_ok())
+            || entry.cached_usage_snapshot.is_some()
+            || entry.auth_failure_active
+            || entry.in_selection_backoff
+            || entry.health_sort_key > 0
+            || entry.inflight_count >= inflight_soft_limit
+            || runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                &name,
+                runtime_route_kind_inflight_context(route_kind),
+            )?
+            || !reserve_runtime_profile_route_circuit_half_open_probe(shared, &name, route_kind)?
+        {
+            continue;
+        }
+
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "selection_pick",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("profile", name.as_str()),
+                    runtime_proxy_log_field("mode", "cold_start"),
+                    runtime_proxy_log_field("inflight", entry.inflight_count.to_string()),
+                    runtime_proxy_log_field("health", entry.health_sort_key.to_string()),
+                    runtime_proxy_log_field("order", candidate_record_count.to_string()),
+                    runtime_proxy_log_field("quota_source", "unknown"),
+                ],
+            ),
+        );
+        let mut traced = runtime_selection_trace_candidate(
+            candidate_record_count,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+            None,
+            Some(entry.inflight_count),
+            Some(entry.health_sort_key),
+            Some(runtime_proxy_crate::RuntimeRouteCircuitState::Closed),
+        );
+        traced.selected = true;
+        trace.record_candidate(&name, traced);
+        return Ok(Some(name));
+    }
+    Ok(None)
+}
+
 pub(super) fn select_runtime_auto_redeem_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -223,17 +296,5 @@ pub(super) fn select_runtime_auto_redeem_candidate(
         trace.record_candidate(&profile, traced);
         return Ok(Some(profile));
     }
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "selection_pick",
-            [
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("profile", "none"),
-                runtime_proxy_log_field("mode", "exhausted"),
-                runtime_proxy_log_field("excluded_count", excluded_profiles.len().to_string()),
-            ],
-        ),
-    );
     Ok(None)
 }

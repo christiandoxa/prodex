@@ -41,7 +41,6 @@ Status values:
 | [Backup and restore](backup-restore.md) | Operations | active | 0.346.0 / 2026-07-25 | Recovery contract |
 | [Local control plane](local-control-plane.md) | Control plane | active | 0.346.0 / 2026-07-25 | Local administration boundary |
 | [Migration guide](migration-guide.md) | Platform | active | 0.346.0 / 2026-07-25 | Enterprise strangler sequence |
-| [Optional-tool migration](migrations/0.346-optional-tools.md) | Runtime launch | active | 0.346.0 / 2026-07-25 | Caveman and Smart Context migration |
 | [Enterprise governance](enterprise-governance/implementation-ledger.md) | Enterprise platform | active | 0.346.0 / 2026-07-25 | Canonical numbered set and ADRs |
 | [App decomposition ADR](refactor/05-prodex-app-decomposition-adr.md) | Platform | ADR | 0.346.0 / 2026-07-25 | Accepted staged extraction plan |
 | [Provider runtime boundary ADR](refactor/06-prodex-provider-runtime-migration.md) | Provider platform | ADR | 0.346.0 / 2026-07-25 | Accepted boundary; implementation pending |

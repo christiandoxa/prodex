@@ -12,19 +12,12 @@ pub(crate) struct RuntimeResponseProbePlan {
     pub(crate) ready_candidates: Vec<ReadyProfileCandidate>,
     pub(crate) stale_probe_refreshes: Vec<RuntimePlannedProbeRefresh>,
     pub(crate) cold_start_probe_jobs: Vec<RunProfileProbeJob>,
-    pub(crate) sync_probe_jobs: Vec<RunProfileProbeJob>,
-    pub(crate) should_sync_probe_cold_start: bool,
-    pub(crate) sync_probe_skip_jobs_count: Option<usize>,
-    pub(crate) sync_probe_skip_profiles_count: Option<usize>,
 }
 
 pub(crate) fn build_runtime_response_probe_plan(
     selection_state: &RuntimeRouteSelectionCatalog,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
-    allow_disk_auth_fallback: bool,
-    sync_probe_pressure_mode: bool,
-    inflight_soft_limit: usize,
     now: i64,
 ) -> RuntimeResponseProbePlan {
     let mut reports = Vec::new();
@@ -61,13 +54,10 @@ pub(crate) fn build_runtime_response_probe_plan(
                 });
             }
         } else {
-            let auth = entry
-                .cached_auth_summary
-                .clone()
-                .or_else(|| {
-                    allow_disk_auth_fallback.then(|| read_auth_summary(&entry.profile.codex_home))
-                })
-                .unwrap_or_else(runtime_profile_uncached_auth_summary_for_selection);
+            let auth = entry.cached_auth_summary.clone().unwrap_or(AuthSummary {
+                label: "uncached-auth".to_string(),
+                quota_compatible: false,
+            });
             reports.push(RunProfileProbeReport {
                 name: name.clone(),
                 order_index,
@@ -109,53 +99,14 @@ pub(crate) fn build_runtime_response_probe_plan(
         )
     });
 
-    let request_probe_jobs = cold_start_probe_jobs
-        .iter()
-        .filter(|job| {
-            !cached_usage_snapshots
-                .get(&job.name)
-                .is_some_and(|snapshot| {
-                    runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
-                })
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
     reports.sort_by_key(|report| report.order_index);
     let ready_candidates =
         runtime_response_ready_candidates(selection_state, &reports, &cached_usage_snapshots);
-    let best_candidate_order_index = runtime_response_best_candidate_order_index(
-        selection_state,
-        excluded_profiles,
-        &ready_candidates,
-        inflight_soft_limit,
-    );
-    let sync_probe_jobs = request_probe_jobs
-        .iter()
-        .filter(|job| {
-            ready_candidates.is_empty()
-                || best_candidate_order_index.is_none()
-                || best_candidate_order_index
-                    .is_some_and(|best_order_index| job.order_index < best_order_index)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let should_sync_probe_cold_start =
-        !sync_probe_pressure_mode && !request_probe_jobs.is_empty() && !sync_probe_jobs.is_empty();
-    let sync_probe_skip_jobs_count = (sync_probe_pressure_mode && !request_probe_jobs.is_empty())
-        .then_some(request_probe_jobs.len());
-    let sync_probe_skip_profiles_count = (sync_probe_pressure_mode
-        && !cold_start_probe_jobs.is_empty())
-    .then_some(cold_start_probe_jobs.len());
     RuntimeResponseProbePlan {
         reports,
         ready_candidates,
         stale_probe_refreshes,
         cold_start_probe_jobs,
-        sync_probe_jobs,
-        should_sync_probe_cold_start,
-        sync_probe_skip_jobs_count,
-        sync_probe_skip_profiles_count,
     }
 }
 
@@ -397,26 +348,6 @@ fn runtime_response_ready_candidates(
         runtime_route_selection_view(selection_state),
         Some(cached_usage_snapshots),
     )
-}
-
-fn runtime_response_best_candidate_order_index(
-    selection_state: &RuntimeRouteSelectionCatalog,
-    excluded_profiles: &BTreeSet<String>,
-    candidates: &[ReadyProfileCandidate],
-    inflight_soft_limit: usize,
-) -> Option<usize> {
-    candidates
-        .iter()
-        .filter(|candidate| !excluded_profiles.contains(&candidate.name))
-        .filter(|candidate| {
-            selection_state.entry(&candidate.name).is_some_and(|entry| {
-                !entry.in_selection_backoff
-                    && !entry.auth_failure_active
-                    && entry.inflight_count < inflight_soft_limit
-            })
-        })
-        .map(|candidate| candidate.order_index)
-        .min()
 }
 
 #[cfg(test)]

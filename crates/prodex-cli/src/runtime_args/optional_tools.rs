@@ -8,28 +8,6 @@ use prodex_optional_tools::{OptionalToolId, OptionalToolSet};
 use std::ffi::OsString;
 use std::fmt;
 
-pub(super) fn extract_super_leading_launch_prefixes(
-    args: Vec<OsString>,
-) -> (Vec<OptionalToolId>, Vec<OsString>) {
-    let mut tools = Vec::new();
-    let mut consumed = 0;
-    for arg in &args {
-        let Some(prefix) = arg.to_str() else {
-            break;
-        };
-        let tool = match prefix {
-            "rtk" => OptionalToolId::Rtk,
-            "playwright" => OptionalToolId::PlaywrightMcp,
-            "ponytail" => OptionalToolId::Ponytail,
-            "presidio" => OptionalToolId::Presidio,
-            _ => break,
-        };
-        tools.push(tool);
-        consumed += 1;
-    }
-    (tools, args.into_iter().skip(consumed).collect())
-}
-
 impl SuperArgs {
     pub fn presidio_preference(&self) -> Option<bool> {
         if self.presidio {
@@ -46,9 +24,6 @@ impl SuperArgs {
     }
 
     pub fn into_runtime_tool_args_with_presidio(self, presidio: bool) -> RuntimeToolArgs {
-        let (legacy_tools, passthrough_codex_args) =
-            extract_super_leading_launch_prefixes(self.codex_args);
-        let presidio = presidio || legacy_tools.contains(&OptionalToolId::Presidio);
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let external_upstream_base_url = self.provider.map(|provider| {
             self.base_url
@@ -88,9 +63,9 @@ impl SuperArgs {
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
         codex_args.extend(feature_overrides);
-        codex_args.extend(passthrough_codex_args);
+        codex_args.extend(self.codex_args);
         let mut tools = OptionalToolSet::super_defaults();
-        for tool in self.tools.into_iter().chain(legacy_tools) {
+        for tool in self.tools {
             tools.insert(tool);
         }
         if presidio {

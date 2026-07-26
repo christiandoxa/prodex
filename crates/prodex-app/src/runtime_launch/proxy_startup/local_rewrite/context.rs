@@ -90,7 +90,7 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
 pub(in super::super) struct RuntimeLocalRewriteRequestContext {
     pub(in super::super) process: Arc<RuntimeLocalRewriteProcessServices>,
     pub(in super::super) upstream_base_url: String,
-    pub(in super::super) provider: RuntimeLocalRewriteProviderOptions,
+    pub(in super::super) provider: Arc<RuntimeLocalRewriteProviderOptions>,
     pub(in super::super) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(in super::super) governed_pricing: Option<RuntimeGatewayProviderPricing>,
     pub(in super::super) gateway_auth_token_hash:
@@ -98,8 +98,8 @@ pub(in super::super) struct RuntimeLocalRewriteRequestContext {
     pub(in super::super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(in super::super) gateway_sso: RuntimeGatewaySsoConfig,
     pub(in super::super) gateway_virtual_keys: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyEntry>>>,
-    pub(in super::super) gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
-    pub(in super::super) gateway_observability: RuntimeGatewayObservabilityConfig,
+    pub(in super::super) gateway_guardrail_webhook: Arc<RuntimeGatewayGuardrailWebhookConfig>,
+    pub(in super::super) gateway_observability: Arc<RuntimeGatewayObservabilityConfig>,
 }
 
 pub(in super::super) type RuntimeLocalRewriteProxyShared = RuntimeLocalRewriteRequestContext;
@@ -120,15 +120,15 @@ impl RuntimeLocalRewriteRequestContext {
         Self {
             process: Arc::clone(&self.process),
             upstream_base_url: self.upstream_base_url.clone(),
-            provider: snapshot.provider.clone(),
+            provider: Arc::clone(&snapshot.provider),
             provider_credential: snapshot.provider_credential.clone(),
             governed_pricing: self.governed_pricing.clone(),
             gateway_auth_token_hash: snapshot.auth_token_hash.clone(),
             gateway_admin_tokens: snapshot.admin_tokens.clone(),
             gateway_sso: snapshot.sso.clone(),
             gateway_virtual_keys: Arc::clone(&snapshot.virtual_keys),
-            gateway_guardrail_webhook: snapshot.guardrail_webhook.clone(),
-            gateway_observability: snapshot.observability.clone(),
+            gateway_guardrail_webhook: Arc::clone(&snapshot.guardrail_webhook),
+            gateway_observability: Arc::clone(&snapshot.observability),
         }
     }
 
@@ -141,15 +141,15 @@ impl RuntimeLocalRewriteRequestContext {
         Self {
             process: Arc::clone(&self.process),
             upstream_base_url,
-            provider,
+            provider: Arc::new(provider),
             provider_credential: Some(provider_credential),
             governed_pricing: self.governed_pricing.clone(),
             gateway_auth_token_hash: self.gateway_auth_token_hash.clone(),
             gateway_admin_tokens: self.gateway_admin_tokens.clone(),
             gateway_sso: self.gateway_sso.clone(),
             gateway_virtual_keys: Arc::clone(&self.gateway_virtual_keys),
-            gateway_guardrail_webhook: self.gateway_guardrail_webhook.clone(),
-            gateway_observability: self.gateway_observability.clone(),
+            gateway_guardrail_webhook: Arc::clone(&self.gateway_guardrail_webhook),
+            gateway_observability: Arc::clone(&self.gateway_observability),
         }
     }
 

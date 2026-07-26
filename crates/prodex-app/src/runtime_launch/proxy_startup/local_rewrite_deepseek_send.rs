@@ -95,7 +95,7 @@ fn send_runtime_deepseek_responses_request(
         RuntimeProviderBridgeKind::DeepSeek,
         &model_selection.model,
     );
-    let (strict_tools, beta_base_url, web_search_mode) = match &shared.provider {
+    let (strict_tools, beta_base_url, web_search_mode) = match shared.provider.as_ref() {
         super::super::local_rewrite_options::RuntimeLocalRewriteProviderOptions::DeepSeek {
             strict_tools,
             beta_base_url,

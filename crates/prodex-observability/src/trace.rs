@@ -254,7 +254,7 @@ pub fn plan_gateway_span(
     }
     let mut descriptor = GatewaySpanDescriptor::new(kind, name);
     for attribute in attributes {
-        if attribute.scope == prodex_domain::TelemetryAttributeScope::MetricLabel {
+        if attribute.scope() == prodex_domain::TelemetryAttributeScope::MetricLabel {
             attribute
                 .as_metric_label()
                 .map_err(SpanPlanError::MetricLabel)?;
@@ -271,33 +271,18 @@ pub fn plan_gateway_span(
 pub fn plan_structured_log_correlation(
     correlation: &CorrelationContext,
 ) -> StructuredLogCorrelationPlan {
-    let mut fields = vec![TelemetryAttribute::trace_only(
-        "request_id",
-        correlation.request_id.to_string(),
-    )];
+    let mut fields = vec![TelemetryAttribute::request_id(correlation.request_id)];
     if let Some(call_id) = correlation.call_id {
-        fields.push(TelemetryAttribute::trace_only(
-            "call_id",
-            call_id.to_string(),
-        ));
+        fields.push(TelemetryAttribute::call_id(call_id));
     }
     if let Some(trace_id) = &correlation.trace_id {
-        fields.push(TelemetryAttribute::trace_only(
-            "trace_id",
-            trace_id.as_str(),
-        ));
+        fields.push(TelemetryAttribute::trace_id(trace_id));
     }
     if let Some(tenant_id) = correlation.tenant_id {
-        fields.push(TelemetryAttribute::trace_only(
-            "tenant_id",
-            tenant_id.to_string(),
-        ));
+        fields.push(TelemetryAttribute::tenant_id(tenant_id));
     }
     if let Some(audit_event_id) = correlation.audit_event_id {
-        fields.push(TelemetryAttribute::trace_only(
-            "audit_event_id",
-            audit_event_id.to_string(),
-        ));
+        fields.push(TelemetryAttribute::audit_event_id(audit_event_id));
     }
     StructuredLogCorrelationPlan { fields }
 }

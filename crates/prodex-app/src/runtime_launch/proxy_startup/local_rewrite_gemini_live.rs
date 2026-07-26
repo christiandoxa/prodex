@@ -157,7 +157,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     mut usage_guard: Option<RuntimeGatewayUsageRequestGuard>,
 ) {
     let network_zone = request.network_zone();
-    let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
+    let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = shared.provider.as_ref() else {
         runtime_gemini_live_mark_terminal(&mut usage_guard, 501);
         let _ = request.respond(build_runtime_proxy_text_response(
             501,
@@ -368,7 +368,7 @@ fn handle_runtime_gemini_live_tcp_stream(
         .set_write_timeout(Some(GEMINI_LIVE_HANDSHAKE_TIMEOUT))
         .context("failed to configure Gemini Live local write timeout")?;
 
-    let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
+    let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = shared.provider.as_ref() else {
         let _ = local_socket.close(None);
         return Ok(());
     };

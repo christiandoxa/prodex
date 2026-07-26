@@ -506,7 +506,7 @@ pub fn plan_application_control_plane_audit_emission_span(
         None,
         vec![
             tenant_trace_attribute(tenant_id),
-            TelemetryAttribute::trace_only("audit_event_id", audit_event_id.to_string()),
+            TelemetryAttribute::audit_event_id(audit_event_id),
         ],
     )
     .map_err(ApplicationControlPlaneAuditEmissionSpanError::Span)?;
@@ -536,7 +536,7 @@ pub fn plan_application_control_plane_audit_persistence_span(
         vec![
             TelemetryAttribute::metric_label("storage_backend", storage_backend),
             tenant_trace_attribute(tenant_id),
-            TelemetryAttribute::trace_only("audit_event_id", audit_event_id.to_string()),
+            TelemetryAttribute::audit_event_id(audit_event_id),
         ],
     )
     .map_err(ApplicationControlPlaneAuditPersistenceSpanError::Span)?;

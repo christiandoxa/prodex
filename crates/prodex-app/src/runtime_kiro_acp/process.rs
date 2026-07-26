@@ -69,6 +69,7 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command_and_timeout(
     result
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_kiro_acp_prompt_turn_with_command(
     command: &OsStr,
     cwd: &Path,

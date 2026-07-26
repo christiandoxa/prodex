@@ -1,6 +1,70 @@
 use super::*;
 
 #[test]
+fn gateway_policy_validate_works_and_lifecycle_reports_unsupported_on_file_backend() {
+    let root = temp_root("gateway-policy-file-backend");
+    let paths = app_paths_for_root(root.clone());
+    let tenant_id = prodex_domain::TenantId::new();
+    let admin_token = "admin-token";
+    let upstream = TestUpstream::start_n(0);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: Some(tenant_id.to_string()),
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::File {
+            key_store_path: root.join("gateway-virtual-keys.json"),
+            usage_path: root.join("gateway-usage.json"),
+            ledger_path: root.join("gateway-ledger.jsonl"),
+        },
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .unwrap();
+    let client = reqwest::blocking::Client::new();
+    let base = format!("http://{}/v1/prodex/gateway/policies", proxy.listen_addr);
+
+    let validation = client
+        .post(format!("{base}/validate"))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"artifact": {}}))
+        .send()
+        .unwrap();
+    assert_eq!(validation.status().as_u16(), 200);
+
+    let lifecycle = client.get(base).bearer_auth(admin_token).send().unwrap();
+    assert_eq!(lifecycle.status().as_u16(), 501);
+    assert_eq!(
+        lifecycle.json::<serde_json::Value>().unwrap()["error"]["code"],
+        "governance_policy_operation_unsupported"
+    );
+}
+
+#[test]
 fn gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage() {
     let root = temp_root("gateway-presidio-redaction-failure-audit");
     let audit_dir = root.join("audit");

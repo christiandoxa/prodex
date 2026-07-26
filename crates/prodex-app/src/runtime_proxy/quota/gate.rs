@@ -6,62 +6,75 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<bool> {
+    runtime_has_route_quota_fallback(shared, profile_name, excluded_profiles, route_kind, false)
+}
+
+pub(crate) fn runtime_has_route_ready_quota_fallback(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    runtime_has_route_quota_fallback(shared, profile_name, excluded_profiles, route_kind, true)
+}
+
+fn runtime_has_route_quota_fallback(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    require_quota_evidence: bool,
+) -> Result<bool> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let allow_disk_auth_fallback =
-        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
-    let disk_fallback_profiles = {
-        let mut runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        prune_runtime_profile_selection_backoff(&mut runtime, now);
-        let mut disk_fallback_profiles = Vec::new();
-        for (candidate_name, profile) in &runtime.state.profiles {
-            if candidate_name == profile_name || excluded_profiles.contains(candidate_name) {
-                continue;
-            }
-            let auth_failure_active = runtime_profile_auth_failure_active_with_auth_cache(
-                &runtime.profile_health,
-                &runtime.profile_usage_auth,
-                candidate_name,
-                now,
-            );
-            let in_selection_backoff = runtime_profile_name_in_selection_backoff(
-                candidate_name,
-                &runtime.profile_retry_backoff_until,
-                &runtime.profile_transport_backoff_until,
-                &runtime.profile_route_circuit_open_until,
-                route_kind,
-                now,
-            );
-            let inflight_count =
-                runtime_profile_inflight_sort_key(candidate_name, &profile_inflight);
-            if auth_failure_active || in_selection_backoff || inflight_count >= inflight_soft_limit
-            {
-                continue;
-            }
-            match runtime_profile_cached_auth_summary_from_maps_for_selection(
-                candidate_name,
-                &runtime.profile_usage_auth,
-                &runtime.profile_probe_cache,
-            ) {
-                Some(summary) if summary.quota_compatible => return Ok(true),
-                Some(_) => {}
-                None if allow_disk_auth_fallback => {
-                    disk_fallback_profiles.push(profile.codex_home.clone());
-                }
-                None => {}
-            }
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    prune_runtime_profile_selection_backoff(&mut runtime, now);
+    for candidate_name in runtime.state.profiles.keys() {
+        if candidate_name == profile_name || excluded_profiles.contains(candidate_name) {
+            continue;
         }
-        disk_fallback_profiles
-    };
-
-    for codex_home in disk_fallback_profiles {
-        if read_auth_summary(&codex_home).quota_compatible {
+        if runtime_profile_auth_failure_active_with_auth_cache(
+            &runtime.profile_health,
+            &runtime.profile_usage_auth,
+            candidate_name,
+            now,
+        ) || runtime_profile_name_in_selection_backoff(
+            candidate_name,
+            &runtime.profile_retry_backoff_until,
+            &runtime.profile_transport_backoff_until,
+            &runtime.profile_route_circuit_open_until,
+            route_kind,
+            now,
+        ) || runtime_profile_inflight_sort_key(candidate_name, &profile_inflight)
+            >= inflight_soft_limit
+        {
+            continue;
+        }
+        if !runtime_profile_cached_auth_summary_from_maps_for_selection(
+            candidate_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        )
+        .is_some_and(|summary| summary.quota_compatible)
+        {
+            continue;
+        }
+        if !require_quota_evidence {
+            return Ok(true);
+        }
+        let (summary, source) = runtime_profile_quota_summary_for_route_from_state(
+            &runtime,
+            candidate_name,
+            route_kind,
+            now,
+        );
+        if source.is_some() && runtime_quota_precommit_guard_reason(summary, route_kind).is_none() {
             return Ok(true);
         }
     }

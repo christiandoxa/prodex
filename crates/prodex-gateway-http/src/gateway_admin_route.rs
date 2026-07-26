@@ -217,11 +217,44 @@ impl GatewayAdminRoute<'_> {
             Self::AuditRetentionHolds => GatewayControlPlaneOperation::PolicyPublish,
             Self::AuditRetentionHold { .. } => GatewayControlPlaneOperation::AuditRetentionPurge,
             Self::AuditRetentionPurge => GatewayControlPlaneOperation::AuditRetentionPurge,
-            Self::Governance { .. }
-            | Self::SessionRevoke { .. }
-            | Self::GovernanceOutbox
-            | Self::GovernanceOutboxClaim
-            | Self::GovernanceAuditIntegrity => GatewayControlPlaneOperation::PolicyPublish,
+            Self::Governance { resource, .. } => match resource {
+                GatewayGovernanceResourceRoute::Collection => match method {
+                    GatewayHttpMethod::Get => GatewayControlPlaneOperation::PolicyRead,
+                    GatewayHttpMethod::Post => GatewayControlPlaneOperation::PolicyCreate,
+                    _ => return None,
+                },
+                GatewayGovernanceResourceRoute::Validate => {
+                    GatewayControlPlaneOperation::PolicyValidate
+                }
+                GatewayGovernanceResourceRoute::Status
+                | GatewayGovernanceResourceRoute::Resource { .. } => {
+                    if method != GatewayHttpMethod::Get {
+                        return None;
+                    }
+                    GatewayControlPlaneOperation::PolicyRead
+                }
+                GatewayGovernanceResourceRoute::Submit { .. } => {
+                    GatewayControlPlaneOperation::PolicySubmit
+                }
+                GatewayGovernanceResourceRoute::Vote { .. } => {
+                    GatewayControlPlaneOperation::PolicyVote
+                }
+                GatewayGovernanceResourceRoute::Activate { .. } => {
+                    GatewayControlPlaneOperation::PolicyActivate
+                }
+                GatewayGovernanceResourceRoute::Rollback { .. } => {
+                    GatewayControlPlaneOperation::PolicyRollback
+                }
+                GatewayGovernanceResourceRoute::Revoke { .. } => {
+                    GatewayControlPlaneOperation::PolicyRevoke
+                }
+                GatewayGovernanceResourceRoute::Unknown(_) => return None,
+            },
+            Self::SessionRevoke { .. } => GatewayControlPlaneOperation::PolicyRevoke,
+            Self::GovernanceOutbox | Self::GovernanceAuditIntegrity => {
+                GatewayControlPlaneOperation::PolicyRead
+            }
+            Self::GovernanceOutboxClaim => GatewayControlPlaneOperation::PolicyPublish,
             Self::Dashboard
             | Self::OpenApi
             | Self::Metrics
@@ -435,6 +468,55 @@ mod tests {
             route.operation(GatewayHttpMethod::Delete),
             Some(GatewayControlPlaneOperation::VirtualKeyDelete)
         );
+    }
+
+    #[test]
+    fn governance_lifecycle_routes_keep_distinct_operations() {
+        for (method, path, expected) in [
+            (
+                GatewayHttpMethod::Get,
+                "/prodex/gateway/policies",
+                GatewayControlPlaneOperation::PolicyRead,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies",
+                GatewayControlPlaneOperation::PolicyCreate,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/validate",
+                GatewayControlPlaneOperation::PolicyValidate,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/rev-1/submit",
+                GatewayControlPlaneOperation::PolicySubmit,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/rev-1/approvals/approval-1/votes",
+                GatewayControlPlaneOperation::PolicyVote,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/rev-1/activate",
+                GatewayControlPlaneOperation::PolicyActivate,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/rev-1/rollback",
+                GatewayControlPlaneOperation::PolicyRollback,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/break-glass-approvals/approval-1/revoke",
+                GatewayControlPlaneOperation::PolicyRevoke,
+            ),
+        ] {
+            let route = parse_gateway_admin_route("", path).expect(path);
+            assert_eq!(route.operation(method), Some(expected), "{path}");
+        }
     }
 
     #[test]

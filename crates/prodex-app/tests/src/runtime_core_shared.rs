@@ -162,7 +162,7 @@ fn initialize_runtime_proxy_log_path_replaces_latest_pointer_symlink_without_tou
     fs::write(&target, "do not touch\n").expect("target should write");
     std::os::unix::fs::symlink(&target, &pointer_path).expect("pointer symlink should create");
 
-    let log_path = initialize_runtime_proxy_log_path();
+    let log_path = initialize_runtime_proxy_log_path().unwrap();
 
     assert_eq!(
         fs::read_to_string(&target).expect("target should remain readable"),
@@ -181,6 +181,21 @@ fn initialize_runtime_proxy_log_path_replaces_latest_pointer_symlink_without_tou
 }
 
 #[test]
+fn create_runtime_proxy_log_path_reports_invalid_directory() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let file = dir.log_path("not-a-directory");
+    fs::write(&file, "occupied\n").expect("blocking file should write");
+
+    let error = create_runtime_proxy_log_path_in_dir(&file).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("failed to create runtime log directory")
+    );
+}
+
+#[test]
 fn runtime_proxy_log_to_path_flushes_async_entries() {
     let _runtime_lock = acquire_test_runtime_lock();
     let dir = RuntimeProxyLogTestDir::new();
@@ -191,7 +206,9 @@ fn runtime_proxy_log_to_path_flushes_async_entries() {
     runtime_proxy_log_to_path(&log_path, "async entry line1\nline2 request=7");
 
     assert_eq!(
-        runtime_proxy_async_logger().pending_count_for_path(&log_path),
+        runtime_proxy_async_logger()
+            .unwrap()
+            .pending_count_for_path(&log_path),
         1,
         "queued entry should remain pending while worker writes are paused"
     );
@@ -215,7 +232,7 @@ fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
     let dir = RuntimeProxyLogTestDir::new();
     let log_path = dir.log_path("dropped.log");
     open_runtime_proxy_private_file(&log_path).expect("private runtime log should create");
-    let logger = runtime_proxy_async_logger();
+    let logger = runtime_proxy_async_logger().unwrap();
     let capacity = logger.capacity();
 
     let pause_guard = RuntimeProxyAsyncLoggerPauseGuard::pause();

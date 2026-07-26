@@ -164,7 +164,7 @@ function render() {
   lines.push("");
   lines.push("## Harness modes");
   lines.push("");
-  lines.push(`Default requested mode: \`${contractCatalog.default_harness_mode}\`. V1 default resolution: \`${contractCatalog.resolved_harness_mode}\`.`);
+  lines.push(`Default mode: \`${contractCatalog.default_harness_mode}\`. Resolved mode for this catalog: \`${contractCatalog.resolved_harness_mode}\`.`);
   lines.push("");
   lines.push("| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |");
   lines.push("|---|---|---|---|---|---|---|---|---|");

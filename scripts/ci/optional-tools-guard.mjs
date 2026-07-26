@@ -43,11 +43,15 @@ export function validateFiles(files) {
       }
     }
     if (filePath === "crates/prodex-cli/src/runtime_args/optional_tools.rs") {
-      const start = contents.indexOf("fn extract_super_leading_launch_prefixes");
+      const start = contents.indexOf("pub fn into_runtime_tool_args_with_presidio");
       const end = contents.indexOf("impl fmt::Debug", start);
-      const extractor = start >= 0 && end > start ? contents.slice(start, end) : "";
-      if (!extractor.includes("_ => break") || !extractor.includes("skip(consumed)") || extractor.includes("retain(")) {
-        violations.push(`${filePath}: legacy tool compatibility must consume leading typed prefixes only`);
+      const converter = start >= 0 && end > start ? contents.slice(start, end) : "";
+      if (
+        !converter.includes("codex_args.extend(self.codex_args)") ||
+        converter.includes("extract_super_leading_launch_prefixes") ||
+        converter.includes("legacy_tools")
+      ) {
+        violations.push(`${filePath}: Super tool selection must use explicit --tool flags`);
       }
     }
   }

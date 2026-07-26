@@ -72,9 +72,8 @@ invalid. `prodex super` skips it unless `--require-tool caveman` is present.
 `prodex claude caveman` resolves the same installation through its Claude plugin
 entry point.
 
-For one compatibility release, `<managed-root>/caveman/` is also accepted when
-it contains the same manifest and vetted tree. Move it to the versioned path;
-the unversioned fallback is scheduled for removal in 0.348.0.
+Unversioned managed directories are rejected. Installations must use the exact
+versioned path shown above.
 
 ## Ponytail
 
@@ -99,7 +98,6 @@ the current workspace trusted only for that invocation. It does not persist the
 trust override. Interactive launches ask about Presidio unless `--presidio` or
 `--no-presidio` supplies the choice.
 
-The compatibility aliases `prodex caveman`, `prodex rtk`, `prodex playwright`,
-`prodex ponytail`, and `prodex s` translate to typed tool selections. Legacy
-leading tool words are accepted for one release only. Tool-like words later in
-the Codex argument list, including `presidio`, are passed through unchanged.
+The aliases `prodex caveman`, `prodex rtk`, `prodex playwright`, `prodex
+ponytail`, and `prodex s` translate to typed tool selections. Tool-like words
+in the Codex argument list are passed through unchanged.
