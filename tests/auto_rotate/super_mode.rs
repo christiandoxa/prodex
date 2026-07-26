@@ -67,7 +67,7 @@ fn s_pty_launch_uses_presidio_tui_and_enters_codex_in_yolo_mode() {
             ("PRODEX_PRESIDIO_AUTO_START", "0"),
         ],
         "Use Presidio for data safety?",
-        "\r",
+        "n\n",
     );
 
     assert!(
@@ -135,6 +135,6 @@ fn s_pty_launch_uses_presidio_tui_and_enters_codex_in_yolo_mode() {
     let log = fs::read_to_string(latest_log).expect("failed to read runtime log");
     assert!(
         log.contains("presidio_redaction_enabled=false"),
-        "enter should keep runtime Presidio redaction disabled, log: {log}"
+        "declining should keep runtime Presidio redaction disabled, log: {log}"
     );
 }
