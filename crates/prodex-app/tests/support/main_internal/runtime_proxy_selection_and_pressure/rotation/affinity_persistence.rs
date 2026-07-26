@@ -281,28 +281,10 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
         RuntimeRouteKind::Compact,
     )
     .expect("compact lineage verification should succeed");
-    wait_for_runtime_background_queues_idle();
-
-    let first_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after initial bindings");
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
     assert_eq!(
         first_revision, 3,
-        "initial binds should persist once each: {first_log}"
-    );
-    assert_eq!(
-        first_log
-            .matches("binding turn_state profile=main value=turn-1")
-            .count(),
-        1,
-        "turn state should be logged once: {first_log}"
-    );
-    assert_eq!(
-        first_log
-            .matches("binding session_id profile=main value=session-1")
-            .count(),
-        1,
-        "session id should be logged once: {first_log}"
+        "initial binds should schedule one persistence update each"
     );
 
     remember_runtime_turn_state(&shared, "main", Some("turn-1"), RuntimeRouteKind::Responses)

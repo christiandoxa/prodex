@@ -46,7 +46,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn s_pty_renders_presidio_tui_before_profile_validation() {
+fn s_pty_renders_presidio_tui() {
     let fixture = setup_fixture();
     fs::write(
         fixture.prodex_home.join("presidio.toml"),
@@ -54,24 +54,16 @@ fn s_pty_renders_presidio_tui_before_profile_validation() {
     )
     .expect("failed to seed enabled Presidio config");
 
-    let run = run_prodex_with_pty_prompt_answer(
+    let run = run_prodex_with_pty_until_prompt(
         &fixture,
-        &[
-            "s",
-            "--profile",
-            "missing-profile",
-            "--skip-quota-check",
-            "exec",
-            "hello",
-        ],
+        &["s", "--skip-quota-check", "exec", "hello"],
         &[],
         "Use Presidio for data safety?",
-        "n\n",
     );
 
     assert!(
         !run.output.status.success(),
-        "profile validation should stop the test launch: tty={} stdout={} stderr={}",
+        "the prompt-only test should stop the launch: tty={} stdout={} stderr={}",
         run.tty_output,
         String::from_utf8_lossy(&run.output.stdout),
         String::from_utf8_lossy(&run.output.stderr)

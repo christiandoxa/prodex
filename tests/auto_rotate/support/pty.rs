@@ -36,6 +36,29 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
     PtyRunOutput { output, tty_output }
 }
 
+pub(crate) fn run_prodex_with_pty_until_prompt(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    prompt: &str,
+) -> PtyRunOutput {
+    let (mut child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
+    let mut tty_output = String::new();
+    read_until_prompt(&mut master, prompt, &mut tty_output);
+    if child
+        .try_wait()
+        .expect("failed to inspect prodex after prompt")
+        .is_none()
+    {
+        child.kill().expect("failed to stop prodex after prompt");
+    }
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for prodex after prompt");
+    read_available(&mut master, &mut tty_output);
+    PtyRunOutput { output, tty_output }
+}
+
 fn spawn_prodex_with_pty(
     fixture: &Fixture,
     args: &[&str],
