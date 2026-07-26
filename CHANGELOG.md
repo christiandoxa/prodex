@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.350.0 - 2026-07-26
+
+### CLI
+
+- Restore Presidio opt-in prompt (`7fd29c3`)
+
 ## 0.349.0 - 2026-07-26
 
 ### CLI
@@ -101,9 +107,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Complete native Windows support (`d9f1e44`)
 - Make PTY tests portable to macOS (`d435275`)
 - Close remaining audited gaps (`741553c`)
-
-## 0.338.0 - 2026-07-22
-
-### Runtime
-
-- Close audited runtime and governance gaps (`014ce83`)
