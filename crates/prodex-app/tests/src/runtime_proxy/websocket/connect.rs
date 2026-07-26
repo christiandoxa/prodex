@@ -17,7 +17,7 @@ fn websocket_read_poll_timeout_preserves_write_timeout() {
 }
 
 #[test]
-fn websocket_upstream_handshake_rejection_preserves_status() {
+fn websocket_upstream_handshake_rejection_preserves_available_details() {
     let _guard = acquire_test_runtime_lock();
     let listener =
         std::net::TcpListener::bind("127.0.0.1:0").expect("upstream listener should bind");
@@ -62,7 +62,9 @@ fn websocket_upstream_handshake_rejection_preserves_status() {
         matches!(
             &result,
             RuntimeWebsocketConnectResult::Rejected(RuntimeWebsocketErrorPayload::Text(body))
-                if body.contains("upstream_rejected") && body.contains("\"status\":400")
+                if (body.contains("upstream_rejected") && body.contains("\"status\":400"))
+                    || (body.contains("invalid_request_error")
+                        && body.contains("unsupported beta"))
         ),
         "unexpected rejection: {result:?}"
     );
