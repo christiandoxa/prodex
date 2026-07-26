@@ -35,6 +35,7 @@ function parseArgs(argv) {
     dryRun: false,
     jobs: defaultJobCount(),
     prebuild: true,
+    prodexAppLib: true,
     testThreads: defaultTestThreads(),
     timings: false,
     timingsJson: false,
@@ -61,6 +62,10 @@ function parseArgs(argv) {
     }
     if (value === "--no-prebuild") {
       args.prebuild = false;
+      continue;
+    }
+    if (value === "--no-prodex-app-lib") {
+      args.prodexAppLib = false;
       continue;
     }
     if (value === "--dry-run") {
@@ -97,7 +102,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/full-rust-test.mjs [--jobs <n>] [--test-threads <n>] [--no-prebuild] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
+      "Usage: node scripts/ci/full-rust-test.mjs [--jobs <n>] [--test-threads <n>] [--no-prebuild] [--no-prodex-app-lib] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
       "",
       "Runs the full workspace Rust suite in faster partitions.",
       "",
@@ -123,18 +128,22 @@ function timingSummary(args, label) {
   };
 }
 
-function prebuildSteps() {
+function prebuildSteps(args) {
   return [
     {
       label: "prebuild:workspace-all-features",
       command: "cargo",
       args: ["test", "--workspace", "--all-features", "--no-run"],
     },
-    {
-      label: "prebuild:prodex-app-lib-all-features",
-      command: "cargo",
-      args: ["test", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
-    },
+    ...(args.prodexAppLib
+      ? [
+          {
+            label: "prebuild:prodex-app-lib-all-features",
+            command: "cargo",
+            args: ["test", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
+          },
+        ]
+      : []),
   ];
 }
 
@@ -231,7 +240,7 @@ async function main() {
   const completed = [];
   if (args.prebuild) {
     completed.push(
-      ...(await runStepsSerial(prebuildSteps(), {
+      ...(await runStepsSerial(prebuildSteps(args), {
         dryRun: args.dryRun,
         timingSummary: timingSummary(args, "full-rust-test:prebuild"),
       })),
@@ -245,12 +254,14 @@ async function main() {
       timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
     })),
   );
-  completed.push(
-    ...(await runStepsSerial([prodexAppStep()], {
-      dryRun: args.dryRun,
-      timingSummary: timingSummary(args, "full-rust-test:prodex-app"),
-    })),
-  );
+  if (args.prodexAppLib) {
+    completed.push(
+      ...(await runStepsSerial([prodexAppStep()], {
+        dryRun: args.dryRun,
+        timingSummary: timingSummary(args, "full-rust-test:prodex-app"),
+      })),
+    );
+  }
 
   if (args.timings && !args.dryRun) {
     process.stdout.write(
