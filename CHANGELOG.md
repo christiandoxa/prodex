@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.352.0 - 2026-07-26
+
+### Misc
+
+- Close audited release gaps (`6b02064`)
+
 ## 0.351.0 - 2026-07-26
 
 ### Misc
@@ -85,13 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete gateway lifecycle and provider health (`a001973`)
-
-## 0.340.0 - 2026-07-23
-
-### Docs
-
-- Clarify Copilot native response transport (`2b289c4`)
-
-### Misc
-
-- Close provider and governance gaps (`61116c9`)

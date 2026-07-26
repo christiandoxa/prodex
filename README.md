@@ -65,7 +65,7 @@ Install Codex separately and ensure `codex` is on `PATH`. The npm wrapper pins
 one vetted Codex release; standalone Prodex uses the selected external Codex
 binary. npm and crates.io are not Prodex release channels.
 
-The current local version in this repo is `0.351.0`.
+The current local version in this repo is `0.352.0`.
 
 ## First run
 
