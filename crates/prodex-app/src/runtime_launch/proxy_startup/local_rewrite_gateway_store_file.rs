@@ -61,8 +61,8 @@ pub(super) fn runtime_gateway_read_regular_file(path: &Path) -> io::Result<Optio
         )));
     }
 
-    let file = File::open(path)?;
-    if !runtime_gateway_same_file_metadata(&metadata, &file.metadata()?) {
+    let file = prodex_core::open_regular_file_no_follow(path)?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         return Err(io::Error::other(format!(
             "gateway state path changed while opening {}",
             path.display()
@@ -79,20 +79,6 @@ pub(super) fn runtime_gateway_read_regular_file(path: &Path) -> io::Result<Optio
         )));
     }
     Ok(Some(bytes))
-}
-
-#[cfg(unix)]
-fn runtime_gateway_same_file_metadata(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_gateway_same_file_metadata(
-    _left: &std::fs::Metadata,
-    _right: &std::fs::Metadata,
-) -> bool {
-    true
 }
 
 pub(super) fn runtime_gateway_virtual_key_store_file_save(

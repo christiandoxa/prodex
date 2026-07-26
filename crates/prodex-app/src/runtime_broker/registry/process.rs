@@ -188,12 +188,11 @@ pub(crate) fn runtime_executable_sha256(path: &Path) -> Result<String> {
         );
     }
 
-    let mut file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let opened_metadata = file
-        .metadata()
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !runtime_process_same_file_metadata(&metadata, &opened_metadata) {
+    let mut file = prodex_core::open_regular_file_no_follow(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+    {
         bail!("{} changed while hashing", path.display());
     }
 
@@ -219,17 +218,6 @@ pub(crate) fn runtime_executable_sha256(path: &Path) -> Result<String> {
     }
     let digest = hasher.finalize();
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-#[cfg(unix)]
-fn runtime_process_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_process_same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub(crate) fn runtime_current_binary_identity() -> (Option<String>, Option<String>) {

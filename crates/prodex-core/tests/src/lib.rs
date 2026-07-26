@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn opened_file_identity_matches_only_its_named_path() {
+    let root = env::temp_dir().join(format!(
+        "prodex-core-file-identity-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let first = root.join("first");
+    let second = root.join("second");
+    fs::write(&first, b"first").unwrap();
+    fs::write(&second, b"second").unwrap();
+    let metadata = fs::symlink_metadata(&first).unwrap();
+    let opened = fs::File::open(&first).unwrap();
+    let replaced = fs::File::open(&second).unwrap();
+
+    assert!(opened_file_matches_path(&metadata, &first, &opened).unwrap());
+    assert!(!opened_file_matches_path(&metadata, &second, &replaced).unwrap());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn no_follow_open_rejects_a_symlink() {
+    let root = env::temp_dir().join(format!(
+        "prodex-core-no-follow-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let target = root.join("target");
+    let link = root.join("link");
+    fs::write(&target, b"secret").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    assert!(open_regular_file_no_follow(&link).is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn binary_resolution_uses_explicit_path_list() {
     let root = env::temp_dir().join(format!(
         "prodex-core-binary-resolution-{}-{}",

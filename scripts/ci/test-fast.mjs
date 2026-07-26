@@ -52,8 +52,13 @@ function packageLibTestStep(label, packageName, options) {
   };
 }
 
-function safeCargoTestSteps(options) {
+function safeTestSteps(options) {
   return [
+    {
+      label: "node-tests",
+      command: "npm",
+      args: ["run", "test:node"],
+    },
     packageLibTestStep("crate:codex-config", "prodex-codex-config", options),
     packageLibTestStep("crate:redaction", "prodex-redaction", options),
     packageLibTestStep("crate:runtime-metrics", "prodex-runtime-metrics", options),
@@ -171,6 +176,7 @@ function printHelp() {
       "Includes:",
       "  - cargo fmt --check",
       "  - docs markdown lint",
+      "  - all Node.js test modules",
       "  - cargo check --locked --workspace --all-targets --all-features",
       "  - optional cargo test --no-run prebuild for cargo test shards",
       "  - safe lib/integration cargo test shards as separate child processes",
@@ -213,7 +219,7 @@ async function main() {
     await runStepsSerial(prebuildSteps(args), { dryRun: args.dryRun, timingSummary });
   }
   if (args.tests) {
-    await runStepsParallel(safeCargoTestSteps(args), { jobs: args.jobs, dryRun: args.dryRun, timingSummary });
+    await runStepsParallel(safeTestSteps(args), { jobs: args.jobs, dryRun: args.dryRun, timingSummary });
   }
 }
 

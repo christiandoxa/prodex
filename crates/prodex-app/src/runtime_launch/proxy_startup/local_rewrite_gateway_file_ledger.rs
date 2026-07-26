@@ -73,8 +73,8 @@ fn open_gateway_ledger_reader(
     let Some(metadata) = gateway_ledger_metadata(path)? else {
         return Ok(None);
     };
-    let file = File::open(path)?;
-    if !runtime_gateway_same_file_metadata(&metadata, &file.metadata()?) {
+    let file = prodex_core::open_regular_file_no_follow(path)?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         return Err(std::io::Error::other(format!(
             "gateway ledger path changed while opening {}",
             path.display()
@@ -99,9 +99,9 @@ fn open_gateway_ledger_append_file(path: &Path) -> std::io::Result<File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(path)?;
+    let file = prodex_core::open_regular_file_with_options_no_follow(path, &mut options)?;
     if let Some(metadata) = existing_metadata
-        && !runtime_gateway_same_file_metadata(&metadata, &file.metadata()?)
+        && !prodex_core::opened_file_matches_path(&metadata, path, &file)?
     {
         return Err(std::io::Error::other(format!(
             "gateway ledger path changed while opening {}",
@@ -272,20 +272,6 @@ pub(super) fn runtime_gateway_file_ledger_load(
     }
     ensure_gateway_ledger_reader_within_limit(path, &reader)?;
     Ok(entries)
-}
-
-#[cfg(unix)]
-fn runtime_gateway_same_file_metadata(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_gateway_same_file_metadata(
-    _left: &std::fs::Metadata,
-    _right: &std::fs::Metadata,
-) -> bool {
-    true
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 dirs = { workspace = true }
+prodex_core = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 

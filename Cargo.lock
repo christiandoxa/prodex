@@ -2969,6 +2969,8 @@ version = "0.352.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "libc",
+ "same-file",
 ]
 
 [[package]]
@@ -3051,6 +3053,7 @@ name = "prodex-optional-tools"
 version = "0.352.0"
 dependencies = [
  "anyhow",
+ "prodex-core",
  "prodex-shared-codex-fs",
  "serde",
  "serde_json",
@@ -3228,6 +3231,7 @@ version = "0.352.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "prodex-core",
  "serde_json",
  "toml",
 ]
@@ -3319,6 +3323,7 @@ dependencies = [
 name = "prodex-runtime-store"
 version = "0.352.0"
 dependencies = [
+ "prodex-core",
  "prodex-runtime-state",
  "prodex-state",
  "serde",

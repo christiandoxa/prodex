@@ -421,7 +421,8 @@
         "concurrent_activation_uses_etag_compare_and_swap",
         "two live PostgreSQL repositories enforce atomic reservation/accounting",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "Redis-backed boundary proof passed; Redis restart and database failover remain deployment tests"
+        "required CI Redis service proves two-executor atomic request and dual request/token limits without overshoot",
+        "Redis restart and database failover remain deployment tests"
       ]
     },
     {

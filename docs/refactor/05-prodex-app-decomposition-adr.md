@@ -8,8 +8,8 @@
 ## Context
 
 `prodex-app` is the workspace composition root, but it also owns several vertical implementations.
-The current source tree contains 697 Rust files and 198,182 physical Rust source lines. Its
-manifest has 89 direct dependencies. Existing crate and production-boundary guards pass, so crate
+The current source tree contains 915 Rust files and 265,655 physical Rust source lines. Its
+manifest has 90 direct dependencies. Existing crate and production-boundary guards pass, so crate
 count alone is not the problem. The problem is that unrelated edits share one compilation,
 review, and release boundary.
 
@@ -28,7 +28,7 @@ The current dependency direction is:
 
 ```text
 root binary
-  -> prodex-app                         (composition root, 89 direct dependencies)
+  -> prodex-app                         (composition root, 90 direct dependencies)
        -> CLI/profile/UI helpers
        -> gateway HTTP/core/server + application/authn/control-plane
        -> provider core/SPI + provider runtime adapters
@@ -143,9 +143,9 @@ Tests move to the narrowest owning crate; integration tests remain above the bou
 
 Current structural baseline:
 
-- 89 direct `prodex-app` dependencies;
-- 697 Rust source files;
-- 198,182 physical Rust source lines.
+- 90 direct `prodex-app` dependencies;
+- 915 Rust source files;
+- 265,655 physical Rust source lines.
 
 Completion targets:
 

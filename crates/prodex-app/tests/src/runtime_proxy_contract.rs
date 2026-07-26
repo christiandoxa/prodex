@@ -35,7 +35,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
             files: &["README.md", "docs/runtime-policy.md"],
             required: &[
                 "Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.",
-                "If one Codex account already meets your needs, direct Codex is simpler.",
+                "If you only use one Codex account and do not need quota rotation, you probably do not need `prodex`.",
             ],
         },
         ContractEvidence {

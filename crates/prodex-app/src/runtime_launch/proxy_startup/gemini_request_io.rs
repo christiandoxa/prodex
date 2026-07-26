@@ -13,25 +13,14 @@ pub(super) fn runtime_gemini_read_text_limited(path: &Path, limit: usize) -> Opt
     if !metadata.is_file() {
         return None;
     }
-    let file = fs::File::open(path).ok()?;
-    if !runtime_gemini_same_text_file(&metadata, &file.metadata().ok()?) {
+    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file).ok()? {
         return None;
     }
     let mut reader = file.take(limit as u64);
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).ok()?;
     Some(String::from_utf8_lossy(&bytes).to_string())
-}
-
-#[cfg(unix)]
-fn runtime_gemini_same_text_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_gemini_same_text_file(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub(super) fn runtime_gemini_path_has_symlink_component(path: &Path) -> bool {
@@ -81,31 +70,6 @@ mod tests {
             ),
             None
         );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn gemini_same_text_file_rejects_replaced_inode() {
-        use std::os::unix::fs::MetadataExt;
-
-        let root = std::env::temp_dir().join(format!(
-            "prodex-gemini-same-text-file-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let path_a = root.join("a.txt");
-        let path_b = root.join("b.txt");
-
-        fs::write(&path_a, "first").unwrap();
-        fs::write(&path_b, "second").unwrap();
-        let before = fs::symlink_metadata(&path_a).unwrap();
-        let after = fs::symlink_metadata(&path_b).unwrap();
-        assert_eq!(before.dev(), after.dev());
-        assert_ne!(before.ino(), after.ino());
-        assert!(!runtime_gemini_same_text_file(&before, &after));
-
         fs::remove_dir_all(root).unwrap();
     }
 }

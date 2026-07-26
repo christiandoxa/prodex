@@ -311,9 +311,8 @@ fn runtime_smart_context_read_artifact_store(
         );
     }
 
-    let file = fs::File::open(path)?;
-    let opened_metadata = file.metadata()?;
-    if !runtime_smart_context_same_artifact_store_file(&metadata, &opened_metadata) {
+    let file = prodex_core::open_regular_file_no_follow(path)?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         bail!(
             "Smart Context artifact store changed while opening {}",
             path.display()
@@ -448,23 +447,6 @@ fn runtime_smart_context_artifact_key(
         .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact key"))?;
     secret_store::write_private_file_atomic(path, &key)?;
     Ok(key)
-}
-
-#[cfg(unix)]
-fn runtime_smart_context_same_artifact_store_file(
-    before: &fs::Metadata,
-    after: &fs::Metadata,
-) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn runtime_smart_context_same_artifact_store_file(
-    _before: &fs::Metadata,
-    _after: &fs::Metadata,
-) -> bool {
-    true
 }
 
 fn runtime_smart_context_write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {

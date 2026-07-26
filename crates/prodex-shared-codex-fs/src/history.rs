@@ -145,23 +145,12 @@ fn open_history_file_for_merge(path: &Path) -> Result<fs::File> {
             CODEX_HISTORY_MERGE_MAX_BYTES
         );
     }
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    if !history_same_file_metadata(&metadata, &file.metadata()?) {
+    let file = prodex_core::open_regular_file_no_follow(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)? {
         bail!("history path changed while opening {}", path.display());
     }
     Ok(file)
-}
-
-#[cfg(unix)]
-fn history_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn history_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
 }
 
 #[cfg(test)]

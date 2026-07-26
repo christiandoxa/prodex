@@ -24,7 +24,7 @@ No row is complete merely because adjacent infrastructure exists.
 | B-04 | Run formatting baseline | tested | cargo fmt --check passed |
 | B-05 | Run Clippy baseline | tested | locked workspace/all-targets/all-features with warnings denied passed |
 | B-06 | Run Rust test baseline | tested | `npm run test:full -- --timings` passed the current all-features workspace and serial runtime shards |
-| B-07 | Run npm install/test baseline | tested | `npm test` passed; `npm ci` is inapplicable because no lockfile is tracked and generated cross-platform workspace locks reject single-host installation |
+| B-07 | Run npm install/test baseline | tested | `npm ci` passed against the tracked root `package-lock.json`; `npm test` includes every checked-in Node.js test module |
 | B-08 | Run documentation and architecture guards | tested | docs lint, crate boundary, and deployment security guard passed |
 | B-09 | Capture baseline performance and resource evidence | tested | The recorded `8ca79a62` governance hot-path benchmark passed with 100-sample maximum-bound estimate intervals of 27.143-27.238 us inspection, 2.768-2.796 us PDP and 6.290-6.393 us routing; prior CPU-pinned `e308fdf6` comparison passed all eight disabled p95/p99 budgets |
 

@@ -152,12 +152,11 @@ fn read_text_file_limited_unchecked(path: &Path) -> Result<Option<String>> {
     if !metadata.is_file() || metadata.len() > TEXT_FILE_READ_LIMIT as u64 {
         return Ok(None);
     }
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let opened_metadata = file
-        .metadata()
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !same_file_metadata(&metadata, &opened_metadata) {
+    let file = prodex_core::open_regular_file_no_follow(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if !prodex_core::opened_file_matches_path(&metadata, path, &file)
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+    {
         return Ok(None);
     }
     let mut bytes = Vec::new();
@@ -170,17 +169,6 @@ fn read_text_file_limited_unchecked(path: &Path) -> Result<Option<String>> {
     let contents = String::from_utf8(bytes)
         .with_context(|| format!("failed to decode UTF-8 {}", path.display()))?;
     Ok(Some(contents))
-}
-
-#[cfg(unix)]
-fn same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 fn ensure_parent_has_no_symlink_component(path: &Path) -> Result<()> {

@@ -94,9 +94,9 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
     let source_metadata = fs::symlink_metadata(source)
         .with_context(|| format!("failed to inspect {}", source.display()))?;
     ensure_shared_codex_file(source, &source_metadata)?;
-    let mut source_file =
-        fs::File::open(source).with_context(|| format!("failed to read {}", source.display()))?;
-    if !shared_codex_same_file_metadata(&source_metadata, &source_file.metadata()?) {
+    let mut source_file = prodex_core::open_regular_file_no_follow(source)
+        .with_context(|| format!("failed to read {}", source.display()))?;
+    if !prodex_core::opened_file_matches_path(&source_metadata, source, &source_file)? {
         bail!("source file changed while opening {}", source.display());
     }
 
@@ -248,17 +248,6 @@ fn create_shared_codex_atomic_file(
         "{context} temporary file for {} after repeated name collisions",
         destination.display()
     )
-}
-
-#[cfg(unix)]
-fn shared_codex_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn shared_codex_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
 }
 
 pub(super) fn move_directory(source: &Path, destination: &Path) -> Result<()> {
