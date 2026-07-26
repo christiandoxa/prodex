@@ -62,6 +62,8 @@ const FILES = Object.freeze({
   applicationProvider: "crates/prodex-application/src/provider.rs",
   providerSpi: "crates/prodex-provider-spi/src/lib.rs",
   keys: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
+  reservation:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reservation.rs",
   ledger: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
   reconciliationWorker:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reconciliation_worker.rs",
@@ -497,19 +499,19 @@ export function validateProductionBoundary(sources) {
     );
   }
   const durableReservation =
-    functionBody(sources.keys, "runtime_gateway_try_durable_reservation") ?? "";
+    functionBody(sources.reservation, "runtime_gateway_try_durable_reservation") ?? "";
   requireBefore(
     errors,
     durableReservation,
     "plan_application_atomic_reservation(",
     "runtime_gateway_sqlite_reserve_usage(",
-    `${FILES.keys}: application storage planning must precede durable reservation execution`,
+    `${FILES.reservation}: application storage planning must precede durable reservation execution`,
   );
   requireText(
     errors,
     durableReservation,
     "ApplicationAtomicReservationStoragePlan::Postgres(storage)",
-    `${FILES.keys}: PostgreSQL durable reservation must consume the application storage plan`,
+    `${FILES.reservation}: PostgreSQL durable reservation must consume the application storage plan`,
   );
   const durableReconciliation =
     functionBody(sources.ledger, "runtime_gateway_durable_reconcile_response") ?? "";
@@ -1592,8 +1594,8 @@ function runSelfTest() {
       runtime_gateway_distributed_rate_limit_admission();
       runtime_gateway_try_durable_reservation();
       apply_gateway_virtual_key_usage_update();
-    }
-    fn runtime_gateway_try_durable_reservation() {
+    }`,
+    reservation: `fn runtime_gateway_try_durable_reservation() {
       plan_application_atomic_reservation();
       ApplicationAtomicReservationStoragePlan::Postgres(storage);
       runtime_gateway_sqlite_reserve_usage();
@@ -2262,6 +2264,13 @@ function runSelfTest() {
       observability: `${valid.observability} schedule_runtime_gateway_durable_reconcile();`,
     }).some((error) => error.includes("duplicate durable settlement")),
     "duplicate durable settlement scheduling accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      reservation: valid.reservation.replace("plan_application_atomic_reservation();", ""),
+    }).some((error) => error.includes("storage planning must precede")),
+    "durable reservation without application storage planning accepted",
   );
 }
 

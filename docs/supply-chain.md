@@ -50,9 +50,11 @@ Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
 and Redis indexes include both Linux amd64 and arm64 manifests. Syft and
 Gitleaks CI images are also tag-and-digest pinned. Dependabot owns Dockerfile
-and Compose refreshes. Kubernetes uses the immutable digest published for the
-selected Prodex release; deployment promotion owns that application-image
-update.
+and Compose refreshes. The release workflow scans the locally built image with
+digest-pinned Trivy 0.72.0, failing on fixable high/critical vulnerabilities,
+then publishes an attested GHCR image and renders the Kubernetes release asset
+from that exact registry digest. The checked-in manifest keeps a non-deployable
+digest placeholder so an old digest cannot be mistaken for the current release.
 
 Primary pin sources:
 
@@ -79,7 +81,9 @@ The release workflow:
 2. attests every binary and the SPDX JSON SBOM;
 3. downloads the staged assets and verifies their GitHub attestations;
 4. generates and verifies `SHA256SUMS`; and
-5. publishes the binaries, SBOM, and checksum file together.
+5. scans and attests the GHCR image, renders the Kubernetes manifest with its
+   registry digest, and publishes that manifest plus the vulnerability report
+   with the binaries, SBOM, and checksum file.
 
 Run the local policy checks with:
 

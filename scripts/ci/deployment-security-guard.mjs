@@ -221,6 +221,7 @@ export function validateDeploymentSecurity(inputs) {
     kubernetesPath = "deploy/kubernetes/prodex-gateway.yaml",
     deploymentGuidePath = "docs/deployment.md",
     backupRunbookPath = "docs/backup-restore.md",
+    requireImageDigestPlaceholder = false,
     compose,
     composePolicy,
     composeSecretFiles,
@@ -793,12 +794,29 @@ export function validateDeploymentSecurity(inputs) {
   if (/healthcheck:[\s\S]*Authorization:\s*Bearer/u.test(compose)) {
     checks.push(`${composePath}: healthcheck must not place bearer tokens in process arguments`);
   }
-  if (/@sha256:([0-9a-f])\1{63}\b/iu.test(kubernetes)) {
+  const prodexImageReferences = Array.from(
+    kubernetes.matchAll(/^\s*image:\s*\S*prodex\S*$/gmu),
+    (match) => match[0],
+  );
+  if (
+    requireImageDigestPlaceholder &&
+    (prodexImageReferences.length === 0 ||
+      prodexImageReferences.some(
+        (reference) => !reference.endsWith("@sha256:PRODEX_IMAGE_DIGEST"),
+      ))
+  ) {
+    checks.push(`${kubernetesPath}: Prodex images must use the release-rendered digest placeholder`);
+  }
+  const renderedKubernetes = kubernetes.replaceAll(
+    "@sha256:PRODEX_IMAGE_DIGEST",
+    "@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c",
+  );
+  if (/@sha256:([0-9a-f])\1{63}\b/iu.test(renderedKubernetes)) {
     checks.push(`${kubernetesPath}: image digest must not use a repeated-character placeholder`);
-  } else if (/@sha256:([0-9a-f]{16})\1{3}\b/iu.test(kubernetes)) {
+  } else if (/@sha256:([0-9a-f]{16})\1{3}\b/iu.test(renderedKubernetes)) {
     checks.push(`${kubernetesPath}: image digest must not use a repeated-pattern placeholder`);
   }
-  if (/@sha256:(?![0-9a-f]{64}\b)[^\s"']+/iu.test(kubernetes)) {
+  if (/@sha256:(?![0-9a-f]{64}\b)[^\s"']+/iu.test(renderedKubernetes)) {
     checks.push(`${kubernetesPath}: image digest must be a 64-character sha256 hex value`);
   }
 
@@ -1632,6 +1650,13 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
+      requireImageDigestPlaceholder: true,
+    }).some((error) => error.includes("release-rendered digest placeholder")),
+    "checked-in static Prodex image digest accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
       kubernetes: `${valid.kubernetes}\nimage: repo/prodex@sha256:0000000000000000000000000000000000000000000000000000000000000000\n`,
     }).some((error) => error.includes("repeated-character placeholder")),
     "all-zero image digest accepted",
@@ -1956,6 +1981,7 @@ function readInputs(secretEnvPath) {
     envExample: fs.readFileSync("deploy/gateway.env.example", "utf8"),
     dockerfile: fs.readFileSync("Dockerfile", "utf8"),
     kubernetes: fs.readFileSync("deploy/kubernetes/prodex-gateway.yaml", "utf8"),
+    requireImageDigestPlaceholder: true,
     deploymentGuide: fs.readFileSync("docs/deployment.md", "utf8"),
     backupRunbook: fs.readFileSync("docs/backup-restore.md", "utf8"),
   };

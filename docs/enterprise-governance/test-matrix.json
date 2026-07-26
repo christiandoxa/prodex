@@ -503,7 +503,7 @@
       "test_type": "end_to_end_chaos_security",
       "expected": "Each missing mandatory dependency denies before upstream commit and emits bounded durable evidence when possible.",
       "implementation_status": "partial",
-      "evidence_required": "Complete sample 07 scenario under dependency fault injection.",
+      "evidence_required": "Complete the bank-mode dependency fault matrix under end-to-end fault injection.",
       "evidence": [
         "bank_snapshot_denies_unsupported_inspection",
         "bank_response_inspection_requires_full_coverage",
@@ -525,7 +525,8 @@
       "evidence": [
         "hardened_container_and_complete_artifacts_are_compliant",
         "deployment-security-guard.mjs",
-        "deployed connectivity/image scan release evidence pending"
+        "standalone release fails closed on fixable high/critical findings with digest-pinned Trivy and publishes the attested scan report",
+        "deployed network-policy connectivity evidence pending"
       ]
     },
     {
