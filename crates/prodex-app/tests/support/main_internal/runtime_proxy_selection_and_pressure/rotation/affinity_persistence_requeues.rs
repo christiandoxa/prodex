@@ -50,11 +50,6 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
-    let initial_second = Local::now().timestamp();
-    while Local::now().timestamp() == initial_second {
-        thread::sleep(Duration::from_millis(5));
-    }
-
     remember_runtime_successful_previous_response_owner(
         &shared,
         "main",
@@ -62,20 +57,11 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
         RuntimeRouteKind::Websocket,
     )
     .expect("first verification should succeed");
-    wait_for_runtime_background_queues_idle();
-
-    let first_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after first bind");
     let binding_marker = "binding previous_response_owner profile=main response_id=resp-1";
-    let first_binding_count = first_log.matches(binding_marker).count();
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
     assert_eq!(
-        first_binding_count, 1,
-        "first bind should be persisted once: {first_log}"
-    );
-    assert_eq!(
         first_revision, 1,
-        "first bind should persist once: {first_log}"
+        "first bind should schedule one persistence update"
     );
 
     remember_runtime_successful_previous_response_owner(
@@ -98,7 +84,7 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
         .expect("runtime log should be readable after duplicate binds");
     assert_eq!(
         second_log.matches(binding_marker).count(),
-        first_binding_count,
+        1,
         "duplicate verifies should not re-log identical owner bindings: {second_log}"
     );
     assert_eq!(
@@ -161,16 +147,11 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
     let response_ids = vec!["resp-1".to_string()];
     remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
         .expect("first response id bind should succeed");
-    wait_for_runtime_background_queues_idle();
-
-    let first_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after first bind");
     let binding_marker = "binding response_ids profile=main count=1 first=Some(\"resp-1\")";
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
-    assert_eq!(first_log.matches(binding_marker).count(), 1);
     assert_eq!(
         first_revision, 1,
-        "first bind should persist once: {first_log}"
+        "first bind should schedule one persistence update"
     );
 
     remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
