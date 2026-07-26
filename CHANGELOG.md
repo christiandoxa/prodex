@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.351.0 - 2026-07-26
+
+### Misc
+
+- Complete audited production paths (`56e2dfd`)
+
 ## 0.350.0 - 2026-07-26
 
 ### CLI
@@ -89,21 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close provider and governance gaps (`61116c9`)
-
-## 0.339.0 - 2026-07-23
-
-### CLI
-
-- Harden cross-platform quota preflight (`ebc4e96`)
-
-### Misc
-
-- Support Windows session attachment paths (`9330667`)
-- Harden cross-platform session repair (`1297235`)
-- Normalize Windows context paths (`0421672`)
-- Make embedded asset checks cross-platform (`a811276`)
-- Accept trusted Windows child owners (`e0fe68c`)
-- Seal cross-platform login secrets (`d7905a9`)
-- Complete native Windows support (`d9f1e44`)
-- Make PTY tests portable to macOS (`d435275`)
-- Close remaining audited gaps (`741553c`)
