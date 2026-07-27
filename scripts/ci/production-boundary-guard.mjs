@@ -125,11 +125,23 @@ export function validateProductionBoundary(sources) {
   if (!root) {
     errors.push(`${FILES.root}: production gateway handler is missing`);
   } else {
-    requireText(
+    requireOrdered(
       errors,
       root,
-      "run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);",
-      `${FILES.root}: production handler must delegate to the typed request pipeline`,
+      [
+        "let request = RuntimeLocalRewriteRequest::tiny(request);",
+        "CanonicalRequestTarget::parse(request.url())",
+        "request.respond(build_runtime_proxy_json_error_response(",
+        "run_runtime_local_rewrite_pipeline(request, target, shared);",
+      ],
+      `${FILES.root}: production handler must wrap requests before target validation and delegate to the typed request pipeline`,
+    );
+    requireCount(
+      errors,
+      root,
+      "RuntimeLocalRewriteRequest::tiny(request)",
+      1,
+      `${FILES.root}: production handler must wrap each request exactly once`,
     );
   }
 
@@ -1463,7 +1475,10 @@ function assertSelfTest(condition, message) {
 function runSelfTest() {
   const valid = {
     root: `fn handle_runtime_local_rewrite_proxy_request() {
-      run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);
+      let request = RuntimeLocalRewriteRequest::tiny(request);
+      let target = CanonicalRequestTarget::parse(request.url());
+      request.respond(build_runtime_proxy_json_error_response());
+      run_runtime_local_rewrite_pipeline(request, target, shared);
     }`,
     pipeline: `struct RuntimeLocalRewriteCanonicalRequest;
     struct RuntimeLocalRewriteAuthenticatedRequest;
@@ -1872,6 +1887,26 @@ function runSelfTest() {
   assertSelfTest(
     validErrors.length === 0,
     `valid wiring rejected: ${validErrors.join("; ")}`,
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      root: valid.root.replace(
+        "let request = RuntimeLocalRewriteRequest::tiny(request);",
+        "",
+      ),
+    }).some((error) => error.includes("wrap requests before target validation")),
+    "unwrapped invalid-target response accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      root: valid.root.replace(
+        "run_runtime_local_rewrite_pipeline(request, target, shared);",
+        "legacy_dispatch(request);",
+      ),
+    }).some((error) => error.includes("typed request pipeline")),
+    "typed request pipeline bypass accepted",
   );
   assertSelfTest(
     validateProductionBoundary({

@@ -6,12 +6,12 @@
       "chore(ci): record reviewed 0.355.0 churn"
     ],
     "caps": {
-      "maxFiles": 80,
-      "maxBehaviorFiles": 50,
-      "maxLines": 3200,
+      "maxFiles": 95,
+      "maxBehaviorFiles": 60,
+      "maxLines": 3400,
       "maxFileLines": 300
     },
-    "reason": "Reviewed the whole-repository audit fixes for detached Ed25519 governance artifact authenticity, fail-closed activation and refresh, SQLite and PostgreSQL signature persistence, durable audit queue telemetry, live RED/provider/inspection histograms, WebSocket HTTPS fallback, observability alerts and dashboards, and removal of superseded documentation; verified with the full locked all-features suite, focused governance and storage regressions, disposable PostgreSQL and backup/restore proofs, load and stress gates, governance benchmarks, strict Clippy, dependency audit and deny checks, an optimized locked build, documentation and deployment guards, and tracked-diff secret, PII, and unfinished-marker scans."
+    "reason": "Reviewed the complete post-0.354.0 source range, including merged Dependabot updates and whole-repository audit fixes for detached Ed25519 governance artifact authenticity, fail-closed activation and refresh, SQLite and PostgreSQL signature persistence, durable audit queue telemetry, live RED/provider/inspection histograms, WebSocket HTTPS fallback, observability alerts and dashboards, and removal of superseded documentation; verified with the full locked all-features suite, focused governance and storage regressions, disposable PostgreSQL and backup/restore proofs, load and stress gates, governance benchmarks, strict Clippy, dependency audit and deny checks, an optimized locked build, documentation and deployment guards, and tracked-diff secret, PII, and unfinished-marker scans."
   },
   {
     "id": "audited-governance-authenticity-and-telemetry-release-0.355.0",
