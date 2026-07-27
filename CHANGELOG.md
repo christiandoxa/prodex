@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.358.0 - 2026-07-27
+
+### Runtime
+
+- Close provider and runtime audit gaps (`65f5028`)
+
 ## 0.357.0 - 2026-07-27
 
 ### Misc
@@ -102,9 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Make super least privilege by default (`6e2d44f`)
 - Execute smart context replay corpus (`8fd3d53`)
 - Make smart context rewrites transactional (`a6b376c`)
-
-## 0.346.0 - 2026-07-24
-
-### Runtime
-
-- Harden log, MCP, and Gemini boundaries (`fe12705`)
