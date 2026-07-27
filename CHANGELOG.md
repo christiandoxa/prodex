@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.359.0 - 2026-07-27
+
+### Misc
+
+- Close audited release gaps (`0735f52`)
+
 ## 0.358.0 - 2026-07-27
 
 ### Runtime
@@ -85,26 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Restore prompt-free yolo launches (`b2de2cd`)
-
-## 0.347.0 - 2026-07-25
-
-### Docs
-
-- Refresh smart context evidence (`5657092`)
-- Record final hardening validation (`5b4b0e6`)
-- Consolidate hardening guidance (`da1b2ab`)
-
-### Misc
-
-- Reuse exact round-trip validation (`36c818b`)
-- Close hardening validation regressions (`5cce0a3`)
-- Pin Windows Codex migration (`4eac31d`)
-- Publish Smart Context performance evidence (`04063d3`)
-- Bound rewrite work (`de60d09`)
-- Reject no-op before tokenization (`08f3fb1`)
-- Pin Codex npm artifacts (`fcd6d78`)
-- Share artifact snapshots (`160a269`)
-- Validate checked subprocess output (`55a816c`)
-- Make super least privilege by default (`6e2d44f`)
-- Execute smart context replay corpus (`8fd3d53`)
-- Make smart context rewrites transactional (`a6b376c`)
