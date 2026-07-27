@@ -689,11 +689,10 @@ fn atomic_reservation_rejects_cross_tenant_and_over_limit_inputs() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     execute_postgres_batch(&url, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     for migration in POSTGRES_MIGRATIONS {
         execute_postgres_batch(&url, migration.sql);

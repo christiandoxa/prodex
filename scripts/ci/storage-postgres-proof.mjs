@@ -261,7 +261,7 @@ async function runWithManagedPostgres() {
       "cargo",
       [
         "test", "-q", "-p", "prodex-storage-postgres-runtime",
-        "--test", "postgres_runtime", "--", "--test-threads=1",
+        "--test", "postgres_runtime", "--", "--ignored", "--test-threads=1",
       ],
       {
         env: {

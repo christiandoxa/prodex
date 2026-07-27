@@ -185,6 +185,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                     matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
                     runtime_gemini_project_id(&selected.auth),
                     thinking_budget_tokens,
+                    shared.allow_local_file_access,
                     &shared.runtime_shared.runtime_config.gemini,
                 )?
             } else {

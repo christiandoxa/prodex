@@ -333,8 +333,10 @@ fn gateway_provider_history_is_scoped_to_virtual_key() {
 }
 
 #[test]
-fn strict_gemini_oauth_session_remembers_the_concrete_model_that_succeeded() {
+fn strict_gemini_oauth_gateway_blocks_host_files_and_remembers_the_concrete_model() {
     let root = temp_root("gateway-request-constraints-gemini-owner");
+    let secret = root.join("gateway-secret.txt");
+    fs::write(&secret, "gateway-must-not-read-this-secret").unwrap();
     let paths = app_paths_for_root(root.clone());
     let upstream = TestUpstream::start_with_statuses(
         &[500, 200, 200],
@@ -401,7 +403,12 @@ fn strict_gemini_oauth_session_remembers_the_concrete_model_that_succeeded() {
             .post(format!("http://{}/v1/responses", proxy.listen_addr))
             .bearer_auth("data-token")
             .header("session_id", "constraint-session")
-            .json(&serde_json::json!({"model":"auto","input":"hi"}))
+            .json(&serde_json::json!({
+                "model": "auto",
+                "input": format!("Review @\"{}\"", secret.display()),
+                "include_paths": [secret.clone()],
+                "gemini_memory_file": secret.clone(),
+            }))
             .send()
             .unwrap();
         assert_eq!(response.status().as_u16(), 200);
@@ -413,6 +420,7 @@ fn strict_gemini_oauth_session_remembers_the_concrete_model_that_succeeded() {
                 .body_rx
                 .recv_timeout(Duration::from_secs(2))
                 .unwrap();
+            assert!(!String::from_utf8_lossy(&body).contains("gateway-must-not-read-this-secret"));
             serde_json::from_slice::<serde_json::Value>(&body).unwrap()["model"]
                 .as_str()
                 .unwrap()

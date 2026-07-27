@@ -114,11 +114,10 @@ fn governance_migration_is_tenant_scoped_and_content_minimized() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let mut client = postgres::Client::connect(&url, NoTls).expect("postgres should connect");
     client
         .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
