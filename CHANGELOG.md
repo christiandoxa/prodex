@@ -2,6 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.355.0 - 2026-07-27
+
+### Deps
+
+- Sync fuzz lockfile (`193f043`)
+- Accommodate base64 version split (`d4e29b8`)
+- Update Rust image to 1.97.1 (#39) (`f5c9da4`)
+- Merge Dependabot fuzz updates (#37) (`3127c06`)
+- Merge Dependabot cargo updates (#36) (`37fd40d`)
+- Bump rust from 1.97.0-bookworm to 1.97.1-bookworm (`fef1e62`)
+- Bump the fuzz-cargo group in /fuzz with 2 updates (`c1e8742`)
+- Bump the cargo group with 2 updates (`853a9f1`)
+
+### Misc
+
+- Harden artifact trust and telemetry (`5332471`)
+
 ## 0.354.0 - 2026-07-26
 
 ### Runtime
@@ -91,10 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Align secure log test fixtures (`32d599f`)
-
-## 0.343.0 - 2026-07-24
-
-### Runtime
-
-- Sync runtime test manifest (`dde40db`)
-- Harden runtime and release pipeline (`e9ed1e0`)
