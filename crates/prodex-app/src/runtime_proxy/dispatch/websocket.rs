@@ -21,11 +21,11 @@ pub(super) fn capture_runtime_proxy_websocket_request(
 
 fn runtime_proxy_websocket_response_inspection_policy(
     rollout: prodex_config::GovernanceRolloutMode,
-) -> Option<(&'static str, bool)> {
+) -> Option<(&'static str, Option<u16>)> {
     match rollout {
         prodex_config::GovernanceRolloutMode::Off => None,
-        prodex_config::GovernanceRolloutMode::Observe => Some(("observe", false)),
-        prodex_config::GovernanceRolloutMode::Enforce => Some(("enforce", true)),
+        prodex_config::GovernanceRolloutMode::Observe => Some(("observe", None)),
+        prodex_config::GovernanceRolloutMode::Enforce => Some(("enforce", Some(426))),
     }
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
         return;
     }
 
-    if let Some((rollout, requires_https)) = runtime_proxy_websocket_response_inspection_policy(
+    if let Some((rollout, fallback_status)) = runtime_proxy_websocket_response_inspection_policy(
         shared.runtime_config.governance.inspection,
     ) {
         runtime_proxy_log(
@@ -72,7 +72,7 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                     runtime_proxy_log_field("rollout", rollout),
                     runtime_proxy_log_field(
                         "action",
-                        if requires_https {
+                        if fallback_status.is_some() {
                             "https_fallback"
                         } else {
                             "observe"
@@ -81,10 +81,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 ],
             ),
         );
-        if requires_https {
+        if let Some(status) = fallback_status {
             let _ = request.respond(build_runtime_proxy_text_response(
-                501,
-                "governance enforcement requires the HTTPS Responses transport",
+                status,
+                "governance enforcement requires HTTPS Responses transport fallback",
             ));
             return;
         }
@@ -231,11 +231,11 @@ mod tests {
         );
         assert_eq!(
             runtime_proxy_websocket_response_inspection_policy(Observe),
-            Some(("observe", false))
+            Some(("observe", None))
         );
         assert_eq!(
             runtime_proxy_websocket_response_inspection_policy(Enforce),
-            Some(("enforce", true))
+            Some(("enforce", Some(426)))
         );
     }
 }

@@ -415,3 +415,15 @@ BEGIN
 END;
 "#,
     };
+
+pub const LOCAL_GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(11),
+    phase: SqliteMigrationPhase::Expand,
+    name: "011_governance_artifact_authenticity",
+    sql: r#"
+ALTER TABLE prodex_governance_revision_artifacts
+    ADD COLUMN signature_key_id TEXT;
+ALTER TABLE prodex_governance_revision_artifacts
+    ADD COLUMN artifact_signature TEXT;
+"#,
+};

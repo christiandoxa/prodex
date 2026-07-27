@@ -26,7 +26,7 @@ A soft score can never restore an ineligible provider. Decisions record
 content-free hard-filter reasons, score components, selected target and snapshot
 revision. Revocation overrides continuation pinning.
 
-## Implementation status
+## Current implementation
 
 The local rewrite runtime publishes a revisioned tenant-bound snapshot for
 eligible executable adapters. It advertises only implemented endpoints and

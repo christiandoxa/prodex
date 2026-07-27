@@ -57,3 +57,83 @@ spec:
           annotations:
             summary: Prodex policy lifecycle operation failed
             description: A governed policy persist, publish, or invalidation operation failed.
+        - alert: ProdexInspectionFailures
+          expr: sum(increase(prodex_inspection_events_total{inspection_outcome=~"timeout|error"}[10m])) + sum(increase(prodex_inspection_events_total{inspection_coverage="unsupported"}[10m])) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex inspection coverage degraded
+            description: At least one governed inspection failed, timed out, or encountered unsupported content.
+        - alert: ProdexInspectionP99LatencyHigh
+          expr: histogram_quantile(0.99, sum by (le) (rate(prodex_inspection_duration_microseconds_bucket[10m]))) > 2000000
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex inspection p99 latency is high
+            description: Inspection p99 latency has exceeded two seconds for fifteen minutes.
+        - alert: ProdexProviderFailureRatioHigh
+          expr: sum(rate(prodex_provider_requests_total{provider_result!="success"}[10m])) / clamp_min(sum(rate(prodex_provider_requests_total[10m])), 0.001) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex provider failure ratio is high
+            description: More than five percent of provider requests have failed for fifteen minutes.
+        - alert: ProdexProviderP99LatencyHigh
+          expr: histogram_quantile(0.99, sum by (le, provider) (rate(prodex_provider_request_duration_ms_bucket[10m]))) > 30000
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex provider p99 latency is high
+            description: Provider request p99 latency has exceeded thirty seconds for fifteen minutes.
+        - alert: ProdexApiServerErrorRatioHigh
+          expr: sum(rate(prodex_api_requests_total{status_class="5xx"}[10m])) / clamp_min(sum(rate(prodex_api_requests_total[10m])), 0.001) > 0.01
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex API server-error ratio is high
+            description: More than one percent of gateway API requests have returned a server error for ten minutes.
+        - alert: ProdexApiP99LatencyHigh
+          expr: histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[10m]))) > 30000
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex API p99 latency is high
+            description: Gateway time-to-response-commit p99 has exceeded thirty seconds for fifteen minutes.
+        - alert: ProdexSiemOutboxLagging
+          expr: max(prodex_governance_siem_outbox_oldest_pending_lag_milliseconds) > 60000
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex SIEM outbox is lagging
+            description: The oldest pending SIEM event has been delayed for more than one minute.
+        - alert: ProdexSiemDeadLetters
+          expr: max(prodex_governance_siem_outbox_dead_lettered) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex SIEM outbox contains dead letters
+            description: At least one governance audit event could not be delivered to SIEM.
+        - alert: ProdexMandatoryAuditPersistenceFailure
+          expr: sum(increase(prodex_audit_events_total{audit_operation="persist",audit_result="failure"}[5m])) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex mandatory audit persistence failed
+            description: At least one governed request could not durably commit its audit event.
+        - alert: ProdexAuditQueueSaturated
+          expr: max(prodex_queue_depth{queue_kind="persistence"} / clamp_min(prodex_queue_capacity{queue_kind="persistence"}, 1)) > 0.8
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex audit persistence queue is saturated
+            description: The bounded persistence queue has remained above eighty percent capacity for five minutes.

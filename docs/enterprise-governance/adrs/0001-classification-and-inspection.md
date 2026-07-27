@@ -29,9 +29,9 @@ authorities must be consolidated behind the typed result. Streaming responses
 need an incremental bounded PEP and cannot claim full coverage before final
 validation.
 
-## Implementation status
+## Current implementation
 
-The candidate implements the typed bounded inspection model, monotonic compiled
+Prodex implements the typed bounded inspection model, monotonic compiled
 classification rules, schema-aware JSON walking, local detectors, bounded
 Presidio mapping, explicit coverage and response-stream overlap inspection.
 Evidence includes `inspection_result_is_bounded_deterministic_and_content_free`,

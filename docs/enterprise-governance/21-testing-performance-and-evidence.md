@@ -15,17 +15,14 @@ affinity, and accounting correctness override performance results.
 
 ## Current Repository Evidence
 
-Verified hardening evidence from 2026-07-25 is indexed in
-`docs/hardening/results.md`, including controlled build/startup samples and the
-generated Smart Context replay and performance reports. `package-lock.json` is
-present and `npm ci` is part of the reproducible workflow. The repository also
-keeps the mock-upstream load/stress harnesses, storage proof scripts,
-backup/restore drill, boundary guards, and focused identity/storage/security
-tests.
+Reproducible evidence is produced by the checked-in CI, benchmark, load,
+storage-proof, backup/restore, and documentation commands. Generated Smart
+Context reports carry their own source/toolchain provenance. `package-lock.json`
+is present and `npm ci` is part of the reproducible workflow.
 
-Those measurements do not cover every enterprise inspection, PDP, approval,
-governed routing, session, SIEM, Vault, or bank-mode path. Each such program
-still requires its own accepted before/after baseline; unrelated Smart Context
+Measurements apply only to the named path and exact recorded environment.
+Inspection, PDP, approval, governed routing, session, SIEM, secret-provider,
+and bank-mode controls use their own focused evidence; unrelated Smart Context
 or CLI measurements cannot be reused as proof.
 
 ## Required Test Matrix
@@ -269,14 +266,13 @@ compensating control, and follow-up owner.
 
 ## Exact Quality Commands
 
-The final candidate should run, at minimum, the repository commands below. The
-list is a required program, not a claim that every command currently succeeds
-in this environment.
+The final candidate runs, at minimum, the applicable repository commands below.
+The list is a required program; pass/fail evidence comes from the actual run.
 
 ```bash
 cargo fmt --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
+npm run test:full -- --timings
 npm ci
 npm test
 npm run docs:lint
@@ -297,6 +293,7 @@ Redis/SQLite boundary, backup/restore, multi-replica, load, stress, and
 benchmark commands. Existing local performance entry points include:
 
 ```bash
+cargo bench --locked --bench governance_hot_paths
 cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 \
   cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
@@ -307,10 +304,6 @@ npm run ci:runtime-stress
 npm run ci:backup-restore-drill
 npm run ci:storage-postgres-proof
 ```
-
-New governance benchmarks and chaos commands must be added as executable
-scripts, not documented as if the existing runtime benchmark already covers
-them.
 
 ## Release Evidence Gate
 

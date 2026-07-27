@@ -90,10 +90,33 @@ fn gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg() {
     let valid_policy = client
         .post(format!("{base}/validate"))
         .bearer_auth(maker_token)
-        .json(&serde_json::json!({"artifact": {}}))
+        .json(&serde_json::json!({
+            "revision_id": revision_v1,
+            "artifact": {"policy_revision": revision_v1}
+        }))
         .send()
         .unwrap();
     assert_eq!(valid_policy.status().as_u16(), 200);
+    let valid_policy = valid_policy.json::<serde_json::Value>().unwrap();
+    assert_eq!(valid_policy["signing"]["algorithm"], "ed25519");
+    assert!(
+        valid_policy["signing"]["payload_base64"]
+            .as_str()
+            .is_some_and(|payload| !payload.is_empty())
+    );
+
+    let unknown_signing_key = client
+        .post(&base)
+        .bearer_auth(maker_token)
+        .header("Idempotency-Key", "unknown-governance-signing-key")
+        .json(&serde_json::json!({
+            "revision_id": revision_v1,
+            "artifact": {"policy_revision": revision_v1},
+            "authenticity": {"key_id": "unknown-key", "signature": "AQID"}
+        }))
+        .send()
+        .unwrap();
+    assert_eq!(unknown_signing_key.status().as_u16(), 400);
 
     let mismatched_revision = client
         .post(&base)

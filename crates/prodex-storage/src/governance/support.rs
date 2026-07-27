@@ -11,7 +11,7 @@ pub use codec::{
     artifact_kind_for_approval, artifact_kind_label, channel_from_label, channel_label,
     classification_from_label, credential_scope_from_label, credential_scope_label, revision_table,
 };
-pub use integrity::{activation_etag, artifact_checksum};
+pub use integrity::{activation_etag, artifact_checksum, artifact_signature_message};
 pub use validation::{
     approval_transition_error, from_i64, require_control_plane_admin, to_i64,
     validate_governance_activation_request, validate_governance_revision_id,

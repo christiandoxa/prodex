@@ -31,12 +31,12 @@ Snapshot and input revisions become part of decision/cache keys and audit.
 Every mandatory obligation needs an acknowledging PEP. Revocation/invalidation
 overrides cache and LKG.
 
-## Implementation status
+## Current implementation
 
-The candidate implements immutable compiled classification/policy snapshots, a
+Prodex implements immutable compiled classification/policy snapshots, a
 pure application PDP, typed PIP input, request/response/session/routing PEPs and
 CI dependency guards. Evidence includes
 `application_pipeline_classifies_before_policy_evaluation`,
 `explicit_deny_wins_and_drops_obligations`, and the production/application
 boundary guards. Durable multi-replica publication and PostgreSQL validation
-remain pending.
+are tracked as deployment acceptance rather than source implementation.

@@ -66,6 +66,7 @@ impl GovernanceSqliteRepository {
         )? {
             if existing.checksum == checksum
                 && existing.compiled_artifact == command.compiled_artifact
+                && existing.authenticity == command.authenticity
                 && existing.created_by == command.created_by
                 && existing.created_at_unix_ms == command.created_at_unix_ms
             {
@@ -76,18 +77,31 @@ impl GovernanceSqliteRepository {
         }
 
         insert_revision_metadata(&transaction, &command, &checksum, created_at)?;
+        let (signature_key_id, artifact_signature) =
+            command
+                .authenticity
+                .as_ref()
+                .map_or((None, None), |authenticity| {
+                    (
+                        Some(authenticity.key_id.as_str()),
+                        Some(authenticity.signature_base64.as_str()),
+                    )
+                });
         transaction
             .execute(
                 "INSERT INTO prodex_governance_revision_artifacts (
                     tenant_id, artifact_kind, revision_id, artifact_checksum,
-                    compiled_artifact, created_by, created_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    compiled_artifact, signature_key_id, artifact_signature,
+                    created_by, created_at_unix_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     command.tenant_id.to_string(),
                     artifact_kind_label(command.kind),
                     command.revision_id,
                     checksum,
                     command.compiled_artifact,
+                    signature_key_id,
+                    artifact_signature,
                     command.created_by.to_string(),
                     created_at,
                 ],
@@ -303,31 +317,41 @@ impl GovernanceSqliteRepository {
     ) -> Result<Vec<GovernanceRevisionSummary>, GovernanceRepositoryError> {
         let connection = self.connection()?;
         let table = revision_table(kind);
+        let kind_label = artifact_kind_label(kind);
         let mut statement = connection
             .prepare(&format!(
-                "SELECT revision_id, artifact_checksum, lifecycle_state, created_at_unix_ms
-                 FROM {table} WHERE tenant_id = ?1
-                 ORDER BY created_at_unix_ms DESC, revision_id DESC"
+                "SELECT revisions.revision_id, revisions.artifact_checksum,
+                        revisions.lifecycle_state, revisions.created_at_unix_ms,
+                        artifacts.signature_key_id
+                 FROM {table} AS revisions
+                 LEFT JOIN prodex_governance_revision_artifacts AS artifacts
+                   ON artifacts.tenant_id = revisions.tenant_id
+                  AND artifacts.artifact_kind = ?2
+                  AND artifacts.revision_id = CAST(revisions.revision_id AS TEXT)
+                 WHERE revisions.tenant_id = ?1
+                 ORDER BY revisions.created_at_unix_ms DESC, revisions.revision_id DESC"
             ))
             .map_err(database_error)?;
         let rows = statement
-            .query_map([tenant_id.to_string()], |row| {
+            .query_map(params![tenant_id.to_string(), kind_label], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             })
             .map_err(database_error)?;
         let mut summaries = Vec::new();
         for row in rows {
-            let (revision_id, fingerprint, lifecycle_state, created_at) =
+            let (revision_id, fingerprint, lifecycle_state, created_at, signature_key_id) =
                 row.map_err(database_error)?;
             summaries.push(GovernanceRevisionSummary {
                 revision_id,
                 fingerprint,
                 lifecycle_state,
+                signature_key_id,
                 created_at_unix_ms: from_i64(created_at)?,
             });
         }

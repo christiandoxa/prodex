@@ -13,6 +13,7 @@ mod decisions;
 pub use decisions::*;
 
 pub const MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
+pub const MAX_GOVERNANCE_SIGNATURE_BYTES: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GovernanceArtifactKind {
@@ -300,6 +301,7 @@ pub struct GovernanceRevisionSummary {
     pub revision_id: String,
     pub fingerprint: String,
     pub lifecycle_state: String,
+    pub signature_key_id: Option<String>,
     pub created_at_unix_ms: u64,
 }
 
@@ -323,6 +325,58 @@ pub struct GovernanceSnapshot {
     pub revision_id: String,
     pub compiled_artifact: Vec<u8>,
     pub source: GovernanceSnapshotSource,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceArtifactAuthenticity {
+    pub key_id: String,
+    pub signature_base64: String,
+}
+
+impl fmt::Debug for GovernanceArtifactAuthenticity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceArtifactAuthenticity")
+            .field("key_id", &self.key_id)
+            .field("signature_base64", &"<redacted>")
+            .finish()
+    }
+}
+
+impl GovernanceArtifactAuthenticity {
+    pub fn is_well_formed(&self) -> bool {
+        !self.key_id.is_empty()
+            && self.key_id.len() <= 64
+            && self
+                .key_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            && !self.signature_base64.is_empty()
+            && self.signature_base64.len() <= MAX_GOVERNANCE_SIGNATURE_BYTES
+            && self.signature_base64.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'_' | b'-' | b'=')
+            })
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct GovernanceArtifactValidationInput<'a> {
+    pub tenant_id: TenantId,
+    pub kind: GovernanceArtifactKind,
+    pub revision_id: &'a str,
+    pub compiled_artifact: &'a [u8],
+    pub authenticity: Option<&'a GovernanceArtifactAuthenticity>,
+}
+
+impl fmt::Debug for GovernanceArtifactValidationInput<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceArtifactValidationInput")
+            .field("tenant_id", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("revision_id", &"<redacted>")
+            .field("compiled_artifact_bytes", &self.compiled_artifact.len())
+            .field("authenticity", &self.authenticity)
+            .finish()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -671,6 +725,7 @@ pub struct GovernanceRevisionWriteCommand {
     pub revision_id: String,
     pub fingerprint: ApprovalFingerprint,
     pub compiled_artifact: Vec<u8>,
+    pub authenticity: Option<GovernanceArtifactAuthenticity>,
     pub created_by: PrincipalId,
     pub created_at_unix_ms: u64,
 }
@@ -684,6 +739,7 @@ impl fmt::Debug for GovernanceRevisionWriteCommand {
             .field("revision_id", &"<redacted>")
             .field("fingerprint", &self.fingerprint)
             .field("compiled_artifact_bytes", &self.compiled_artifact.len())
+            .field("authenticity", &self.authenticity)
             .field("created_by", &"<redacted>")
             .field("created_at_unix_ms", &"<redacted>")
             .finish()
@@ -720,6 +776,13 @@ pub fn plan_governance_revision_write(
         || command.compiled_artifact.len() > MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES
     {
         return Err(GovernanceStorageError::ArtifactSizeInvalid);
+    }
+    if command
+        .authenticity
+        .as_ref()
+        .is_some_and(|authenticity| !authenticity.is_well_formed())
+    {
+        return Err(GovernanceStorageError::InvalidAuthenticity);
     }
     Ok(GovernanceRevisionWritePlan(command))
 }
@@ -810,6 +873,7 @@ pub enum GovernanceStorageError {
     TenantMismatch,
     InvalidRevision,
     ArtifactSizeInvalid,
+    InvalidAuthenticity,
     ApprovalRequired,
     InvalidEtag,
     InvalidRetryPolicy,

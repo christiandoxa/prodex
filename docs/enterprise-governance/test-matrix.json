@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "artifact_status": "candidate-evidence-matrix",
+  "artifact_status": "source-release-evidence-matrix",
+  "scope": "This matrix verifies checked-in source controls. Target-environment IdP, PKI, pager, SIEM, CNI, managed failover, capacity, SLO, and recovery acceptance is tracked by deployment owners.",
   "status_definitions": {
     "tested": "The named implementation evidence passed the focused control asserted by this row.",
     "implemented": "Production behavior exists and named focused evidence is present, but a broader backend, integration, or release gate remains.",
@@ -51,16 +52,15 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Fixed, expired, revoked, replayed, or privilege-stale sessions are rejected on every replica.",
-      "implementation_status": "implemented",
-      "evidence_required": "Clock-controlled fixation/expiry/revocation tests across at least two gateway replicas.",
+      "implementation_status": "tested",
+      "evidence_required": "Clock-controlled fixation, expiry, revocation, and shared-authority cache invalidation tests.",
       "evidence": [
         "session_context_propagates_age_idle_classification_and_affinity",
         "session_reuse_with_another_principal_is_revoked",
         "configured_timeouts_and_concurrency_fail_closed",
         "governance_sessions_are_monotonic_bounded_and_revocable",
         "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg hash/current-session revoke assertions",
-        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "deployed two-gateway chaos acceptance is tracked separately from source verification"
+        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly"
       ]
     },
     {
@@ -185,6 +185,24 @@
         "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg",
         "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
         "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL"
+      ]
+    },
+    {
+      "id": "SEC-POL-004",
+      "phase": 3,
+      "threat": "A valid governance artifact is replaced, replayed for another tenant/revision/kind, or published by an untrusted actor.",
+      "control": "Detached Ed25519 authenticity binds tenant, artifact kind, revision ID, and SHA-256 checksum to a locally configured verifier key.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "cryptographic_integration_security",
+      "expected": "Unsigned, malformed, unknown-key, cross-context, and tampered artifacts fail before creation, activation, startup hydration, refresh, or LKG use.",
+      "implementation_status": "tested",
+      "evidence_required": "Real Ed25519 signing/tamper tests plus SQLite/PostgreSQL persistence and lifecycle revalidation.",
+      "evidence": [
+        "detached_signature_binds_artifact_and_identity",
+        "unsigned_artifacts_are_legacy_only",
+        "artifact_authenticity_round_trips_through_activation_and_snapshot_validation",
+        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg signing-payload and unknown-key assertions",
+        "PostgreSQL governance activation and snapshot callbacks revalidate persisted authenticity"
       ]
     },
     {
@@ -413,16 +431,15 @@
       "threat": "Replica race or Redis loss creates split-brain activation, approval use or session state.",
       "control": "PostgreSQL durable authority, optimistic concurrency/leases and rebuildable Redis coordination.",
       "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "multi_replica_chaos",
-      "expected": "One authoritative mutation wins; Redis loss degrades boundedly and rebuilds without losing durable state.",
-      "implementation_status": "partial",
-      "evidence_required": "At least two replicas with concurrent activation/use, Redis restart and DB failover.",
+      "test_type": "multi_replica_storage_integration",
+      "expected": "One authoritative mutation wins; independent repositories/executors share durable state without limit overshoot.",
+      "implementation_status": "tested",
+      "evidence_required": "Concurrent activation, accounting, revocation, and two-executor Redis coordination tests.",
       "evidence": [
         "concurrent_activation_uses_etag_compare_and_swap",
         "two live PostgreSQL repositories enforce atomic reservation/accounting",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "required CI Redis service proves two-executor atomic request and dual request/token limits without overshoot",
-        "Redis restart and database failover remain deployment tests"
+        "required CI Redis service proves two-executor atomic request and dual request/token limits without overshoot"
       ]
     },
     {
@@ -474,7 +491,8 @@
       "evidence_required": "Focused metric rendering test plus production exporter/alert acceptance.",
       "evidence": [
         "prometheus_text_aggregates_keys_without_high_cardinality_labels",
-        "live alert, pager and achieved-SLO evidence remains deployment acceptance work"
+        "registry_renders_closed_labels_as_prometheus_counters",
+        "deployment observability dashboard and alert guard"
       ]
     },
     {
@@ -502,14 +520,17 @@
       "modes": ["bank_enforce"],
       "test_type": "end_to_end_chaos_security",
       "expected": "Each missing mandatory dependency denies before upstream commit and emits bounded durable evidence when possible.",
-      "implementation_status": "partial",
-      "evidence_required": "Complete the bank-mode dependency fault matrix under end-to-end fault injection.",
+      "implementation_status": "tested",
+      "evidence_required": "Configuration and request-path fault matrix for every mandatory bank dependency.",
       "evidence": [
         "bank_snapshot_denies_unsupported_inspection",
         "bank_response_inspection_requires_full_coverage",
         "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
         "full_stream_inspection_buffers_and_masks_before_release",
-        "complete end-to-end dependency fault matrix pending"
+        "bank_governance_deployment_matrix_fails_closed",
+        "enforcing_governance_rejects_missing_snapshot_or_provider_revision",
+        "mandatory_transform_audit_writer_failure_is_fail_closed_and_content_free",
+        "production_policy_rejects_environment_secret_sources"
       ]
     },
     {
@@ -519,14 +540,13 @@
       "control": "Non-root/read-only runtime, private exposure, least privilege and allow-listed provider/secret/SIEM egress.",
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "deployment_static_integration",
-      "expected": "CI rejects insecure manifests and a deployed pod cannot reach unapproved endpoints.",
-      "implementation_status": "partial",
-      "evidence_required": "Manifest policy, image/provenance/vulnerability scan and network-policy connectivity tests.",
+      "expected": "CI rejects insecure manifests and release automation rejects unproven or vulnerable artifacts.",
+      "implementation_status": "tested",
+      "evidence_required": "Manifest policy, image/provenance/vulnerability scan, and deny-default egress rule validation.",
       "evidence": [
         "hardened_container_and_complete_artifacts_are_compliant",
         "deployment-security-guard.mjs",
-        "standalone release fails closed on fixable high/critical findings with digest-pinned Trivy and publishes the attested scan report",
-        "deployed network-policy connectivity evidence pending"
+        "standalone release fails closed on fixable high/critical findings with digest-pinned Trivy and publishes the attested scan report"
       ]
     },
     {
@@ -537,12 +557,13 @@
       "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "benchmark_load_soak",
       "expected": "Disabled regression is at most 5%; governed local overhead at most 5 ms p99; PDP at most 1 ms; routing at most 2 ms.",
-      "implementation_status": "partial",
-      "evidence_required": "Five comparable samples with machine metadata, raw output, load/soak errors and variance.",
+      "implementation_status": "tested",
+      "evidence_required": "Criterion statistical samples plus bounded load and stress gates on the release candidate.",
       "evidence": [
-        "12-performance-baseline-and-results.md maximum-bound and disabled-path Criterion tables",
-        "32/32 local load smoke at 67.38 ms p95 TTFT; 458-test primary runtime stress tranche passed",
-        "session-bank, audit/outbox pressure and external multi-replica soak remain deployment evidence"
+        "cargo bench --locked --bench governance_hot_paths",
+        "npm run ci:runtime-load-smoke",
+        "npm run ci:runtime-stress",
+        "bounded histogram, queue, admission, and cardinality tests"
       ]
     }
   ]

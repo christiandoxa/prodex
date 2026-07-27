@@ -5,6 +5,10 @@ use crate::types::{
 };
 use crate::validate_secrets::validate_secret_policy;
 use anyhow::{Result, bail};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD},
+};
 use std::path::Path;
 
 pub const MAX_GOVERNANCE_INSPECTION_PATTERNS: usize = 64;
@@ -67,6 +71,16 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
 
 fn validate_governance_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     validate_runtime_governance_settings(&policy.governance, path)?;
+    if matches!(
+        policy.governance.mode,
+        RuntimeGovernanceMode::EnterpriseEnforce | RuntimeGovernanceMode::BankEnforce
+    ) && policy.governance.artifact_verifiers.is_empty()
+    {
+        bail!(
+            "enforcing governance mode requires at least one Ed25519 artifact verifier in {}",
+            path.display()
+        );
+    }
     if policy.governance.mode == RuntimeGovernanceMode::BankEnforce {
         validate_bank_deployment(policy, path)?;
     }
@@ -81,6 +95,7 @@ pub fn validate_runtime_governance_settings(
         bail!("governance.config_version in {} must be 1", path.display());
     }
     validate_governance_authority_tenants(governance, path)?;
+    validate_governance_artifact_verifiers(governance, path)?;
     validate_governance_inspection_patterns(governance, path)?;
     validate_governance_policy_rules(governance, path)?;
     validate_governance_session(governance, path)?;
@@ -193,6 +208,49 @@ pub fn validate_runtime_governance_settings(
         {
             bail!(
                 "enforcing governance mode requires explicit bounded session controls in {}",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_governance_artifact_verifiers(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
+    if governance.artifact_verifiers.len() > 16 {
+        bail!(
+            "governance.artifact_verifiers in {} cannot exceed 16 entries",
+            path.display()
+        );
+    }
+    let mut key_ids = std::collections::BTreeSet::new();
+    for verifier in &governance.artifact_verifiers {
+        if verifier.key_id.is_empty()
+            || verifier.key_id.len() > 64
+            || !verifier
+                .key_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            bail!(
+                "governance.artifact_verifiers key_id in {} is invalid",
+                path.display()
+            );
+        }
+        if !key_ids.insert(verifier.key_id.as_str()) {
+            bail!(
+                "governance.artifact_verifiers key_id in {} must be unique",
+                path.display()
+            );
+        }
+        let decoded = [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD]
+            .into_iter()
+            .find_map(|engine| engine.decode(&verifier.ed25519_public_key_base64).ok());
+        if decoded.as_deref().is_none_or(|key| key.len() != 32) {
+            bail!(
+                "governance.artifact_verifiers public key in {} must be a base64-encoded Ed25519 public key",
                 path.display()
             );
         }

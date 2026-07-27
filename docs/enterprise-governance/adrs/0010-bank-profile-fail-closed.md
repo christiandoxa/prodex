@@ -27,7 +27,7 @@ Bank mode trades availability for the declared controls. Every dependency has
 an explicit fail-closed test, alert and runbook. The name provides technical
 controls and evidence, not automatic legal or regulatory certification.
 
-## Implementation status
+## Current implementation
 
 The typed profile, startup validator, mandatory stage checks, private-listener
 guard, identity/audit/secret-reference requirements and runtime fail-closed

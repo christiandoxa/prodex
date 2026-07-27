@@ -9,8 +9,9 @@ pub const INSERT_GOVERNANCE_REVISION_ARTIFACT_STATEMENT: PostgresStatement = Pos
     sql: r#"
 INSERT INTO prodex_governance_revision_artifacts (
     tenant_id, artifact_kind, revision_id, artifact_checksum,
-    compiled_artifact, created_by, created_at_unix_ms
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    compiled_artifact, signature_key_id, artifact_signature,
+    created_by, created_at_unix_ms
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (tenant_id, artifact_kind, revision_id) DO NOTHING
 RETURNING revision_id
 "#,
@@ -19,7 +20,8 @@ RETURNING revision_id
 pub const LOAD_GOVERNANCE_REVISION_ARTIFACT_STATEMENT: PostgresStatement = PostgresStatement {
     name: "load_governance_revision_artifact",
     sql: r#"
-SELECT artifact_checksum, compiled_artifact, created_by, created_at_unix_ms
+SELECT artifact_checksum, compiled_artifact, signature_key_id, artifact_signature,
+       created_by, created_at_unix_ms
 FROM prodex_governance_revision_artifacts
 WHERE tenant_id = $1 AND artifact_kind = $2 AND revision_id = $3
 "#,

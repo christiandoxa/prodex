@@ -10,9 +10,10 @@ use prodex_domain::{
 use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteRequest, AtomicReservationCommand, AuditOutboxWriteCommand,
     BudgetStorageScope, ExpiredReservationRecoveryCommand, GovernanceActivationAction,
-    GovernanceActivationRequest, GovernanceArtifactKind, GovernanceRevisionWriteCommand,
-    GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome,
-    GovernanceWriteOutcome, TenantStorageKey, UsageReconciliationCommand,
+    GovernanceActivationRequest, GovernanceArtifactAuthenticity, GovernanceArtifactKind,
+    GovernanceRevisionWriteCommand, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
+    GovernanceSessionUpsertOutcome, GovernanceWriteOutcome, TenantStorageKey,
+    UsageReconciliationCommand,
 };
 use prodex_storage_postgres::{SET_TENANT_STATEMENT, UPSERT_TENANT_LIFECYCLE_STATEMENT};
 use prodex_storage_postgres_runtime::{
@@ -163,6 +164,10 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         revision_id: revision_id.to_string(),
         fingerprint: ApprovalFingerprint::new(fingerprint.clone()).unwrap(),
         compiled_artifact: artifact,
+        authenticity: Some(GovernanceArtifactAuthenticity {
+            key_id: "release-2026-01".to_string(),
+            signature_base64: "AQID".to_string(),
+        }),
         created_by: maker.id,
         created_at_unix_ms: 1_800_000_000_001,
     };
@@ -242,7 +247,11 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         activated_at_unix_ms: 1_800_000_000_004,
     };
     let activated = repository
-        .governance_activate_revision(request.clone(), |_| true)
+        .governance_activate_revision(request.clone(), |input| {
+            input.authenticity.is_some_and(|authenticity| {
+                authenticity.key_id == "release-2026-01" && authenticity.signature_base64 == "AQID"
+            })
+        })
         .await
         .unwrap();
     assert_eq!(activated.outcome, GovernanceWriteOutcome::Applied);
@@ -252,6 +261,28 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         .unwrap();
     assert_eq!(replayed.outcome, GovernanceWriteOutcome::Replayed);
     assert_eq!(replayed.etag, activated.etag);
+    let snapshot = repository
+        .governance_load_snapshot(tenant_id, GovernanceArtifactKind::Policy, |input| {
+            input.authenticity.is_some_and(|authenticity| {
+                authenticity.key_id == "release-2026-01" && authenticity.signature_base64 == "AQID"
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(snapshot.revision_id, revision_id.to_string());
+    assert_eq!(
+        repository
+            .governance_get_revision(
+                tenant_id,
+                GovernanceArtifactKind::Policy,
+                &revision_id.to_string(),
+            )
+            .await
+            .unwrap()
+            .signature_key_id
+            .as_deref(),
+        Some("release-2026-01")
+    );
     assert_eq!(
         repository
             .governance_status(tenant_id, GovernanceArtifactKind::Policy)
@@ -502,6 +533,7 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
                     revision_id: revision_id.clone(),
                     fingerprint: ApprovalFingerprint::new(fingerprint.clone()).unwrap(),
                     compiled_artifact: artifact.clone(),
+                    authenticity: None,
                     created_by: maker.id,
                     created_at_unix_ms: now,
                 },

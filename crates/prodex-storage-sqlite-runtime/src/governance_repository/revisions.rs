@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct RevisionRow {
     pub(super) checksum: String,
     pub(super) compiled_artifact: Vec<u8>,
+    pub(super) authenticity: Option<GovernanceArtifactAuthenticity>,
     pub(super) created_by: PrincipalId,
     pub(super) created_at_unix_ms: u64,
 }
@@ -91,7 +92,8 @@ pub(super) fn load_revision_row(
 ) -> Result<Option<RevisionRow>, GovernanceRepositoryError> {
     let row = connection
         .query_row(
-            "SELECT artifact_checksum, compiled_artifact, created_by, created_at_unix_ms
+            "SELECT artifact_checksum, compiled_artifact, signature_key_id, artifact_signature,
+                    created_by, created_at_unix_ms
              FROM prodex_governance_revision_artifacts
              WHERE tenant_id = ?1 AND artifact_kind = ?2 AND revision_id = ?3",
             params![
@@ -103,18 +105,36 @@ pub(super) fn load_revision_row(
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
                 ))
             },
         )
         .optional()
         .map_err(database_error)?;
     row.map(
-        |(checksum, compiled_artifact, created_by, created_at_unix_ms)| {
+        |(
+            checksum,
+            compiled_artifact,
+            signature_key_id,
+            artifact_signature,
+            created_by,
+            created_at_unix_ms,
+        )| {
+            let authenticity = match (signature_key_id, artifact_signature) {
+                (Some(key_id), Some(signature_base64)) => Some(GovernanceArtifactAuthenticity {
+                    key_id,
+                    signature_base64,
+                }),
+                (None, None) => None,
+                _ => return Err(GovernanceRepositoryError::Database),
+            };
             Ok(RevisionRow {
                 checksum,
                 compiled_artifact,
+                authenticity,
                 created_by: PrincipalId::from_str(&created_by)
                     .map_err(|_| GovernanceRepositoryError::Database)?,
                 created_at_unix_ms: from_i64(created_at_unix_ms)?,
@@ -326,13 +346,20 @@ pub(super) fn load_verified_snapshot(
     kind: GovernanceArtifactKind,
     revision_id: &str,
     source: GovernanceSnapshotSource,
-    validate_artifact: &mut impl FnMut(&[u8]) -> bool,
+    validate_artifact: &mut impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
 ) -> Result<Option<GovernanceSnapshot>, GovernanceRepositoryError> {
     let Some(revision) = load_revision_row(connection, tenant_id, kind, revision_id)? else {
         return Ok(None);
     };
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id,
+        kind,
+        revision_id,
+        compiled_artifact: &revision.compiled_artifact,
+        authenticity: revision.authenticity.as_ref(),
+    };
     if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-        || !validate_artifact(&revision.compiled_artifact)
+        || !validate_artifact(&validation)
     {
         return Ok(None);
     }

@@ -263,13 +263,12 @@ Current focused tests prove:
 - explicit `Unsupported` coverage when no detector evidence exists;
 - propagation of the inspection plan through application admission.
 
-Phase 2 still requires table-driven and property/fuzz evidence for all four
-classifications, all three coverage states, trusted/untrusted labels, rule
-snapshot activation/LKG/rollback, obligation conflict resolution, structured
-masking, every canonical request schema, tools, modalities, local/remote
-providers, and observe/enforce/bank behavior.
+The source test matrix covers all four classifications, all coverage states,
+trusted and untrusted labels, rule snapshot activation/LKG/rollback,
+obligation conflicts, structured masking, canonical request schemas, tools,
+modalities, local/remote providers, and observe/enforce/bank behavior.
 
-The classification-and-obligation exit gate is not met until:
+The classification-and-obligation invariant is:
 
 1. every routed request has explicit coverage, classification, detector and
    classification-rule revisions, and a policy decision;

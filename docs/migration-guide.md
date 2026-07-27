@@ -211,6 +211,28 @@ tests named above and the credential refresh implementation in
 5. Roll back by returning traffic to the legacy adapter without schema downgrade
    while expand-compatible migrations are active.
 
+### Signed governance artifact upgrade
+
+Enforcement deployments must establish an Ed25519 trust root before upgrading
+an active policy authority:
+
+1. Configure one or more `[[governance.artifact_verifiers]]` entries in the
+   deployment policy. Keep private signing keys outside Prodex.
+2. Call the resource validation endpoint with the intended `revision_id` and
+   sign the returned domain-separated `signing.payload_base64` bytes.
+3. Create replacement policy, classification, provider-registry, and pricing
+   revisions with the matching detached `authenticity` key ID and signature.
+4. Complete normal approval and activation, then verify every active and LKG
+   revision uses a retained verifier before removing an old key.
+5. Roll back by activating a previously approved, still-signed revision. Do not
+   copy a signature to another tenant, artifact kind, revision, or payload.
+
+SQLite migration v11 and PostgreSQL migration v15 add the detached-signature
+columns without rewriting existing revisions. Personal and observe modes can
+read unsigned legacy revisions for compatibility. `enterprise_enforce` and
+`bank_enforce` reject unsigned, unknown-key, malformed, or invalid signatures
+during creation, activation, startup hydration, refresh, and LKG loading.
+
 ## Release Gates
 
 Before declaring the enterprise target complete, verify:

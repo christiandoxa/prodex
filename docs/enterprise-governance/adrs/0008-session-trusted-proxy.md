@@ -27,9 +27,9 @@ Untrusted forwarding headers are stripped. Logout, role reduction, credential
 disable and incident response invalidate sessions across replicas. Bank mode
 requires private/internal exposure and forbids anonymous compatibility bypass.
 
-## Implementation status
+## Current implementation
 
-The candidate implements typed identity evidence, explicit role/tenant
+Prodex implements typed identity evidence, explicit role/tenant
 resolution, browser Authorization Code with PKCE S256, secure bounded cookies,
 edge-header canonicalization, governed session binding/expiry/concurrency/
 revocation, workload JWT verification, direct Rustls client-certificate

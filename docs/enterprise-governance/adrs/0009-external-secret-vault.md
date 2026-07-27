@@ -30,7 +30,7 @@ rotation/revocation and injector-outage drills are mandatory deployment
 evidence. Development-only local backends remain clearly labelled and cannot
 satisfy bank mode.
 
-## Implementation status
+## Current implementation
 
 Secret references, projected-secret resolution, redacted wrappers, purpose
 binding, exact projected versions, anchored filesystem validation, atomic

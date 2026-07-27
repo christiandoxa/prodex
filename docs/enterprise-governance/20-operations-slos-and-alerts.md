@@ -3,24 +3,23 @@
 ## Status and Interpretation
 
 This document defines the minimum operational contract for the governed
-gateway. Values marked **initial target** are proposed release objectives that
-must be approved and measured per environment; they are not claims about an
-existing deployment. Metric-plan types alone are not live telemetry. The
-gateway now exports closed-label authn, authz, tenant-isolation,
-policy-lifecycle, and runtime secret-provider counters, with versioned
-Prometheus rules and a Grafana dashboard under `deploy/observability/`. These
-artifacts are not pager integration or evidence of an achieved SLO.
+gateway. Values marked **initial target** are release objectives that must be
+approved and measured per environment; they are not claims about an existing
+deployment. The gateway exports closed-label counters, gauges, and classic
+Prometheus histograms with versioned rules and a Grafana dashboard under
+`deploy/observability/`. These source artifacts are not pager integration or
+evidence of an achieved environment SLO.
 
-Repository evidence observed on 2026-07-19 includes:
+Current repository evidence includes:
 
 - bounded runtime broker Prometheus output for request/lane pressure,
   continuation state, profile health, backoff, allocation when enabled, queue
   waits, and runtime-state lock waits;
 - live gateway counters for authentication, authorization, tenant isolation,
-  policy lifecycle, and runtime secret-provider operations, plus broader
-  `prodex-observability` plans for API RED signals, policy/JWKS/config refresh,
-  provider/circuit/routing, accounting, audit chain, secret rotation,
-  backup/restore, rollout, migration, health, and shutdown events;
+  policy lifecycle, runtime secret-provider operations, API requests and
+  admission, provider requests, inspection, audit, and persistence;
+- live bounded queue depth/capacity gauges, SIEM outbox health gauges, and
+  API/provider/inspection/audit duration histograms;
 - runtime logs plus `prodex doctor --runtime` diagnostics for proxy selection,
   admission pressure, transport failures, affinity, and state-save behavior;
 - Kubernetes health probes, bounded resources, multiple gateway replicas,
@@ -28,14 +27,13 @@ Repository evidence observed on 2026-07-19 includes:
   scaffolding;
 - a PostgreSQL backup/restore drill script for the current storage subset.
 
-Material gaps include live end-to-end emission of the remaining planned metric
-families, governance inspection/PDP/approval/SIEM/Vault metrics, durable outbox
-exporter health, production RPO/RTO evidence, and an approved pager/runbook
-ownership map.
+The checked-in alert rules cover authentication, authorization, tenant
+isolation, secret and policy failure, inspection coverage/latency, provider
+failure/latency, API error/latency, SIEM lag/dead letters, mandatory audit
+failure, and persistence-queue saturation. Environment owners still supply
+pager routing, ownership, measured RPO/RTO, and achieved-SLO evidence.
 
-Candidate implementation evidence adds bounded inspection, policy, routing,
-session, audit and SIEM health plans plus enforcing data-plane audit. The
-following operational residuals remain explicit:
+The following operational dependencies remain explicit:
 
 - mandatory governed data-plane audit is synchronous precommit I/O; an append
   failure denies, while slow storage directly adds request latency;
@@ -51,7 +49,7 @@ following operational residuals remain explicit:
 
 | Failure | Current behavior | Evidence/state |
 | --- | --- | --- |
-| Mandatory governance audit append fails | Deny before provider dispatch | Implemented; synchronous precommit residual |
+| Mandatory governance audit append fails | Deny before provider dispatch | Bounded queue, durable commit acknowledgement, failure/latency metrics, and saturation alert |
 | Presidio unavailable, saturated, timed out, or oversized | Produce typed unavailable coverage; enforcing/bank policy denies when full inspection is mandatory | Focused adapter/config/failure tests |
 | Guardrail webhook fails or denies | Fixed timeout/response bound; configured fail-open/closed behavior; denial uses stable `webhook_denied` reason | Focused webhook regression |
 | Selected provider lacks an eligible executable binding | Fail unavailable before dispatch; never reinterpret through another adapter | Provider registry/application dispatch tests and production guard |
@@ -91,7 +89,14 @@ carry correlation IDs and stable stage/outcome metadata, not request content.
 ## Minimum Signal Catalog
 
 The following signals are required before bank-mode readiness can be asserted.
-Names are conceptual unless the repository already exports the named metric.
+Names are conceptual unless the repository exports the named metric. The live
+gateway families include `prodex_api_requests_total`,
+`prodex_api_request_duration_ms`, `prodex_provider_requests_total`,
+`prodex_provider_request_duration_ms`, `prodex_inspection_events_total`,
+`prodex_inspection_duration_microseconds`, `prodex_audit_events_total`,
+`prodex_audit_duration_milliseconds`, `prodex_persistence_operations_total`,
+`prodex_queue_depth`, `prodex_queue_capacity`, and the
+`prodex_governance_siem_outbox_*` gauges.
 
 | Control area | Required measures | Required alerts |
 | --- | --- | --- |
@@ -173,9 +178,11 @@ prodex quota --all --once
 The runtime doctor resolves the effective runtime log and summarizes known
 pressure, affinity, transport, and persistence markers. Operators should inspect
 the latest runtime log pointer rather than changing proxy behavior from a
-single symptom. Health, metrics, audit-integrity, policy/registry snapshot, SIEM
-outbox, secret-lease, and backup/drill endpoints or commands are target work
-where no production operator surface yet exists.
+single symptom. Dedicated gateway/control-plane roots expose health and metrics;
+tenant-scoped administration exposes audit integrity/export, policy/registry
+snapshots, and SIEM outbox health. Backup/restore evidence is produced by the
+checked-in drill command, while secret lease state remains bounded operational
+telemetry rather than secret-bearing output.
 
 Operator output must be content-free, access controlled where sensitive, and
 bounded. A health endpoint must not expose raw configuration, tenant names,

@@ -61,7 +61,7 @@ pub(super) fn runtime_local_rewrite_dispatch_websocket<'target>(
         ),
     );
     Err(state.reject(build_runtime_proxy_text_response(
-        501,
-        "provider adapter requires the HTTPS Responses transport",
+        426,
+        "provider adapter requires HTTPS Responses transport fallback",
     )))
 }

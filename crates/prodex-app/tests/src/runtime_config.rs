@@ -122,6 +122,10 @@ classification_checksum = "sha256-test-v1"
 provider_registry_revision = 1
 routing_score_revision = 1
 
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 [governance.session]
 absolute_timeout_seconds = 3600
 idle_timeout_seconds = 900

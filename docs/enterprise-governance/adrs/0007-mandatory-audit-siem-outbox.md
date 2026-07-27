@@ -26,9 +26,9 @@ Storage capacity/backlog is a safety signal requiring admission and alerting.
 Hash verification, independent export, retention, backup and database/RLS
 controls remain necessary. Events exclude bodies, secrets and raw identifiers.
 
-## Implementation status
+## Current implementation
 
-The candidate implements typed content-free audit/outbox contracts, SQLite and
+Prodex implements typed content-free audit/outbox contracts, SQLite and
 PostgreSQL repository ports, bounded exporter/lease/dead-letter behavior, and a
 mandatory precommit data-plane audit. Evidence includes
 `audit_failure_rolls_back_activation_fail_closed`,

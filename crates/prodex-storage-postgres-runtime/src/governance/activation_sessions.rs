@@ -7,7 +7,7 @@ impl PostgresRepository {
         validate_artifact: F,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError>
     where
-        F: FnOnce(&[u8]) -> bool,
+        F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
     {
         self.governance_timeout(self.governance_activate_revision_inner(request, validate_artifact))
             .await
@@ -19,7 +19,7 @@ impl PostgresRepository {
         validate_artifact: F,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError>
     where
-        F: FnOnce(&[u8]) -> bool,
+        F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
     {
         let activated_at = validate_governance_activation_request(&request)?;
         let mut client = self.pool.get().await.map_err(database_error)?;
@@ -40,8 +40,15 @@ impl PostgresRepository {
         )
         .await?
         .ok_or(GovernanceRepositoryError::NotFound)?;
+        let validation = GovernanceArtifactValidationInput {
+            tenant_id: request.tenant_id,
+            kind: request.kind,
+            revision_id: &request.revision_id,
+            compiled_artifact: &revision.compiled_artifact,
+            authenticity: revision.authenticity.as_ref(),
+        };
         if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-            || !validate_artifact(&revision.compiled_artifact)
+            || !validate_artifact(&validation)
         {
             return Err(GovernanceRepositoryError::SnapshotUnavailable);
         }

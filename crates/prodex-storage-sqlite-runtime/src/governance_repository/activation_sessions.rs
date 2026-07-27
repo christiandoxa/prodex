@@ -4,7 +4,7 @@ impl GovernanceSqliteRepository {
     pub fn activate_revision(
         &self,
         request: GovernanceActivationRequest,
-        validate_artifact: impl FnOnce(&[u8]) -> bool,
+        validate_artifact: impl FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
         let activated_at = validate_governance_activation_request(&request)?;
         let mut connection = self.connection()?;
@@ -23,8 +23,15 @@ impl GovernanceSqliteRepository {
             &request.revision_id,
         )?
         .ok_or(GovernanceRepositoryError::NotFound)?;
+        let validation = GovernanceArtifactValidationInput {
+            tenant_id: request.tenant_id,
+            kind: request.kind,
+            revision_id: &request.revision_id,
+            compiled_artifact: &revision.compiled_artifact,
+            authenticity: revision.authenticity.as_ref(),
+        };
         if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-            || !validate_artifact(&revision.compiled_artifact)
+            || !validate_artifact(&validation)
         {
             return Err(GovernanceRepositoryError::SnapshotUnavailable);
         }
@@ -115,7 +122,7 @@ impl GovernanceSqliteRepository {
         &self,
         tenant_id: TenantId,
         kind: GovernanceArtifactKind,
-        mut validate_artifact: impl FnMut(&[u8]) -> bool,
+        mut validate_artifact: impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceSnapshot, GovernanceRepositoryError> {
         let connection = self.connection()?;
         let pointer = load_pointer(&connection, tenant_id, kind)?

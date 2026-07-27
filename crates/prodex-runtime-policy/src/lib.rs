@@ -31,12 +31,12 @@ pub use self::types::{
     RuntimePolicyGatewayObservabilitySettings, RuntimePolicyGatewayRequestConstraintSettings,
     RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
     RuntimePolicyGatewaySettings, RuntimePolicyGatewayVirtualKey,
-    RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyGovernanceProviderSettings,
-    RuntimePolicyGovernanceSessionSettings, RuntimePolicyGovernanceSettings,
-    RuntimePolicyInspectionPattern, RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection,
-    RuntimePolicyProxySettings, RuntimePolicyRuntimeFile, RuntimePolicyRuntimeSettings,
-    RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicyServiceMode,
-    RuntimePolicySummary,
+    RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyGovernanceArtifactVerifier,
+    RuntimePolicyGovernanceProviderSettings, RuntimePolicyGovernanceSessionSettings,
+    RuntimePolicyGovernanceSettings, RuntimePolicyInspectionPattern, RuntimePolicyProxyPreset,
+    RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
+    RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile, RuntimePolicySecretsSettings,
+    RuntimePolicyServiceMode, RuntimePolicySummary,
 };
 
 pub const MAX_GATEWAY_GUARDRAIL_KEYWORDS: usize = 128;

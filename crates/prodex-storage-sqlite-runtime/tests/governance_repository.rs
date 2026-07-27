@@ -11,9 +11,9 @@ use prodex_domain::{
 };
 use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteIdempotency, AuditOutboxWriteCommand,
-    GovernanceArtifactKind, GovernanceRevisionWriteCommand, GovernanceSessionRevokeCommand,
-    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, SiemOutboxRetryPolicy,
-    TenantStorageKey,
+    GovernanceArtifactAuthenticity, GovernanceArtifactKind, GovernanceRevisionWriteCommand,
+    GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome,
+    SiemOutboxRetryPolicy, TenantStorageKey,
 };
 use prodex_storage_sqlite::SQLITE_MIGRATIONS;
 use prodex_storage_sqlite_runtime::{
@@ -160,6 +160,7 @@ fn revision_command(
         revision_id: revision_id.to_string(),
         fingerprint: ApprovalFingerprint::new(checksum(artifact)).unwrap(),
         compiled_artifact: artifact.to_vec(),
+        authenticity: None,
         created_by: maker,
         created_at_unix_ms: 1_000,
     }
@@ -882,6 +883,82 @@ fn all_governance_artifact_kinds_use_revisioned_authority() {
 }
 
 #[test]
+fn artifact_authenticity_round_trips_through_activation_and_snapshot_validation() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    let maker = principal(tenant_id);
+    let checker = principal(tenant_id);
+    let mut audit = AuditCursor::default();
+    let revision_id = PolicyRevisionId::new().to_string();
+    let artifact = b"signed-policy";
+    let mut command = revision_command(
+        tenant_id,
+        GovernanceArtifactKind::Policy,
+        &revision_id,
+        artifact,
+        maker.id,
+    );
+    command.authenticity = Some(GovernanceArtifactAuthenticity {
+        key_id: "release-2026-01".to_string(),
+        signature_base64: "AQID".to_string(),
+    });
+    repository
+        .write_revision(
+            command.clone(),
+            audit.next(tenant_id, &maker, "governance.revision.write"),
+        )
+        .unwrap();
+    let approval = prepare_approval_for_existing(
+        &repository,
+        &mut audit,
+        tenant_id,
+        GovernanceArtifactKind::Policy,
+        command.fingerprint,
+        &maker,
+        &checker,
+        "policy/signed",
+    );
+    repository
+        .activate_revision(
+            activation_request(
+                tenant_id,
+                GovernanceArtifactKind::Policy,
+                &revision_id,
+                &approval,
+                &checker,
+                GovernanceActivationAction::Activate,
+                None,
+                "activate-signed-policy",
+                audit.next(tenant_id, &checker, "governance.revision.activate"),
+            ),
+            |input| {
+                input.authenticity.is_some_and(|authenticity| {
+                    authenticity.key_id == "release-2026-01"
+                        && authenticity.signature_base64 == "AQID"
+                })
+            },
+        )
+        .unwrap();
+    let snapshot = repository
+        .load_snapshot(tenant_id, GovernanceArtifactKind::Policy, |input| {
+            input.authenticity.is_some_and(|authenticity| {
+                authenticity.key_id == "release-2026-01" && authenticity.signature_base64 == "AQID"
+            })
+        })
+        .unwrap();
+    assert_eq!(snapshot.compiled_artifact, artifact);
+    assert_eq!(
+        repository
+            .get_revision(tenant_id, GovernanceArtifactKind::Policy, &revision_id)
+            .unwrap()
+            .signature_key_id
+            .as_deref(),
+        Some("release-2026-01")
+    );
+}
+
+#[test]
 fn tenant_scoping_prevents_cross_tenant_snapshot_access() {
     let tenant_a = TenantId::new();
     let tenant_b = TenantId::new();
@@ -1084,8 +1161,8 @@ fn malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic() {
         )
         .unwrap();
     let fallback = repository
-        .load_snapshot(tenant_id, GovernanceArtifactKind::Policy, |artifact| {
-            artifact != b"malformed-v2"
+        .load_snapshot(tenant_id, GovernanceArtifactKind::Policy, |input| {
+            input.compiled_artifact != b"malformed-v2"
         })
         .unwrap();
     assert_eq!(fallback.revision_id, v1);

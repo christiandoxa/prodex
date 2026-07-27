@@ -265,6 +265,8 @@ pub struct RuntimePolicyGovernanceSettings {
     #[serde(default)]
     pub authority_tenants: Vec<TenantId>,
     #[serde(default)]
+    pub artifact_verifiers: Vec<RuntimePolicyGovernanceArtifactVerifier>,
+    #[serde(default)]
     pub mode: RuntimeGovernanceMode,
     #[serde(default)]
     pub inspection: RuntimeGovernanceRolloutMode,
@@ -315,6 +317,7 @@ impl Default for RuntimePolicyGovernanceSettings {
         Self {
             config_version: 1,
             authority_tenants: Vec::new(),
+            artifact_verifiers: Vec::new(),
             mode: RuntimeGovernanceMode::Personal,
             inspection: RuntimeGovernanceRolloutMode::Off,
             classification: RuntimeGovernanceRolloutMode::Off,
@@ -339,6 +342,13 @@ impl Default for RuntimePolicyGovernanceSettings {
             session: RuntimePolicyGovernanceSessionSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGovernanceArtifactVerifier {
+    pub key_id: String,
+    pub ed25519_public_key_base64: String,
 }
 
 const fn default_governance_config_version() -> u32 {

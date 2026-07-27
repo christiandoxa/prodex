@@ -2,25 +2,21 @@
 
 ## Purpose and Current State
 
-This document defines a reversible path from the current compatibility runtime
-to one governed production pipeline. It does not authorize a rollout or claim
-release readiness.
+This document defines reversible rollout for the governed production pipeline.
+It does not authorize a rollout or claim that a target environment has passed
+its acceptance program.
 
-Existing repository foundations include immutable/LKG-style runtime policy
-snapshots, API version/deprecation domain decisions, compatibility and
-deprecation metric plans, strict gateway routes, bounded drain plans, a
-three-replica Kubernetes gateway scaffold, external migration modes, provider
-affinity and pre-commit rotation invariants, and historical compatibility/load
-tests. The current tranche based on `8ca79a62` adds typed governance modes,
-inspection/classification/PDP/obligation/session stages, policy lifecycle,
-governed routing, bank startup gates, focused security evidence and governance
-microbenchmarks.
+The source includes immutable active/LKG snapshots, signed governance
+artifacts, typed modes, inspection/classification/PDP/obligation/session
+stages, governed routing, bank startup gates, API version/deprecation controls,
+bounded drain, external migrations, provider affinity, pre-commit-only
+rotation, deployment manifests, security gates, load/stress harnesses, and
+governance benchmarks.
 
-The release-candidate gates cover supported capabilities. The open residuals
-are synchronous mandatory precommit audit, policy-selected request-path
-Presidio/webhook calls, deployment validation of the 250-millisecond shared
-revocation-epoch poll path, and managed failover, external SIEM, trusted TLS
-termination/mTLS peer verification and multi-replica soak evidence.
+Mandatory audit deliberately waits for a bounded durable commit before
+dispatch. Policy-selected Presidio/webhook calls are bounded explicit
+request-path dependencies. Managed failover, external SIEM, ingress/TLS/PKI,
+pager, capacity, and multi-replica soak are target-environment acceptance.
 
 Rollout is therefore a controlled migration of authority, not a collection of
 independent feature toggles.

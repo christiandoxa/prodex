@@ -19,10 +19,10 @@ use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
     ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand, AuditRetentionPurgeCommand,
     DurableStoreKind, GovernanceActivationAction, GovernanceActivationRequest,
-    GovernanceActivationResult, GovernanceArtifactKind, GovernanceAuditExportRecord,
-    GovernanceAuditIntegrityHealth, GovernanceOutboxHealth, GovernanceRepositoryError,
-    GovernanceRevisionSummary, GovernanceRevisionWriteCommand, GovernanceSnapshot,
-    GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceArtifactValidationInput,
+    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceOutboxHealth,
+    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
+    GovernanceSnapshot, GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
 };
 use prodex_storage_sqlite_runtime::GovernanceSqliteRepository;
 use sha2::{Digest, Sha256};
@@ -42,6 +42,10 @@ use super::local_rewrite_gateway_admin_response::{
 };
 use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
+use super::local_rewrite_governance_artifact_authenticity::{
+    governance_artifact_signature_payload_base64, parse_governance_artifact_authenticity,
+    runtime_governance_artifact_authenticity_is_valid,
+};
 use super::*;
 
 pub(super) fn runtime_gateway_admin_policy_response(
@@ -467,7 +471,7 @@ impl RuntimeGovernanceRepository<'_> {
         &self,
         tenant_id: prodex_domain::TenantId,
         kind: GovernanceArtifactKind,
-        validate_artifact: impl FnMut(&[u8]) -> bool,
+        validate_artifact: impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceSnapshot, GovernanceRepositoryError> {
         match self {
             Self::Sqlite(repository) => {
@@ -500,7 +504,7 @@ impl RuntimeGovernanceRepository<'_> {
     fn activate_revision(
         &self,
         request: GovernanceActivationRequest,
-        validate_artifact: impl FnOnce(&[u8]) -> bool,
+        validate_artifact: impl FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
         match self {
             Self::Sqlite(repository) => repository.activate_revision(request, validate_artifact),
@@ -616,7 +620,7 @@ impl ApplicationGovernanceRepository for RuntimeGovernanceRepository<'_> {
     fn activate_revision(
         &self,
         request: GovernanceActivationRequest,
-        validate_artifact: &mut dyn FnMut(&[u8]) -> bool,
+        validate_artifact: &mut dyn FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
         RuntimeGovernanceRepository::activate_revision(self, request, validate_artifact)
     }
@@ -709,6 +713,22 @@ fn governance_artifact_is_valid(
     }
 }
 
+fn governance_artifact_validation_is_valid(
+    shared: &RuntimeLocalRewriteProxyShared,
+    resource: RuntimeGovernanceResource,
+    input: &GovernanceArtifactValidationInput<'_>,
+) -> bool {
+    input.kind == resource.kind()
+        && runtime_governance_artifact_authenticity_is_valid(shared, input)
+        && governance_artifact_is_valid(
+            shared,
+            input.tenant_id,
+            resource,
+            Some(input.revision_id),
+            input.compiled_artifact,
+        )
+}
+
 fn validate_response(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -731,12 +751,48 @@ fn validate_response(
     if !governance_artifact_is_valid(shared, tenant_id, resource, None, &bytes) {
         return invalid_request();
     }
+    let signing = match body.get("revision_id") {
+        Some(value) => {
+            let Some(revision_id) = value.as_str() else {
+                return invalid_request();
+            };
+            let input = GovernanceArtifactValidationInput {
+                tenant_id,
+                kind: resource.kind(),
+                revision_id,
+                compiled_artifact: &bytes,
+                authenticity: None,
+            };
+            if prodex_storage::governance_support::validate_governance_revision_id(
+                resource.kind(),
+                revision_id,
+            )
+            .is_err()
+                || !governance_artifact_is_valid(
+                    shared,
+                    tenant_id,
+                    resource,
+                    Some(revision_id),
+                    &bytes,
+                )
+            {
+                return invalid_request();
+            }
+            Some(serde_json::json!({
+                "algorithm": "ed25519",
+                "key_selection": "governance.artifact_verifiers.key_id",
+                "payload_base64": governance_artifact_signature_payload_base64(&input),
+            }))
+        }
+        None => None,
+    };
     runtime_gateway_admin_json_response(
         200,
         serde_json::json!({
             "object": format!("governance.{}_validation", resource.label()),
             "valid": true,
             "fingerprint": artifact_fingerprint(&bytes),
+            "signing": signing,
         }),
     )
 }
@@ -763,13 +819,18 @@ fn create_response(
     let Ok(compiled_artifact) = serde_json::to_vec(artifact) else {
         return invalid_request();
     };
-    if !governance_artifact_is_valid(
-        shared,
-        base_action.tenant.tenant_id,
-        resource,
-        Some(revision_id),
-        &compiled_artifact,
-    ) {
+    let authenticity = match parse_governance_artifact_authenticity(&body) {
+        Ok(authenticity) => authenticity,
+        Err(()) => return invalid_request(),
+    };
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id: base_action.tenant.tenant_id,
+        kind: resource.kind(),
+        revision_id,
+        compiled_artifact: &compiled_artifact,
+        authenticity: authenticity.as_ref(),
+    };
+    if !governance_artifact_validation_is_valid(shared, resource, &validation) {
         return invalid_request();
     }
     let execution = match execution(captured, path, admin_auth, base_action) {
@@ -788,6 +849,7 @@ fn create_response(
         revision_id: revision_id.to_string(),
         fingerprint: fingerprint_value,
         compiled_artifact,
+        authenticity,
         created_by: execution.authorized_action.audit_event.principal_id,
         created_at_unix_ms: execution.atomic_write.completed_at_unix_ms,
     };
@@ -1950,15 +2012,7 @@ fn activation_response(
                 audit_outbox: audit,
                 activated_at_unix_ms: execution.atomic_write.completed_at_unix_ms,
             },
-            |artifact| {
-                governance_artifact_is_valid(
-                    shared,
-                    tenant_id,
-                    resource,
-                    Some(revision_id),
-                    artifact,
-                )
-            },
+            |input| governance_artifact_validation_is_valid(shared, resource, input),
         )
     };
     let activation = match shared.governance_authority.as_ref() {
@@ -1967,14 +2021,8 @@ fn activation_response(
     };
     match activation {
         Ok(result) => {
-            let snapshot = match repository.load_snapshot(tenant_id, resource.kind(), |artifact| {
-                governance_artifact_is_valid(
-                    shared,
-                    tenant_id,
-                    resource,
-                    Some(revision_id),
-                    artifact,
-                )
+            let snapshot = match repository.load_snapshot(tenant_id, resource.kind(), |input| {
+                governance_artifact_validation_is_valid(shared, resource, input)
             }) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -2379,6 +2427,7 @@ fn revision_json(
         "revision_id": revision.revision_id,
         "fingerprint": revision.fingerprint,
         "state": revision.lifecycle_state,
+        "signature_key_id": revision.signature_key_id,
         "created_at_unix_ms": revision.created_at_unix_ms,
     })
 }

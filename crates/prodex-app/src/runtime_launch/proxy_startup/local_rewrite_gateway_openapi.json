@@ -2876,7 +2876,7 @@
       "post": {
         "operationId": "createPolicyRevision",
         "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["revision_id", "artifact"], "properties": {"revision_id": {"type": "string", "format": "uuid"}, "artifact": {}}}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["revision_id", "artifact"], "properties": {"revision_id": {"type": "string", "format": "uuid"}, "artifact": {}, "authenticity": {"type": "object", "required": ["key_id", "signature"], "additionalProperties": false, "properties": {"key_id": {"type": "string", "maxLength": 64}, "signature": {"type": "string", "maxLength": 128}}}}}}}},
         "responses": {
           "201": {"description": "Immutable policy revision created", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "400": {"$ref": "#/components/responses/GatewayError"},
@@ -2893,7 +2893,7 @@
     "/v1/prodex/gateway/policies/validate": {
       "post": {
         "operationId": "validatePolicyRevision",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["artifact"], "properties": {"artifact": {}}}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["artifact"], "properties": {"revision_id": {"type": "string", "description": "When present, returns the detached Ed25519 signing payload"}, "artifact": {}}}}}},
         "responses": {
           "200": {"description": "Policy validation result", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "400": {"$ref": "#/components/responses/GatewayError"},
