@@ -21,130 +21,126 @@ export class ProdexGatewayClient {
   async createResponse(body, options = {}) {
     const stream = options.stream ?? body?.stream === true;
     return this.request("/v1/responses", {
+      ...options,
       method: "POST",
       body,
       accept: stream ? "text/event-stream" : undefined,
       parse: stream ? "stream" : undefined,
-      signal: options.signal,
     });
   }
 
   async listKeys(options = {}) {
-    return this.request("/v1/prodex/gateway/keys", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/keys", options);
   }
 
   async createKey(body, options = {}) {
     return this.request("/v1/prodex/gateway/keys", {
+      ...mutationOptions(options),
       method: "POST",
       body,
-      signal: options.signal,
     });
   }
 
   async getKey(name, options = {}) {
-    return this.request(`/v1/prodex/gateway/keys/${encodeURIComponent(name)}`, {
-      signal: options.signal,
-    });
+    return this.request(`/v1/prodex/gateway/keys/${encodeURIComponent(name)}`, options);
   }
 
   async updateKey(name, body, options = {}) {
     return this.request(`/v1/prodex/gateway/keys/${encodeURIComponent(name)}`, {
+      ...mutationOptions(options),
       method: "PATCH",
       body,
-      signal: options.signal,
     });
   }
 
   async deleteKey(name, options = {}) {
     return this.request(`/v1/prodex/gateway/keys/${encodeURIComponent(name)}`, {
+      ...mutationOptions(options),
       method: "DELETE",
-      signal: options.signal,
     });
   }
 
   async listScimUsers(options = {}) {
-    return this.request("/v1/prodex/gateway/scim/v2/Users", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/scim/v2/Users", options);
   }
 
   async createScimUser(body, options = {}) {
     return this.request("/v1/prodex/gateway/scim/v2/Users", {
+      ...mutationOptions(options),
       method: "POST",
       body,
-      signal: options.signal,
     });
   }
 
   async getScimUser(id, options = {}) {
-    return this.request(`/v1/prodex/gateway/scim/v2/Users/${encodeURIComponent(id)}`, {
-      signal: options.signal,
-    });
+    return this.request(`/v1/prodex/gateway/scim/v2/Users/${encodeURIComponent(id)}`, options);
   }
 
   async updateScimUser(id, body, options = {}) {
     return this.request(`/v1/prodex/gateway/scim/v2/Users/${encodeURIComponent(id)}`, {
+      ...mutationOptions(options),
       method: options.method ?? "PATCH",
       body,
-      signal: options.signal,
     });
   }
 
   async deleteScimUser(id, options = {}) {
     return this.request(`/v1/prodex/gateway/scim/v2/Users/${encodeURIComponent(id)}`, {
+      ...mutationOptions(options),
       method: "DELETE",
-      signal: options.signal,
     });
   }
 
   async usage(options = {}) {
-    return this.request("/v1/prodex/gateway/usage", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/usage", options);
   }
 
   async ledger(options = {}) {
-    return this.request("/v1/prodex/gateway/ledger", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/ledger", options);
   }
 
   async ledgerCsv(options = {}) {
     return this.request("/v1/prodex/gateway/ledger.csv", {
+      ...options,
       accept: "text/csv",
       parse: "text",
-      signal: options.signal,
     });
   }
 
   async billingSummary(options = {}) {
-    return this.request("/v1/prodex/gateway/ledger/summary", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/ledger/summary", options);
   }
 
   async billingSummaryCsv(options = {}) {
     return this.request("/v1/prodex/gateway/ledger/summary.csv", {
+      ...options,
       accept: "text/csv",
       parse: "text",
-      signal: options.signal,
     });
   }
 
   async openapi(options = {}) {
-    return this.request("/v1/prodex/gateway/openapi.json", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/openapi.json", options);
   }
 
   async metrics(options = {}) {
     return this.request("/v1/prodex/gateway/metrics", {
+      ...options,
       accept: "text/plain",
       parse: "text",
-      signal: options.signal,
     });
   }
 
   async observability(options = {}) {
-    return this.request("/v1/prodex/gateway/observability", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/observability", options);
   }
 
   async guardrails(options = {}) {
-    return this.request("/v1/prodex/gateway/guardrails", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/guardrails", options);
   }
 
   async providers(options = {}) {
-    return this.request("/v1/prodex/gateway/providers", { signal: options.signal });
+    return this.request("/v1/prodex/gateway/providers", options);
   }
 
   async request(path, options = {}) {
@@ -195,6 +191,18 @@ export class ProdexGatewayClient {
     }
     return responseBody;
   }
+}
+
+function mutationOptions(options) {
+  const headers = new Headers(options.headers ?? {});
+  const idempotencyKey = headers.get("idempotency-key")?.trim() || options.idempotencyKey?.trim();
+  if (!idempotencyKey) {
+    throw new TypeError(
+      "Prodex gateway mutations require options.idempotencyKey or an Idempotency-Key header",
+    );
+  }
+  headers.set("idempotency-key", idempotencyKey);
+  return { ...options, headers };
 }
 
 async function readResponseBody(response, parse) {

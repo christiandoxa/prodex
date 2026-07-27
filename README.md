@@ -734,7 +734,7 @@ DeepSeek compatibility matrix:
 | Strict function tools | Beta only, opt in with `deepseek.strict_tools = true`. |
 | Web search | `auto`/`anthropic` use DeepSeek's native Anthropic-compatible web-search tool; `openai_chat` is explicit best-effort forwarding; `off` rejects. |
 | Images, documents, audio, video, vision detail | Unsupported on this text/tool adapter; requests fail clearly. |
-| Chat prefix completion, FIM `/completions` | DeepSeek beta features, not enabled on the current `/responses` adapter; completion-shaped requests fail fast. |
+| Chat prefix completion, FIM `/completions` | Separate DeepSeek beta APIs outside the `/responses` adapter; completion-shaped requests fail fast. |
 | Remote compact | Emulated locally with a bounded deterministic summary. |
 
 Strict DeepSeek function calling is opt-in because DeepSeek documents it on the beta endpoint. Add this to the selected Codex profile config:
@@ -745,7 +745,7 @@ strict_tools = true
 beta_base_url = "https://api.deepseek.com/beta"
 ```
 
-Gateway/profileless launches can use `PRODEX_DEEPSEEK_STRICT_TOOLS=1` and optional `PRODEX_DEEPSEEK_BETA_BASE_URL`. When enabled, Prodex routes rewritten DeepSeek `/responses` traffic through the beta base URL, sets every translated function tool to `strict: true`, forces strict object schemas to require all properties with `additionalProperties = false`, and rejects unsupported strict schema keywords or types clearly. DeepSeek beta chat prefix completion and FIM `/completions` are not enabled by this adapter yet; `prefix`, `prompt`, and `suffix` completion-style requests fail fast instead of being rewritten as chat.
+Gateway/profileless launches can use `PRODEX_DEEPSEEK_STRICT_TOOLS=1` and optional `PRODEX_DEEPSEEK_BETA_BASE_URL`. When enabled, Prodex routes rewritten DeepSeek `/responses` traffic through the beta base URL, sets every translated function tool to `strict: true`, forces strict object schemas to require all properties with `additionalProperties = false`, and rejects unsupported strict schema keywords or types clearly. DeepSeek beta chat prefix completion and FIM `/completions` use separate protocols outside this adapter; `prefix`, `prompt`, and `suffix` completion-style requests fail fast instead of being rewritten as chat.
 
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 

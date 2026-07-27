@@ -154,17 +154,17 @@ pub fn deepseek_provider_core_reject_beta_completion_fields(
 ) -> Result<(), String> {
     if value.get("prefix").is_some() {
         return Err(format!(
-            "{provider_label} chat prefix completion requires the beta chat endpoint, which this Responses adapter does not enable yet"
+            "{provider_label} chat prefix completion requires the beta chat endpoint, which is outside this Responses adapter"
         ));
     }
     if value.get("suffix").is_some() {
         return Err(format!(
-            "{provider_label} FIM suffix completion requires the beta /completions endpoint, which this Responses adapter does not enable yet"
+            "{provider_label} FIM suffix completion requires the beta /completions endpoint, which is outside this Responses adapter"
         ));
     }
     if value.get("prompt").is_some() {
         return Err(format!(
-            "{provider_label} prompt completions require the beta /completions endpoint, which this Responses adapter does not enable yet"
+            "{provider_label} prompt completions require the beta /completions endpoint, which is outside this Responses adapter"
         ));
     }
     Ok(())

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
-import { repoRoot } from "../npm/common.mjs";
+import { openaiCodexVersion, repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
+const EXPECTED_CODEX_RELEASE = `rust-v${openaiCodexVersion}`;
 
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
@@ -1331,8 +1332,14 @@ function validateBaseline(baseline) {
     warnings.push("codex.compatibility.guard_command should document the offline guard command");
   }
 
-  if (typeof compat.tested_codex_release !== "string" || compat.tested_codex_release.length === 0) {
-    errors.push("codex.compatibility.tested_codex_release must identify the tested Codex release");
+  if (compat.tested_codex_release !== EXPECTED_CODEX_RELEASE) {
+    errors.push(
+      `codex.compatibility.tested_codex_release must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+    );
+  }
+
+  if (baseline?.codex?.latestRelease?.tag_name !== EXPECTED_CODEX_RELEASE) {
+    errors.push(`codex.latestRelease.tag_name must match bundled Codex ${EXPECTED_CODEX_RELEASE}`);
   }
 
   const appServerProtocol = compat.app_server_protocol;
@@ -1399,11 +1406,12 @@ function renderReport(report) {
 function buildSelfTestBaseline() {
   return {
     codex: {
+      latestRelease: { tag_name: EXPECTED_CODEX_RELEASE },
       compatibility: {
         upstream_repository: "self-test",
         guard_command: "node scripts/compat/check-upstream-baseline.mjs --self-test",
         format_version: COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS,
-        tested_codex_release: "self-test",
+        tested_codex_release: EXPECTED_CODEX_RELEASE,
         app_server_protocol: {
           schema_command: "codex app-server generate-json-schema --out DIR",
           schema_hash: null,
@@ -1430,7 +1438,7 @@ function buildSelfTestBaseline() {
 
 function assertSelfTestError({ name, mutate, expectedMessage }) {
   const baseline = buildSelfTestBaseline();
-  mutate(baseline.codex.compatibility);
+  mutate(baseline.codex.compatibility, baseline);
   const { errors } = validateBaseline(baseline);
   if (!errors.includes(expectedMessage)) {
     throw new Error(
@@ -1456,6 +1464,22 @@ function runSelfTest() {
   if (valid.errors.length > 0) {
     throw new Error(`self-test valid baseline failed: ${valid.errors.join("; ")}`);
   }
+
+  assertSelfTestError({
+    name: "mismatched bundled release",
+    mutate: (compat) => {
+      compat.tested_codex_release = "rust-v0.0.0";
+    },
+    expectedMessage: `codex.compatibility.tested_codex_release must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+  });
+
+  assertSelfTestError({
+    name: "mismatched latest release",
+    mutate: (_compat, baseline) => {
+      baseline.codex.latestRelease.tag_name = "rust-v0.0.0";
+    },
+    expectedMessage: `codex.latestRelease.tag_name must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+  });
 
   assertSelfTestError({
     name: "missing semantic group",

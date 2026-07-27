@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.144.6 release",
+      "baseline_source": "openai/codex rust-v0.145.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1202,7 +1202,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.144.6",
+      "tested_codex_release": "rust-v0.145.0",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1219,26 +1219,28 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.144.6",
-      "name": "0.144.6",
-      "published_at": "2026-07-18T13:51:52Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.6",
+      "tag_name": "rust-v0.145.0",
+      "name": "0.145.0",
+      "published_at": "2026-07-21T18:21:04Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.145.0",
       "body_head": [
-        "## Bug Fixes",
-        "- Refreshed bundled instructions for GPT-5.6 Sol, Terra, and Luna, and corrected their context windows to 272,000 tokens. (#33972, #34009)",
-        "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.5...rust-v0.144.6",
-        "- #33972 Backport refreshed bundled model metadata to 0.144 @sayan-oai",
-        "- #34009 Narrow 0.144 hotfix to GPT-5.6 prompts and context @sayan-oai"
+        "## New Features",
+        "- Added experimental paginated thread history with efficient resume, search, persisted names, sub-agent support, and memories. (#33364, #33907, #34085, #34229, #34386)",
+        "- Expanded `/import` to migrate Cursor and Claude Code settings, MCP servers, plugins, sessions, commands, and project-scoped memories. (#31672, #33411, #33426, #33444)",
+        "- Added experimental Amazon Bedrock login, custom endpoint and authentication support, and GPT-5.6 Sol as the default Bedrock model. (#31327, #33170, #33175, #32288, #33695)",
+        "- Added audio inputs and tool outputs, including common local audio formats, and introduced streaming realtime V3 conversations. (#33261, #33856, #33932, #34080, #34385)",
+        "- Stabilized the opt-in multi-agent V2 experience with configurable sub-agent models, reasoning levels, concurrency, restored roles, and improved agent navigation. (#33550, #33631, #33657, #33841, #34383)",
+        "- Added secure, clickable inline visualization links in the terminal UI. (#33925, #34217, #34346)",
+        "## Bug Fixes"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.169",
-      "name": "v2.1.169",
-      "published_at": "2026-06-08T21:57:18Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.169"
+      "tag_name": "v2.1.220",
+      "name": "v2.1.220",
+      "published_at": "2026-07-25T01:35:55Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.220"
     },
     "docs": [
       {

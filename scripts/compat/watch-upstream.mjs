@@ -560,11 +560,17 @@ function buildDiffs(baseline, current) {
 }
 
 function baselineSnapshotFromCurrent(baseline, current) {
+  const codexRelease = current.codex.latestRelease.tag_name;
   return {
     ...baseline,
     codex: {
       ...(baseline.codex ?? {}),
       latestRelease: current.codex.latestRelease,
+      compatibility: {
+        ...(baseline.codex?.compatibility ?? {}),
+        baseline_source: `openai/codex ${codexRelease} release`,
+        tested_codex_release: codexRelease,
+      },
     },
     claude: {
       latestRelease: current.claude.latestRelease,

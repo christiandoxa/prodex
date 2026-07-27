@@ -167,11 +167,18 @@ export function validateWorkflow(filePath, contents) {
   return violations;
 }
 
-export function validateDockerfile(contents) {
+export function validateDockerfile(contents, rustToolchain = "1.97.0") {
   const fromLines = contents.split(/\r?\n/u).filter((line) => /^FROM\s+/iu.test(line));
-  return fromLines
+  const violations = fromLines
     .filter((line) => !/^FROM\s+(?:--platform=\S+\s+)?\S+:[^@\s]+@sha256:[0-9a-f]{64}(?:\s+AS\s+\S+)?$/iu.test(line))
     .map((line) => `Dockerfile: base image is not tag-and-digest pinned: ${line}`);
+  const builderTag = fromLines
+    .find((line) => /\s+AS\s+builder\s*$/iu.test(line))
+    ?.match(/^FROM\s+(?:--platform=\S+\s+)?rust:([^@\s]+)@sha256:/iu)?.[1];
+  if (builderTag !== rustToolchain && !builderTag?.startsWith(`${rustToolchain}-`)) {
+    violations.push(`Dockerfile: Rust builder must match rust-toolchain.toml channel ${rustToolchain}`);
+  }
+  return violations;
 }
 
 export function validateCompose(contents) {
@@ -243,7 +250,11 @@ function selfTest() {
     validateDockerfile("FROM rust:1.97.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n"),
     [],
   );
-  assert.equal(validateDockerfile("FROM rust:latest\n").length, 1);
+  assert.equal(validateDockerfile("FROM rust:latest\n").length, 2);
+  assert.equal(
+    validateDockerfile("FROM rust:1.97.1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n").length,
+    1,
+  );
   assert.deepEqual(
     validateCompose("services:\n  db:\n    image: postgres:16@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"),
     [],
@@ -346,10 +357,17 @@ async function main() {
       );
     }
   }
-  violations.push(...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8")));
+  const toolchain = await fs.readFile(path.join(repoRoot, "rust-toolchain.toml"), "utf8");
+  const rustToolchain = toolchain.match(/^channel\s*=\s*"([^"]+)"/mu)?.[1];
+  if (!rustToolchain) {
+    violations.push("rust-toolchain.toml: missing toolchain channel");
+  } else {
+    violations.push(
+      ...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8"), rustToolchain),
+    );
+  }
   violations.push(...validateCompose(await fs.readFile(path.join(repoRoot, "compose.yaml"), "utf8")));
 
-  const toolchain = await fs.readFile(path.join(repoRoot, "rust-toolchain.toml"), "utf8");
   for (const marker of ['channel = "1.97.0"', 'components = ["clippy", "rustfmt"]']) {
     if (!toolchain.includes(marker)) violations.push(`rust-toolchain.toml: missing ${marker}`);
   }
