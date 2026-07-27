@@ -13,7 +13,11 @@ export interface ProdexGatewayResponseOptions extends ProdexGatewayRequestOption
   stream?: boolean;
 }
 
-export interface GatewayKeyMutationOptions extends ProdexGatewayRequestOptions {}
+export interface GatewayMutationOptions extends ProdexGatewayRequestOptions {
+  idempotencyKey: string;
+}
+
+export interface GatewayKeyMutationOptions extends GatewayMutationOptions {}
 
 export interface GatewayKeyCreateRequest {
   name: string;
@@ -287,19 +291,19 @@ export class ProdexGatewayClient {
     options: ProdexGatewayResponseOptions & { stream: true },
   ): Promise<ReadableStream<Uint8Array>>;
   listKeys(options?: ProdexGatewayRequestOptions): Promise<GatewayKeyList>;
-  createKey(body: GatewayKeyCreateRequest, options?: GatewayKeyMutationOptions): Promise<GatewayKeyResponse>;
+  createKey(body: GatewayKeyCreateRequest, options: GatewayKeyMutationOptions): Promise<GatewayKeyResponse>;
   getKey(name: string, options?: ProdexGatewayRequestOptions): Promise<GatewayKeyResponse>;
-  updateKey(name: string, body: GatewayKeyPatchRequest, options?: GatewayKeyMutationOptions): Promise<GatewayKeyResponse>;
-  deleteKey(name: string, options?: ProdexGatewayRequestOptions): Promise<GatewayKeyDeleted>;
+  updateKey(name: string, body: GatewayKeyPatchRequest, options: GatewayKeyMutationOptions): Promise<GatewayKeyResponse>;
+  deleteKey(name: string, options: GatewayMutationOptions): Promise<GatewayKeyDeleted>;
   listScimUsers(options?: ProdexGatewayRequestOptions): Promise<GatewayScimUserList>;
-  createScimUser(body: GatewayScimUserWrite, options?: ProdexGatewayRequestOptions): Promise<GatewayScimUser>;
+  createScimUser(body: GatewayScimUserWrite, options: GatewayMutationOptions): Promise<GatewayScimUser>;
   getScimUser(id: string, options?: ProdexGatewayRequestOptions): Promise<GatewayScimUser>;
   updateScimUser(
     id: string,
     body: GatewayScimPatchRequest | Partial<GatewayScimUserWrite>,
-    options?: ProdexGatewayRequestOptions & { method?: "PATCH" | "PUT" | string },
+    options: GatewayMutationOptions & { method?: "PATCH" | "PUT" | string },
   ): Promise<GatewayScimUser>;
-  deleteScimUser(id: string, options?: ProdexGatewayRequestOptions): Promise<GatewayScimUserDeleted>;
+  deleteScimUser(id: string, options: GatewayMutationOptions): Promise<GatewayScimUserDeleted>;
   usage(options?: ProdexGatewayRequestOptions): Promise<GatewayKeyList>;
   ledger(options?: ProdexGatewayRequestOptions): Promise<GatewayBillingLedger>;
   ledgerCsv(options?: ProdexGatewayRequestOptions): Promise<string>;

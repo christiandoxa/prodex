@@ -391,13 +391,13 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
                 print_stderr_panel(
                     "Runtime Provider",
                     &[format!(
-                        "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",
+                        "Using provider '{provider}' through the local compatibility proxy. Smart Context rewrites require a proven tokenizer. {rotation}",
                     )],
                 )?;
             } else {
                 print_stderr_panel(
                     "Runtime Provider",
-                    &["Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.".to_string()],
+                    &["Using prodex-local through the local compatibility proxy. Smart Context rewrites require a proven tokenizer. Quota preflight and account rotation stay disabled.".to_string()],
                 )?;
             }
             return Ok(());

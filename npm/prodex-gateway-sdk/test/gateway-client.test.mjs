@@ -16,10 +16,11 @@ test("createResponse returns the live body for streaming requests", async () => 
 
   const stream = await client.createResponse(
     { model: "prodex-fast", input: "hello", stream: true },
-    { stream: true },
+    { stream: true, headers: { "x-codex-turn-state": "turn-state" } },
   );
 
   assert.equal(calls[0].init.headers.get("accept"), "text/event-stream");
+  assert.equal(calls[0].init.headers.get("x-codex-turn-state"), "turn-state");
   assert.match(await new Response(stream).text(), /response\.completed/);
 });
 
@@ -34,15 +35,33 @@ test("createKey sends bearer JSON request", async () => {
     },
   });
 
-  const result = await client.createKey({ name: "team-a", budget_usd: 1.5 });
+  const result = await client.createKey(
+    { name: "team-a", budget_usd: 1.5 },
+    { idempotencyKey: "create-team-a-1", headers: { "x-request-scope": "test" } },
+  );
 
   assert.equal(result.token, "pk-test");
   assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/keys");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.get("authorization"), "Bearer admin-token");
   assert.equal(calls[0].init.headers.get("content-type"), "application/json");
+  assert.equal(calls[0].init.headers.get("idempotency-key"), "create-team-a-1");
+  assert.equal(calls[0].init.headers.get("x-request-scope"), "test");
   assert.equal(calls[0].init.redirect, "error");
   assert.deepEqual(JSON.parse(calls[0].init.body), { name: "team-a", budget_usd: 1.5 });
+});
+
+test("mutations fail locally without an idempotency key", async () => {
+  let calls = 0;
+  const client = new ProdexGatewayClient({
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({});
+    },
+  });
+
+  await assert.rejects(() => client.createKey({ name: "team-a" }), /require.*idempotency/i);
+  assert.equal(calls, 0);
 });
 
 test("request rejects cross-origin targets before attaching credentials", async () => {
@@ -185,19 +204,24 @@ test("SCIM user helpers send bearer JSON requests", async () => {
     },
   });
 
-  const created = await client.createScimUser({
-    userName: "alice@example.com",
-    active: true,
-    "urn:prodex:params:scim:schemas:gateway:2.0:User": {
-      role: "admin",
-      team_id: "team-a",
-      budget_id: "budget-a",
-      allowed_key_prefixes: ["team-a-"],
+  const created = await client.createScimUser(
+    {
+      userName: "alice@example.com",
+      active: true,
+      "urn:prodex:params:scim:schemas:gateway:2.0:User": {
+        role: "admin",
+        team_id: "team-a",
+        budget_id: "budget-a",
+        allowed_key_prefixes: ["team-a-"],
+      },
     },
-  });
-  const updated = await client.updateScimUser("user-1", {
-    Operations: [{ op: "replace", path: "active", value: false }],
-  });
+    { idempotencyKey: "create-user-1" },
+  );
+  const updated = await client.updateScimUser(
+    "user-1",
+    { Operations: [{ op: "replace", path: "active", value: false }] },
+    { idempotencyKey: "update-user-1" },
+  );
 
   assert.equal(created.id, "user-1");
   assert.equal(updated.userName, "alice@example.com");
@@ -206,9 +230,11 @@ test("SCIM user helpers send bearer JSON requests", async () => {
   assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/scim/v2/Users");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.get("authorization"), "Bearer admin-token");
+  assert.equal(calls[0].init.headers.get("idempotency-key"), "create-user-1");
   assert.equal(JSON.parse(calls[0].init.body).userName, "alice@example.com");
   assert.equal(calls[1].url, "http://127.0.0.1:4000/v1/prodex/gateway/scim/v2/Users/user-1");
   assert.equal(calls[1].init.method, "PATCH");
+  assert.equal(calls[1].init.headers.get("idempotency-key"), "update-user-1");
   assert.deepEqual(JSON.parse(calls[1].init.body).Operations[0], {
     op: "replace",
     path: "active",
@@ -230,7 +256,7 @@ test("SCIM list and delete helpers target Users endpoints", async () => {
   });
 
   const listed = await client.listScimUsers();
-  const deleted = await client.deleteScimUser("user-1");
+  const deleted = await client.deleteScimUser("user-1", { idempotencyKey: "delete-user-1" });
 
   assert.equal(listed.totalResults, 0);
   assert.equal(deleted.deleted, true);
@@ -238,6 +264,7 @@ test("SCIM list and delete helpers target Users endpoints", async () => {
   assert.equal(calls[0].init.method, "GET");
   assert.equal(calls[1].url, "http://127.0.0.1:4000/v1/prodex/gateway/scim/v2/Users/user-1");
   assert.equal(calls[1].init.method, "DELETE");
+  assert.equal(calls[1].init.headers.get("idempotency-key"), "delete-user-1");
 });
 
 test("ledger reads billing records", async () => {

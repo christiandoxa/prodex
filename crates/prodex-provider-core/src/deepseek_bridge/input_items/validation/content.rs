@@ -90,7 +90,7 @@ pub(in crate::deepseek_bridge::input_items) fn deepseek_provider_core_reject_cha
 ) -> Result<(), String> {
     if object.get("prefix").is_some() {
         return Err(format!(
-            "{provider_label} chat prefix completion requires the beta chat endpoint, which this Responses adapter does not enable yet"
+            "{provider_label} chat prefix completion requires the beta chat endpoint, which is outside this Responses adapter"
         ));
     }
     Ok(())
