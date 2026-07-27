@@ -2557,7 +2557,7 @@
     "expected_usage": null
   },
   {
-    "name": "kiro-request-responses-passthrough",
+    "name": "kiro-request-responses-validated",
     "provider": "kiro",
     "endpoint": "responses",
     "operation": "request",
@@ -2573,7 +2573,7 @@
       "input": "hello kiro",
       "stream": false
     },
-    "expected_loss": "lossless",
+    "expected_loss": "degraded",
     "expected_usage": null,
     "error_status": 503,
     "error_code": null,
@@ -2724,7 +2724,7 @@
     "expected_usage": null
   },
   {
-    "name": "kiro-chat-completions-request-strips-accepted-controls",
+    "name": "kiro-chat-completions-request-rejects-token-limit",
     "provider": "kiro",
     "endpoint": "chat-completions",
     "operation": "request",
@@ -2739,28 +2739,10 @@
         }
       ],
       "stream": false,
-      "temperature": 1,
-      "parallel_tool_calls": true,
-      "max_tokens": 32,
-      "user": "user-123"
+      "max_tokens": 32
     },
-    "expected_body": {
-      "model": "claude-sonnet-4",
-      "stream": false,
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "hello kiro chat"
-            }
-          ]
-        }
-      ]
-    },
-    "expected_loss": "degraded",
+    "expected_body": null,
+    "expected_loss": "rejected",
     "expected_usage": null
   },
   {
@@ -2805,12 +2787,11 @@
           }
         }
       ],
-      "function_call": {
-        "name": "lookup"
-      }
+      "stream": false
     },
     "expected_body": {
       "model": "claude-sonnet-4",
+      "stream": false,
       "input": [
         {
           "type": "message",
@@ -2850,13 +2831,7 @@
             }
           }
         }
-      ],
-      "tool_choice": {
-        "type": "function",
-        "function": {
-          "name": "lookup"
-        }
-      }
+      ]
     },
     "expected_loss": "degraded",
     "expected_usage": null
@@ -2954,7 +2929,7 @@
     "expected_usage": null
   },
   {
-    "name": "kiro-messages-request-passthrough",
+    "name": "kiro-messages-request-validated",
     "provider": "kiro",
     "endpoint": "messages",
     "operation": "request",
@@ -2978,11 +2953,11 @@
         }
       ]
     },
-    "expected_loss": "lossless",
+    "expected_loss": "degraded",
     "expected_usage": null
   },
   {
-    "name": "kiro-messages-response-passthrough",
+    "name": "kiro-messages-response-runtime-translated",
     "provider": "kiro",
     "endpoint": "messages",
     "operation": "response",
@@ -3020,7 +2995,7 @@
         "total_tokens": 8
       }
     },
-    "expected_loss": "lossless",
+    "expected_loss": "degraded",
     "expected_usage": {
       "input_tokens": 6,
       "output_tokens": 2,

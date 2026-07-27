@@ -45,7 +45,6 @@ const providerCountKeys = {
   local: "Local",
 };
 const claimedStatuses = new Set(["native", "passthrough", "translated"]);
-const v1TranslatedProviders = new Set(["deepseek", "gemini"]);
 
 function endpointStatus(contract, endpoint) {
   return contract.endpoint_status.find((item) => item.endpoint === endpoint)?.status ?? "unsupported";
@@ -89,7 +88,7 @@ function validateContractCoverage(contracts) {
   const issues = [];
   for (const contract of contracts) {
     const responsesEndpoint = contract.endpoint_status.find((item) => item.endpoint === "responses");
-    if (contract.transform_status === "translated" && v1TranslatedProviders.has(contract.provider)) {
+    if (contract.transform_status === "translated") {
       if (!providerHasNonLosslessFixture(contract.provider)) {
         issues.push(
           `${contract.provider} is translated but has no degraded/rejected/unsupported fixture`,

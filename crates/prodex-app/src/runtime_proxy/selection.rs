@@ -18,13 +18,11 @@ use self::policy::{
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use self::policy::{
-    RuntimeCandidateAffinity, RuntimeNoRotateAffinity,
-    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
-    RuntimeQuotaBlockedAffinityReleasePolicy, RuntimeQuotaBlockedAffinityReleaseRequest,
-    RuntimeResponseCandidateSelection, RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
-    runtime_candidate_has_hard_affinity, runtime_candidate_no_rotate_affinity,
+    RuntimeCandidateAffinity, RuntimePreviousResponseNotFoundFallbackRequest,
+    RuntimePreviousResponseStaleContinuationPolicy, RuntimeResponseCandidateSelection,
+    RuntimeWebsocketReuseWatchdogPreviousResponseFallback, runtime_candidate_has_hard_affinity,
     runtime_previous_response_not_found_fallback_policy,
-    runtime_quota_blocked_affinity_is_releasable, runtime_quota_blocked_affinity_release_policy,
+    runtime_quota_blocked_affinity_is_releasable,
     runtime_quota_blocked_previous_response_fresh_fallback_allowed,
     runtime_quota_precommit_guard_reason,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,

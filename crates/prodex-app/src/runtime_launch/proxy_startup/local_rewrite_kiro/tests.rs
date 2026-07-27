@@ -222,8 +222,8 @@ fn kiro_chat_request_rejects_semantic_parallel_tool_calls_control() {
 }
 
 #[test]
-fn kiro_chat_request_tolerates_token_limit_controls_as_noop() {
-    let translated = match runtime_kiro_request_body_for_endpoint(
+fn kiro_chat_request_rejects_unenforceable_token_limit_controls() {
+    let error = match runtime_kiro_request_body_for_endpoint(
         ProviderEndpoint::ChatCompletions,
         serde_json::to_vec(&json!({
             "model": "claude-sonnet-4",
@@ -237,14 +237,11 @@ fn kiro_chat_request_tolerates_token_limit_controls_as_noop() {
         }))
         .unwrap(),
     ) {
-        Ok(translated) => translated,
-        Err(_) => panic!("valid token-limit controls should be ignored"),
+        Ok(_) => panic!("unenforceable token-limit controls should fail"),
+        Err(error) => error,
     };
-    let translated: Value = serde_json::from_slice(&translated).unwrap();
-    assert!(translated.get("max_output_tokens").is_none());
-    assert!(translated.get("max_tokens").is_none());
-    assert!(translated.get("max_completion_tokens").is_none());
-    assert_eq!(translated["input"][0]["role"], "user");
+    let body: Value = serde_json::from_slice(&error.body).unwrap();
+    assert_eq!(body["error"]["code"], "unsupported_token_limit");
 }
 
 #[test]
@@ -266,6 +263,22 @@ fn kiro_chat_request_rejects_invalid_token_limit_controls() {
     };
     let body: Value = serde_json::from_slice(&error.body).unwrap();
     assert_eq!(body["error"]["code"], "unsupported_token_limit");
+}
+
+#[test]
+fn kiro_responses_request_rejects_unenforceable_generation_control() {
+    let error = runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "model": "auto",
+            "input": "hello",
+            "temperature": 0.2
+        }))
+        .unwrap(),
+    )
+    .expect_err("Kiro Responses temperature should fail before ACP launch");
+    let body: Value = serde_json::from_slice(&error.body).unwrap();
+    assert_eq!(body["error"]["code"], "unsupported_generation_control");
 }
 
 #[test]

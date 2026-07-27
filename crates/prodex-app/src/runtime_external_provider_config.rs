@@ -356,13 +356,7 @@ fn external_catalog_model(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> serde_json::Value {
-    let input_modalities = match provider {
-        ExternalCatalogProvider::Anthropic
-        | ExternalCatalogProvider::Copilot
-        | ExternalCatalogProvider::Kiro => {
-            json!(["text", "image"])
-        }
-    };
+    let kiro = matches!(provider, ExternalCatalogProvider::Kiro);
     json!({
         "slug": slug,
         "display_name": display_name,
@@ -396,8 +390,8 @@ fn external_catalog_model(
         "availability_nux": null,
         "upgrade": null,
         "base_instructions": "",
-        "supports_reasoning_summaries": true,
-        "supports_reasoning_summary_parameter": true,
+        "supports_reasoning_summaries": !kiro,
+        "supports_reasoning_summary_parameter": !kiro,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
         "default_verbosity": null,
@@ -414,8 +408,8 @@ fn external_catalog_model(
         "auto_compact_token_limit": auto_compact_token_limit,
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
-        "input_modalities": input_modalities,
-        "supports_search_tool": true
+        "input_modalities": (if kiro { json!(["text"]) } else { json!(["text", "image"]) }),
+        "supports_search_tool": !kiro
     })
 }
 
@@ -756,6 +750,11 @@ mod tests {
             catalog["models"][1]["description"],
             "Experimental preview of DeepSeek V3.2"
         );
+        let model = &catalog["models"][0];
+        assert_eq!(model["input_modalities"], json!(["text"]));
+        assert_eq!(model["supports_search_tool"], false);
+        assert_eq!(model["supports_reasoning_summaries"], false);
+        assert_eq!(model["supports_reasoning_summary_parameter"], false);
     }
 
     #[test]

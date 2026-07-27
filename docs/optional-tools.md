@@ -5,6 +5,11 @@ checks happen before launch; activation writes only to the temporary launch
 overlay. Normal launches do not download, clone, update, trust, or grant extra
 permissions to a tool.
 
+Do not replace an externally managed optional-tool binary while its daemon or
+clients are still active. Finish those sessions before updating it; if a mixed
+binary cohort still fails at startup, Prodex preserves the tool's bounded stderr
+diagnostic instead of reporting only the child exit status.
+
 ## Discovery
 
 Managed roots are searched in this order:

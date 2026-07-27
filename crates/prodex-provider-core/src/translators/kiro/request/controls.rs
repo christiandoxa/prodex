@@ -49,11 +49,11 @@ pub(super) fn kiro_provider_core_has_requested_parallel_tool_calls_control(value
     }
 }
 
-pub(super) fn kiro_provider_core_strip_accepted_token_limit_controls(
-    object: &mut serde_json::Map<String, Value>,
+pub(super) fn kiro_provider_core_reject_token_limit_controls(
+    object: &serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
     for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-        let Some(value) = object.get(field) else {
+        let Some(value) = object.get(field).filter(|value| !value.is_null()) else {
             continue;
         };
         if value.as_u64().is_none_or(|count| count == 0) {
@@ -62,9 +62,10 @@ pub(super) fn kiro_provider_core_strip_accepted_token_limit_controls(
                 "unsupported_token_limit",
             ));
         }
-    }
-    for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-        object.remove(field);
+        return Err(KiroProviderCoreRequestError::new(
+            format!("Kiro ACP does not expose the {field} control"),
+            "unsupported_token_limit",
+        ));
     }
     Ok(())
 }

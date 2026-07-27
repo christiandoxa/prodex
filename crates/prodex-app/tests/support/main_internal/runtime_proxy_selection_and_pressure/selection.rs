@@ -1,7 +1,5 @@
 use super::*;
 
-#[path = "selection/affinity_policy.rs"]
-mod affinity_policy;
 #[path = "selection/fallback_shapes.rs"]
 mod fallback_shapes;
 #[path = "selection/http_error_policy.rs"]

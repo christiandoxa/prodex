@@ -31,3 +31,4 @@ Default mode: `native`. Resolved mode for this catalog: `native`.
 - `anthropic`: `input[*].content[type!=text]`, `response_format.type`, `reasoning`, `text.format`, `n>1`, `metadata`, `safety_identifier`, `web_search_options`, `input[type=custom_tool_call|tool_search_call]`, `messages`, `tools[type!=function]`, `tool_choice[type!=function]`, `parallel_tool_calls=false`, `logprobs/top_logprobs`, `stop_sequences`, `previous_response_id`
 - `deepseek`: `parallel_tool_calls=false`, `web_search_options`, `safety_identifier`, `tools[type!=function]`, `input[*].content[type!=text]`
 - `gemini`: `response_format.type`
+- `kiro`: `temperature/top_p`, `stop/stop_sequences`, `logprobs/top_logprobs`, `response_format/text.format[type!=text]`, `tool_choice!=auto`, `tools/web_search_options`, `parallel_tool_calls=false`, `input[*].content[type!=text]`, `max_output_tokens/max_tokens/max_completion_tokens`
