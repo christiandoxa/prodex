@@ -1328,6 +1328,7 @@ name = "prodex-runtime-policy"
 version = "0.354.0"
 dependencies = [
  "anyhow",
+ "base64 0.23.0",
  "prodex-authn",
  "prodex-core",
  "prodex-domain",
