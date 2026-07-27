@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.356.0 - 2026-07-27
+
+### Runtime
+
+- Harden Gemini compatibility (`67d338b`)
+
 ## 0.355.0 - 2026-07-27
 
 ### Deps
@@ -102,9 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Complete audited security paths (`aaaf603`)
-
-## 0.344.0 - 2026-07-24
-
-### Runtime
-
-- Align secure log test fixtures (`32d599f`)
