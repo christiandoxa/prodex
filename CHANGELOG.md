@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.357.0 - 2026-07-27
+
+### Misc
+
+- Isolate Gemini host files (`fb963d4`)
+
 ## 0.356.0 - 2026-07-27
 
 ### Runtime
@@ -102,9 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden log, MCP, and Gemini boundaries (`fe12705`)
-
-## 0.345.0 - 2026-07-24
-
-### Runtime
-
-- Complete audited security paths (`aaaf603`)
