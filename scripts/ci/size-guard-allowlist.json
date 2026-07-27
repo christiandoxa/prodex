@@ -186,13 +186,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1502,
-    "reason": "Gateway launch composes durable tenant discovery, governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1540,
+    "reason": "Gateway launch composes durable tenant discovery, signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 2485,
-    "reason": "The governed artifact lifecycle, execution approvals, SIEM outbox claims, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
+    "maxLines": 2534,
+    "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
@@ -201,8 +201,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
-    "maxLines": 1225,
-    "reason": "Lifecycle HTTP coverage exercises four governed artifact kinds plus execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
+    "maxLines": 1248,
+    "reason": "Lifecycle HTTP coverage exercises signing-payload generation, signature rejection, four governed artifact kinds, execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
   },
   {
     "file": "crates/prodex-config/src/lib.rs",
@@ -216,18 +216,18 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 926,
-    "reason": "Runtime policy types carry gateway harness selection, governance authority, lifecycle, authentication assurance, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
+    "maxLines": 936,
+    "reason": "Runtime policy types carry gateway harness selection, governance authority and verifier roots, lifecycle, authentication assurance, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
-    "maxLines": 1197,
-    "reason": "Runtime-policy validation coverage keeps governance mode, bounded OIDC reauthentication, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
+    "maxLines": 1234,
+    "reason": "Runtime-policy validation coverage keeps exact Ed25519 verifier roots, enforcing governance mode, bounded OIDC reauthentication, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 1580,
-    "reason": "SQLite governance integration coverage proves lifecycle, bounded durable tenant discovery, approval idempotency and denial audit, session revisions/revocation, audit integrity, export, and SIEM outbox behavior."
+    "maxLines": 1657,
+    "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency and denial audit, session revisions/revocation, audit integrity, export, and SIEM outbox behavior."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
@@ -251,8 +251,8 @@
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",
-    "maxLines": 1128,
-    "reason": "Transactional PostgreSQL governance revision, bounded tenant discovery, approval, legal-hold, purge, status, and snapshot operations remain capped until retention operations split from lifecycle persistence."
+    "maxLines": 1162,
+    "reason": "Transactional PostgreSQL signed governance revision, bounded tenant discovery, approval, legal-hold, purge, status, and snapshot operations remain capped until retention operations split from lifecycle persistence."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",
@@ -261,7 +261,22 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 905,
-    "reason": "The ordered PostgreSQL migration catalog keeps immutable SQL revisions and schema-version planning together until historical migration constants move to versioned fixture files."
+    "maxLines": 930,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable SQL revisions, including governance artifact authenticity, and schema-version planning together until historical migration constants move to versioned fixture files."
+  },
+  {
+    "file": "crates/prodex-storage-postgres-runtime/tests/postgres_runtime.rs",
+    "maxLines": 864,
+    "reason": "PostgreSQL runtime integration coverage keeps signed governance artifact persistence and activation alongside live tenant accounting and lifecycle proofs."
+  },
+  {
+    "file": "crates/prodex-storage-sqlite-runtime/src/governance_repository/repository_core.rs",
+    "maxLines": 868,
+    "reason": "SQLite governance repository transactions keep signed immutable revision writes and revision-summary provenance with the lifecycle persistence boundary."
+  },
+  {
+    "file": "crates/prodex-storage/src/governance.rs",
+    "maxLines": 888,
+    "reason": "Governance storage contracts keep detached artifact authenticity, revision lifecycle, approval, session, audit, and outbox commands in one backend-neutral boundary."
   }
 ]
