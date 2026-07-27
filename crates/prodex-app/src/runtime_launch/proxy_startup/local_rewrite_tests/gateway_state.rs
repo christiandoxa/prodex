@@ -878,11 +878,10 @@ fn gateway_sqlite_shared_backend_allows_only_one_budget_limited_reservation_acro
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_across_proxies() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let coordination_redis_url = std::env::var("PRODEX_TEST_REDIS_URL").ok();
 
     let root = temp_root("gateway-postgres-shared-backend");
@@ -1153,11 +1152,10 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_postgres_state_store_rotates_admin_keys() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
 
     let root = temp_root("gateway-postgres-rotate-key");
     let paths = app_paths_for_root(root);

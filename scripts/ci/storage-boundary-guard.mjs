@@ -59,6 +59,7 @@ const OPTIONAL_POSTGRES_EVIDENCE_TEST = Object.freeze({
     "prodex-storage-postgres",
     "postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -71,6 +72,7 @@ const OPTIONAL_POSTGRES_MIGRATION_TEST = Object.freeze({
     "prodex-storage-postgres",
     "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -83,6 +85,7 @@ const OPTIONAL_POSTGRES_RUNTIME_TEST = Object.freeze({
     "prodex-storage-postgres-runtime",
     "two_repositories_reserve_and_reconcile_idempotently",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -95,6 +98,7 @@ const OPTIONAL_POSTGRES_GROUPED_REQUEST_TEST = Object.freeze({
     "prodex-storage-postgres-runtime",
     "two_repositories_enforce_one_grouped_request_atomically",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -108,6 +112,7 @@ const OPTIONAL_POSTGRES_GATEWAY_ACCOUNTING_TEST = Object.freeze({
     "--lib",
     "gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_across_proxies",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -121,6 +126,7 @@ const OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST = Object.freeze({
     "--lib",
     "gateway_postgres_grouped_request_budget_is_atomic_across_two_proxies_and_keys",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });
@@ -134,6 +140,7 @@ const OPTIONAL_POSTGRES_CONFIG_PUBLICATION_TEST = Object.freeze({
     "--lib",
     "postgres_config_publication_transport_is_idempotent_replica_scoped_and_compactable",
     "--",
+    "--ignored",
     "--test-threads=1",
   ],
 });

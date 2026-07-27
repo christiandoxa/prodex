@@ -74,11 +74,10 @@ fn create_grouped_key(
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_postgres_grouped_request_budget_is_atomic_across_two_proxies_and_keys() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let root = temp_root("gateway-postgres-grouped-request-budget");
     let paths = app_paths_for_root(root);
     runtime_gateway_postgres_create_current_schema_for_tests(&url);

@@ -107,6 +107,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
         code_assist,
         project_id,
         thinking_budget_tokens,
+        true,
         &config.gemini,
     )
 }
@@ -117,6 +118,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_config(
     code_assist: bool,
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
+    allow_local_file_access: bool,
     config: &RuntimeGeminiConfig,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     runtime_gemini_generate_request_body_with_local_file_access_and_config(
@@ -125,7 +127,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_config(
         code_assist,
         project_id,
         thinking_budget_tokens,
-        true,
+        allow_local_file_access,
         config,
     )
 }

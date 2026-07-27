@@ -359,11 +359,10 @@ fn config_publication_transport_compaction_skips_events_without_all_replica_acks
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn postgres_config_publication_transport_is_idempotent_replica_scoped_and_compactable() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
     crate::runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(&url, &tls).unwrap();
     let mut client = prodex_storage_postgres_runtime::connect_blocking(&url, &tls).unwrap();

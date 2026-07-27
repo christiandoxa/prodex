@@ -366,11 +366,10 @@ fn sqlite_key_store_round_trips_keys_and_scim_users() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn postgres_key_store_round_trips_keys_and_scim_users() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     runtime_gateway_postgres_create_current_schema_for_tests(&url);
     let tenant_id = prodex_domain::TenantId::new().to_string();
     let principal_id = prodex_domain::PrincipalId::new().to_string();

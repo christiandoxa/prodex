@@ -130,14 +130,10 @@ fn governance_checksum(artifact: &[u8]) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 async fn postgres_policy_governance_activates_and_replays_idempotently() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!(
-            "skipping postgres_policy_governance_activates_and_replays_idempotently: \
-             PRODEX_TEST_POSTGRES_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let config = PostgresRuntimeConfig::new(url, 2).expect("test config should be valid");
     let pool = config
         .create_pool_explicit_no_tls()
@@ -473,14 +469,10 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!(
-            "skipping postgres_governance_lifecycle_supports_all_artifact_kinds: \
-             PRODEX_TEST_POSTGRES_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let config = PostgresRuntimeConfig::new(url, 2).expect("test config should be valid");
     let pool = config
         .create_pool_explicit_no_tls()
@@ -648,14 +640,10 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 async fn two_repositories_reserve_and_reconcile_idempotently() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!(
-            "skipping two_repositories_reserve_and_reconcile_idempotently: \
-             PRODEX_TEST_POSTGRES_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let config = PostgresRuntimeConfig::new(url, 4).expect("test config should be valid");
     let pool_one = config
         .create_pool_explicit_no_tls()
@@ -789,14 +777,10 @@ async fn two_repositories_reserve_and_reconcile_idempotently() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 async fn two_repositories_enforce_one_grouped_request_atomically() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!(
-            "skipping two_repositories_enforce_one_grouped_request_atomically: \
-             PRODEX_TEST_POSTGRES_URL is not set"
-        );
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let config = PostgresRuntimeConfig::new(url, 4).expect("test config should be valid");
     let pool_one = config
         .create_pool_explicit_no_tls()

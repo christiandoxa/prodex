@@ -1317,11 +1317,10 @@ fn gateway_scim_delete_keeps_compat_shape_on_sqlite_backend() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
     let user_name = format!("postgres-{}@example.com", prodex_domain::PrincipalId::new());
 
     let root = temp_root("gateway-scim-postgres-compat");
@@ -1393,11 +1392,10 @@ fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
 
     let root = temp_root("gateway-scim-postgres-update-compat");
     let paths = app_paths_for_root(root);
@@ -1496,11 +1494,10 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
 }
 
 #[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
 fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
-    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
-        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
-        return;
-    };
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
 
     let root = temp_root("gateway-scim-postgres-delete-compat");
     let paths = app_paths_for_root(root);

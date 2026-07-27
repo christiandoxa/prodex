@@ -4,8 +4,8 @@
 //! This crate composes domain/gateway/control-plane/storage contracts into
 //! side-effect-free use-case plans. It intentionally has no CLI, filesystem,
 //! HTTP framework, async runtime, database driver, network client, or provider
-//! SDK dependency. `prodex-app` and future binaries should become composition
-//! roots that adapt real transports and storage clients into these plans.
+//! SDK dependency. `prodex-app` and dedicated binaries are composition roots
+//! that adapt real transports and storage clients into the plans they need.
 
 pub mod distributed_rate_limit;
 
