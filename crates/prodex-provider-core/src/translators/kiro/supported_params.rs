@@ -51,10 +51,68 @@ pub(super) fn kiro_chat_completions_supported_params() -> ProviderParamSupport {
             },
             ProviderUnsupportedReason {
                 field: "max_output_tokens/max_tokens/max_completion_tokens".to_string(),
-                reason:
-                    "Kiro ignores valid chat token-limit controls and rejects non-positive values"
-                        .to_string(),
+                reason: "Kiro ACP does not expose chat token-limit controls".to_string(),
+            },
+            ProviderUnsupportedReason {
+                field: "tool_choice!=auto/function_call".to_string(),
+                reason: "Kiro ACP owns tool selection".to_string(),
+            },
+            ProviderUnsupportedReason {
+                field: "logprobs/top_logprobs".to_string(),
+                reason: "Kiro ACP does not expose log probabilities".to_string(),
             },
         ],
+    }
+}
+
+pub(super) fn kiro_responses_supported_params(
+    ignores_required_token_limit: bool,
+) -> ProviderParamSupport {
+    let mut unsupported = vec![
+        ProviderUnsupportedReason {
+            field: "temperature/top_p".to_string(),
+            reason: "Kiro ACP does not expose sampling controls".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "stop/stop_sequences".to_string(),
+            reason: "Kiro ACP does not expose stop-sequence controls".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "logprobs/top_logprobs".to_string(),
+            reason: "Kiro ACP does not expose log probabilities".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "response_format/text.format[type!=text]".to_string(),
+            reason: "Kiro ACP does not guarantee structured output".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "tool_choice!=auto".to_string(),
+            reason: "Kiro ACP owns tool selection".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "tools/web_search_options".to_string(),
+            reason: "Kiro ACP owns its tool and web-search inventory".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "parallel_tool_calls=false".to_string(),
+            reason: "Kiro ACP does not expose parallel tool-call control".to_string(),
+        },
+        ProviderUnsupportedReason {
+            field: "input[*].content[type!=text]".to_string(),
+            reason: "Kiro ACP is initialized as a text-only client".to_string(),
+        },
+    ];
+    unsupported.push(ProviderUnsupportedReason {
+        field: "max_output_tokens/max_tokens/max_completion_tokens".to_string(),
+        reason: if ignores_required_token_limit {
+            "Kiro Messages accepts the required token limit for compatibility, but ACP cannot enforce it"
+        } else {
+            "Kiro ACP does not expose output token-limit controls"
+        }
+        .to_string(),
+    });
+    ProviderParamSupport {
+        supported: true,
+        unsupported,
     }
 }

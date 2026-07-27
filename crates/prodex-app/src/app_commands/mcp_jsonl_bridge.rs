@@ -1,7 +1,7 @@
 use crate::McpJsonlBridgeArgs;
 use anyhow::{Context, Result, bail};
 use prodex_mcp_stdio::{McpMessageFraming, read_mcp_message, write_mcp_message};
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self, BufReader, BufWriter, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -9,12 +9,15 @@ use std::time::{Duration, Instant};
 
 const MCP_BRIDGE_MONITOR_INTERVAL: Duration = Duration::from_millis(10);
 const MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+const MCP_BRIDGE_STDERR_LIMIT: usize = 64 * 1024;
+type McpStderrReader = JoinHandle<io::Result<(Vec<u8>, bool)>>;
 
 pub(crate) fn handle_mcp_jsonl_bridge(args: McpJsonlBridgeArgs) -> Result<()> {
     let mut child = Command::new(&args.command)
         .args(&args.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to start MCP server {}", args.command.display()))?;
 
@@ -26,6 +29,10 @@ pub(crate) fn handle_mcp_jsonl_bridge(args: McpJsonlBridgeArgs) -> Result<()> {
         .stdin
         .take()
         .context("failed to capture MCP server stdin")?;
+    let child_stderr = child
+        .stderr
+        .take()
+        .context("failed to capture MCP server stderr")?;
     let framing = Arc::new(Mutex::new(McpMessageFraming::ContentLength));
     let output_framing = Arc::clone(&framing);
 
@@ -53,17 +60,20 @@ pub(crate) fn handle_mcp_jsonl_bridge(args: McpJsonlBridgeArgs) -> Result<()> {
         }
         Ok(())
     });
+    let stderr = std::thread::spawn(move || read_bounded_mcp_stderr(child_stderr));
 
-    monitor_mcp_bridge(&mut child, output, input)
+    monitor_mcp_bridge(&mut child, output, input, stderr)
 }
 
 fn monitor_mcp_bridge(
     child: &mut Child,
     output: JoinHandle<Result<()>>,
     input: JoinHandle<Result<()>>,
+    stderr: McpStderrReader,
 ) -> Result<()> {
     let mut output = Some(output);
     let mut input = Some(input);
+    let mut stderr = Some(stderr);
     loop {
         if let Err(err) = join_finished_mcp_input(&mut input) {
             stop_mcp_child(child);
@@ -81,7 +91,7 @@ fn monitor_mcp_bridge(
             }
             if let Some(status) = poll_mcp_child(child)? {
                 join_finished_mcp_input(&mut input)?;
-                return mcp_child_status_result(status);
+                return mcp_child_status_result(status, join_mcp_stderr(&mut stderr)?);
             }
             stop_mcp_child(child);
             bail!("MCP server closed stdout before exiting");
@@ -98,7 +108,7 @@ fn monitor_mcp_bridge(
             }
             join_mcp_bridge_pump(output, "output")?;
             join_finished_mcp_input(&mut input)?;
-            return mcp_child_status_result(status);
+            return mcp_child_status_result(status, join_mcp_stderr(&mut stderr)?);
         }
 
         std::thread::sleep(MCP_BRIDGE_MONITOR_INTERVAL);
@@ -129,6 +139,32 @@ fn join_mcp_bridge_pump(handle: JoinHandle<Result<()>>, name: &str) -> Result<()
         .map_err(|_| anyhow::anyhow!("MCP bridge {name} thread panicked"))?
 }
 
+fn read_bounded_mcp_stderr(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)> {
+    let mut retained = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok((retained, truncated));
+        }
+        let keep = MCP_BRIDGE_STDERR_LIMIT
+            .saturating_sub(retained.len())
+            .min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+}
+
+fn join_mcp_stderr(stderr: &mut Option<McpStderrReader>) -> Result<(Vec<u8>, bool)> {
+    stderr
+        .take()
+        .expect("MCP stderr reader should exist")
+        .join()
+        .map_err(|_| anyhow::anyhow!("MCP bridge stderr thread panicked"))?
+        .context("failed to read MCP server stderr")
+}
+
 fn stop_mcp_child(child: &mut Child) {
     if child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
@@ -136,9 +172,15 @@ fn stop_mcp_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn mcp_child_status_result(status: ExitStatus) -> Result<()> {
+fn mcp_child_status_result(status: ExitStatus, stderr: (Vec<u8>, bool)) -> Result<()> {
     if !status.success() {
-        bail!("MCP server exited with status {status}");
+        let diagnostic = String::from_utf8_lossy(&stderr.0);
+        let diagnostic = diagnostic.trim();
+        if diagnostic.is_empty() {
+            bail!("MCP server exited with status {status}");
+        }
+        let suffix = if stderr.1 { " (stderr truncated)" } else { "" };
+        bail!("MCP server exited with status {status}: {diagnostic}{suffix}");
     }
     Ok(())
 }

@@ -1189,7 +1189,7 @@ fn kiro_messages_route_streams_anthropic_sse() {
 }
 
 #[test]
-fn kiro_chat_completions_route_accepts_legacy_functions_and_function_call() {
+fn kiro_chat_completions_route_rejects_legacy_function_call_control() {
     let root = temp_root("kiro-chat-legacy-functions");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -1245,7 +1245,7 @@ fn kiro_chat_completions_route_accepts_legacy_functions_and_function_call() {
     })
     .expect("kiro local rewrite proxy should start");
 
-    let first: serde_json::Value = reqwest::blocking::Client::new()
+    let response = reqwest::blocking::Client::new()
         .post(format!("http://{}/v1/chat/completions", proxy.listen_addr))
         .json(&serde_json::json!({
             "model": "claude-sonnet-4",
@@ -1268,20 +1268,11 @@ fn kiro_chat_completions_route_accepts_legacy_functions_and_function_call() {
             }]
         }))
         .send()
-        .expect("legacy chat functions request should be sent")
-        .json()
-        .expect("legacy chat response JSON should parse");
+        .expect("legacy chat functions request should be sent");
 
-    assert_eq!(first["object"], "chat.completion");
-    assert_eq!(first["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        first["choices"][0]["message"]["tool_calls"][0]["id"],
-        "call_1"
-    );
-    assert_eq!(
-        first["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-        "read_file"
-    );
+    assert_eq!(response.status().as_u16(), 400);
+    let body: serde_json::Value = response.json().expect("error JSON should parse");
+    assert_eq!(body["error"]["code"], "unsupported_tool_choice");
 }
 
 #[test]
@@ -2054,7 +2045,7 @@ fn kiro_chat_completions_route_ignores_user_metadata() {
 }
 
 #[test]
-fn kiro_chat_completions_route_ignores_token_limit_controls() {
+fn kiro_chat_completions_route_rejects_token_limit_controls() {
     let root = temp_root("kiro-chat-token-limit");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -2123,9 +2114,9 @@ fn kiro_chat_completions_route_ignores_token_limit_controls() {
         }))
         .send()
         .expect("kiro chat completions request should be sent");
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 400);
     let body: serde_json::Value = response.json().expect("response JSON should parse");
-    assert_eq!(body["object"], "chat.completion");
+    assert_eq!(body["error"]["code"], "unsupported_token_limit");
 }
 
 #[test]
@@ -2348,18 +2339,6 @@ fn kiro_chat_completions_stream_emits_tool_calls() {
         .json(&serde_json::json!({
             "model": "claude-sonnet-4",
             "stream": true,
-            "function_call": {"name": "read_file"},
-            "functions": [{
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"}
-                    },
-                    "required": ["path"]
-                }
-            }],
             "messages": [{
                 "role": "user",
                 "content": "start tool"

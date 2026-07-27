@@ -1,5 +1,6 @@
 //! Kiro request ownership characterization tests.
 
+use super::request::kiro_provider_core_responses_request_body;
 use super::*;
 use serde_json::{Value, json};
 
@@ -13,10 +14,7 @@ fn kiro_provider_core_preserves_chat_control_failure_matrix() {
             "top_p": 1,
             "presence_penalty": 0,
             "frequency_penalty": 0,
-            "parallel_tool_calls": true,
-            "max_output_tokens": 64,
-            "max_tokens": 32,
-            "max_completion_tokens": 16
+            "parallel_tool_calls": true
         }))
         .unwrap(),
     )
@@ -29,9 +27,6 @@ fn kiro_provider_core_preserves_chat_control_failure_matrix() {
         "presence_penalty",
         "frequency_penalty",
         "parallel_tool_calls",
-        "max_output_tokens",
-        "max_tokens",
-        "max_completion_tokens",
     ] {
         assert!(defaults.get(field).is_none(), "{field}");
     }
@@ -53,6 +48,7 @@ fn kiro_provider_core_preserves_chat_control_failure_matrix() {
             "unsupported_parallel_tool_calls",
         ),
         ("max_tokens", json!(0), "unsupported_token_limit"),
+        ("max_tokens", json!(32), "unsupported_token_limit"),
     ] {
         let mut request = json!({"messages": [{"role": "user", "content": "hello"}]});
         request[field] = value;
@@ -62,6 +58,42 @@ fn kiro_provider_core_preserves_chat_control_failure_matrix() {
         .unwrap_err();
         assert_eq!(error.code, code, "{field}");
     }
+}
+
+#[test]
+fn kiro_provider_core_rejects_unenforceable_responses_controls() {
+    for (field, value, code) in [
+        ("temperature", json!(1), "unsupported_generation_control"),
+        ("max_output_tokens", json!(64), "unsupported_token_limit"),
+        ("tool_choice", json!("required"), "unsupported_tool_choice"),
+        (
+            "web_search_options",
+            json!({}),
+            "unsupported_web_search_options",
+        ),
+    ] {
+        let mut request = json!({"model": "auto", "input": "hello"});
+        request[field] = value;
+        let error = kiro_provider_core_responses_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, code, "{field}");
+    }
+}
+
+#[test]
+fn kiro_provider_core_validates_responses_shaped_chat_requests() {
+    let missing =
+        kiro_provider_core_chat_completions_request_body(br#"{"model":"auto"}"#).unwrap_err();
+    assert_eq!(missing.code, "missing_messages");
+
+    let unsupported = kiro_provider_core_chat_completions_request_body(
+        br#"{"model":"auto","input":"hello","web_search_options":{}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(unsupported.code, "unsupported_web_search_options");
 }
 
 #[test]

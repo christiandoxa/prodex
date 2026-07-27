@@ -11,7 +11,6 @@ fn kiro_provider_core_translates_chat_controls_and_messages() {
             "messages": [{"role": "user", "content": "hello"}],
             "temperature": 1,
             "parallel_tool_calls": true,
-            "max_tokens": 32,
             "user": "user-123"
         }))
         .unwrap()
@@ -21,7 +20,6 @@ fn kiro_provider_core_translates_chat_controls_and_messages() {
     let translated: Value = serde_json::from_slice(&translated).unwrap();
     assert!(translated.get("temperature").is_none());
     assert!(translated.get("parallel_tool_calls").is_none());
-    assert!(translated.get("max_tokens").is_none());
     assert!(translated.get("user").is_none());
     assert_eq!(translated["input"][0]["role"], "user");
 }

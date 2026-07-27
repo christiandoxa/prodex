@@ -14,7 +14,12 @@ use temp_dir::TestDir;
 #[test]
 fn mcp_jsonl_bridge_reports_child_failure_without_waiting_for_stdin_eof() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prodex"))
-        .args(["__mcp-jsonl-bridge", "sh", "-c", "exit 7"])
+        .args([
+            "__mcp-jsonl-bridge",
+            "sh",
+            "-c",
+            "printf 'cohort mismatch: active daemon build differs\\n' >&2; exit 7",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -45,6 +50,10 @@ fn mcp_jsonl_bridge_reports_child_failure_without_waiting_for_stdin_eof() {
     assert!(!status.success());
     assert!(
         stderr.contains("MCP server exited with status"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("cohort mismatch: active daemon build differs"),
         "unexpected stderr: {stderr}"
     );
 }

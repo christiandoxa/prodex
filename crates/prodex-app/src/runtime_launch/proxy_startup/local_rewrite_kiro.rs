@@ -1,3 +1,6 @@
+mod request_validation;
+
+use self::request_validation::runtime_kiro_request_body_for_endpoint;
 use super::chat_compatible_request::runtime_provider_chat_compatible_request_body;
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode,
@@ -185,6 +188,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
         .map(|model| runtime_provider_canonical_model(RuntimeProviderBridgeKind::Kiro, model));
     let requested_effort = value
         .pointer("/reasoning/effort")
+        .or_else(|| value.get("reasoning_effort"))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|effort| !effort.is_empty())
@@ -360,6 +364,7 @@ fn runtime_kiro_semantic_compact_summary(
             .map(|model| runtime_provider_canonical_model(RuntimeProviderBridgeKind::Kiro, model));
         let requested_effort = value
             .pointer("/reasoning/effort")
+            .or_else(|| value.get("reasoning_effort"))
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|effort| !effort.is_empty());
@@ -382,27 +387,6 @@ fn schedule_runtime_kiro_blocking_work(
     work: impl FnOnce() + Send + 'static,
 ) {
     drop(async_runtime.spawn_blocking(work));
-}
-
-fn runtime_kiro_request_body_for_endpoint(
-    endpoint: ProviderEndpoint,
-    body: Vec<u8>,
-) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    if endpoint != ProviderEndpoint::ChatCompletions {
-        return Ok(body);
-    }
-    prodex_provider_core::kiro_provider_core_chat_completions_request_body(&body)
-        .map_err(|error| runtime_kiro_invalid_request_error(&error.message, &error.code))
-}
-
-fn runtime_kiro_invalid_request_error(
-    message: &str,
-    code: &str,
-) -> RuntimeHeapTrimmedBufferedResponseParts {
-    runtime_kiro_json_parts(
-        400,
-        prodex_provider_core::kiro_provider_core_invalid_request_error_value(message, code),
-    )
 }
 
 fn runtime_kiro_json_parts(status: u16, body: Value) -> RuntimeHeapTrimmedBufferedResponseParts {

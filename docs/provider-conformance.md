@@ -17,19 +17,21 @@ transport or rotation policy into translators.
 
 ## Capability negotiation
 
-Provider selection and request admission use this order:
+Provider capability inspection uses this order:
 
 1. choose the provider
 2. verify the endpoint through `provider_adapter(provider).supported_endpoints()`
 3. inspect endpoint status through `provider_adapter_contract_matrix()` or
    `capability_status(endpoint)`
-4. inspect model-aware parameter support through
+4. report model-aware parameter support through
    `provider_translator(provider).supported_params(endpoint, model)`
-5. run `transform_request`, `transform_response`, or `transform_stream_event`
+5. validate the concrete payload with provider-core predicates and run
+   `transform_request`, `transform_response`, or `transform_stream_event`
 
 Adapter metadata answers whether an endpoint can be considered. Translator
-support describes parameter-level loss. Transform results record what happened
-to the concrete payload.
+support describes known parameter-level limits for catalogs and diagnostics; it
+is not an executable admission policy. Concrete payload validation and transform
+results determine what the runtime accepts and record any loss.
 
 Catalog limits are optional. Missing context, output, reasoning, pricing, or
 embedding compatibility data remains unknown and follows the configured

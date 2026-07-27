@@ -346,6 +346,24 @@ fn categorical_endpoint_rejection_precedes_unknown_model_policy() {
 }
 
 #[test]
+fn kiro_messages_catalog_matches_the_runtime_endpoint() {
+    let request = provider_request_requirements(
+        br#"{"model":"auto","messages":[{"role":"user","content":"hi"}],"max_tokens":64}"#,
+        ProviderEndpoint::Messages,
+        "auto",
+        &[],
+    )
+    .unwrap();
+    let result =
+        evaluate_provider_request_constraints(ProviderId::Kiro, "auto", &request, strict_policy());
+    assert!(result.eligible);
+    assert_ne!(
+        result.decision,
+        ProviderRequestConstraintDecision::EndpointUnsupported
+    );
+}
+
+#[test]
 fn reasoning_reserve_is_counted_and_can_be_the_excess() {
     let mut model = entry(Some(8), None);
     model.supported_reasoning_efforts = Some(vec![ProviderReasoningEffort::High]);

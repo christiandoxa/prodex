@@ -1,9 +1,8 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::{
-    RuntimeAffinitySelectionKind, RuntimeNoRotateAffinity,
-    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
-    RuntimeQuotaBlockedAffinityReleasePolicy,
+    RuntimeAffinitySelectionKind, RuntimePreviousResponseNotFoundFallbackRequest,
+    RuntimePreviousResponseStaleContinuationPolicy,
     RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
     runtime_previous_response_not_found_fallback_policy,
     runtime_quota_blocked_previous_response_fresh_fallback_allowed,
@@ -64,34 +63,6 @@ pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffi
     runtime_proxy_crate::runtime_candidate_has_hard_affinity(runtime_candidate_affinity_to_proxy(
         affinity,
     ))
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_candidate_no_rotate_affinity(
-    affinity: RuntimeCandidateAffinity<'_>,
-) -> Option<RuntimeNoRotateAffinity> {
-    runtime_proxy_crate::runtime_candidate_no_rotate_affinity(runtime_candidate_affinity_to_proxy(
-        affinity,
-    ))
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RuntimeQuotaBlockedAffinityReleaseRequest<'a> {
-    pub(crate) affinity: RuntimeCandidateAffinity<'a>,
-    pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_quota_blocked_affinity_release_policy(
-    request: RuntimeQuotaBlockedAffinityReleaseRequest<'_>,
-) -> RuntimeQuotaBlockedAffinityReleasePolicy {
-    runtime_proxy_crate::runtime_quota_blocked_affinity_release_policy(
-        runtime_proxy_crate::RuntimeQuotaBlockedAffinityReleaseRequest {
-            affinity: runtime_candidate_affinity_to_proxy(request.affinity),
-            fresh_fallback_shape: request.fresh_fallback_shape,
-        },
-    )
 }
 
 pub(crate) fn runtime_quota_blocked_affinity_is_releasable(

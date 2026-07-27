@@ -171,25 +171,3 @@ fn previous_response_not_found_fallback_matrix_fails_closed_for_context_dependen
         }
     }
 }
-
-#[test]
-fn quota_blocked_affinity_release_policy_preserves_unclassified_release_behavior() {
-    let policy =
-        runtime_quota_blocked_affinity_release_policy(RuntimeQuotaBlockedAffinityReleaseRequest {
-            affinity: RuntimeCandidateAffinity::new(
-                RuntimeRouteKind::Responses,
-                "main",
-                None,
-                Some("main"),
-                None,
-                None,
-                true,
-            ),
-            fresh_fallback_shape: None,
-        });
-
-    assert_eq!(
-        policy,
-        RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
-    );
-}

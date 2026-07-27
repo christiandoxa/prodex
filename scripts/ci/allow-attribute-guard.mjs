@@ -14,7 +14,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 23;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 20;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
@@ -76,9 +76,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/runtime_background/probe_refresh/worker.rs|pub(crate) fn runtime_probe_refresh_take_next_job(",
   "crates/prodex-app/src/runtime_persistence/continuation_store.rs|pub(crate) fn save_runtime_continuation_journal(",
   "crates/prodex-app/src/runtime_proxy/lineage/release.rs|pub(crate) fn clear_runtime_stale_previous_response_binding(",
-  "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn runtime_candidate_no_rotate_affinity(",
-  "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn runtime_quota_blocked_affinity_release_policy(",
-  "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) struct RuntimeQuotaBlockedAffinityReleaseRequest<'a> {",
   "crates/prodex-app/src/runtime_store/backoffs.rs|pub(crate) fn save_runtime_profile_backoffs(",
   "crates/prodex-app/src/runtime_store/scores.rs|pub(crate) fn save_runtime_profile_scores(",
   "crates/prodex-app/src/runtime_store/usage_snapshots.rs|pub(crate) fn save_runtime_usage_snapshots(",

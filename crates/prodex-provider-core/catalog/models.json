@@ -1751,6 +1751,7 @@
       "responses",
       "responses/compact",
       "chat-completions",
+      "messages",
       "models"
     ],
     "aliases": [
@@ -1762,7 +1763,7 @@
       "vision": false,
       "audio": false,
       "web_search": false,
-      "reasoning": false
+      "reasoning": true
     },
     "pricing_known": false
   },

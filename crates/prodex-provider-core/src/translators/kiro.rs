@@ -84,6 +84,14 @@ impl ProviderTranslator for KiroTranslator {
         if endpoint == ProviderEndpoint::ChatCompletions {
             return supported_params::kiro_chat_completions_supported_params();
         }
+        if matches!(
+            endpoint,
+            ProviderEndpoint::Responses | ProviderEndpoint::Messages
+        ) {
+            return supported_params::kiro_responses_supported_params(
+                endpoint == ProviderEndpoint::Messages,
+            );
+        }
         if provider_supported_endpoints(self.provider()).contains(&endpoint) {
             ProviderParamSupport::full()
         } else {
@@ -123,6 +131,37 @@ impl ProviderTranslator for KiroTranslator {
                     self.upstream_wire_format(),
                     body,
                     "Kiro chat completions are translated to the Responses-style request surface",
+                    kiro_degraded_details(
+                        input.endpoint,
+                        self.client_wire_format(),
+                        self.upstream_wire_format(),
+                    ),
+                ),
+                Err(error) => ProviderTransformResult::rejected(
+                    self.provider(),
+                    input.endpoint,
+                    self.client_wire_format(),
+                    self.upstream_wire_format(),
+                    error.message,
+                )
+                .with_metadata("error_code", Value::String(error.code)),
+            };
+        }
+        if matches!(
+            input.endpoint,
+            ProviderEndpoint::Responses | ProviderEndpoint::Messages
+        ) {
+            return match request::kiro_provider_core_responses_request_body(
+                &input.body,
+                input.endpoint == ProviderEndpoint::Messages,
+            ) {
+                Ok(body) => ProviderTransformResult::degraded(
+                    self.provider(),
+                    input.endpoint,
+                    self.client_wire_format(),
+                    self.upstream_wire_format(),
+                    body,
+                    "Kiro executes compatible requests through its ACP agent",
                     kiro_degraded_details(
                         input.endpoint,
                         self.client_wire_format(),
@@ -213,6 +252,21 @@ impl ProviderTranslator for KiroTranslator {
                 self.client_wire_format(),
                 body,
                 "Kiro Responses-style output is translated to chat completions response shape",
+                kiro_degraded_details(
+                    input.endpoint,
+                    self.upstream_wire_format(),
+                    self.client_wire_format(),
+                ),
+            );
+        }
+        if input.endpoint == ProviderEndpoint::Messages {
+            return ProviderTransformResult::degraded(
+                self.provider(),
+                input.endpoint,
+                self.upstream_wire_format(),
+                self.client_wire_format(),
+                input.body,
+                "Kiro ACP output is translated to Anthropic Messages response shape",
                 kiro_degraded_details(
                     input.endpoint,
                     self.upstream_wire_format(),

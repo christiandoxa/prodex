@@ -365,6 +365,29 @@ fn translated_responses_contract_surface_exposes_known_parameter_limitations() {
         .expect("responses endpoint");
     assert_eq!(copilot_responses.status, "native");
     assert!(copilot_responses.unsupported_params.is_empty());
+
+    let kiro_responses = matrix
+        .iter()
+        .find(|spec| spec.provider == "kiro")
+        .expect("kiro contract")
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses")
+        .expect("responses endpoint");
+    for field in [
+        "temperature/top_p",
+        "max_output_tokens/max_tokens/max_completion_tokens",
+        "tools/web_search_options",
+        "input[*].content[type!=text]",
+    ] {
+        assert!(
+            kiro_responses
+                .unsupported_params
+                .iter()
+                .any(|value| value == field),
+            "kiro {field}"
+        );
+    }
 }
 
 #[test]

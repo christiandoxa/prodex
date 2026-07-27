@@ -167,15 +167,15 @@ fn v1_conformance_fixtures_cover_explicit_non_openai_provider_flows() {
     );
     assert!(
         cases.iter().any(|case| {
-            case.name == "kiro-chat-completions-request-strips-accepted-controls"
+            case.name == "kiro-chat-completions-request-rejects-token-limit"
                 && case.endpoint == ProviderEndpoint::ChatCompletions
                 && case.operation == ProviderConformanceOperation::Request
                 && matches!(
                     case.expected_loss,
-                    ProviderConformanceExpectedLoss::Degraded
+                    ProviderConformanceExpectedLoss::Rejected
                 )
         }),
-        "missing accepted-control Kiro chat-completions request fixture"
+        "missing rejected token-limit Kiro chat-completions request fixture"
     );
     assert!(
         cases.iter().any(|case| {
