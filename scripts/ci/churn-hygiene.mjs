@@ -163,7 +163,7 @@ function printHelp() {
       "  --message-file <path>     read staged/worktree commit message from a file",
       "  --json                    print machine-readable result",
       "",
-      "Default selector: HEAD~1..HEAD when available, otherwise HEAD",
+      "Default selector: staged changes when present, otherwise HEAD~1..HEAD or HEAD",
     ].join("\n") + "\n",
   );
 }
@@ -221,6 +221,11 @@ async function defaultRangeAvailable() {
   }
 }
 
+async function stagedChangesAvailable() {
+  const { stdout } = await git(["diff", "--cached", "--name-only"], { cwd: repoRoot });
+  return stdout.trim() !== "";
+}
+
 async function diffPlan(args) {
   assertSingleSelector(args);
   validateIgnoreBeforeSelector(args);
@@ -251,7 +256,7 @@ async function diffPlan(args) {
       command: ["diff", "--numstat", "--diff-filter=ACMR", effectiveSelector ?? range],
     };
   }
-  if (args.staged) {
+  if (args.staged || (!args.worktree && (await stagedChangesAvailable()))) {
     return {
       selector: "staged",
       command: ["diff", "--cached", "--numstat", "--diff-filter=ACMR"],
