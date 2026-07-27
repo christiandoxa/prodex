@@ -73,6 +73,7 @@ use super::local_rewrite_kiro::{
 };
 use super::local_rewrite_options::RuntimeLocalRewriteProviderOptions;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
+use super::local_rewrite_request::runtime_api_route_kind;
 use super::local_rewrite_response::{
     respond_runtime_local_rewrite_proxy_request, runtime_local_rewrite_response_with_call_id,
 };
@@ -96,6 +97,7 @@ use prodex_application::{
     ApplicationInspectionPlan, ApplicationRequestContextError, ApplicationRequestDeadline,
 };
 use prodex_domain::{RequestId, ReservationReconciliationReason};
+use prodex_observability::ApiAdmissionResult;
 use runtime_proxy_crate::{
     RuntimeProxyRequest, path_without_query, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
@@ -320,6 +322,10 @@ fn runtime_local_rewrite_canonical_context<'target>(
         .gateway_draining
         .load(std::sync::atomic::Ordering::SeqCst)
     {
+        crate::runtime_operational_metrics::record_runtime_api_admission_metric(
+            runtime_api_route_kind(&state.path, state.request.is_websocket_upgrade()),
+            ApiAdmissionResult::Draining,
+        );
         return Err(state.reject(build_runtime_proxy_json_error_response(
             503,
             "service_unavailable",
@@ -640,6 +646,7 @@ fn runtime_local_rewrite_bounded_admission<'target>(
         }
     }
     let websocket = state.request.is_websocket_upgrade();
+    let metric_route = runtime_api_route_kind(&state.path, websocket);
     let transport = if websocket { "websocket" } else { "http" };
     state.guards.active = match acquire_runtime_proxy_active_request_slot_with_wait(
         &shared.runtime_shared,
@@ -648,6 +655,10 @@ fn runtime_local_rewrite_bounded_admission<'target>(
     ) {
         Ok(guard) => Some(guard),
         Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+            crate::runtime_operational_metrics::record_runtime_api_admission_metric(
+                metric_route,
+                ApiAdmissionResult::GlobalLimitReached,
+            );
             mark_runtime_proxy_local_overload(&shared.runtime_shared, "active_request_limit");
             let response = runtime_proxy_overloaded_response(
                 &shared.runtime_shared,
@@ -658,6 +669,10 @@ fn runtime_local_rewrite_bounded_admission<'target>(
             return Err(state.reject(response));
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
+            crate::runtime_operational_metrics::record_runtime_api_admission_metric(
+                metric_route,
+                ApiAdmissionResult::RouteLimitReached,
+            );
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
             let response = runtime_proxy_overloaded_response(
                 &shared.runtime_shared,
@@ -668,6 +683,10 @@ fn runtime_local_rewrite_bounded_admission<'target>(
             return Err(state.reject(response));
         }
     };
+    crate::runtime_operational_metrics::record_runtime_api_admission_metric(
+        metric_route,
+        ApiAdmissionResult::Accepted,
+    );
     Ok(RuntimeLocalRewriteAdmittedRequest(state))
 }
 

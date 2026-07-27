@@ -533,30 +533,27 @@ Existing runtime hot-path benchmarks with 64 to 96 profile candidates remain
 regression coverage, but they do not substitute for governed registry,
 eligibility, scoring, refresh, and reconciliation benchmarks.
 
-## Current Repository Baseline and Gaps
+## Production Implementation
 
-| Area | Existing evidence | Gap to this design |
-| --- | --- | --- |
-| Provider identity and catalog | `prodex-provider-core` has a fixed `ProviderId`, static adapters/translators, and an embedded model catalog | No tenant provider-instance identity, immutable registry revision, approval, activation, suspension, or revocation |
-| Provider invocation | `prodex-provider-spi` carries tenant, principal, route, `SecretRef`, stream mode, and usage estimate | Invocation is built from an already configured provider rather than an authoritative routing decision |
-| Capability contract | Provider core and SPI expose explicit capability status and translation conformance | Capability negotiation is not the production provider-selection authority |
-| Routing | Runtime selection preserves profile affinity and ranks quota, health, inflight load, priority, and cache signals; gateway aliases support cost/latency strategies | These selectors do not hard-filter classification, residency, retention, trust, risk, and governance status before scoring |
-| Decision explanation | Runtime route traces are bounded and redacted | They are diagnostic and non-durable; they lack policy, registry, pricing, and score revisions and component proofs |
-| Health | Endpoint-aware transport backoff, circuit state, half-open reservation, and a background refresh queue exist | Selection can still perform synchronous usage probes; governance snapshots and strict queue/state bounds are incomplete |
-| Retry and affinity | Precommit retry, hard profile affinity, and no-retry-after-first-byte/cancellation are used in production | Fallback is not pinned to an original governed eligible set, and registry/policy revocation behavior is undefined |
-| Cost and quota | Static microusd model costs, estimates, atomic reservations, and reconciliation primitives exist | Governed pricing revisions and complete tenant/user/project/provider decision inputs are absent; some spend events use floating point |
-| Adapter execution | Static adapter/translator contracts and provider fixture suites exist | Actual network dispatch remains provider-specific application code rather than one production SPI dispatch contract |
-| Production gate | The local rewrite pipeline performs admission, constraints, governance hooks, accounting, and dispatch | Provider identity is derived from the configured bridge before dispatch; no durable governed `RoutingDecision` is required |
+| Area | Current source boundary |
+| --- | --- |
+| Registry authority | Tenant-scoped immutable provider-registry revisions use the shared approval, signed-artifact, activation, rollback, and LKG lifecycle. |
+| Routing | `prodex-application` performs hard eligibility and deterministic integer scoring from immutable policy, registry, pricing, affinity, health, and accounting inputs. |
+| Invocation | `prodex-provider-spi` receives the governed routing decision and a scoped `SecretRef`; provider adapters cannot choose a replacement outside the eligible set. |
+| Capability contract | Provider capability status is explicit, generated into the capability matrix, and enforced before dispatch. |
+| Affinity and retry | Continuations retain their owner. Fresh fallback is bounded to the original eligible set and stops after response commitment. |
+| Health and load | Endpoint-aware health, circuit, transport-backoff, quota, and bounded in-flight signals influence only eligible fresh selection. |
+| Cost and accounting | Integer micro-unit pricing revisions and atomic reservation/reconciliation bind the selected route to durable accounting evidence. |
+| Evidence | Bounded decision traces and mandatory audit records bind policy, registry, provider, outcome, and stable reason codes without request content. |
 
 Relevant current documentation includes
 [`provider-conformance.md`](../provider-conformance.md),
 [`provider-capabilities.md`](../provider-capabilities.md), and
-[`runtime-policy.md`](../runtime-policy.md). The phased ownership and canonical
-pipeline are defined in
-[`01-target-architecture.md`](01-target-architecture.md), while implementation
-status remains tracked in
+[`runtime-policy.md`](../runtime-policy.md). Current ownership and the canonical
+pipeline are defined in [`architecture.md`](../architecture.md), while
+source-verification status is tracked in
 [`implementation-ledger.md`](implementation-ledger.md).
 
-Phase 4 is complete only when every production provider dispatch can be joined
-to one durable decision proving tenant binding, hard eligibility, deterministic
-selection, pinned revisions, reservation, bounded fallback, and commit state.
+Every governed production dispatch is joined to a decision proving tenant
+binding, hard eligibility, deterministic selection, pinned revisions,
+reservation, bounded fallback, and commit state.

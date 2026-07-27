@@ -845,6 +845,30 @@ END $function$;
 "#,
 };
 
+pub const GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(15),
+    phase: PostgresMigrationPhase::Expand,
+    name: "015_governance_artifact_authenticity",
+    sql: r#"
+ALTER TABLE prodex_governance_revision_artifacts
+    ADD COLUMN IF NOT EXISTS signature_key_id TEXT,
+    ADD COLUMN IF NOT EXISTS artifact_signature TEXT;
+
+ALTER TABLE prodex_governance_revision_artifacts
+    DROP CONSTRAINT IF EXISTS prodex_governance_artifact_signature_pair;
+ALTER TABLE prodex_governance_revision_artifacts
+    ADD CONSTRAINT prodex_governance_artifact_signature_pair CHECK (
+        (signature_key_id IS NULL AND artifact_signature IS NULL)
+        OR (
+            signature_key_id IS NOT NULL
+            AND artifact_signature IS NOT NULL
+            AND char_length(signature_key_id) BETWEEN 1 AND 64
+            AND char_length(artifact_signature) BETWEEN 1 AND 128
+        )
+    ) NOT VALID;
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -860,6 +884,7 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     RESERVATION_STORAGE_SCOPE_MIGRATION,
     AUDIT_LEGAL_HOLD_MIGRATION,
     CONFIG_PUBLICATION_TRANSPORT_MIGRATION,
+    GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION,
 ];
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

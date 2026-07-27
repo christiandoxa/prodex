@@ -2,10 +2,10 @@
 
 ## Status and Scope
 
-This document separates repository evidence observed on 2026-07-13 from the
-storage and recovery target required by the enterprise-governance design. It is
-an implementation plan and operational contract, not evidence of production
-readiness, certification, or regulatory compliance.
+This document defines the implemented storage boundary and the operational
+acceptance contract for high availability and recovery. Checked-in source and
+synthetic drills are not evidence of a particular deployment's readiness,
+certification, or regulatory compliance.
 
 The scope includes authoritative governance and accounting state, tenant
 isolation, migrations, cache and coordination state, service availability,
@@ -16,21 +16,21 @@ references rather than plaintext secret material.
 
 The terms in this document have the following meaning:
 
-- **Existing evidence** is behavior or configuration present in the current
+- **Source control** is behavior or configuration implemented in this
   repository.
-- **Target** is required behavior that is not proven merely by this document.
-- **Gap** is work or operational evidence still needed before the target can be
-  treated as implemented.
+- **Deployment requirement** is an invariant each target environment must
+  satisfy.
+- **Acceptance evidence** is output captured from the target environment.
 
-## Existing Evidence and Material Gaps
+## Source Boundaries and Environment Acceptance
 
-| Area | Existing evidence | Gap against the target |
+| Area | Source control | Environment acceptance |
 | --- | --- | --- |
 | PostgreSQL schema | External migrations cover tenant/accounting plus four-kind governance revisions/pointers/approvals, execution and break-glass approvals, sessions/revocation epochs, audit-chain metadata, legal holds, retention purge, SIEM outbox and dead letters. | Managed-service migration, failover and recovery evidence remains an environment responsibility. |
 | Tenant isolation | Migrations enable and force RLS on every discovered tenant-policy table. The runtime sets tenant context within a transaction. PostgreSQL proof and backup drill use a `NOSUPERUSER NOBYPASSRLS` role and exercise cross-tenant denial. | Complete production role/grant separation, connection-pool reset behavior, and managed-service role policy remain deployment evidence. |
 | Migration boundary | `prodex-storage-postgres` rejects DDL in gateway startup and request-path modes. The Kubernetes manifest supplies a distinct migration Job and service account. Governance migrations are idempotency-tested. | Managed-environment downgrade/forward-recovery rehearsal remains operator evidence. |
 | SQLite | `prodex-storage-sqlite-runtime` implements transactional four-kind lifecycle, session, audit/export and outbox compatibility operations over the driver-free SQLite plan crate. | SQLite does not provide the multi-replica HA or PostgreSQL RLS boundary required by enterprise enforcement. |
-| Redis | `prodex-storage-redis` has a core contract that rejects authoritative durable state and provides bounded coordination and rate-limit behavior. | Compatibility configuration and documentation still permit Redis-backed gateway state. That ambiguity must be removed for enterprise enforcement modes. Redis loss and failover behavior are not proven in an environment drill. |
+| Redis | `prodex-storage-redis` rejects authoritative durable state and provides bounded, rebuildable coordination and rate-limit behavior; enforcement startup validates the required durable topology. | Exercise loss, restart, failover, and rebuild against the environment's Redis service. |
 | Gateway availability | The Kubernetes baseline declares three gateway and three control-plane replicas, topology spreading, PodDisruptionBudgets with `minAvailable: 2`, HPAs, health probes, and graceful termination. | The manifest does not deploy PostgreSQL HA. End-to-end failover under active unary and streaming traffic is not proven. |
 | Backup and restore | `scripts/ci/backup-restore-drill.mjs` encrypts a PostgreSQL custom dump with an authenticated AES-256-GCM envelope and an ephemeral separated key, removes plaintext before restore, then compares tenant/accounting/governance fingerprints, checks a recovery-point marker, validates policy/provider/session/audit/SIEM links, and tests RLS. It writes redacted JSON evidence. | Production KMS/HSM custody, legal holds, WAL/PITR, immutable retention, regional recovery and application cutover remain environment responsibilities. |
 | Recovery thresholds | The synthetic drill has configurable limits and defaults of 60 seconds for its `rpo_seconds` value and 300 seconds for restore duration. | Those CI thresholds are not approved production RPO/RTO objectives. The current `rpo_seconds` calculation measures elapsed time from dump recovery point to restored verification, not the amount of acknowledged production data lost at a declared disaster cutoff. |
@@ -39,7 +39,7 @@ The terms in this document have the following meaning:
 
 ## Authoritative Storage Contract
 
-### Target ownership by backend
+### Ownership by backend
 
 | Data class | Authoritative target | Non-authoritative copies |
 | --- | --- | --- |
@@ -67,19 +67,19 @@ record or alter the active governance revision. Redis recovery should rebuild
 from PostgreSQL and current traffic rather than restore Redis as a source of
 truth.
 
-The bank-enforcement target must fail closed when authoritative state needed to
+Bank enforcement fails closed when authoritative state needed to
 authorize, classify, reserve, audit, or execute a request cannot be read or
 committed. Exact behavior for an unavailable Redis coordination service must be
 defined per operation: security and budget limits must become conservative,
 while no code may silently substitute Redis data for PostgreSQL authority.
-These deployment modes and startup gates are target work; they are not present
-under those names in the current repository.
+Typed startup gates reject bank configurations without the required
+PostgreSQL, Redis coordination, TLS, identity, secret, inspection, and audit
+boundaries.
 
-## Target Governance Schema
+## Governance Schema Contract
 
-The PostgreSQL model should add versioned migrations for at least the following
-bounded, tenant-scoped entities. Names are conceptual until the migration and
-domain-model reviews approve concrete table names.
+Versioned PostgreSQL migrations and repository contracts cover the following
+bounded, tenant-scoped entities.
 
 ### Identity and session state
 
@@ -149,7 +149,7 @@ authorization design rather than an omitted tenant key by accident. Raw prompt,
 response, token, credential, or secret content must not be added merely to make
 recovery verification convenient.
 
-## PostgreSQL Isolation and Role Target
+## PostgreSQL Isolation and Role Contract
 
 RLS is defense in depth, not a replacement for tenant-aware domain types and
 query parameters. The target database contract is:

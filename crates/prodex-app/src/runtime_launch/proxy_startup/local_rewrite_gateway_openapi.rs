@@ -80,7 +80,7 @@ mod tests {
     const COMPONENTS_DIGEST: &str =
         "c2400ae0ae697f55ecdb969515aad49ebe4a6c28b5ad361934ebf88f41ed6326";
     const DOCUMENT_DIGEST: &str =
-        "a948b18ef5086f126b260b7deaeef096481acef904ef8f84788a8b23aa242866";
+        "2a1514dd27cbeb3641e6f6bb7f044a33034b5ff710277560497f4711c9806aed";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())

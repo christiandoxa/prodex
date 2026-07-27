@@ -847,12 +847,16 @@ fn runtime_gateway_governance_authority(
             sqlite_repository.as_ref(),
             *tenant_id,
             prodex_storage::GovernanceArtifactKind::Policy,
-            |artifact| {
-                crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
-                    artifact,
-                    deployment_mode,
-                )
-                .is_ok()
+            |input| {
+                super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                        &runtime_config.governance_policy,
+                        input,
+                    )
+                    && crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                        input.compiled_artifact,
+                        deployment_mode,
+                    )
+                    .is_ok()
             },
         )
         .and_then(|stored| {
@@ -872,12 +876,16 @@ fn runtime_gateway_governance_authority(
             sqlite_repository.as_ref(),
             *tenant_id,
             prodex_storage::GovernanceArtifactKind::ClassificationRules,
-            |artifact| {
-                super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
-                    *tenant_id,
-                    artifact,
-                )
-                .is_ok()
+            |input| {
+                super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                        &runtime_config.governance_policy,
+                        input,
+                    )
+                    && super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                        input.tenant_id,
+                        input.compiled_artifact,
+                    )
+                    .is_ok()
             },
         )
         .and_then(|stored| {
@@ -896,14 +904,18 @@ fn runtime_gateway_governance_authority(
             sqlite_repository.as_ref(),
             *tenant_id,
             prodex_storage::GovernanceArtifactKind::ProviderRegistry,
-            |artifact| {
-                super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
-                    artifact,
-                    provider,
-                    provider_credential,
-                    deployment_mode,
-                )
-                .is_ok()
+            |input| {
+                super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                        &runtime_config.governance_policy,
+                        input,
+                    )
+                    && super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
+                        input.compiled_artifact,
+                        provider,
+                        provider_credential,
+                        deployment_mode,
+                    )
+                    .is_ok()
             },
         )
         .and_then(|stored| {
@@ -924,11 +936,15 @@ fn runtime_gateway_governance_authority(
             sqlite_repository.as_ref(),
             *tenant_id,
             prodex_storage::GovernanceArtifactKind::RoutingScores,
-            |artifact| {
-                super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
-                    artifact,
-                )
-                .is_ok()
+            |input| {
+                super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                        &runtime_config.governance_policy,
+                        input,
+                    )
+                    && super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
+                        input.compiled_artifact,
+                    )
+                    .is_ok()
             },
         )
         .and_then(|stored| {
@@ -987,7 +1003,7 @@ fn runtime_gateway_load_governance_snapshot(
     sqlite_repository: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
     tenant_id: prodex_domain::TenantId,
     kind: prodex_storage::GovernanceArtifactKind,
-    validate_artifact: impl FnMut(&[u8]) -> bool,
+    validate_artifact: impl FnMut(&prodex_storage::GovernanceArtifactValidationInput<'_>) -> bool,
 ) -> Result<prodex_storage::GovernanceSnapshot> {
     match authority {
         RuntimeGovernanceAuthority::Sqlite { .. } => sqlite_repository
@@ -1098,6 +1114,11 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
         let shutdown = Arc::clone(shutdown);
         let log_path = shared.runtime_shared.log_path.clone();
         let deployment_mode = shared.runtime_shared.runtime_config.governance.mode;
+        let governance_policy = shared
+            .runtime_shared
+            .runtime_config
+            .governance_policy
+            .clone();
         worker_threads.push(thread::spawn(move || {
             let sqlite_repository = match &authority {
                 RuntimeGovernanceAuthority::Sqlite { path, .. } => {
@@ -1160,12 +1181,16 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         sqlite_repository.as_ref(),
                         *tenant_id,
                         prodex_storage::GovernanceArtifactKind::Policy,
-                        |artifact| {
-                            crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
-                                artifact,
-                                deployment_mode,
-                            )
-                            .is_ok()
+                        |input| {
+                            super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                                    &governance_policy,
+                                    input,
+                                )
+                                && crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                                    input.compiled_artifact,
+                                    deployment_mode,
+                                )
+                                .is_ok()
                         },
                     ) && let Ok(snapshot) =
                         crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
@@ -1185,12 +1210,16 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         sqlite_repository.as_ref(),
                         *tenant_id,
                         prodex_storage::GovernanceArtifactKind::ClassificationRules,
-                        |artifact| {
-                            super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
-                                *tenant_id,
-                                artifact,
-                            )
-                            .is_ok()
+                        |input| {
+                            super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                                    &governance_policy,
+                                    input,
+                                )
+                                && super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                                    input.tenant_id,
+                                    input.compiled_artifact,
+                                )
+                                .is_ok()
                         },
                     ) && let Ok(snapshot) = super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
                         *tenant_id,
@@ -1206,14 +1235,18 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         sqlite_repository.as_ref(),
                         *tenant_id,
                         prodex_storage::GovernanceArtifactKind::ProviderRegistry,
-                        |artifact| {
-                            super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
-                                artifact,
-                                &provider,
-                                provider_credential.as_ref(),
-                                deployment_mode,
-                            )
-                            .is_ok()
+                        |input| {
+                            super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                                    &governance_policy,
+                                    input,
+                                )
+                                && super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
+                                    input.compiled_artifact,
+                                    &provider,
+                                    provider_credential.as_ref(),
+                                    deployment_mode,
+                                )
+                                .is_ok()
                         },
                     ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                         &stored.compiled_artifact,
@@ -1231,9 +1264,13 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         sqlite_repository.as_ref(),
                         *tenant_id,
                         prodex_storage::GovernanceArtifactKind::RoutingScores,
-                        |artifact| {
-                            super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(artifact)
-                                .is_ok()
+                        |input| {
+                            super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
+                                    &governance_policy,
+                                    input,
+                                )
+                                && super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(input.compiled_artifact)
+                                    .is_ok()
                         },
                     ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
                         &stored.compiled_artifact,
@@ -1484,6 +1521,7 @@ fn handle_runtime_local_rewrite_proxy_request(
     request: tiny_http::Request,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
+    let request = RuntimeLocalRewriteRequest::tiny(request);
     let target = match prodex_gateway_http::CanonicalRequestTarget::parse(request.url()) {
         Ok(target) => target,
         Err(_) => {
@@ -1495,7 +1533,7 @@ fn handle_runtime_local_rewrite_proxy_request(
             return;
         }
     };
-    run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);
+    run_runtime_local_rewrite_pipeline(request, target, shared);
 }
 #[cfg(test)]
 #[path = "local_rewrite_request_guard_tests.rs"]

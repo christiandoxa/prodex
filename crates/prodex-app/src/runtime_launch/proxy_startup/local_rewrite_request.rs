@@ -2,6 +2,7 @@ use std::{
     io::{self, Read},
     num::NonZeroUsize,
     sync::Arc,
+    time::Instant,
 };
 
 use bytes::Bytes;
@@ -9,6 +10,7 @@ use prodex_gateway_server::{
     GatewayHandlerError, GatewayHandlerResponse, GatewayHandlerResult, GatewayResponseBodySender,
     bounded_in_process_upgrade, bounded_response_body_with_guard,
 };
+use prodex_observability::{ApiRouteKind, ApiStatusClass};
 use tokio::sync::{mpsc, oneshot};
 
 use super::local_rewrite_response::runtime_local_rewrite_append_call_id_header;
@@ -26,6 +28,7 @@ pub(super) struct RuntimeLocalRewriteRequest {
     headers: Vec<(String, String)>,
     network_zone: prodex_domain::NetworkZone,
     mtls_peer_certificate_sha256: Option<[u8; 32]>,
+    metric_started_at: Instant,
     transport: RuntimeLocalRewriteTransport,
 }
 
@@ -89,6 +92,7 @@ impl RuntimeLocalRewriteRequest {
             headers,
             network_zone,
             mtls_peer_certificate_sha256: None,
+            metric_started_at: Instant::now(),
             transport: RuntimeLocalRewriteTransport::Tiny(request),
         }
     }
@@ -108,6 +112,7 @@ impl RuntimeLocalRewriteRequest {
             headers,
             network_zone,
             mtls_peer_certificate_sha256,
+            metric_started_at: Instant::now(),
             transport: RuntimeLocalRewriteTransport::Direct { body, reply },
         }
     }
@@ -177,6 +182,7 @@ impl RuntimeLocalRewriteRequest {
     }
 
     pub(super) fn respond(self, response: tiny_http::ResponseBox) -> io::Result<()> {
+        self.record_api_red_metric(response.status_code().0);
         match self.transport {
             RuntimeLocalRewriteTransport::Tiny(request) => request.respond(response),
             RuntimeLocalRewriteTransport::Direct { reply, .. } => reply.respond(response),
@@ -188,6 +194,7 @@ impl RuntimeLocalRewriteRequest {
         mut response: RuntimeStreamingResponse,
         call_id_shared: Option<&super::local_rewrite::RuntimeLocalRewriteProxyShared>,
     ) -> io::Result<()> {
+        self.record_api_red_metric(response.status);
         if let Some(shared) = call_id_shared {
             runtime_local_rewrite_append_call_id_header(
                 &mut response.headers,
@@ -208,6 +215,7 @@ impl RuntimeLocalRewriteRequest {
         protocol: &str,
         response: tiny_http::ResponseBox,
     ) -> io::Result<Box<dyn TinyReadWrite + Send>> {
+        self.record_api_red_metric(response.status_code().0);
         match self.transport {
             RuntimeLocalRewriteTransport::Tiny(request) => Ok(request.upgrade(protocol, response)),
             RuntimeLocalRewriteTransport::Direct { reply, .. } => reply.upgrade(protocol, response),
@@ -227,6 +235,53 @@ impl RuntimeLocalRewriteRequest {
             RuntimeLocalRewriteTransport::Tiny(request) => request.as_reader(),
             RuntimeLocalRewriteTransport::Direct { body, .. } => body,
         }
+    }
+
+    fn record_api_red_metric(&self, status: u16) {
+        let route = runtime_api_route_kind(&self.path_and_query, self.is_websocket_upgrade());
+        let status_class = runtime_api_status_class(status);
+        let duration_ms =
+            u64::try_from(self.metric_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        crate::runtime_operational_metrics::record_runtime_api_red_metric(
+            route,
+            status_class,
+            duration_ms,
+        );
+    }
+}
+
+pub(super) fn runtime_api_route_kind(path_and_query: &str, websocket: bool) -> ApiRouteKind {
+    let path = path_and_query.split('?').next().unwrap_or(path_and_query);
+    if websocket {
+        ApiRouteKind::Websocket
+    } else if path.ends_with("/responses/compact") {
+        ApiRouteKind::Compact
+    } else if matches!(
+        path,
+        "/healthz" | "/readyz" | "/livez" | "/startupz" | "/metrics"
+    ) {
+        ApiRouteKind::Health
+    } else if path == "/v1/prodex/gateway"
+        || path.starts_with("/v1/prodex/gateway/")
+        || path.contains("/admin/")
+        || path.starts_with("/admin/")
+        || path.contains("/scim/")
+        || path.starts_with("/scim/")
+        || path.contains("/billing/")
+    {
+        ApiRouteKind::ControlPlane
+    } else {
+        ApiRouteKind::Responses
+    }
+}
+
+fn runtime_api_status_class(status: u16) -> ApiStatusClass {
+    match status {
+        100..=199 => ApiStatusClass::Informational,
+        200..=299 => ApiStatusClass::Success,
+        300..=399 => ApiStatusClass::Redirection,
+        400..=499 => ApiStatusClass::ClientError,
+        _ => ApiStatusClass::ServerError,
     }
 }
 
@@ -445,6 +500,39 @@ mod tests {
         drop(sender);
         let error = truncated.read(&mut byte).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn api_metric_route_and_status_classes_are_closed_and_stable() {
+        assert_eq!(
+            runtime_api_route_kind("/v1/responses?stream=true", false),
+            ApiRouteKind::Responses
+        );
+        assert_eq!(
+            runtime_api_route_kind("/v1/responses/compact", false),
+            ApiRouteKind::Compact
+        );
+        assert_eq!(
+            runtime_api_route_kind("/v1/responses", true),
+            ApiRouteKind::Websocket
+        );
+        assert_eq!(
+            runtime_api_route_kind("/admin/v1/policies", false),
+            ApiRouteKind::ControlPlane
+        );
+        assert_eq!(
+            runtime_api_route_kind("/v1/prodex/gateway/policies", false),
+            ApiRouteKind::ControlPlane
+        );
+        assert_eq!(
+            runtime_api_route_kind("/readyz", false),
+            ApiRouteKind::Health
+        );
+        assert_eq!(runtime_api_status_class(101), ApiStatusClass::Informational);
+        assert_eq!(runtime_api_status_class(204), ApiStatusClass::Success);
+        assert_eq!(runtime_api_status_class(302), ApiStatusClass::Redirection);
+        assert_eq!(runtime_api_status_class(429), ApiStatusClass::ClientError);
+        assert_eq!(runtime_api_status_class(503), ApiStatusClass::ServerError);
     }
 
     #[test]

@@ -16,8 +16,8 @@ use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
     ApprovalVoteRequest, AuditOutboxWriteCommand, GovernanceActivationAction,
     GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
-    GovernanceRepositoryError, GovernanceRevisionWriteCommand, GovernanceWriteOutcome,
-    TenantStorageKey,
+    GovernanceArtifactValidationInput, GovernanceRepositoryError, GovernanceRevisionWriteCommand,
+    GovernanceWriteOutcome, TenantStorageKey,
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -93,7 +93,7 @@ pub trait ApplicationGovernanceRepository {
     fn activate_revision(
         &self,
         request: GovernanceActivationRequest,
-        validate_artifact: &mut dyn FnMut(&[u8]) -> bool,
+        validate_artifact: &mut dyn FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError>;
 
     fn append_audit_outbox(
@@ -412,7 +412,7 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanc
         action: ControlPlaneActionRequest,
         mut request: GovernanceActivationRequest,
         audit: ApplicationGovernanceAuditLink,
-        validate_artifact: impl FnMut(&[u8]) -> bool,
+        validate_artifact: impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, ApplicationGovernanceLifecycleError> {
         if request.kind != GovernanceArtifactKind::Policy
             || request.tenant_id != action.resource.tenant_id

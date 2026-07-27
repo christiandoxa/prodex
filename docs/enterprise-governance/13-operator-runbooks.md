@@ -1,9 +1,10 @@
 # Operator Runbooks
 
-These runbooks describe target governed operation. Commands and dashboards must
-be replaced with deployed, tested equivalents before production use. Existing
-runtime diagnosis (`prodex doctor --runtime`), logs, policy LKG and recovery
-primitives remain useful; governance-specific automation is still incomplete.
+These runbooks describe governed operation. `prodex doctor --runtime`, runtime
+logs, the Prometheus/Grafana assets under `deploy/observability/`, policy LKG,
+audit-integrity, outbox-health, and recovery controls provide the repository
+entry points. Deployment owners bind them to environment-specific dashboards,
+pager routes, access roles, and incident systems before production use.
 
 ## Common first response
 

@@ -83,6 +83,22 @@ authority_tenants = [
 }
 
 #[test]
+fn governance_artifact_verifier_requires_an_exact_ed25519_public_key() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+"#,
+    );
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("a non-32-byte public key must be rejected");
+    assert!(error.to_string().contains("Ed25519 public key"));
+}
+
+#[test]
 fn governance_policy_rules_are_strict_typed_and_bounded() {
     let valid = parse_policy(
         r#"
@@ -274,6 +290,10 @@ classification_checksum = "sha256-test-v1"
 provider_registry_revision = 1
 routing_score_revision = 1
 
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 [governance.session]
 absolute_timeout_seconds = 3600
 idle_timeout_seconds = 900
@@ -291,6 +311,11 @@ training_use = false
 
     validate_runtime_policy_file(&policy, Path::new("policy.toml"))
         .expect("complete immutable governance snapshots should validate");
+    let mut unsigned = policy;
+    unsigned.governance.artifact_verifiers.clear();
+    let error = validate_runtime_policy_file(&unsigned, Path::new("policy.toml"))
+        .expect_err("enforcing governance without a verifier must fail closed");
+    assert!(error.to_string().contains("Ed25519 artifact verifier"));
 }
 
 #[test]
@@ -306,6 +331,10 @@ classification = "enforce"
 policy = "enforce"
 routing = "enforce"
 mandatory_audit = true
+
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 "#,
     );
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
@@ -333,6 +362,10 @@ routing = "enforce"
 mandatory_audit = {mandatory_audit}
 anonymous_data_plane = {anonymous_data_plane}
 raw_secret_sources = {raw_secret_sources}
+
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 "#
         );
         let error = validate_runtime_policy_file(&parse_policy(&input), Path::new("policy.toml"))
@@ -409,6 +442,10 @@ classification_revision = "classification-v1"
 classification_checksum = "sha256-test-v1"
 provider_registry_revision = 1
 routing_score_revision = 1
+
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 [governance.session]
 absolute_timeout_seconds = 3600

@@ -26,7 +26,7 @@ Approval state needs durable uniqueness, expiry, revocation and use accounting.
 Retries with the same idempotency key observe one outcome. Raw request content
 is not stored in approval records.
 
-## Implementation status
+## Current implementation
 
 The optional execution-approval effect is enforced in the gateway before
 provider dispatch. The production PEP derives a content-free fingerprint from

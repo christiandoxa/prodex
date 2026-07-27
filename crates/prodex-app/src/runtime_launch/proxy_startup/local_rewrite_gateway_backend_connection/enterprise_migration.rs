@@ -269,6 +269,13 @@ fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
 }
 
 fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
+    if runtime_gateway_sqlite_table_has_column(
+        conn,
+        "prodex_governance_revision_artifacts",
+        "signature_key_id",
+    )? {
+        return Ok(11);
+    }
     if runtime_gateway_sqlite_table_exists(conn, "prodex_audit_legal_holds")? {
         return Ok(10);
     }
@@ -308,6 +315,22 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
 }
 
 fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
+    if runtime_gateway_postgres_table_has_column(
+        client,
+        "prodex_governance_revision_artifacts",
+        "signature_key_id",
+    )? {
+        return Ok(15);
+    }
+    if runtime_gateway_postgres_table_exists(client, "prodex_config_publication_events")? {
+        return Ok(14);
+    }
+    if runtime_gateway_postgres_table_exists(client, "prodex_audit_legal_holds")? {
+        return Ok(13);
+    }
+    if runtime_gateway_postgres_table_has_column(client, "prodex_reservations", "storage_scope")? {
+        return Ok(12);
+    }
     if runtime_gateway_postgres_table_has_column(
         client,
         "prodex_tenants",

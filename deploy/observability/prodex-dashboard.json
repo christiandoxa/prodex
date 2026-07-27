@@ -138,6 +138,253 @@
       ],
       "title": "Policy lifecycle (1h)",
       "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, inspection_stage) (rate(prodex_inspection_duration_microseconds_bucket[5m])))",
+          "legendFormat": "p99 {{inspection_stage}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, inspection_stage) (rate(prodex_inspection_duration_microseconds_bucket[5m])))",
+          "legendFormat": "p95 {{inspection_stage}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Inspection latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, provider) (rate(prodex_provider_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p99 {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(prodex_provider_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p95 {{provider}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Provider latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum by (provider, provider_result) (rate(prodex_provider_requests_total[5m]))",
+          "legendFormat": "{{provider}} / {{provider_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "max by (siem_outbox_status) (prodex_governance_siem_outbox_pending)",
+          "legendFormat": "pending / {{siem_outbox_status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (siem_outbox_status) (prodex_governance_siem_outbox_dead_lettered)",
+          "legendFormat": "dead letters / {{siem_outbox_status}}",
+          "refId": "B"
+        },
+        {
+          "expr": "max by (siem_outbox_status) (prodex_governance_siem_outbox_oldest_pending_lag_milliseconds)",
+          "legendFormat": "lag ms / {{siem_outbox_status}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Governance SIEM outbox",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum by (api_route, status_class) (rate(prodex_api_requests_total[5m]))",
+          "legendFormat": "{{api_route}} / {{status_class}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway API outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p99 {{api_route}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p95 {{api_route}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Gateway API time to response commit",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "sum by (audit_operation, audit_result) (rate(prodex_audit_events_total[5m]))",
+          "legendFormat": "{{audit_operation}} / {{audit_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Governance audit outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "prodex_queue_depth{queue_kind=\"persistence\"} / clamp_min(prodex_queue_capacity{queue_kind=\"persistence\"}, 1)",
+          "legendFormat": "audit persistence",
+          "refId": "A"
+        }
+      ],
+      "title": "Bounded queue utilization",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct RevisionRow {
     pub(super) checksum: String,
     pub(super) compiled_artifact: Vec<u8>,
+    pub(super) authenticity: Option<GovernanceArtifactAuthenticity>,
     pub(super) created_by: PrincipalId,
     pub(super) created_at_unix_ms: u64,
 }
@@ -37,11 +38,22 @@ pub(super) async fn load_revision_row(
         .await
         .map_err(database_error)?
         .map(|row| {
+            let signature_key_id = row.get::<_, Option<String>>(2);
+            let artifact_signature = row.get::<_, Option<String>>(3);
+            let authenticity = match (signature_key_id, artifact_signature) {
+                (Some(key_id), Some(signature_base64)) => Some(GovernanceArtifactAuthenticity {
+                    key_id,
+                    signature_base64,
+                }),
+                (None, None) => None,
+                _ => return Err(GovernanceRepositoryError::Database),
+            };
             Ok(RevisionRow {
                 checksum: row.get(0),
                 compiled_artifact: row.get(1),
-                created_by: PrincipalId::from_uuid(row.get::<_, Uuid>(2)),
-                created_at_unix_ms: from_i64(row.get(3))?,
+                authenticity,
+                created_by: PrincipalId::from_uuid(row.get::<_, Uuid>(4)),
+                created_at_unix_ms: from_i64(row.get(5))?,
             })
         })
         .transpose()
@@ -53,13 +65,20 @@ pub(super) async fn load_verified_snapshot(
     kind: GovernanceArtifactKind,
     revision_id: &str,
     source: GovernanceSnapshotSource,
-    validate_artifact: &mut impl FnMut(&[u8]) -> bool,
+    validate_artifact: &mut impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
 ) -> Result<Option<GovernanceSnapshot>, GovernanceRepositoryError> {
     let Some(revision) = load_revision_row(transaction, tenant_id, kind, revision_id).await? else {
         return Ok(None);
     };
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id,
+        kind,
+        revision_id,
+        compiled_artifact: &revision.compiled_artifact,
+        authenticity: revision.authenticity.as_ref(),
+    };
     if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-        || !validate_artifact(&revision.compiled_artifact)
+        || !validate_artifact(&validation)
     {
         return Ok(None);
     }

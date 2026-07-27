@@ -335,6 +335,41 @@ no static tenant-bound admin token. `enterprise_enforce` and `bank_enforce` requ
 an authoritative SQLite or PostgreSQL store and at least one configured authority
 tenant.
 
+Enforcing modes also require at least one trusted Ed25519 artifact verifier. Public
+keys are raw 32-byte Ed25519 keys encoded with standard or URL-safe base64. Multiple
+entries provide a rotation overlap; remove an old key only after every active and
+last-known-good artifact has been re-signed with a retained key.
+
+```toml
+[[governance.artifact_verifiers]]
+key_id = "release-2026-01"
+ed25519_public_key_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+```
+
+The private signing key remains outside Prodex. The
+`POST /v1/prodex/gateway/{resource}/validate` endpoint accepts an optional `revision_id`; when it
+is present, the response includes the exact base64 payload that the publisher must
+sign. Revision creation then supplies the detached signature:
+
+```json
+{
+  "revision_id": "00000000-0000-7000-8000-000000000001",
+  "artifact": {},
+  "authenticity": {
+    "key_id": "release-2026-01",
+    "signature": "BASE64_ED25519_SIGNATURE"
+  }
+}
+```
+
+The versioned signing payload is domain-separated and length-prefixes the tenant
+ID, artifact kind, revision ID, and SHA-256 artifact checksum. This prevents a
+valid signature from being replayed across tenants, artifact kinds, revisions, or
+payloads. SQLite and PostgreSQL persist the key ID and signature with the immutable
+revision and verify them again during activation, startup hydration, refresh, and
+last-known-good fallback. Unsigned legacy revisions remain compatible only in
+personal and observe modes; enforcing modes reject them before activation or load.
+
 The stored `Policy` artifact is strict JSON using the same schema as
 `RuntimePolicyGovernanceSettings`. Local `policy.toml` can configure the equivalent
 fields directly. An empty `policy_rules` list keeps the mode baseline. Non-empty

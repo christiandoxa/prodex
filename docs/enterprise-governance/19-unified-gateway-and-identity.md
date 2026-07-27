@@ -2,13 +2,13 @@
 
 ## Status and Scope
 
-This document defines the target authenticated boundary for CLI, IDE, browser,
-and service traffic. It separates repository evidence observed on 2026-07-13
-from controls that still require implementation and environment-specific proof.
-It is not evidence that a deployment is bank-ready, certified, or approved by a
+This document defines the authenticated boundary for CLI, IDE, browser, and
+service traffic. It distinguishes implemented source controls from
+environment-specific identity, PKI, network, and availability acceptance. It
+is not evidence that a deployment is bank-ready, certified, or approved by a
 regulator.
 
-The target request sequence is:
+The canonical request sequence is:
 
 ```text
 channel
@@ -27,28 +27,28 @@ channel
 No channel, route alias, provider adapter, or compatibility entry point may
 skip a stage required by the active governance mode.
 
-## Existing Evidence and Gaps
+## Current Source Boundary
 
-| Area | Existing repository evidence | Gap against the target |
+| Area | Implemented control | Environment acceptance |
 | --- | --- | --- |
-| Identity domain | `prodex-domain` has typed issuer, audience, algorithm allowlists, principal kinds, tenant context, credential scopes, role mapping, and redacted error plans. | It does not define the complete human and workload authentication protocol or the requested access-session policy. |
-| OIDC validation | `prodex-authn` validates exact HTTPS OIDC endpoints, restricts JWKS origins, rejects redirects, and provides bounded JWKS last-known-good behavior. The gateway verifies bearer tokens and implements browser Authorization Code with PKCE S256, state/nonce checks, bounded token exchange, local logout, and signed recent-event OIDC back-channel logout. | A CLI/IDE device flow and deployed IdP rotation/failure exercises remain outside the current browser contract. |
-| Service identity | The gateway verifies workload JWT signature, issuer, audience, subject, tenant, and required `data_plane` scope before building a service principal. JWKS discovery/cache follows the same bounded no-redirect origin policy as human OIDC. | Credential issuance and managed issuer/key rotation remain deployment responsibilities. |
-| mTLS | The direct Rustls listener loads projected server identity and client CA material, verifies client certificate chains, computes the leaf SHA-256 fingerprint, and requires matching JWT `cnf.x5t#S256` evidence when configured. | Deployed CA revocation/rotation, certificate inventory, and bank PKI outage exercises remain environment acceptance work. |
-| Gateway HTTP policy | `prodex-gateway-http` has strict request-target parsing, route/method classification, bounded header count/total/single-value size, body limits, one derived deadline enforced across application stages, stream concurrency, cancellation, backpressure, and drain plans. | Distributed admission parity and full OpenAPI compatibility enforcement remain deployment/integration work. |
-| Application admission | `prodex-gateway-core`, `prodex-application`, and the canonical runtime path enforce typed tenant, principal, authorization, reservation, provider invocation, and trace relationships. | Anonymous compatibility admission and early WebSocket/Gemini paths have not all been removed or proven to converge on the governed application use case. |
-| Browser protections | The unified edge enforces canonical Host/Origin/CSRF policy and exposes opt-in login/callback/logout routes. PKCE transactions and OIDC-token-backed sessions are bounded; accepted PostgreSQL+Redis topologies share them across replicas, and every request revalidates the token before reconstructing admin identity. Cookies are Secure, HttpOnly, SameSite, path-scoped, and explicitly cleared on logout. Signed back-channel logout tokens revoke bounded `sid`/`sub` indexes without storing those identifiers in Redis keys. | Deployed IdP failure/rotation exercises remain environment acceptance work. |
-| Trusted proxy | The production async edge preserves the TCP peer, requires explicit `gateway.expected_host` for non-loopback listeners, rejects untrusted forwarding, derives a bounded right-to-left client address from exact trusted proxies, strips forwarding headers before dispatch, and maps validated metadata to a low-cardinality governance zone. | Privacy-preserving persisted network-risk history and deployment-specific multi-proxy/geo evidence remain outside the in-process request contract. |
-| Sessions | Governed sessions enforce tenant/principal binding, timeouts, concurrency, monotonic classification, revision pins and atomic revoke/audit/outbox; a shared authority revocation epoch triggers cache refresh on a 250-millisecond poll path. A virtual-key holder can revoke only its bound current session through the bodyless `sessions/current/revoke` route. Browser sessions also accept verified OIDC back-channel logout. Verified OIDC `acr` supplies MFA/strength evidence, while a bounded `auth_time` plus browser `max_age` supplies fresh reauthentication evidence. | A deployed two-gateway chaos proof remains environment acceptance work. |
-| Deployment exposure | Kubernetes uses a ClusterIP-style internal service, non-root containers, read-only filesystems, dropped capabilities, resource bounds, probes, graceful drain scaffolding, and the runtime can terminate direct mTLS. | Compose currently publishes a host port broadly, and the checked-in deployment does not prove private ingress, IdP/Vault/SIEM egress restrictions, managed PKI rotation, or the full bank profile. |
+| Identity domain | Typed issuer, audience, algorithm allowlists, human/workload principals, tenant context, scopes, role mapping, assurance, and redacted errors | Approve issuer, claims, and role mapping |
+| OIDC | Exact HTTPS discovery/JWKS origin policy, no redirects, bounded LKG, bearer verification, Authorization Code with PKCE S256, state/nonce, logout, and signed back-channel logout | Exercise IdP key rotation and outage |
+| Service identity | Workload JWT signature/issuer/audience/subject/tenant/scope verification with bounded background JWKS refresh | Operate credential issuance and rotation |
+| mTLS | Rustls server identity, client-chain verification, leaf fingerprinting, and optional JWT `cnf.x5t#S256` binding | Operate CA inventory, revocation, and rotation |
+| Gateway HTTP | Canonical target/method classification, bounded headers/body/deadline/concurrency, cancellation, backpressure, and drain | Size and load for the deployed topology |
+| Application admission | One typed tenant/principal/authz/session/inspection/PDP/accounting/routing/response/audit sequence for supported routes; uninspectable enforcing WebSocket attempts receive HTTP fallback before upgrade | Validate ingress and client compatibility |
+| Browser boundary | Exact Host/Origin/CSRF, bounded shared PKCE/session state, secure cookies, token revalidation, and logout revocation | Exercise browser and IdP integration |
+| Trusted proxy | Exact trusted peers, bounded forwarding derivation/stripping, required expected Host, and low-cardinality network zone | Validate the deployed proxy chain |
+| Sessions | Tenant/principal binding, rotation, timeouts, concurrency, monotonic classification, revision pins, durable revoke/audit/outbox, and cross-replica revocation epochs | Exercise replica loss and recovery |
+| Deployment exposure | Internal Kubernetes service, non-root/read-only workloads, dropped capabilities, resource limits, probes, drain, and deny-default allow-listed egress policy | Validate the cluster CNI, ingress, IdP, Vault, SIEM, and PKI paths |
 
-Existing primitives are foundations, not proof of the Phase 5 exit gate.
+These controls must never disclose another tenant's existence, limits,
+provider state, or policy internals.
 
 ## Deployment Modes
 
-The gateway must consume one validated, versioned governance snapshot. The mode
-names below are target configuration until the typed mode contract is present
-in production.
+The gateway consumes one validated, versioned governance snapshot. The typed
+mode contract uses the names below.
 
 | Mode | Listener and identity behavior | Governance failure behavior |
 | --- | --- | --- |
@@ -204,7 +204,7 @@ wildcard-bind authority.
 
 ## Access-Session Contract
 
-The enterprise target uses an opaque, high-entropy session ID. Only a digest or
+The enterprise boundary uses an opaque, high-entropy session ID. Only a digest or
 other non-reversible lookup representation is persisted where practical. Each
 session is bounded and binds:
 

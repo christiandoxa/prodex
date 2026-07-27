@@ -70,6 +70,7 @@ impl PostgresRepository {
         {
             if existing.checksum == checksum
                 && existing.compiled_artifact == command.compiled_artifact
+                && existing.authenticity == command.authenticity
                 && existing.created_by == command.created_by
                 && existing.created_at_unix_ms == command.created_at_unix_ms
             {
@@ -80,6 +81,16 @@ impl PostgresRepository {
         }
 
         insert_revision_metadata(&transaction, &command, &checksum, created_at).await?;
+        let (signature_key_id, artifact_signature) =
+            command
+                .authenticity
+                .as_ref()
+                .map_or((None, None), |authenticity| {
+                    (
+                        Some(authenticity.key_id.as_str()),
+                        Some(authenticity.signature_base64.as_str()),
+                    )
+                });
         let statement = transaction
             .prepare_cached(INSERT_GOVERNANCE_REVISION_ARTIFACT_STATEMENT.sql)
             .await
@@ -93,6 +104,8 @@ impl PostgresRepository {
                     &command.revision_id,
                     &checksum,
                     &command.compiled_artifact,
+                    &signature_key_id,
+                    &artifact_signature,
                     &command.created_by.as_uuid(),
                     &created_at,
                 ],
@@ -354,14 +367,22 @@ impl PostgresRepository {
         set_tenant_context(&transaction, tenant_id)
             .await
             .map_err(database_error)?;
+        let kind_label = artifact_kind_label(kind);
         let query = format!(
-            "SELECT revision_id, artifact_checksum, lifecycle_state, created_at_unix_ms
-             FROM {} WHERE tenant_id = $1
-             ORDER BY created_at_unix_ms DESC, revision_id DESC",
+            "SELECT revisions.revision_id, revisions.artifact_checksum,
+                    revisions.lifecycle_state, revisions.created_at_unix_ms,
+                    artifacts.signature_key_id
+             FROM {} AS revisions
+             LEFT JOIN prodex_governance_revision_artifacts AS artifacts
+               ON artifacts.tenant_id = revisions.tenant_id
+              AND artifacts.artifact_kind = $2
+              AND artifacts.revision_id = revisions.revision_id::text
+             WHERE revisions.tenant_id = $1
+             ORDER BY revisions.created_at_unix_ms DESC, revisions.revision_id DESC",
             revision_table(kind)
         );
         let rows = transaction
-            .query(&query, &[&tenant_id.as_uuid()])
+            .query(&query, &[&tenant_id.as_uuid(), &kind_label])
             .await
             .map_err(database_error)?;
         let summaries = rows
@@ -371,6 +392,7 @@ impl PostgresRepository {
                     revision_id: revision_id_from_row(&row, 0, kind),
                     fingerprint: row.get(1),
                     lifecycle_state: row.get(2),
+                    signature_key_id: row.get(4),
                     created_at_unix_ms: from_i64(row.get(3))?,
                 })
             })
@@ -407,19 +429,30 @@ impl PostgresRepository {
         set_tenant_context(&transaction, tenant_id)
             .await
             .map_err(database_error)?;
+        let kind_label = artifact_kind_label(kind);
         let query = format!(
-            "SELECT revision_id, artifact_checksum, lifecycle_state, created_at_unix_ms
-             FROM {} WHERE tenant_id = $1 AND revision_id = $2",
+            "SELECT revisions.revision_id, revisions.artifact_checksum,
+                    revisions.lifecycle_state, revisions.created_at_unix_ms,
+                    artifacts.signature_key_id
+             FROM {} AS revisions
+             LEFT JOIN prodex_governance_revision_artifacts AS artifacts
+               ON artifacts.tenant_id = revisions.tenant_id
+              AND artifacts.artifact_kind = $3
+              AND artifacts.revision_id = revisions.revision_id::text
+             WHERE revisions.tenant_id = $1 AND revisions.revision_id = $2",
             revision_table(kind)
         );
         let row = if kind == GovernanceArtifactKind::Policy {
             let revision_id = policy_revision_id(&revision_id)?;
             transaction
-                .query_opt(&query, &[&tenant_id.as_uuid(), &revision_id.as_uuid()])
+                .query_opt(
+                    &query,
+                    &[&tenant_id.as_uuid(), &revision_id.as_uuid(), &kind_label],
+                )
                 .await
         } else {
             transaction
-                .query_opt(&query, &[&tenant_id.as_uuid(), &revision_id])
+                .query_opt(&query, &[&tenant_id.as_uuid(), &revision_id, &kind_label])
                 .await
         }
         .map_err(database_error)?
@@ -428,6 +461,7 @@ impl PostgresRepository {
             revision_id: revision_id_from_row(&row, 0, kind),
             fingerprint: row.get(1),
             lifecycle_state: row.get(2),
+            signature_key_id: row.get(4),
             created_at_unix_ms: from_i64(row.get(3))?,
         };
         transaction.commit().await.map_err(database_error)?;
@@ -886,7 +920,7 @@ impl PostgresRepository {
         validate_artifact: F,
     ) -> Result<GovernanceSnapshot, GovernanceRepositoryError>
     where
-        F: FnMut(&[u8]) -> bool,
+        F: FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     {
         self.governance_timeout(self.governance_load_snapshot_inner(
             tenant_id,
@@ -903,7 +937,7 @@ impl PostgresRepository {
         mut validate_artifact: F,
     ) -> Result<GovernanceSnapshot, GovernanceRepositoryError>
     where
-        F: FnMut(&[u8]) -> bool,
+        F: FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     {
         let mut client = self.pool.get().await.map_err(database_error)?;
         let transaction = client.transaction().await.map_err(database_error)?;

@@ -26,9 +26,9 @@ The database is authoritative; caches are rebuildable. Availability may use a
 verified LKG only when mode/policy permits and invalidation has not occurred.
 Every race, rejection, activation, rollback and failed attempt is audited.
 
-## Implementation status
+## Current implementation
 
-The candidate implements immutable governance revisions, approval transitions,
+Prodex implements immutable signed governance revisions, approval transitions,
 maker-checker/quorum enforcement, optimistic activation, active/LKG pointers,
 rollback, audit and outbox contracts. Evidence includes
 `maker_checker_quorum_and_activation_are_enforced`,

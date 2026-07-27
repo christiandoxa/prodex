@@ -7,14 +7,14 @@ SSE, and supported WebSocket output. Typed, classification-aware obligations
 now drive coverage checks, masking, output bounds, pre-commit denial, and
 post-commit termination without weakening affinity or no-mid-stream rotation.
 
-## Current Production Evidence and Gaps
+## Current Production Boundaries
 
-| Path | Current behavior | Remaining gap |
+| Path | Current behavior | Deliberate boundary |
 | --- | --- | --- |
 | Buffered HTTP response | Successful bodies run typed inspection/masking and full-coverage/output-limit obligations before commit; denial is content-free and mandatory-audited when configured | Inspection remains bounded to supported response schemas and modalities |
 | HTTP streaming response | Bank mode buffers locally inspectable text/SSE output up to the existing 4 MiB response bound and performs full local masking, output-limit, keyword, and post-webhook checks before commit. Other modes retain the 4 KiB pre-commit hold and bounded incremental literal inspector | A non-bank violation found after commit terminates the stream; already released safe bytes cannot be recalled |
 | Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the same guard-then-account stream wrapper | Direct generic WebSocket and binary output remain explicit partial/unsupported coverage rather than being reported as `Full` |
-| Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and is rejected before upgrade in enforce mode | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
+| Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and receives `426 Upgrade Required` before upgrade in enforce mode, which activates Codex's native HTTPS fallback | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
 | Gemini Live WebSocket response | Anonymous/personal and virtual-key text frames are bounded, classified/governed, token-accounted, and terminally reconciled; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
 | Usage reconciliation | The spend reader wraps the governed output, so pre-commit denial and post-commit guard errors reconcile once as interrupted while clean EOF remains completed | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
@@ -36,7 +36,7 @@ OpenAI-compatible provider that advertises `supports_websockets=false` and
 points at the runtime proxy. This keeps auto-rotation and affinity in the proxy
 while routing inspectable model output through HTTPS/SSE. A defensive direct
 WebSocket attempt is observed as unsupported coverage or rejected with an
-explicit HTTPS-fallback response according to rollout mode. Gemini Live remains
+explicit `426 Upgrade Required` HTTPS-fallback response according to rollout mode. Gemini Live remains
 the translated governed compatibility WebSocket path; virtual-key sessions use
 bounded reservations and per-frame accounting while retaining one provider for
 the session. With inspection off, native OpenAI WebSockets retain the

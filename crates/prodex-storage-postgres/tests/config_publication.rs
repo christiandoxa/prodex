@@ -1,13 +1,15 @@
 use prodex_storage_postgres::{
-    CONFIG_PUBLICATION_TRANSPORT_MIGRATION, REQUIRED_POSTGRES_SCHEMA_VERSION,
+    CONFIG_PUBLICATION_TRANSPORT_MIGRATION, PostgresMigrationVersion,
+    REQUIRED_POSTGRES_SCHEMA_VERSION,
 };
 
 #[test]
 fn config_publication_migration_is_durable_bounded_and_replica_scoped() {
     assert_eq!(
         CONFIG_PUBLICATION_TRANSPORT_MIGRATION.version,
-        REQUIRED_POSTGRES_SCHEMA_VERSION
+        PostgresMigrationVersion(14)
     );
+    assert!(REQUIRED_POSTGRES_SCHEMA_VERSION >= CONFIG_PUBLICATION_TRANSPORT_MIGRATION.version);
     for table in [
         "prodex_config_publication_events",
         "prodex_config_publication_replicas",

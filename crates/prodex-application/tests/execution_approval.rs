@@ -80,7 +80,7 @@ impl ApplicationGovernanceRepository for Repository {
     fn activate_revision(
         &self,
         _: GovernanceActivationRequest,
-        _: &mut dyn FnMut(&[u8]) -> bool,
+        _: &mut dyn FnMut(&prodex_storage::GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
         Err(GovernanceRepositoryError::Unsupported)
     }

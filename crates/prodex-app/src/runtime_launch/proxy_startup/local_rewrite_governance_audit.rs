@@ -4,16 +4,23 @@ use prodex_domain::{
     AuditAction, AuditEvent, AuditEventId, AuditOutcome, AuditResource, AuditResourceId, Principal,
     TenantContext, compute_audit_chain_digest,
 };
+use prodex_observability::{
+    AuditOperation, AuditResult, PersistenceOperation, PersistenceResult, QueueDepthKind,
+};
 use prodex_storage::{
     AppendOnlyAuditCommand, AuditOutboxWriteCommand, GovernanceRepositoryError, TenantStorageKey,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::local_rewrite::{RuntimeGovernanceAuthority, RuntimeLocalRewriteProxyShared};
+use crate::runtime_operational_metrics::{
+    record_runtime_audit_metric, record_runtime_persistence_metric,
+    record_runtime_queue_depth_metric,
+};
 
 const AUDIT_CHAIN_RETRIES: usize = 3;
 const AUDIT_WRITER_QUEUE_LIMIT: usize = 128;
@@ -41,9 +48,13 @@ impl RuntimeGovernanceAuditContext {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct RuntimeGovernanceAuditWriter(
-    Arc<Mutex<Option<SyncSender<RuntimeGovernanceAuditWrite>>>>,
-);
+pub(super) struct RuntimeGovernanceAuditWriter(Arc<Mutex<Option<RuntimeGovernanceAuditQueue>>>);
+
+#[derive(Clone)]
+struct RuntimeGovernanceAuditQueue {
+    sender: SyncSender<RuntimeGovernanceAuditWrite>,
+    depth: Arc<AtomicUsize>,
+}
 
 struct RuntimeGovernanceAuditWrite {
     event: AuditEvent,
@@ -63,34 +74,145 @@ impl RuntimeGovernanceAuditWriter {
             RuntimeGovernanceAuthority::Postgres { .. } => None,
         };
         let (sender, receiver) = sync_channel(AUDIT_WRITER_QUEUE_LIMIT);
+        let depth = Arc::new(AtomicUsize::new(0));
         *self
             .0
             .lock()
-            .map_err(|_| GovernanceRepositoryError::Database)? = Some(sender);
+            .map_err(|_| GovernanceRepositoryError::Database)? =
+            Some(RuntimeGovernanceAuditQueue {
+                sender,
+                depth: Arc::clone(&depth),
+            });
+        record_audit_queue_depth(0);
         Ok(thread::spawn(move || {
-            runtime_governance_audit_writer(authority, sqlite, receiver, shutdown)
+            runtime_governance_audit_writer(authority, sqlite, receiver, depth, shutdown)
         }))
     }
 
     fn append(&self, event: AuditEvent) -> Result<(), GovernanceRepositoryError> {
-        let sender = self
+        let started_at = Instant::now();
+        let queue = self
             .0
             .lock()
             .map_err(|_| GovernanceRepositoryError::Database)?
-            .clone()
-            .ok_or(GovernanceRepositoryError::Unsupported)?;
+            .clone();
+        let Some(queue) = queue else {
+            record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Dropped, None);
+            record_runtime_persistence_metric(
+                PersistenceOperation::Commit,
+                PersistenceResult::Unavailable,
+            );
+            return Err(GovernanceRepositoryError::Unsupported);
+        };
         let (acknowledge, response) = sync_channel(1);
-        sender
+        queue.depth.fetch_add(1, Ordering::AcqRel);
+        if let Err(error) = queue
+            .sender
             .try_send(RuntimeGovernanceAuditWrite { event, acknowledge })
-            .map_err(|error| match error {
+        {
+            decrement_queue_depth(&queue.depth);
+            record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Dropped, None);
+            record_runtime_persistence_metric(
+                PersistenceOperation::Commit,
+                PersistenceResult::Unavailable,
+            );
+            return Err(match error {
                 TrySendError::Full(_) | TrySendError::Disconnected(_) => {
                     GovernanceRepositoryError::Database
                 }
-            })?;
-        response
-            .recv_timeout(AUDIT_WRITER_ACK_TIMEOUT)
-            .map_err(|_| GovernanceRepositoryError::Database)?
+            });
+        }
+        record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Success, None);
+        record_audit_queue_depth(queue.depth.load(Ordering::Acquire));
+        match response.recv_timeout(AUDIT_WRITER_ACK_TIMEOUT) {
+            Ok(Ok(())) => {
+                record_runtime_audit_metric(
+                    AuditOperation::Persist,
+                    AuditResult::Success,
+                    Some(duration_millis(started_at)),
+                );
+                record_runtime_persistence_metric(
+                    PersistenceOperation::Commit,
+                    PersistenceResult::Success,
+                );
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                record_runtime_audit_metric(
+                    AuditOperation::Persist,
+                    AuditResult::Failure,
+                    Some(duration_millis(started_at)),
+                );
+                record_runtime_persistence_metric(
+                    PersistenceOperation::Commit,
+                    persistence_result(&error),
+                );
+                Err(error)
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                record_runtime_audit_metric(
+                    AuditOperation::Persist,
+                    AuditResult::Failure,
+                    Some(duration_millis(started_at)),
+                );
+                record_runtime_persistence_metric(
+                    PersistenceOperation::Commit,
+                    PersistenceResult::Timeout,
+                );
+                Err(GovernanceRepositoryError::Database)
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                record_runtime_audit_metric(
+                    AuditOperation::Persist,
+                    AuditResult::Failure,
+                    Some(duration_millis(started_at)),
+                );
+                record_runtime_persistence_metric(
+                    PersistenceOperation::Commit,
+                    PersistenceResult::Unavailable,
+                );
+                Err(GovernanceRepositoryError::Database)
+            }
+        }
     }
+}
+
+fn duration_millis(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn persistence_result(error: &GovernanceRepositoryError) -> PersistenceResult {
+    match error {
+        GovernanceRepositoryError::Conflict
+        | GovernanceRepositoryError::AuditChainConflict
+        | GovernanceRepositoryError::EtagMismatch
+        | GovernanceRepositoryError::StaleVersion => PersistenceResult::Conflict,
+        GovernanceRepositoryError::Database | GovernanceRepositoryError::Unsupported => {
+            PersistenceResult::Unavailable
+        }
+        _ => PersistenceResult::Failed,
+    }
+}
+
+fn decrement_queue_depth(depth: &AtomicUsize) -> usize {
+    depth
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            Some(value.saturating_sub(1))
+        })
+        .unwrap_or_default()
+        .saturating_sub(1)
+}
+
+fn record_audit_queue_depth(depth: usize) {
+    record_runtime_queue_depth_metric(
+        QueueDepthKind::Persistence,
+        depth.try_into().unwrap_or(u64::MAX),
+        AUDIT_WRITER_QUEUE_LIMIT.try_into().unwrap_or(u64::MAX),
+    );
 }
 
 pub(super) fn persist_runtime_control_plane_audit_event(
@@ -221,12 +343,17 @@ fn runtime_governance_audit_writer(
     authority: RuntimeGovernanceAuthority,
     sqlite: Option<prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
     receiver: Receiver<RuntimeGovernanceAuditWrite>,
+    depth: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
 ) {
-    while !shutdown.load(Ordering::SeqCst) {
-        let Ok(write) = receiver.recv_timeout(Duration::from_millis(100)) else {
-            continue;
+    loop {
+        let write = match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(write) => write,
+            Err(RecvTimeoutError::Timeout) if shutdown.load(Ordering::SeqCst) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
+        record_audit_queue_depth(decrement_queue_depth(&depth));
         let result = append_durable_audit(&authority, sqlite.as_ref(), write.event);
         let _ = write.acknowledge.send(result);
     }

@@ -2,11 +2,11 @@
 
 ## Status and Scope
 
-This document defines the Phase 3 target for one durable, tamper-evident audit
+This document defines one durable, tamper-evident audit
 contract across the Prodex data plane and control plane, asynchronous SIEM
 delivery, evidence verification, retention, legal hold, and failure behavior.
-It is a design and migration contract, not a claim that current local logs are
-immutable audit evidence or that any deployment is certified.
+It is a source and operational contract, not a claim that personal-mode local
+logs are immutable audit evidence or that any deployment is certified.
 
 Operational logs, metrics, traces, usage ledgers, and audit records remain
 different products. A log message does not satisfy a mandatory audit write.
@@ -16,17 +16,17 @@ SIEM is never the system of record.
 The terms **must**, **must not**, **required**, **should**, and **may** are
 normative in this document.
 
-## Candidate Repository Evidence and Residuals
+## Current Source Boundary
 
-| Area | Existing repository primitive | Gap against the target |
+| Area | Implemented control | Deliberate boundary or environment acceptance |
 | --- | --- | --- |
 | Local audit log | `prodex-audit-log` appends structured JSONL and supports bounded recent queries. `prodex audit` filters component, action, and outcome, with a 512-KiB read window. | Records contain arbitrary `details`, local process/time fields, and no tenant hash chain. This path is file-backed, not a durable multi-replica authority, and is not a complete query/export/verification interface. |
 | Live call sites | Governed data-plane decisions and four-kind control-plane mutations submit bounded content-free audit events and await durable transaction acknowledgement before success. | Legacy personal-mode operational JSONL remains separate and best effort. |
 | Typed audit domain | `prodex-domain` has bounded action/resource/reason and governance revision context, tenant/principal identity, event IDs, outcomes, query/export/retention models, canonical digests and redacted debug output. | Independent external chain-anchor signing remains a deployment control. |
 | Control-plane planning | Every governance artifact lifecycle, execution-approval create/consume, bounded break-glass lifecycle/use, retention purge, and session revocation writes content-free mutation, hash-chain audit and SIEM outbox state atomically. | External incident-management integration remains deployment-specific. |
 | Storage plans | PostgreSQL and SQLite runtime repositories implement tenant-scoped append, bounded query/export, integrity verification, SIEM claim/finalize/dead-letter, durable legal holds, and hold-aware contiguous-prefix purge. PostgreSQL applies RLS plus a purge trigger guard. | Independent external chain-anchor signing remains a deployment control. |
-| Observability | `prodex-observability` has low-cardinality audit emit/persist/export, chain, query, and retention metric plans. | There are no SIEM delivery/backlog/dead-letter metrics or operational exporter wired to a durable outbox. |
-| SIEM | A bounded exporter port consumes durable SQLite/PostgreSQL outbox claims with retry, stable IDs, leases, finalize and visible dead-letter state. | External sink credentials, delivery SLO and outage exercise belong to the deployment. |
+| Observability | Live low-cardinality audit emit/persist and persistence metrics include duration histograms and bounded queue gauges; SIEM pending/dead-letter/lag gauges feed checked-in dashboard panels and alerts. | Pager routing and achieved SLO evidence belong to the deployment. |
+| SIEM | A bounded exporter consumes durable SQLite/PostgreSQL outbox claims with retry, stable IDs, leases, finalize and visible dead-letter state. | External sink credentials, delivery SLO and outage exercise belong to the deployment. |
 
 The existing JSONL file remains useful as a personal-mode operational record
 during migration. It must not be relabeled as the enterprise audit authority.
@@ -57,7 +57,7 @@ during migration. It must not be relabeled as the enterprise audit authority.
 
 ## Versioned Audit Event
 
-The target event is an immutable typed value. Its canonical serialization is
+The event is an immutable typed value. Its canonical serialization is
 versioned and independent of map iteration order or locale.
 
 ~~~text

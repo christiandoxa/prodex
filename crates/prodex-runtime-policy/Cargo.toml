@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = { workspace = true }
 prodex_authn = { workspace = true }
 prodex_core = { workspace = true }
 prodex_domain = { workspace = true }

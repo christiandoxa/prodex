@@ -2,16 +2,16 @@
 
 ## Status and Scope
 
-This document defines the Phase 3 contract for policy administration, approval,
+This document defines the contract for policy administration, approval,
 publication, evaluation, activation, rollback, and last-known-good operation.
 The repository implements the durable SQLite/PostgreSQL lifecycle, HTTP admin
 surface, maker-checker approvals, activation, rollback, snapshots, and audit
-outbox. A complete policy grammar/compiler/PDP and deployment-specific
-operational evidence remain outside the implemented core. HTTP/OpenAPI is the
-canonical administration surface; a duplicate CLI lifecycle is not part of the
-current product contract.
+outbox, plus a bounded typed compiler/PDP and detached Ed25519 artifact
+verification. Deployment-specific operational evidence remains environment
+acceptance. HTTP/OpenAPI is the canonical administration surface; a duplicate
+CLI lifecycle is not part of the current product contract.
 
-The target extends existing Prodex domain, control-plane, configuration, and
+The boundary uses Prodex domain, control-plane, configuration, and
 storage boundaries. It does not turn `policy.toml`, a provider adapter, a route
 handler, Redis, or an external policy service into a second policy authority.
 The pure policy evaluator and routing planner perform no filesystem, database,
@@ -20,11 +20,11 @@ network, Vault, SIEM, clock, or environment access.
 The terms **must**, **must not**, **required**, **should**, and **may** are
 normative in this document.
 
-## Current Repository Evidence and Gaps
+## Current Source Boundary
 
-| Area | Existing repository primitive | Gap against the target |
+| Area | Implemented control | Deliberate boundary or environment acceptance |
 | --- | --- | --- |
-| Snapshot integrity | `prodex-domain` and `prodex-storage` model immutable revisions, digests, activation state, active/LKG pointers, approval records, quorum, and stable repository errors. | Artifact validation is supplied through a bounded callback. A complete governance grammar/compiler, verifier-key lifecycle, and general PDP remain future work. |
+| Snapshot integrity | Immutable revisions, SHA-256 digests, detached Ed25519 signatures, activation state, active/LKG pointers, approval quorum, and stable repository errors; tenant/kind/revision/checksum binding is reverified on every lifecycle load. | Private signing-key custody and rotation ceremony are deployment responsibilities. |
 | Configuration publication | `prodex-application` provides policy governance services over tenant-bound revision, approval, activation, rollback, revoke, and snapshot repository operations. | Runtime operational configuration remains separate from governance policy authority. |
 | Runtime policy | `prodex-runtime-policy` parses, validates, caches, reloads, and invalidates the local runtime policy file. | The runtime file remains operational configuration. It is not the revisioned tenant policy store or the sole PDP source. |
 | Control-plane authorization | `prodex-control-plane` and the application layer enforce tenant, role, credential scope, idempotency, maker-checker separation, and append-only audit planning for lifecycle mutations. | Deployment-specific role and identity mappings remain operator-owned. |
@@ -32,12 +32,11 @@ normative in this document.
 | Durable storage | SQLite and PostgreSQL repositories implement revisions, approvals, votes, activation history, active/LKG snapshots, execution approvals, audit chaining, and SIEM outbox state. | File and Redis are intentionally unsupported governance authorities; production PostgreSQL HA remains deployment evidence. |
 | Administration API | Authenticated gateway HTTP routes and checked OpenAPI expose revision, validation, submission, voting, activation, rollback, revoke, status, and inspection operations. | HTTP/OpenAPI is canonical; a duplicate first-class CLI is intentionally out of scope. |
 
-Implemented lifecycle primitives should be reused where their semantics match.
-They must not be described as a complete general PDP or as deployment evidence.
+These source controls must not be described as deployment evidence.
 
 ## Policy Authority Boundaries
 
-The target separates four responsibilities:
+The implementation separates four responsibilities:
 
 | Role | Responsibility | Prohibited responsibility |
 | --- | --- | --- |
@@ -120,7 +119,7 @@ parse
 -> validate schema and bounded values
 -> compile
 -> static analysis
--> canonical fingerprint and optional signature verification
+-> canonical fingerprint and mandatory detached signature verification in enforcement modes
 -> persist immutable revision
 -> submit and collect approval
 -> atomically activate with mandatory audit and invalidation outbox
@@ -259,7 +258,7 @@ does not query the policy store.
 
 1. A refresh reads the active revision and all pinned dependencies.
 2. It verifies tenant binding, schema and compiler compatibility, digest,
-   signature when configured, bounded artifact shape, and dependency
+   the configured Ed25519 signature in enforcement modes, bounded artifact shape, and dependency
    fingerprints.
 3. It constructs evaluator indexes off the request path.
 4. It atomically swaps one immutable snapshot only after all verification

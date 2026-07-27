@@ -26,13 +26,14 @@ Bindings must be merge-safe across processes, tenant-scoped and free of raw
 content. Tests cover affinity under backoff/saturation, explicit revocation,
 expiry, restart and concurrent persistence.
 
-## Implementation status
+## Current implementation
 
 Runtime response/session affinity, tenant-bound governance session state,
 provider revocation precedence and no-midstream-rotate behavior are wired into
-the candidate. Evidence includes
+the production boundary. Evidence includes
 `governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score`,
 `explicit_provider_revocation_overrides_continuation_affinity`,
 `session_reuse_with_another_principal_is_revoked`, and
 `explicit_quota_codes_rotate_only_before_commit`. Durable multi-replica session
-and revocation validation remains pending with PostgreSQL.
+and revocation validation uses the PostgreSQL authority plus rebuildable cache
+invalidation.

@@ -76,6 +76,7 @@ fn governance_revision_is_tenant_bound_bounded_and_content_free_in_debug() {
         revision_id: "policy-v1".to_string(),
         fingerprint: ApprovalFingerprint::new("sha256:fixture").unwrap(),
         compiled_artifact: b"compiled-policy-sentinel".to_vec(),
+        authenticity: None,
         created_by: PrincipalId::new(),
         created_at_unix_ms: 100,
     };
@@ -91,6 +92,7 @@ fn governance_revision_is_tenant_bound_bounded_and_content_free_in_debug() {
             revision_id: "policy-v1".to_string(),
             fingerprint: ApprovalFingerprint::new("sha256:fixture").unwrap(),
             compiled_artifact: vec![1],
+            authenticity: None,
             created_by: PrincipalId::new(),
             created_at_unix_ms: 100,
         })

@@ -88,6 +88,7 @@ mod local_rewrite_gemini_live;
 mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
+mod local_rewrite_governance_artifact_authenticity;
 mod local_rewrite_governance_audit;
 mod local_rewrite_governance_session;
 mod local_rewrite_kiro;
