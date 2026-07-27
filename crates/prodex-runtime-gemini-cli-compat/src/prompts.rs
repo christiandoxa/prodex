@@ -69,7 +69,7 @@ fn builtin_gemini_prompts() -> Vec<GeneratedPrompt> {
                 "Inspect Gemini extension compatibility for `$FILTER`.\n\n",
                 "Check `~/.gemini/extensions`, project `.gemini/extensions`, ",
                 "`extension-enablement.json`, generated Codex `config.toml` MCP entries named ",
-                "`gemini_*`, generated `hooks.json` entries with `Gemini extension ...` status, ",
+                "`gemini_*`, generated `hooks.json` entries with `prodex-gemini-cli-compat: ` status, ",
                 "`prompts/*.md`, `.agents/skills`, and `agents/*.toml`. Do not edit unrelated files."
             )
             .to_string(),
@@ -146,7 +146,9 @@ fn builtin_gemini_prompts() -> Vec<GeneratedPrompt> {
             body: concat!(
                 "Create a Gemini-style workspace checkpoint.\n\n",
                 "Run `prodex-gemini-checkpoint-create $NAME`. It records git HEAD, status, ",
-                "and a binary diff under `.gemini/checkpoints/`. Use this before risky mutating work."
+                "and a binary diff of staged, unstaged, and untracked non-ignored files under ",
+                "`.gemini/checkpoints/`. The checkpoint directory itself is excluded. Use this ",
+                "before risky mutating work."
             )
             .to_string(),
         },
@@ -383,7 +385,7 @@ fn remove_generated_prompt_files(prompts_dir: &Path) -> Result<()> {
         let Some(text) = read_text_limited(&path, 4096) else {
             continue;
         };
-        if text.contains(GENERATED_PROMPT_MARKER) {
+        if text.lines().next() == Some(GENERATED_PROMPT_MARKER) {
             fs::remove_file(&path)
                 .with_context(|| format!("failed to remove {}", path.display()))?;
         }

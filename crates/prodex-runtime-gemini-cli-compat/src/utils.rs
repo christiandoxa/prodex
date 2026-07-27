@@ -42,18 +42,11 @@ pub(super) fn unique_slug(slug: &str, seen: &mut BTreeSet<String>) -> String {
 }
 
 pub(super) fn yaml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    serde_json::to_string(value).expect("serializing a string cannot fail")
 }
 
 pub(super) fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-pub(super) fn toml_multiline_string_literal(value: &str) -> String {
-    format!(
-        "\"\"\"\n{}\n\"\"\"",
-        value.replace("\"\"\"", "\\\"\\\"\\\"")
-    )
+    toml::Value::String(value.to_string()).to_string()
 }
 
 pub(super) fn first_nonempty_line(text: &str) -> Option<String> {
@@ -209,6 +202,19 @@ mod tests {
         assert_eq!(
             translate_gemini_prompt_placeholders("Use {{args.path}} {{arguments}} {{user}}"),
             "Use $PATH $ARGUMENTS {{user}}"
+        );
+    }
+
+    #[test]
+    fn generated_string_literals_round_trip_control_characters() {
+        let value = "C:\\temp\\queue\n\t\"quoted\"";
+        assert_eq!(
+            serde_json::from_str::<String>(&yaml_string_literal(value)).unwrap(),
+            value
+        );
+        assert_eq!(
+            toml_string_literal(value).parse::<toml::Value>().unwrap(),
+            toml::Value::String(value.to_string())
         );
     }
 }

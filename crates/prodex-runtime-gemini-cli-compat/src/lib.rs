@@ -565,7 +565,7 @@ fn gemini_mcp_server_enabled_by_filters(
 }
 
 pub(crate) fn read_toml_table(path: &Path) -> Result<toml::Table> {
-    let contents = read_text_limited(path, GEMINI_COMPAT_FILE_LIMIT).unwrap_or_default();
+    let contents = read_optional_text_limited(path, GEMINI_COMPAT_FILE_LIMIT)?.unwrap_or_default();
     if contents.trim().is_empty() {
         return Ok(toml::Table::new());
     }
