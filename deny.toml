@@ -37,6 +37,7 @@ deny = [
 # Exact older transitive lines retained by upstream crates. Remove an entry as
 # soon as `cargo tree -i <crate>@<version>` no longer reports it.
 skip = [
+    { name = "base64", version = "0.22.1", reason = "reqwest, JWT, PostgreSQL, and tokenizer transitive compatibility stack" },
     { name = "bitflags", version = "1.3.2", reason = "portable-pty has not moved to bitflags 2" },
     { name = "block-buffer", version = "0.10.4", reason = "digest 0.10 compatibility stack" },
     { name = "cfg_aliases", version = "0.1.1", reason = "nix 0.28 build dependency" },
