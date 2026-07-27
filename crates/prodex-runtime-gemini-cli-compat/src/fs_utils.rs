@@ -150,6 +150,19 @@ pub(crate) fn read_text_limited(path: &Path, limit: usize) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+pub(crate) fn read_optional_text_limited(path: &Path, limit: usize) -> Result<Option<String>> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to stat {}", path.display())),
+        Ok(_) => read_text_limited(path, limit).map(Some).ok_or_else(|| {
+            anyhow::anyhow!(
+                "refusing to read {}: expected a regular UTF-8 file no larger than {limit} bytes with no symlink components",
+                path.display()
+            )
+        }),
+    }
+}
+
 pub(crate) fn path_has_symlink_component(path: &Path) -> bool {
     let mut current = PathBuf::new();
     for component in path.components() {

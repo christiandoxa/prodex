@@ -1,14 +1,18 @@
-use super::fs_utils::{read_text_limited, write_file_atomic_no_symlink};
+use super::fs_utils::{
+    read_optional_text_limited, read_text_limited, write_file_atomic_no_symlink,
+};
 use super::utils::GeminiCompatVars;
 use super::{
     GEMINI_COMPAT_FILE_LIMIT, GeminiExtension, ensure_child_table, read_toml_table,
     write_toml_table,
 };
 use crate::{GeminiSettingsSource, gemini_settings_sources};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+const GENERATED_HOOK_STATUS_PREFIX: &str = "prodex-gemini-cli-compat: ";
 
 pub(super) fn write_gemini_hooks(
     codex_home: &Path,
@@ -228,7 +232,7 @@ fn codex_command_hook(
         output.insert(
             "statusMessage".to_string(),
             json!(format!(
-                "Gemini extension {}: {}",
+                "{GENERATED_HOOK_STATUS_PREFIX}Gemini extension {}: {}",
                 extension.name,
                 vars.expand(status)
             )),
@@ -237,7 +241,7 @@ fn codex_command_hook(
         output.insert(
             "statusMessage".to_string(),
             json!(format!(
-                "Gemini extension {}: {}",
+                "{GENERATED_HOOK_STATUS_PREFIX}Gemini extension {}: {}",
                 extension.name,
                 vars.expand(command)
             )),
@@ -309,20 +313,22 @@ fn enable_codex_hooks_feature(codex_home: &Path) -> Result<()> {
 }
 
 fn read_hooks_json(path: &Path) -> Result<serde_json::Value> {
-    let contents = read_text_limited(path, GEMINI_COMPAT_FILE_LIMIT).unwrap_or_default();
+    let contents = read_optional_text_limited(path, GEMINI_COMPAT_FILE_LIMIT)?.unwrap_or_default();
     if contents.trim().is_empty() {
         return Ok(json!({"hooks": {}}));
     }
     let mut value = serde_json::from_str::<serde_json::Value>(&contents)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     if !value.is_object() {
-        value = json!({"hooks": {}});
+        bail!("{} must contain a JSON object", path.display());
     }
     if value.get("hooks").is_none() {
         value
             .as_object_mut()
             .expect("hooks root should be object")
             .insert("hooks".to_string(), json!({}));
+    } else if !value.get("hooks").is_some_and(serde_json::Value::is_object) {
+        bail!("{}.hooks must contain a JSON object", path.display());
     }
     Ok(value)
 }
@@ -338,11 +344,15 @@ fn remove_generated_hooks(root: &mut serde_json::Value) {
         let Some(groups) = groups.as_array_mut() else {
             continue;
         };
-        groups.retain(|group| {
-            !group
-                .get("hooks")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|hooks| hooks.iter().any(generated_command_hook))
+        groups.retain_mut(|group| {
+            let Some(commands) = group
+                .get_mut("hooks")
+                .and_then(serde_json::Value::as_array_mut)
+            else {
+                return true;
+            };
+            commands.retain(|hook| !generated_command_hook(hook));
+            !commands.is_empty()
         });
     }
 }
@@ -350,5 +360,5 @@ fn remove_generated_hooks(root: &mut serde_json::Value) {
 fn generated_command_hook(hook: &serde_json::Value) -> bool {
     hook.get("statusMessage")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|status| status.starts_with("Gemini extension "))
+        .is_some_and(|status| status.starts_with(GENERATED_HOOK_STATUS_PREFIX))
 }

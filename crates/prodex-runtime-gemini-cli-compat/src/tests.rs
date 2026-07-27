@@ -178,6 +178,209 @@ fn missing_gemini_skill_source_does_not_remove_existing_generated_target() {
 }
 
 #[test]
+fn gemini_cli_compat_preserves_user_prompt_and_hook_marker_text() {
+    let root = temp_dir("user-marker-text");
+    let codex_home = root.join("codex");
+    let prompts_dir = codex_home.join("prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    let prompt_path = prompts_dir.join("notes.md");
+    let prompt =
+        format!("---\ndescription: User notes\n---\n\nThis documents {GENERATED_PROMPT_MARKER}.\n");
+    fs::write(&prompt_path, &prompt).unwrap();
+    let hooks_path = codex_home.join("hooks.json");
+    fs::write(
+        &hooks_path,
+        serde_json::json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "echo old-generated",
+                            "statusMessage": "prodex-gemini-cli-compat: Gemini extension old"
+                        },
+                        {
+                            "type": "command",
+                            "command": "echo keep-me",
+                            "statusMessage": "Gemini extension manual validation"
+                        }
+                    ]
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    write_gemini_prompts(&codex_home, &[], None).unwrap();
+    write_gemini_hooks(&codex_home, &[], None).unwrap();
+
+    assert_eq!(fs::read_to_string(prompt_path).unwrap(), prompt);
+    let hooks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(hooks_path).unwrap()).unwrap();
+    let commands = hooks["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0]["command"], "echo keep-me");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn gemini_cli_compat_deduplicates_normalized_skill_and_agent_names() {
+    let root = temp_dir("normalized-collisions");
+    let codex_home = root.join("codex");
+    let extension_dir = root.join("extension");
+    for (name, body) in [("foo bar", "skill one"), ("foo-bar", "skill two")] {
+        let skill_dir = extension_dir.join("skills").join(name);
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), body).unwrap();
+        fs::create_dir_all(extension_dir.join("agents")).unwrap();
+        fs::write(
+            extension_dir.join("agents").join(format!("{name}.md")),
+            body,
+        )
+        .unwrap();
+    }
+    let extensions = vec![GeminiExtension {
+        directory: extension_dir,
+        name: "tools".to_string(),
+        value: serde_json::json!({}),
+    }];
+
+    write_gemini_skills(&codex_home, &extensions).unwrap();
+    write_gemini_agents(&codex_home, &extensions).unwrap();
+
+    let skills_root = codex_home.join(".agents/skills");
+    let agents_root = codex_home.join("agents");
+    for (suffix, expected) in [("", "skill one"), ("-2", "skill two")] {
+        let name = format!("gemini-tools-foo-bar{suffix}");
+        assert!(
+            fs::read_to_string(skills_root.join(&name).join("SKILL.md"))
+                .unwrap()
+                .contains(expected)
+        );
+        assert!(
+            fs::read_to_string(agents_root.join(format!("{name}.toml")))
+                .unwrap()
+                .contains(expected)
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn gemini_cli_compat_serializes_agent_toml_and_skill_yaml() {
+    let root = temp_dir("generated-serialization");
+    let codex_home = root.join("codex");
+    let extension_dir = root.join("extension");
+    let skill_dir = extension_dir.join("skills/review");
+    let agents_dir = extension_dir.join("agents");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::create_dir_all(&agents_dir).unwrap();
+    fs::write(skill_dir.join("SKILL.md"), "Review carefully.").unwrap();
+    let agent_body = "# Reviewer\n\nC:\\temp\\queue\nline\t\"quoted\"\n";
+    fs::write(agents_dir.join("review.md"), agent_body).unwrap();
+    let extensions = vec![GeminiExtension {
+        directory: extension_dir,
+        name: "bad: [x".to_string(),
+        value: serde_json::json!({}),
+    }];
+
+    write_gemini_skills(&codex_home, &extensions).unwrap();
+    write_gemini_agents(&codex_home, &extensions).unwrap();
+
+    let agent = fs::read_to_string(codex_home.join("agents/gemini-bad-x-review.toml")).unwrap();
+    let parsed = toml::from_str::<toml::Value>(&agent).unwrap();
+    assert_eq!(parsed["developer_instructions"].as_str(), Some(agent_body));
+    let skill =
+        fs::read_to_string(codex_home.join(".agents/skills/gemini-bad-x-review/SKILL.md")).unwrap();
+    let description = skill
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<String>(description).unwrap(),
+        "Gemini extension bad: [x skill review."
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn gemini_checkpoint_round_trips_staged_and_untracked_files() {
+    use std::process::Command;
+
+    let root = temp_dir("checkpoint-round-trip");
+    let repo = root.join("repo");
+    let codex_home = root.join("codex");
+    fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.name", "Prodex Test"]);
+    git(&["config", "user.email", "developer@example.com"]);
+    fs::write(repo.join("tracked.txt"), "base\n").unwrap();
+    git(&["add", "tracked.txt"]);
+    git(&["commit", "--quiet", "-m", "test base"]);
+    fs::write(repo.join("tracked.txt"), "staged change\n").unwrap();
+    git(&["add", "tracked.txt"]);
+    fs::write(repo.join("untracked.txt"), "untracked content\n").unwrap();
+    write_gemini_admin_helpers(&codex_home).unwrap();
+
+    let create = codex_home.join("bin/prodex-gemini-checkpoint-create");
+    let output = Command::new(create)
+        .arg("round-trip")
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let relative_diff = String::from_utf8(output.stdout).unwrap();
+    let checkpoint = repo.join(relative_diff.trim());
+    let patch = fs::read_to_string(&checkpoint).unwrap();
+    assert!(patch.contains("+staged change"));
+    assert!(patch.contains("+untracked content"));
+    assert!(!patch.contains(".gemini/checkpoints"));
+
+    git(&["reset", "--hard", "--quiet", "HEAD"]);
+    fs::remove_file(repo.join("untracked.txt")).unwrap();
+    let restore = codex_home.join("bin/prodex-gemini-checkpoint-restore");
+    let output = Command::new(restore)
+        .arg(&checkpoint)
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+        "staged change\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("untracked.txt")).unwrap(),
+        "untracked content\n"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn gemini_directory_copy_uses_one_global_entry_budget() {
     let root = temp_dir("copy-budget");
     let source = root.join("source");
@@ -307,7 +510,8 @@ fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
 
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(codex_home.join("hooks.json")).unwrap()).unwrap();
-    let expected_status = "Gemini extension workspace-tools: Checking shell";
+    let expected_status =
+        "prodex-gemini-cli-compat: Gemini extension workspace-tools: Checking shell";
     let (hook_group, generated_hook) = hooks["hooks"]["PreToolUse"]
         .as_array()
         .unwrap()
@@ -360,6 +564,10 @@ fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
             .join("prodex-gemini-refresh")
             .is_file()
     );
+    let helper = codex_home.join("bin/prodex-gemini-refresh");
+    fs::write(&helper, "#!/usr/bin/env sh\necho keep-me\n").unwrap();
+    assert!(write_gemini_admin_helpers(&codex_home).is_err());
+    assert!(fs::read_to_string(helper).unwrap().contains("keep-me"));
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -445,7 +653,7 @@ fn gemini_cli_compat_bridges_settings_mcp_over_extension_mcp_and_hooks() {
     assert_eq!(
         hooks["hooks"]["PostToolUse"][0]["hooks"][0]["statusMessage"],
         serde_json::Value::String(format!(
-            "Gemini extension project:{}: echo done",
+            "prodex-gemini-cli-compat: Gemini extension project:{}: echo done",
             workspace.display()
         ))
     );
@@ -565,19 +773,21 @@ fn gemini_cli_compat_preserves_user_mcp_and_replaces_generated_entries() {
 }
 
 #[test]
-fn gemini_cli_compat_ignores_oversized_existing_config() {
+fn gemini_cli_compat_preserves_oversized_existing_config() {
     let root = temp_dir("oversized-config");
-    fs::create_dir_all(&root).unwrap();
-    let config_path = root.join("config.toml");
-    fs::write(
-        &config_path,
-        vec![b'a'; GEMINI_COMPAT_FILE_LIMIT.saturating_add(1)],
-    )
-    .unwrap();
+    let codex_home = root.join("codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    let config_path = codex_home.join("config.toml");
+    let original = format!(
+        "answer = 42\npadding = \"{}\"\n",
+        "a".repeat(GEMINI_COMPAT_FILE_LIMIT)
+    );
+    fs::write(&config_path, &original).unwrap();
 
-    let table = read_toml_table(&config_path).unwrap();
+    let result = write_gemini_mcp_config(&codex_home, &[], None);
 
-    assert!(table.is_empty());
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), original);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -599,22 +809,27 @@ fn gemini_cli_compat_refuses_symlinked_config_write() {
 }
 
 #[test]
-fn gemini_cli_compat_ignores_oversized_existing_hooks_json() {
+fn gemini_cli_compat_preserves_oversized_existing_hooks_json() {
     let root = temp_dir("oversized-hooks");
     let codex_home = root.join("codex");
     fs::create_dir_all(&codex_home).unwrap();
     let hooks_path = codex_home.join("hooks.json");
-    fs::write(
-        &hooks_path,
-        vec![b'{'; GEMINI_COMPAT_FILE_LIMIT.saturating_add(1)],
-    )
-    .unwrap();
+    let original = serde_json::json!({
+        "hooks": {},
+        "padding": "a".repeat(GEMINI_COMPAT_FILE_LIMIT)
+    })
+    .to_string();
+    fs::write(&hooks_path, &original).unwrap();
 
-    write_gemini_hooks(&codex_home, &[], None).unwrap();
+    let result = write_gemini_hooks(&codex_home, &[], None);
 
-    let hooks: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&hooks_path).unwrap()).unwrap();
-    assert!(hooks.get("hooks").is_some_and(serde_json::Value::is_object));
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(&hooks_path).unwrap(), original);
+    for invalid in ["[]", r#"{"hooks": []}"#] {
+        fs::write(&hooks_path, invalid).unwrap();
+        assert!(write_gemini_hooks(&codex_home, &[], None).is_err());
+        assert_eq!(fs::read_to_string(&hooks_path).unwrap(), invalid);
+    }
     fs::remove_dir_all(root).unwrap();
 }
 
