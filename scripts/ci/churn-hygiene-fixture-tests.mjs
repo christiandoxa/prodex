@@ -375,6 +375,15 @@ assert.notDeepEqual(
       /--ignore-before is only supported with --range/,
       "env baseline must not weaken --base/--head guard ranges",
     );
+
+    writeFile(repo, "src/staged.rs", "pub fn staged() {}\n");
+    git(repo, ["add", "src/staged.rs"]);
+    const stagedDefaultRun = runChurn(repo, ["--dry-run"]);
+    assert.match(
+      stagedDefaultRun.stdout,
+      /git diff --cached --numstat --diff-filter=ACMR/,
+      "default selector must inspect staged changes before the previous commit",
+    );
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
