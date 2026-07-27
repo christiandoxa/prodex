@@ -129,7 +129,7 @@ test("install.ps1 installs the native Windows binary", { skip: process.platform 
     path.join(releaseDir, "SHA256SUMS"),
     `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n`,
   );
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
   const result = await run(
     "powershell.exe",
