@@ -182,63 +182,6 @@ pub(crate) fn clear_runtime_dead_response_bindings(
 
     Ok(changed)
 }
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn clear_runtime_stale_previous_response_binding(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    previous_response_id: Option<&str>,
-) -> Result<bool> {
-    let Some(previous_response_id) = previous_response_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(false);
-    };
-
-    let mut runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    if runtime
-        .state
-        .response_profile_bindings
-        .get(previous_response_id)
-        .is_none_or(|binding| binding.profile_name != profile_name)
-    {
-        drop(runtime);
-        return Ok(false);
-    }
-
-    runtime
-        .state
-        .response_profile_bindings
-        .remove(previous_response_id);
-    let _ = clear_runtime_response_turn_state_lineage(
-        &mut runtime.state.response_profile_bindings,
-        previous_response_id,
-    );
-    let now = Local::now().timestamp();
-    let _ = runtime_mark_continuation_status_dead(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::Response,
-        previous_response_id,
-        now,
-    );
-    schedule_runtime_state_save_from_runtime(
-        shared,
-        &runtime,
-        RuntimeStateMutation::PreviousResponseBindingClear(profile_name.to_string()),
-    );
-    drop(runtime);
-    runtime_proxy_log(
-        shared,
-        format!(
-            "previous_response_binding_cleared profile={profile_name} response_id={previous_response_id}"
-        ),
-    );
-    Ok(true)
-}
-
 pub(super) fn release_runtime_affinity_bindings(
     runtime: &mut RuntimeRotationState,
     profile_name: &str,

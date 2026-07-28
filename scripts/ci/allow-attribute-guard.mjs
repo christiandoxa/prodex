@@ -14,7 +14,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 20;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 19;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
@@ -49,14 +49,14 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn activation_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn vote_response(",
   // ponytail: keep security/audit inputs explicit; add a request context if this endpoint family grows again.
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn audit_retention_purge_response(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn audit_retention_response(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/audit_retention.rs|fn audit_retention_purge_response(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/audit_retention.rs|pub(super) fn audit_retention_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn break_glass_transition_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/session.rs|fn runtime_gemini_live_drain_upstream<S>(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs|pub(super) fn remember(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_dispatch.rs|pub(super) fn respond_runtime_local_rewrite_live_response(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs|fn activate(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs|fn vote(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn activate(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn vote(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/websocket.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/src/governance_repository/revisions.rs|pub(super) fn store_pointer(",
@@ -75,7 +75,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/profile_commands/kiro.rs|pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {",
   "crates/prodex-app/src/runtime_background/probe_refresh/worker.rs|pub(crate) fn runtime_probe_refresh_take_next_job(",
   "crates/prodex-app/src/runtime_persistence/continuation_store.rs|pub(crate) fn save_runtime_continuation_journal(",
-  "crates/prodex-app/src/runtime_proxy/lineage/release.rs|pub(crate) fn clear_runtime_stale_previous_response_binding(",
   "crates/prodex-app/src/runtime_store/backoffs.rs|pub(crate) fn save_runtime_profile_backoffs(",
   "crates/prodex-app/src/runtime_store/scores.rs|pub(crate) fn save_runtime_profile_scores(",
   "crates/prodex-app/src/runtime_store/usage_snapshots.rs|pub(crate) fn save_runtime_usage_snapshots(",

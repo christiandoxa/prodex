@@ -2,6 +2,7 @@
 
 mod approvals;
 mod audit_outbox;
+mod audit_retention;
 mod revisions;
 mod sessions;
 
@@ -19,21 +20,27 @@ use std::time::Duration;
 use prodex_domain::{
     ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalReasonCode, ApprovalRecord,
     ApprovalScope, ApprovalState, ApprovalVote, AuditDigest, AuditEventId, AuditReasonCode,
-    AuditRetentionHold, AuditTimestamp, IdempotencyReplayDecision, PolicyRevisionId, PrincipalId,
-    TenantId, decide_idempotency_replay,
+    AuditRetentionBatchLimit, AuditRetentionHold, AuditTimestamp, IdempotencyReplayDecision,
+    PolicyRevisionId, PrincipalId, TenantId, decide_idempotency_replay,
 };
 use prodex_storage::{
     ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest,
     ApprovalVoteSnapshot, ApprovalVoteStableOutcome, ApprovalVoteTransitionDecision,
-    AuditOutboxWriteCommand, GovernanceActivationCurrent, GovernanceActivationRequest,
-    GovernanceActivationResult, GovernanceArtifactAuthenticity, GovernanceArtifactKind,
-    GovernanceArtifactValidationInput, GovernanceAuditExportRecord, GovernanceAuditExporter,
-    GovernanceAuditIntegrityHealth, GovernanceOutboxHealth, GovernanceRepositoryError,
-    GovernanceRevisionSummary, GovernanceRevisionWriteCommand, GovernanceSessionRecord,
-    GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome,
-    GovernanceSnapshot, GovernanceSnapshotSource, GovernanceStatus, GovernanceWriteOutcome,
-    IdempotencyRecordLookupRow, IdempotencyRecordLookupRowStatus, SiemExportBatch, SiemExportEvent,
-    SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy, denied_approval_audit_outbox,
+    AuditOutboxWriteCommand, GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
+    GOVERNANCE_AUDIT_LEGAL_HOLD_DELETE_APPLIED_IDEMPOTENCY_RESPONSE,
+    GOVERNANCE_AUDIT_LEGAL_HOLD_DELETE_NOT_FOUND_IDEMPOTENCY_RESPONSE,
+    GOVERNANCE_AUDIT_LEGAL_HOLD_UPSERT_IDEMPOTENCY_RESPONSE,
+    GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE, GovernanceActivationCurrent,
+    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactAuthenticity,
+    GovernanceArtifactKind, GovernanceArtifactValidationInput, GovernanceAuditExportRecord,
+    GovernanceAuditExporter, GovernanceAuditIntegrityHealth, GovernanceMutationIdempotency,
+    GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
+    GovernanceRevisionWriteCommand, GovernanceSessionRecord, GovernanceSessionRevokeCommand,
+    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, GovernanceSnapshot,
+    GovernanceSnapshotSource, GovernanceStatus, GovernanceWriteOutcome, IdempotencyRecordLookupRow,
+    IdempotencyRecordLookupRowStatus, SiemExportBatch, SiemExportEvent, SiemOutboxDeliveryDecision,
+    SiemOutboxRetryPolicy, decode_governance_audit_retention_purge_idempotency_response,
+    denied_approval_audit_outbox, encode_governance_audit_retention_purge_idempotency_response,
     governance_support::{
         approval_artifact_kind, approval_kind_from_label, approval_kind_label,
         approval_state_from_label, approval_state_label, artifact_checksum, artifact_kind_label,

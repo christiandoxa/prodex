@@ -2,14 +2,15 @@
 
 ## Scope
 
-This threat model covers the enterprise target architecture for Prodex as a
+This threat model covers the implemented enterprise architecture for Prodex as a
 multi-tenant, multi-replica platform. It focuses on the gateway data plane,
 control plane, provider boundary, storage backends, identity integration,
 configuration publication, audit trail, and production deployment artifacts.
 
-The current repository is moving incrementally toward this target. Existing
-legacy runtime proxy paths remain compatibility surfaces until they are migrated
-behind the new boundary crates.
+Upstream and legacy compatibility mechanics remain explicit composition-adapter
+responsibilities. Authorization, governance mutations, storage decisions, and
+runtime policy enforcement cross the typed boundary crates and retain
+characterization coverage.
 
 ## Assets
 
@@ -137,13 +138,8 @@ denials, request body limit denials, backup/restore operations, and break-glass
 use. Audit records must include tenant ID, principal ID, action, resource,
 outcome, reason code, event ID, and hash-chain digest when persisted.
 
-## Residual Risks and Migration Notes
+## Residual Risks and Deployment Boundaries
 
-Legacy runtime paths still contain compatibility logic while the modular
-boundaries are being introduced. Those paths must be migrated behind
-`prodex-application`, `prodex-gateway-http`, `prodex-control-plane`, and storage
-adapter crates with characterization tests for transport transparency,
-continuation affinity, upstream error compatibility, and CLI compatibility.
 The live config-publication adapter supports both a durable shared-filesystem
 transport and a PostgreSQL outbox with replica-scoped acknowledgements and
 advisory-lock ownership. Separate node-local roots must not be treated as
@@ -163,7 +159,6 @@ authority; deployment timeouts and concurrency remain adapter/runtime authority;
 live health, quota, circuit, and load remain runtime-state authority. Registry
 snapshots carry bounded compliance metadata plus explicit pricing, cost,
 latency, risk, and priority revisions without duplicating those live signals.
-The mounted lifecycle HTTP adapter still contains compatibility orchestration
-around the application/control-plane boundary; replacing its remaining direct
-repository calls is residual architecture work, not a prerequisite for the
-typed storage and runtime enforcement described above.
+The lifecycle HTTP adapter parses transport input and performs bounded reads.
+All four artifact mutation paths cross `ApplicationGovernanceLifecycleService`
+and the atomic idempotent SQLite/PostgreSQL repository contracts before success.

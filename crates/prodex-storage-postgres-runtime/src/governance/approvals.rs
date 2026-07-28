@@ -124,10 +124,10 @@ fn approval_from_row(
     })
 }
 
-pub(super) async fn approval_idempotency_replay_postgres(
+pub(super) async fn governance_idempotency_replay_postgres(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
+    idempotency: &GovernanceMutationIdempotency,
 ) -> Result<IdempotencyReplayDecision<Vec<u8>>, GovernanceRepositoryError> {
     if idempotency.operation.tenant_id != tenant_id || idempotency.started_at_unix_ms == 0 {
         return Err(GovernanceRepositoryError::InvalidInput);
@@ -175,10 +175,10 @@ pub(super) async fn approval_idempotency_replay_postgres(
         .map_err(|_| GovernanceRepositoryError::Conflict)
 }
 
-pub(super) async fn insert_approval_idempotency_pending_postgres(
+pub(super) async fn insert_governance_idempotency_pending_postgres(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
+    idempotency: &GovernanceMutationIdempotency,
 ) -> Result<(), GovernanceRepositoryError> {
     let inserted = transaction
         .execute(
@@ -200,14 +200,13 @@ pub(super) async fn insert_approval_idempotency_pending_postgres(
     Ok(())
 }
 
-pub(super) async fn complete_approval_idempotency_postgres(
+pub(super) async fn complete_governance_idempotency_postgres(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
-    outcome: ApprovalVoteStableOutcome,
+    idempotency: &GovernanceMutationIdempotency,
+    response: &[u8],
     completed_at_unix_ms: u64,
 ) -> Result<(), GovernanceRepositoryError> {
-    let response = outcome.encode();
     let updated = transaction
         .execute(
             "UPDATE prodex_idempotency_records

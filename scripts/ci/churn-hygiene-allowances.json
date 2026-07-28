@@ -1,5 +1,18 @@
 [
   {
+    "id": "atomic-governance-mutation-lifecycle-0.365.0",
+    "requiredSubjects": [
+      "fix(governance): complete atomic mutation lifecycle"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 33,
+      "maxLines": 6150,
+      "maxFileLines": 640
+    },
+    "reason": "Reviewed the whole-repository completion audit for atomic idempotent governance revisions, approvals, legal holds, and retention purges across the application, SQLite, and PostgreSQL boundaries; stable HTTP replay and conflict behavior; retention-anchor continuity after a full-prefix purge; removal of superseded lineage mutation code; and focused module extraction. Verified with focused regressions, the full locked all-features suite, disposable PostgreSQL and Redis integration, backup/restore, strict Clippy and preflight guards, dependency and secret audits, six fuzz targets, runtime load smoke, and an optimized locked build."
+  },
+  {
     "id": "audited-runtime-completion-feature-0.361.0",
     "requiredSubjects": [
       "fix(runtime): close audited implementation gaps"

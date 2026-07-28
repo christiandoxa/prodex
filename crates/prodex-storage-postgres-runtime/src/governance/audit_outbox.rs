@@ -5,22 +5,31 @@ pub(super) async fn latest_audit_digest_tx(
     tenant_id: TenantId,
 ) -> Result<Option<String>, GovernanceRepositoryError> {
     transaction
-        .query_opt(
-            "SELECT audit.event_digest
-             FROM prodex_audit_log audit
-             WHERE audit.tenant_id = $1
-               AND NOT EXISTS (
-                   SELECT 1 FROM prodex_audit_log child
-                   WHERE child.tenant_id = audit.tenant_id
-                     AND child.previous_digest = audit.event_digest
-               )
-             ORDER BY audit.occurred_at_unix_ms DESC, audit.audit_event_id DESC
-             LIMIT 1",
+        .query_one(
+            "SELECT COALESCE(
+                (
+                    SELECT audit.event_digest
+                    FROM prodex_audit_log audit
+                    WHERE audit.tenant_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM prodex_audit_log child
+                          WHERE child.tenant_id = audit.tenant_id
+                            AND child.previous_digest = audit.event_digest
+                      )
+                    ORDER BY audit.occurred_at_unix_ms DESC, audit.audit_event_id DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT last_purged_digest
+                    FROM prodex_audit_retention_anchors
+                    WHERE tenant_id = $1
+                )
+             )",
             &[&tenant_id.as_uuid()],
         )
         .await
         .map_err(database_error)
-        .map(|row| row.map(|row| row.get(0)))
+        .map(|row| row.get(0))
 }
 
 pub(super) async fn append_audit_outbox_tx(
