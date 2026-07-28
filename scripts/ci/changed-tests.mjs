@@ -351,7 +351,7 @@ async function addCargoSteps(steps, paths) {
       addStep(steps, "cargo:prodex-app:smart-context", {
         label: "cargo:prodex-app:smart-context",
         command: "cargo",
-        args: ["test", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
+        args: ["test", "--locked", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
       });
       continue;
     }
@@ -369,7 +369,7 @@ async function addCargoSteps(steps, paths) {
       addStep(steps, "cargo:prodex-root", {
         label: "cargo:prodex-root",
         command: "cargo",
-        args: ["check", "-q", "-p", "prodex", "--all-targets", "--all-features"],
+        args: ["check", "--locked", "-q", "-p", "prodex", "--all-targets", "--all-features"],
       });
     }
   }
@@ -379,7 +379,7 @@ async function addCargoSteps(steps, paths) {
     addStep(steps, `cargo:${packageName}`, {
       label: `cargo:${packageName}`,
       command: "cargo",
-      args: ["test", "-q", "-p", packageName],
+      args: ["test", "--locked", "-q", "-p", packageName],
     });
   }
 
@@ -387,7 +387,7 @@ async function addCargoSteps(steps, paths) {
     addStep(steps, "cargo:prodex-app:smart-context", {
       label: "cargo:prodex-app:smart-context",
       command: "cargo",
-      args: ["test", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
+      args: ["test", "--locked", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
     });
   }
 }

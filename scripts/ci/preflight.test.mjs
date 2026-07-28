@@ -190,6 +190,18 @@ test("preflight runs crate boundary guard self-test before scanning workspace", 
   assert.ok(labels.indexOf("crate-boundary-guard") > labels.indexOf("crate-boundary-guard-self-test"));
 });
 
+test("preflight runs clippy across the locked workspace", () => {
+  const clippy = preflightSteps(parseArgs(["node", "preflight.mjs"])).find(
+    (step) => step.label === "clippy",
+  );
+
+  assert.deepEqual(clippy, {
+    label: "clippy",
+    command: "cargo",
+    args: ["clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"],
+  });
+});
+
 test("preflight dry-run prints storage postgres proof step when enabled", async () => {
   const { stdout } = await execFileAsync(process.execPath, [SCRIPT_PATH, "--dry-run", "--storage-postgres-proof"]);
 

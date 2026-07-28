@@ -95,7 +95,7 @@ function printHelp() {
       "Default checks:",
       "  - release hygiene, Rust size/allow/super-wildcard guards, crate boundaries, runtime hot-path, churn hygiene, manifest-owned version sync",
       "  - docs lint, upstream baseline, runtime manifest, fmt, cargo check",
-      "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "  - cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
       "",
       "Churn hygiene fails locally and in CI by default. Use --churn-report-only or PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 for exploratory dry runs.",
@@ -377,7 +377,7 @@ export function preflightSteps(args) {
     {
       label: "clippy",
       command: "cargo",
-      args: ["clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
+      args: ["clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"],
     },
   ];
 

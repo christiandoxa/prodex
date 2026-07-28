@@ -302,7 +302,7 @@ function printSummary(summary, budgetEntries = DEFAULT_DUPLICATE_BUDGET) {
 }
 
 async function cargoTreeDuplicatesOutput() {
-  const result = await run("cargo", ["tree", "-d", "--workspace"], { cwd: repoRoot });
+  const result = await run("cargo", ["tree", "--locked", "-d", "--workspace"], { cwd: repoRoot });
   return result.stdout;
 }
 

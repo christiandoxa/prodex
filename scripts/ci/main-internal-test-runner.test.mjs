@@ -44,6 +44,7 @@ test("cargo helpers include all-features before filters and harness args", () =>
     {
       args: [
         "test",
+        "--locked",
         "--test",
         "auto_rotate",
         "--all-features",

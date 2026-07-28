@@ -76,7 +76,8 @@ Runtime proxy edit points:
 - Provider catalog limits, request-requirement parsing, token estimation, and pure model constraint evaluation: `crates/prodex-provider-core`.
 - Gateway live-plan orchestration and the authenticated, side-effect-free route-explain HTTP/dashboard edge: `crates/prodex-app/src/runtime_launch/proxy_startup`.
 - Launch planning: `crates/prodex-app/src/runtime_launch`, `prodex-runtime-launch`, `prodex-runtime-claude`, `prodex-runtime-anthropic`.
-- Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`, `crates/prodex-app/src/runtime_policy.rs`, and ADR 1055.
+- Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`,
+  `crates/prodex-app/src/runtime_policy.rs`, and the [runtime policy reference](runtime-policy.md).
 - Benchmark support: `prodex-bench-support`, root `benches/`.
 
 ## State And Persistence
@@ -97,10 +98,11 @@ Key crates:
 - `prodex-runtime-store`: merge and compaction helpers for persisted runtime state.
 - `prodex-session-store`: persisted shared Codex session metadata helpers.
 - `prodex-secret-store`: development storage primitives and the bounded,
-  read-only projected external-secret provider described by ADR 1058. Explicit
+  read-only projected external-secret provider described by
+  [ADR 0009](enterprise-governance/adrs/0009-external-secret-vault.md). Explicit
   production gateway policy resolves typed credential references through that
-  provider at startup and rejects raw CLI/environment sources as described by
-  ADR 1059.
+  provider at startup and rejects raw CLI/environment sources as recorded in
+  the [security test matrix](security-test-matrix.md).
 - `prodex-profile-export`: encrypted import/export envelopes.
 
 Persistence rules:
@@ -110,7 +112,8 @@ Persistence rules:
 - Add merge/persistence regression tests when changing state shape or save behavior.
 - PostgreSQL recovery must pass the Docker-backed dump/restore gate for RPO,
   RTO, tenant-table completeness, accounting consistency, point-in-time
-  exclusion, and non-owner RLS isolation; see ADR 1057.
+  exclusion, and non-owner RLS isolation; see the
+  [storage, HA, backup, and DR contract](enterprise-governance/09-storage-ha-backup-and-dr.md).
 
 ## Quota, Doctor, Observability
 

@@ -18,7 +18,7 @@ const commit = runChecked("git", ["rev-parse", "HEAD"], { cwd: repoRoot }).stdou
 const rustToolchain = runChecked("rustc", ["--version"], { cwd: repoRoot }).stdout.trim();
 const report = runCheckedJson(
   "cargo",
-  ["run", "-q", "--bin", "prodex", "--", "context", "replay-report", corpus, "--json", "--strict"],
+  ["run", "--locked", "-q", "--bin", "prodex", "--", "context", "replay-report", corpus, "--json", "--strict"],
   {
     cwd: repoRoot,
     timeoutMs: 180_000,

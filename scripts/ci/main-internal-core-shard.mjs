@@ -91,7 +91,7 @@ function printHelp() {
 }
 
 function listedCoreTests() {
-  const result = spawnSync("cargo", ["test", "-p", "prodex-app", "--lib", MAIN_INTERNAL_FILTER, "--", "--list"], {
+  const result = spawnSync("cargo", ["test", "--locked", "-p", "prodex-app", "--lib", MAIN_INTERNAL_FILTER, "--", "--list"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -205,6 +205,7 @@ async function main() {
     command: "cargo",
     args: [
       "test",
+      "--locked",
       "-p",
       "prodex-app",
       "--lib",

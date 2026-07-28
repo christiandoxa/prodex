@@ -260,7 +260,7 @@ async function runWithManagedPostgres() {
     await run(
       "cargo",
       [
-        "test", "-q", "-p", "prodex-storage-postgres-runtime",
+        "test", "--locked", "-q", "-p", "prodex-storage-postgres-runtime",
         "--test", "postgres_tls", "--", "--test-threads=1",
       ],
       {
