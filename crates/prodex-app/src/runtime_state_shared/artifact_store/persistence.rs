@@ -7,7 +7,7 @@ use super::RuntimeSmartContextArtifactStore;
 use anyhow::{Context, bail};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Read as _, Write};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use zeroize::Zeroizing;
@@ -176,12 +176,7 @@ impl RuntimeSmartContextArtifactStore {
             self.scope_id.as_ref(),
             raw.as_slice(),
         )?;
-        let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
-        runtime_smart_context_write_private_file(&temp_path, &encoded)?;
-        if let Err(err) = fs::rename(&temp_path, path) {
-            let _ = fs::remove_file(&temp_path);
-            return Err(err.into());
-        }
+        crate::runtime_store::write_private_file_atomic(path, &encoded)?;
         Ok(())
     }
 
@@ -447,30 +442,6 @@ fn runtime_smart_context_artifact_key(
         .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact key"))?;
     secret_store::write_private_file_atomic(path, &key)?;
     Ok(key)
-}
-
-fn runtime_smart_context_write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = runtime_smart_context_open_private_file(path)?;
-    file.write_all(bytes)
-}
-
-#[cfg(unix)]
-fn runtime_smart_context_open_private_file(path: &Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn runtime_smart_context_open_private_file(path: &Path) -> io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
 }
 
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {

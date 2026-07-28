@@ -8,17 +8,6 @@ use crate::{
     RuntimeProfileHealth, RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
 };
 
-fn runtime_route_kind_to_proxy(
-    route_kind: RuntimeRouteKind,
-) -> runtime_proxy_crate::RuntimeRouteKind {
-    match route_kind {
-        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
-    }
-}
-
 pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
     Ok(shared
         .runtime
@@ -60,7 +49,7 @@ pub(crate) fn runtime_profile_in_selection_backoff(
         profile_name,
         &runtime.profile_retry_backoff_until,
         &runtime.profile_transport_backoff_until,
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         now,
     )
 }
@@ -176,7 +165,7 @@ pub(crate) fn runtime_profile_selection_jitter(
     runtime_proxy_crate::runtime_profile_selection_jitter(
         shared.request_sequence.load(Ordering::Relaxed),
         profile_name,
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     )
 }
 
@@ -206,9 +195,7 @@ pub(crate) fn runtime_profile_inflight_weight(context: &str) -> usize {
 }
 
 pub(crate) fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
-    runtime_proxy_crate::runtime_route_kind_inflight_context(runtime_route_kind_to_proxy(
-        route_kind,
-    ))
+    runtime_proxy_crate::runtime_route_kind_inflight_context(route_kind)
 }
 
 pub(crate) fn runtime_profile_inflight_soft_limit_for_shared(
@@ -217,7 +204,7 @@ pub(crate) fn runtime_profile_inflight_soft_limit_for_shared(
     pressure_mode: bool,
 ) -> usize {
     runtime_proxy_crate::runtime_profile_inflight_soft_limit(
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         pressure_mode,
         shared.runtime_config.tuning.profile_inflight_soft_limit,
     )
@@ -229,7 +216,7 @@ pub(crate) fn runtime_profile_inflight_soft_limit(
     pressure_mode: bool,
 ) -> usize {
     runtime_proxy_crate::runtime_profile_inflight_soft_limit(
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         pressure_mode,
         runtime_proxy_profile_inflight_soft_limit(),
     )

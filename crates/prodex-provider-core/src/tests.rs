@@ -46,19 +46,16 @@ fn catalog_covers_gateway_providers() {
             ProviderEndpoint::Responses,
             ProviderEndpoint::ResponsesCompact,
             ProviderEndpoint::ChatCompletions,
-            ProviderEndpoint::Messages,
             ProviderEndpoint::Models,
             ProviderEndpoint::Embeddings,
             ProviderEndpoint::Images,
             ProviderEndpoint::Audio,
             ProviderEndpoint::Batches,
-            ProviderEndpoint::Rerank,
-            ProviderEndpoint::A2a,
         ]
     );
     assert_eq!(
         provider_supported_endpoints(ProviderId::Local),
-        provider_supported_endpoints(ProviderId::OpenAi)
+        ALL_PROVIDER_ENDPOINTS
     );
     assert_eq!(
         provider_supported_endpoints(ProviderId::Gemini),

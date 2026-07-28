@@ -13,14 +13,11 @@
       "responses",
       "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ]
   },
   {

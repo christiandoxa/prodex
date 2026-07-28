@@ -290,22 +290,60 @@ pub(crate) fn write_json_file_with_backup(
 }
 
 fn write_json_file_atomic_private(path: &Path, json: &str) -> Result<()> {
+    write_private_file_atomic(path, json.as_bytes())
+}
+
+pub(crate) fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let temp_file = unique_state_temp_file_path(path);
-    write_private_file(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    if let Err(err) = fs::rename(&temp_file, path) {
+    let result = (|| -> io::Result<()> {
+        let mut file = open_private_file(&temp_file)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        replace_file_atomic(&temp_file, path)?;
+        sync_parent_directory(path)
+    })();
+    if result.is_err() {
         let _ = fs::remove_file(&temp_file);
-        return Err(err).with_context(|| format!("failed to replace {}", path.display()));
     }
-    sync_parent_directory(path)
-        .with_context(|| format!("failed to sync parent of {}", path.display()))?;
+    result.with_context(|| format!("failed to atomically write {}", path.display()))
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let from = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let to = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both buffers are NUL-terminated Windows paths and remain live
+    // for the call.
+    if unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
 }
 
-fn write_private_file(path: &Path, content: &str) -> io::Result<()> {
-    let mut file = open_private_file(path)?;
-    file.write_all(content.as_bytes())?;
-    file.sync_all()
+#[cfg(not(windows))]
+fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
 }
 
 #[cfg(unix)]

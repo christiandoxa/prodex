@@ -106,7 +106,7 @@
   },
   {
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
-    "maxLines": 1000,
+    "maxLines": 995,
     "reason": "Cross-provider conformance v1 fixtures verify capability, transform status, stream termination, usage, error, and tool-call contracts across every supported provider."
   },
   {

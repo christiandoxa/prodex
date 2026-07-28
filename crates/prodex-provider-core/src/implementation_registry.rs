@@ -44,7 +44,6 @@ const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderEndpoint::ChatCompletions,
         ProviderCapabilityStatus::Native,
     ),
-    (ProviderEndpoint::Messages, ProviderCapabilityStatus::Native),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Native),
     (
         ProviderEndpoint::Embeddings,
@@ -53,8 +52,6 @@ const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (ProviderEndpoint::Images, ProviderCapabilityStatus::Native),
     (ProviderEndpoint::Audio, ProviderCapabilityStatus::Native),
     (ProviderEndpoint::Batches, ProviderCapabilityStatus::Native),
-    (ProviderEndpoint::Rerank, ProviderCapabilityStatus::Native),
-    (ProviderEndpoint::A2a, ProviderCapabilityStatus::Native),
 ];
 const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
@@ -180,6 +177,15 @@ const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (ProviderEndpoint::A2a, ProviderCapabilityStatus::Passthrough),
 ];
 const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
+    ProviderEndpoint::ChatCompletions,
+    ProviderEndpoint::Models,
+    ProviderEndpoint::Embeddings,
+    ProviderEndpoint::Images,
+    ProviderEndpoint::Audio,
+    ProviderEndpoint::Batches,
+];
+const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
@@ -348,9 +354,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
         response_format: ProviderWireFormat::OpenAiResponses,
         supports_streaming: true,
         supports_model_fallback: false,
-        supported_endpoints: OPENAI_ENDPOINTS,
+        supported_endpoints: ALL_PROVIDER_ENDPOINTS,
         capabilities: LOCAL_CAPABILITIES,
-        passthrough_endpoints: OPENAI_PASSTHROUGH_ENDPOINTS,
+        passthrough_endpoints: LOCAL_PASSTHROUGH_ENDPOINTS,
         model_catalog: LOCAL_MODELS,
         runtime_metadata: Some(&LOCAL_RUNTIME_METADATA),
     },

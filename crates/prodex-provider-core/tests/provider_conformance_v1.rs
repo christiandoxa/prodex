@@ -2,7 +2,7 @@ use prodex_provider_core::{
     ProviderConformanceExpectedErrorClass, ProviderConformanceExpectedLoss,
     ProviderConformanceOperation, ProviderEndpoint, ProviderErrorClass, ProviderId,
     ProviderTransformInput, ProviderTransformLoss, classify_provider_error_body,
-    provider_conformance_cases, provider_translator,
+    provider_conformance_cases, provider_supported_endpoints, provider_translator,
 };
 
 fn input(case: &prodex_provider_core::ProviderConformanceCase) -> ProviderTransformInput {
@@ -912,58 +912,53 @@ fn responses_surface_has_request_response_and_stream_coverage_for_every_current_
 
 #[test]
 fn passthrough_providers_have_non_responses_fixture_coverage_where_docs_claim_support() {
-    for (provider, endpoint) in [
-        (ProviderId::OpenAi, ProviderEndpoint::ChatCompletions),
-        (ProviderId::OpenAi, ProviderEndpoint::Messages),
-        (ProviderId::Local, ProviderEndpoint::ChatCompletions),
-        (ProviderId::Local, ProviderEndpoint::Messages),
-    ] {
-        let provider_cases: Vec<_> = provider_conformance_cases()
-            .iter()
-            .filter(|case| case.provider == provider && case.endpoint == endpoint)
-            .collect();
-        assert!(
-            provider_cases
-                .iter()
-                .any(|case| case.operation == ProviderConformanceOperation::Request)
-        );
-        assert!(
-            provider_cases
-                .iter()
-                .any(|case| case.operation == ProviderConformanceOperation::Response)
-        );
+    for provider in [ProviderId::OpenAi, ProviderId::Local] {
+        for endpoint in [
+            ProviderEndpoint::ChatCompletions,
+            ProviderEndpoint::Messages,
+        ]
+        .into_iter()
+        .filter(|endpoint| provider_supported_endpoints(provider).contains(endpoint))
+        {
+            assert_request_response_fixture_coverage(provider, endpoint);
+        }
     }
 }
 
 #[test]
 fn passthrough_providers_have_fixture_coverage_for_all_supported_non_streaming_endpoints() {
     for provider in [ProviderId::OpenAi, ProviderId::Local] {
-        for endpoint in [
-            ProviderEndpoint::Models,
-            ProviderEndpoint::Embeddings,
-            ProviderEndpoint::Images,
-            ProviderEndpoint::Audio,
-            ProviderEndpoint::Batches,
-            ProviderEndpoint::Rerank,
-            ProviderEndpoint::A2a,
-        ] {
-            let provider_cases: Vec<_> = provider_conformance_cases()
-                .iter()
-                .filter(|case| case.provider == provider && case.endpoint == endpoint)
-                .collect();
-            assert!(
-                provider_cases
-                    .iter()
-                    .any(|case| case.operation == ProviderConformanceOperation::Request),
-                "missing request fixture for {provider:?} {endpoint:?}"
-            );
-            assert!(
-                provider_cases
-                    .iter()
-                    .any(|case| case.operation == ProviderConformanceOperation::Response),
-                "missing response fixture for {provider:?} {endpoint:?}"
-            );
+        for endpoint in provider_supported_endpoints(provider)
+            .iter()
+            .copied()
+            .filter(|endpoint| {
+                !matches!(
+                    endpoint,
+                    ProviderEndpoint::Responses
+                        | ProviderEndpoint::ResponsesCompact
+                        | ProviderEndpoint::ChatCompletions
+                        | ProviderEndpoint::Messages
+                )
+            })
+        {
+            assert_request_response_fixture_coverage(provider, endpoint);
         }
+    }
+}
+
+fn assert_request_response_fixture_coverage(provider: ProviderId, endpoint: ProviderEndpoint) {
+    for operation in [
+        ProviderConformanceOperation::Request,
+        ProviderConformanceOperation::Response,
+    ] {
+        assert!(
+            provider_conformance_cases().iter().any(|case| {
+                case.provider == provider
+                    && case.endpoint == endpoint
+                    && case.operation == operation
+            }),
+            "missing {operation:?} fixture for {provider:?} {endpoint:?}"
+        );
     }
 }
 

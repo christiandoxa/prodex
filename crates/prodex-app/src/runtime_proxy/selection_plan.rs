@@ -201,7 +201,7 @@ pub(crate) fn runtime_optimistic_current_candidate_decision(
     runtime_proxy_crate::runtime_optimistic_current_candidate_decision(
         runtime_proxy_crate::RuntimeOptimisticCurrentCandidateInput {
             current_profile: input.current_profile,
-            route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(input.route_kind),
+            route_kind: input.route_kind,
             auth_failure_active: input.auth_failure_active,
             in_selection_backoff: input.in_selection_backoff,
             circuit_open: input.circuit_open,
@@ -276,7 +276,7 @@ where
         candidate_inputs,
         excluded_profiles,
         runtime_proxy_crate::runtime_response_candidate_plan_options(
-            prodex_runtime_quota::runtime_route_kind_to_proxy(route_kind),
+            route_kind,
             inflight_soft_limit,
             prompt_cache_key,
             prompt_cache_owner_profile,
