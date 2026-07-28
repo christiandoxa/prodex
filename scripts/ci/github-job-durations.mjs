@@ -16,6 +16,7 @@ export const DEFAULT_LIMIT = 10;
 export const DEFAULT_RUNTIME_STRESS_MANIFEST_PATH = "scripts/ci/runtime-test-manifest.mjs";
 const RUNTIME_STRESS_CARGO_LIST_ARGS = [
   "test",
+  "--locked",
   "-p",
   "prodex-app",
   "--lib",

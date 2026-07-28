@@ -138,6 +138,7 @@ function runtimeSmokeSteps(smokeTests, options) {
         command: "cargo",
         args: [
           "test",
+          "--locked",
           "-p",
           testCase.package,
           ...cargoFeatureArgs(options),

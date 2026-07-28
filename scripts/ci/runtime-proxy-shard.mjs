@@ -208,6 +208,7 @@ async function runShard(args) {
 
   const cargoArgs = [
     "test",
+    "--locked",
     "-p",
     "prodex-app",
     "--lib",

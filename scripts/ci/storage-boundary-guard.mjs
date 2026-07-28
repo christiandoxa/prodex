@@ -54,6 +54,7 @@ const OPTIONAL_POSTGRES_STORAGE_TESTS = Object.freeze({
   command: "cargo",
   args: [
     "test",
+    "--locked",
     "-q",
     "-p",
     "prodex-storage-postgres",
@@ -66,6 +67,7 @@ const OPTIONAL_POSTGRES_RUNTIME_TESTS = Object.freeze({
   command: "cargo",
   args: [
     "test",
+    "--locked",
     "-q",
     "-p",
     "prodex-storage-postgres-runtime",
@@ -78,6 +80,7 @@ const OPTIONAL_POSTGRES_APP_TESTS = Object.freeze({
   command: "cargo",
   args: [
     "test",
+    "--locked",
     "-q",
     "-p",
     "prodex-app",

@@ -326,7 +326,7 @@ export async function workspaceMetadataFromCargoToml(root = repoRoot) {
 
 async function runCargoMetadata(root = repoRoot) {
   return await new Promise((resolve, reject) => {
-    const child = spawn("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    const child = spawn("cargo", ["metadata", "--locked", "--format-version", "1", "--no-deps"], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
     });

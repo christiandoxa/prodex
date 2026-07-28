@@ -28,7 +28,7 @@ export function cargoTestStep(label, filter, extraArgs = [], options = {}) {
   return {
     label,
     command: "cargo",
-    args: ["test", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", filter, "--", "--test-threads=1", ...extraArgs],
+    args: ["test", "--locked", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", filter, "--", "--test-threads=1", ...extraArgs],
     failOnZeroTests: true,
   };
 }
@@ -39,6 +39,7 @@ export function cargoIntegrationTestStep(label, testName, harnessArgs = [], opti
     command: "cargo",
     args: [
       "test",
+      "--locked",
       "--test",
       testName,
       ...cargoFeatureArgs(options),
@@ -54,6 +55,7 @@ export function cargoIntegrationTestFilterStep(label, testName, filter, harnessA
     command: "cargo",
     args: [
       "test",
+      "--locked",
       "--test",
       testName,
       ...cargoFeatureArgs(options),

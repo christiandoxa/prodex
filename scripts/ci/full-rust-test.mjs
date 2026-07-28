@@ -133,14 +133,14 @@ function prebuildSteps(args) {
     {
       label: "prebuild:workspace-all-features",
       command: "cargo",
-      args: ["test", "--workspace", "--all-features", "--no-run"],
+      args: ["test", "--locked", "--workspace", "--all-features", "--no-run"],
     },
     ...(args.prodexAppLib
       ? [
           {
             label: "prebuild:prodex-app-lib-all-features",
             command: "cargo",
-            args: ["test", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
+            args: ["test", "--locked", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
           },
         ]
       : []),
@@ -154,6 +154,7 @@ function workspaceSteps(args) {
       command: "cargo",
       args: [
         "test",
+        "--locked",
         "-q",
         "--workspace",
         "--all-features",
@@ -167,6 +168,7 @@ function workspaceSteps(args) {
       command: "cargo",
       args: [
         "test",
+        "--locked",
         "-q",
         "-p",
         "prodex-runtime-broker-log",
@@ -183,6 +185,7 @@ function workspaceSteps(args) {
       command: "cargo",
       args: [
         "test",
+        "--locked",
         "-q",
         "-p",
         "prodex-optional-tools",
@@ -218,6 +221,7 @@ function prodexAppStep() {
     command: "cargo",
     args: [
       "test",
+      "--locked",
       "-q",
       "-p",
       "prodex-app",

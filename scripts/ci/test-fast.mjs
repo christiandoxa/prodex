@@ -33,12 +33,12 @@ function prebuildSteps(options) {
     {
       label: "prebuild:lib-tests",
       command: "cargo",
-      args: ["test", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", "--no-run"],
+      args: ["test", "--locked", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", "--no-run"],
     },
     {
       label: "prebuild:test:auto-rotate",
       command: "cargo",
-      args: ["test", "--test", "auto_rotate", ...cargoFeatureArgs(options), "--no-run"],
+      args: ["test", "--locked", "--test", "auto_rotate", ...cargoFeatureArgs(options), "--no-run"],
     },
   ];
 }
@@ -47,7 +47,7 @@ function packageLibTestStep(label, packageName, options) {
   return {
     label,
     command: "cargo",
-    args: ["test", "-p", packageName, ...cargoFeatureArgs(options), "--lib", "--", "--test-threads=1"],
+    args: ["test", "--locked", "-p", packageName, ...cargoFeatureArgs(options), "--lib", "--", "--test-threads=1"],
     failOnZeroTests: true,
   };
 }

@@ -120,6 +120,7 @@ async function main() {
         "cargo",
         [
           "test",
+          "--locked",
           "-p",
           "prodex-app",
           "--lib",

@@ -11,7 +11,7 @@ const conformancePath = resolve(root, "crates/prodex-provider-core/tests/fixture
 const conformance = JSON.parse(readFileSync(conformancePath, "utf8"));
 const contractCatalog = runCheckedJson(
   "cargo",
-  ["run", "-q", "-p", "prodex-provider-core", "--example", "provider-contract-matrix"],
+  ["run", "--locked", "-q", "-p", "prodex-provider-core", "--example", "provider-contract-matrix"],
   { cwd: root, timeoutMs: 120_000 },
 );
 const contracts = contractCatalog.providers;

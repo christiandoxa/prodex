@@ -580,7 +580,7 @@ async function runManagedDrill() {
 
     await run(
       "cargo",
-      ["run", "--quiet", "--bin", "prodex-gateway", "--", "migrate", "--backend", "postgres", "--url-env", "PRODEX_GATEWAY_POSTGRES_URL", "--tls-mode", "disable"],
+      ["run", "--locked", "--quiet", "--bin", "prodex-gateway", "--", "migrate", "--backend", "postgres", "--url-env", "PRODEX_GATEWAY_POSTGRES_URL", "--tls-mode", "disable"],
       { capture: true, env: { PRODEX_GATEWAY_POSTGRES_URL: postgresUrl } },
     );
     await dockerPsql(containerId, sourceDatabase, seedSql);
