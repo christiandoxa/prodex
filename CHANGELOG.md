@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.360.0 - 2026-07-28
+
+### Misc
+
+- Close audited source gaps (`853f0da`)
+
 ## 0.359.0 - 2026-07-27
 
 ### Misc
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Use local Ponytail marketplace source (`91c8e75`)
-
-## 0.348.0 - 2026-07-26
-
-### CLI
-
-- Restore prompt-free yolo launches (`b2de2cd`)
