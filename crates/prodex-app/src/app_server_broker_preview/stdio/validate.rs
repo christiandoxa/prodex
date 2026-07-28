@@ -98,15 +98,16 @@ fn write_validate_diagnostic_stream<R: BufRead, W: Write>(
         if line.is_empty() {
             continue;
         }
-        let observation = session.validate_line(line_index, line);
-        app_server_broker_log_preview_event(&log_path, line_index, &observation.preview);
-        serde_json::to_writer(&mut diagnostics_writer, &observation.preview)?;
-        diagnostics_writer.write_all(b"\n")?;
-        lifecycle_failure = lifecycle_failure.or(observation.lifecycle_failure);
-        request_response_failure =
-            request_response_failure.or(observation.request_response_failure);
-        lifecycle_payload_failure =
-            lifecycle_payload_failure.or(observation.lifecycle_payload_failure);
+        for observation in session.validate_line(line_index, line) {
+            app_server_broker_log_preview_event(&log_path, line_index, &observation.preview);
+            serde_json::to_writer(&mut diagnostics_writer, &observation.preview)?;
+            diagnostics_writer.write_all(b"\n")?;
+            lifecycle_failure = lifecycle_failure.or(observation.lifecycle_failure);
+            request_response_failure =
+                request_response_failure.or(observation.request_response_failure);
+            lifecycle_payload_failure =
+                lifecycle_payload_failure.or(observation.lifecycle_payload_failure);
+        }
     }
     if lifecycle_failure.is_none()
         && request_response_failure.is_none()

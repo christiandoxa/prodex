@@ -487,6 +487,20 @@ fn runtime_super_kiro_cli_profile_env(
 }
 
 pub(super) fn handle_super_native_cli(args: SuperArgs, presidio_enabled: bool) -> Result<()> {
+    let agent = validate_super_native_cli_args(&args)?;
+    execute_runtime_launch(SuperNativeCliLaunchStrategy {
+        args,
+        presidio_enabled,
+        agent,
+    })
+}
+
+pub(super) fn handle_super_native_cli_dry_run(args: SuperArgs) -> Result<()> {
+    let report = super_native_cli_dry_run_report(&args)?;
+    crate::print_runtime_launch_dry_run_report("native-cli", &report)
+}
+
+fn validate_super_native_cli_args(args: &SuperArgs) -> Result<SuperCliAgent> {
     let agent = args.cli.context("native external agent CLI is missing")?;
     match agent {
         SuperCliAgent::Gemini | SuperCliAgent::Agy
@@ -505,11 +519,54 @@ pub(super) fn handle_super_native_cli(args: SuperArgs, presidio_enabled: bool) -
     if args.api_key.is_some() && agent != SuperCliAgent::Copilot {
         bail!("only native Copilot CLI supports Prodex --api-key routing")
     }
-    execute_runtime_launch(SuperNativeCliLaunchStrategy {
-        args,
-        presidio_enabled,
-        agent,
-    })
+    Ok(agent)
+}
+
+fn super_native_cli_dry_run_report(args: &SuperArgs) -> Result<String> {
+    let agent = validate_super_native_cli_args(args)?;
+    let binary = match agent {
+        SuperCliAgent::Gemini => gemini_bin(),
+        SuperCliAgent::Copilot => copilot_bin(),
+        SuperCliAgent::Kiro => kiro_bin(),
+        SuperCliAgent::Agy => agy_bin(),
+        SuperCliAgent::Codex => bail!("Codex is not a native external CLI launch target"),
+    };
+    let provider = match agent {
+        SuperCliAgent::Gemini => "gemini",
+        SuperCliAgent::Copilot => "copilot",
+        SuperCliAgent::Kiro => "kiro",
+        SuperCliAgent::Agy => "antigravity",
+        SuperCliAgent::Codex => unreachable!(),
+    };
+    let model = args
+        .local_model
+        .as_deref()
+        .or((agent == SuperCliAgent::Copilot).then_some(SUPER_COPILOT_DEFAULT_MODEL))
+        .unwrap_or("(CLI default)");
+    let proxy = match agent {
+        SuperCliAgent::Gemini | SuperCliAgent::Copilot => "would use local provider bridge",
+        SuperCliAgent::Kiro => "would use authenticated CONNECT tunnel",
+        SuperCliAgent::Agy => "disabled",
+        SuperCliAgent::Codex => unreachable!(),
+    };
+    let launch_args =
+        runtime_super_native_cli_launch_args(agent, &args.codex_args, args.local_model.as_deref());
+    let mut output = format!(
+        "Prodex dry run: launch diagnostics\nFlow: native-cli\nBinary: {}\nProvider: {provider}\nModel: {model}\nProfile: {}\nRuntime proxy: {proxy}\nArgs:\n",
+        redaction::redaction_display_os(&binary),
+        args.profile.as_deref().unwrap_or("(active/default)")
+    );
+    if launch_args.is_empty() {
+        output.push_str("  (none)\n");
+    } else {
+        for arg in redaction::redaction_redacted_cli_args(&launch_args) {
+            output.push_str(&format!("  {arg}\n"));
+        }
+    }
+    output.push_str(
+        "Credentials: resolved only at launch\nNative CLI not started because --dry-run was set.\n",
+    );
+    Ok(output)
 }
 
 #[cfg(test)]

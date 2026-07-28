@@ -140,7 +140,9 @@ pub(crate) fn app_server_broker_lifecycle_stage(
                 None
             }
         }
-        AppServerBrokerFrameKind::Invalid | AppServerBrokerFrameKind::Response => None,
+        AppServerBrokerFrameKind::Batch
+        | AppServerBrokerFrameKind::Invalid
+        | AppServerBrokerFrameKind::Response => None,
     }
 }
 

@@ -332,6 +332,13 @@ fn runtime_local_rewrite_canonical_context<'target>(
             "gateway is draining",
         )));
     }
+    if shared.gateway_credentials.refresh_is_stale() {
+        return Err(state.reject(build_runtime_proxy_json_error_response(
+            503,
+            "credential_refresh_stale",
+            "gateway credentials are stale",
+        )));
+    }
     Ok(RuntimeLocalRewriteCanonicalRequest(state))
 }
 

@@ -17,7 +17,7 @@ use terminal_ui::{
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, RunArgs, SessionCommands, SessionResumeArgs, absolutize,
-    handle_run, print_stdout_line, print_stdout_text,
+    print_stdout_line, print_stdout_text,
 };
 use prodex_app_reports::render_session_reports_output;
 use prodex_cli::CodexRuntimeFeatureArgs;
@@ -443,7 +443,7 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
     )
     .map_err(anyhow::Error::new)?;
 
-    handle_run(RunArgs {
+    super::runtime_launch::handle_run(RunArgs {
         profile: None,
         auto_rotate: false,
         no_auto_rotate: false,

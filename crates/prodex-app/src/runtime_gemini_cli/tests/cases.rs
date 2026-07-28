@@ -5,6 +5,7 @@ use super::{
     SuperCliAgent, SuperExternalProvider, SuperNativeCliLaunchStrategy,
     runtime_super_copilot_cli_env, runtime_super_gemini_cli_oauth_env,
     runtime_super_gemini_cli_system_settings_from, runtime_super_native_cli_launch_args,
+    super_native_cli_dry_run_report,
 };
 use crate::{GeminiOAuthSecret, RuntimeLaunchStrategy, write_gemini_oauth_secret};
 use prodex_cli::CodexRuntimeFeatureArgs;
@@ -113,6 +114,24 @@ fn native_copilot_cli_forwards_model_without_google_flags() {
             OsString::from("review"),
         ]
     );
+}
+
+#[test]
+fn native_cli_dry_run_is_redacted_and_does_not_resolve_credentials() {
+    let mut args = native_cli_super_args();
+    args.cli = Some(SuperCliAgent::Copilot);
+    args.provider = Some(SuperExternalProvider::Copilot);
+    args.api_key = Some("secret-provider-key".to_string());
+    args.local_model = Some("gpt-test".to_string());
+    args.codex_args = vec![OsString::from("--prompt"), OsString::from("review")];
+
+    let report = super_native_cli_dry_run_report(&args).unwrap();
+
+    assert!(report.contains("Provider: copilot"));
+    assert!(report.contains("Model: gpt-test"));
+    assert!(report.contains("would use local provider bridge"));
+    assert!(report.contains("--prompt"));
+    assert!(!report.contains("secret-provider-key"));
 }
 
 #[test]

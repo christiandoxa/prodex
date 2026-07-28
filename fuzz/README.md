@@ -12,8 +12,9 @@ cargo +nightly-2026-07-11 fuzz run governance_policy --fuzz-dir fuzz
 cargo +nightly-2026-07-11 fuzz run smart_context_inputs --fuzz-dir fuzz
 ```
 
-CI validates `fuzz/Cargo.lock` and compiles every target under AddressSanitizer with the same
-dated nightly. Local smoke runs can add `-- -max_total_time=10` for a bounded pass.
+CI validates `fuzz/Cargo.lock`, compiles every target under AddressSanitizer with the same dated
+nightly, and runs each target for a bounded ten-second smoke campaign. Local smoke runs can add
+`-- -max_total_time=10` for the same bounded pass.
 
 The request-target harness checks canonical round trips and verifies that owned and borrowed route
 classification always agree on the route kind and plane. The OIDC harness exercises issuer, JWKS,

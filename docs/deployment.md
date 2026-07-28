@@ -77,7 +77,10 @@ curl http://127.0.0.1:4000/v1/prodex/gateway/openapi.json \
 
 Container health checks use the public `/readyz` probe instead of an admin
 endpoint so readiness can be evaluated without placing bearer tokens in process
-arguments.
+arguments. Projected gateway credentials retain their last-known-good snapshot
+for at most one minute. Twelve failed five-second refreshes or the monotonic
+one-minute deadline make `/readyz` report `credentials_stale`; new gateway work
+then fails with `credential_refresh_stale` until a valid projection is observed.
 
 Recent billing ledger records are available at `/v1/prodex/gateway/ledger`, aggregated billing totals are available at `/v1/prodex/gateway/ledger/summary`, billing CSV exports are available at `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, Prometheus-compatible virtual-key usage metrics are available to the same admin token at `/v1/prodex/gateway/metrics`, SCIM-compatible SSO user provisioning is available at `/v1/prodex/gateway/scim/v2/Users`, and the built-in single-node gateway admin dashboard is available at `/v1/prodex/gateway/admin`.
 

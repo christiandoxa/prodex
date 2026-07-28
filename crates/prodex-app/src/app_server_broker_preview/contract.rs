@@ -87,11 +87,14 @@ pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
         "diagnostics": {
             "jsonrpc_envelope_validation": true,
             "max_preview_line_bytes": APP_SERVER_BROKER_MAX_PREVIEW_LINE_BYTES,
-            "frame_kinds": ["request", "notification", "response", "invalid"],
+            "frame_kinds": ["batch", "request", "notification", "response", "invalid"],
             "method_kinds": ["lifecycle", "other", "absent"],
             "invalid_reasons": [
                 "non_jsonrpc_version",
-                "batch_frame_unsupported",
+                "empty_batch",
+                "batch_too_large",
+                "nested_batch",
+                "invalid_batch_member",
                 "non_object_frame",
                 "non_scalar_id",
                 "non_container_params",

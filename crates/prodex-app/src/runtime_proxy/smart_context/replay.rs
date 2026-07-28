@@ -213,12 +213,6 @@ pub(crate) fn render_runtime_smart_context_replay_markdown(
 fn run_runtime_smart_context_replay_scenario(
     scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
 ) -> Result<runtime_proxy_crate::SmartContextReplayScenarioResult> {
-    if !scenario.provider.eq_ignore_ascii_case("openai") {
-        bail!(
-            "unsupported replay provider {}; the first executable slice supports openai",
-            scenario.provider
-        );
-    }
     let mut exact = RuntimeSmartContextReplayHarness::new(
         scenario,
         runtime_proxy_crate::SmartContextReplayMode::Exact,
@@ -545,6 +539,9 @@ fn runtime_smart_context_replay_shared_at_root(
         root: root.to_path_buf(),
     };
     let profile_name = "replay".to_string();
+    let provider = prodex_provider_core::ProviderId::parse(&scenario.provider)
+        .with_context(|| format!("unsupported replay provider {}", scenario.provider))?;
+    let upstream_base_url = format!("https://{}.example.com/v1", provider.label());
     let state = RuntimeRotationState {
         paths: paths.clone(),
         state: AppState {
@@ -562,7 +559,7 @@ fn runtime_smart_context_replay_shared_at_root(
             response_profile_bindings: BTreeMap::new(),
             session_profile_bindings: BTreeMap::new(),
         },
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        upstream_base_url,
         include_code_review: false,
         current_profile: profile_name,
         profile_usage_auth: BTreeMap::new(),

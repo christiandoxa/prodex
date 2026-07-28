@@ -165,6 +165,7 @@ impl AppServerBrokerPolicyHint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppServerBrokerFrameKind {
+    Batch,
     Invalid,
     Request,
     Notification,
@@ -181,6 +182,7 @@ pub(crate) enum AppServerBrokerMethodKind {
 impl AppServerBrokerFrameKind {
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::Batch => "batch",
             Self::Invalid => "invalid",
             Self::Request => "request",
             Self::Notification => "notification",
@@ -334,7 +336,15 @@ pub(crate) fn app_server_broker_diagnostic_summary(
     value: &Value,
 ) -> AppServerBrokerDiagnosticSummary {
     let object = value.as_object();
-    let valid_jsonrpc = object.is_some_and(app_server_broker_has_valid_wire_jsonrpc);
+    let valid_jsonrpc = object.is_some_and(app_server_broker_has_valid_wire_jsonrpc)
+        || value.as_array().is_some_and(|batch| {
+            !batch.is_empty()
+                && batch.iter().all(|frame| {
+                    frame
+                        .as_object()
+                        .is_some_and(app_server_broker_has_valid_wire_jsonrpc)
+                })
+        });
     let method = object
         .and_then(|object| object.get("method"))
         .and_then(Value::as_str)

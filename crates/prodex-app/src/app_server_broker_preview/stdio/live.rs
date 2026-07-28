@@ -51,30 +51,31 @@ impl AppServerBrokerLiveValidator {
         }
         state.line_index = state.line_index.saturating_add(1);
         let line_index = state.line_index;
-        let mut observation = state.session.validate_line(line_index, line);
-        observation.preview["direction"] = direction.into();
-        app_server_broker_log_preview_event(&state.log_path, line_index, &observation.preview);
-        serde_json::to_writer(&mut *diagnostics, &observation.preview)?;
-        diagnostics.write_all(b"\n")?;
-        diagnostics.flush()?;
+        for mut observation in state.session.validate_line(line_index, line) {
+            observation.preview["direction"] = direction.into();
+            app_server_broker_log_preview_event(&state.log_path, line_index, &observation.preview);
+            serde_json::to_writer(&mut *diagnostics, &observation.preview)?;
+            diagnostics.write_all(b"\n")?;
+            diagnostics.flush()?;
 
-        let parse_failed = !observation.preview["preview"]["parse_ok"]
-            .as_bool()
-            .unwrap_or_default();
-        let invalid_frame = observation.preview["preview"]["summary"]["frame_kind"]
-            .as_str()
-            .is_some_and(|kind| kind == "invalid");
-        let failure = observation
-            .lifecycle_failure
-            .or(observation.request_response_failure)
-            .or(observation.lifecycle_payload_failure)
-            .map(|failure| failure.to_string());
-        if parse_failed || invalid_frame || failure.is_some() {
-            let reason = failure.unwrap_or_else(|| "invalid protocol frame".to_string());
-            finish_locked(&mut state, diagnostics)?;
-            anyhow::bail!(
-                "app-server broker live validation failed direction={direction}: {reason}"
-            );
+            let parse_failed = !observation.preview["preview"]["parse_ok"]
+                .as_bool()
+                .unwrap_or_default();
+            let invalid_frame = observation.preview["preview"]["summary"]["frame_kind"]
+                .as_str()
+                .is_some_and(|kind| kind == "invalid");
+            let failure = observation
+                .lifecycle_failure
+                .or(observation.request_response_failure)
+                .or(observation.lifecycle_payload_failure)
+                .map(|failure| failure.to_string());
+            if parse_failed || invalid_frame || failure.is_some() {
+                let reason = failure.unwrap_or_else(|| "invalid protocol frame".to_string());
+                finish_locked(&mut state, diagnostics)?;
+                anyhow::bail!(
+                    "app-server broker live validation failed direction={direction}: {reason}"
+                );
+            }
         }
         Ok(())
     }

@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-runtime-completion-feature-0.361.0",
+    "requiredSubjects": [
+      "fix(runtime): close audited implementation gaps"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 50,
+      "maxLines": 1400,
+      "maxFileLines": 210
+    },
+    "reason": "Reviewed the whole-repository completion audit covering monotonic projected-credential staleness, fail-closed readiness, JSON-RPC batch validation and exact passthrough, native CLI dry-run parity, all-provider Smart Context replay, executable fuzz targets, redundant runtime forwarding removal, and superseded documentation deletion; verified with focused regressions, the full locked all-features suite, strict Clippy, complete boundary and documentation guards, an optimized locked build, provider evidence, compatibility replay, runtime load and gateway security smoke tests, RustSec audit, cargo-deny, cargo-machete, Gitleaks, and tracked-diff identifier scans."
+  },
+  {
+    "id": "audited-runtime-completion-release-0.361.0",
+    "requiredSubjects": [
+      "fix(runtime): close audited implementation gaps",
+      "chore(release): release 0.361.0"
+    ],
+    "caps": {
+      "maxFiles": 80,
+      "maxBehaviorFiles": 55,
+      "maxLines": 2200,
+      "maxFileLines": 300
+    },
+    "reason": "Reviewed the complete 0.361.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata; the source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
+  },
+  {
     "id": "audited-governance-authenticity-and-telemetry-feature-0.355.0",
     "requiredSubjects": [
       "feat(governance): harden artifact trust and telemetry",

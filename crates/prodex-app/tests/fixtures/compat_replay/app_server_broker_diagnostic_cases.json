@@ -983,7 +983,7 @@
       "continuation_decision": "fresh",
       "frame_kind": "invalid",
       "id": null,
-      "invalid_reason": "batch_frame_unsupported",
+      "invalid_reason": "invalid_batch_member",
       "is_lifecycle_method": false,
       "item_id": null,
       "lifecycle_stage": null,
@@ -1004,7 +1004,7 @@
       "turn_id": null,
       "valid_jsonrpc": false
     },
-    "name": "invalid_batch_frame_unsupported",
+    "name": "invalid_batch_member",
     "payload": [
       "not",
       "a",

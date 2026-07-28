@@ -2,7 +2,8 @@ mod lifecycle;
 mod payload;
 mod request_response;
 
-use super::parse::app_server_broker_preview_line;
+use super::super::app_server_broker_protocol::app_server_broker_invalid_reason;
+use super::parse::{app_server_broker_preview_line, app_server_broker_preview_value};
 use super::report::app_server_broker_preview_report_from_previews;
 use lifecycle::LifecycleValidation;
 use payload::LifecyclePayloadValidation;
@@ -113,8 +114,8 @@ pub(super) struct PreviewObservation {
 #[derive(Default)]
 pub(super) struct PreviewSession {
     previews: Vec<Value>,
-    preview_count: usize,
-    parsed_count: usize,
+    line_count: usize,
+    parsed_line_count: usize,
     invalid_count: usize,
     previews_truncated: bool,
     request_response: RequestResponseValidation,
@@ -123,54 +124,97 @@ pub(super) struct PreviewSession {
 }
 
 impl PreviewSession {
-    fn parsed_preview(&self, line_index: usize, line: &str) -> Value {
-        serde_json::json!({
-            "object": "app_server_broker.preview_event",
-            "line": line_index,
-            "preview": app_server_broker_preview_line(line),
-        })
-    }
-
-    pub(super) fn observe_line(&mut self, line_index: usize, line: &str) -> Value {
-        let mut preview = self.parsed_preview(line_index, line);
+    fn parsed_previews(&self, line_index: usize, line: &str) -> Vec<(Value, Option<Value>)> {
         let frame = serde_json::from_str::<Value>(line).ok();
-        self.request_response
-            .annotate_response_schema(&mut preview, frame.as_ref());
-        self.request_response.observe_for_schema_tracking(&preview);
-        self.record_preview(&preview);
-        preview
-    }
-
-    pub(super) fn validate_line(&mut self, line_index: usize, line: &str) -> PreviewObservation {
-        let mut preview = self.parsed_preview(line_index, line);
-        let frame = serde_json::from_str::<Value>(line).ok();
-        self.request_response
-            .annotate_response_schema(&mut preview, frame.as_ref());
-        let lifecycle_failure = self.lifecycle.observe_preview(&preview);
-        let request_response_failure = self
-            .request_response
-            .observe_preview_and_frame(&preview, frame.as_ref());
-        let lifecycle_payload_failure = self
-            .lifecycle_payload
-            .observe_preview_and_frame(&preview, frame.as_ref());
-        self.record_preview(&preview);
-        PreviewObservation {
-            preview,
-            lifecycle_failure,
-            request_response_failure,
-            lifecycle_payload_failure,
+        if let Some(batch) = frame.as_ref().and_then(Value::as_array).filter(|_| {
+            frame
+                .as_ref()
+                .and_then(app_server_broker_invalid_reason)
+                .is_none()
+        }) {
+            return batch
+                .iter()
+                .enumerate()
+                .map(|(batch_index, frame)| {
+                    (
+                        serde_json::json!({
+                            "object": "app_server_broker.preview_event",
+                            "line": line_index,
+                            "batch_index": batch_index,
+                            "preview": app_server_broker_preview_value(frame),
+                        }),
+                        Some(frame.clone()),
+                    )
+                })
+                .collect();
         }
+        vec![(
+            serde_json::json!({
+                "object": "app_server_broker.preview_event",
+                "line": line_index,
+                "preview": app_server_broker_preview_line(line),
+            }),
+            frame,
+        )]
+    }
+
+    pub(super) fn observe_line(&mut self, line_index: usize, line: &str) -> Vec<Value> {
+        let previews = self.parsed_previews(line_index, line);
+        self.record_line(&previews[0].0);
+        previews
+            .into_iter()
+            .map(|(mut preview, frame)| {
+                self.request_response
+                    .annotate_response_schema(&mut preview, frame.as_ref());
+                self.request_response.observe_for_schema_tracking(&preview);
+                self.record_preview(&preview);
+                preview
+            })
+            .collect()
+    }
+
+    pub(super) fn validate_line(
+        &mut self,
+        line_index: usize,
+        line: &str,
+    ) -> Vec<PreviewObservation> {
+        let previews = self.parsed_previews(line_index, line);
+        self.record_line(&previews[0].0);
+        previews
+            .into_iter()
+            .map(|(mut preview, frame)| {
+                self.request_response
+                    .annotate_response_schema(&mut preview, frame.as_ref());
+                let lifecycle_failure = self.lifecycle.observe_preview(&preview);
+                let request_response_failure = self
+                    .request_response
+                    .observe_preview_and_frame(&preview, frame.as_ref());
+                let lifecycle_payload_failure = self
+                    .lifecycle_payload
+                    .observe_preview_and_frame(&preview, frame.as_ref());
+                self.record_preview(&preview);
+                PreviewObservation {
+                    preview,
+                    lifecycle_failure,
+                    request_response_failure,
+                    lifecycle_payload_failure,
+                }
+            })
+            .collect()
     }
 
     pub(super) fn finish(&self, line_index: usize) -> Option<ValidationFailure> {
         self.request_response.finish(line_index)
     }
 
-    fn record_preview(&mut self, preview: &Value) {
-        self.preview_count = self.preview_count.saturating_add(1);
+    fn record_line(&mut self, preview: &Value) {
+        self.line_count = self.line_count.saturating_add(1);
         if preview["preview"]["parse_ok"].as_bool().unwrap_or_default() {
-            self.parsed_count = self.parsed_count.saturating_add(1);
+            self.parsed_line_count = self.parsed_line_count.saturating_add(1);
         }
+    }
+
+    fn record_preview(&mut self, preview: &Value) {
         if preview["preview"]["summary"]["frame_kind"].as_str() == Some("invalid") {
             self.invalid_count = self.invalid_count.saturating_add(1);
         }
@@ -190,10 +234,13 @@ impl PreviewSession {
 
     pub(super) fn into_report_json(self) -> Value {
         let mut report = app_server_broker_preview_report_from_previews(self.previews);
+        report["line_count"] = self.line_count.into();
+        report["parsed_count"] = self.parsed_line_count.into();
+        report["error_count"] = self
+            .line_count
+            .saturating_sub(self.parsed_line_count)
+            .into();
         if self.previews_truncated {
-            report["line_count"] = self.preview_count.into();
-            report["parsed_count"] = self.parsed_count.into();
-            report["error_count"] = self.preview_count.saturating_sub(self.parsed_count).into();
             report["frame_kind_counts"]["invalid"] = self.invalid_count.into();
             report["previews_truncated"] = Value::Bool(true);
             report["retained_preview_count"] = APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS.into();
@@ -213,7 +260,7 @@ mod tests {
     fn preview_session_retains_a_bounded_report_window() {
         let mut session = PreviewSession::default();
         for line in 1..=APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS + 1 {
-            session.observe_line(
+            let _ = session.observe_line(
                 line,
                 r#"{"jsonrpc":"2.0","method":"custom/event","params":{}}"#,
             );

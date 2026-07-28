@@ -2,7 +2,16 @@
 
 use super::*;
 
+pub(crate) const APP_SERVER_BROKER_MAX_BATCH_ITEMS: usize = 4_096;
+
 pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFrameKind {
+    if value.is_array() {
+        return if app_server_broker_invalid_reason(value).is_none() {
+            AppServerBrokerFrameKind::Batch
+        } else {
+            AppServerBrokerFrameKind::Invalid
+        };
+    }
     let Some(object) = value.as_object() else {
         return AppServerBrokerFrameKind::Invalid;
     };
@@ -52,8 +61,23 @@ pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFram
 }
 
 pub(crate) fn app_server_broker_invalid_reason(value: &Value) -> Option<&'static str> {
-    if value.is_array() {
-        return Some("batch_frame_unsupported");
+    if let Some(batch) = value.as_array() {
+        if batch.is_empty() {
+            return Some("empty_batch");
+        }
+        if batch.len() > APP_SERVER_BROKER_MAX_BATCH_ITEMS {
+            return Some("batch_too_large");
+        }
+        if batch.iter().any(Value::is_array) {
+            return Some("nested_batch");
+        }
+        if batch
+            .iter()
+            .any(|frame| app_server_broker_invalid_reason(frame).is_some())
+        {
+            return Some("invalid_batch_member");
+        }
+        return None;
     }
     let Some(object) = value.as_object() else {
         return Some("non_object_frame");

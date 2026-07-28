@@ -40,8 +40,8 @@ prodex super --require-tool rtk --dry-run
 
 ## Caveman
 
-Caveman is not embedded in Prodex. Prodex 0.346.0 accepts the vetted external
-release below:
+Caveman is not embedded in Prodex. The current source accepts the vetted
+external release below:
 
 | Field | Required value |
 | --- | --- |

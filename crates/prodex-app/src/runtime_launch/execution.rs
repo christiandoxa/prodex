@@ -74,7 +74,10 @@ where
     emit_runtime_launch_progress(&request);
     let resolved_harness =
         prodex_provider_core::resolve_harness_mode(strategy.harness_mode(), None);
-    let prepared = super::prepare_runtime_launch_with_harness(request, resolved_harness)?;
+    let prepared = crate::app_commands::runtime_launch::prepare_runtime_launch_with_harness(
+        request,
+        resolved_harness,
+    )?;
     if let (Some(runtime_proxy), Some(session_id)) = (
         prepared.runtime_proxy.as_ref(),
         strategy.session_affinity_release(),

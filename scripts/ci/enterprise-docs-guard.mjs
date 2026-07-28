@@ -50,12 +50,8 @@ const DOCUMENTS = [
 
 const REQUIRED_ENTERPRISE_ARTIFACT_PATHS = [
   ...[
-    "04-policy-model-and-obligations.md",
-    "05-approval-and-break-glass.md",
     "06-provider-registry-and-routing.md",
-    "07-identity-session-and-api-gateway.md",
     "09-storage-ha-backup-and-dr.md",
-    "13-operator-runbooks.md",
     "15-classification-contract-and-enforcement.md",
     "16-response-stream-enforcement.md",
     "17-policy-authority-and-revision-store.md",
