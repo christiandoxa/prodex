@@ -8,6 +8,7 @@ cargo +nightly-2026-07-11 fuzz run canonical_request_target --fuzz-dir fuzz
 cargo +nightly-2026-07-11 fuzz run oidc_endpoint_policy --fuzz-dir fuzz
 cargo +nightly-2026-07-11 fuzz run profile_export_envelope --fuzz-dir fuzz
 cargo +nightly-2026-07-11 fuzz run runtime_policy_parse --fuzz-dir fuzz
+cargo +nightly-2026-07-11 fuzz run governance_policy --fuzz-dir fuzz
 cargo +nightly-2026-07-11 fuzz run smart_context_inputs --fuzz-dir fuzz
 ```
 
@@ -23,5 +24,7 @@ The profile-export harness caps individual fuzz inputs at 1 MiB for throughput a
 bounded envelope, profile, nested-secret, and secret-file deserializers together.
 The runtime-policy harness applies the same input cap, parses only UTF-8 TOML, and runs the
 production section validators for every structurally valid policy.
+The governance-policy harness checks bounded compilation and deterministic evaluation across
+equivalent policy inputs.
 The Smart Context harness caps inputs at 64 KiB and exercises JSON-shape admission, strong
 artifact identity, reference rendering/compaction, and line-range validation.

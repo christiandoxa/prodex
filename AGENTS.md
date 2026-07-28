@@ -50,6 +50,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-claude/`: Claude Code runtime launch configuration helpers
 - `crates/prodex-runtime-cookies/`: runtime proxy profile-scoped cookie relay helpers
 - `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
+- `crates/prodex-runtime-gemini-cli-compat/`: native Gemini CLI checkpoint and resume compatibility helpers
 - `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
 - `crates/prodex-runtime-log/`: runtime log path and marker helpers
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering

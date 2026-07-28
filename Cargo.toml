@@ -84,6 +84,11 @@ rust-version = "1.97.0"
 [profile.release]
 strip = "symbols"
 
+[[bin]]
+name = "prodex-control-plane"
+path = "src/bin/prodex-control-plane.rs"
+doc = false
+
 [workspace.dependencies]
 aes-gcm-siv = "0.11.1"
 anyhow = "1.0.102"

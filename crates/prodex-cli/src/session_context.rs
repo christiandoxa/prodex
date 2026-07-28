@@ -259,7 +259,7 @@ pub struct ContextExportArgs {
     /// Unique full or partial shared Codex session id.
     #[arg(value_name = "ID")]
     pub id: String,
-    /// Output Markdown path. Defaults to ./context_<resolved-session-id>.md
+    /// Output Markdown path. Defaults to `./context_<resolved-session-id>.md`.
     #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
 }
