@@ -27,17 +27,31 @@ pub(super) fn append_audit_outbox_tx(
         )
         .map_err(database_error)?;
     let mut rows = statement.query([&tenant_id]).map_err(database_error)?;
-    let current = rows
+    let mut current = rows
         .next()
         .map_err(database_error)?
         .map(|row| row.get::<_, String>(0))
         .transpose()
         .map_err(database_error)?;
-    if rows.next().map_err(database_error)?.is_some() || current.as_deref() != expected_previous {
+    if rows.next().map_err(database_error)?.is_some() {
         return Err(GovernanceRepositoryError::AuditChainConflict);
     }
     drop(rows);
     drop(statement);
+    if current.is_none() {
+        current = transaction
+            .query_row(
+                "SELECT last_purged_digest FROM prodex_audit_retention_anchors
+                 WHERE tenant_id = ?1",
+                [&tenant_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(database_error)?;
+    }
+    if current.as_deref() != expected_previous {
+        return Err(GovernanceRepositoryError::AuditChainConflict);
+    }
     let event_envelope =
         serde_json::to_string(&envelope).map_err(|_| GovernanceRepositoryError::InvalidInput)?;
     transaction

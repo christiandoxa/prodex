@@ -54,7 +54,6 @@ pub enum RuntimeStateMutation {
     PreviousResponseOwner(String),
     PreviousResponseNegativeCache(String),
     PreviousResponseRelease(String),
-    PreviousResponseBindingClear(String),
     ResponseTouch(String),
     TurnState(String),
     TurnStateTouch(String),
@@ -95,9 +94,6 @@ impl RuntimeStateMutation {
                 with_value("previous_response_negative_cache", value)
             }
             Self::PreviousResponseRelease(value) => with_value("previous_response_release", value),
-            Self::PreviousResponseBindingClear(value) => {
-                with_value("previous_response_binding_clear", value)
-            }
             Self::ResponseTouch(value) => with_value("response_touch", value),
             Self::TurnState(value) => with_value("turn_state", value),
             Self::TurnStateTouch(value) => with_value("turn_state_touch", value),
@@ -321,7 +317,6 @@ pub fn runtime_state_save_sections(mutation: &RuntimeStateMutation) -> RuntimeSt
             | RuntimeStateMutation::PreviousResponseOwner(_)
             | RuntimeStateMutation::PreviousResponseNegativeCache(_)
             | RuntimeStateMutation::PreviousResponseRelease(_)
-            | RuntimeStateMutation::PreviousResponseBindingClear(_)
             | RuntimeStateMutation::ResponseTouch(_)
             | RuntimeStateMutation::TurnState(_)
             | RuntimeStateMutation::TurnStateTouch(_)

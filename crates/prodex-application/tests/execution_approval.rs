@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use prodex_application::{
@@ -7,26 +8,30 @@ use prodex_application::{
 };
 use prodex_domain::{
     ApprovalAction, ApprovalFingerprint, ApprovalRecord, ApprovalState, AuditAction, AuditEvent,
-    AuditEventId, AuditOutcome, AuditResource, CredentialScope, PolicyEffect, Principal,
-    PrincipalId, PrincipalKind, Role, TenantContext, TenantId, compute_audit_chain_digest,
-    transition_approval,
+    AuditEventId, AuditOutcome, AuditResource, CredentialScope, IdempotencyKey,
+    IdempotentOperation, PolicyEffect, Principal, PrincipalId, PrincipalKind, Role, TenantContext,
+    TenantId, compute_audit_chain_digest, transition_approval,
 };
 use prodex_storage::{
-    AppendOnlyAuditCommand, ApprovalVoteRequest, AuditOutboxWriteCommand,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceRepositoryError,
-    GovernanceRevisionWriteCommand, GovernanceWriteOutcome, TenantStorageKey,
+    AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
+    ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand,
+    GovernanceActivationRequest, GovernanceActivationResult, GovernanceMutationIdempotency,
+    GovernanceRepositoryError, GovernanceRevisionWriteCommand, GovernanceWriteOutcome,
+    TenantStorageKey,
 };
 
 #[derive(Default)]
 struct Repository {
     approval: Mutex<Option<ApprovalRecord>>,
+    votes: Mutex<BTreeMap<String, (String, ApprovalVoteSnapshot)>>,
 }
 
 impl ApplicationGovernanceRepository for Repository {
-    fn write_revision(
+    fn write_revision_idempotent(
         &self,
         _: GovernanceRevisionWriteCommand,
         _: AuditOutboxWriteCommand,
+        _: GovernanceMutationIdempotency,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         Err(GovernanceRepositoryError::Unsupported)
     }
@@ -38,6 +43,15 @@ impl ApplicationGovernanceRepository for Repository {
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         *self.approval.lock().unwrap() = Some(approval);
         Ok(GovernanceWriteOutcome::Applied)
+    }
+
+    fn create_approval_idempotent(
+        &self,
+        approval: ApprovalRecord,
+        audit: AuditOutboxWriteCommand,
+        _: GovernanceMutationIdempotency,
+    ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
+        self.create_approval(approval, audit)
     }
 
     fn transition_approval(
@@ -63,6 +77,32 @@ impl ApplicationGovernanceRepository for Repository {
         Ok(transitioned)
     }
 
+    fn transition_approval_idempotent(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        let key = idempotency.operation.key.as_str().to_string();
+        let mut votes = self.votes.lock().unwrap();
+        if let Some((fingerprint, snapshot)) = votes.get(&key) {
+            return if fingerprint == &idempotency.operation.request_fingerprint {
+                Ok(ApprovalVoteMutationOutcome::Replayed(*snapshot))
+            } else {
+                Err(GovernanceRepositoryError::Conflict)
+            };
+        }
+        let approval = self.transition_approval(request, action)?;
+        votes.insert(
+            key,
+            (
+                idempotency.operation.request_fingerprint,
+                ApprovalVoteSnapshot::from_record(&approval),
+            ),
+        );
+        Ok(ApprovalVoteMutationOutcome::Applied(approval))
+    }
+
     fn get_approval(
         &self,
         tenant_id: TenantId,
@@ -83,13 +123,6 @@ impl ApplicationGovernanceRepository for Repository {
         _: &mut dyn FnMut(&prodex_storage::GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
         Err(GovernanceRepositoryError::Unsupported)
-    }
-
-    fn append_audit_outbox(
-        &self,
-        _: AuditOutboxWriteCommand,
-    ) -> Result<(), GovernanceRepositoryError> {
-        Ok(())
     }
 }
 
@@ -199,4 +232,67 @@ fn execution_approval_is_policy_selected_quorum_gated_and_one_use() {
         panic!("changed request must require a distinct approval");
     };
     assert_ne!(changed.id, approved_id);
+}
+
+#[test]
+fn execution_approval_review_replays_idempotently() {
+    let tenant_id = TenantId::new();
+    let maker = Principal::new(
+        PrincipalId::new(),
+        Some(tenant_id),
+        PrincipalKind::User,
+        Role::Admin,
+        CredentialScope::DataPlane,
+    );
+    let reviewer = Principal::new(
+        PrincipalId::new(),
+        Some(tenant_id),
+        PrincipalKind::User,
+        Role::Admin,
+        CredentialScope::ControlPlane,
+    );
+    let repository = Repository::default();
+    let service = ApplicationExecutionApprovalService::new(&repository);
+    let ApplicationExecutionApprovalDecision::Pending(approval) = service
+        .enforce(request(tenant_id, &maker, PolicyEffect::RequireApproval))
+        .unwrap()
+    else {
+        panic!("first request must be pending");
+    };
+    let operation = IdempotentOperation::new(
+        tenant_id,
+        IdempotencyKey::new("review-request").unwrap(),
+        "sha256:review-request",
+    )
+    .unwrap();
+    let vote = || ApprovalVoteRequest {
+        tenant_id,
+        approval_id: approval.id.clone(),
+        actor: reviewer.clone(),
+        expected_version: approval.version,
+        now_unix_ms: 3_000,
+        reason: None,
+        audit_outbox: audit(tenant_id, &reviewer, "execution.review"),
+    };
+    let idempotency = ApprovalVoteIdempotency {
+        operation,
+        started_at_unix_ms: 2_999,
+    };
+
+    assert!(matches!(
+        service
+            .review_idempotent(vote(), ApprovalAction::Approve, idempotency.clone())
+            .unwrap(),
+        ApprovalVoteMutationOutcome::Applied(_)
+    ));
+    assert!(matches!(
+        service
+            .review_idempotent(vote(), ApprovalAction::Approve, idempotency)
+            .unwrap(),
+        ApprovalVoteMutationOutcome::Replayed(ApprovalVoteSnapshot {
+            version: 2,
+            vote_count: 1,
+            ..
+        })
+    ));
 }

@@ -11,6 +11,8 @@ use prodex_domain::{
 
 mod decisions;
 pub use decisions::*;
+mod idempotency;
+pub use idempotency::*;
 
 pub const MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_GOVERNANCE_SIGNATURE_BYTES: usize = 128;
@@ -98,21 +100,6 @@ pub struct ApprovalVoteRequest {
     pub now_unix_ms: u64,
     pub reason: Option<ApprovalReasonCode>,
     pub audit_outbox: AuditOutboxWriteCommand,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct ApprovalVoteIdempotency {
-    pub operation: IdempotentOperation,
-    pub started_at_unix_ms: u64,
-}
-
-impl fmt::Debug for ApprovalVoteIdempotency {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApprovalVoteIdempotency")
-            .field("operation", &"<redacted>")
-            .field("started_at_unix_ms", &"<redacted>")
-            .finish()
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

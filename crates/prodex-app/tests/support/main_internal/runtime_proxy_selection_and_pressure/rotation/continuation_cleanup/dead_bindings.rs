@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
+fn clear_runtime_dead_response_binding_marks_dead_tombstone() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -60,8 +60,13 @@ fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
     wait_for_runtime_background_queues_idle();
 
     assert!(
-        clear_runtime_stale_previous_response_binding(&shared, "main", Some("resp-main"))
-            .expect("stale clear should succeed")
+        clear_runtime_dead_response_bindings(
+            &shared,
+            "main",
+            &[String::from("resp-main")],
+            "test",
+        )
+        .expect("dead binding clear should succeed")
     );
     wait_for_runtime_background_queues_idle();
 

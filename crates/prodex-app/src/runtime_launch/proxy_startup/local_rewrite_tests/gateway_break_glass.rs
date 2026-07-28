@@ -82,21 +82,49 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
         .unwrap()
         .as_millis() as u64
         + 600_000;
+    let create_body = serde_json::json!({
+        "approval_id": approval_id,
+        "reason_code": "incident.retention",
+        "expires_at_unix_ms": expires_at_unix_ms
+    });
     let created: serde_json::Value = client
         .post(&approval_base)
         .bearer_auth("maker-token")
         .header("Idempotency-Key", "break-glass-create")
-        .json(&serde_json::json!({
-            "approval_id": approval_id,
-            "reason_code": "incident.retention",
-            "expires_at_unix_ms": expires_at_unix_ms
-        }))
+        .json(&create_body)
         .send()
         .unwrap()
         .json()
         .unwrap();
     assert_eq!(created["approval"]["scope"], "audit_retention");
     assert_eq!(created["approval"]["state"], "pending_approval");
+    let replayed: serde_json::Value = client
+        .post(&approval_base)
+        .bearer_auth("maker-token")
+        .header("Idempotency-Key", "break-glass-create")
+        .json(&create_body)
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(replayed["approval"], created["approval"]);
+    assert_eq!(replayed["replayed"], true);
+    assert_eq!(
+        client
+            .post(&approval_base)
+            .bearer_auth("maker-token")
+            .header("Idempotency-Key", "break-glass-create")
+            .json(&serde_json::json!({
+                "approval_id": approval_id,
+                "reason_code": "incident.other",
+                "expires_at_unix_ms": expires_at_unix_ms
+            }))
+            .send()
+            .unwrap()
+            .status()
+            .as_u16(),
+        409
+    );
 
     let audit_event_id = Connection::open(&database_path)
         .unwrap()
@@ -179,7 +207,73 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
     .json()
     .unwrap();
     assert_eq!(active["state"], "active");
-    assert_eq!(purge("break-glass-active-purge").status().as_u16(), 200);
+    let active_purge = purge("break-glass-active-purge");
+    assert_eq!(active_purge.status().as_u16(), 200);
+    let active_purge_body = active_purge.text().unwrap();
+    let replayed_purge = purge("break-glass-active-purge");
+    assert_eq!(replayed_purge.status().as_u16(), 200);
+    assert_eq!(replayed_purge.text().unwrap(), active_purge_body);
+
+    let held_event_id = Connection::open(&database_path)
+        .unwrap()
+        .query_row(
+            "SELECT audit_event_id FROM prodex_audit_log WHERE tenant_id = ?1 ORDER BY occurred_at_unix_ms DESC LIMIT 1",
+            [tenant_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    let holds_url = format!(
+        "http://{}/v1/prodex/gateway/audit/retention/holds",
+        proxy.listen_addr
+    );
+    let hold_body = serde_json::json!({
+        "audit_event_id": held_event_id,
+        "reason_code": "legal.investigation"
+    });
+    let upsert_hold = || {
+        client
+            .post(&holds_url)
+            .bearer_auth("checker-one-token")
+            .header("Idempotency-Key", "legal-hold-upsert")
+            .json(&hold_body)
+            .send()
+            .unwrap()
+    };
+    let first_hold = upsert_hold();
+    assert_eq!(first_hold.status().as_u16(), 200);
+    let first_hold_body = first_hold.text().unwrap();
+    let replayed_hold = upsert_hold();
+    assert_eq!(replayed_hold.status().as_u16(), 200);
+    assert_eq!(replayed_hold.text().unwrap(), first_hold_body);
+    assert_eq!(
+        client
+            .post(&holds_url)
+            .bearer_auth("checker-one-token")
+            .header("Idempotency-Key", "legal-hold-upsert")
+            .json(&serde_json::json!({
+                "audit_event_id": held_event_id,
+                "reason_code": "legal.other"
+            }))
+            .send()
+            .unwrap()
+            .status()
+            .as_u16(),
+        409
+    );
+    let delete_hold = || {
+        client
+            .delete(format!("{holds_url}/{held_event_id}"))
+            .bearer_auth("checker-one-token")
+            .header("Idempotency-Key", "legal-hold-delete")
+            .send()
+            .unwrap()
+    };
+    let first_delete = delete_hold();
+    assert_eq!(first_delete.status().as_u16(), 200);
+    let first_delete_body = first_delete.text().unwrap();
+    let replayed_delete = delete_hold();
+    assert_eq!(replayed_delete.status().as_u16(), 200);
+    assert_eq!(replayed_delete.text().unwrap(), first_delete_body);
 
     let connection = Connection::open(&database_path).unwrap();
     connection
@@ -231,6 +325,19 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
         )
         .unwrap();
     assert_eq!(lifecycle_audits, 6);
+    let idempotent_mutation_audits = connection
+        .query_row(
+            "SELECT COUNT(*) FROM prodex_audit_log
+             WHERE tenant_id = ?1 AND action IN (
+                 'governance.audit_retention.purge',
+                 'governance.audit_legal_hold.upsert',
+                 'governance.audit_legal_hold.delete'
+             )",
+            [tenant_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(idempotent_mutation_audits, 3);
     drop(connection);
     let integrity: serde_json::Value = client
         .get(format!(

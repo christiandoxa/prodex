@@ -121,10 +121,10 @@ pub(super) fn load_approval_tx(
     }))
 }
 
-pub(super) fn approval_idempotency_replay_sqlite(
+pub(super) fn governance_idempotency_replay_sqlite(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
+    idempotency: &GovernanceMutationIdempotency,
 ) -> Result<IdempotencyReplayDecision<Vec<u8>>, GovernanceRepositoryError> {
     if idempotency.operation.tenant_id != tenant_id || idempotency.started_at_unix_ms == 0 {
         return Err(GovernanceRepositoryError::InvalidInput);
@@ -167,10 +167,10 @@ pub(super) fn approval_idempotency_replay_sqlite(
         .map_err(|_| GovernanceRepositoryError::Conflict)
 }
 
-pub(super) fn insert_approval_idempotency_pending_sqlite(
+pub(super) fn insert_governance_idempotency_pending_sqlite(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
+    idempotency: &GovernanceMutationIdempotency,
 ) -> Result<(), GovernanceRepositoryError> {
     let inserted = transaction
         .execute(
@@ -191,11 +191,11 @@ pub(super) fn insert_approval_idempotency_pending_sqlite(
     Ok(())
 }
 
-pub(super) fn complete_approval_idempotency_sqlite(
+pub(super) fn complete_governance_idempotency_sqlite(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
-    idempotency: &ApprovalVoteIdempotency,
-    outcome: ApprovalVoteStableOutcome,
+    idempotency: &GovernanceMutationIdempotency,
+    response: &[u8],
     completed_at_unix_ms: u64,
 ) -> Result<(), GovernanceRepositoryError> {
     let updated = transaction
@@ -209,7 +209,7 @@ pub(super) fn complete_approval_idempotency_sqlite(
                 idempotency.operation.key.as_str(),
                 idempotency.operation.request_fingerprint,
                 to_i64(completed_at_unix_ms)?,
-                outcome.encode(),
+                response,
             ],
         )
         .map_err(database_error)?;

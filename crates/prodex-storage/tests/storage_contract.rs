@@ -1,3 +1,6 @@
+#[path = "storage_contract/governance_idempotency.rs"]
+mod governance_idempotency;
+
 use prodex_domain::{
     AuditAction, AuditDigest, AuditExportFormat, AuditExportPlan, AuditOutcome, AuditPageLimit,
     AuditQueryPlan, AuditQueryScope, AuditResource, AuditRetentionBatchLimit,
@@ -1235,22 +1238,6 @@ fn append_only_audit_plan_rejects_cross_tenant_event_storage_key() {
             key_tenant,
             event_tenant,
         })
-    );
-}
-
-#[test]
-fn audit_retention_purge_plan_uses_tenant_scoped_batch() {
-    let tenant_id = TenantId::new();
-    let command = retention_purge_command(tenant_id);
-    let expected_event_ids = command.batch.event_ids().collect::<Vec<_>>();
-
-    let plan = plan_audit_retention_purge(command).unwrap();
-
-    assert_eq!(plan.storage_key.tenant_id, tenant_id);
-    assert_eq!(plan.batch.tenant_id, tenant_id);
-    assert_eq!(
-        plan.batch.event_ids().collect::<Vec<_>>(),
-        expected_event_ids
     );
 }
 

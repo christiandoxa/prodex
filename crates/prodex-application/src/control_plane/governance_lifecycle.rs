@@ -1,71 +1,57 @@
-//! Executing policy-governance use case behind the existing control-plane boundary.
+//! Executing governance lifecycle use cases behind the control-plane boundary.
 
 use std::error::Error;
 use std::fmt;
 
-use prodex_control_plane::{
-    ControlPlaneActionRequest, ControlPlaneAuthorizationError, ControlPlaneDecision,
-    ControlPlaneOperation, decide_control_plane_action,
-};
+use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
 use prodex_domain::{
-    ApprovalAction, ApprovalFingerprint, ApprovalKind, ApprovalReasonCode, ApprovalRecord,
-    ApprovalScope, ApprovalState, AuditAction, AuditDigest, AuditEvent, AuditEventId,
-    AuditResource, PolicyEffect, Principal, ResourceKind, TenantId, execution_approval_id,
+    ApprovalAction, ApprovalFingerprint, ApprovalKind, ApprovalRecord, ApprovalScope,
+    ApprovalState, PolicyEffect, Principal, TenantId, execution_approval_id,
 };
 use prodex_storage::{
-    AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
-    ApprovalVoteRequest, AuditOutboxWriteCommand, GovernanceActivationAction,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
-    GovernanceArtifactValidationInput, GovernanceRepositoryError, GovernanceRevisionWriteCommand,
-    GovernanceWriteOutcome, TenantStorageKey,
+    ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest,
+    AuditOutboxWriteCommand, GovernanceActivationAction, GovernanceActivationRequest,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceArtifactValidationInput,
+    GovernanceMutationIdempotency, GovernanceRepositoryError, GovernanceRevisionWriteCommand,
+    GovernanceWriteOutcome,
+    governance_support::{
+        approval_kind_for_artifact, artifact_kind_for_approval, artifact_kind_label,
+    },
 };
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct ApplicationGovernanceAuditLink {
-    pub previous_digest: Option<AuditDigest>,
-    pub event_digest: AuditDigest,
-    pub outbox_event_id: AuditEventId,
-}
-
-impl fmt::Debug for ApplicationGovernanceAuditLink {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationGovernanceAuditLink")
-            .field(
-                "previous_digest",
-                &self.previous_digest.as_ref().map(|_| "<redacted>"),
-            )
-            .field("event_digest", &"<redacted>")
-            .field("outbox_event_id", &"<redacted>")
-            .finish()
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApplicationGovernanceLifecycleError {
     InvalidAction,
-    Authorization(ControlPlaneAuthorizationError),
     Repository(GovernanceRepositoryError),
 }
 
 impl fmt::Display for ApplicationGovernanceLifecycleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "policy governance operation failed")
+        write!(f, "governance lifecycle operation failed")
     }
 }
 
 impl Error for ApplicationGovernanceLifecycleError {}
 
 pub trait ApplicationGovernanceRepository {
-    fn write_revision(
+    fn write_revision_idempotent(
         &self,
         command: GovernanceRevisionWriteCommand,
         audit_outbox: AuditOutboxWriteCommand,
+        idempotency: GovernanceMutationIdempotency,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError>;
 
     fn create_approval(
         &self,
         approval: prodex_domain::ApprovalRecord,
         audit_outbox: AuditOutboxWriteCommand,
+    ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError>;
+
+    fn create_approval_idempotent(
+        &self,
+        approval: prodex_domain::ApprovalRecord,
+        audit_outbox: AuditOutboxWriteCommand,
+        idempotency: GovernanceMutationIdempotency,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError>;
 
     fn transition_approval(
@@ -78,11 +64,8 @@ pub trait ApplicationGovernanceRepository {
         &self,
         request: ApprovalVoteRequest,
         action: ApprovalAction,
-        _idempotency: ApprovalVoteIdempotency,
-    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
-        self.transition_approval(request, action)
-            .map(ApprovalVoteMutationOutcome::Applied)
-    }
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError>;
 
     fn get_approval(
         &self,
@@ -95,11 +78,6 @@ pub trait ApplicationGovernanceRepository {
         request: GovernanceActivationRequest,
         validate_artifact: &mut dyn FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, GovernanceRepositoryError>;
-
-    fn append_audit_outbox(
-        &self,
-        command: AuditOutboxWriteCommand,
-    ) -> Result<(), GovernanceRepositoryError>;
 }
 
 pub const EXECUTION_APPROVAL_TTL_MS: u64 = 15 * 60 * 1_000;
@@ -286,221 +264,203 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationExecutionApprov
     }
 }
 
-pub struct ApplicationPolicyGovernanceService<'a, R: ApplicationGovernanceRepository + ?Sized> {
+pub struct ApplicationGovernanceLifecycleService<'a, R: ApplicationGovernanceRepository + ?Sized> {
     repository: &'a R,
 }
 
 impl<R: ApplicationGovernanceRepository + ?Sized> fmt::Debug
-    for ApplicationPolicyGovernanceService<'_, R>
+    for ApplicationGovernanceLifecycleService<'_, R>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationPolicyGovernanceService")
+        f.debug_struct("ApplicationGovernanceLifecycleService")
             .field("repository", &"<redacted>")
             .finish()
     }
 }
 
-impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationPolicyGovernanceService<'a, R> {
+impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationGovernanceLifecycleService<'a, R> {
     pub fn new(repository: &'a R) -> Self {
         Self { repository }
     }
 
     pub fn write_revision(
         &self,
-        action: ControlPlaneActionRequest,
+        action: &ControlPlaneActionPlan,
         revision: GovernanceRevisionWriteCommand,
-        audit: ApplicationGovernanceAuditLink,
+        idempotency: GovernanceMutationIdempotency,
+        audit_outbox: AuditOutboxWriteCommand,
     ) -> Result<GovernanceWriteOutcome, ApplicationGovernanceLifecycleError> {
-        if revision.kind != GovernanceArtifactKind::Policy
-            || revision.tenant_id != action.resource.tenant_id
+        if revision.tenant_id != action.tenant.tenant_id
+            || idempotency.operation.tenant_id != revision.tenant_id
         {
             return Err(ApplicationGovernanceLifecycleError::InvalidAction);
         }
-        let audit_outbox = self.authorize(
+        let label = artifact_kind_label(revision.kind);
+        validate_action(
             action,
             ControlPlaneOperation::PolicyCreate,
-            audit,
-            "governance.policy.revision.write",
-            Some(revision.revision_id.clone()),
+            revision.tenant_id,
+            &audit_outbox,
+            &format!("governance.{label}.revision.write"),
+            &format!("governance_{label}_revision"),
+            Some(&revision.revision_id),
         )?;
         self.repository
-            .write_revision(revision, audit_outbox)
+            .write_revision_idempotent(revision, audit_outbox, idempotency)
             .map_err(ApplicationGovernanceLifecycleError::Repository)
     }
 
     pub fn create_approval(
         &self,
-        action: ControlPlaneActionRequest,
+        action: &ControlPlaneActionPlan,
         approval: prodex_domain::ApprovalRecord,
-        audit: ApplicationGovernanceAuditLink,
+        idempotency: GovernanceMutationIdempotency,
+        audit_outbox: AuditOutboxWriteCommand,
     ) -> Result<GovernanceWriteOutcome, ApplicationGovernanceLifecycleError> {
-        if approval.kind != prodex_domain::ApprovalKind::PolicyRevision
-            || approval.tenant_id != action.resource.tenant_id
+        let kind = artifact_kind_for_approval(approval.kind)
+            .map_err(|_| ApplicationGovernanceLifecycleError::InvalidAction)?;
+        if approval.tenant_id != action.tenant.tenant_id
+            || idempotency.operation.tenant_id != approval.tenant_id
+            || approval.maker != action.audit_event.principal_id
         {
             return Err(ApplicationGovernanceLifecycleError::InvalidAction);
         }
-        let audit_outbox = self.authorize(
+        let label = artifact_kind_label(kind);
+        validate_action(
             action,
             ControlPlaneOperation::PolicySubmit,
-            audit,
-            "governance.policy.approval.create",
-            Some(approval.id.as_str().to_string()),
+            approval.tenant_id,
+            &audit_outbox,
+            &format!("governance.{label}.approval.create"),
+            &format!("governance_{label}_revision"),
+            Some(approval.id.as_str()),
         )?;
         self.repository
-            .create_approval(approval, audit_outbox)
+            .create_approval_idempotent(approval, audit_outbox, idempotency)
             .map_err(ApplicationGovernanceLifecycleError::Repository)
-    }
-
-    pub fn vote_approval(
-        &self,
-        action: ControlPlaneActionRequest,
-        request: ApprovalVoteRequest,
-        audit: ApplicationGovernanceAuditLink,
-    ) -> Result<prodex_domain::ApprovalRecord, ApplicationGovernanceLifecycleError> {
-        self.transition_approval(action, request, ApprovalAction::Approve, audit)
-    }
-
-    pub fn reject_approval(
-        &self,
-        action: ControlPlaneActionRequest,
-        mut request: ApprovalVoteRequest,
-        reason: ApprovalReasonCode,
-        audit: ApplicationGovernanceAuditLink,
-    ) -> Result<prodex_domain::ApprovalRecord, ApplicationGovernanceLifecycleError> {
-        request.reason = Some(reason);
-        self.transition_approval(action, request, ApprovalAction::Reject, audit)
-    }
-
-    pub fn cancel_approval(
-        &self,
-        action: ControlPlaneActionRequest,
-        mut request: ApprovalVoteRequest,
-        reason: ApprovalReasonCode,
-        audit: ApplicationGovernanceAuditLink,
-    ) -> Result<prodex_domain::ApprovalRecord, ApplicationGovernanceLifecycleError> {
-        request.reason = Some(reason);
-        self.transition_approval(action, request, ApprovalAction::Cancel, audit)
     }
 
     pub fn transition_approval(
         &self,
-        action: ControlPlaneActionRequest,
-        mut request: ApprovalVoteRequest,
+        action: &ControlPlaneActionPlan,
+        kind: GovernanceArtifactKind,
+        request: ApprovalVoteRequest,
         approval_action: ApprovalAction,
-        audit: ApplicationGovernanceAuditLink,
-    ) -> Result<prodex_domain::ApprovalRecord, ApplicationGovernanceLifecycleError> {
-        if request.tenant_id != action.resource.tenant_id {
+        idempotency: GovernanceMutationIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, ApplicationGovernanceLifecycleError> {
+        if request.tenant_id != action.tenant.tenant_id
+            || idempotency.operation.tenant_id != request.tenant_id
+            || request.actor.id != action.audit_event.principal_id
+            || self
+                .repository
+                .get_approval(request.tenant_id, &request.approval_id)
+                .map_err(ApplicationGovernanceLifecycleError::Repository)?
+                .kind
+                != approval_kind_for_artifact(kind)
+        {
             return Err(ApplicationGovernanceLifecycleError::InvalidAction);
         }
-        request.actor = action.principal.clone();
-        let audit_action = approval_transition_audit_action(approval_action)
+        let audit_action = approval_transition_audit_action(kind, approval_action)
             .ok_or(ApplicationGovernanceLifecycleError::InvalidAction)?;
-        request.audit_outbox = self.authorize(
+        let label = artifact_kind_label(kind);
+        validate_action(
             action,
             ControlPlaneOperation::PolicyVote,
-            audit,
-            audit_action,
-            Some(request.approval_id.as_str().to_string()),
+            request.tenant_id,
+            &request.audit_outbox,
+            &audit_action,
+            &format!("governance_{label}_revision"),
+            Some(request.approval_id.as_str()),
         )?;
         self.repository
-            .transition_approval(request, approval_action)
+            .transition_approval_idempotent(request, approval_action, idempotency)
             .map_err(ApplicationGovernanceLifecycleError::Repository)
     }
 
     pub fn activate_revision(
         &self,
-        action: ControlPlaneActionRequest,
-        mut request: GovernanceActivationRequest,
-        audit: ApplicationGovernanceAuditLink,
+        action: &ControlPlaneActionPlan,
+        request: GovernanceActivationRequest,
         validate_artifact: impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
     ) -> Result<GovernanceActivationResult, ApplicationGovernanceLifecycleError> {
-        if request.kind != GovernanceArtifactKind::Policy
-            || request.tenant_id != action.resource.tenant_id
+        if request.tenant_id != action.tenant.tenant_id
+            || request.actor.id != action.audit_event.principal_id
         {
             return Err(ApplicationGovernanceLifecycleError::InvalidAction);
         }
+        let label = artifact_kind_label(request.kind);
         let audit_action = match request.action {
-            GovernanceActivationAction::Activate => "governance.policy.revision.activate",
-            GovernanceActivationAction::Rollback => "governance.policy.revision.rollback",
+            GovernanceActivationAction::Activate => {
+                format!("governance.{label}.revision.activate")
+            }
+            GovernanceActivationAction::Rollback => {
+                format!("governance.{label}.revision.rollback")
+            }
         };
-        request.actor = action.principal.clone();
-        request.audit_outbox = self.authorize(
+        validate_action(
             action,
             match request.action {
                 GovernanceActivationAction::Activate => ControlPlaneOperation::PolicyActivate,
                 GovernanceActivationAction::Rollback => ControlPlaneOperation::PolicyRollback,
             },
-            audit,
-            audit_action,
-            Some(request.revision_id.clone()),
+            request.tenant_id,
+            &request.audit_outbox,
+            &audit_action,
+            &format!("governance_{label}_revision"),
+            Some(&request.revision_id),
         )?;
         let mut validate_artifact = validate_artifact;
         self.repository
             .activate_revision(request, &mut validate_artifact)
             .map_err(ApplicationGovernanceLifecycleError::Repository)
     }
-
-    fn authorize(
-        &self,
-        action: ControlPlaneActionRequest,
-        expected_operation: ControlPlaneOperation,
-        audit: ApplicationGovernanceAuditLink,
-        audit_action: &'static str,
-        resource_id: Option<String>,
-    ) -> Result<AuditOutboxWriteCommand, ApplicationGovernanceLifecycleError> {
-        if action.operation != expected_operation || action.resource.kind != ResourceKind::Policy {
-            return Err(ApplicationGovernanceLifecycleError::InvalidAction);
-        }
-        match decide_control_plane_action(action) {
-            ControlPlaneDecision::Authorized(plan) => Ok(audit_command(
-                plan.audit_event,
-                audit,
-                audit_action,
-                resource_id,
-            )),
-            ControlPlaneDecision::Denied {
-                error, audit_event, ..
-            } => {
-                let command = audit_command(audit_event, audit, audit_action, resource_id);
-                self.repository
-                    .append_audit_outbox(command)
-                    .map_err(ApplicationGovernanceLifecycleError::Repository)?;
-                Err(ApplicationGovernanceLifecycleError::Authorization(error))
-            }
-        }
-    }
 }
 
-const fn approval_transition_audit_action(action: ApprovalAction) -> Option<&'static str> {
-    match action {
-        ApprovalAction::Approve => Some("governance.policy.approval.vote"),
-        ApprovalAction::Reject => Some("governance.policy.approval.reject"),
-        ApprovalAction::Cancel => Some("governance.policy.approval.cancel"),
-        ApprovalAction::Activate | ApprovalAction::Supersede | ApprovalAction::RollBack => None,
-    }
+fn approval_transition_audit_action(
+    kind: GovernanceArtifactKind,
+    action: ApprovalAction,
+) -> Option<String> {
+    let action = match action {
+        ApprovalAction::Approve => "approve",
+        ApprovalAction::Reject => "reject",
+        ApprovalAction::Cancel => "cancel",
+        ApprovalAction::Activate | ApprovalAction::Supersede | ApprovalAction::RollBack => {
+            return None;
+        }
+    };
+    Some(format!(
+        "governance.{}.approval.{action}",
+        artifact_kind_label(kind)
+    ))
 }
 
-fn audit_command(
-    mut event: AuditEvent,
-    audit: ApplicationGovernanceAuditLink,
-    action: &'static str,
-    resource_id: Option<String>,
-) -> AuditOutboxWriteCommand {
-    event.action = AuditAction::new(action);
-    event.resource = AuditResource::new(
-        "governance_policy_revision",
-        resource_id,
-        Some(event.tenant_id),
-    );
-    AuditOutboxWriteCommand {
-        outbox_event_id: audit.outbox_event_id,
-        audit: AppendOnlyAuditCommand {
-            storage_key: TenantStorageKey::tenant(event.tenant_id),
-            event,
-            previous_digest: audit.previous_digest,
-            event_digest: audit.event_digest,
-        },
+fn validate_action(
+    action: &ControlPlaneActionPlan,
+    operation: ControlPlaneOperation,
+    tenant_id: TenantId,
+    audit: &AuditOutboxWriteCommand,
+    audit_action: &str,
+    resource_kind: &str,
+    resource_id: Option<&str>,
+) -> Result<(), ApplicationGovernanceLifecycleError> {
+    let event = &audit.audit.event;
+    if action.operation != operation
+        || action.requirement != operation.requirement()
+        || action.tenant.tenant_id != tenant_id
+        || action.audit_write.tenant_partition_key != tenant_id
+        || action.audit_write.event != action.audit_event
+        || action.audit_event.tenant_id != tenant_id
+        || audit.audit.storage_key.tenant_id != tenant_id
+        || event.tenant_id != tenant_id
+        || event.principal_id != action.audit_event.principal_id
+        || event.action.as_str() != audit_action
+        || event.resource.kind != resource_kind
+        || event.resource.id.as_deref() != resource_id
+        || event.resource.tenant_id != Some(tenant_id)
+    {
+        return Err(ApplicationGovernanceLifecycleError::InvalidAction);
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -510,19 +470,31 @@ mod tests {
     #[test]
     fn application_approval_actions_have_explicit_audit_contracts() {
         assert_eq!(
-            approval_transition_audit_action(ApprovalAction::Approve),
-            Some("governance.policy.approval.vote")
+            approval_transition_audit_action(
+                GovernanceArtifactKind::Policy,
+                ApprovalAction::Approve
+            ),
+            Some("governance.policy.approval.approve".to_string())
         );
         assert_eq!(
-            approval_transition_audit_action(ApprovalAction::Reject),
-            Some("governance.policy.approval.reject")
+            approval_transition_audit_action(
+                GovernanceArtifactKind::ClassificationRules,
+                ApprovalAction::Reject
+            ),
+            Some("governance.classification_rules.approval.reject".to_string())
         );
         assert_eq!(
-            approval_transition_audit_action(ApprovalAction::Cancel),
-            Some("governance.policy.approval.cancel")
+            approval_transition_audit_action(
+                GovernanceArtifactKind::ProviderRegistry,
+                ApprovalAction::Cancel
+            ),
+            Some("governance.provider_registry.approval.cancel".to_string())
         );
         assert_eq!(
-            approval_transition_audit_action(ApprovalAction::Activate),
+            approval_transition_audit_action(
+                GovernanceArtifactKind::RoutingScores,
+                ApprovalAction::Activate
+            ),
             None
         );
     }
