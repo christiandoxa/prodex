@@ -105,7 +105,7 @@ pub struct PresidioEnableArgs {
     /// Language detection mode: fixed (default), auto, multi.
     #[arg(long, value_enum, value_name = "MODE", default_value_t = PresidioLanguageMode::Fixed)]
     pub language_mode: PresidioLanguageMode,
-    /// Runtime failure behavior for future prompt-redaction hooks.
+    /// Runtime behavior when prompt redaction fails.
     #[arg(long, default_value = "open", value_enum)]
     pub fail_mode: PresidioFailMode,
 }
