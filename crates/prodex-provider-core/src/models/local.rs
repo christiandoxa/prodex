@@ -1,8 +1,7 @@
 //! Local provider model catalog.
 
 use super::model;
-use crate::OPENAI_ENDPOINTS;
-use crate::{ProviderId, ProviderModelSpec};
+use crate::{ALL_PROVIDER_ENDPOINTS, ProviderId, ProviderModelSpec};
 
 pub(super) const MODELS: &[ProviderModelSpec] = &[model!(
     ProviderId::Local,
@@ -13,6 +12,6 @@ pub(super) const MODELS: &[ProviderModelSpec] = &[model!(
     None,
     None,
     None,
-    OPENAI_ENDPOINTS,
+    ALL_PROVIDER_ENDPOINTS,
     ["default"]
 )];

@@ -2,7 +2,6 @@ use crate::pressure::{
     runtime_quota_pressure_band_from_proxy, runtime_quota_pressure_band_reason,
     runtime_quota_pressure_band_to_proxy,
 };
-use crate::route::runtime_route_kind_to_proxy;
 use crate::snapshot::{
     RuntimeProfileUsageSnapshot, runtime_quota_summary_from_usage_snapshot_at,
     runtime_usage_snapshot_is_usable,
@@ -83,7 +82,7 @@ pub fn runtime_quota_summary_for_route(
     runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
         runtime_quota_window_observation(usage, "5h"),
         runtime_quota_window_observation(usage, "weekly"),
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     ))
 }
 
@@ -94,7 +93,7 @@ pub fn runtime_quota_summary_blocking_reset_at(
 ) -> Option<i64> {
     runtime_proxy::runtime_proxy_quota_summary_blocking_reset_at(
         runtime_quota_summary_to_proxy(summary),
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         responses_critical_floor_percent,
     )
 }
@@ -148,7 +147,7 @@ pub fn runtime_quota_summary_requires_precommit_live_probe(
     runtime_proxy::runtime_proxy_quota_summary_requires_precommit_live_probe(
         runtime_quota_summary_to_proxy(summary),
         runtime_quota_source_option_to_proxy(source),
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     )
 }
 
@@ -160,7 +159,7 @@ pub fn runtime_quota_summary_requires_live_source_after_probe(
     runtime_proxy::runtime_proxy_quota_summary_requires_live_source_after_probe(
         runtime_quota_summary_to_proxy(summary),
         runtime_quota_source_option_to_proxy(source),
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     )
 }
 
@@ -171,7 +170,7 @@ pub fn runtime_precommit_quota_block_reason(
 ) -> Option<runtime_proxy::RuntimePrecommitQuotaBlockReason> {
     runtime_proxy::runtime_proxy_precommit_quota_block_reason(
         runtime_quota_summary_to_proxy(summary),
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         responses_critical_floor_percent,
     )
 }
@@ -187,7 +186,7 @@ pub fn runtime_precommit_quota_gate_initial_decision(
         runtime_proxy::RuntimeProxyPrecommitQuotaGateInitialInput {
             summary: runtime_quota_summary_to_proxy(summary),
             source: runtime_quota_source_option_to_proxy(source),
-            route_kind: runtime_route_kind_to_proxy(route_kind),
+            route_kind,
             has_continuation_context,
             responses_critical_floor_percent,
         },
@@ -205,7 +204,7 @@ pub fn runtime_precommit_quota_gate_final_decision(
         runtime_proxy::RuntimeProxyPrecommitQuotaGateFinalInput {
             summary: runtime_quota_summary_to_proxy(summary),
             source: runtime_quota_source_option_to_proxy(source),
-            route_kind: runtime_route_kind_to_proxy(route_kind),
+            route_kind,
             has_alternative_quota_profile,
             responses_critical_floor_percent,
         },

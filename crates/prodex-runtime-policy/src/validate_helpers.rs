@@ -99,14 +99,6 @@ pub(crate) fn validate_optional_usize(
     Ok(())
 }
 
-pub(crate) fn validate_optional_usize_allow_zero(
-    _value: Option<usize>,
-    _path: &Path,
-    _field: &str,
-) -> Result<()> {
-    Ok(())
-}
-
 pub(crate) fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str) -> Result<()> {
     if matches!(value, Some(0)) {
         bail!("{field} in {} must be greater than 0", path.display());

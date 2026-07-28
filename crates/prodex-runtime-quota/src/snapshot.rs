@@ -1,4 +1,3 @@
-use crate::route::runtime_route_kind_to_proxy;
 use crate::summary::{runtime_quota_precommit_guard_reason, runtime_quota_summary_from_proxy};
 use crate::window::{
     runtime_quota_window_observation, runtime_quota_window_status_from_proxy,
@@ -94,7 +93,7 @@ pub fn runtime_quota_summary_from_usage_snapshot_at(
     runtime_quota_summary_from_proxy(
         runtime_proxy::runtime_proxy_quota_summary_from_usage_snapshot_at(
             runtime_usage_snapshot_to_proxy(snapshot),
-            runtime_route_kind_to_proxy(route_kind),
+            route_kind,
             now,
         ),
     )

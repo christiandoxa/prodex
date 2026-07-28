@@ -1,16 +1,5 @@
 use super::*;
 
-fn runtime_route_kind_to_proxy(
-    route_kind: RuntimeRouteKind,
-) -> runtime_proxy_crate::RuntimeRouteKind {
-    match route_kind {
-        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
-    }
-}
-
 pub(crate) fn update_runtime_profile_route_performance(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -80,7 +69,7 @@ pub(crate) fn note_runtime_profile_latency_observation(
     let next_score = runtime_proxy_crate::runtime_profile_latency_observation_next_score(
         current_score,
         elapsed_ms,
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         stage,
     );
     let _ = update_runtime_profile_route_performance(

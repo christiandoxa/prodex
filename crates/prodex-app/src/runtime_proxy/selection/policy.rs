@@ -49,7 +49,7 @@ fn runtime_candidate_affinity_to_proxy(
     affinity: RuntimeCandidateAffinity<'_>,
 ) -> runtime_proxy_crate::RuntimeCandidateAffinity<'_> {
     runtime_proxy_crate::RuntimeCandidateAffinity {
-        route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(affinity.route_kind),
+        route_kind: affinity.route_kind,
         candidate_name: affinity.candidate_name,
         strict_affinity_profile: affinity.strict_affinity_profile,
         pinned_profile: affinity.pinned_profile,
@@ -158,7 +158,7 @@ fn runtime_soft_affinity_input_to_proxy(
 ) -> runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
     runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
         affinity_kind: input.affinity_kind,
-        route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(input.route_kind),
+        route_kind: input.route_kind,
         quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
             input.quota_summary,
         ),

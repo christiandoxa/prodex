@@ -4,17 +4,6 @@ pub(crate) use runtime_proxy_crate::{
     RuntimeProfileInFlightReleaseSnapshot, RuntimeProxyQueueRejection,
 };
 
-fn runtime_route_kind_to_proxy(
-    route_kind: RuntimeRouteKind,
-) -> runtime_proxy_crate::RuntimeRouteKind {
-    match route_kind {
-        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeProxyAdmissionRejection {
     GlobalLimit,
@@ -198,7 +187,7 @@ pub(crate) fn runtime_proxy_pressure_mode_for_route(
     background_queue_pressure: bool,
 ) -> bool {
     runtime_proxy_crate::runtime_proxy_pressure_mode_for_route(
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         local_overload_pressure,
         background_queue_pressure,
     )
@@ -232,7 +221,7 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_mode_for_route(
     background_queue_pressure: bool,
 ) -> bool {
     runtime_proxy_crate::runtime_proxy_sync_probe_pressure_mode_for_route(
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
         local_overload_pressure,
         background_queue_pressure,
     )
@@ -250,9 +239,7 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_mode_active_for_route(
 }
 
 pub(crate) fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
-    runtime_proxy_crate::runtime_proxy_lane_limit_marks_global_overload(
-        runtime_route_kind_to_proxy(lane),
-    )
+    runtime_proxy_crate::runtime_proxy_lane_limit_marks_global_overload(lane)
 }
 
 pub(crate) fn runtime_proxy_should_shed_fresh_compact_request(

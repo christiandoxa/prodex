@@ -1,7 +1,6 @@
 use crate::types::RuntimePolicyFile;
 use crate::validate_helpers::{
     validate_optional_i64_percent, validate_optional_u64, validate_optional_usize,
-    validate_optional_usize_allow_zero,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -127,11 +126,6 @@ pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) ->
         path,
         "runtime_proxy.websocket_connect_queue_capacity",
     )?;
-    validate_optional_usize_allow_zero(
-        policy.runtime_proxy.websocket_connect_overflow_capacity,
-        path,
-        "runtime_proxy.websocket_connect_overflow_capacity",
-    )?;
     validate_optional_usize(
         policy.runtime_proxy.websocket_dns_worker_count,
         path,
@@ -141,11 +135,6 @@ pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) ->
         policy.runtime_proxy.websocket_dns_queue_capacity,
         path,
         "runtime_proxy.websocket_dns_queue_capacity",
-    )?;
-    validate_optional_usize_allow_zero(
-        policy.runtime_proxy.websocket_dns_overflow_capacity,
-        path,
-        "runtime_proxy.websocket_dns_overflow_capacity",
     )?;
     validate_optional_u64(
         policy.runtime_proxy.broker_ready_timeout_ms,

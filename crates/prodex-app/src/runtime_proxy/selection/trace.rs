@@ -8,10 +8,7 @@ pub(super) fn runtime_selection_trace_builder(
     route_kind: RuntimeRouteKind,
     requested_model: Option<&str>,
 ) -> runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder {
-    runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder::new(
-        prodex_runtime_quota::runtime_route_kind_to_proxy(route_kind).into(),
-        requested_model,
-    )
+    runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder::new(route_kind.into(), requested_model)
 }
 
 pub(super) fn runtime_selection_trace_reason(

@@ -6,7 +6,6 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -213,38 +212,7 @@ where
 }
 
 fn runtime_write_json_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
-    write_private_file(&temp_path, bytes)
-        .with_context(|| format!("failed to write {}", temp_path.display()))?;
-    if let Err(err) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err).with_context(|| format!("failed to replace {}", path.display()));
-    }
-    Ok(())
-}
-
-fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = open_private_file(path)?;
-    file.write_all(bytes)
-}
-
-#[cfg(unix)]
-fn open_private_file(path: &Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_private_file(path: &Path) -> io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
+    crate::runtime_store::write_private_file_atomic(path, bytes)
 }
 
 #[cfg(test)]

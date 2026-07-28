@@ -1,4 +1,3 @@
-use crate::route::runtime_route_kind_to_proxy;
 use crate::summary::runtime_quota_summary_to_proxy;
 use crate::window::runtime_quota_window_observation;
 use prodex_quota::{
@@ -139,7 +138,7 @@ pub fn runtime_quota_pressure_sort_key_for_route(
         runtime_proxy::runtime_proxy_quota_pressure_sort_key_for_route(
             runtime_quota_window_observation(usage, "5h"),
             runtime_quota_window_observation(usage, "weekly"),
-            runtime_route_kind_to_proxy(route_kind),
+            route_kind,
         ),
     );
     let scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
@@ -167,7 +166,7 @@ pub fn runtime_quota_pressure_band_for_route(
         runtime_proxy::runtime_proxy_quota_pressure_band_for_route(
             runtime_quota_window_observation(usage, "5h"),
             runtime_quota_window_observation(usage, "weekly"),
-            runtime_route_kind_to_proxy(route_kind),
+            route_kind,
         ),
     )
 }

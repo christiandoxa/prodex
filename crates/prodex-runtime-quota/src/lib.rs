@@ -1,6 +1,5 @@
 mod cache;
 mod pressure;
-mod route;
 pub mod selection;
 mod snapshot;
 mod source;
@@ -16,7 +15,6 @@ pub use pressure::{
     runtime_quota_pressure_sort_key_for_route_from_summary, runtime_quota_sort_key_from_proxy,
     runtime_response_quota_pressure_sort_key_to_proxy,
 };
-pub use route::runtime_route_kind_to_proxy;
 pub use selection::*;
 pub use snapshot::{
     RuntimeProfileUsageSnapshot, runtime_profile_usage_snapshot_from_usage,
