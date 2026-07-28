@@ -221,10 +221,6 @@ pub(super) fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -
             "Recent profile auth recovered after an upstream unauthorized response. Next step: {}",
             runtime_doctor_profile_auth_recovery_next_step(summary)
         )
-    } else if runtime_doctor_marker_count(summary, "selection_pick") > 0
-        || runtime_doctor_marker_count(summary, "selection_skip_current") > 0
-    {
-        "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
     } else if runtime_doctor_marker_count(summary, "precommit_budget_exhausted") > 0 {
         "Recent candidate selection exhausted before commit.".to_string()
     } else if runtime_doctor_marker_count(summary, "upstream_usage_limit_passthrough") > 0
@@ -379,6 +375,10 @@ pub(super) fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -
         "A running runtime broker uses a different prodex binary than this command; restart active prodex/codex sessions so the patched runtime is loaded.".to_string()
     } else if summary.prodex_binary_mismatch {
         "Multiple prodex binaries on PATH differ by version or hash; align installs so new sessions use the patched runtime.".to_string()
+    } else if runtime_doctor_marker_count(summary, "selection_pick") > 0
+        || runtime_doctor_marker_count(summary, "selection_skip_current") > 0
+    {
+        "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
     } else {
         "No recent overload or stream-failure markers were detected in the sampled runtime tail."
             .to_string()

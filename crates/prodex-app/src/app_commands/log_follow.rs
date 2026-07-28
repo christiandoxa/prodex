@@ -9,7 +9,7 @@ const LOG_FOLLOW_PENDING_MAX_BYTES: usize = 1024 * 1024;
 #[derive(Default)]
 pub(crate) struct FollowedLog {
     pub(crate) offset: u64,
-    pub(crate) pending: String,
+    pub(crate) pending: Vec<u8>,
 }
 
 pub(crate) fn collect_new_followed_lines(
@@ -35,10 +35,11 @@ pub(crate) fn collect_new_followed_lines(
         return Ok(Vec::new());
     }
 
-    state.pending.push_str(&String::from_utf8_lossy(&bytes));
+    state.pending.extend_from_slice(&bytes);
     let complete_len = state
         .pending
-        .rfind('\n')
+        .iter()
+        .rposition(|byte| *byte == b'\n')
         .map(|index| index + 1)
         .unwrap_or_default();
     if complete_len == 0 {
@@ -47,7 +48,7 @@ pub(crate) fn collect_new_followed_lines(
         }
         return Ok(Vec::new());
     }
-    let complete = state.pending[..complete_len].to_string();
+    let complete = String::from_utf8_lossy(&state.pending[..complete_len]).into_owned();
     state.pending.drain(..complete_len);
     if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
         state.pending.clear();
@@ -61,7 +62,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn followed_log_drops_oversized_partial_line() {
+    fn followed_log_bounds_partial_lines_and_preserves_split_utf8() {
         let root = std::env::temp_dir().join(format!(
             "prodex-log-follow-large-{}-{}",
             std::process::id(),
@@ -87,6 +88,20 @@ mod tests {
                 .is_empty()
         );
         assert!(state.pending.is_empty());
+
+        let mut content = vec![b'a'; LOG_FOLLOW_READ_CHUNK_BYTES - 2];
+        content.extend_from_slice("🌋\n".as_bytes());
+        fs::write(&path, content).unwrap();
+        let mut state = FollowedLog::default();
+        assert!(
+            collect_new_followed_lines(&path, &mut state)
+                .unwrap()
+                .is_empty()
+        );
+        let lines = collect_new_followed_lines(&path, &mut state).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].ends_with('🌋'));
+        assert!(!lines[0].contains('\u{fffd}'));
         fs::remove_dir_all(root).unwrap();
     }
 }

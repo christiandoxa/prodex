@@ -19,3 +19,31 @@ fn runtime_doctor_finalize_summary_uses_broker_artifact_diagnosis() {
     assert!(summary.diagnosis.contains("broker-a") && summary.diagnosis.contains("dead pid 123"));
     assert!(summary.diagnosis.contains("prodex cleanup"));
 }
+
+#[test]
+fn runtime_doctor_failure_diagnosis_overrides_routine_selection_markers() {
+    for (marker, expected) in [
+        (
+            "precommit_budget_exhausted",
+            "candidate selection exhausted before commit",
+        ),
+        ("stream_read_error", "stream read failure"),
+        ("state_save_error", "state save failures"),
+    ] {
+        let mut summary = RuntimeDoctorSummary {
+            pointer_exists: true,
+            log_exists: true,
+            line_count: 2,
+            marker_counts: [("selection_pick", 1), (marker, 1)].into(),
+            ..RuntimeDoctorSummary::default()
+        };
+
+        runtime_doctor_finalize_summary(&mut summary);
+
+        assert!(
+            summary.diagnosis.to_ascii_lowercase().contains(expected),
+            "{marker} should outrank routine selection: {}",
+            summary.diagnosis
+        );
+    }
+}

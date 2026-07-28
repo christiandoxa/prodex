@@ -25,6 +25,21 @@ fn kiro_streaming_reader_times_out_while_the_worker_is_silent() {
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
 }
 
+#[test]
+fn kiro_streaming_queue_applies_backpressure() {
+    let (sender, _receiver) = mpsc::sync_channel(16);
+    for _ in 0..16 {
+        sender
+            .try_send(RuntimeKiroStreamingChunk::End)
+            .expect("queue should accept work up to its capacity");
+    }
+
+    assert!(matches!(
+        sender.try_send(RuntimeKiroStreamingChunk::End),
+        Err(mpsc::TrySendError::Full(_))
+    ));
+}
+
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
     let script = root.join("fake-kiro-compact");
     fs::write(

@@ -96,7 +96,7 @@ pub fn gemini_settings_source_paths_for_config_home(
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
     let mut push_unique = |name: String, path: PathBuf| {
-        let key = path.to_string_lossy().to_ascii_lowercase();
+        let key = crate::gemini_path_identity(&path);
         if seen.insert(key) {
             paths.push((name, path));
         }

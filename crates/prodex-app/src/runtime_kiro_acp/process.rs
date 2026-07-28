@@ -3,9 +3,10 @@ use super::{
     RuntimeKiroAcpNewSessionResult, runtime_kiro_acp_initialize_request,
     runtime_kiro_acp_session_new_request, runtime_kiro_acp_session_prompt_request,
 };
+use crate::RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES;
 use anyhow::{Context, Result, bail};
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -327,12 +328,15 @@ pub(crate) fn runtime_kiro_acp_line_receiver(
     let (sender, receiver) = mpsc::sync_channel(16);
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
+        let mut received_bytes = 0;
         loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) if sender.send(Ok(line)).is_err() => break,
-                Ok(_) => {}
+            match runtime_kiro_acp_read_line(&mut reader, &mut received_bytes) {
+                Ok(None) => break,
+                Ok(Some(line)) => {
+                    if sender.send(Ok(line)).is_err() {
+                        break;
+                    }
+                }
                 Err(error) => {
                     let _ = sender.send(Err(error));
                     break;
@@ -341,4 +345,61 @@ pub(crate) fn runtime_kiro_acp_line_receiver(
         }
     });
     receiver
+}
+
+fn runtime_kiro_acp_read_line(
+    reader: &mut impl BufRead,
+    received_bytes: &mut usize,
+) -> io::Result<Option<String>> {
+    let remaining = RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES.saturating_sub(*received_bytes);
+    let mut line = String::new();
+    let read = reader
+        .by_ref()
+        .take(remaining.saturating_add(1) as u64)
+        .read_line(&mut line)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if read > remaining {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Kiro ACP output exceeded safe size limit ({RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES})"
+            ),
+        ));
+    }
+    *received_bytes += read;
+    Ok(Some(line))
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn kiro_acp_output_is_bounded_across_lines() {
+        let first_line_bytes = RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES / 2;
+        let mut input = vec![b'x'; first_line_bytes - 1];
+        input.push(b'\n');
+        input.extend(vec![
+            b'y';
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
+                - first_line_bytes
+                + 1
+        ]);
+        let mut reader = Cursor::new(input);
+        let mut received_bytes = 0;
+
+        assert!(
+            runtime_kiro_acp_read_line(&mut reader, &mut received_bytes)
+                .unwrap()
+                .is_some()
+        );
+
+        let error = runtime_kiro_acp_read_line(&mut reader, &mut received_bytes).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeded safe size limit"));
+    }
 }
