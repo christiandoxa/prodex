@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.362.0 - 2026-07-28
+
+### Runtime
+
+- Harden runtime compatibility edge cases (`ec50608`)
+
 ## 0.361.0 - 2026-07-28
 
 ### Runtime
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete audited production paths (`56e2dfd`)
-
-## 0.350.0 - 2026-07-26
-
-### CLI
-
-- Restore Presidio opt-in prompt (`7fd29c3`)
