@@ -63,23 +63,6 @@ pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 pub(crate) use self::status::*;
 
-pub(super) fn handle_run(args: RunArgs) -> Result<()> {
-    runtime_launch::handle_run(args)
-}
-
-pub(crate) fn start_policy_gateway_backend_inner(
-    preferred_listen_addr: Option<String>,
-) -> Result<GatewayBackend> {
-    runtime_launch::start_policy_gateway_backend_inner(preferred_listen_addr)
-}
-
-pub(crate) fn start_policy_gateway_application_inner(
-    service_mode: RuntimePolicyServiceMode,
-    preferred_listen_addr: Option<String>,
-) -> Result<GatewayApplication> {
-    runtime_launch::start_policy_gateway_application_inner(service_mode, preferred_listen_addr)
-}
-
 pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
     let use_presidio = if matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
@@ -102,19 +85,6 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
         return crate::runtime_gemini_cli::handle_super_native_cli(args, use_presidio);
     }
     handle_runtime_tools(args.into_runtime_tool_args_with_presidio(use_presidio))
-}
-
-pub(super) fn prepare_runtime_launch_with_harness(
-    request: RuntimeLaunchRequest<'_>,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
-) -> Result<PreparedRuntimeLaunch> {
-    runtime_launch::prepare_runtime_launch_with_harness(request, resolved_harness)
-}
-
-pub(super) fn prepare_runtime_launch_dry_run(
-    request: RuntimeLaunchRequest<'_>,
-) -> Result<PreparedRuntimeLaunch> {
-    runtime_launch::prepare_runtime_launch_dry_run(request)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

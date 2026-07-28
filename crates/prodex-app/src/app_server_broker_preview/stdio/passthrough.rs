@@ -56,46 +56,47 @@ pub(super) fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
             passthrough_writer.flush()?;
             continue;
         }
-        let observation = session.validate_line(line_index, line);
-        app_server_broker_log_preview_event(&log_path, line_index, &observation.preview);
-        serde_json::to_writer(&mut diagnostics_writer, &observation.preview)?;
-        diagnostics_writer.write_all(b"\n")?;
-        diagnostics_writer.flush()?;
-
-        let parse_failed = !observation.preview["preview"]["parse_ok"]
-            .as_bool()
-            .unwrap_or_default();
-        let invalid_frame = observation.preview["preview"]["summary"]["frame_kind"]
-            .as_str()
-            .is_some_and(|frame_kind| frame_kind == "invalid");
-        if parse_failed || invalid_frame {
-            let summary = session.into_report_json();
-            app_server_broker_log_preview_summary(&log_path, &summary);
-            app_server_broker_audit_preview_summary(mode, &summary)?;
-            serde_json::to_writer(&mut diagnostics_writer, &summary)?;
+        for observation in session.validate_line(line_index, line) {
+            app_server_broker_log_preview_event(&log_path, line_index, &observation.preview);
+            serde_json::to_writer(&mut diagnostics_writer, &observation.preview)?;
             diagnostics_writer.write_all(b"\n")?;
-            let (parse_error_count, invalid_frame_count) = validation_failure_counts(&summary);
-            anyhow::bail!(
-                "app-server broker validation failed before passthrough: parse_error_count={parse_error_count} invalid_frame_count={invalid_frame_count}"
-            );
-        }
-        if let Some(failure) = observation.lifecycle_failure {
-            finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
-            anyhow::bail!(
-                "app-server broker lifecycle validation failed before passthrough: {failure}"
-            );
-        }
-        if let Some(failure) = observation.request_response_failure {
-            finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
-            anyhow::bail!(
-                "app-server broker request/response validation failed before passthrough: {failure}"
-            );
-        }
-        if let Some(failure) = observation.lifecycle_payload_failure {
-            finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
-            anyhow::bail!(
-                "app-server broker lifecycle payload validation failed before passthrough: {failure}"
-            );
+            diagnostics_writer.flush()?;
+
+            let parse_failed = !observation.preview["preview"]["parse_ok"]
+                .as_bool()
+                .unwrap_or_default();
+            let invalid_frame = observation.preview["preview"]["summary"]["frame_kind"]
+                .as_str()
+                .is_some_and(|frame_kind| frame_kind == "invalid");
+            if parse_failed || invalid_frame {
+                let summary = session.into_report_json();
+                app_server_broker_log_preview_summary(&log_path, &summary);
+                app_server_broker_audit_preview_summary(mode, &summary)?;
+                serde_json::to_writer(&mut diagnostics_writer, &summary)?;
+                diagnostics_writer.write_all(b"\n")?;
+                let (parse_error_count, invalid_frame_count) = validation_failure_counts(&summary);
+                anyhow::bail!(
+                    "app-server broker validation failed before passthrough: parse_error_count={parse_error_count} invalid_frame_count={invalid_frame_count}"
+                );
+            }
+            if let Some(failure) = observation.lifecycle_failure {
+                finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
+                anyhow::bail!(
+                    "app-server broker lifecycle validation failed before passthrough: {failure}"
+                );
+            }
+            if let Some(failure) = observation.request_response_failure {
+                finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
+                anyhow::bail!(
+                    "app-server broker request/response validation failed before passthrough: {failure}"
+                );
+            }
+            if let Some(failure) = observation.lifecycle_payload_failure {
+                finish_failed_session(session, &log_path, mode, &mut diagnostics_writer)?;
+                anyhow::bail!(
+                    "app-server broker lifecycle payload validation failed before passthrough: {failure}"
+                );
+            }
         }
 
         // Validate-before-forward ordering is intentionally explicit.

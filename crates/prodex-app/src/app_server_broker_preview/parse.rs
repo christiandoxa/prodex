@@ -16,14 +16,18 @@ pub(crate) fn app_server_broker_preview_line(line: &str) -> Value {
     }
 
     match serde_json::from_str::<Value>(line) {
-        Ok(value) => serde_json::json!({
-            "parse_ok": true,
-            "summary": app_server_broker_diagnostic_summary_json(&value),
-        }),
+        Ok(value) => app_server_broker_preview_value(&value),
         Err(error) => serde_json::json!({
             "parse_ok": false,
             "error": "invalid_json",
             "message": error.to_string(),
         }),
     }
+}
+
+pub(crate) fn app_server_broker_preview_value(value: &Value) -> Value {
+    serde_json::json!({
+        "parse_ok": true,
+        "summary": app_server_broker_diagnostic_summary_json(value),
+    })
 }

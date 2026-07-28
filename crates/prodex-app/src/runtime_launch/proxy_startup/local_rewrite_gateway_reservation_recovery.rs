@@ -280,8 +280,8 @@ mod tests {
             .join()
             .is_err()
         );
-        let credentials =
-            RuntimeGatewayCredentialState::new(runtime_gateway_initial_credential_snapshot(
+        let credentials = RuntimeGatewayCredentialState::new(
+            runtime_gateway_initial_credential_snapshot(
                 RuntimeGatewayCredentialRefreshCandidate {
                     fingerprint: [0; 32],
                     provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
@@ -296,7 +296,9 @@ mod tests {
                     observability: RuntimeGatewayObservabilityConfig::default(),
                 },
                 virtual_keys,
-            ));
+            ),
+            false,
+        );
 
         assert!(recovery_tenant_ids(None, &credentials).is_err());
     }

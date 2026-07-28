@@ -62,7 +62,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Ping(command) => handle_ping(command),
         Commands::Gui(args) => handle_gui(args),
         Commands::Dashboard(args) => handle_dashboard(args),
-        Commands::Run(args) => handle_run(args),
+        Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Caveman(mut args) => {
             args.require_tool(prodex_optional_tools::OptionalToolId::Caveman);
             execute_tool_launch(args)
@@ -136,16 +136,8 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
         return handle_super_gui(args);
     }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
-        if matches!(
-            args.cli,
-            Some(
-                SuperCliAgent::Gemini
-                    | SuperCliAgent::Copilot
-                    | SuperCliAgent::Kiro
-                    | SuperCliAgent::Agy
-            )
-        ) {
-            bail!("--dry-run is not supported with native external agent CLIs")
+        if matches!(args.cli, Some(agent) if agent != SuperCliAgent::Codex) {
+            return crate::runtime_gemini_cli::handle_super_native_cli_dry_run(args);
         }
         let use_presidio = args.presidio_preference().unwrap_or(false);
         return handle_runtime_tools_dry_run(

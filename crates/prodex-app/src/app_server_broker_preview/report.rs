@@ -3,12 +3,17 @@
 use serde_json::Value;
 
 pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value>) -> Value {
+    let is_first_wire_frame =
+        |entry: &&Value| entry["batch_index"].as_u64().is_none_or(|index| index == 0);
+    let line_count = previews.iter().filter(is_first_wire_frame).count();
     let parsed = previews
         .iter()
+        .filter(is_first_wire_frame)
         .filter(|entry| entry["preview"]["parse_ok"] == serde_json::Value::Bool(true))
         .count();
-    let failed = previews.len().saturating_sub(parsed);
+    let failed = line_count.saturating_sub(parsed);
     let mut request_count = 0usize;
+    let mut batch_count = 0usize;
     let mut notification_count = 0usize;
     let mut response_count = 0usize;
     let mut invalid_count = 0usize;
@@ -39,7 +44,10 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
     let mut owner_thread_count = 0usize;
     let mut owner_turn_count = 0usize;
     let mut non_jsonrpc_version_count = 0usize;
-    let mut batch_frame_unsupported_count = 0usize;
+    let mut empty_batch_count = 0usize;
+    let mut batch_too_large_count = 0usize;
+    let mut nested_batch_count = 0usize;
+    let mut invalid_batch_member_count = 0usize;
     let mut non_object_frame_count = 0usize;
     let mut non_scalar_id_count = 0usize;
     let mut non_container_params_count = 0usize;
@@ -53,7 +61,11 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
     let mut method_with_result_or_error_count = 0usize;
     let mut missing_method_and_response_payload_count = 0usize;
     for entry in &previews {
+        if entry["batch_index"].as_u64() == Some(0) {
+            batch_count += 1;
+        }
         match entry["preview"]["summary"]["frame_kind"].as_str() {
+            Some("batch") => batch_count += 1,
             Some("request") => request_count += 1,
             Some("notification") => notification_count += 1,
             Some("response") => response_count += 1,
@@ -121,7 +133,10 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
         }
         match entry["preview"]["summary"]["invalid_reason"].as_str() {
             Some("non_jsonrpc_version") => non_jsonrpc_version_count += 1,
-            Some("batch_frame_unsupported") => batch_frame_unsupported_count += 1,
+            Some("empty_batch") => empty_batch_count += 1,
+            Some("batch_too_large") => batch_too_large_count += 1,
+            Some("nested_batch") => nested_batch_count += 1,
+            Some("invalid_batch_member") => invalid_batch_member_count += 1,
             Some("non_object_frame") => non_object_frame_count += 1,
             Some("non_scalar_id") => non_scalar_id_count += 1,
             Some("non_container_params") => non_container_params_count += 1,
@@ -140,10 +155,11 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
         }
     }
     serde_json::json!({
-        "line_count": previews.len(),
+        "line_count": line_count,
         "parsed_count": parsed,
         "error_count": failed,
         "frame_kind_counts": {
+            "batch": batch_count,
             "request": request_count,
             "notification": notification_count,
             "response": response_count,
@@ -193,7 +209,10 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
         },
         "invalid_reason_counts": {
             "non_jsonrpc_version": non_jsonrpc_version_count,
-            "batch_frame_unsupported": batch_frame_unsupported_count,
+            "empty_batch": empty_batch_count,
+            "batch_too_large": batch_too_large_count,
+            "nested_batch": nested_batch_count,
+            "invalid_batch_member": invalid_batch_member_count,
             "non_object_frame": non_object_frame_count,
             "non_scalar_id": non_scalar_id_count,
             "non_container_params": non_container_params_count,

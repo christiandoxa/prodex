@@ -203,8 +203,9 @@ Target migration requirements are:
 - no deletion of audit, legal-hold, approval, or ledger history through a
   generic schema rollback.
 
-The existing phase enum and DDL boundary are useful evidence, but the current
-catalog contains only two expand migrations. They do not prove this lifecycle.
+The checked-in migration catalogs and DDL boundary provide source evidence for
+this lifecycle. Rolling upgrade, managed failover, and forward-recovery proof
+remain deployment acceptance evidence.
 
 ## High-Availability Target
 

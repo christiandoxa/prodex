@@ -60,6 +60,7 @@
       "continue-turn"
     ],
     "frame_kind_count_fields": [
+      "batch",
       "request",
       "notification",
       "response",
@@ -67,7 +68,10 @@
     ],
     "invalid_reason_count_fields": [
       "non_jsonrpc_version",
-      "batch_frame_unsupported",
+      "empty_batch",
+      "batch_too_large",
+      "nested_batch",
+      "invalid_batch_member",
       "non_object_frame",
       "non_scalar_id",
       "non_container_params",

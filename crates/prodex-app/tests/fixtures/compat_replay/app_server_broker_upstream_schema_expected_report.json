@@ -11,17 +11,21 @@
   },
   "error_count": 0,
   "frame_kind_counts": {
+    "batch": 0,
     "invalid": 0,
     "notification": 3,
     "request": 5,
     "response": 5
   },
   "invalid_reason_counts": {
-    "batch_frame_unsupported": 0,
+    "batch_too_large": 0,
+    "empty_batch": 0,
+    "invalid_batch_member": 0,
     "invalid_method_name": 0,
     "method_with_result_or_error": 0,
     "missing_method_and_response_payload": 0,
     "missing_response_id": 0,
+    "nested_batch": 0,
     "non_container_params": 0,
     "non_integer_error_code": 0,
     "non_jsonrpc_version": 0,

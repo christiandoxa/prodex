@@ -3,7 +3,7 @@ use std::{net::SocketAddr, time::Duration};
 use anyhow::Result;
 use prodex_gateway_server::{GatewayHandlerRequest, GatewayHandlerResult};
 
-use crate::{RuntimeGatewayApplication, app_commands};
+use crate::RuntimeGatewayApplication;
 
 pub struct GatewayApplication {
     runtime: RuntimeGatewayApplication,
@@ -77,5 +77,8 @@ fn start_policy_gateway_application_for_mode_with_listen(
     preferred_listen_addr: Option<String>,
 ) -> Result<GatewayApplication> {
     prodex_runtime_policy::ensure_runtime_policy_service_mode(service_mode)?;
-    app_commands::start_policy_gateway_application_inner(service_mode, preferred_listen_addr)
+    crate::app_commands::runtime_launch::gateway_startup::start_policy_gateway_application(
+        service_mode,
+        preferred_listen_addr,
+    )
 }

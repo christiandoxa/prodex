@@ -565,11 +565,14 @@ pub(super) fn runtime_gateway_operational_probe_response(
     }
     let overloaded = runtime_proxy_local_overload_pressure_active(&shared.runtime_shared);
     let draining = shared.gateway_draining.load(Ordering::SeqCst);
-    let ready = probe != "readyz" || (!overloaded && !draining);
+    let credentials_stale = shared.gateway_credentials.refresh_is_stale();
+    let ready = probe != "readyz" || (!overloaded && !draining && !credentials_stale);
     let state = if ready {
         "ok"
     } else if draining {
         "draining"
+    } else if credentials_stale {
+        "credentials_stale"
     } else {
         "overloaded"
     };
@@ -580,7 +583,7 @@ pub(super) fn runtime_gateway_operational_probe_response(
     };
     let result_metric = if draining {
         prodex_observability::HealthProbeResult::Draining
-    } else if overloaded {
+    } else if overloaded || credentials_stale {
         prodex_observability::HealthProbeResult::Degraded
     } else {
         prodex_observability::HealthProbeResult::Passing
@@ -593,6 +596,7 @@ pub(super) fn runtime_gateway_operational_probe_response(
         "ready": ready,
         "local_overload": overloaded,
         "draining": draining,
+        "credentials_stale": credentials_stale,
         "policy_version": shared.gateway_policy_version,
         "active_requests": shared.runtime_shared.active_request_count.load(Ordering::SeqCst),
         "active_request_limit": shared.runtime_shared.active_request_limit,

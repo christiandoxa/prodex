@@ -560,8 +560,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         ),
     );
     let openai_contract = provider_adapter(bridge_kind.provider_id());
-    let gateway_virtual_key_store_path = gateway_state_store.key_store_path().to_path_buf();
-    let gateway_virtual_key_usage_path = gateway_state_store.usage_path().to_path_buf();
     let gateway_virtual_key_entries = runtime_gateway_virtual_key_entries_from_sources(
         gateway_virtual_keys,
         &gateway_state_store,
@@ -607,8 +605,8 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     }
     let shutdown = Arc::new(AtomicBool::new(false));
     let gateway_virtual_keys = Arc::new(Mutex::new(gateway_virtual_key_entries));
-    let gateway_credentials =
-        RuntimeGatewayCredentialState::new(runtime_gateway_initial_credential_snapshot(
+    let gateway_credentials = RuntimeGatewayCredentialState::new(
+        runtime_gateway_initial_credential_snapshot(
             super::local_rewrite_gateway_credentials::RuntimeGatewayCredentialRefreshCandidate {
                 fingerprint: secret_refresh
                     .as_ref()
@@ -624,7 +622,9 @@ pub(super) fn prepare_runtime_local_rewrite_application(
                 observability: gateway_observability.clone(),
             },
             Arc::clone(&gateway_virtual_keys),
-        ));
+        ),
+        secret_refresh.is_some(),
+    );
     let initial_gateway_credentials = gateway_credentials.current.load_full();
     let process = Arc::new(RuntimeLocalRewriteProcessServices {
         runtime_shared: runtime_shared.clone(),
@@ -649,18 +649,18 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gateway_workload_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),
         gateway_browser: Default::default(),
         gateway_credentials,
-        gateway_state_store,
         gateway_postgres_repository,
         gateway_redis_rate_limit_executor,
         gateway_policy_version: prodex_runtime_policy::runtime_policy_summary()
             .ok()
             .flatten()
             .map(|summary| summary.version),
-        gateway_virtual_key_store_path,
+        gateway_virtual_key_store_path: gateway_state_store.key_store_path().to_path_buf(),
         gateway_usage: runtime_local_rewrite_usage_state(
             gateway_virtual_key_usage,
-            gateway_virtual_key_usage_path,
+            gateway_state_store.usage_path().to_path_buf(),
         ),
+        gateway_state_store,
         gateway_route_aliases,
         gateway_request_constraints,
         gateway_route_load: Arc::new(Mutex::new(BTreeMap::new())),

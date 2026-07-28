@@ -163,6 +163,22 @@ jobs:
       - name: Build all fuzz targets
         run: cargo +nightly-2026-07-11 fuzz build --fuzz-dir fuzz
 
+      - name: Run bounded fuzz smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in \
+            canonical_request_target \
+            oidc_endpoint_policy \
+            profile_export_envelope \
+            runtime_policy_parse \
+            governance_policy \
+            smart_context_inputs
+          do
+            cargo +nightly-2026-07-11 fuzz run "${target}" --fuzz-dir fuzz -- \
+              -max_total_time=10 -timeout=5 -rss_limit_mb=2048
+          done
+
   docs-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30

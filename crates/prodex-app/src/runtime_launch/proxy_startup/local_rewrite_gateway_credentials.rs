@@ -14,12 +14,14 @@ use super::provider_bridge::RuntimeProviderBridgeKind;
 use crate::{runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use anyhow::{Context, Result, bail};
 use arc_swap::ArcSwap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const GATEWAY_SECRET_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const GATEWAY_SECRET_REFRESH_MAX_AGE: Duration = Duration::from_secs(60);
+const GATEWAY_SECRET_REFRESH_FAILURE_LIMIT: usize = 12;
 const GATEWAY_SECRET_REFRESH_SHUTDOWN_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
@@ -74,14 +76,64 @@ pub(super) struct RuntimeGatewayCredentialSnapshot {
 pub(super) struct RuntimeGatewayCredentialState {
     pub(super) current: Arc<ArcSwap<RuntimeGatewayCredentialSnapshot>>,
     pub(super) update: Arc<Mutex<()>>,
+    consecutive_failures: Arc<AtomicUsize>,
+    refresh_deadline: Option<Arc<ArcSwap<Instant>>>,
+    stale_reported: Arc<AtomicBool>,
 }
 
 impl RuntimeGatewayCredentialState {
-    pub(super) fn new(snapshot: RuntimeGatewayCredentialSnapshot) -> Self {
+    pub(super) fn new(snapshot: RuntimeGatewayCredentialSnapshot, refresh_enabled: bool) -> Self {
+        Self::new_with_refresh_max_age(snapshot, refresh_enabled, GATEWAY_SECRET_REFRESH_MAX_AGE)
+    }
+
+    fn new_with_refresh_max_age(
+        snapshot: RuntimeGatewayCredentialSnapshot,
+        refresh_enabled: bool,
+        max_age: Duration,
+    ) -> Self {
         Self {
             current: Arc::new(ArcSwap::from_pointee(snapshot)),
             update: Arc::new(Mutex::new(())),
+            consecutive_failures: Arc::new(AtomicUsize::new(0)),
+            refresh_deadline: refresh_enabled
+                .then(|| Arc::new(ArcSwap::from_pointee(Instant::now() + max_age))),
+            stale_reported: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    fn record_refresh_failure(&self) -> bool {
+        if self.refresh_deadline.is_none() {
+            return false;
+        }
+        let _ = self
+            .consecutive_failures
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |failures| {
+                Some(
+                    failures
+                        .saturating_add(1)
+                        .min(GATEWAY_SECRET_REFRESH_FAILURE_LIMIT),
+                )
+            })
+            .unwrap_or(GATEWAY_SECRET_REFRESH_FAILURE_LIMIT);
+        self.refresh_is_stale() && !self.stale_reported.swap(true, Ordering::AcqRel)
+    }
+
+    fn record_refresh_success(&self) -> bool {
+        let recovered = self.refresh_is_stale();
+        self.consecutive_failures.store(0, Ordering::Release);
+        if let Some(deadline) = &self.refresh_deadline {
+            deadline.store(Arc::new(Instant::now() + GATEWAY_SECRET_REFRESH_MAX_AGE));
+        }
+        self.stale_reported.store(false, Ordering::Release);
+        recovered
+    }
+
+    pub(super) fn refresh_is_stale(&self) -> bool {
+        self.refresh_deadline.as_ref().is_some_and(|deadline| {
+            self.consecutive_failures.load(Ordering::Acquire)
+                >= GATEWAY_SECRET_REFRESH_FAILURE_LIMIT
+                || **deadline.load() <= Instant::now()
+        })
     }
 }
 
@@ -126,7 +178,7 @@ fn runtime_gateway_run_secret_refresh_loop(
         let candidate = match (plan.resolver)() {
             Ok(candidate) => candidate,
             Err(_) => {
-                runtime_gateway_log_secret_refresh(&shared, "resolution_failed");
+                runtime_gateway_record_secret_refresh_failure(&shared, "resolution_failed");
                 continue;
             }
         };
@@ -143,9 +195,15 @@ fn runtime_gateway_run_secret_refresh_loop(
                 .context("gateway identity state reload failed")
             },
         ) {
-            Ok(true) => runtime_gateway_log_secret_refresh(&shared, "applied"),
-            Ok(false) => {}
-            Err(error) => runtime_gateway_log_secret_refresh(
+            Ok(applied) => {
+                let recovered = shared.gateway_credentials.record_refresh_success();
+                if applied {
+                    runtime_gateway_log_secret_refresh(&shared, "applied");
+                } else if recovered {
+                    runtime_gateway_log_secret_refresh(&shared, "recovered");
+                }
+            }
+            Err(error) => runtime_gateway_record_secret_refresh_failure(
                 &shared,
                 if error
                     .chain()
@@ -283,6 +341,16 @@ fn runtime_gateway_log_secret_refresh(shared: &RuntimeLocalRewriteProxyShared, o
     );
 }
 
+fn runtime_gateway_record_secret_refresh_failure(
+    shared: &RuntimeLocalRewriteProxyShared,
+    outcome: &str,
+) {
+    runtime_gateway_log_secret_refresh(shared, outcome);
+    if shared.gateway_credentials.record_refresh_failure() {
+        runtime_gateway_log_secret_refresh(shared, "stale");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -341,10 +409,10 @@ mod tests {
         candidate: RuntimeGatewayCredentialRefreshCandidate,
         entries: Vec<RuntimeGatewayVirtualKeyEntry>,
     ) -> RuntimeGatewayCredentialState {
-        RuntimeGatewayCredentialState::new(runtime_gateway_initial_credential_snapshot(
-            candidate,
-            Arc::new(Mutex::new(entries)),
-        ))
+        RuntimeGatewayCredentialState::new(
+            runtime_gateway_initial_credential_snapshot(candidate, Arc::new(Mutex::new(entries))),
+            true,
+        )
     }
 
     fn provider_api_key(snapshot: &super::RuntimeGatewayCredentialSnapshot) -> &str {
@@ -464,6 +532,44 @@ mod tests {
             .is_err()
         );
         assert_eq!(provider_api_key(&state.current.load_full()), "old-secret");
+    }
+
+    #[test]
+    fn refresh_failures_expire_and_success_recovers_last_known_good() {
+        let state = state(candidate(1, "old-secret"), Vec::new());
+        for _ in 1..super::GATEWAY_SECRET_REFRESH_FAILURE_LIMIT {
+            assert!(!state.record_refresh_failure());
+            assert!(!state.refresh_is_stale());
+        }
+        assert!(state.record_refresh_failure());
+        assert!(state.refresh_is_stale());
+        assert!(state.record_refresh_success());
+        assert!(!state.refresh_is_stale());
+    }
+
+    #[test]
+    fn refresh_deadline_expires_even_without_twelve_failed_attempts() {
+        let snapshot = runtime_gateway_initial_credential_snapshot(
+            candidate(1, "old-secret"),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let state = RuntimeGatewayCredentialState::new_with_refresh_max_age(
+            snapshot,
+            true,
+            std::time::Duration::ZERO,
+        );
+        assert!(state.refresh_is_stale());
+
+        let snapshot = runtime_gateway_initial_credential_snapshot(
+            candidate(1, "static-secret"),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let static_state = RuntimeGatewayCredentialState::new_with_refresh_max_age(
+            snapshot,
+            false,
+            std::time::Duration::ZERO,
+        );
+        assert!(!static_state.refresh_is_stale());
     }
 
     #[test]

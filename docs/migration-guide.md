@@ -186,9 +186,12 @@ shipping the contract step.
    its pinned snapshot until completion.
 5. Treat `gateway_secret_refresh outcome=applied` as a successful publication.
    `resolution_failed` and `validation_failed` are categorical redacted events;
-   they leave last-known-good active. The gateway does not currently expire
-   stale credentials or degrade readiness solely because refresh keeps failing,
-   so operators must alert on repeated failures.
+   they leave last-known-good active for at most one minute. Twelve consecutive
+   five-second failures emit `outcome=stale`; the same monotonic one-minute
+   deadline also covers a stalled resolver. Either condition fails `/readyz`
+   and rejects new gateway work with `credential_refresh_stale`. A later valid
+   refresh emits `outcome=recovered` when the fingerprint is unchanged and
+   restores service.
 6. Roll back a bad credential by publishing the previous valid value as a new
    projection generation. Do not remove the active generation in place.
 7. Restart gateway replicas to rotate PostgreSQL or Redis connection URLs.

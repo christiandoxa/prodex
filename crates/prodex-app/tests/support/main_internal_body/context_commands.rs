@@ -114,6 +114,40 @@ fn context_replay_report_fixture_renders_markdown() {
 }
 
 #[test]
+fn context_replay_report_supports_every_registered_provider() {
+    for provider in [
+        "openai",
+        "anthropic",
+        "copilot",
+        "deepseek",
+        "gemini",
+        "kiro",
+        "local",
+    ] {
+        let corpus = serde_json::json!({
+            "schema_version": 2,
+            "scenarios": [{
+                "id": format!("{provider}-exact"),
+                "transport": "http",
+                "route": "responses",
+                "provider": provider,
+                "model": "gpt-5.1-codex",
+                "context_window_tokens": 16384,
+                "mode": "exact",
+                "turns": [{
+                    "request": {"model": "gpt-5.1-codex", "input": "hello"},
+                    "expected_outcome": "pass_through"
+                }]
+            }]
+        });
+        let report = run_runtime_smart_context_replay_json(&corpus.to_string())
+            .unwrap_or_else(|error| panic!("{provider} replay failed: {error:#}"));
+        assert!(report.passed, "{provider} replay should pass");
+        assert_eq!(report.scenarios[0].provider, provider);
+    }
+}
+
+#[test]
 fn context_replay_report_strict_rejects_failed_corpus() {
     let temp_dir = TestDir::new();
     let corpus_path = temp_dir.path.join("failed-replay.json");

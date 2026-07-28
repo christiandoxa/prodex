@@ -4,7 +4,7 @@ pub(crate) mod gateway_config;
 #[path = "runtime_launch/gateway_shutdown.rs"]
 mod gateway_shutdown;
 #[path = "runtime_launch/gateway_startup.rs"]
-mod gateway_startup;
+pub(crate) mod gateway_startup;
 mod gateway_status;
 pub(crate) mod goal_resume;
 mod preflight;
@@ -31,7 +31,6 @@ use gateway_config::{
 #[cfg(test)]
 use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_config_with_secrets};
 use gateway_startup::start_gateway_backend;
-pub(crate) use gateway_startup::start_policy_gateway_backend as start_policy_gateway_backend_inner;
 use gateway_status::print_gateway_status;
 use goal_resume::*;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
@@ -250,7 +249,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     }
 }
 
-pub(super) fn handle_run(args: RunArgs) -> Result<()> {
+pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
@@ -283,13 +282,6 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         backend.auth_required(),
     )?;
     gateway_shutdown::wait_for_signal_and_drain(&backend)
-}
-
-pub(crate) fn start_policy_gateway_application_inner(
-    service_mode: RuntimePolicyServiceMode,
-    preferred_listen_addr: Option<String>,
-) -> Result<GatewayApplication> {
-    gateway_startup::start_policy_gateway_application(service_mode, preferred_listen_addr)
 }
 
 struct RuntimeLaunchPreparationBuilder<'a> {
@@ -611,7 +603,7 @@ pub(super) fn prepare_runtime_launch(
     )
 }
 
-pub(super) fn prepare_runtime_launch_with_harness(
+pub(crate) fn prepare_runtime_launch_with_harness(
     request: RuntimeLaunchRequest<'_>,
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<PreparedRuntimeLaunch> {

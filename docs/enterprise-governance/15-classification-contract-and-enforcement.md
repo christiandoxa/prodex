@@ -209,11 +209,9 @@ within the request, and structure preserving. If the mask would corrupt JSON,
 tool semantics, or leave unacceptable residual risk, enforcement denies rather
 than guessing.
 
-The current Presidio path performs anonymization before a PDP exists. It is a
-migration safety layer, not the final obligation executor. The legacy local PII
-redactor now acts only as a fallback when typed inspection coverage is
-`Unsupported`; it must be removed as an authoritative policy path after all
-supported schemas converge.
+Presidio and the local PII inspector feed the typed inspection plan. Unsupported
+schemas and modalities retain conservative coverage and fail closed whenever
+the active enforcement obligations require full inspection.
 
 ## Bounded Hot-Path Rules
 

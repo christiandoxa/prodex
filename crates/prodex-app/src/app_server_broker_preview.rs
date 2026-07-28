@@ -41,7 +41,7 @@ pub(crate) fn app_server_broker_preview_lines(input: &str) -> Vec<Value> {
     for (index, line) in input.lines().enumerate() {
         let line = line.trim();
         if !line.is_empty() {
-            session.observe_line(index + 1, line);
+            let _ = session.observe_line(index + 1, line);
         }
     }
     session.into_previews()

@@ -2,15 +2,15 @@
 
 ## Status and Scope
 
-This document defines the Phase 4 target contract for tenant-aware provider
-registration, compliance-first routing, provider execution, and migration from
-the current runtime selectors. It is a design and verification baseline, not a
-claim that the target is implemented.
+This document defines the implemented tenant-aware provider-registration,
+compliance-first routing, and provider-execution contract. It records source
+invariants and verification requirements; deployment-specific evidence remains
+an operator responsibility.
 
-The target reuses the existing transport-transparent proxy, continuation
-affinity, pre-commit retry, endpoint-aware health, accounting, and provider
-translation primitives. It adds one missing authority boundary: every provider
-dispatch must be authorized by one immutable, revision-pinned routing decision.
+Every governed provider dispatch is authorized by one immutable,
+revision-pinned routing decision while retaining transport transparency,
+continuation affinity, pre-commit retry, endpoint-aware health, accounting, and
+provider translation.
 
 The terms **must**, **must not**, **required**, **should**, and **may** are
 normative in this document.

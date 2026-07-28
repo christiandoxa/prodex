@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "app_server_broker/stdio_validation.rs"]
+mod stdio_validation;
+
 #[derive(serde::Deserialize)]
 struct AppServerBrokerDiagnosticFixtureCase {
     name: String,
@@ -786,12 +789,18 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
     let previews = report["previews"]
         .as_array()
         .unwrap_or_else(|| panic!("{context}: previews should be an array"));
+    let line_count = previews
+        .iter()
+        .filter(|preview| preview["batch_index"].as_u64().is_none_or(|index| index == 0))
+        .count() as u64;
     let parsed_count = previews
         .iter()
+        .filter(|preview| preview["batch_index"].as_u64().is_none_or(|index| index == 0))
         .filter(|preview| preview["preview"]["parse_ok"] == serde_json::Value::Bool(true))
         .count() as u64;
-    let error_count = (previews.len() as u64).saturating_sub(parsed_count);
+    let error_count = line_count.saturating_sub(parsed_count);
 
+    let mut batch = 0u64;
     let mut request = 0u64;
     let mut notification = 0u64;
     let mut response = 0u64;
@@ -823,7 +832,10 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
     let mut owner_thread = 0u64;
     let mut owner_turn = 0u64;
     let mut non_jsonrpc_version = 0u64;
-    let mut batch_frame_unsupported = 0u64;
+    let mut empty_batch = 0u64;
+    let mut batch_too_large = 0u64;
+    let mut nested_batch = 0u64;
+    let mut invalid_batch_member = 0u64;
     let mut non_object_frame = 0u64;
     let mut non_scalar_id = 0u64;
     let mut non_container_params = 0u64;
@@ -838,7 +850,11 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
     let mut missing_method_and_response_payload = 0u64;
 
     for preview in previews {
+        if preview["batch_index"].as_u64() == Some(0) {
+            batch += 1;
+        }
         match preview["preview"]["summary"]["frame_kind"].as_str() {
+            Some("batch") => batch += 1,
             Some("request") => request += 1,
             Some("notification") => notification += 1,
             Some("response") => response += 1,
@@ -906,7 +922,10 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
         }
         match preview["preview"]["summary"]["invalid_reason"].as_str() {
             Some("non_jsonrpc_version") => non_jsonrpc_version += 1,
-            Some("batch_frame_unsupported") => batch_frame_unsupported += 1,
+            Some("empty_batch") => empty_batch += 1,
+            Some("batch_too_large") => batch_too_large += 1,
+            Some("nested_batch") => nested_batch += 1,
+            Some("invalid_batch_member") => invalid_batch_member += 1,
             Some("non_object_frame") => non_object_frame += 1,
             Some("non_scalar_id") => non_scalar_id += 1,
             Some("non_container_params") => non_container_params += 1,
@@ -923,9 +942,10 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
         }
     }
 
-    assert_eq!(report["line_count"].as_u64(), Some(previews.len() as u64), "{context}");
+    assert_eq!(report["line_count"].as_u64(), Some(line_count), "{context}");
     assert_eq!(report["parsed_count"].as_u64(), Some(parsed_count), "{context}");
     assert_eq!(report["error_count"].as_u64(), Some(error_count), "{context}");
+    assert_eq!(report["frame_kind_counts"]["batch"].as_u64(), Some(batch), "{context}");
     assert_eq!(report["frame_kind_counts"]["request"].as_u64(), Some(request), "{context}");
     assert_eq!(
         report["frame_kind_counts"]["notification"].as_u64(),
@@ -1055,8 +1075,23 @@ fn assert_preview_report_counts_match_previews(report: &serde_json::Value, conte
         "{context}"
     );
     assert_eq!(
-        report["invalid_reason_counts"]["batch_frame_unsupported"].as_u64(),
-        Some(batch_frame_unsupported),
+        report["invalid_reason_counts"]["empty_batch"].as_u64(),
+        Some(empty_batch),
+        "{context}"
+    );
+    assert_eq!(
+        report["invalid_reason_counts"]["batch_too_large"].as_u64(),
+        Some(batch_too_large),
+        "{context}"
+    );
+    assert_eq!(
+        report["invalid_reason_counts"]["nested_batch"].as_u64(),
+        Some(nested_batch),
+        "{context}"
+    );
+    assert_eq!(
+        report["invalid_reason_counts"]["invalid_batch_member"].as_u64(),
+        Some(invalid_batch_member),
         "{context}"
     );
     assert_eq!(
@@ -1329,6 +1364,7 @@ fn app_server_broker_protocol_surface_fixture_matches_helper_taxonomy() {
     assert_eq!(
         fixture.frame_kinds,
         vec![
+            AppServerBrokerFrameKind::Batch.label().to_string(),
             AppServerBrokerFrameKind::Request.label().to_string(),
             AppServerBrokerFrameKind::Notification.label().to_string(),
             AppServerBrokerFrameKind::Response.label().to_string(),
@@ -1347,7 +1383,10 @@ fn app_server_broker_protocol_surface_fixture_matches_helper_taxonomy() {
         fixture.invalid_reasons,
         vec![
             "non_jsonrpc_version".to_string(),
-            "batch_frame_unsupported".to_string(),
+            "empty_batch".to_string(),
+            "batch_too_large".to_string(),
+            "nested_batch".to_string(),
+            "invalid_batch_member".to_string(),
             "non_object_frame".to_string(),
             "non_scalar_id".to_string(),
             "non_container_params".to_string(),
@@ -2041,7 +2080,7 @@ fn app_server_broker_upstream_schema_replay_matches_preview_and_stream_helpers()
         Some(0)
     );
     assert_eq!(
-        report["report"]["invalid_reason_counts"]["batch_frame_unsupported"].as_u64(),
+        report["report"]["invalid_reason_counts"]["invalid_batch_member"].as_u64(),
         Some(0)
     );
     assert_eq!(
@@ -2166,145 +2205,6 @@ fn app_server_broker_write_stdio_passthrough_preview_stream_matches_malformed_fi
         String::from_utf8(diagnostics).unwrap(),
         app_server_broker_stdio_preview_malformed_expected_stream_fixture()
     );
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_stream_does_not_hint_response_errors() {
-    let replay = "{\"jsonrpc\":\"2.0\",\"id\":\"req-thread-start\",\"method\":\"thread/start\",\"params\":{\"cwd\":\"/workspace\",\"model\":\"gpt-5\",\"modelProvider\":\"openai\",\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"ephemeral\":false}}\n\
-{\"jsonrpc\":\"2.0\",\"id\":\"req-thread-start\",\"error\":{\"code\":-32000,\"message\":\"failed\"}}\n";
-    let mut diagnostics = Vec::new();
-
-    app_server_broker_write_stdio_validate_stream(std::io::Cursor::new(replay), &mut diagnostics)
-        .expect("response-error replay should still validate");
-
-    let diagnostics_text = String::from_utf8(diagnostics).unwrap();
-    let lines: Vec<&str> = diagnostics_text.lines().collect();
-    assert_eq!(lines.len(), 3);
-    let request_preview: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    let response_preview: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
-    let report: serde_json::Value = serde_json::from_str(lines[2]).unwrap();
-
-    assert_eq!(
-        request_preview["preview"]["summary"]["lifecycle_schema_file"],
-        serde_json::Value::String("ThreadStartParams.json".to_string())
-    );
-    assert_eq!(response_preview["preview"]["summary"]["frame_kind"], "response");
-    assert_eq!(
-        response_preview["preview"]["summary"]["lifecycle_schema_file"],
-        serde_json::Value::Null
-    );
-    assert_eq!(report["report"]["error_count"].as_u64(), Some(0));
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_stream_accepts_valid_schema_replay() {
-    let replay = app_server_broker_upstream_schema_replay_fixture();
-    let mut diagnostics = Vec::new();
-
-    app_server_broker_write_stdio_validate_stream(std::io::Cursor::new(replay), &mut diagnostics)
-        .expect("valid schema replay should validate");
-
-    let rendered = String::from_utf8(diagnostics).unwrap();
-    assert_eq!(
-        rendered,
-        app_server_broker_upstream_schema_expected_stream_fixture()
-    );
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_stream_rejects_malformed_replay() {
-    let replay = app_server_broker_stdio_preview_malformed_replay_fixture();
-    let mut diagnostics = Vec::new();
-
-    let err =
-        app_server_broker_write_stdio_validate_stream(std::io::Cursor::new(replay), &mut diagnostics)
-            .expect_err("malformed replay should fail closed");
-
-    assert!(
-        err.to_string()
-            .contains("app-server broker validation failed"),
-        "{err}"
-    );
-    assert_eq!(
-        String::from_utf8(diagnostics).unwrap(),
-        app_server_broker_stdio_preview_malformed_expected_stream_fixture()
-    );
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_passthrough_stream_accepts_valid_schema_replay() {
-    let replay = app_server_broker_upstream_schema_replay_fixture();
-    let mut passthrough = Vec::new();
-    let mut diagnostics = Vec::new();
-
-    app_server_broker_write_stdio_validate_passthrough_stream(
-        std::io::Cursor::new(replay),
-        &mut passthrough,
-        &mut diagnostics,
-    )
-    .expect("valid schema replay should validate before passthrough");
-
-    assert_eq!(
-        String::from_utf8(passthrough).unwrap(),
-        app_server_broker_upstream_schema_passthrough_expected_stdout_fixture()
-    );
-    assert_eq!(
-        String::from_utf8(diagnostics).unwrap(),
-        app_server_broker_upstream_schema_passthrough_expected_stderr_fixture()
-    );
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_passthrough_stream_blocks_malformed_replay() {
-    let replay = "\
-{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"custom/ping\",\"params\":{}}\n\
-\n\
-{\"jsonrpc\":\"2.0\"\n\
-{\"jsonrpc\":\"2.0\",\"id\":\"resp-1\",\"result\":{\"ok\":true}}\n";
-    let mut passthrough = Vec::new();
-    let mut diagnostics = Vec::new();
-
-    let err = app_server_broker_write_stdio_validate_passthrough_stream(
-        std::io::Cursor::new(replay),
-        &mut passthrough,
-        &mut diagnostics,
-    )
-    .expect_err("malformed replay should fail before passthrough");
-
-    assert!(
-        err.chain().any(|cause| cause
-            .to_string()
-            .contains("app-server broker validation failed before passthrough")),
-        "{err}"
-    );
-    assert_eq!(
-        String::from_utf8(passthrough).unwrap(),
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"custom/ping\",\"params\":{}}\n\n"
-    );
-    let rendered = String::from_utf8(diagnostics).unwrap();
-    assert!(rendered.contains("\"error\":\"invalid_json\""));
-    assert!(rendered.contains("\"line\":3"));
-    assert!(!rendered.contains("resp-1"));
-}
-
-#[test]
-fn app_server_broker_write_stdio_validate_passthrough_stream_blocks_invalid_frame() {
-    let replay = "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"turn/start\",\"result\":{}}\n";
-    let mut passthrough = Vec::new();
-    let mut diagnostics = Vec::new();
-
-    let err = app_server_broker_write_stdio_validate_passthrough_stream(
-        std::io::Cursor::new(replay),
-        &mut passthrough,
-        &mut diagnostics,
-    )
-    .expect_err("invalid JSON-RPC frame should fail before passthrough");
-
-    assert!(err.to_string().contains("invalid_frame_count=1"), "{err}");
-    assert!(passthrough.is_empty());
-    let rendered = String::from_utf8(diagnostics).unwrap();
-    assert!(rendered.contains("\"frame_kind\":\"invalid\""));
-    assert!(rendered.contains("\"method_with_result_or_error\""));
 }
 
 #[test]
@@ -5689,7 +5589,10 @@ fn app_server_broker_preview_report_counts_parsed_and_failed_lines() {
     assert_eq!(report["method_kind_counts"]["other"], 1);
     assert_eq!(report["method_kind_counts"]["absent"], 1);
     assert_eq!(report["invalid_reason_counts"]["non_jsonrpc_version"], 1);
-    assert_eq!(report["invalid_reason_counts"]["batch_frame_unsupported"], 0);
+    assert_eq!(report["invalid_reason_counts"]["empty_batch"], 0);
+    assert_eq!(report["invalid_reason_counts"]["batch_too_large"], 0);
+    assert_eq!(report["invalid_reason_counts"]["nested_batch"], 0);
+    assert_eq!(report["invalid_reason_counts"]["invalid_batch_member"], 0);
     assert_eq!(report["invalid_reason_counts"]["non_object_frame"], 0);
     assert_eq!(report["invalid_reason_counts"]["non_scalar_id"], 0);
     assert_eq!(report["invalid_reason_counts"]["non_container_params"], 0);
@@ -5764,11 +5667,9 @@ fn app_server_broker_preview_report_matches_fixture_corpus() {
         .iter()
         .filter(|case| case.expect.invalid_reason.as_deref() == Some("non_object_frame"))
         .count();
-    let batch_frame_unsupported_count = cases
+    let invalid_batch_member_count = cases
         .iter()
-        .filter(|case| {
-            case.expect.invalid_reason.as_deref() == Some("batch_frame_unsupported")
-        })
+        .filter(|case| case.expect.invalid_reason.as_deref() == Some("invalid_batch_member"))
         .count();
     let non_scalar_id_count = cases
         .iter()
@@ -5845,8 +5746,8 @@ fn app_server_broker_preview_report_matches_fixture_corpus() {
         non_object_frame_count
     );
     assert_eq!(
-        report["invalid_reason_counts"]["batch_frame_unsupported"],
-        batch_frame_unsupported_count
+        report["invalid_reason_counts"]["invalid_batch_member"],
+        invalid_batch_member_count
     );
     assert_eq!(
         report["invalid_reason_counts"]["non_string_method"],

@@ -19,10 +19,10 @@ use terminal_ui::{
 use crate::{
     ChildProcessPlan, ProdexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     RuntimeToolArgs, SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value,
-    codex_cli_profile_v2_name, prepare_runtime_launch_dry_run,
-    preview_deepseek_provider_codex_args, preview_external_provider_catalog_codex_args,
-    preview_gemini_provider_codex_args, preview_local_provider_catalog_codex_args,
-    profile_openai_compatible_codex_args, runtime_launch_cli_gemini_thinking_budget_tokens,
+    codex_cli_profile_v2_name, preview_deepseek_provider_codex_args,
+    preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
+    preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
+    runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
     trusted_workspace_codex_args, validate_credential_free_http_url,
 };
@@ -473,7 +473,7 @@ pub(crate) fn print_runtime_launch_dry_run(
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
-    let prepared = prepare_runtime_launch_dry_run(request)?;
+    let prepared = super::runtime_launch::prepare_runtime_launch_dry_run(request)?;
     let local_provider_bridge = prepared
         .runtime_proxy
         .as_ref()
@@ -528,7 +528,7 @@ fn runtime_launch_harness_dry_run_line(
     )
 }
 
-fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
+pub(crate) fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
     let height = runtime_launch_dry_run_tui_height(output);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         print!("{output}");

@@ -1,4 +1,4 @@
-use crate::{RuntimeRotationProxy, app_commands};
+use crate::RuntimeRotationProxy;
 use anyhow::Result;
 use std::{net::SocketAddr, time::Duration};
 
@@ -67,5 +67,7 @@ pub fn start_policy_gateway_backend_for_mode(
     service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
 ) -> Result<GatewayBackend> {
     prodex_runtime_policy::ensure_runtime_policy_service_mode(service_mode)?;
-    app_commands::start_policy_gateway_backend_inner(preferred_listen_addr)
+    crate::app_commands::runtime_launch::gateway_startup::start_policy_gateway_backend(
+        preferred_listen_addr,
+    )
 }

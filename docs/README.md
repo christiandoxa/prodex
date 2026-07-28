@@ -36,12 +36,8 @@ not retained here; Git history is the record for obsolete material.
 
 The maintained enterprise contract is split by responsibility:
 
-- [Policy model and obligations](enterprise-governance/04-policy-model-and-obligations.md)
-- [Approval and break-glass](enterprise-governance/05-approval-and-break-glass.md)
 - [Provider registry and routing](enterprise-governance/06-provider-registry-and-routing.md)
-- [Identity, sessions, and API gateway](enterprise-governance/07-identity-session-and-api-gateway.md)
 - [Storage, HA, backup, and DR](enterprise-governance/09-storage-ha-backup-and-dr.md)
-- [Operator runbooks](enterprise-governance/13-operator-runbooks.md)
 - [Classification and enforcement](enterprise-governance/15-classification-contract-and-enforcement.md)
 - [Response-stream enforcement](enterprise-governance/16-response-stream-enforcement.md)
 - [Policy authority and revision store](enterprise-governance/17-policy-authority-and-revision-store.md)

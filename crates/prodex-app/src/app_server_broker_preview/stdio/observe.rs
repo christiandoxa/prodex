@@ -66,10 +66,11 @@ fn write_preview_stream<R: BufRead, W: Write, D: Write>(
         if line.is_empty() {
             continue;
         }
-        let preview = session.observe_line(line_index, line);
-        app_server_broker_log_preview_event(&log_path, line_index, &preview);
-        serde_json::to_writer(&mut diagnostics_writer, &preview)?;
-        diagnostics_writer.write_all(b"\n")?;
+        for preview in session.observe_line(line_index, line) {
+            app_server_broker_log_preview_event(&log_path, line_index, &preview);
+            serde_json::to_writer(&mut diagnostics_writer, &preview)?;
+            diagnostics_writer.write_all(b"\n")?;
+        }
     }
     let summary = session.into_report_json();
     app_server_broker_log_preview_summary(&log_path, &summary);
