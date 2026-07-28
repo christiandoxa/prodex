@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.365.0 - 2026-07-28
+
+### Misc
+
+- Complete atomic mutation lifecycle (`5a957e6`)
+
 ## 0.364.0 - 2026-07-28
 
 ### Runtime
@@ -76,13 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Close runtime governance gaps (`0c5e2ce`)
-
-## 0.353.0 - 2026-07-26
-
-### Docs
-
-- Restore README banner and format (`ffcf905`)
-
-### Misc
-
-- Harden file checks and test coverage (`2af9e9d`)
