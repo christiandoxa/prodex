@@ -143,7 +143,7 @@ pub fn runtime_doctor_incident_explainer(
         "stream_read_error",
     ];
     let transport_count = runtime_doctor_incident_marker_total(summary, &transport_markers);
-    if transport_count > 0 || runtime_doctor_marker_count(summary, "profile_health") > 0 {
+    if transport_count > 0 {
         let cause = if runtime_doctor_marker_count(summary, "profile_transport_backoff") > 0 {
             "A profile route is in short transport backoff after upstream transport failures."
         } else if runtime_doctor_marker_count(summary, "stream_read_error") > 0 {
@@ -165,11 +165,30 @@ pub fn runtime_doctor_incident_explainer(
                 runtime_doctor_incident_top_facet_evidence(summary, "reason"),
             ],
             &transport_markers,
-            if runtime_doctor_marker_count(summary, "profile_health") > 0 {
-                runtime_doctor_route_health_next_step(summary)
-            } else {
-                runtime_doctor_transport_backoff_next_step(summary)
-            },
+            runtime_doctor_transport_backoff_next_step(summary),
+        ));
+    }
+
+    let route_health_markers = ["profile_health"];
+    let route_health_count = runtime_doctor_incident_marker_total(summary, &route_health_markers);
+    if route_health_count > 0 {
+        let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
+            .unwrap_or_else(|| "an unknown route".to_string());
+        let reason = runtime_doctor_marker_last_field(summary, "profile_health", "reason")
+            .unwrap_or("unknown_reason");
+        incidents.push(runtime_doctor_incident(
+            "route_health_penalty",
+            format!(
+                "Route-specific health penalty is steering fresh selection away from {scope} after {reason}."
+            ),
+            vec![
+                Some(format!("profile_health={route_health_count}")),
+                Some(format!("reason={reason}")),
+                runtime_doctor_incident_top_facet_evidence(summary, "profile"),
+                runtime_doctor_incident_top_facet_evidence(summary, "route"),
+            ],
+            &route_health_markers,
+            runtime_doctor_route_health_next_step(summary),
         ));
     }
 

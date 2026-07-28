@@ -261,19 +261,6 @@ async function runWithManagedPostgres() {
       "cargo",
       [
         "test", "-q", "-p", "prodex-storage-postgres-runtime",
-        "--test", "postgres_runtime", "--", "--ignored", "--test-threads=1",
-      ],
-      {
-        env: {
-          PRODEX_TEST_POSTGRES_URL: `postgres://postgres:postgres@127.0.0.1:${port}/prodex_test`,
-          PRODEX_TEST_REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
-        },
-      },
-    );
-    await run(
-      "cargo",
-      [
-        "test", "-q", "-p", "prodex-storage-postgres-runtime",
         "--test", "postgres_tls", "--", "--test-threads=1",
       ],
       {

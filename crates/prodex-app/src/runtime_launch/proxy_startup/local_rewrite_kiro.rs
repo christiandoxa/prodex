@@ -56,7 +56,7 @@ use std::io::{self, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
 
@@ -513,7 +513,7 @@ fn runtime_kiro_streaming_reader(
             .tuning
             .stream_idle_timeout_ms,
     );
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(16);
     let error_sender = sender.clone();
     schedule_runtime_kiro_blocking_work(&async_runtime, move || {
         let result = runtime_kiro_streaming_worker(
@@ -547,7 +547,7 @@ fn runtime_kiro_streaming_reader(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_worker(
-    sender: Sender<RuntimeKiroStreamingChunk>,
+    sender: SyncSender<RuntimeKiroStreamingChunk>,
     request_id: u64,
     prompt: &str,
     prompt_messages: Vec<Value>,
@@ -812,7 +812,7 @@ fn runtime_kiro_streaming_worker(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_stream_notification(
-    sender: &Sender<RuntimeKiroStreamingChunk>,
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
     notification: &RuntimeKiroAcpSessionNotification,
     response_id: &str,
     chat_completion_id: &str,
@@ -940,7 +940,7 @@ fn runtime_kiro_stream_notification(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_stream_tool_call(
-    sender: &Sender<RuntimeKiroStreamingChunk>,
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
     response_id: &str,
     chat_completion_id: &str,
     stream_model: &str,

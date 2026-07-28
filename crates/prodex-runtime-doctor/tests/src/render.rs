@@ -268,6 +268,29 @@ fn runtime_doctor_incident_explainer_classifies_transport_and_quota_fixture_logs
 }
 
 #[test]
+fn runtime_doctor_incident_explainer_does_not_call_overload_transport() {
+    let summary = runtime_doctor_fixture_summary(
+        b"[2026-04-24 12:00:00.000 +07:00] profile_health profile=alpha route=responses score=40 reason=responses_overload\n",
+    );
+    let value = runtime_doctor_json_value(&summary);
+    let health = runtime_doctor_json_incident(&value, "route_health_penalty");
+
+    assert!(
+        health["cause"]
+            .as_str()
+            .expect("route health cause should be a string")
+            .contains("responses_overload")
+    );
+    assert!(
+        value["incident_explainer"]
+            .as_array()
+            .expect("incident_explainer should be an array")
+            .iter()
+            .all(|incident| incident["id"] != "transport_backoff")
+    );
+}
+
+#[test]
 fn runtime_doctor_incident_explainer_classifies_precommit_budget() {
     let mut summary = runtime_doctor_fixture_summary(
         b"[2026-04-24 12:00:00.000 +07:00] request=80 precommit_budget_exhausted route=responses attempts=3 reason=candidate_exhausted\n[2026-04-24 12:00:01.000 +07:00] request=81 compact_precommit_budget_exhausted route=/responses/compact attempts=2 reason=quota\n",

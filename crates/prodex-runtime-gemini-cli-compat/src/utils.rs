@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub(super) fn safe_slug(value: &str) -> String {
@@ -125,12 +126,59 @@ pub(super) fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = BTreeSet::new();
     let mut output = Vec::new();
     for path in paths {
-        let key = path.to_string_lossy().to_ascii_lowercase();
+        let key = gemini_path_identity(&path);
         if seen.insert(key) {
             output.push(path);
         }
     }
     output
+}
+
+pub fn gemini_path_identity(path: &Path) -> OsString {
+    #[cfg(windows)]
+    {
+        path.as_os_str().to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        path.as_os_str().to_os_string()
+    }
+}
+
+pub fn gemini_extension_override_matches(rule: &str, cwd: &Path) -> Option<bool> {
+    let mut rule = rule.trim();
+    if rule.is_empty() {
+        return None;
+    }
+    let disable = rule.starts_with('!');
+    if disable {
+        rule = &rule[1..];
+    }
+    let include_subdirs = rule.ends_with('*');
+    if include_subdirs {
+        rule = &rule[..rule.len().saturating_sub(1)];
+    }
+    let rule = normalize_enablement_path(rule);
+    let cwd = normalize_enablement_path(&cwd.to_string_lossy());
+    let matches = if include_subdirs {
+        cwd.starts_with(&rule)
+    } else {
+        cwd == rule
+    };
+    matches.then_some(disable)
+}
+
+fn normalize_enablement_path(path: &str) -> String {
+    let mut value = path.trim().replace('\\', "/");
+    #[cfg(windows)]
+    value.make_ascii_lowercase();
+    if !value.starts_with('/') {
+        value.insert(0, '/');
+    }
+    if !value.ends_with('/') {
+        value.push('/');
+    }
+    value
 }
 
 pub(super) fn gemini_env_bool(key: &str) -> Option<bool> {
@@ -215,6 +263,36 @@ mod tests {
         assert_eq!(
             toml_string_literal(value).parse::<toml::Value>().unwrap(),
             toml::Value::String(value.to_string())
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn path_dedupe_preserves_case_distinct_paths() {
+        let paths = vec![PathBuf::from("/tmp/Foo"), PathBuf::from("/tmp/foo")];
+
+        assert_eq!(dedupe_paths(paths.clone()), paths);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_dedupe_preserves_non_utf8_paths() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let paths = vec![
+            PathBuf::from(OsString::from_vec(b"/tmp/\x80".to_vec())),
+            PathBuf::from(OsString::from_vec(b"/tmp/\x81".to_vec())),
+        ];
+
+        assert_eq!(dedupe_paths(paths.clone()), paths);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn path_identity_folds_windows_ascii_case() {
+        assert_eq!(
+            gemini_path_identity(Path::new(r"C:\\Work\\Foo")),
+            gemini_path_identity(Path::new(r"c:\\work\\foo"))
         );
     }
 }

@@ -2,7 +2,7 @@ use super::gemini_request::{
     RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT,
 };
 use super::gemini_request_io::runtime_gemini_read_text_limited;
-use crate::RuntimeGeminiConfig;
+use crate::{RuntimeGeminiConfig, gemini_extension_override_matches, gemini_path_identity};
 use prodex_provider_core::gemini_provider_core_collect_string_values;
 use std::collections::BTreeSet;
 use std::env;
@@ -51,7 +51,7 @@ fn runtime_gemini_extension_context_files_from_roots_with_config(
             if !path.is_file() {
                 continue;
             }
-            let key = path.to_string_lossy().to_ascii_lowercase();
+            let key = gemini_path_identity(&path);
             if seen.insert(key) {
                 paths.push(path);
             }
@@ -227,43 +227,9 @@ fn runtime_gemini_extension_is_enabled(
     };
     let mut enabled = true;
     for rule in overrides.iter().filter_map(serde_json::Value::as_str) {
-        if let Some(disable) = runtime_gemini_extension_override_matches(rule, cwd) {
+        if let Some(disable) = gemini_extension_override_matches(rule, cwd) {
             enabled = !disable;
         }
     }
     enabled
-}
-
-fn runtime_gemini_extension_override_matches(rule: &str, cwd: &Path) -> Option<bool> {
-    let mut rule = rule.trim();
-    if rule.is_empty() {
-        return None;
-    }
-    let disable = rule.starts_with('!');
-    if disable {
-        rule = &rule[1..];
-    }
-    let include_subdirs = rule.ends_with('*');
-    if include_subdirs {
-        rule = &rule[..rule.len().saturating_sub(1)];
-    }
-    let rule = runtime_gemini_normalize_extension_override_path(rule);
-    let cwd = runtime_gemini_normalize_extension_override_path(&cwd.to_string_lossy());
-    let matches = if include_subdirs {
-        cwd.starts_with(&rule)
-    } else {
-        cwd == rule
-    };
-    matches.then_some(disable)
-}
-
-fn runtime_gemini_normalize_extension_override_path(path: &str) -> String {
-    let mut value = path.trim().replace('\\', "/");
-    if !value.starts_with('/') {
-        value.insert(0, '/');
-    }
-    if !value.ends_with('/') {
-        value.push('/');
-    }
-    value
 }

@@ -17,6 +17,8 @@ mod hooks;
 mod prompts;
 mod utils;
 
+pub use utils::{gemini_extension_override_matches, gemini_path_identity};
+
 use assets::{write_gemini_admin_helpers, write_gemini_agents, write_gemini_skills};
 use fs_utils::*;
 use hooks::write_gemini_hooks;
@@ -462,7 +464,7 @@ fn extension_is_enabled(name: &str, cwd: Option<&Path>, extension_root: &Path) -
     };
     let mut enabled = true;
     for rule in overrides.iter().filter_map(serde_json::Value::as_str) {
-        if let Some(disable) = extension_override_matches(rule, cwd) {
+        if let Some(disable) = gemini_extension_override_matches(rule, cwd) {
             enabled = !disable;
         }
     }
@@ -489,40 +491,6 @@ fn extension_name_override(name: &str) -> Option<bool> {
             .iter()
             .any(|item| item == &name.to_ascii_lowercase()),
     )
-}
-
-fn extension_override_matches(rule: &str, cwd: &Path) -> Option<bool> {
-    let mut rule = rule.trim();
-    if rule.is_empty() {
-        return None;
-    }
-    let disable = rule.starts_with('!');
-    if disable {
-        rule = &rule[1..];
-    }
-    let include_subdirs = rule.ends_with('*');
-    if include_subdirs {
-        rule = &rule[..rule.len().saturating_sub(1)];
-    }
-    let rule = normalize_enablement_path(rule);
-    let cwd = normalize_enablement_path(&cwd.to_string_lossy());
-    let matches = if include_subdirs {
-        cwd.starts_with(&rule)
-    } else {
-        cwd == rule
-    };
-    matches.then_some(disable)
-}
-
-fn normalize_enablement_path(path: &str) -> String {
-    let mut value = path.trim().replace('\\', "/");
-    if !value.starts_with('/') {
-        value.insert(0, '/');
-    }
-    if !value.ends_with('/') {
-        value.push('/');
-    }
-    value
 }
 
 fn gemini_mcp_settings_filters(

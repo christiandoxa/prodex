@@ -54,7 +54,7 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
             path,
             FollowedLog {
                 offset,
-                pending: String::new(),
+                pending: Vec::new(),
             },
         );
     }
@@ -91,7 +91,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             path,
             FollowedLog {
                 offset,
-                pending: String::new(),
+                pending: Vec::new(),
             },
         );
     }
