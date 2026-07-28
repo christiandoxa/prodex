@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.363.0 - 2026-07-28
+
+- No grouped changes.
+
 ## 0.362.0 - 2026-07-28
 
 ### Runtime
@@ -85,9 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Route stderr size queries through backend (`2627508`)
 - Initialize stderr TUI without /dev/tty (`2770426`)
 - Close audited release gaps (`6b02064`)
-
-## 0.351.0 - 2026-07-26
-
-### Misc
-
-- Complete audited production paths (`56e2dfd`)
