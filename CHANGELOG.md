@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.364.0 - 2026-07-28
+
+### Runtime
+
+- Correct provider contracts and durable state writes (`c67df85`)
+
 ## 0.363.0 - 2026-07-28
 
 - No grouped changes.
@@ -80,12 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden file checks and test coverage (`2af9e9d`)
-
-## 0.352.0 - 2026-07-26
-
-### Misc
-
-- Split full app tests from platform matrix (`8bc5170`)
-- Route stderr size queries through backend (`2627508`)
-- Initialize stderr TUI without /dev/tty (`2770426`)
-- Close audited release gaps (`6b02064`)
