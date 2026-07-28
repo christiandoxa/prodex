@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.361.0 - 2026-07-28
+
+### Runtime
+
+- Close audited implementation gaps (`6200d1d`)
+
 ## 0.360.0 - 2026-07-28
 
 ### Misc
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Restore Presidio opt-in prompt (`7fd29c3`)
-
-## 0.349.0 - 2026-07-26
-
-### CLI
-
-- Use local Ponytail marketplace source (`91c8e75`)
