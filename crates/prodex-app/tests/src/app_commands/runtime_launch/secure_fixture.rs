@@ -43,3 +43,22 @@ pub(super) fn write_runtime_launch_auth(
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .write_text(&secret_store::SecretLocation::file(path), text)
 }
+
+pub(super) fn session_meta_line(
+    session_id: &str,
+    cwd: &std::path::Path,
+    model_provider: Option<&str>,
+) -> String {
+    let mut payload = serde_json::json!({"id": session_id, "cwd": cwd.to_string_lossy()});
+    if let Some(model_provider) = model_provider {
+        payload["model_provider"] = model_provider.into();
+    }
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "timestamp": "2026-06-05T01:00:00Z",
+            "type": "session_meta",
+            "payload": payload,
+        })
+    )
+}

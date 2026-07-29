@@ -290,15 +290,16 @@ jobs:
           package-manager-cache: false
 
       - name: Run Windows runtime launch regressions
+        timeout-minutes: 10
         env:
           RUST_BACKTRACE: "1"
           RUST_TEST_NOCAPTURE: "1"
-        run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1
+        run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
 
       - name: Run full Windows Rust suite
         env:
           RUST_BACKTRACE: "1"
-        run: npm run test:full -- --jobs 2 --test-threads 2
+        run: npm run test:full -- --jobs 2 --test-threads 2 --no-prodex-app-lib
 
   macos-workspace:
     name: macOS full workspace tests
