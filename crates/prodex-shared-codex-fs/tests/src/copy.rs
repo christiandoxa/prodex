@@ -107,6 +107,58 @@ fn copy_directory_contents_does_not_preserve_symlink_escape() {
 
 #[cfg(unix)]
 #[test]
+fn copy_codex_home_skips_codex_managed_packages_directory() {
+    let temp_dir = CopyTestDir::new("codex-packages");
+    let source = temp_dir.path.join("source");
+    let destination = temp_dir.path.join("destination");
+    let release_dir = source.join("packages/standalone/releases/0.145.0-aarch64-apple-darwin");
+    let current_link = source.join("packages/standalone/current");
+
+    fs::create_dir_all(&release_dir).expect("release dir should be created");
+    fs::write(release_dir.join("codex"), "binary").expect("release binary should write");
+    std::os::unix::fs::symlink(
+        Path::new("releases/0.145.0-aarch64-apple-darwin"),
+        &current_link,
+    )
+    .expect("release symlink should be created");
+    fs::write(source.join("config.toml"), "model = \"gpt-5\"\n").expect("config should write");
+
+    copy_codex_home(&source, &destination)
+        .expect("Codex managed packages directory must not fail the copy");
+
+    assert_eq!(
+        fs::read_to_string(destination.join("config.toml")).expect("config should be readable"),
+        "model = \"gpt-5\"\n"
+    );
+    assert!(
+        fs::symlink_metadata(destination.join("packages")).is_err(),
+        "Codex managed packages directory should not be copied into the profile"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_codex_home_copies_nested_packages_directory() {
+    let temp_dir = CopyTestDir::new("nested-packages");
+    let source = temp_dir.path.join("source");
+    let destination = temp_dir.path.join("destination");
+    let nested_file = source.join("skills/packages/manifest.json");
+
+    fs::create_dir_all(nested_file.parent().expect("nested parent"))
+        .expect("nested parent should be created");
+    fs::write(&nested_file, "{}").expect("nested file should write");
+
+    copy_codex_home(&source, &destination).expect("copy should succeed");
+
+    assert_eq!(
+        fs::read_to_string(destination.join("skills/packages/manifest.json"))
+            .expect("nested file should be readable"),
+        "{}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn copy_directory_contents_localizes_internal_file_symlink() {
     let temp_dir = CopyTestDir::new("internal-file-symlink");
     let source = temp_dir.path.join("source");
