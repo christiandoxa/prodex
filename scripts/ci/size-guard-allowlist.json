@@ -56,7 +56,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1075,
+    "maxLines": 1070,
     "reason": "Runtime launch run-command strategy regression coverage includes terminal keyboard reset planning and remains capped after live goal recovery cases moved to their focused module."
   },
   {

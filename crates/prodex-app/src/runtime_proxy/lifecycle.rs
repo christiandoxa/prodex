@@ -47,7 +47,7 @@ impl Drop for RuntimeRotationProxy {
 }
 
 fn runtime_proxy_join_workers_on_drop() -> bool {
-    cfg!(test)
+    cfg!(all(test, not(windows)))
 }
 
 #[cfg(test)]

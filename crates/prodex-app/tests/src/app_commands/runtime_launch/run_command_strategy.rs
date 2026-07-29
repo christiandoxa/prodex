@@ -18,24 +18,6 @@ fn exit_status(code: i32) -> std::process::ExitStatus {
     }
 }
 
-fn session_meta_line(session_id: &str, cwd: &Path, model_provider: Option<&str>) -> String {
-    let mut payload = serde_json::json!({
-        "id": session_id,
-        "cwd": cwd.to_string_lossy(),
-    });
-    if let Some(model_provider) = model_provider {
-        payload["model_provider"] = serde_json::Value::String(model_provider.to_string());
-    }
-    format!(
-        "{}\n",
-        serde_json::json!({
-            "timestamp": "2026-06-05T01:00:00Z",
-            "type": "session_meta",
-            "payload": payload,
-        })
-    )
-}
-
 fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
     let value: serde_json::Value =
         serde_json::from_str(line).expect("repaired metadata should be valid JSON");

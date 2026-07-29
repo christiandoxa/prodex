@@ -25,7 +25,7 @@ mod secure_fixture;
 mod session_maintenance;
 #[path = "runtime_launch/super_runtime.rs"]
 mod super_runtime;
-use secure_fixture::{temp_dir, write_runtime_launch_auth};
+use secure_fixture::{session_meta_line, temp_dir, write_runtime_launch_auth};
 fn gateway_args() -> GatewayArgs {
     GatewayArgs {
         command: None,
