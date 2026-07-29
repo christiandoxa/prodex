@@ -264,8 +264,8 @@ npm run bench:smart-context-report
 
 CI runs the correctness guard and evidence check. The raw report separates
 tokenizer-counted values from estimates, includes per-turn transformations,
-validation, reference blocking, state mutations, hashes, and duration, and
-records `allocation_bytes: null` until allocation instrumentation is available.
+validation, reference blocking, state mutations, hashes, duration, and
+optimized-turn allocation bytes from the opt-in counting allocator.
 Live-model evaluation is optional non-deterministic evidence and must not be
 reported as deterministic CI proof.
 

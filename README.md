@@ -147,6 +147,11 @@ On Windows, run this from PowerShell or Command Prompt:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
 ```
 
+Managed profiles require Windows symbolic-link permission. Enable Developer
+Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an administrator
+before importing or creating a profile. Prodex checks this before migrating
+profile state and reports an actionable error when permission is unavailable.
+
 <details>
 <summary>Installer verification, alternate source, and legacy migration</summary>
 

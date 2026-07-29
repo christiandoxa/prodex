@@ -111,6 +111,13 @@ fn context_replay_report_fixture_renders_markdown() {
     assert!(report.contains("# Smart Context Deterministic Replay"));
     assert!(report.contains("- passed: true"));
     assert!(report.contains("within-request-duplicate-build-output"));
+    #[cfg(feature = "allocation-bench-support")]
+    assert!(replay.scenarios.iter().all(|scenario| {
+        scenario
+            .turns
+            .iter()
+            .all(|turn| turn.allocation_bytes.is_some_and(|bytes| bytes > 0))
+    }));
 }
 
 #[test]

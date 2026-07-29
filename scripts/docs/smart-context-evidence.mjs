@@ -18,7 +18,7 @@ const commit = runChecked("git", ["rev-parse", "HEAD"], { cwd: repoRoot }).stdou
 const rustToolchain = runChecked("rustc", ["--version"], { cwd: repoRoot }).stdout.trim();
 const report = runCheckedJson(
   "cargo",
-  ["run", "--locked", "-q", "--bin", "prodex", "--", "context", "replay-report", corpus, "--json", "--strict"],
+  ["run", "--locked", "-q", "--features", "allocation-bench-support", "--bin", "prodex", "--", "context", "replay-report", corpus, "--json", "--strict"],
   {
     cwd: repoRoot,
     timeoutMs: 180_000,
@@ -52,7 +52,7 @@ function renderMarkdown(value) {
     );
   }
   lines.push("");
-  lines.push("This is deterministic correctness and tokenizer-count evidence. It is not live-model quality evidence.");
+  lines.push("This is deterministic correctness, tokenizer-count, and optimized-rewrite allocation evidence. It is not live-model quality evidence.");
   lines.push("");
   return lines.join("\n");
 }
@@ -63,7 +63,10 @@ function normalizedReport(value) {
   normalized.provenance.commit_sha = "<source-commit>";
   normalized.provenance.rust_toolchain = "<toolchain>";
   for (const scenario of normalized.scenarios) {
-    for (const turn of scenario.turns) turn.rewrite_duration_ns = 0;
+    for (const turn of scenario.turns) {
+      turn.rewrite_duration_ns = 0;
+      if (turn.allocation_bytes !== null) turn.allocation_bytes = 0;
+    }
   }
   return JSON.stringify(normalized);
 }

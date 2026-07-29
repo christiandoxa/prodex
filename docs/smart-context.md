@@ -140,7 +140,8 @@ Rollback and corruption handling follow the common
 
 - Deterministic fixtures prove request invariants, not task quality from a live
   model.
-- Allocation/request, queue-wait, and per-scope lock-wait distributions are not
-  captured by the current benchmark; no no-regression claim is made for them.
+- Allocation per optimized replay turn is captured with the opt-in counting
+  allocator. Queue-wait and per-scope lock-wait distributions remain outside
+  the current benchmark, so no no-regression claim is made for those waits.
 - Persisted-artifact insertion is retained for compatibility and rehydration,
   but active rewrites intentionally emit only self-contained inline references.

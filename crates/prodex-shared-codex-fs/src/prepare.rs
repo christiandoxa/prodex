@@ -50,9 +50,11 @@ fn prepare_managed_codex_home_internal(
     ensure_managed_profiles_root(paths)?;
     ensure_managed_codex_home_is_not_symlink(codex_home)?;
     create_codex_home_if_missing(codex_home)?;
-    migrate_legacy_shared_codex_roots(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
+    #[cfg(windows)]
+    ensure_windows_shared_codex_symlink_support(&paths.shared_codex_root, codex_home)?;
+    migrate_legacy_shared_codex_roots(paths)?;
 
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
