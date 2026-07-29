@@ -51,7 +51,7 @@ The following operational dependencies remain explicit:
 | --- | --- | --- |
 | Mandatory governance audit append fails | Deny before provider dispatch | Bounded queue, durable commit acknowledgement, failure/latency metrics, and saturation alert |
 | Presidio unavailable, saturated, timed out, or oversized | Produce typed unavailable coverage; enforcing/bank policy denies when full inspection is mandatory | Focused adapter/config/failure tests |
-| Guardrail webhook fails or denies | Fixed timeout/response bound; configured fail-open/closed behavior; denial uses stable `webhook_denied` reason | Focused webhook regression |
+| Guardrail webhook fails or denies | Fixed timeout/response bound; configured fail-open/closed behavior; endpoint failures emit redacted `gateway_guardrail_webhook_failed` with a stable error kind; denial uses stable `webhook_denied` reason | Focused webhook regression |
 | Selected provider lacks an eligible executable binding | Fail unavailable before dispatch; never reinterpret through another adapter | Provider registry/application dispatch tests and production guard |
 | Failure after response commitment | Surface natural transport/stream termination; never retry or rotate | Runtime precommit/postcommit regressions |
 | PostgreSQL governance or SIEM exporter failure | Fail-closed transaction or durable asynchronous retry/dead-letter, respectively | SQLite exporter and live PostgreSQL outbox lifecycle passed; external sink outage remains deployment evidence |
