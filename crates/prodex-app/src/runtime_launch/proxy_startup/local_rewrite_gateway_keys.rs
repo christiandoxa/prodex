@@ -5,12 +5,11 @@ use super::local_rewrite::{
 };
 use super::local_rewrite_application_data_plane::runtime_gateway_application_data_plane_admission;
 use super::local_rewrite_gateway_admission::{
-    RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS, RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS,
-    RUNTIME_GATEWAY_RESERVATION_TTL_MS, RuntimeGatewayRealtimeAccountingPlan,
+    RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS, RuntimeGatewayRealtimeAccountingPlan,
     RuntimeGatewayVirtualKeyAdmissionFailure, RuntimeGatewayVirtualKeyAdmissionOutcome,
     runtime_gateway_application_admission_rejection,
     runtime_gateway_application_admission_without_virtual_key,
-    runtime_gateway_conversation_namespace,
+    runtime_gateway_conversation_namespace, runtime_gateway_reservation_ttl_ms,
 };
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_distributed_rate_limit::runtime_gateway_distributed_rate_limit_admission;
@@ -503,11 +502,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             reserved_tokens,
             estimated_cost_microusd,
             minute_epoch,
-            reservation_ttl_ms: if realtime {
-                RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS
-            } else {
-                RUNTIME_GATEWAY_RESERVATION_TTL_MS
-            },
+            reservation_ttl_ms: runtime_gateway_reservation_ttl_ms(shared, realtime),
         })?;
     let admission = virtual_key_plan.gateway.admission.clone();
     let usage_update = virtual_key_plan.gateway.usage_update;

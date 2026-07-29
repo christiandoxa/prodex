@@ -25,7 +25,7 @@ use prodex_storage::{
 use prodex_storage_postgres::{SET_TENANT_STATEMENT, UPSERT_TENANT_LIFECYCLE_STATEMENT};
 use prodex_storage_postgres_runtime::{
     IdempotentWriteOutcome, PostgresRepository, PostgresRuntimeConfig, ReserveOutcome,
-    ReserveRejection,
+    ReserveRejection, StoredReservationState,
 };
 use sha2::{Digest, Sha256};
 
@@ -441,6 +441,117 @@ async fn two_repositories_reserve_and_reconcile_idempotently() {
     assert_eq!(counter.get::<_, i64>(1), 0);
     assert_eq!(counter.get::<_, i64>(2), 40);
     assert_eq!(counter.get::<_, i64>(3), 400);
+    transaction.commit().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
+async fn released_reservation_reconciles_without_consuming_active_reservation() {
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
+    let config = PostgresRuntimeConfig::new(url, 4).expect("test config should be valid");
+    let pool = config
+        .create_pool_explicit_no_tls()
+        .expect("test pool should build");
+    let repository = PostgresRepository::from_pool_with_config(pool.clone(), &config);
+    let tenant_id = TenantId::new();
+    create_tenant(&pool, tenant_id).await;
+
+    let expired = reservation_command(tenant_id);
+    let mut active = reservation_command(tenant_id);
+    active.storage_key = expired.storage_key;
+    let expired_record = match repository.reserve(expired.clone()).await.unwrap() {
+        ReserveOutcome::Reserved(record) => record,
+        outcome => panic!("unexpected expired reservation outcome: {outcome:?}"),
+    };
+    let active_record = match repository.reserve(active.clone()).await.unwrap() {
+        ReserveOutcome::Reserved(record) => record,
+        outcome => panic!("unexpected active reservation outcome: {outcome:?}"),
+    };
+    repository
+        .release_expired(ExpiredReservationRecoveryCommand {
+            storage_key: expired.storage_key,
+            snapshot: BudgetSnapshot {
+                reserved: UsageAmount::new(200, 2_000),
+                committed: UsageAmount::ZERO,
+            },
+            record: expired_record,
+            now_unix_ms: expired_record.expires_at_unix_ms,
+        })
+        .await
+        .expect("expired reservation should release");
+
+    let actual = UsageAmount::new(40, 400);
+    let reconcile = UsageReconciliationCommand {
+        storage_key: expired.storage_key,
+        snapshot: BudgetSnapshot {
+            reserved: expired_record.reserved,
+            committed: UsageAmount::ZERO,
+        },
+        record: expired_record,
+        actual,
+        reason: ReservationReconciliationReason::Completed,
+    };
+    assert_eq!(
+        repository
+            .reconcile_usage(reconcile.clone(), 1_800_000_061_000)
+            .await
+            .unwrap(),
+        IdempotentWriteOutcome::Applied
+    );
+    assert_eq!(
+        repository
+            .reconcile_usage(reconcile, 1_800_000_061_001)
+            .await
+            .unwrap(),
+        IdempotentWriteOutcome::Replayed
+    );
+    assert_eq!(
+        repository
+            .load_reservation(tenant_id, expired_record.call_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        StoredReservationState::Committed
+    );
+    assert_eq!(
+        repository
+            .load_reservation(tenant_id, active_record.call_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        StoredReservationState::Active
+    );
+
+    let mut client = pool.get().await.expect("verification pool should connect");
+    let transaction = client.transaction().await.unwrap();
+    transaction
+        .query_one(SET_TENANT_STATEMENT.sql, &[&tenant_id.to_string()])
+        .await
+        .unwrap();
+    let storage_scope = expired.storage_key.storage_scope();
+    let counter = transaction
+        .query_one(
+            "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = $1 AND storage_scope = $2",
+            &[&tenant_id.as_uuid(), &storage_scope],
+        )
+        .await
+        .unwrap();
+    assert_eq!(counter.get::<_, i64>(0), 100);
+    assert_eq!(counter.get::<_, i64>(1), 1_000);
+    assert_eq!(counter.get::<_, i64>(2), 40);
+    assert_eq!(counter.get::<_, i64>(3), 400);
+    let ledger = transaction
+        .query_one(
+            "SELECT COUNT(*) FILTER (WHERE event_kind = 'released'), COUNT(*) FILTER (WHERE event_kind = 'committed') FROM prodex_usage_ledger WHERE tenant_id = $1 AND reservation_id = $2",
+            &[&tenant_id.as_uuid(), &expired_record.reservation_id.as_uuid()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(ledger.get::<_, i64>(0), 1);
+    assert_eq!(ledger.get::<_, i64>(1), 1);
     transaction.commit().await.unwrap();
 }
 

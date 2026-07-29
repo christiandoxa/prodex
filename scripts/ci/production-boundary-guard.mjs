@@ -564,15 +564,30 @@ export function validateProductionBoundary(sources) {
       `${FILES.reconciliationWorker}: reconciliation workers must remain bounded`,
     );
   }
-  const reconciliationLoop =
-    functionBody(sources.reconciliationWorker, "runtime_gateway_reconcile_until_persisted") ?? "";
+  const reconciliationWorkerLoop =
+    functionBody(sources.reconciliationWorker, "runtime_gateway_reconciliation_worker_loop") ?? "";
+  requireText(
+    errors,
+    reconciliationWorkerLoop,
+    "runtime_gateway_reconciliation_worker_step(",
+    `${FILES.reconciliationWorker}: reconciliation workers must use the fair queue step`,
+  );
+  const reconciliationStep =
+    functionBody(sources.reconciliationWorker, "runtime_gateway_reconciliation_worker_step") ?? "";
+  requireText(
+    errors,
+    reconciliationStep,
+    "queue.requeue(job)",
+    `${FILES.reconciliationWorker}: failed reconciliation must requeue behind pending jobs`,
+  );
+  const reconciliationAttempt =
+    functionBody(sources.reconciliationWorker, "runtime_gateway_reconcile_once") ?? "";
   requireOrdered(
     errors,
-    reconciliationLoop,
+    reconciliationAttempt,
     [
       "runtime_gateway_application_reconciliation_execution(",
       "reconciliation.retry.attempts().last()",
-      "loop {",
       "runtime_gateway_billing_ledger_reconcile_response(",
       "runtime_gateway_durable_reconcile_response(",
       "runtime_gateway_record_reconciliation_audit(",
@@ -580,27 +595,19 @@ export function validateProductionBoundary(sources) {
     ],
     `${FILES.reconciliationWorker}: every backend must consume application reconciliation policy before retry and success side effects`,
   );
-  for (const duplicate of ["0..25", "Duration::from_millis(20)"]) {
-    forbidText(
-      errors,
-      sources.reconciliationWorker,
-      duplicate,
-      `${FILES.reconciliationWorker}: app-local reconciliation retry policy '${duplicate}' is forbidden`,
-    );
-  }
   requireText(
     errors,
-    reconciliationLoop,
-    "reconciliation.exhausted(storage_error_observed)",
+    reconciliationAttempt,
+    "reconciliation.exhausted(job.storage_error_observed)",
     `${FILES.reconciliationWorker}: extended reconciliation retries must receive an application failure classification`,
   );
   for (const retrySideEffect of [
-    "runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt)",
+    "runtime_gateway_reconciliation_retry_sleep(reconciliation, job.attempt)",
     '"gateway_billing_ledger_reconcile_retrying"',
   ]) {
     requireText(
       errors,
-      reconciliationLoop,
+      reconciliationAttempt,
       retrySideEffect,
       `${FILES.reconciliationWorker}: pending reconciliation must retain state and retry after policy exhaustion`,
     );
@@ -1625,19 +1632,22 @@ function runSelfTest() {
         runtime_gateway_reconciliation_worker_loop();
       });
     }
-    fn runtime_gateway_reconcile_until_persisted() {
+    fn runtime_gateway_reconciliation_worker_loop() {
+      runtime_gateway_reconciliation_worker_step();
+    }
+    fn runtime_gateway_reconciliation_worker_step() {
+      queue.requeue(job);
+    }
+    fn runtime_gateway_reconcile_once() {
       let reconciliation = runtime_gateway_application_reconciliation_execution();
       let terminal_attempt = reconciliation.retry.attempts().last();
-      let storage_error_observed = false;
-      loop {
-          runtime_gateway_billing_ledger_reconcile_response();
-          runtime_gateway_durable_reconcile_response();
-          runtime_gateway_record_reconciliation_audit();
-          runtime_gateway_finish_reconciliation();
-        reconciliation.exhausted(storage_error_observed);
-        "gateway_billing_ledger_reconcile_retrying";
-        runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt);
-      }
+      runtime_gateway_billing_ledger_reconcile_response();
+      runtime_gateway_durable_reconcile_response();
+      runtime_gateway_record_reconciliation_audit();
+      runtime_gateway_finish_reconciliation();
+      reconciliation.exhausted(job.storage_error_observed);
+      "gateway_billing_ledger_reconcile_retrying";
+      runtime_gateway_reconciliation_retry_sleep(reconciliation, job.attempt);
     }
     fn runtime_gateway_record_reconciliation_audit() {
       if runtime_gateway_audit_usage_reconciliation(runtime_shared, audit).is_err() {
@@ -2259,8 +2269,15 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
+      reconciliationWorker: valid.reconciliationWorker.replace("queue.requeue(job);", ""),
+    }).some((error) => error.includes("requeue behind pending jobs")),
+    "unfair reconciliation retry queue accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
       reconciliationWorker: valid.reconciliationWorker.replace(
-        "reconciliation.exhausted(storage_error_observed);",
+        "reconciliation.exhausted(job.storage_error_observed);",
         "",
       ),
     }).some((error) => error.includes("application failure classification")),

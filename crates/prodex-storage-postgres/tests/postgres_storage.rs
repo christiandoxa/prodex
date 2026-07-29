@@ -1526,24 +1526,14 @@ fn usage_reconciliation_plan_uses_tenant_context_dml_and_idempotent_ledger_event
             .iter()
             .all(|statement| !statement_contains_ddl(statement.sql))
     );
-    assert!(RECONCILE_USAGE_STATEMENT.sql.contains("FOR UPDATE"));
-    assert!(
-        RECONCILE_USAGE_STATEMENT
-            .sql
-            .contains("reserved_tokens = reserved_tokens -")
-    );
-    assert!(
-        RECONCILE_USAGE_STATEMENT
-            .sql
-            .contains("committed_tokens = committed_tokens +")
-    );
-    assert!(
-        RECONCILE_USAGE_STATEMENT
-            .sql
-            .contains("ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING")
-    );
-    assert!(RECONCILE_USAGE_STATEMENT.sql.contains("'committed'"));
-    assert!(RECONCILE_USAGE_STATEMENT.sql.contains("'released'"));
+    let sql = RECONCILE_USAGE_STATEMENT.sql;
+    assert!(sql.contains("FOR UPDATE"));
+    assert!(sql.contains("reserved_tokens = counter.reserved_tokens - CASE"));
+    assert!(sql.contains("committed_tokens = counter.committed_tokens +"));
+    assert!(sql.contains("WHEN reservation.released_at_unix_ms IS NULL THEN $4"));
+    assert!(sql.contains("ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING"));
+    assert!(sql.contains("'committed'"));
+    assert!(sql.contains("'released'"));
 }
 
 #[test]

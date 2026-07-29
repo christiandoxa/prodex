@@ -1,6 +1,5 @@
 #![cfg(test)]
 
-use super::super::local_rewrite_gateway_admission::RUNTIME_GATEWAY_RESERVATION_TTL_MS;
 use super::super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::super::local_rewrite_gateway_reservation::runtime_gateway_sqlite_reserve_usage;
 use super::{
@@ -182,7 +181,7 @@ fn sqlite_durable_reservation_rejects_second_concurrent_claim_on_same_budget_sco
                 estimate: UsageAmount::new(22, 42),
             },
             created_at_unix_ms: 1_000,
-            ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
+            ttl_ms: 60_000,
         }
     };
     let barrier = Arc::new(Barrier::new(2));

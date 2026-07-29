@@ -158,25 +158,57 @@ fn runtime_gateway_sqlite_reconcile_usage(
     let tenant_id = plan.tenant_id.to_string();
     let reservation_id = record.reservation_id.to_string();
     let call_id = record.call_id.to_string();
-    let committed: Option<i64> = tx
+    let storage_scope = runtime_gateway_reconciliation_storage_scope(plan.storage_key);
+    let reserved_tokens = runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens);
+    let reserved_cost_micros = runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros);
+    let stored = tx
         .query_row(
-            "SELECT committed_at_unix_ms FROM prodex_reservations WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
+            "SELECT storage_scope, reserved_tokens, reserved_cost_micros, committed_at_unix_ms, released_at_unix_ms FROM prodex_reservations WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
             rusqlite::params![tenant_id, reservation_id, call_id],
-            |row| row.get(0),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                ))
+            },
         )
-        .optional()?
-        .flatten();
-    if committed.is_some() {
+        .optional()?;
+    let Some((stored_scope, stored_tokens, stored_cost_micros, committed_at, released_at)) = stored
+    else {
+        anyhow::bail!("durable reservation was not found");
+    };
+    if stored_scope != storage_scope
+        || stored_tokens != reserved_tokens
+        || stored_cost_micros != reserved_cost_micros
+    {
+        anyhow::bail!("durable reservation state conflicts with reconciliation");
+    }
+    if committed_at.is_some() {
         tx.commit()?;
         return Ok(());
     }
     let updated = runtime_gateway_unix_epoch_millis();
-    let storage_scope = runtime_gateway_reconciliation_storage_scope(plan.storage_key);
-    let released_tokens = record.reserved.tokens.saturating_sub(actual.tokens);
-    let released_cost_micros = record
-        .reserved
-        .cost_micros
-        .saturating_sub(actual.cost_micros);
+    let reservation_was_released = released_at.is_some();
+    let reserved_tokens_to_release = if reservation_was_released {
+        0
+    } else {
+        reserved_tokens
+    };
+    let reserved_cost_to_release = if reservation_was_released {
+        0
+    } else {
+        reserved_cost_micros
+    };
+    let released = if reservation_was_released {
+        UsageAmount::ZERO
+    } else {
+        record.reserved.saturating_sub(actual)
+    };
+    let released_tokens = released.tokens;
+    let released_cost_micros = released.cost_micros;
     let changed = tx.execute(
         r#"
         UPDATE prodex_budget_counters
@@ -202,8 +234,8 @@ fn runtime_gateway_sqlite_reconcile_usage(
             tenant_id,
             reservation_id,
             call_id,
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+            reserved_tokens_to_release,
+            reserved_cost_to_release,
             runtime_gateway_sqlite_u64_to_i64(actual.tokens),
             runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
             runtime_gateway_sqlite_u64_to_i64(updated),
@@ -217,7 +249,11 @@ fn runtime_gateway_sqlite_reconcile_usage(
         r#"
         UPDATE prodex_reservations
         SET committed_at_unix_ms = ?8,
-            released_at_unix_ms = CASE WHEN ?10 > 0 OR ?11 > 0 THEN ?8 ELSE released_at_unix_ms END
+            released_at_unix_ms = CASE
+                WHEN released_at_unix_ms IS NOT NULL THEN released_at_unix_ms
+                WHEN ?10 > 0 OR ?11 > 0 THEN ?8
+                ELSE NULL
+            END
         WHERE tenant_id = ?1
           AND reservation_id = ?2
           AND call_id = ?3
@@ -227,8 +263,8 @@ fn runtime_gateway_sqlite_reconcile_usage(
             tenant_id,
             reservation_id,
             call_id,
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+            reserved_tokens,
+            reserved_cost_micros,
             runtime_gateway_sqlite_u64_to_i64(actual.tokens),
             runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
             runtime_gateway_sqlite_u64_to_i64(updated),
@@ -254,8 +290,8 @@ fn runtime_gateway_sqlite_reconcile_usage(
             tenant_id,
             reservation_id,
             call_id,
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
-            runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+            reserved_tokens,
+            reserved_cost_micros,
             runtime_gateway_sqlite_u64_to_i64(actual.tokens),
             runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
             runtime_gateway_sqlite_u64_to_i64(updated),
@@ -283,8 +319,8 @@ fn runtime_gateway_sqlite_reconcile_usage(
                 tenant_id,
                 reservation_id,
                 call_id,
-                runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
-                runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+                reserved_tokens,
+                reserved_cost_micros,
                 runtime_gateway_sqlite_u64_to_i64(actual.tokens),
                 runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
                 runtime_gateway_sqlite_u64_to_i64(updated),
@@ -489,12 +525,13 @@ mod tests {
         )
         .expect("budget counter row should insert");
         conn.execute(
-            "INSERT INTO prodex_reservations (tenant_id, reservation_id, call_id, virtual_key_id, idempotency_key, reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO prodex_reservations (tenant_id, reservation_id, call_id, virtual_key_id, storage_scope, idempotency_key, reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 tenant_id.to_string(),
                 reservation_id_text,
                 call_id_text,
                 virtual_key_id.to_string(),
+                runtime_gateway_reconciliation_storage_scope(storage_key),
                 idempotency_key.as_str(),
                 runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
                 runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
@@ -542,6 +579,145 @@ mod tests {
             .expect("released ledger rows should load");
         assert_eq!(committed_rows, 1);
         assert_eq!(released_rows, 0);
+
+        std::fs::remove_dir_all(root).expect("test root should clean up");
+    }
+
+    #[test]
+    fn sqlite_late_reconcile_preserves_unrelated_reservation() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-late-reconcile-{}",
+            prodex_domain::RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        let path = root.join("state.sqlite");
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path)
+            .expect("sqlite schema fixture should be created");
+
+        let tenant_id = TenantId::new();
+        let virtual_key_id = VirtualKeyId::new();
+        let storage_key = prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id);
+        let expired = ReservationRecord::from_request(
+            ReservationRequest {
+                tenant_id,
+                call_id: prodex_domain::CallId::new(),
+                reservation_id: prodex_domain::ReservationId::new(),
+                estimate: UsageAmount::new(22, 42),
+            },
+            100,
+            100,
+        )
+        .expect("expired reservation record");
+        let active = ReservationRecord::from_request(
+            ReservationRequest {
+                tenant_id,
+                call_id: prodex_domain::CallId::new(),
+                reservation_id: prodex_domain::ReservationId::new(),
+                estimate: UsageAmount::new(13, 17),
+            },
+            200,
+            10_000,
+        )
+        .expect("active reservation record");
+        let conn = runtime_gateway_sqlite_open(&path).expect("sqlite database should open");
+        conn.execute(
+            "INSERT INTO prodex_tenants (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms) VALUES (?1, 'tenant', 1, 1)",
+            rusqlite::params![tenant_id.to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prodex_budget_counters (tenant_id, storage_scope, virtual_key_id, reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros, updated_at_unix_ms) VALUES (?1, ?2, ?3, 35, 59, 0, 0, 200)",
+            rusqlite::params![
+                tenant_id.to_string(),
+                runtime_gateway_reconciliation_storage_scope(storage_key),
+                virtual_key_id.to_string(),
+            ],
+        )
+        .unwrap();
+        for record in [expired, active] {
+            let idempotency_key =
+                IdempotencyKey::from_call_reservation(record.call_id, record.reservation_id);
+            conn.execute(
+                "INSERT INTO prodex_reservations (tenant_id, reservation_id, call_id, virtual_key_id, storage_scope, idempotency_key, reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![
+                    tenant_id.to_string(),
+                    record.reservation_id.to_string(),
+                    record.call_id.to_string(),
+                    virtual_key_id.to_string(),
+                    runtime_gateway_reconciliation_storage_scope(storage_key),
+                    idempotency_key.as_str(),
+                    runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
+                    runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+                    runtime_gateway_sqlite_u64_to_i64(record.created_at_unix_ms),
+                    runtime_gateway_sqlite_u64_to_i64(record.expires_at_unix_ms),
+                ],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let mut repository =
+            prodex_storage_sqlite_runtime::SqliteAccountingRepository::open(&path).unwrap();
+        repository
+            .release_expired(prodex_storage::ExpiredReservationRecoveryCommand {
+                storage_key,
+                snapshot: BudgetSnapshot {
+                    reserved: UsageAmount::new(35, 59),
+                    committed: UsageAmount::ZERO,
+                },
+                record: expired,
+                now_unix_ms: 300,
+            })
+            .expect("expired reservation should release");
+        drop(repository);
+        let conn = runtime_gateway_sqlite_open(&path).unwrap();
+        let counters_after_recovery: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
+                rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(counters_after_recovery, (13, 17, 0, 0));
+        drop(conn);
+
+        let actual = UsageAmount::new(9, 11);
+        let plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
+            prodex_storage::UsageReconciliationCommand {
+                storage_key,
+                snapshot: BudgetSnapshot {
+                    reserved: expired.reserved,
+                    committed: UsageAmount::ZERO,
+                },
+                record: expired,
+                actual,
+                reason: prodex_domain::ReservationReconciliationReason::Completed,
+            },
+        )
+        .unwrap();
+        runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
+            .expect("late reconciliation should apply");
+        runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
+            .expect("late reconciliation replay should be idempotent");
+
+        let conn = runtime_gateway_sqlite_open(&path).expect("sqlite database should reopen");
+        let counters: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
+                rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(counters, (13, 17, 9, 11));
+        let ledger: (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*) FILTER (WHERE event_kind = 'released'), COUNT(*) FILTER (WHERE event_kind = 'committed') FROM prodex_usage_ledger WHERE tenant_id = ?1 AND reservation_id = ?2",
+                rusqlite::params![tenant_id.to_string(), expired.reservation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(ledger, (1, 1));
+        drop(conn);
 
         std::fs::remove_dir_all(root).expect("test root should clean up");
     }

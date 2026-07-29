@@ -585,7 +585,7 @@ pub const RECONCILE_USAGE_STATEMENT: PostgresStatement = PostgresStatement {
     name: "reconcile_usage_atomically",
     sql: r#"
 WITH locked_reservation AS (
-    SELECT tenant_id, reservation_id, call_id, virtual_key_id
+    SELECT tenant_id, reservation_id, call_id, virtual_key_id, released_at_unix_ms
     FROM prodex_reservations
     WHERE tenant_id = $1
       AND reservation_id = $2
@@ -593,22 +593,38 @@ WITH locked_reservation AS (
       AND committed_at_unix_ms IS NULL
     FOR UPDATE
 ), update_counter AS (
-    UPDATE prodex_budget_counters
-    SET reserved_tokens = reserved_tokens - $4,
-        reserved_cost_micros = reserved_cost_micros - $5,
-        committed_tokens = committed_tokens + $6,
-        committed_cost_micros = committed_cost_micros + $7,
+    UPDATE prodex_budget_counters AS counter
+    SET reserved_tokens = counter.reserved_tokens - CASE
+            WHEN reservation.released_at_unix_ms IS NULL THEN $4
+            ELSE 0
+        END,
+        reserved_cost_micros = counter.reserved_cost_micros - CASE
+            WHEN reservation.released_at_unix_ms IS NULL THEN $5
+            ELSE 0
+        END,
+        committed_tokens = counter.committed_tokens + $6,
+        committed_cost_micros = counter.committed_cost_micros + $7,
         updated_at_unix_ms = $8
-    WHERE tenant_id = $1
-      AND storage_scope = $9
-      AND reserved_tokens >= $4
-      AND reserved_cost_micros >= $5
-      AND EXISTS (SELECT 1 FROM locked_reservation)
-    RETURNING tenant_id
+    FROM locked_reservation AS reservation
+    WHERE counter.tenant_id = $1
+      AND counter.storage_scope = $9
+      AND counter.reserved_tokens >= CASE
+          WHEN reservation.released_at_unix_ms IS NULL THEN $4
+          ELSE 0
+      END
+      AND counter.reserved_cost_micros >= CASE
+          WHEN reservation.released_at_unix_ms IS NULL THEN $5
+          ELSE 0
+      END
+    RETURNING counter.tenant_id
 ), mark_reservation AS (
     UPDATE prodex_reservations
     SET committed_at_unix_ms = $8,
-        released_at_unix_ms = CASE WHEN $10::BIGINT > 0 OR $11::BIGINT > 0 THEN $8 ELSE released_at_unix_ms END
+        released_at_unix_ms = CASE
+            WHEN released_at_unix_ms IS NOT NULL THEN released_at_unix_ms
+            WHEN $10::BIGINT > 0 OR $11::BIGINT > 0 THEN $8
+            ELSE NULL
+        END
     WHERE tenant_id = $1
       AND reservation_id = $2
       AND EXISTS (SELECT 1 FROM update_counter)
@@ -642,6 +658,11 @@ WITH locked_reservation AS (
     SELECT $1, $13, $2, $3, 'released', $10, $11, $8
     WHERE EXISTS (SELECT 1 FROM mark_reservation)
       AND ($10::BIGINT > 0 OR $11::BIGINT > 0)
+      AND EXISTS (
+          SELECT 1
+          FROM locked_reservation
+          WHERE released_at_unix_ms IS NULL
+      )
     ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING
     RETURNING tenant_id
 )

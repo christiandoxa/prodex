@@ -236,20 +236,8 @@ const REQUIRED_CONTROL_PLANE_HTTP_BINDING_SNIPPETS = Object.freeze([
     "application boundary must expose a typed reconciliation retry plan",
   ],
   [
-    "max_attempts: 25",
-    "application boundary must retain the characterized reconciliation attempt budget",
-  ],
-  [
-    "Duration::from_millis(20)",
-    "application boundary must retain the characterized reconciliation backoff",
-  ],
-  [
     "ApplicationUsageReconciliationAuditPlan",
     "application boundary must expose typed reconciliation audit semantics",
-  ],
-  [
-    '"gateway_reconciliation_retry_exhausted"',
-    "application boundary must classify pending reconciliation exhaustion",
   ],
 ]);
 
@@ -463,11 +451,7 @@ let _ = plan_gateway_control_plane_route_error_response(error);
 let _ = ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed;
 struct ApplicationUsageReconciliationRetryPlan;
 struct ApplicationUsageReconciliationAuditPlan;
-fn plan_application_usage_reconciliation_execution() {
-    let max_attempts: 25;
-    Duration::from_millis(20);
-    let _ = "gateway_reconciliation_retry_exhausted";
-}
+fn plan_application_usage_reconciliation_execution() {}
 `;
   assertSelfTest(
     validateApplicationBindings(validBindingSource).length === 0,
@@ -502,12 +486,6 @@ fn plan_application_usage_reconciliation_execution() {
       validBindingSource.replace("plan_application_usage_reconciliation_execution", "bypassed_reconciliation"),
     ).some((error) => error.includes("reconciliation execution policy")),
     "missing reconciliation execution planner accepted",
-  );
-  assertSelfTest(
-    validateApplicationBindings(
-      validBindingSource.replace('"gateway_reconciliation_retry_exhausted"', '"silent_drop"'),
-    ).some((error) => error.includes("pending reconciliation exhaustion")),
-    "silent pending reconciliation exhaustion accepted",
   );
 }
 
