@@ -289,6 +289,12 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
+      - name: Run Windows runtime launch regressions
+        env:
+          RUST_BACKTRACE: "1"
+          RUST_TEST_NOCAPTURE: "1"
+        run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1
+
       - name: Run full Windows Rust suite
         env:
           RUST_BACKTRACE: "1"

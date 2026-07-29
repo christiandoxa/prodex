@@ -1,5 +1,4 @@
 use super::*;
-use std::process::Command;
 
 #[path = "run_command_strategy/live_goal_resume.rs"]
 mod live_goal_resume;
@@ -7,10 +6,34 @@ mod live_goal_resume;
 mod session_binding;
 
 fn exit_status(code: i32) -> std::process::ExitStatus {
-    Command::new("/bin/sh")
-        .args(["-c", &format!("exit {code}")])
-        .status()
-        .expect("exit status should run")
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        std::process::ExitStatus::from_raw(code << 8)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::ExitStatusExt as _;
+        std::process::ExitStatus::from_raw(code as u32)
+    }
+}
+
+fn session_meta_line(session_id: &str, cwd: &Path, model_provider: Option<&str>) -> String {
+    let mut payload = serde_json::json!({
+        "id": session_id,
+        "cwd": cwd.to_string_lossy(),
+    });
+    if let Some(model_provider) = model_provider {
+        payload["model_provider"] = serde_json::Value::String(model_provider.to_string());
+    }
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "timestamp": "2026-06-05T01:00:00Z",
+            "type": "session_meta",
+            "payload": payload,
+        })
+    )
 }
 
 fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
@@ -36,10 +59,7 @@ fn run_strategy_resolves_codex_delete_partial_selector_before_launch() {
     fs::create_dir_all(&sessions).unwrap();
     fs::write(
         sessions.join("rollout.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\"}}}}\n",
-            root.display()
-        ),
+        session_meta_line(session_id, &root, None),
     )
     .unwrap();
 
@@ -310,10 +330,7 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     fs::create_dir_all(&sessions).unwrap();
     fs::write(
         sessions.join("rollout.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
-            root.display()
-        ),
+        session_meta_line(session_id, &root, Some("prodex-gemini")),
     )
     .unwrap();
 
@@ -396,10 +413,7 @@ fn run_strategy_auto_routes_kiro_resume_sessions_to_provider_bridge() {
     fs::create_dir_all(&sessions).unwrap();
     fs::write(
         sessions.join("rollout.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-kiro\"}}}}\n",
-            root.display()
-        ),
+        session_meta_line(session_id, &root, Some("prodex-kiro")),
     )
     .unwrap();
 
@@ -456,10 +470,7 @@ fn run_strategy_exact_resume_provider_detection_skips_unreadable_unrelated_files
     let unrelated = sessions.join("rollout-2026-06-05T01-00-00-other-session.jsonl");
     fs::write(
         &target,
-        format!(
-            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
-            root.display()
-        ),
+        session_meta_line(session_id, &root, Some("prodex-gemini")),
     )
     .unwrap();
     fs::write(
@@ -510,8 +521,13 @@ fn run_strategy_repairs_resume_session_metadata_prefix_before_provider_detection
     fs::write(
         &session_path,
         format!(
-            "{{\"timestamp\":\"2026-06-05T00:59:00Z\",\"type\":\"event\",\"payload\":{{\"message\":\"partial\"}}}}\n{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
-            root.display()
+            "{}\n{}",
+            serde_json::json!({
+                "timestamp": "2026-06-05T00:59:00Z",
+                "type": "event",
+                "payload": {"message": "partial"},
+            }),
+            session_meta_line(session_id, &root, Some("prodex-gemini"))
         ),
     )
     .unwrap();
@@ -930,10 +946,7 @@ fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bri
     fs::create_dir_all(&sessions).unwrap();
     fs::write(
         sessions.join("rollout.jsonl"),
-        format!(
-            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
-            root.display()
-        ),
+        session_meta_line(session_id, &root, Some("prodex-gemini")),
     )
     .unwrap();
 

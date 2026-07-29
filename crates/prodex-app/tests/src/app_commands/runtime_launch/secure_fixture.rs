@@ -17,9 +17,7 @@ pub(super) fn temp_dir(name: &str) -> PathBuf {
     if dir.exists() {
         fs::remove_dir_all(&dir).unwrap();
     }
-    fs::create_dir_all(&dir).unwrap();
-    #[cfg(unix)]
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    secret_store::ensure_private_directory(&dir).unwrap();
     dir
 }
 
@@ -39,6 +37,8 @@ pub(super) fn write_runtime_launch_auth(
                 directory = current.parent().filter(|next| next.starts_with(&temp_root));
             }
         }
+        secret_store::ensure_private_directory(parent)
+            .expect("failed to secure runtime launch auth parent");
     }
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .write_text(&secret_store::SecretLocation::file(path), text)

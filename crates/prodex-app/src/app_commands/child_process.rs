@@ -211,10 +211,10 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
         if !arg0_path_is_regular_dir(&path)? || !arg0_dir_name_is_owned(&path) {
             continue;
         }
-        let Some(_lock_file) = try_lock_codex_arg0_dir(&path)? else {
+        let Some(lock_file) = try_lock_codex_arg0_dir(&path)? else {
             continue;
         };
-        if let Err(err) = fs::remove_dir_all(&path) {
+        if let Err(err) = remove_locked_codex_arg0_dir(&path, lock_file) {
             if err.kind() == io::ErrorKind::NotFound {
                 continue;
             }
@@ -227,6 +227,31 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn remove_locked_codex_arg0_dir(path: &Path, _lock_file: File) -> io::Result<()> {
+    fs::remove_dir_all(path)
+}
+
+#[cfg(windows)]
+fn remove_locked_codex_arg0_dir(path: &Path, lock_file: File) -> io::Result<()> {
+    let lock_path = path.join(".lock");
+    fs::remove_file(&lock_path)?;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let child = entry.path();
+        if child == lock_path {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(child)?;
+        } else {
+            fs::remove_file(child)?;
+        }
+    }
+    drop(lock_file);
+    fs::remove_dir(path)
 }
 
 fn arg0_path_is_regular_dir(path: &Path) -> io::Result<bool> {

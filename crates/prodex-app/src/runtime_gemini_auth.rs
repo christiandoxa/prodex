@@ -91,6 +91,8 @@ pub(crate) fn write_gemini_oauth_secret(
     secret: &GeminiOAuthSecret,
 ) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
+    secret_store::ensure_private_directory(codex_home)
+        .with_context(|| format!("failed to secure {}", codex_home.display()))?;
     let path = gemini_oauth_secret_path(codex_home);
     let text =
         serde_json::to_string_pretty(secret).context("failed to serialize Gemini OAuth secret")?;
