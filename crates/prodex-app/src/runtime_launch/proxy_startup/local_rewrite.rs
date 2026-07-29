@@ -1,11 +1,13 @@
 use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 mod context;
+mod governance_refresh;
 mod listener_worker;
 pub(super) use self::context::{
     RuntimeLocalRewriteProcessServices, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteRequestContext,
 };
+use self::governance_refresh::runtime_gateway_refresh_policy_snapshot;
 use self::listener_worker::spawn_runtime_local_rewrite_listener_worker;
 #[cfg(test)]
 pub(crate) use super::local_rewrite_constraints::start_runtime_gateway_rewrite_proxy;
@@ -856,7 +858,9 @@ fn runtime_gateway_governance_authority(
                         input.compiled_artifact,
                         deployment_mode,
                     )
-                    .is_ok()
+                    .is_ok_and(|snapshot| {
+                        snapshot.application.policy.revision().to_string() == input.revision_id
+                    })
             },
         )
         .and_then(|stored| {
@@ -1172,39 +1176,21 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                 let mut next_provider = (*provider_snapshots.load_full()).clone();
                 let mut next_routing = (*routing_snapshots.load_full()).clone();
                 let mut policy_refreshed = 0usize;
+                let mut policy_unavailable = 0usize;
                 let mut classification_refreshed = 0usize;
                 let mut provider_refreshed = 0usize;
                 let mut routing_refreshed = 0usize;
                 for tenant_id in &tenant_ids {
-                    if let Ok(stored) = runtime_gateway_load_governance_snapshot(
+                    let (refreshed, unavailable) = runtime_gateway_refresh_policy_snapshot(
                         &authority,
                         sqlite_repository.as_ref(),
                         *tenant_id,
-                        prodex_storage::GovernanceArtifactKind::Policy,
-                        |input| {
-                            super::local_rewrite_governance_artifact_authenticity::governance_artifact_authenticity_is_valid(
-                                    &governance_policy,
-                                    input,
-                                )
-                                && crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
-                                    input.compiled_artifact,
-                                    deployment_mode,
-                                )
-                                .is_ok()
-                        },
-                    ) && let Ok(snapshot) =
-                        crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
-                            &stored.compiled_artifact,
-                            deployment_mode,
-                        )
-                        && snapshot.application.policy.revision().to_string()
-                            == stored.revision_id
-                        && let Ok(updated) =
-                            next_policy.with_tenant_snapshot(*tenant_id, snapshot)
-                    {
-                        next_policy = updated;
-                        policy_refreshed += 1;
-                    }
+                        &governance_policy,
+                        deployment_mode,
+                        &mut next_policy,
+                    );
+                    policy_refreshed += refreshed;
+                    policy_unavailable += unavailable;
                     if let Ok(stored) = runtime_gateway_load_governance_snapshot(
                         &authority,
                         sqlite_repository.as_ref(),
@@ -1281,7 +1267,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         routing_refreshed += 1;
                     }
                 }
-                if policy_refreshed > 0 {
+                if policy_refreshed + policy_unavailable > 0 {
                     policy_snapshots.store(Arc::new(next_policy));
                 }
                 if classification_refreshed > 0 {
@@ -1293,11 +1279,11 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                 if routing_refreshed > 0 {
                     routing_snapshots.store(Arc::new(next_routing));
                 }
-                if policy_refreshed + classification_refreshed + provider_refreshed + routing_refreshed > 0 {
+                if policy_refreshed + policy_unavailable + classification_refreshed + provider_refreshed + routing_refreshed > 0 {
                     runtime_proxy_log_to_path(
                         &log_path,
                         &format!(
-                            "governance_snapshot_refresh status=success policy={policy_refreshed} classification_rules={classification_refreshed} provider_registry={provider_refreshed} routing_scores={routing_refreshed} configured={}",
+                            "governance_snapshot_refresh status=success policy={policy_refreshed} policy_unavailable={policy_unavailable} classification_rules={classification_refreshed} provider_registry={provider_refreshed} routing_scores={routing_refreshed} configured={}",
                             tenant_ids.len()
                         ),
                     );

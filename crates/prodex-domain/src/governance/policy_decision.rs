@@ -12,6 +12,7 @@ use crate::{
 
 use super::{DataClassification, FindingKind, InspectionCoverage};
 
+mod compiled_policy;
 mod principal_attributes;
 pub use principal_attributes::{MAX_POLICY_PRINCIPAL_GROUPS, PrincipalPolicyAttributes};
 
@@ -641,23 +642,6 @@ pub struct CompiledGovernancePolicy {
     valid_until_unix_ms: u64,
     default_effect: PolicyEffect,
     rules: Vec<GovernancePolicyRule>,
-}
-
-impl CompiledGovernancePolicy {
-    pub fn revision(&self) -> PolicyRevisionId {
-        self.revision
-    }
-}
-
-impl fmt::Debug for CompiledGovernancePolicy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CompiledGovernancePolicy")
-            .field("revision", &"<redacted>")
-            .field("valid_until_unix_ms", &"<redacted>")
-            .field("default_effect", &self.default_effect)
-            .field("rule_count", &self.rules.len())
-            .finish()
-    }
 }
 
 pub fn compile_governance_policy(

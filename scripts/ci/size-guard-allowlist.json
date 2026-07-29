@@ -186,8 +186,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1540,
-    "reason": "Gateway launch composes durable tenant discovery, signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1526,
+    "reason": "Gateway launch composes durable tenant discovery, signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; policy refresh is split out and the file remains capped until authority bootstrap moves."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
@@ -236,8 +236,8 @@
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",
-    "maxLines": 945,
-    "reason": "The pure governance PDP keeps typed authentication conditions, obligations, conflict analysis, and deterministic default-deny evaluation together after bounded principal attributes moved to a focused module."
+    "maxLines": 929,
+    "reason": "The pure governance PDP keeps typed authentication conditions, obligations, conflict analysis, and deterministic default-deny evaluation together after bounded principal attributes and compiled-policy methods moved to focused modules."
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",

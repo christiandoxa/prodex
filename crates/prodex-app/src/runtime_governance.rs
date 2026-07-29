@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+mod authority_snapshot_set;
 mod builtin_authentication;
 mod runtime_governance_selectors;
 mod runtime_governance_validation;
@@ -44,43 +45,6 @@ impl std::fmt::Debug for RuntimeGovernanceAuthoritySnapshot {
 pub(crate) struct RuntimeGovernanceAuthoritySnapshotSet {
     tenant_snapshots: BTreeMap<prodex_domain::TenantId, Arc<RuntimeGovernanceAuthoritySnapshot>>,
     fallback: Option<Arc<RuntimeGovernanceAuthoritySnapshot>>,
-}
-
-impl RuntimeGovernanceAuthoritySnapshotSet {
-    pub(crate) fn bootstrap(
-        snapshot: RuntimeGovernanceAuthoritySnapshot,
-        allow_fallback: bool,
-    ) -> Self {
-        Self {
-            tenant_snapshots: BTreeMap::new(),
-            fallback: allow_fallback.then(|| Arc::new(snapshot)),
-        }
-    }
-
-    pub(crate) fn snapshot_for(
-        &self,
-        tenant_id: prodex_domain::TenantId,
-    ) -> Option<Arc<RuntimeGovernanceAuthoritySnapshot>> {
-        self.tenant_snapshots
-            .get(&tenant_id)
-            .cloned()
-            .or_else(|| self.fallback.clone())
-    }
-
-    pub(crate) fn with_tenant_snapshot(
-        &self,
-        tenant_id: prodex_domain::TenantId,
-        snapshot: RuntimeGovernanceAuthoritySnapshot,
-    ) -> Result<Self> {
-        if !self.tenant_snapshots.contains_key(&tenant_id)
-            && self.tenant_snapshots.len() >= MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS
-        {
-            anyhow::bail!("governance authority tenant limit exceeded");
-        }
-        let mut next = self.clone();
-        next.tenant_snapshots.insert(tenant_id, Arc::new(snapshot));
-        Ok(next)
-    }
 }
 
 pub(crate) fn compile_runtime_governance_artifact(
@@ -739,6 +703,24 @@ mod tests {
             ),
             PolicyEffect::Allow
         );
+    }
+
+    #[test]
+    fn authority_snapshot_servability_tracks_expiry_and_invalidation() {
+        let tenant_id = TenantId::new();
+        let snapshot = compile_runtime_governance_settings(&RuntimePolicyGovernanceSettings {
+            policy_valid_until_unix_ms: Some(10_000),
+            ..RuntimePolicyGovernanceSettings::default()
+        })
+        .unwrap();
+        let snapshots = RuntimeGovernanceAuthoritySnapshotSet::bootstrap(snapshot.clone(), false)
+            .with_tenant_snapshot(tenant_id, snapshot)
+            .unwrap();
+
+        assert!(snapshots.policies_are_servable(&[tenant_id], 9_999));
+        assert!(!snapshots.policies_are_servable(&[tenant_id], 10_000));
+        let invalidated = snapshots.without_tenant_snapshot(tenant_id).unwrap();
+        assert!(!invalidated.policies_are_servable(&[tenant_id], 9_999));
     }
 
     #[test]
