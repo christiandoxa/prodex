@@ -123,6 +123,22 @@ async function setupFixtureRepo() {
     "npm/prodex/package.json",
     `${JSON.stringify({ name: "@christiandoxa/prodex", version: "0.1.0" }, null, 2)}\n`,
   );
+  await writeFile(
+    fixtureRoot,
+    "package-lock.json",
+    `${JSON.stringify(
+      {
+        name: "prodex-fixture",
+        lockfileVersion: 3,
+        packages: {
+          "": { dependencies: { "@openai/codex": "0.145.0" } },
+          "node_modules/@openai/codex": { version: "0.145.0" },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
   await commit(fixtureRoot, "test: seed release guard fixture");
   return fixtureRoot;
 }
@@ -160,6 +176,33 @@ async function buildFixtures(fixtureRoot) {
     ].join("\n"),
   );
   const dependencyBump = await commit(fixtureRoot, "chore(deps): bump tokio from 1.52.2 to 1.52.3");
+
+  await writeFile(
+    fixtureRoot,
+    "package-lock.json",
+    `${JSON.stringify(
+      {
+        name: "prodex-fixture",
+        lockfileVersion: 3,
+        packages: {
+          "": { dependencies: { "@openai/codex": "0.146.0" } },
+          "node_modules/@openai/codex": { version: "0.146.0" },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const lockfileDependencyBump = await commit(
+    fixtureRoot,
+    "chore(deps): bump Codex from 0.145.0 to 0.146.0",
+  );
+  await writeFile(
+    fixtureRoot,
+    "npm/prodex/package.json",
+    `${JSON.stringify({ name: "@christiandoxa/prodex", version: "0.2.0" }, null, 2)}\n`,
+  );
+  const npmPackageVersionBump = await commit(fixtureRoot, "feat: bump npm package version");
 
   await appendFile(fixtureRoot, "README.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
   await appendFile(fixtureRoot, "QUICKSTART.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
@@ -297,6 +340,18 @@ async function buildFixtures(fixtureRoot) {
       script: "version-metadata-release-guard.mjs",
       args: ["--commit", dependencyBump],
       expectedExit: 0,
+    },
+    {
+      name: "npm lockfile dependency bumps pass version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", lockfileDependencyBump],
+      expectedExit: 0,
+    },
+    {
+      name: "npm package version bumps fail version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", npmPackageVersionBump],
+      expectedExit: 1,
     },
     {
       name: "empty release commit fails empty commit guard",

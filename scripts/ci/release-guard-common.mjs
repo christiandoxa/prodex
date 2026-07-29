@@ -135,14 +135,10 @@ function isNpmVersionMetadataChange(change, filePath) {
   const normalized = normalizeGitPath(filePath);
   if (
     ![
-      "package-lock.json",
-      "npm/package-lock.json",
       "npm/prodex/package.json",
-      "npm/prodex/package-lock.json",
       "npm/prodex-gateway-sdk/package.json",
-      "npm/prodex-gateway-sdk/package-lock.json",
     ].includes(normalized) &&
-    !/^npm\/platforms\/[^/]+\/package(?:-lock)?\.json$/.test(normalized)
+    !/^npm\/platforms\/[^/]+\/package\.json$/.test(normalized)
   ) {
     return false;
   }
