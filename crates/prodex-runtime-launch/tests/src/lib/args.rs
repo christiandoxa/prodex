@@ -175,6 +175,9 @@ fn runtime_proxy_passthrough_args_force_governed_responses_to_http() {
         arg == "model_providers.prodex-openai-governed-http.supports_websockets=false"
     }));
     assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.supports_standalone_web_search=true"
+    }));
+    assert!(args.iter().any(|arg| {
         arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/v1\""
     }));
     assert_eq!(args.last().map(String::as_str), Some("hello"));
