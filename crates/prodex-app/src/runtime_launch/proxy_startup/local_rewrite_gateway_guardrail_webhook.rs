@@ -142,39 +142,26 @@ fn runtime_gateway_guardrail_webhook_decision(
         "failed to read gateway guardrail webhook response body",
     ) {
         Ok(body) => body,
-        Err(err) => {
-            let _ = err;
-            return shared.gateway_guardrail_webhook.fail_closed.then(|| {
-                RuntimeGatewayGuardrailWebhookBlock {
-                    reason: "webhook_body".to_string(),
-                }
-            });
+        Err(_) => {
+            return runtime_gateway_guardrail_webhook_failure(shared, phase, request_id, "body");
         }
     };
     if !status.is_success() {
-        return shared.gateway_guardrail_webhook.fail_closed.then(|| {
-            RuntimeGatewayGuardrailWebhookBlock {
-                reason: "webhook_status".to_string(),
-            }
-        });
+        return runtime_gateway_guardrail_webhook_failure(shared, phase, request_id, "http_status");
     }
     let value = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(value) => value,
-        Err(err) => {
-            let _ = err;
-            return shared.gateway_guardrail_webhook.fail_closed.then(|| {
-                RuntimeGatewayGuardrailWebhookBlock {
-                    reason: "webhook_response".to_string(),
-                }
-            });
+        Err(_) => {
+            return runtime_gateway_guardrail_webhook_failure(shared, phase, request_id, "decode");
         }
     };
     let Some(allow) = value.get("allow").and_then(serde_json::Value::as_bool) else {
-        return shared.gateway_guardrail_webhook.fail_closed.then(|| {
-            RuntimeGatewayGuardrailWebhookBlock {
-                reason: "webhook_response".to_string(),
-            }
-        });
+        return runtime_gateway_guardrail_webhook_failure(
+            shared,
+            phase,
+            request_id,
+            "response_schema",
+        );
     };
     // Webhook response text is untrusted content. Keep audit, trace, and log dimensions stable.
     runtime_gateway_guardrail_webhook_policy_block(allow)

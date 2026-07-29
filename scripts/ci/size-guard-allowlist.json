@@ -46,8 +46,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
-    "maxLines": 1667,
-    "reason": "Gateway usage regressions cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; realtime coverage has moved to a focused sibling module."
+    "maxLines": 1590,
+    "reason": "Gateway usage regressions cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; realtime and guardrail-failure coverage have moved to focused sibling modules."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",

@@ -173,7 +173,7 @@ hash instead of the source path.
 | `gateway.guardrails.webhook_phases` | none | both phases | External guardrail phases: `pre` for requests before upstream send, `post` for buffered responses before returning to caller. |
 | `gateway.guardrails.webhook_bearer_token_env` | none | empty | Exact whitespace-free environment variable name containing a non-empty, whitespace-free bearer token for `gateway.guardrails.webhook_url`. |
 | `gateway.guardrails.webhook_bearer_token_ref` | none | empty | Projected webhook bearer-token reference. Mutually exclusive with `webhook_bearer_token_env`. |
-| `gateway.guardrails.webhook_fail_closed` | none | `false` | Block when the external guardrail endpoint fails or returns non-2xx. |
+| `gateway.guardrails.webhook_fail_closed` | none | `false` | Block when the external guardrail endpoint fails, returns non-2xx, cannot be read, or returns invalid JSON/`allow` schema. Every endpoint failure emits a redacted `gateway_guardrail_webhook_failed` runtime-log marker; an explicit `allow=false` remains a separate policy denial. |
 
 ### Route decisions and request constraints
 
