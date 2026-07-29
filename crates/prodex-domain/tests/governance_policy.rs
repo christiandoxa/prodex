@@ -61,6 +61,21 @@ fn input<'a>(
 }
 
 #[test]
+fn compiled_policy_validity_excludes_expiry_boundary() {
+    let policy = compile_governance_policy(GovernancePolicyArtifact {
+        revision: PolicyRevisionId::new(),
+        valid_until_unix_ms: 10_000,
+        default_effect: PolicyEffect::Deny,
+        rules: Vec::new(),
+    })
+    .unwrap();
+
+    assert_eq!(policy.valid_until_unix_ms(), 10_000);
+    assert!(policy.is_valid_at(9_999));
+    assert!(!policy.is_valid_at(10_000));
+}
+
+#[test]
 fn explicit_deny_wins_and_drops_obligations() {
     let tenant_id = TenantId::new();
     let tenant = TenantContext { tenant_id };

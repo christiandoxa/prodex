@@ -38,6 +38,27 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
             .state
             .reject(runtime_local_rewrite_request_timeout_response()));
     }
+    if request
+        .state
+        .application
+        .as_ref()
+        .and_then(|authorized| authorized.tenant_context())
+        .is_some_and(|tenant| {
+            shared
+                .governance_snapshot
+                .load()
+                .snapshot_for(tenant.tenant_id)
+                .is_none()
+        })
+    {
+        return Err(request
+            .state
+            .reject(build_runtime_proxy_json_error_response(
+                503,
+                "gateway_policy_unavailable",
+                "gateway policy is temporarily unavailable",
+            )));
+    }
     let mut constraints = match runtime_gateway_prepare_constraint_plan(
         request.state.request_id,
         &request.captured,

@@ -12,6 +12,9 @@ use super::{
     start_runtime_local_rewrite_proxy, temp_root,
 };
 
+#[path = "gateway_policy_readiness.rs"]
+mod policy_readiness;
+
 #[test]
 fn gateway_operational_health_endpoints_are_public_and_machine_readable() {
     let root = temp_root("gateway-operational-health");

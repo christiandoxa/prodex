@@ -81,6 +81,10 @@ arguments. Projected gateway credentials retain their last-known-good snapshot
 for at most one minute. Twelve failed five-second refreshes or the monotonic
 one-minute deadline make `/readyz` report `credentials_stale`; new gateway work
 then fails with `credential_refresh_stale` until a valid projection is observed.
+In enforcing governance modes, `/readyz` also reports
+`governance_policy_unavailable` when any configured tenant lacks a valid,
+non-expired authoritative policy snapshot. `/livez` and `/startupz` remain
+available so the process can be diagnosed or restarted without masking liveness.
 
 Recent billing ledger records are available at `/v1/prodex/gateway/ledger`, aggregated billing totals are available at `/v1/prodex/gateway/ledger/summary`, billing CSV exports are available at `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, Prometheus-compatible virtual-key usage metrics are available to the same admin token at `/v1/prodex/gateway/metrics`, SCIM-compatible SSO user provisioning is available at `/v1/prodex/gateway/scim/v2/Users`, and the built-in single-node gateway admin dashboard is available at `/v1/prodex/gateway/admin`.
 
