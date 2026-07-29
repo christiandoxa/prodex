@@ -67,6 +67,10 @@ fn normalizes_prodex_openai_mount_paths() {
         runtime_proxy_normalize_openai_path("/backend-api/prodex/live/call-123").as_ref(),
         "/backend-api/codex/live/call-123"
     );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/alpha/search?query=rust").as_ref(),
+        "/backend-api/codex/alpha/search?query=rust"
+    );
 }
 
 #[test]
@@ -102,6 +106,10 @@ fn classifies_runtime_proxy_lanes_without_transport_side_effects() {
     );
     assert_eq!(
         runtime_proxy_request_lane("/dashboard", false),
+        RuntimeRouteKind::Standard
+    );
+    assert_eq!(
+        runtime_proxy_request_lane("/backend-api/codex/alpha/search", false),
         RuntimeRouteKind::Standard
     );
     assert!(runtime_proxy_request_is_long_lived(

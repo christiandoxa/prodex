@@ -77,6 +77,9 @@ fn runtime_proxy_governed_http_codex_args(
         format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.wire_api=\"responses\""),
         format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.requires_openai_auth=true"),
         format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_websockets=false"),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_standalone_web_search=true"
+        ),
     ];
     let insert_at = governed_http_config_insertion_index(&args);
     args.splice(

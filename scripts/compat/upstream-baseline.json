@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.145.0 release",
+      "baseline_source": "openai/codex rust-v0.146.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -51,7 +51,6 @@
             "client_metadata",
             "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
             "x-codex-ws-stream-request-start-ms",
-            "item_ids_enabled",
             "prepare_response_items_for_request",
             "responses_request_properties_match"
           ]
@@ -127,7 +126,10 @@
             "to_ascii_json_string",
             "ThreadSource",
             "THREAD_SOURCE_KEY",
-            "thread_source"
+            "thread_source",
+            "CODE_MODE_TOOL_NAMES_KEY",
+            "code_mode_tool_names",
+            "code_mode_tool_names: None"
           ]
         },
         {
@@ -149,6 +151,7 @@
           "required_contains": [
             "ModelProviderInfo",
             "supports_remote_compaction",
+            "supports_standalone_web_search",
             "is_openai()",
             "is_azure_responses_provider",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
@@ -194,6 +197,7 @@
           "required_contains": [
             "ConversationStartTransport::Websocket",
             "realtime_request_headers",
+            "build_session_headers",
             "RealtimeWsVersion::V1",
             "openai-alpha",
             "quicksilver=v1"
@@ -282,6 +286,9 @@
             "x-models-etag",
             "parse_wrapped_websocket_error_event",
             "websocket_connection_limit_reached",
+            "PREVIOUS_RESPONSE_NOT_FOUND_CODE",
+            "previous_response_not_found",
+            "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
@@ -298,7 +305,9 @@
             "respect_system_proxy",
             "Feature::RespectSystemProxy",
             "resolve_bootstrap_respect_system_proxy",
-            "AuthRouteConfig::respect_system_proxy",
+            "AuthRouteConfig::from_http_client_factory",
+            "http_client_factory",
+            "OutboundProxyPolicy::RespectSystemProxy",
             "features.enabled",
             "feature_requirements"
           ]
@@ -377,7 +386,10 @@
             "logoDark",
             "interface.logoDark",
             "resolve_interface_asset_path",
-            "PluginManifestInterface"
+            "PluginManifestInterface",
+            "AGENT_PLUGIN_MANIFEST_RELATIVE_PATH",
+            "parse_agent_plugin_manifest_uri",
+            "parse_resolved_plugin_manifest_uri"
           ]
         },
         {
@@ -390,12 +402,35 @@
           ]
         },
         {
+          "path": "codex-rs/ext/web-search/src/extension.rs",
+          "reason": "Owns the Codex 0.146 custom-provider gate for standalone web search used by the governed OpenAI-through-Prodex provider.",
+          "required_contains": [
+            "WebSearchExtensionConfig",
+            "supports_standalone_web_search",
+            "web_search_mode",
+            "WebSearchMode::Disabled",
+            "create_model_provider",
+            "WebSearchTool"
+          ]
+        },
+        {
           "path": "codex-rs/ext/web-search/src/tool.rs",
           "reason": "Owns standalone web search tool exposure and plaintext result delivery used by code mode and provider compatibility paths.",
           "required_contains": [
             "ToolExposure::Direct",
             "SearchOutput",
             "response.output"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/search.rs",
+          "reason": "Owns the standalone search HTTP route that Prodex normalizes and forwards through the governed OpenAI proxy.",
+          "required_contains": [
+            "SearchClient",
+            "alpha/search",
+            "Method::POST",
+            "SearchRequest",
+            "SearchResponse"
           ]
         },
         {
@@ -544,6 +579,7 @@
       "expected_routes": [
         "/responses",
         "/responses/compact",
+        "alpha/search",
         "/memories/trace_summarize",
         "websocket_url_for_path(\"responses\")",
         "/realtime/calls"
@@ -729,6 +765,7 @@
           "file_contains_all": [
             "ConversationStartTransport::Websocket",
             "realtime_request_headers",
+            "build_session_headers",
             "RealtimeWsVersion::V1",
             "openai-alpha",
             "quicksilver=v1"
@@ -844,7 +881,10 @@
             "X_CODEX_TURN_METADATA_HEADER",
             "ThreadSource",
             "THREAD_SOURCE_KEY",
-            "thread_source"
+            "thread_source",
+            "CODE_MODE_TOOL_NAMES_KEY",
+            "code_mode_tool_names",
+            "code_mode_tool_names: None"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -858,6 +898,7 @@
           "file_contains_all": [
             "ModelProviderInfo",
             "supports_remote_compaction",
+            "supports_standalone_web_search",
             "is_openai()",
             "is_azure_responses_provider"
           ]
@@ -945,6 +986,35 @@
           ]
         },
         {
+          "id": "web-search.custom-provider-capability",
+          "kind": "capability_gate",
+          "file": "codex-rs/ext/web-search/src/extension.rs",
+          "reason": "The governed OpenAI-through-Prodex provider depends on Codex honoring supports_standalone_web_search when web search is enabled.",
+          "file_contains_all": [
+            "WebSearchExtensionConfig",
+            "supports_standalone_web_search",
+            "web_search_mode",
+            "WebSearchMode::Disabled",
+            "create_model_provider",
+            "WebSearchTool"
+          ]
+        },
+        {
+          "id": "web-search.standalone-route",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/endpoint/search.rs",
+          "reason": "Prodex must keep forwarding Codex standalone search requests at the alpha/search provider-relative route.",
+          "file_contains_all": [
+            "SearchClient",
+            "alpha/search",
+            "Method::POST",
+            "SearchRequest"
+          ],
+          "expected_routes_all": [
+            "alpha/search"
+          ]
+        },
+        {
           "id": "websocket.responses-route",
           "kind": "route",
           "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
@@ -970,6 +1040,9 @@
             "x-codex-turn-state",
             "parse_wrapped_websocket_error_event",
             "websocket_connection_limit_reached",
+            "PREVIOUS_RESPONSE_NOT_FOUND_CODE",
+            "previous_response_not_found",
+            "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
@@ -1112,7 +1185,10 @@
             "logoDark",
             "interface.logoDark",
             "resolve_interface_asset_path",
-            "PluginManifestInterface"
+            "PluginManifestInterface",
+            "AGENT_PLUGIN_MANIFEST_RELATIVE_PATH",
+            "parse_agent_plugin_manifest_uri",
+            "parse_resolved_plugin_manifest_uri"
           ]
         },
         {
@@ -1202,11 +1278,11 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.145.0",
+      "tested_codex_release": "rust-v0.146.0",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "Generated schema artifacts are version-specific and not vendored in Prodex yet.",
+        "schema_hash_note": "Selected lifecycle schemas are vendored for compatibility replay; the complete upstream schema set is not.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -1219,18 +1295,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.145.0",
-      "name": "0.145.0",
-      "published_at": "2026-07-21T18:21:04Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.145.0",
+      "tag_name": "rust-v0.146.0",
+      "name": "0.146.0",
+      "published_at": "2026-07-29T01:42:51Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.146.0",
       "body_head": [
         "## New Features",
-        "- Added experimental paginated thread history with efficient resume, search, persisted names, sub-agent support, and memories. (#33364, #33907, #34085, #34229, #34386)",
-        "- Expanded `/import` to migrate Cursor and Claude Code settings, MCP servers, plugins, sessions, commands, and project-scoped memories. (#31672, #33411, #33426, #33444)",
-        "- Added experimental Amazon Bedrock login, custom endpoint and authentication support, and GPT-5.6 Sol as the default Bedrock model. (#31327, #33170, #33175, #32288, #33695)",
-        "- Added audio inputs and tool outputs, including common local audio formats, and introduced streaming realtime V3 conversations. (#33261, #33856, #33932, #34080, #34385)",
-        "- Stabilized the opt-in multi-agent V2 experience with configurable sub-agent models, reasoning levels, concurrency, restored roles, and improved agent navigation. (#33550, #33631, #33657, #33841, #34383)",
-        "- Added secure, clickable inline visualization links in the terminal UI. (#33925, #34217, #34346)",
+        "- Name new sessions with `/new` or `/clear`, pin important threads, and switch between side conversations without closing them. (#34605, #34840, #35011)",
+        "- Support Agent Plugins manifests, workspace plugin publishing, and additional plugin marketplaces for Amazon Bedrock and Claude Code. (#35105, #35254, #34931, #34979)",
+        "- Fork threads with paginated history, including temporary forks that do not appear in thread listings. (#35220, #35251)",
+        "- Connect app-server to remote Code Mode hosts over WebSocket. (#35078, #35098)",
+        "- Enable standalone web search for compatible custom model providers. (#34846)",
+        "- Discover executor-provided skills and securely read their associated resources, including explicitly selected skills. (#35184, #35198)",
         "## Bug Fixes"
       ]
     }
