@@ -2,6 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.366.0 - 2026-07-29
+
+### Runtime
+
+- Bound Windows proxy test shutdown (`8f377b8`)
+- Harden Windows launch maintenance (`0cb8fe2`)
+- Harden profile links and replay evidence (`50491ec`)
+
+### Deps
+
+- Sync Codex 0.146.0 lockfile (`0a64694`)
+
+### Misc
+
+- Support Codex 0.146.0 (`48c4b94`)
+
 ## 0.365.0 - 2026-07-28
 
 ### Misc
@@ -76,9 +92,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden artifact trust and telemetry (`5332471`)
-
-## 0.354.0 - 2026-07-26
-
-### Runtime
-
-- Close runtime governance gaps (`0c5e2ce`)
