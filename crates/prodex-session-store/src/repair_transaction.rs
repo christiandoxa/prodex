@@ -88,11 +88,19 @@ impl SessionRepairTransaction {
         repaired: &[u8],
         before_source_verification: impl FnOnce(),
     ) -> Result<()> {
-        verify_source(&self.path, &self.source, &self.source_revision)?;
-        let mut backup = ensure_backup(&self.path, self.contents.as_bytes())?;
+        let Self {
+            path,
+            parent,
+            source,
+            source_revision,
+            contents,
+            _maintenance_lock,
+        } = self;
+        verify_source(&path, &source, &source_revision)?;
+        let mut backup = ensure_backup(&path, contents.as_bytes())?;
 
         let result = (|| {
-            let mut temporary = create_temporary_file(&self.path)?;
+            let mut temporary = create_temporary_file(&path)?;
             temporary.file_mut().write_all(repaired).with_context(|| {
                 format!(
                     "failed to write repaired session {}",
@@ -105,25 +113,26 @@ impl SessionRepairTransaction {
                     temporary.path().display()
                 )
             })?;
-            sync_directory(&self.parent)?;
+            sync_directory(&parent)?;
 
             before_source_verification();
-            verify_source(&self.path, &self.source, &self.source_revision)?;
+            verify_source(&path, &source, &source_revision)?;
+            drop(source);
             temporary.close();
-            fs::rename(temporary.path(), &self.path).with_context(|| {
-                format!("failed to replace repaired session {}", self.path.display())
+            fs::rename(temporary.path(), &path).with_context(|| {
+                format!("failed to replace repaired session {}", path.display())
             })?;
             temporary.disarm();
             if let Some(backup) = backup.as_mut() {
                 backup.disarm();
             }
-            temporary.verify_replaced(&self.path)?;
-            sync_directory(&self.parent)
+            temporary.verify_replaced(&path)?;
+            sync_directory(&parent)
         })();
 
         if result.is_err() {
             drop(backup);
-            let _ = sync_directory(&self.parent);
+            let _ = sync_directory(&parent);
         }
         result
     }

@@ -4,7 +4,7 @@ use super::*;
 fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret() {
     let root = temp_dir("gateway-projected-secrets");
     let secret_root = root.join("projected");
-    std::fs::create_dir_all(&secret_root).unwrap();
+    secret_store::ensure_private_directory(&secret_root).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -21,7 +21,7 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         ("sso-token", "sso-secret-value"),
     ] {
         let path = secret_root.join(name);
-        std::fs::write(&path, value).unwrap();
+        secret_store::write_private_file_atomic(&path, value.as_bytes()).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -105,7 +105,8 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         .as_ref()
         .unwrap()
         .join("postgres-url");
-    std::fs::write(&postgres_path, "postgres://prodex@127.0.0.2/prodex").unwrap();
+    secret_store::write_private_file_atomic(&postgres_path, b"postgres://prodex@127.0.0.2/prodex")
+        .unwrap();
     let static_rotated = resolve_gateway_launch_config_with_secrets(
         &paths,
         &state,
@@ -120,7 +121,7 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         .as_ref()
         .unwrap()
         .join("provider-key");
-    std::fs::write(&provider_path, "rotated-provider-secret").unwrap();
+    secret_store::write_private_file_atomic(&provider_path, b"rotated-provider-secret").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;

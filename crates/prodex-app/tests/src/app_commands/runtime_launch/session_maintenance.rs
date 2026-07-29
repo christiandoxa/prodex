@@ -12,11 +12,24 @@ fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
     fs::create_dir_all(&root).expect("root dir should exist");
     fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
     fs::write(&image_source, b"png bytes").expect("source image should write");
+    let original_text = format!(
+        "pasted session text plus <image path=\"{}\">",
+        image_source.display()
+    );
     fs::write(
         &session_file,
         format!(
-            r#"{{"timestamp":"2026-06-24T01:02:03Z","type":"event","payload":{{"content":[{{"type":"input_text","text":"pasted session text plus <image path=\"{}\">"}}]}}}}"#,
-            image_source.display()
+            "{}\n",
+            serde_json::json!({
+                "timestamp": "2026-06-24T01:02:03Z",
+                "type": "event",
+                "payload": {
+                    "content": [{
+                        "type": "input_text",
+                        "text": original_text,
+                    }],
+                },
+            })
         ),
     )
     .expect("session should write");
@@ -31,16 +44,19 @@ fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
         b"png bytes"
     );
     let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    let rewritten: serde_json::Value =
+        serde_json::from_str(rewritten.trim()).expect("rewritten session should remain valid JSON");
+    let rewritten_text = rewritten["payload"]["content"][0]["text"]
+        .as_str()
+        .expect("rewritten input text should remain present");
     assert!(
-        rewritten.contains("pasted session text plus"),
-        "post-exit maintenance should preserve pasted session text: {rewritten}"
+        rewritten_text.contains("pasted session text plus"),
+        "post-exit maintenance should preserve pasted session text: {rewritten_text}"
     );
-    assert!(
-        rewritten.contains(&copied.display().to_string()),
-        "session should reference stable attachment path after post-exit maintenance: {rewritten}"
-    );
-    assert!(
-        !rewritten.contains(&image_source.display().to_string()),
-        "session should no longer reference transient clipboard image path: {rewritten}"
-    );
+    let rewritten_path = rewritten_text
+        .split_once("<image path=\"")
+        .and_then(|(_, suffix)| suffix.strip_suffix("\">"))
+        .expect("rewritten input should keep its image path tag");
+    assert_eq!(std::path::Path::new(rewritten_path), copied);
+    assert_ne!(std::path::Path::new(rewritten_path), image_source);
 }
