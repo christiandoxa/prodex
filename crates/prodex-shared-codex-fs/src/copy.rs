@@ -20,7 +20,8 @@ pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
         bail!("copy source and destination are the same path");
     }
 
-    if destination.exists() && !dir_is_empty(destination)? {
+    let destination_existed = destination.exists();
+    if destination_existed && !dir_is_empty(destination)? {
         bail!(
             "destination {} already exists and is not empty",
             destination.display()
@@ -28,12 +29,16 @@ pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     }
 
     create_codex_home_if_missing(destination)?;
-    copy_directory_contents_under_root(
+    let result = copy_directory_contents_under_root(
         source,
         source,
         destination,
         CodexManagedPackages::SkipAtRoot,
-    )
+    );
+    if result.is_err() && !destination_existed {
+        let _ = fs::remove_dir_all(destination);
+    }
+    result
 }
 
 pub(super) fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {

@@ -159,6 +159,37 @@ fn copy_codex_home_copies_nested_packages_directory() {
 
 #[cfg(unix)]
 #[test]
+fn copy_codex_home_cleans_only_destination_it_created_after_failure() {
+    let temp_dir = CopyTestDir::new("failed-copy-cleanup");
+    let source = temp_dir.path.join("source");
+    let internal_dir = source.join("state/releases/current");
+    let directory_link = source.join("state/current");
+
+    fs::create_dir_all(&internal_dir).expect("internal directory should be created");
+    std::os::unix::fs::symlink(&internal_dir, &directory_link)
+        .expect("directory symlink should be created");
+
+    for destination_existed in [false, true] {
+        let destination = temp_dir
+            .path
+            .join(format!("destination-{destination_existed}"));
+        if destination_existed {
+            fs::create_dir(&destination).expect("existing destination should be created");
+        }
+
+        copy_codex_home(&source, &destination)
+            .expect_err("directory symlink should fail the file-only copy");
+
+        assert_eq!(
+            destination.exists(),
+            destination_existed,
+            "copy should remove only the destination it created"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn copy_directory_contents_localizes_internal_file_symlink() {
     let temp_dir = CopyTestDir::new("internal-file-symlink");
     let source = temp_dir.path.join("source");
