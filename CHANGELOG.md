@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.368.0 - 2026-07-29
+
+### Misc
+
+- Log all guardrail webhook failures (`1537859`)
+- Fail readiness on unavailable policy snapshots (`cd6cb74`)
+- Make gateway accounting reconciliation durable (`649b9bf`)
+
 ## 0.367.0 - 2026-07-29
 
 ### Misc
@@ -75,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Isolate Gemini host files (`fb963d4`)
-
-## 0.356.0 - 2026-07-27
-
-### Runtime
-
-- Harden Gemini compatibility (`67d338b`)
