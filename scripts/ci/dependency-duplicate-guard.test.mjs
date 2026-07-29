@@ -13,13 +13,7 @@ import {
 
 const SCRIPT_PATH = new URL("./dependency-duplicate-guard.mjs", import.meta.url).pathname;
 
-const CURRENT_TREE_OUTPUT = `base64 v0.22.1
-    jsonwebtoken v11.0.0
-
-base64 v0.23.0
-    prodex-app v0.354.0
-
-block-buffer v0.10.4
+const CURRENT_TREE_OUTPUT = `block-buffer v0.10.4
     digest v0.10.7
 
 block-buffer v0.12.0
@@ -134,7 +128,6 @@ test("default budget accepts current duplicate families", () => {
   assert.deepEqual(
     duplicateFamilies.map((entry) => [entry.name, entry.versions.length]),
     [
-      ["base64", 2],
       ["block-buffer", 2],
       ["cfg_aliases", 2],
       ["const-oid", 2],

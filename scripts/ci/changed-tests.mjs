@@ -295,8 +295,7 @@ function isEnterpriseDocsGuardRelevantPath(filePath) {
     filePath === "scripts/ci/storage-postgres-proof.mjs" ||
     filePath === "scripts/ci/test-impact-manifest.json" ||
     filePath === "docs/testing.md" ||
-    filePath === "docs/threat-model.md" ||
-    filePath === "docs/migration-guide.md"
+    filePath === "docs/threat-model.md"
   );
 }
 

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+#[cfg(test)]
 use chrono::Local;
 use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeMap;
@@ -6,10 +7,12 @@ use std::thread;
 
 use crate::ProfileProviderExt;
 use crate::{
-    AppState, MainWindowSnapshot, ProfileEntry, RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-    ReadyProfileCandidate, RunProfileProbeJob, RunProfileProbeReport, RuntimeProfileUsageSnapshot,
-    UsageResponse, fetch_usage_with_proxy_policy,
+    AppState, ProfileEntry, RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS, ReadyProfileCandidate,
+    RunProfileProbeJob, RunProfileProbeReport, RuntimeProfileUsageSnapshot,
+    fetch_usage_with_proxy_policy,
 };
+#[cfg(test)]
+use crate::{MainWindowSnapshot, UsageResponse};
 
 #[cfg(test)]
 pub(crate) use prodex_runtime_quota::ready_profile_sort_key;
@@ -166,7 +169,7 @@ pub(crate) fn schedule_ready_profile_candidates(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn required_main_window_snapshot(
     usage: &UsageResponse,
     label: &str,

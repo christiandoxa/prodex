@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 998,
+    "maxLines": 997,
     "reason": "Kiro profile import and catalog refresh remain capped after persistent credential-store handling, data-directory discovery, and environment compatibility moved to focused modules."
   },
   {

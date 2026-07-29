@@ -180,7 +180,6 @@ pub fn runtime_anthropic_output_blocks_from_json(
         .translate(output)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn runtime_anthropic_response_from_json_value(
     value: &serde_json::Value,
     requested_model: &str,

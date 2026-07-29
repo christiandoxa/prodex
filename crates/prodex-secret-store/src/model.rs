@@ -9,11 +9,7 @@ use zeroize::{ZeroizeOnDrop, Zeroizing};
 #[derive(Clone, PartialEq, Eq)]
 pub enum SecretLocation {
     File(PathBuf),
-    #[cfg_attr(not(test), allow(dead_code))]
-    Keyring {
-        service: String,
-        account: String,
-    },
+    Keyring { service: String, account: String },
 }
 
 impl SecretLocation {
@@ -25,7 +21,6 @@ impl SecretLocation {
         Self::File(codex_home.as_ref().join("auth.json"))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn keyring(service: impl Into<String>, account: impl Into<String>) -> Self {
         Self::Keyring {
             service: service.into(),
@@ -64,7 +59,6 @@ impl SecretValue {
         Self::Text(Zeroizing::new(value.into()))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn bytes(value: impl Into<Vec<u8>>) -> Self {
         Self::Bytes(Zeroizing::new(value.into()))
     }
@@ -283,12 +277,10 @@ impl SecretRevision {
         Self::new(metadata.len(), metadata.modified().ok())
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn size_bytes(&self) -> u64 {
         self.size_bytes
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
@@ -312,7 +304,6 @@ impl fmt::Display for SecretRevision {
 pub trait SecretBackend {
     fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError>;
     fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError>;
-    #[cfg_attr(not(test), allow(dead_code))]
     fn delete(&self, location: &SecretLocation) -> Result<(), SecretError>;
 }
 
@@ -339,7 +330,6 @@ impl<B> SecretManager<B> {
 }
 
 impl<B: SecretBackend> SecretManager<B> {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
         self.backend.read(location)
     }
@@ -357,7 +347,6 @@ impl<B: SecretBackend> SecretManager<B> {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
         self.backend.write(location, value)
     }
@@ -370,7 +359,6 @@ impl<B: SecretBackend> SecretManager<B> {
         self.backend.write(location, SecretValue::text(value))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete(&self, location: &SecretLocation) -> Result<(), SecretError> {
         self.backend.delete(location)
     }

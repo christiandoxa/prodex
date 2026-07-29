@@ -87,7 +87,7 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     handle_runtime_tools(args.into_runtime_tool_args_with_presidio(use_presidio))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn resolve_runtime_launch_profile_name(
     state: &AppState,
     requested: Option<&str>,
