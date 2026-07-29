@@ -9,6 +9,17 @@ use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connecti
 };
 use std::fs;
 
+fn wait_for_runtime_log(path: &std::path::Path, marker: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let runtime_log = fs::read_to_string(path).expect("runtime log should be readable");
+        if runtime_log.contains(marker) || std::time::Instant::now() >= deadline {
+            return runtime_log;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
     let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
     runtime_gateway_postgres_migrate_enterprise_state(url, &tls)
@@ -801,7 +812,6 @@ fn expired_oidc_jwks_cache_fails_closed_without_request_path_fetch() {
         .expect("first OIDC admin create key request should be sent");
     assert_eq!(first.status().as_u16(), 201);
     assert_eq!(jwks.request_count(), 1);
-
     let refresh_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while jwks.request_count() < 2 && std::time::Instant::now() < refresh_deadline {
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -911,7 +921,7 @@ fn oidc_background_refresh_uses_jwks_cache_control_max_age() {
         "Cache-Control max-age should override the longer fallback TTL"
     );
 
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = wait_for_runtime_log(&proxy.log_path, "gateway_jwks_cache_age_metric");
     assert!(runtime_log.contains("gateway_oidc_refresh_metric"));
     assert!(runtime_log.contains("metric_name=prodex_oidc_refresh_events_total"));
     assert!(runtime_log.contains("oidc_refresh_operation=fetch_jwks"));
@@ -989,7 +999,7 @@ fn oidc_background_refresh_retries_failed_jwks_after_backoff() {
         "failed background JWKS refresh should retry after the bounded backoff"
     );
 
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = wait_for_runtime_log(&proxy.log_path, "oidc_refresh_result=backoff");
     assert!(runtime_log.contains("gateway_oidc_prefetch_failed"));
     assert!(runtime_log.contains("oidc_refresh_result=failed"));
     assert!(runtime_log.contains("oidc_refresh_result=backoff"));
@@ -1081,17 +1091,7 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
         "request path must not fetch JWKS when startup prefetch failed"
     );
 
-    let log_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let runtime_log = loop {
-        let runtime_log =
-            fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
-        if runtime_log.contains("oidc_refresh_result=failed")
-            || std::time::Instant::now() >= log_deadline
-        {
-            break runtime_log;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    };
+    let runtime_log = wait_for_runtime_log(&proxy.log_path, "jwks_refresh_result=failure");
     assert!(runtime_log.contains("gateway_oidc_refresh_metric"));
     assert!(runtime_log.contains("metric_name=prodex_oidc_refresh_events_total"));
     assert!(runtime_log.contains("oidc_refresh_operation=fetch_jwks"));
