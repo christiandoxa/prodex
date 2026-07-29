@@ -11,6 +11,10 @@ You need:
 - Codex CLI available as `codex` on `PATH`;
 - one logged-in Codex account for quota-aware routing.
 
+Windows must permit symbolic-link creation for managed profiles. Enable
+Developer Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an
+administrator before importing or creating a profile.
+
 Install Prodex on macOS or Linux:
 
 ```bash

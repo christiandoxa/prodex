@@ -4,6 +4,9 @@ use std::ffi::OsString;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SHARED_CODEX_ATOMIC_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+static SHARED_CODEX_SYMLINK_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+const WINDOWS_SHARED_CODEX_SYMLINK_ERROR: &str = "Windows cannot create symbolic links required for managed profiles; enable Developer Mode, grant SeCreateSymbolicLinkPrivilege, or run Prodex as administrator";
 
 pub(super) fn ensure_shared_codex_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -291,11 +294,140 @@ pub(super) fn ensure_symlink_to_shared(
     if let Some(parent) = local_path.parent() {
         create_codex_home_if_missing(parent)?;
     }
-    if local_path.exists() || fs::symlink_metadata(local_path).is_ok() {
-        remove_path(local_path)?;
+    let existing = load_shared_codex_entry_metadata(local_path)?;
+    let staged_path = unique_shared_codex_sibling_path(local_path, "link")?;
+    let backup_path = existing
+        .as_ref()
+        .map(|_| unique_shared_codex_sibling_path(local_path, "link-backup"))
+        .transpose()?;
+    create_symlink(shared_path, &staged_path, kind)?;
+
+    if existing.is_none() {
+        if let Err(error) = fs::rename(&staged_path, local_path) {
+            let _ = remove_path(&staged_path);
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to install shared Codex state link {}",
+                    local_path.display()
+                )
+            });
+        }
+        return Ok(());
     }
 
-    create_symlink(shared_path, local_path, kind)
+    let backup_path = backup_path.context("missing shared Codex link backup path")?;
+    if let Err(error) = fs::rename(local_path, &backup_path) {
+        let _ = remove_path(&staged_path);
+        return Err(error).with_context(|| {
+            format!(
+                "failed to preserve existing shared Codex path {}",
+                local_path.display()
+            )
+        });
+    }
+    if let Err(error) = fs::rename(&staged_path, local_path) {
+        let restore = fs::rename(&backup_path, local_path);
+        let _ = remove_path(&staged_path);
+        if let Err(restore_error) = restore {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to install shared Codex state link {}; previous path remains at {} and restoration failed: {restore_error}",
+                    local_path.display(),
+                    backup_path.display()
+                )
+            });
+        }
+        return Err(error).with_context(|| {
+            format!(
+                "failed to install shared Codex state link {}",
+                local_path.display()
+            )
+        });
+    }
+    remove_path(&backup_path)
+}
+
+fn unique_shared_codex_sibling_path(path: &Path, purpose: &str) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .context("shared Codex link path must have a file name")?;
+    for _ in 0..64 {
+        let counter = SHARED_CODEX_SYMLINK_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut candidate_name = OsString::from(".");
+        candidate_name.push(file_name);
+        candidate_name.push(format!(
+            ".prodex-{purpose}-{}-{counter}",
+            std::process::id()
+        ));
+        let candidate = parent.join(candidate_name);
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(candidate),
+            Ok(_) => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to inspect {}", candidate.display()));
+            }
+        }
+    }
+    bail!(
+        "failed to reserve temporary shared Codex link beside {}",
+        path.display()
+    )
+}
+
+#[cfg(windows)]
+pub(super) fn ensure_windows_shared_codex_symlink_support(
+    shared_root: &Path,
+    codex_home: &Path,
+) -> Result<()> {
+    let counter = SHARED_CODEX_SYMLINK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let probe_name = format!(".prodex-symlink-probe-{}-{counter}", std::process::id());
+    let target_dir = shared_root.join(format!("{probe_name}-target-dir"));
+    let target_file = shared_root.join(format!("{probe_name}-target-file"));
+    let link_dir = codex_home.join(format!("{probe_name}-dir"));
+    let link_file = codex_home.join(format!("{probe_name}-file"));
+
+    let mut target_dir_created = false;
+    let mut target_file_created = false;
+    let mut link_dir_created = false;
+    let mut link_file_created = false;
+    let probe = (|| -> Result<()> {
+        fs::create_dir(&target_dir)
+            .with_context(|| format!("failed to create {}", target_dir.display()))?;
+        target_dir_created = true;
+        fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&target_file)
+            .with_context(|| format!("failed to create {}", target_file.display()))?;
+        target_file_created = true;
+        create_symlink(&target_dir, &link_dir, SharedCodexEntryKind::Directory)
+            .context(WINDOWS_SHARED_CODEX_SYMLINK_ERROR)?;
+        link_dir_created = true;
+        create_symlink(&target_file, &link_file, SharedCodexEntryKind::File)
+            .context(WINDOWS_SHARED_CODEX_SYMLINK_ERROR)?;
+        link_file_created = true;
+        Ok(())
+    })();
+
+    if link_file_created {
+        let _ = remove_path(&link_file);
+    }
+    if link_dir_created {
+        let _ = remove_path(&link_dir);
+    }
+    if target_file_created {
+        let _ = fs::remove_file(&target_file);
+    }
+    if target_dir_created {
+        let _ = fs::remove_dir(&target_dir);
+    }
+
+    probe
 }
 
 fn create_symlink(target: &Path, link: &Path, kind: SharedCodexEntryKind) -> Result<()> {
@@ -532,6 +664,22 @@ fn copy_failure_keeps_existing_destination() {
         .expect_err("directory source should fail");
 
     assert_eq!(fs::read(&destination).unwrap(), b"previous");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_shared_link_creation_preserves_existing_path() {
+    let root = shared_codex_ops_test_dir("failed-link-preserves-local");
+    let local_path = root.join("x".repeat(240));
+    let shared_path = root.join("shared-state");
+    fs::write(&local_path, b"profile-state").unwrap();
+    fs::write(&shared_path, b"shared-state").unwrap();
+
+    ensure_symlink_to_shared(&local_path, &shared_path, SharedCodexEntryKind::File)
+        .expect_err("overlong staged link name should fail");
+
+    assert_eq!(fs::read(&local_path).unwrap(), b"profile-state");
     fs::remove_dir_all(root).unwrap();
 }
 

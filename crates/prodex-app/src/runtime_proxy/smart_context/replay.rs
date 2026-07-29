@@ -9,6 +9,17 @@ use std::time::Instant;
 
 static SMART_CONTEXT_REPLAY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(feature = "allocation-bench-support")]
+const SMART_CONTEXT_REPLAY_EVIDENCE_LEVEL: &str =
+    "deterministic_correctness_with_tokenizer_and_allocation_counts";
+#[cfg(not(feature = "allocation-bench-support"))]
+const SMART_CONTEXT_REPLAY_EVIDENCE_LEVEL: &str = "deterministic_correctness_with_tokenizer_counts";
+#[cfg(feature = "allocation-bench-support")]
+const SMART_CONTEXT_REPLAY_COMMAND: &str = "cargo run --locked -q --features allocation-bench-support --bin prodex -- context replay-report <corpus.json> --json --strict";
+#[cfg(not(feature = "allocation-bench-support"))]
+const SMART_CONTEXT_REPLAY_COMMAND: &str =
+    "cargo run --locked -q --bin prodex -- context replay-report <corpus.json> --json --strict";
+
 struct RuntimeSmartContextReplayHarness {
     shared: Option<RuntimeRotationProxyShared>,
     marker: Option<crate::RuntimeProxyMarkerGuard>,
@@ -80,7 +91,7 @@ pub(crate) fn run_runtime_smart_context_replay_json(
             concurrent_groups.entry(group).or_default().push(index);
         } else {
             scenario_results[index] = Some(
-                run_runtime_smart_context_replay_scenario(scenario).with_context(|| {
+                run_runtime_smart_context_replay_scenario(scenario, false).with_context(|| {
                     format!("failed Smart Context replay scenario {}", scenario.id)
                 })?,
             );
@@ -94,7 +105,9 @@ pub(crate) fn run_runtime_smart_context_replay_json(
                     let scenario = &corpus.scenarios[*index];
                     (
                         *index,
-                        scope.spawn(move || run_runtime_smart_context_replay_scenario(scenario)),
+                        scope.spawn(move || {
+                            run_runtime_smart_context_replay_scenario(scenario, false)
+                        }),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -124,6 +137,16 @@ pub(crate) fn run_runtime_smart_context_replay_json(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    #[cfg(feature = "allocation-bench-support")]
+    let mut scenario_results = scenario_results;
+    #[cfg(feature = "allocation-bench-support")]
+    for (scenario, result) in corpus.scenarios.iter().zip(scenario_results.iter_mut()) {
+        let measured = run_runtime_smart_context_replay_scenario(scenario, true)
+            .with_context(|| format!("failed allocation replay scenario {}", scenario.id))?;
+        for (turn, measured_turn) in result.turns.iter_mut().zip(measured.turns) {
+            turn.allocation_bytes = measured_turn.allocation_bytes;
+        }
+    }
     let mut failures = Vec::new();
     for result in &scenario_results {
         if !result.passed {
@@ -144,7 +167,7 @@ pub(crate) fn run_runtime_smart_context_replay_json(
     Ok(runtime_proxy_crate::SmartContextReplayReport {
         schema_version: runtime_proxy_crate::SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION,
         corpus_schema_version: corpus.schema_version,
-        evidence_level: "deterministic_correctness_with_tokenizer_counts",
+        evidence_level: SMART_CONTEXT_REPLAY_EVIDENCE_LEVEL,
         provenance: runtime_proxy_crate::SmartContextReplayProvenance {
             package_version: env!("CARGO_PKG_VERSION"),
             commit_sha: replay_commit_sha(),
@@ -155,7 +178,7 @@ pub(crate) fn run_runtime_smart_context_replay_json(
                 .ok(),
             tokenizer_source: "tiktoken-rs@0.12.0",
             token_measurement: "tokenizer_counted",
-            command: "cargo run -q --bin prodex -- context replay-report <corpus.json> --json --strict",
+            command: SMART_CONTEXT_REPLAY_COMMAND,
         },
         scenarios: scenario_results,
         exact_input_tokens,
@@ -212,6 +235,7 @@ pub(crate) fn render_runtime_smart_context_replay_markdown(
 
 fn run_runtime_smart_context_replay_scenario(
     scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
+    measure_allocation: bool,
 ) -> Result<runtime_proxy_crate::SmartContextReplayScenarioResult> {
     let mut exact = RuntimeSmartContextReplayHarness::new(
         scenario,
@@ -232,6 +256,7 @@ fn run_runtime_smart_context_replay_scenario(
             turn_index,
             exact.shared()?,
             optimized.shared()?,
+            measure_allocation,
         )?);
     }
 
@@ -265,6 +290,7 @@ fn run_runtime_smart_context_replay_turn(
     turn_index: usize,
     exact: &RuntimeRotationProxyShared,
     optimized: &RuntimeRotationProxyShared,
+    measure_allocation: bool,
 ) -> Result<runtime_proxy_crate::SmartContextReplayTurnResult> {
     let body = serde_json::to_vec(&turn.request).context("failed to serialize replay request")?;
     let exact_generation_before = replay_state_generation(exact)?;
@@ -284,10 +310,32 @@ fn run_runtime_smart_context_replay_turn(
         replay_state_generation(exact)?.saturating_sub(exact_generation_before);
 
     let optimized_generation_before = replay_state_generation(optimized)?;
+    #[cfg(feature = "allocation-bench-support")]
+    let allocation_before =
+        measure_allocation.then(crate::allocation_bench_support::runtime_allocation_snapshot);
+    #[cfg(not(feature = "allocation-bench-support"))]
+    let allocation_before: Option<()> = {
+        let _ = measure_allocation;
+        None
+    };
     let started_at = Instant::now();
     let optimized_prepared =
         replay_prepare_body(scenario, scenario.mode, turn_index, &body, optimized)?;
     let rewrite_duration_ns = u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    #[cfg(feature = "allocation-bench-support")]
+    let allocation_bytes = allocation_before.map(|before| {
+        let after = crate::allocation_bench_support::runtime_allocation_snapshot();
+        after
+            .allocated_bytes
+            .saturating_sub(before.allocated_bytes)
+            .saturating_add(
+                after
+                    .reallocated_bytes
+                    .saturating_sub(before.reallocated_bytes),
+            )
+    });
+    #[cfg(not(feature = "allocation-bench-support"))]
+    let allocation_bytes = allocation_before.map(|()| 0);
     let optimized_state_mutations =
         replay_state_generation(optimized)?.saturating_sub(optimized_generation_before);
     let (optimized_body, blocked_before_upstream, missing_artifact_count) = match optimized_prepared
@@ -437,7 +485,7 @@ fn run_runtime_smart_context_replay_turn(
         missing_artifact_count,
         validation_passed,
         fallback_reason,
-        allocation_bytes: None,
+        allocation_bytes,
         rewrite_duration_ns,
         exact_body_sha256: replay_body_sha256(&exact_body),
         optimized_body_sha256: replay_body_sha256(&optimized_body),
