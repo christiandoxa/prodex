@@ -1,7 +1,7 @@
 use super::local_rewrite_application_boundary::runtime_gateway_stable_id;
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError,
-    runtime_gateway_application_data_plane_admission,
+    runtime_gateway_application_data_plane_admission, runtime_gateway_application_http_policy,
 };
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
@@ -16,7 +16,7 @@ use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_
 pub(super) const RUNTIME_GATEWAY_REALTIME_SESSION_MAX_TOKENS: u64 = 32_768;
 pub(super) const RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS: u64 = 5 * 60 * 1_000;
 pub(super) const RUNTIME_GATEWAY_REALTIME_FRAME_MAX_BYTES: usize = 32 * 1_024;
-pub(super) const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
+const RUNTIME_GATEWAY_RESERVATION_COMPLETION_GRACE_MS: u64 = 30_000;
 
 #[derive(Clone)]
 pub(super) struct RuntimeGatewayRealtimeAccountingPlan {
@@ -32,6 +32,23 @@ pub(super) struct RuntimeGatewayRealtimeUsage {
     pub(super) input_bytes: usize,
     pub(super) output_bytes: usize,
     pub(super) policy_interrupted: bool,
+}
+
+pub(super) fn runtime_gateway_reservation_ttl_ms(
+    shared: &super::local_rewrite::RuntimeLocalRewriteProxyShared,
+    realtime: bool,
+) -> u64 {
+    let request_timeout_ms = runtime_gateway_application_http_policy(shared).request_timeout_ms;
+    runtime_gateway_reservation_ttl_for_timeout(request_timeout_ms, realtime)
+}
+
+fn runtime_gateway_reservation_ttl_for_timeout(request_timeout_ms: u64, realtime: bool) -> u64 {
+    let active_request_limit_ms = if realtime {
+        request_timeout_ms.max(RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS)
+    } else {
+        request_timeout_ms
+    };
+    active_request_limit_ms.saturating_add(RUNTIME_GATEWAY_RESERVATION_COMPLETION_GRACE_MS)
 }
 
 pub(super) fn runtime_gateway_conversation_namespace(
@@ -170,11 +187,7 @@ pub(super) fn runtime_gateway_application_admission_without_virtual_key(
             estimate,
         },
         created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
-        ttl_ms: if realtime_accounting.is_some() {
-            RUNTIME_GATEWAY_REALTIME_SESSION_MAX_MILLIS
-        } else {
-            RUNTIME_GATEWAY_RESERVATION_TTL_MS
-        },
+        ttl_ms: runtime_gateway_reservation_ttl_ms(shared, realtime_accounting.is_some()),
     };
     let application = runtime_gateway_application_data_plane_admission(
         authorized,
@@ -212,4 +225,25 @@ pub(super) fn runtime_gateway_application_admission_without_virtual_key(
         application,
         realtime_accounting,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reservation_ttl_covers_request_lifetime_and_completion_grace() {
+        assert_eq!(
+            runtime_gateway_reservation_ttl_for_timeout(300_000, false),
+            330_000
+        );
+        assert_eq!(
+            runtime_gateway_reservation_ttl_for_timeout(600_000, false),
+            630_000
+        );
+        assert_eq!(
+            runtime_gateway_reservation_ttl_for_timeout(120_000, true),
+            330_000
+        );
+    }
 }

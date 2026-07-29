@@ -24,6 +24,10 @@ const RUNTIME_GATEWAY_RECONCILIATION_WORKER_LIMIT: usize = 4;
 struct RuntimeGatewayReconciliationJob {
     event: RuntimeProviderGatewaySpendEvent,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    attempt: u8,
+    ledger_reconciled: bool,
+    storage_error_observed: bool,
+    retry_logged: bool,
 }
 
 #[derive(Clone)]
@@ -79,8 +83,19 @@ impl RuntimeGatewayReconciliationQueue {
             .push_back(RuntimeGatewayReconciliationJob {
                 event,
                 _permit: permit,
+                attempt: 0,
+                ledger_reconciled: false,
+                storage_error_observed: false,
+                retry_logged: false,
             });
         true
+    }
+
+    fn requeue(&self, job: RuntimeGatewayReconciliationJob) {
+        self.pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push_back(job);
     }
 
     fn pop(&self) -> Option<RuntimeGatewayReconciliationJob> {
@@ -175,9 +190,9 @@ fn start_runtime_gateway_reconciliation_workers(shared: &RuntimeLocalRewriteProx
 }
 
 fn runtime_gateway_reconciliation_worker_loop(shared: RuntimeLocalRewriteProxyShared) {
-    while let Some(job) = shared.gateway_usage.reconciliation.pop() {
-        runtime_gateway_reconcile_until_persisted(&shared, &job.event);
-    }
+    while runtime_gateway_reconciliation_worker_step(&shared.gateway_usage.reconciliation, |job| {
+        runtime_gateway_reconcile_once(&shared, job)
+    }) {}
     shared
         .gateway_usage
         .reconciliation
@@ -188,63 +203,72 @@ fn runtime_gateway_reconciliation_worker_loop(shared: RuntimeLocalRewriteProxySh
     }
 }
 
-fn runtime_gateway_reconcile_until_persisted(
+fn runtime_gateway_reconciliation_worker_step(
+    queue: &RuntimeGatewayReconciliationQueue,
+    reconcile: impl FnOnce(&mut RuntimeGatewayReconciliationJob) -> bool,
+) -> bool {
+    let Some(mut job) = queue.pop() else {
+        return false;
+    };
+    if !reconcile(&mut job) {
+        queue.requeue(job);
+    }
+    true
+}
+
+fn runtime_gateway_reconcile_once(
     shared: &RuntimeLocalRewriteProxyShared,
-    event: &RuntimeProviderGatewaySpendEvent,
-) {
+    job: &mut RuntimeGatewayReconciliationJob,
+) -> bool {
+    let event = &job.event;
     let state_store = &shared.gateway_state_store;
     let reconciliation = runtime_gateway_application_reconciliation_execution(state_store, event);
     let terminal_attempt = reconciliation.retry.attempts().last().unwrap_or_default();
-    let mut attempt = 0;
-    let mut ledger_reconciled = false;
-    let mut storage_error_observed = false;
-    let mut retry_logged = false;
-    loop {
-        if !ledger_reconciled {
-            match runtime_gateway_billing_ledger_reconcile_response(state_store, event) {
-                Ok(changed) => ledger_reconciled = changed,
-                Err(_err) => storage_error_observed = true,
-            }
+    if !job.ledger_reconciled {
+        match runtime_gateway_billing_ledger_reconcile_response(state_store, event) {
+            Ok(changed) => job.ledger_reconciled = changed,
+            Err(_err) => job.storage_error_observed = true,
         }
-        if ledger_reconciled {
-            match runtime_gateway_durable_reconcile_response(
-                &shared.runtime_shared,
-                state_store,
-                shared.gateway_postgres_repository.as_ref(),
-                &shared.gateway_usage.durable_reservations,
-                event,
-            ) {
-                Ok(()) => {
-                    runtime_gateway_record_reconciliation_audit(
-                        &shared.runtime_shared,
-                        event,
-                        reconciliation,
-                        ApplicationUsageReconciliationAuditOutcome::Success,
-                    );
-                    runtime_gateway_finish_reconciliation(shared, event.request);
-                    return;
-                }
-                Err(_err) => storage_error_observed = true,
-            }
-        }
-        if attempt == terminal_attempt && !retry_logged {
-            retry_logged = true;
-            let exhaustion = reconciliation.exhausted(storage_error_observed);
-            crate::runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_billing_ledger_reconcile_retrying",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("backend", state_store.label()),
-                        runtime_proxy_log_field("error_kind", exhaustion.error_kind()),
-                    ],
-                ),
-            );
-        }
-        runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt);
-        attempt = attempt.saturating_add(1).min(terminal_attempt);
     }
+    if job.ledger_reconciled {
+        match runtime_gateway_durable_reconcile_response(
+            &shared.runtime_shared,
+            state_store,
+            shared.gateway_postgres_repository.as_ref(),
+            &shared.gateway_usage.durable_reservations,
+            event,
+        ) {
+            Ok(()) => {
+                runtime_gateway_record_reconciliation_audit(
+                    &shared.runtime_shared,
+                    event,
+                    reconciliation,
+                    ApplicationUsageReconciliationAuditOutcome::Success,
+                );
+                runtime_gateway_finish_reconciliation(shared, event.request);
+                return true;
+            }
+            Err(_err) => job.storage_error_observed = true,
+        }
+    }
+    if job.attempt == terminal_attempt && !job.retry_logged {
+        job.retry_logged = true;
+        let exhaustion = reconciliation.exhausted(job.storage_error_observed);
+        crate::runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_billing_ledger_reconcile_retrying",
+                [
+                    runtime_proxy_log_field("request", event.request.to_string()),
+                    runtime_proxy_log_field("backend", state_store.label()),
+                    runtime_proxy_log_field("error_kind", exhaustion.error_kind()),
+                ],
+            ),
+        );
+    }
+    runtime_gateway_reconciliation_retry_sleep(reconciliation, job.attempt);
+    job.attempt = job.attempt.saturating_add(1).min(terminal_attempt);
+    false
 }
 
 fn runtime_gateway_finish_reconciliation(shared: &RuntimeLocalRewriteProxyShared, request: u64) {
@@ -355,6 +379,53 @@ mod tests {
 
         drop(permits.pop());
         assert!(queue.try_reserve().is_some());
+    }
+
+    #[test]
+    fn failed_reconciliation_is_requeued_behind_later_jobs() {
+        let queue = RuntimeGatewayReconciliationQueue::new();
+        for request in [1, 2] {
+            queue.commit(request, queue.try_reserve().unwrap());
+            assert!(queue.enqueue(test_spend_event(request)));
+        }
+
+        let mut attempted = Vec::new();
+        assert!(runtime_gateway_reconciliation_worker_step(&queue, |job| {
+            attempted.push(job.event.request);
+            false
+        }));
+        assert!(runtime_gateway_reconciliation_worker_step(&queue, |job| {
+            attempted.push(job.event.request);
+            true
+        }));
+
+        assert_eq!(attempted, vec![1, 2]);
+        assert_eq!(queue.pop().unwrap().event.request, 1);
+    }
+
+    fn test_spend_event(request: u64) -> RuntimeProviderGatewaySpendEvent {
+        RuntimeProviderGatewaySpendEvent {
+            event: "gateway_spend",
+            phase: "response",
+            request,
+            key_name: None,
+            tenant_id: None,
+            request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            legacy_request_sequence: request,
+            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
+            provider: "openai".to_string(),
+            path: "/v1/responses".to_string(),
+            model: "gpt-5.4".to_string(),
+            status: 200,
+            elapsed_ms: 1,
+            request_bytes: 1,
+            response_bytes: Some(1),
+            input_tokens: Some(1),
+            output_tokens: Some(1),
+            cost_usd: None,
+            reconciliation_reason: Some(prodex_domain::ReservationReconciliationReason::Completed),
+            sink: "runtime-log".to_string(),
+        }
     }
 
     #[test]
