@@ -149,11 +149,23 @@ function isNpmVersionMetadataChange(change, filePath) {
   );
 }
 
+function isNpmLockWorkspaceVersionMetadataChange(change, filePath) {
+  if (normalizeGitPath(filePath) !== "package-lock.json") {
+    return false;
+  }
+  return changedLinesForPath(change, filePath).some((line) =>
+    /^[ \t]*"@christiandoxa\/prodex(?:-[^"]+)?"[ \t]*:[ \t]*"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"[, \t]*$/.test(
+      line.text,
+    ),
+  );
+}
+
 export function isVersionMetadataChangePath(change, filePath) {
   return (
     isCargoManifestVersionMetadataChange(change, filePath) ||
     isCargoLockVersionMetadataChange(change, filePath) ||
     isNpmVersionMetadataChange(change, filePath) ||
+    isNpmLockWorkspaceVersionMetadataChange(change, filePath) ||
     (isDocMetadataPath(filePath) && isDocVersionMetadataChange(change, filePath))
   );
 }

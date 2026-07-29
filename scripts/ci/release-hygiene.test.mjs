@@ -14,6 +14,20 @@ test("fuzz lock workspace versions count as release metadata", () => {
   assert.equal(isVersionMetadataChangePath(change, filePath), true);
 });
 
+test("npm lock workspace versions, not dependency versions, count as release metadata", () => {
+  const filePath = "package-lock.json";
+  const change = (text) => ({ changedLinesByFile: new Map([[filePath, [{ text }]]]) });
+
+  assert.equal(
+    isVersionMetadataChangePath(
+      change('        "@christiandoxa/prodex-linux-x64": "0.366.0",'),
+      filePath,
+    ),
+    true,
+  );
+  assert.equal(isVersionMetadataChangePath(change('      "version": "0.146.0",'), filePath), false);
+});
+
 test("release hygiene policy keeps ordered mandatory guards and fixtures", () => {
   assert.deepEqual(
     RELEASE_HYGIENE_POLICY.map((entry) => entry.label),
