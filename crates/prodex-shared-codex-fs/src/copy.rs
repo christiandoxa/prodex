@@ -1,5 +1,16 @@
 use super::*;
 
+/// Directory the Codex installer manages under `CODEX_HOME`. It holds release
+/// trees plus a `standalone/current` symlink that points at a directory, so it
+/// is neither profile state nor safely copyable as files.
+const CODEX_MANAGED_PACKAGES_DIR_NAME: &str = "packages";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexManagedPackages {
+    Copy,
+    SkipAtRoot,
+}
+
 pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     if !source.is_dir() {
         bail!("copy source {} is not a directory", source.display());
@@ -17,23 +28,34 @@ pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     }
 
     create_codex_home_if_missing(destination)?;
-    copy_directory_contents(source, destination)
+    copy_directory_contents_under_root(
+        source,
+        source,
+        destination,
+        CodexManagedPackages::SkipAtRoot,
+    )
 }
 
 pub(super) fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {
-    copy_directory_contents_under_root(source, source, destination)
+    copy_directory_contents_under_root(source, source, destination, CodexManagedPackages::Copy)
 }
 
 fn copy_directory_contents_under_root(
     source_root: &Path,
     source: &Path,
     destination: &Path,
+    managed_packages: CodexManagedPackages,
 ) -> Result<()> {
     for entry in fs::read_dir(source)
         .with_context(|| format!("failed to read directory {}", source.display()))?
     {
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", source.display()))?;
+        if managed_packages == CodexManagedPackages::SkipAtRoot
+            && entry.file_name() == CODEX_MANAGED_PACKAGES_DIR_NAME
+        {
+            continue;
+        }
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
         let file_type = entry
@@ -53,7 +75,12 @@ fn copy_directory_entry(
 ) -> Result<()> {
     if file_type.is_dir() {
         create_codex_home_if_missing(destination_path)?;
-        return copy_directory_contents_under_root(source_root, source_path, destination_path);
+        return copy_directory_contents_under_root(
+            source_root,
+            source_path,
+            destination_path,
+            CodexManagedPackages::Copy,
+        );
     }
 
     if file_type.is_file() {
