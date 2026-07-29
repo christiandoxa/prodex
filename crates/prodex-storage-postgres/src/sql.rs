@@ -595,11 +595,11 @@ WITH locked_reservation AS (
 ), update_counter AS (
     UPDATE prodex_budget_counters AS counter
     SET reserved_tokens = counter.reserved_tokens - CASE
-            WHEN reservation.released_at_unix_ms IS NULL THEN $4
+            WHEN reservation.released_at_unix_ms IS NULL THEN $4::BIGINT
             ELSE 0
         END,
         reserved_cost_micros = counter.reserved_cost_micros - CASE
-            WHEN reservation.released_at_unix_ms IS NULL THEN $5
+            WHEN reservation.released_at_unix_ms IS NULL THEN $5::BIGINT
             ELSE 0
         END,
         committed_tokens = counter.committed_tokens + $6,
@@ -609,11 +609,11 @@ WITH locked_reservation AS (
     WHERE counter.tenant_id = $1
       AND counter.storage_scope = $9
       AND counter.reserved_tokens >= CASE
-          WHEN reservation.released_at_unix_ms IS NULL THEN $4
+          WHEN reservation.released_at_unix_ms IS NULL THEN $4::BIGINT
           ELSE 0
       END
       AND counter.reserved_cost_micros >= CASE
-          WHEN reservation.released_at_unix_ms IS NULL THEN $5
+          WHEN reservation.released_at_unix_ms IS NULL THEN $5::BIGINT
           ELSE 0
       END
     RETURNING counter.tenant_id
