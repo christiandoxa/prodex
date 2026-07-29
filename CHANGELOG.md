@@ -2,10 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.369.0 - 2026-07-29
+
+### Misc
+
+- Clean partial Codex home copies (`9a099a1`)
+- Skip Codex managed packages directory when copying CODEX_HOME (`953ad03`)
+
 ## 0.368.0 - 2026-07-29
 
 ### Misc
 
+- Preserve postgres reconciliation parameter types (`1bf7ef6`)
 - Log all guardrail webhook failures (`1537859`)
 - Fail readiness on unavailable policy snapshots (`cd6cb74`)
 - Make gateway accounting reconciliation durable (`649b9bf`)
@@ -77,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Close provider and runtime audit gaps (`65f5028`)
-
-## 0.357.0 - 2026-07-27
-
-### Misc
-
-- Isolate Gemini host files (`fb963d4`)
