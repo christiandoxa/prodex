@@ -29,7 +29,6 @@ not retained here; Git history is the record for obsolete material.
 | [Supply chain](supply-chain.md) | Pins, provenance, and release gates |
 | [Deployment](deployment.md) | Supported deployment patterns |
 | [Backup and restore](backup-restore.md) | Recovery contract |
-| [Migration guide](migration-guide.md) | Upgrade and compatibility choreography |
 | [Local control plane](local-control-plane.md) | Local administration boundary |
 
 ## Enterprise Governance

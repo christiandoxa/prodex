@@ -7,9 +7,9 @@ use super::io::{
     runtime_usage_snapshots_file_path, runtime_usage_snapshots_last_good_file_path,
     save_versioned_json_file_with_fence,
 };
-use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileUsageSnapshot,
-};
+use crate::{AppPaths, ProfileEntry, RecoveredLoad, RuntimeProfileUsageSnapshot};
+#[cfg(test)]
+use crate::{AppState, AppStateIoExt};
 
 pub(crate) use prodex_runtime_store::compact_runtime_usage_snapshots;
 
@@ -66,7 +66,7 @@ pub(crate) fn load_runtime_usage_snapshots_with_recovery(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn save_runtime_usage_snapshots(
     paths: &AppPaths,
     snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,

@@ -6,12 +6,6 @@ import { repoRoot } from "../npm/common.mjs";
 
 export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
   {
-    name: "base64",
-    maxVersions: 2,
-    reason:
-      "Direct Prodex crates use base64 0.23 while reqwest/hyper-util, JWT, PostgreSQL, and tokenizer dependencies still resolve 0.22.",
-  },
-  {
     name: "block-buffer",
     maxVersions: 2,
     reason: "digest 0.10 and 0.11 are both present through sha1/sha2-era crypto crates.",

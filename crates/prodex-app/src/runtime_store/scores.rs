@@ -7,7 +7,9 @@ use super::io::{
     runtime_scores_file_path, runtime_scores_last_good_file_path,
     save_versioned_json_file_with_fence,
 };
-use crate::{AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileHealth};
+use crate::{AppPaths, ProfileEntry, RecoveredLoad, RuntimeProfileHealth};
+#[cfg(test)]
+use crate::{AppState, AppStateIoExt};
 
 pub(crate) use prodex_runtime_store::{
     compact_runtime_profile_scores, runtime_profile_score_profile_name,
@@ -68,7 +70,7 @@ pub(crate) fn load_runtime_profile_scores_with_recovery(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn save_runtime_profile_scores(
     paths: &AppPaths,
     scores: &BTreeMap<String, RuntimeProfileHealth>,

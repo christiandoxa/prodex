@@ -1,5 +1,7 @@
+#[cfg(test)]
+use super::AppStateIoExt;
 use super::{
-    AppState, AppStateIoExt, ProfileEntry, RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT, RecoveredLoad,
+    AppState, ProfileEntry, RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT, RecoveredLoad,
     RuntimeContinuationJournal, RuntimeContinuationStore, read_versioned_json_file_with_backup,
     remember_runtime_sidecar_generation, runtime_continuation_compaction_policy,
     runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
@@ -109,7 +111,7 @@ pub(crate) fn load_runtime_continuation_journal_with_recovery(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn save_runtime_continuation_journal(
     paths: &AppPaths,
     continuations: &RuntimeContinuationStore,

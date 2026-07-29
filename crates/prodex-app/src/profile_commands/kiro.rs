@@ -518,7 +518,6 @@ pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
     Ok(models.clone())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {
     let path = codex_home.join(KIRO_CREDENTIALS_FILE);
     let text = read_kiro_auth_secret_text(&path)?;

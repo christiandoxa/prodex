@@ -14,7 +14,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 19;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 0;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
@@ -70,25 +70,6 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
 ]);
 
 export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
-  "crates/prodex-app/src/app_commands.rs|pub(crate) fn resolve_runtime_launch_profile_name(",
-  "crates/prodex-app/src/app_commands/selection.rs|pub(crate) fn required_main_window_snapshot(",
-  "crates/prodex-app/src/profile_commands/kiro.rs|pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {",
-  "crates/prodex-app/src/runtime_background/probe_refresh/worker.rs|pub(crate) fn runtime_probe_refresh_take_next_job(",
-  "crates/prodex-app/src/runtime_persistence/continuation_store.rs|pub(crate) fn save_runtime_continuation_journal(",
-  "crates/prodex-app/src/runtime_store/backoffs.rs|pub(crate) fn save_runtime_profile_backoffs(",
-  "crates/prodex-app/src/runtime_store/scores.rs|pub(crate) fn save_runtime_profile_scores(",
-  "crates/prodex-app/src/runtime_store/usage_snapshots.rs|pub(crate) fn save_runtime_usage_snapshots(",
-  "crates/prodex-runtime-anthropic/src/output.rs|pub fn runtime_anthropic_response_from_json_value(",
-  "crates/prodex-runtime-anthropic/src/output/buffered_sse.rs|pub fn runtime_anthropic_response_from_sse_bytes(",
-  "crates/prodex-secret-store/src/model.rs|Keyring {",
-  "crates/prodex-secret-store/src/model.rs|fn delete(&self, location: &SecretLocation) -> Result<(), SecretError>;",
-  "crates/prodex-secret-store/src/model.rs|pub fn bytes(value: impl Into<Vec<u8>>) -> Self {",
-  "crates/prodex-secret-store/src/model.rs|pub fn delete(&self, location: &SecretLocation) -> Result<(), SecretError> {",
-  "crates/prodex-secret-store/src/model.rs|pub fn keyring(service: impl Into<String>, account: impl Into<String>) -> Self {",
-  "crates/prodex-secret-store/src/model.rs|pub fn modified_at(&self) -> Option<SystemTime> {",
-  "crates/prodex-secret-store/src/model.rs|pub fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {",
-  "crates/prodex-secret-store/src/model.rs|pub fn size_bytes(&self) -> u64 {",
-  "crates/prodex-secret-store/src/model.rs|pub fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {",
 ]);
 
 function parseArgs(argv) {

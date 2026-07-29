@@ -392,7 +392,6 @@ impl RuntimeAnthropicCollectedResponse {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn runtime_anthropic_response_from_sse_bytes(
     body: &[u8],
     requested_model: &str,

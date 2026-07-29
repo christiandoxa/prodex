@@ -2,7 +2,6 @@ use super::super::*;
 use super::apply::runtime_probe_refresh_apply_wait_timeout;
 use super::attempt::{RuntimeProbeExecutionMode, RuntimeProbeRefreshAttempt};
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_probe_refresh_take_next_job(
     queue: &RuntimeProbeRefreshQueue,
 ) -> ((PathBuf, String), RuntimeProbeRefreshJob) {
