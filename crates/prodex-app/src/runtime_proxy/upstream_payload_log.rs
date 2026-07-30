@@ -46,8 +46,11 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
 }
 
 fn runtime_upstream_payload_logging_allowed(transport: &str, route_kind: RuntimeRouteKind) -> bool {
-    let _ = transport;
-    route_kind != RuntimeRouteKind::Standard
+    transport == "http"
+        && matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Compact
+        )
 }
 
 #[cfg(test)]
@@ -56,13 +59,25 @@ mod tests {
 
     #[test]
     fn upstream_payload_logging_skips_websocket_request_text() {
-        assert!(runtime_upstream_payload_logging_allowed(
+        assert!(!runtime_upstream_payload_logging_allowed(
             "websocket",
+            RuntimeRouteKind::Websocket
+        ));
+        assert!(!runtime_upstream_payload_logging_allowed(
+            "websocket",
+            RuntimeRouteKind::Responses
+        ));
+        assert!(!runtime_upstream_payload_logging_allowed(
+            "http",
             RuntimeRouteKind::Websocket
         ));
         assert!(runtime_upstream_payload_logging_allowed(
             "http",
             RuntimeRouteKind::Responses
+        ));
+        assert!(runtime_upstream_payload_logging_allowed(
+            "http",
+            RuntimeRouteKind::Compact
         ));
         assert!(!runtime_upstream_payload_logging_allowed(
             "http",

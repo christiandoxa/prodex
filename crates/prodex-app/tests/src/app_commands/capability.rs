@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(unix)]
 use crate::TestEnvVarGuard;
+#[cfg(unix)]
 use std::path::PathBuf;
 
 #[test]

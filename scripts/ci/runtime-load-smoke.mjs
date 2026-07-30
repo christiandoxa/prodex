@@ -98,8 +98,8 @@ function printHelp() {
       "Usage: node scripts/ci/runtime-load-smoke.mjs [--mode mock|proxy] [--requests N] [--concurrency N]",
       "",
       "Runs a bounded baseline load smoke through tests/load/runtime-proxy-load.mjs.",
-      "Default mock mode is CI-safe and does not build or launch prodex.",
-      "Proxy mode is for local preflight after building target/debug/prodex.",
+      "Default mock mode does not build or launch prodex.",
+      "Proxy mode requires a prebuilt prodex binary.",
     ].join("\n") + "\n",
   );
 }

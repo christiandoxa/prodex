@@ -6,7 +6,7 @@
   },
   {
     "file": "crates/prodex-app/src/dashboard.rs",
-    "maxLines": 1135,
+    "maxLines": 1134,
     "reason": "The local control-plane JSON endpoints now surface mutation-audit persistence failures while provider/model catalog assembly and dashboard tests remain capped after HTTP transport moved to dashboard/server.rs."
   },
   {

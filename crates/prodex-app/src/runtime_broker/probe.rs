@@ -34,7 +34,7 @@ pub(crate) fn runtime_broker_client_with_config(config: &RuntimeConfig) -> Resul
         .context("failed to build runtime broker control client")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn runtime_broker_client() -> Result<Client> {
     runtime_broker_client_with_config(&RuntimeConfig::compatibility_current())
 }

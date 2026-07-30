@@ -85,14 +85,7 @@ fn duplicate_provider_ids_are_rejected() {
 }
 
 #[test]
-fn duplicate_labels_and_aliases_are_rejected() {
-    let mut labels = registrations();
-    labels[1].canonical_label = " OPENAI ";
-    assert!(matches!(
-        ProviderImplementationRegistry::from_registrations(&labels),
-        Err(ProviderImplementationRegistryError::DuplicateCanonicalLabel { .. })
-    ));
-
+fn duplicate_aliases_and_label_collisions_are_rejected() {
     let mut aliases = registrations();
     aliases[1].aliases = &[" OPENAI-COMPATIBLE "];
     assert!(matches!(
@@ -109,30 +102,16 @@ fn duplicate_labels_and_aliases_are_rejected() {
 }
 
 #[test]
-fn missing_or_mismatched_implementations_are_rejected() {
-    let mut missing_adapter = registrations();
-    missing_adapter[0].adapter = None;
-    assert!(matches!(
-        ProviderImplementationRegistry::from_registrations(&missing_adapter),
-        Err(ProviderImplementationRegistryError::MissingAdapter { .. })
-    ));
-
-    let mut missing_translator = registrations();
-    missing_translator[0].translator = None;
-    assert!(matches!(
-        ProviderImplementationRegistry::from_registrations(&missing_translator),
-        Err(ProviderImplementationRegistryError::MissingTranslator { .. })
-    ));
-
+fn mismatched_implementations_are_rejected() {
     let mut adapter_mismatch = registrations();
-    adapter_mismatch[1].adapter = Some(StaticProviderAdapter::new(ProviderId::OpenAi));
+    adapter_mismatch[1].adapter = StaticProviderAdapter::new(ProviderId::OpenAi);
     assert!(matches!(
         ProviderImplementationRegistry::from_registrations(&adapter_mismatch),
         Err(ProviderImplementationRegistryError::AdapterProviderMismatch { .. })
     ));
 
     let mut translator_mismatch = registrations();
-    translator_mismatch[1].translator = Some(&OPENAI_TRANSLATOR);
+    translator_mismatch[1].translator = &OPENAI_TRANSLATOR;
     assert!(matches!(
         ProviderImplementationRegistry::from_registrations(&translator_mismatch),
         Err(ProviderImplementationRegistryError::TranslatorProviderMismatch { .. })

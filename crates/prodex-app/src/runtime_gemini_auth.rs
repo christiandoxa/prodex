@@ -259,6 +259,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     fn test_gemini_oauth_secret() -> GeminiOAuthSecret {
         GeminiOAuthSecret {
             auth_mode: "gemini_oauth".to_string(),

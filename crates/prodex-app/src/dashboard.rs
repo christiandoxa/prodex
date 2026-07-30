@@ -8,14 +8,12 @@ use tiny_http::{Method, Request, StatusCode};
 
 mod server;
 
-#[cfg(test)]
-use server::{
-    dashboard_browser_command, dashboard_status_fields, read_dashboard_json_body_limited,
-};
 use server::{
     dashboard_json_body_error_status, percent_decode, read_json_body, respond_error, respond_html,
     respond_json, respond_json_result, respond_status,
 };
+#[cfg(test)]
+use server::{dashboard_status_fields, read_dashboard_json_body_limited};
 pub(crate) use server::{open_browser, serve_dashboard};
 
 use crate::dashboard_html::DASHBOARD_HTML;
@@ -742,6 +740,7 @@ fn window_json(window: &prodex_quota::UsageWindow) -> Value {
 mod tests {
     use super::*;
     use std::collections::{BTreeSet, HashMap};
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     use std::ffi::OsString;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -763,7 +762,7 @@ mod tests {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     #[test]
     fn dashboard_browser_uses_xdg_open_on_linux_and_unix() {
-        let (program, args) = dashboard_browser_command("http://127.0.0.1:8765");
+        let (program, args) = server::dashboard_browser_command("http://127.0.0.1:8765");
 
         assert_eq!(program, "xdg-open");
         assert_eq!(args, vec![OsString::from("http://127.0.0.1:8765")]);

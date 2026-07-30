@@ -16,8 +16,8 @@ Managed roots are searched in this order:
 
 1. `PRODEX_OPTIMIZERS_HOME`
 2. `$XDG_DATA_HOME/prodex-optimizers`
-3. the platform user-data fallback, such as
-   `$HOME/.local/share/prodex-optimizers` on Linux
+3. `$HOME/.local/share/prodex-optimizers`, or
+   `%USERPROFILE%\.local\share\prodex-optimizers` on Windows when `HOME` is unset
 
 Command tools may also be resolved from `PATH`. Managed paths are canonicalized;
 paths escaping a managed root, symlinks in plugin trees, unsupported file types,

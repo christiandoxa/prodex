@@ -106,6 +106,40 @@ fn configures_playwright_default() {
 }
 
 #[test]
+fn activation_pins_the_validated_rtk_path_in_the_overlay() -> Result<()> {
+    let root = temp_dir("super-managed-rtk");
+    let home = root.join("overlay");
+    let managed = root.join("managed tools");
+    fs::create_dir_all(&managed)?;
+    let rtk = managed.join(if cfg!(windows) { "rtk.exe" } else { "rtk" });
+    fs::write(&rtk, "validated fixture")?;
+    let plan = ToolActivationPlan {
+        activations: vec![ToolActivation {
+            tool: crate::ResolvedTool {
+                descriptor: crate::optional_tool_descriptor(OptionalToolId::Rtk),
+                source: crate::ToolDiscoverySource::ManagedRoot,
+                path: Some(rtk.clone()),
+                version: Some("test".to_string()),
+                digest: Some("sha256:test".to_string()),
+            },
+            required: false,
+        }],
+        unavailable: Vec::new(),
+    };
+
+    activate_optional_tools_for_codex(&home, &plan, false)?;
+
+    let wrapper = home
+        .join("bin")
+        .join(if cfg!(windows) { "rtk.cmd" } else { "rtk" });
+    let script = fs::read_to_string(wrapper)?;
+    assert!(script.contains(&rtk.display().to_string()));
+    assert!(!script.contains("not installed"));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn preserves_user_playwright_server() {
     let mut table = toml::from_str::<toml::Table>(
         r#"

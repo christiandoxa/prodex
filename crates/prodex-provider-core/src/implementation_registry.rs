@@ -224,10 +224,9 @@ static LOCAL_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(Prov
 #[derive(Clone, Copy)]
 struct ProviderImplementationRegistration {
     provider: ProviderId,
-    canonical_label: &'static str,
     aliases: &'static [&'static str],
-    adapter: Option<StaticProviderAdapter>,
-    translator: Option<&'static dyn ProviderTranslator>,
+    adapter: StaticProviderAdapter,
+    translator: &'static dyn ProviderTranslator,
     client_request_format: ProviderWireFormat,
     upstream_request_format: ProviderWireFormat,
     response_format: ProviderWireFormat,
@@ -243,10 +242,9 @@ struct ProviderImplementationRegistration {
 const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     ProviderImplementationRegistration {
         provider: ProviderId::OpenAi,
-        canonical_label: "openai",
         aliases: &["openai-responses", "openai_compatible", "openai-compatible"],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::OpenAi)),
-        translator: Some(&OPENAI_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::OpenAi),
+        translator: &OPENAI_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::OpenAiResponses,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -260,10 +258,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::Anthropic,
-        canonical_label: "anthropic",
         aliases: &["claude"],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::Anthropic)),
-        translator: Some(&ANTHROPIC_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::Anthropic),
+        translator: &ANTHROPIC_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::OpenAiChatCompletions,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -277,10 +274,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::Copilot,
-        canonical_label: "copilot",
         aliases: &["github-copilot", "github_copilot"],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::Copilot)),
-        translator: Some(&COPILOT_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::Copilot),
+        translator: &COPILOT_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::OpenAiResponses,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -294,10 +290,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::DeepSeek,
-        canonical_label: "deepseek",
         aliases: &[],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::DeepSeek)),
-        translator: Some(&DEEPSEEK_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::DeepSeek),
+        translator: &DEEPSEEK_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::OpenAiChatCompletions,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -311,10 +306,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::Gemini,
-        canonical_label: "gemini",
         aliases: &["google"],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::Gemini)),
-        translator: Some(&GEMINI_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::Gemini),
+        translator: &GEMINI_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::GeminiGenerateContent,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -328,10 +322,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::Kiro,
-        canonical_label: "kiro",
         aliases: &[],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::Kiro)),
-        translator: Some(&KIRO_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::Kiro),
+        translator: &KIRO_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::Passthrough,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -345,10 +338,9 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     },
     ProviderImplementationRegistration {
         provider: ProviderId::Local,
-        canonical_label: "local",
         aliases: &["local-openai", "local_openai"],
-        adapter: Some(StaticProviderAdapter::new(ProviderId::Local)),
-        translator: Some(&LOCAL_TRANSLATOR),
+        adapter: StaticProviderAdapter::new(ProviderId::Local),
+        translator: &LOCAL_TRANSLATOR,
         client_request_format: ProviderWireFormat::OpenAiResponses,
         upstream_request_format: ProviderWireFormat::OpenAiResponses,
         response_format: ProviderWireFormat::OpenAiResponses,
@@ -374,7 +366,7 @@ impl ProviderImplementationDescriptor {
     }
 
     pub const fn canonical_label(&self) -> &'static str {
-        self.registration.canonical_label
+        self.registration.provider.label()
     }
 
     pub const fn accepted_aliases(&self) -> &'static [&'static str] {
@@ -461,12 +453,8 @@ impl ProviderImplementationRegistry {
         validate_names(registrations)?;
         let mut descriptors = Vec::with_capacity(registrations.len());
         for (index, registration) in registrations.iter().copied().enumerate() {
-            let adapter = registration
-                .adapter
-                .ok_or(ProviderImplementationRegistryError::MissingAdapter { index })?;
-            let translator = registration
-                .translator
-                .ok_or(ProviderImplementationRegistryError::MissingTranslator { index })?;
+            let adapter = registration.adapter;
+            let translator = registration.translator;
             validate_registration(index, registration, adapter, translator)?;
             descriptors.push(ProviderImplementationDescriptor {
                 registration,
@@ -524,12 +512,8 @@ pub(crate) const fn builtin_provider_runtime_metadata(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProviderImplementationRegistryError {
     DuplicateProviderId { first: usize, duplicate: usize },
-    DuplicateCanonicalLabel { first: usize, duplicate: usize },
     DuplicateNormalizedAlias { first: usize, duplicate: usize },
     AliasCanonicalLabelCollision { alias: usize, label: usize },
-    CanonicalLabelProviderMismatch { index: usize },
-    MissingAdapter { index: usize },
-    MissingTranslator { index: usize },
     AdapterProviderMismatch { index: usize },
     TranslatorProviderMismatch { index: usize },
     InconsistentWireFormatMetadata { index: usize },
@@ -565,14 +549,6 @@ fn validate_names(
                     duplicate: index,
                 });
             }
-            if normalized(candidate.canonical_label) == normalized(registration.canonical_label) {
-                return Err(
-                    ProviderImplementationRegistryError::DuplicateCanonicalLabel {
-                        first: previous,
-                        duplicate: index,
-                    },
-                );
-            }
         }
     }
     let mut seen_aliases = Vec::new();
@@ -591,7 +567,7 @@ fn validate_names(
                 );
             }
             for (label_index, candidate) in registrations.iter().enumerate() {
-                if normalized(candidate.canonical_label) == normalized_alias {
+                if normalized(candidate.provider.label()) == normalized_alias {
                     return Err(
                         ProviderImplementationRegistryError::AliasCanonicalLabelCollision {
                             alias: index,
@@ -612,9 +588,6 @@ fn validate_registration(
     adapter: StaticProviderAdapter,
     translator: &'static dyn ProviderTranslator,
 ) -> Result<(), ProviderImplementationRegistryError> {
-    if normalized(registration.canonical_label) != registration.provider.label() {
-        return Err(ProviderImplementationRegistryError::CanonicalLabelProviderMismatch { index });
-    }
     if adapter.provider() != registration.provider {
         return Err(ProviderImplementationRegistryError::AdapterProviderMismatch { index });
     }
