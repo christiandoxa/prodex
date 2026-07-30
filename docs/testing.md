@@ -11,6 +11,8 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:runtime-manifest` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `npm run ci:runtime-manifest` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
+  The full workflow runs the workspace and four disjoint `prodex-app` library
+  partitions concurrently; each risky partition remains internally serial.
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
@@ -22,7 +24,7 @@ previously exposed non-canonical test fixture paths.
 
 ## CI Impact Gating
 
-The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress.
+The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
 
 When the classifier returns `heavy=false`, cheap and broadly relevant checks still run: formatting, docs lint, secret scan, process guards, and release sync. Use this path for docs-only or similarly low-impact changes once the classifier recognizes them.
 

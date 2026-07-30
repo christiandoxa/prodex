@@ -301,7 +301,7 @@ function parseRuntimeProxyWorkflowShardFilters(workflowText) {
     const jobText = lines.slice(jobStartIndex, jobEndIndex).join("\n");
     const usesGeneratedMatrix =
       workflowText.includes("runtime-proxy-ci-matrix.mjs --github-matrix") &&
-      jobText.includes("fromJSON(needs.runtime-proxy-shard-matrix.outputs.matrix)");
+      jobText.includes("fromJSON(needs.changes.outputs.runtime_proxy_matrix)");
 
     if (usesGeneratedMatrix) {
       return {
