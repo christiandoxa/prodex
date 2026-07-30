@@ -28,6 +28,7 @@ jobs:
     outputs:
       heavy: ${{ steps.impact.outputs.heavy }}
       reason: ${{ steps.impact.outputs.reason }}
+      runtime_proxy_matrix: ${{ steps.runtime-matrix.outputs.matrix }}
 
     steps:
       - name: Check out repository
@@ -78,6 +79,14 @@ jobs:
         run: |
           echo "heavy=${{ steps.impact.outputs.heavy }}"
           echo "reason=${{ steps.impact.outputs.reason }}"
+
+      - name: Generate runtime proxy shard matrix
+        id: runtime-matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
 
   fmt:
     runs-on: ubuntu-latest
@@ -964,43 +973,15 @@ jobs:
       - name: Run env-sensitive parallel guard
         run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 
-  runtime-proxy-shard-matrix:
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Generate runtime proxy shard matrix
-        id: matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
-          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
-
   main-internal-runtime-proxy:
     name: Main internal runtime proxy (${{ matrix.label }})
-    needs:
-      - changes
-      - runtime-proxy-shard-matrix
+    needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.runtime-proxy-shard-matrix.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.changes.outputs.runtime_proxy_matrix) }}
     env:
       RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
       CARGO_TERM_COLOR: always
@@ -1299,7 +1280,6 @@ jobs:
       - profile-commands-internal
       - main-internal-core
       - env-sensitive-parallel-guard
-      - runtime-proxy-shard-matrix
       - main-internal-runtime-proxy
       - runtime-proxy-bench-smoke
       - runtime-load-smoke
