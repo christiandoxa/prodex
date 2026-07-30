@@ -230,8 +230,8 @@ jobs:
         run: |
           set -euo pipefail
           promtool_image="docker.io/prom/prometheus:v3.12.0@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac"
-          mkdir -p target
-          rules_dir="$(mktemp -d "${PWD}/target/promtool.XXXXXX")"
+          rules_dir="${PWD}/target/promtool"
+          mkdir -p "${rules_dir}"
           sed -n '/^spec:$/,$p' deploy/observability/prodex-alerts.yaml \
             | sed '1d; s/^  //' \
             > "${rules_dir}/prodex-alerts.rules.yaml"
