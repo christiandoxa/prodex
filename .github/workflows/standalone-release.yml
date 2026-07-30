@@ -438,7 +438,7 @@ jobs:
             echo "rendered Kubernetes manifest still contains an image placeholder" >&2
             exit 1
           fi
-          if [ "$(grep -c "@${IMAGE_DIGEST}" "${output}")" -ne 3 ]; then
+          if [ "$(grep -c "@${IMAGE_DIGEST}" "${output}")" -ne "$(grep -c '@sha256:PRODEX_IMAGE_DIGEST' deploy/kubernetes/prodex-gateway.yaml)" ]; then
             echo "rendered Kubernetes manifest does not pin all Prodex workloads" >&2
             exit 1
           fi
