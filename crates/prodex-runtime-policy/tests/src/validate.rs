@@ -9,48 +9,8 @@ fn parse_policy(input: &str) -> RuntimePolicyFile {
     toml::from_str(input).expect("policy TOML should parse")
 }
 
-fn control_plane_policy() -> RuntimePolicyFile {
-    parse_policy(
-        r#"
-version = 1
-service_mode = "control-plane"
-[secrets]
-production = true
-projected_root = "/run/secrets/prodex"
-projected_provider = "kubernetes"
-
-[gateway.state]
-backend = "postgres"
-postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
-
-[[gateway.admin_tokens]]
-name = "operations"
-token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
-role = "admin"
-"#,
-    )
-}
-
-#[test]
-fn service_mode_defaults_to_gateway_and_accepts_explicit_control_plane() {
-    assert_eq!(
-        parse_policy("version = 1").service_mode,
-        RuntimePolicyServiceMode::Gateway
-    );
-    validate_runtime_policy_file(&control_plane_policy(), Path::new("policy.toml"))
-        .expect("projected admin auth and shared state should satisfy control-plane mode");
-}
-
-#[test]
-fn governance_defaults_preserve_personal_mode() {
-    let policy = parse_policy("version = 1");
-    assert_eq!(
-        policy.governance.mode,
-        crate::RuntimeGovernanceMode::Personal
-    );
-    validate_runtime_policy_file(&policy, Path::new("policy.toml"))
-        .expect("personal governance defaults should remain compatible");
-}
+#[path = "validate_control_plane_bank.rs"]
+mod control_plane_bank;
 
 #[test]
 fn governance_authority_tenants_are_typed_unique_and_bounded() {
@@ -395,6 +355,15 @@ provider_api_key_ref = { provider = "kubernetes", name = "PROVIDER_KEY" }
 auth_token_ref = { provider = "kubernetes", name = "GATEWAY_TOKEN" }
 trusted_proxies = ["10.0.0.2"]
 
+[gateway.workload_identity]
+enabled = true
+issuer = "https://workload.example.com"
+audience = "prodex-data-plane"
+required_scope = "data_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "kubernetes", name = "WORKLOAD_CA" }
+tls_identity_ref = { provider = "kubernetes", name = "GATEWAY_TLS" }
+
 [gateway.state]
 backend = "postgres"
 postgres_url_ref = { provider = "kubernetes", name = "POSTGRES_URL" }
@@ -515,6 +484,16 @@ fn bank_governance_deployment_matrix_fails_closed() {
             "reauthentication_max_age_seconds = 300",
             "reauthentication_max_age_seconds = 901",
             "reauthentication within 900 seconds",
+        ),
+        (
+            "required_scope = \"data_plane\"",
+            "required_scope = \"control_plane\"",
+            "data_plane workload identity",
+        ),
+        (
+            "mtls_required = true",
+            "mtls_required = false",
+            "mTLS SecretRefs",
         ),
         (
             "classification_default = \"restricted\"",
@@ -648,6 +627,13 @@ projected_provider = "kubernetes"
         input.push_str(
             r#"
 
+[gateway.workload_identity]
+enabled = true
+required_scope = "control_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "kubernetes", name = "WORKLOAD_CA" }
+tls_identity_ref = { provider = "kubernetes", name = "CONTROL_PLANE_TLS" }
+
 [gateway.state]
 backend = "postgres"
 postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
@@ -694,6 +680,13 @@ service_mode = "control-plane"
 production = true
 projected_root = "/run/secrets/prodex"
 projected_provider = "kubernetes"
+
+[gateway.workload_identity]
+enabled = true
+required_scope = "control_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "kubernetes", name = "WORKLOAD_CA" }
+tls_identity_ref = { provider = "kubernetes", name = "CONTROL_PLANE_TLS" }
 
 [gateway.state]
 backend = "postgres"

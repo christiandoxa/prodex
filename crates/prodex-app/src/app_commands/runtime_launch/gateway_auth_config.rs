@@ -97,6 +97,7 @@ fn gateway_admin_tokens_config_with_resolver(
     resolver: &GatewaySecretResolver,
 ) -> Result<Vec<RuntimeGatewayAdminToken>> {
     let mut tokens = Vec::new();
+    let mut token_hashes = std::collections::BTreeSet::new();
     for configured in &policy.admin_tokens {
         let context = format!("gateway.admin_tokens token_env for {:?}", configured.name);
         let token = resolver
@@ -128,9 +129,13 @@ fn gateway_admin_tokens_config_with_resolver(
         if !gateway_exact_policy_identifier(&configured.name) {
             anyhow::bail!("gateway.admin_tokens name must be non-empty without whitespace");
         }
+        let token_hash = runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token);
+        if !token_hashes.insert(*token_hash.hash_bytes()) {
+            anyhow::bail!("gateway.admin_tokens must use distinct credential values");
+        }
         tokens.push(RuntimeGatewayAdminToken {
             name: configured.name.clone(),
-            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token),
+            token_hash,
             role,
             tenant_id: gateway_policy_optional_scope(
                 "admin_tokens",

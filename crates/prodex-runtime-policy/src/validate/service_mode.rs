@@ -18,6 +18,12 @@ pub(super) fn validate_service_mode(policy: &RuntimePolicyFile, path: &Path) -> 
             path.display()
         );
     }
+    if policy.gateway.workload_identity == Default::default() {
+        bail!(
+            "gateway.workload_identity in {} must configure native mTLS when service_mode=control-plane",
+            path.display()
+        );
+    }
     let has_projected_admin = policy.gateway.admin_tokens.iter().any(|token| {
         token.token_ref.is_some()
             && token.token_env.is_empty()
@@ -70,10 +76,6 @@ fn control_plane_data_plane_field(policy: &RuntimePolicyFile) -> Option<&'static
         (
             "gateway.trusted_proxies",
             !gateway.trusted_proxies.is_empty(),
-        ),
-        (
-            "gateway.workload_identity",
-            gateway.workload_identity != Default::default(),
         ),
         (
             "gateway.observability",

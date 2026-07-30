@@ -7,6 +7,9 @@
     "listener": "private_internal",
     "anonymous_compatibility": false,
     "trusted_proxy_only": true,
+    "workload_jwt_mtls_required": true,
+    "control_plane_native_mtls": true,
+    "control_plane_distinct_maker_checker": true,
     "durable_store": "postgresql_with_rls",
     "external_secret_manager": true,
     "provider_egress_allow_list": true
@@ -17,7 +20,9 @@
     "valid_provider_registry_snapshot",
     "required_full_inspection",
     "durable_audit_and_outbox",
-    "authorized_secret_reference"
+    "authorized_secret_reference",
+    "verified_workload_certificate_binding",
+    "distinct_control_plane_approver"
   ],
   "failure_cases": [
     {"missing": "authenticated_tenant_identity", "expected": "deny"},
@@ -25,7 +30,9 @@
     {"missing": "valid_provider_registry_snapshot", "expected": "deny"},
     {"missing": "required_full_inspection", "expected": "deny"},
     {"missing": "durable_audit_and_outbox", "expected": "deny"},
-    {"missing": "authorized_secret_reference", "expected": "deny"}
+    {"missing": "authorized_secret_reference", "expected": "deny"},
+    {"missing": "verified_workload_certificate_binding", "expected": "deny"},
+    {"missing": "distinct_control_plane_approver", "expected": "deny"}
   ],
   "expected": {
     "insecure_startup_configuration": "reject_startup",

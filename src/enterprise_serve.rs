@@ -253,10 +253,8 @@ fn gateway_server_config(
                 .map_err(|_| "gateway trusted proxy must be an exact IP address".to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if mode == DedicatedServerMode::DataPlane {
-        server_config.tls = prodex_app::runtime_policy_gateway_tls_config()
-            .map_err(|error| format!("failed to configure gateway TLS: {error}"))?;
-    }
+    server_config.tls = prodex_app::runtime_policy_gateway_tls_config()
+        .map_err(|error| format!("failed to configure gateway TLS: {error}"))?;
     Ok(server_config)
 }
 
