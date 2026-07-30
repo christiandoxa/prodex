@@ -56,7 +56,7 @@ Status values are:
 | Control | Status | Source evidence |
 | --- | --- | --- |
 | Live low-cardinality telemetry | verified | Authn/authz/policy/secret/API/provider/inspection/audit/persistence counters, bounded gauges, and classic histograms |
-| Operational alerting artifacts | verified | Checked-in Prometheus rules and Grafana panels for latency, failures, SIEM, audit, and queue saturation |
+| Operational alerting artifacts | verified | Checked-in Prometheus rules and Grafana panels for latency, failures, SIEM, audit, and queue saturation; metadata guard plus `promtool` syntax and synthetic firing tests |
 | Runtime diagnostics without TUI output | verified | Runtime log markers, doctor summaries, and stdout/stderr isolation tests |
 | Hardened deployment artifacts | verified | Non-root/read-only manifests, least privilege, probes, disruption budget, and deny-default/allow-listed network policy guard |
 | Supply-chain release gates | verified | Locked dependencies, audit/deny checks, SBOM/provenance, signed checksum, and vulnerability scanning workflow |

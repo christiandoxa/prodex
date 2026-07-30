@@ -1,0 +1,104 @@
+rule_files:
+  - prodex-alerts.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: gateway availability burn windows fire on sustained errors
+    interval: 1m
+    input_series:
+      - series: 'prodex_api_requests_total{status_class="2xx"}'
+        values: '0+540x400'
+      - series: 'prodex_api_requests_total{status_class="5xx"}'
+        values: '0+60x400'
+    alert_rule_test:
+      - eval_time: 6h20m
+        alertname: ProdexGatewayAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              owner: prodex-platform
+              escalation: page
+            exp_annotations:
+              summary: Prodex gateway availability error budget is burning rapidly
+              description: The 99.9% availability error budget is burning above 14.4x over both five-minute and one-hour windows.
+              runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+              auto_resolve: Resolves automatically when either burn-rate window falls below threshold.
+              closure_evidence: Attach both burn-rate windows, incident cause, remediation, and recovered availability evidence.
+      - eval_time: 6h20m
+        alertname: ProdexGatewayAvailabilitySlowBurn
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              owner: prodex-platform
+              escalation: ticket
+            exp_annotations:
+              summary: Prodex gateway availability error budget is burning steadily
+              description: The 99.9% availability error budget is burning above 6x over both thirty-minute and six-hour windows.
+              runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+              auto_resolve: Resolves automatically when either burn-rate window falls below threshold.
+              closure_evidence: Attach both burn-rate windows, incident cause, remediation, and recovered availability evidence.
+  - name: gateway latency windows fire on sustained high p99
+    interval: 1m
+    input_series:
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="30000"}'
+        values: '0x400'
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="60000"}'
+        values: '0+100x400'
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="+Inf"}'
+        values: '0+100x400'
+    alert_rule_test:
+      - eval_time: 6h20m
+        alertname: ProdexApiP99LatencyFast
+        exp_alerts:
+          - exp_labels:
+              api_route: responses
+              severity: critical
+              owner: prodex-platform
+              escalation: page
+            exp_annotations:
+              summary: Prodex API p99 latency is rapidly exceeding its threshold
+              description: Gateway time-to-response-commit p99 exceeds thirty seconds over both five-minute and one-hour windows.
+              runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+              auto_resolve: Resolves automatically when either latency window falls below threshold.
+              closure_evidence: Attach both latency windows, queue and dependency evidence, remediation, and recovered p99 evidence.
+      - eval_time: 6h20m
+        alertname: ProdexApiP99LatencySlow
+        exp_alerts:
+          - exp_labels:
+              api_route: responses
+              severity: warning
+              owner: prodex-platform
+              escalation: ticket
+            exp_annotations:
+              summary: Prodex API p99 latency is steadily exceeding its threshold
+              description: Gateway time-to-response-commit p99 exceeds thirty seconds over both thirty-minute and six-hour windows.
+              runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+              auto_resolve: Resolves automatically when either latency window falls below threshold.
+              closure_evidence: Attach both latency windows, queue and dependency evidence, remediation, and recovered p99 evidence.
+  - name: healthy gateway does not burn availability or latency objectives
+    interval: 1m
+    input_series:
+      - series: 'prodex_api_requests_total{status_class="2xx"}'
+        values: '0+600x400'
+      - series: 'prodex_api_requests_total{status_class="5xx"}'
+        values: '0x400'
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="1000"}'
+        values: '0+100x400'
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="30000"}'
+        values: '0+100x400'
+      - series: 'prodex_api_request_duration_ms_bucket{api_route="responses",le="+Inf"}'
+        values: '0+100x400'
+    alert_rule_test:
+      - eval_time: 6h20m
+        alertname: ProdexGatewayAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 6h20m
+        alertname: ProdexGatewayAvailabilitySlowBurn
+        exp_alerts: []
+      - eval_time: 6h20m
+        alertname: ProdexApiP99LatencyFast
+        exp_alerts: []
+      - eval_time: 6h20m
+        alertname: ProdexApiP99LatencySlow
+        exp_alerts: []

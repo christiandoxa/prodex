@@ -59,5 +59,7 @@ test("Windows CI runs three test partitions with one cache writer", () => {
     /-p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands/,
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
+  assert.match(block, /--workspace --exclude prodex --all-features -- --test-threads=4/);
+  assert.match(block, /--all-features --jobs 4 --shard-index/);
   assert.match(block, /--shard-index \$\{\{ matrix\.auto_rotate_shard \}\} --shard-count 2/);
 });

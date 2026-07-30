@@ -95,8 +95,9 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["name: prodex-gateway-policy", "gateway policy ConfigMap"],
   ["token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_METRICS_TOKEN\" }", "metrics viewer admin token policy binding"],
   ['role = "viewer"', "metrics viewer admin token role"],
-  ["mountPath: /var/lib/prodex/policy.toml", "gateway policy file mount"],
-  ["subPath: policy.toml", "gateway policy ConfigMap subPath"],
+  ['args: ["serve", "--listen", "0.0.0.0:4000", "--config-publication-postgres"]', "gateway PostgreSQL config-publication consumer"],
+  ['command: ["ln", "-sfn", "/var/lib/prodex/policy-source/policy.toml", "/var/lib/prodex/policy.toml"]', "live gateway policy link"],
+  ["mountPath: /var/lib/prodex/policy-source", "updateable gateway policy directory mount"],
   ['backend = "postgres"', "PostgreSQL gateway state backend"],
   ["postgres_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_POSTGRES_URL\" }", "PostgreSQL gateway state URL reference"],
   ['postgres_tls_mode = "verify-full"', "PostgreSQL certificate and hostname verification policy"],
@@ -119,7 +120,8 @@ const REQUIRED_CONTROL_PLANE_MARKERS = Object.freeze([
   ["serviceAccountName: prodex-control-plane", "explicit control-plane service account"],
   ["app.kubernetes.io/component: control-plane", "control-plane component label"],
   ['command: ["/usr/local/bin/prodex-control-plane"]', "control-plane binary command"],
-  ['args: ["serve", "--listen", "0.0.0.0:4100"]', "explicit control-plane listen address"],
+  ['args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]', "control-plane listen address and PostgreSQL config-publication consumer"],
+  ["name: prodex-control-plane-policy-link", "control-plane live policy link initializer"],
   ["service_mode = \"control-plane\"", "typed control-plane runtime policy mode"],
   ["PRODEX_CONTROL_PLANE_ADMIN_TOKEN", "projected control-plane admin token"],
   ["terminationGracePeriodSeconds: 45", "control-plane termination grace period"],
@@ -542,8 +544,8 @@ export function validateDeploymentSecurity(inputs) {
     if (!/^\s*command:\s*\["\/usr\/local\/bin\/prodex-gateway"\]\s*$/mu.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must use the dedicated prodex-gateway entrypoint`);
     }
-    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4000"\]\s*$/mu.test(gatewayDeployment)) {
-      checks.push(`${kubernetesPath}: gateway Deployment must run the dedicated serve command`);
+    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4000",\s*"--config-publication-postgres"\]\s*$/mu.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway Deployment must run serve with PostgreSQL config publication`);
     }
     if (/envFrom:[\s\S]*?secretRef:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Secret must not be consumed through envFrom`);
@@ -557,14 +559,30 @@ export function validateDeploymentSecurity(inputs) {
     if (/secretRef:\s*\n\s*name:\s*prodex-control-plane-secrets/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway workload must not mount prodex-control-plane-secrets`);
     }
-    if (!/mountPath:\s*\/var\/lib\/prodex\/policy\.toml[\s\S]*?subPath:\s*policy\.toml/u.test(gatewayDeployment)) {
-      checks.push(`${kubernetesPath}: gateway Deployment must mount policy.toml from ConfigMap`);
+    if (!/name:\s*prodex-gateway-policy-link[\s\S]*?command:\s*\["ln",\s*"-sfn",\s*"\/var\/lib\/prodex\/policy-source\/policy\.toml",\s*"\/var\/lib\/prodex\/policy\.toml"\]/u.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway Deployment must initialize the live policy link`);
+    }
+    const gatewayPolicyMountCount =
+      gatewayDeployment.match(/name:\s*gateway-policy\s*\n\s*mountPath:\s*\/var\/lib\/prodex\/policy-source\s*\n\s*readOnly:\s*true/gu)?.length ?? 0;
+    if (gatewayPolicyMountCount !== 2) {
+      checks.push(`${kubernetesPath}: gateway Deployment must mount the updateable policy directory in its init and serving containers`);
+    }
+    const gatewayRootMountCount =
+      gatewayDeployment.match(/name:\s*prodex-home\s*\n\s*mountPath:\s*\/var\/lib\/prodex\s*$/gmu)?.length ?? 0;
+    if (gatewayRootMountCount !== 2) {
+      checks.push(`${kubernetesPath}: gateway Deployment must preserve its writable runtime root in its init and serving containers`);
+    }
+    if (/subPath:\s*policy\.toml/u.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway policy mount must not use update-blocking subPath`);
     }
     if (!/configMap:\s*\n\s*name:\s*prodex-gateway-policy/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must source policy.toml from prodex-gateway-policy`);
     }
-    const gatewayVolumeMounts =
-      gatewayDeployment.split(/\n\s+volumeMounts:\s*\n/u)[1]?.split(/\n\s+volumes:\s*\n/u)[0] ?? "";
+    const gatewayVolumeMounts = gatewayDeployment
+      .split(/\n\s+volumeMounts:\s*\n/u)
+      .slice(1)
+      .map((section) => section.split(/\n\s+(?:initContainers|containers|volumes):\s*\n/u)[0])
+      .find((section) => /name:\s+prodex-gateway-secrets\b/u.test(section)) ?? "";
     const gatewaySecretMount = gatewayVolumeMounts
       .split(/(?=^\s+-\s+name:\s+)/mu)
       .find((item) => /name:\s+prodex-gateway-secrets\b/u.test(item));
@@ -611,8 +629,8 @@ export function validateDeploymentSecurity(inputs) {
     ) {
       checks.push(`${kubernetesPath}: control-plane Deployment must spread across zones and nodes`);
     }
-    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4100"\]\s*$/mu.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane Deployment must listen explicitly on 0.0.0.0:4100`);
+    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4100",\s*"--config-publication-postgres"\]\s*$/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must listen explicitly and consume PostgreSQL config publication`);
     }
     if (!/terminationGracePeriodSeconds:\s*45\b/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must declare a 45-second termination grace period`);
@@ -629,14 +647,30 @@ export function validateDeploymentSecurity(inputs) {
     if (!/name:\s*PRODEX_CONFIG_PUBLICATION_REPLICA_ID\s*\n\s*valueFrom:\s*\n\s*fieldRef:\s*\n\s*fieldPath:\s*metadata\.name/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane config-publication replica ID must come from the pod name`);
     }
-    if (!/mountPath:\s*\/var\/lib\/prodex\/policy\.toml[\s\S]*?subPath:\s*policy\.toml/u.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane Deployment must mount its policy.toml ConfigMap`);
+    if (!/name:\s*prodex-control-plane-policy-link[\s\S]*?command:\s*\["ln",\s*"-sfn",\s*"\/var\/lib\/prodex\/policy-source\/policy\.toml",\s*"\/var\/lib\/prodex\/policy\.toml"\]/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must initialize the live policy link`);
+    }
+    const controlPlanePolicyMountCount =
+      controlPlaneDeployment.match(/name:\s*control-plane-policy\s*\n\s*mountPath:\s*\/var\/lib\/prodex\/policy-source\s*\n\s*readOnly:\s*true/gu)?.length ?? 0;
+    if (controlPlanePolicyMountCount !== 2) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must mount the updateable policy directory in its init and serving containers`);
+    }
+    const controlPlaneRootMountCount =
+      controlPlaneDeployment.match(/name:\s*prodex-home\s*\n\s*mountPath:\s*\/var\/lib\/prodex\s*$/gmu)?.length ?? 0;
+    if (controlPlaneRootMountCount !== 2) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must preserve its writable runtime root in its init and serving containers`);
+    }
+    if (/subPath:\s*policy\.toml/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane policy mount must not use update-blocking subPath`);
     }
     if (!/configMap:\s*\n\s*name:\s*prodex-control-plane-policy/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must source prodex-control-plane-policy`);
     }
-    const controlPlaneVolumeMounts =
-      controlPlaneDeployment.split(/\n\s+volumeMounts:\s*\n/u)[1]?.split(/\n\s+volumes:\s*\n/u)[0] ?? "";
+    const controlPlaneVolumeMounts = controlPlaneDeployment
+      .split(/\n\s+volumeMounts:\s*\n/u)
+      .slice(1)
+      .map((section) => section.split(/\n\s+(?:initContainers|containers|volumes):\s*\n/u)[0])
+      .find((section) => /name:\s+prodex-control-plane-secrets\b/u.test(section)) ?? "";
     const controlPlaneSecretMount = controlPlaneVolumeMounts
       .split(/(?=^\s+-\s+name:\s+)/mu)
       .find((item) => /name:\s+prodex-control-plane-secrets\b/u.test(item));
@@ -948,10 +982,24 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: prodex-gateway-policy-link
+          command: ["ln", "-sfn", "/var/lib/prodex/policy-source/policy.toml", "/var/lib/prodex/policy.toml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: gateway-policy
+              mountPath: /var/lib/prodex/policy-source
+              readOnly: true
       containers:
         - name: prodex-gateway
           command: ["/usr/local/bin/prodex-gateway"]
-          args: ["serve", "--listen", "0.0.0.0:4000"]
+          args: ["serve", "--listen", "0.0.0.0:4000", "--config-publication-postgres"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -966,14 +1014,17 @@ spec:
             fieldRef:
               fieldPath: metadata.name
       volumeMounts:
+        - name: prodex-home
+          mountPath: /var/lib/prodex
         - name: prodex-gateway-secrets
           mountPath: /run/secrets/prodex
           readOnly: true
         - name: gateway-policy
-          mountPath: /var/lib/prodex/policy.toml
-          subPath: policy.toml
+          mountPath: /var/lib/prodex/policy-source
           readOnly: true
       volumes:
+        - name: prodex-home
+          emptyDir: {}
         - name: prodex-gateway-secrets
           projected:
             defaultMode: 0440
@@ -1002,10 +1053,24 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
         - topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
+      initContainers:
+        - name: prodex-control-plane-policy-link
+          command: ["ln", "-sfn", "/var/lib/prodex/policy-source/policy.toml", "/var/lib/prodex/policy.toml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: control-plane-policy
+              mountPath: /var/lib/prodex/policy-source
+              readOnly: true
       containers:
         - name: prodex-control-plane
           command: ["/usr/local/bin/prodex-control-plane"]
-          args: ["serve", "--listen", "0.0.0.0:4100"]
+          args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]
           envFrom:
             - configMapRef:
                 name: prodex-control-plane-config
@@ -1024,14 +1089,17 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
             - name: prodex-control-plane-secrets
               mountPath: /run/secrets/prodex
               readOnly: true
             - name: control-plane-policy
-              mountPath: /var/lib/prodex/policy.toml
-              subPath: policy.toml
+              mountPath: /var/lib/prodex/policy-source
               readOnly: true
       volumes:
+        - name: prodex-home
+          emptyDir: {}
         - name: prodex-control-plane-secrets
           projected:
             defaultMode: 0440
@@ -1486,9 +1554,19 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("mountPath: /var/lib/prodex/policy.toml", "mountPath: /var/lib/prodex/policy-missing.toml"),
-    }).some((error) => error.includes("gateway Deployment must mount policy.toml")),
+      kubernetes: valid.kubernetes.replaceAll("mountPath: /var/lib/prodex/policy-source", "mountPath: /var/lib/prodex/policy-missing"),
+    }).some((error) => error.includes("gateway Deployment must mount the updateable policy directory")),
     "missing gateway policy mount accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "          mountPath: /var/lib/prodex/policy-source\n          readOnly: true",
+        "          mountPath: /var/lib/prodex/policy-source\n          subPath: policy.toml\n          readOnly: true",
+      ),
+    }).some((error) => error.includes("must not use update-blocking subPath")),
+    "update-blocking gateway policy subPath accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
@@ -1558,11 +1636,11 @@ export function runSelfTest() {
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
+        'args: ["serve", "--listen", "0.0.0.0:4000", "--config-publication-postgres"]',
         'args: ["serve", "--listen", "0.0.0.0:4000"]',
-        'args: ["gateway", "--listen", "0.0.0.0:4000"]',
       ),
-    }).some((error) => error.includes("dedicated serve command")),
-    "legacy Kubernetes gateway arguments accepted",
+    }).some((error) => error.includes("serve with PostgreSQL config publication")),
+    "gateway accepted without PostgreSQL config publication",
   );
   assertSelfTest(
     validateDeploymentSecurity({
@@ -1713,7 +1791,7 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
+      kubernetes: valid.kubernetes.replaceAll("readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
     }).some((error) => error.includes("gateway Deployment read-only container filesystem")),
     "unhardened gateway workload accepted",
   );
@@ -1916,11 +1994,11 @@ export function runSelfTest() {
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
+        'args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]',
         'args: ["serve", "--listen", "0.0.0.0:4100"]',
-        'args: ["serve"]',
       ),
-    }).some((error) => error.includes("listen explicitly on 0.0.0.0:4100")),
-    "implicit loopback control-plane listen accepted",
+    }).some((error) => error.includes("consume PostgreSQL config publication")),
+    "control-plane accepted without PostgreSQL config publication",
   );
   assertSelfTest(
     validateDeploymentSecurity({

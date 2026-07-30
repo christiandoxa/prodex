@@ -222,12 +222,28 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: prodex-gateway
+      initContainers:
+        - name: prodex-gateway-policy-link
+          image: ghcr.io/christiandoxa/prodex@sha256:PRODEX_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          command: ["ln", "-sfn", "/var/lib/prodex/policy-source/policy.toml", "/var/lib/prodex/policy.toml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: gateway-policy
+              mountPath: /var/lib/prodex/policy-source
+              readOnly: true
       containers:
         - name: prodex-gateway
           image: ghcr.io/christiandoxa/prodex@sha256:PRODEX_IMAGE_DIGEST
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/prodex-gateway"]
-          args: ["serve", "--listen", "0.0.0.0:4000"]
+          args: ["serve", "--listen", "0.0.0.0:4000", "--config-publication-postgres"]
           ports:
             - name: http
               containerPort: 4000
@@ -283,8 +299,7 @@ spec:
               mountPath: /run/secrets/prodex
               readOnly: true
             - name: gateway-policy
-              mountPath: /var/lib/prodex/policy.toml
-              subPath: policy.toml
+              mountPath: /var/lib/prodex/policy-source
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -592,12 +607,28 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: prodex-control-plane
+      initContainers:
+        - name: prodex-control-plane-policy-link
+          image: ghcr.io/christiandoxa/prodex@sha256:PRODEX_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          command: ["ln", "-sfn", "/var/lib/prodex/policy-source/policy.toml", "/var/lib/prodex/policy.toml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: control-plane-policy
+              mountPath: /var/lib/prodex/policy-source
+              readOnly: true
       containers:
         - name: prodex-control-plane
           image: ghcr.io/christiandoxa/prodex@sha256:PRODEX_IMAGE_DIGEST
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/prodex-control-plane"]
-          args: ["serve", "--listen", "0.0.0.0:4100"]
+          args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]
           ports:
             - name: http
               containerPort: 4100
@@ -653,8 +684,7 @@ spec:
               mountPath: /run/secrets/prodex
               readOnly: true
             - name: control-plane-policy
-              mountPath: /var/lib/prodex/policy.toml
-              subPath: policy.toml
+              mountPath: /var/lib/prodex/policy-source
               readOnly: true
             - name: tmp
               mountPath: /tmp

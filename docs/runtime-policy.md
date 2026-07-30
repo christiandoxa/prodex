@@ -255,6 +255,12 @@ contain revision IDs and targets rather than policy content or credentials, so
 deploy the candidate `policy.toml` to every runtime root before publishing its
 notification.
 
+Kubernetes consumers must expose `policy.toml` through an updateable directory
+projection rather than a ConfigMap `subPath` mount. The tracked manifest mounts
+the ConfigMap at `/var/lib/prodex/policy-source` and links the projected file into
+the writable Prodex root before startup, so later atomic ConfigMap updates remain
+visible when a PostgreSQL publication notification triggers reload.
+
 Example:
 
 ```toml

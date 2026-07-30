@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
@@ -34,4 +35,19 @@ test("full Rust runner locks every direct cargo test command", () => {
   const cargoTestLines = result.stdout.split("\n").filter((line) => line.includes(": cargo test "));
   assert.ok(cargoTestLines.length > 0);
   assert.ok(cargoTestLines.every((line) => line.includes("cargo test --locked ")));
+});
+
+test("scheduled full suite runs workspace and prodex-app partitions in parallel", () => {
+  const workflow = readFileSync(".github/workflows/full-test.yml", "utf8");
+
+  assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
+  assert.match(workflow, /- suite: workspace/);
+  assert.match(workflow, /- suite: prodex-app-lib/);
+  assert.equal(workflow.match(/save_cache: true/g)?.length, 1);
+  assert.equal(workflow.match(/save_cache: false/g)?.length, 1);
+  assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
+  assert.match(
+    workflow,
+    /cargo test --locked -q -p prodex-app --lib --all-features -- \\\n\s+--test-threads=1/,
+  );
 });
