@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.374.0 - 2026-07-31
+
+### Misc
+
+- Make revision publication atomic (`b4f1ade`)
+
 ## 0.373.0 - 2026-07-30
 
 ### Misc
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.363.0 - 2026-07-28
 
 - No grouped changes.
-
-## 0.362.0 - 2026-07-28
-
-### Runtime
-
-- Harden runtime compatibility edge cases (`ec50608`)
