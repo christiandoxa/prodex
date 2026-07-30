@@ -17,11 +17,18 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use prodex_application::ApplicationResponseObligationPlan;
-use prodex_provider_core::{estimate_text_tokens, gemini_provider_core_live_binary_frame_error};
+use prodex_observability::InspectionStage;
+use prodex_provider_core::{
+    estimate_text_tokens, gemini_provider_core_live_binary_frame_error,
+    gemini_provider_core_live_provider_stream_error,
+};
 use std::io::{Read, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 use tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
+
+const GEMINI_LIVE_BINARY_OUTPUT_UNSUPPORTED_MESSAGE: &str =
+    "Gemini Live provider returned unsupported binary websocket output.";
 
 pub(super) fn runtime_gemini_live_session<S>(
     request_id: u64,
@@ -134,6 +141,9 @@ where
                     translated.wait_for_setup,
                     translated.wait_for_turn,
                 )?;
+                if usage.policy_interrupted {
+                    return Ok(());
+                }
             }
             Ok(WsMessage::Ping(payload)) => {
                 local_socket
@@ -317,9 +327,15 @@ where
                 let _ = local_socket.close(frame);
                 return Ok(());
             }
-            Ok(WsMessage::Binary(_)) | Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {
-                progressed = true;
+            Ok(WsMessage::Binary(_)) => {
+                return runtime_gemini_live_reject_upstream_binary(
+                    request_id,
+                    local_socket,
+                    usage,
+                    shared,
+                );
             }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => progressed = true,
             Err(err) if crate::runtime_websocket_timeout_error(&err) => {}
             Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
                 return Ok(());
@@ -397,7 +413,15 @@ where
                 let _ = local_socket.close(frame);
                 return Ok(());
             }
-            Ok(WsMessage::Binary(_)) | Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Binary(_)) => {
+                return runtime_gemini_live_reject_upstream_binary(
+                    request_id,
+                    local_socket,
+                    usage,
+                    shared,
+                );
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Err(err) if crate::runtime_websocket_timeout_error(&err) => return Ok(()),
             Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
                 return Ok(());
@@ -456,6 +480,85 @@ where
         .send(WsMessage::Text(text.into()))
         .context("failed to send translated Gemini Live event")?;
     Ok(true)
+}
+
+fn runtime_gemini_live_reject_upstream_binary<S>(
+    request_id: u64,
+    socket: &mut WsSocket<S>,
+    usage: &mut RuntimeGatewayRealtimeUsage,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<()>
+where
+    S: Read + Write,
+{
+    let mode = shared.runtime_shared.runtime_config.governance.mode;
+    let enforcing = mode.is_enforcing();
+    usage.policy_interrupted = true;
+    crate::runtime_proxy::presidio::runtime_emit_inspection_denied_metric(
+        &shared.runtime_shared,
+        InspectionStage::ResponseEnforcement,
+    );
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_response_inspection",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "gemini_live_websocket"),
+                runtime_proxy_log_field("coverage", "unsupported"),
+                runtime_proxy_log_field("outcome", "denied"),
+                runtime_proxy_log_field("mode", mode.as_str()),
+                runtime_proxy_log_field(
+                    "action",
+                    if enforcing {
+                        "policy_close"
+                    } else {
+                        "unsupported_close"
+                    },
+                ),
+            ],
+        ),
+    );
+    if enforcing {
+        runtime_gateway_guardrail_websocket_block(
+            request_id,
+            shared,
+            "response_inspection_unsupported",
+        );
+    }
+    runtime_gemini_live_send_binary_output_error_and_close(
+        socket,
+        runtime_gemini_live_binary_output_close_code(mode),
+    )
+}
+
+fn runtime_gemini_live_binary_output_close_code(mode: prodex_config::GovernanceMode) -> CloseCode {
+    if mode.is_enforcing() {
+        CloseCode::Policy
+    } else {
+        CloseCode::Unsupported
+    }
+}
+
+fn runtime_gemini_live_send_binary_output_error_and_close<S>(
+    socket: &mut WsSocket<S>,
+    code: CloseCode,
+) -> Result<()>
+where
+    S: Read + Write,
+{
+    let send_result = runtime_gemini_live_send_json(
+        socket,
+        gemini_provider_core_live_provider_stream_error(
+            GEMINI_LIVE_BINARY_OUTPUT_UNSUPPORTED_MESSAGE,
+        ),
+    );
+    let close_result = socket.close(Some(CloseFrame {
+        code,
+        reason: "binary provider output unsupported".into(),
+    }));
+    send_result?;
+    close_result.context("failed to close Gemini Live after unsupported binary output")
 }
 
 fn runtime_gemini_live_accept_input(
@@ -518,6 +621,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{TcpListener, TcpStream};
+    use tungstenite::{connect, stream::MaybeTlsStream};
 
     fn accounting(token_limit: u64) -> RuntimeGatewayRealtimeAccountingPlan {
         RuntimeGatewayRealtimeAccountingPlan {
@@ -547,5 +652,64 @@ mod tests {
         assert!(output_usage.output_tokens > 1);
         assert_eq!(output_usage.output_bytes, 8);
         assert!(output_usage.policy_interrupted);
+    }
+
+    #[test]
+    fn upstream_binary_output_is_explicit_and_terminal() {
+        let (mut bridge, mut client) = test_websocket_pair();
+
+        runtime_gemini_live_send_binary_output_error_and_close(&mut bridge, CloseCode::Unsupported)
+            .expect("unsupported output should produce a terminal protocol response");
+
+        let WsMessage::Text(error) = client.read().expect("client should receive error") else {
+            panic!("expected provider stream error");
+        };
+        let error: serde_json::Value =
+            serde_json::from_str(error.as_ref()).expect("error should be JSON");
+        assert_eq!(error["error"]["type"], "provider_stream_error");
+        assert_eq!(
+            error["error"]["message"],
+            GEMINI_LIVE_BINARY_OUTPUT_UNSUPPORTED_MESSAGE
+        );
+        let WsMessage::Close(Some(frame)) = client.read().expect("client should receive close")
+        else {
+            panic!("expected terminal close frame");
+        };
+        assert_eq!(frame.code, CloseCode::Unsupported);
+    }
+
+    #[test]
+    fn enforcing_mode_uses_policy_close_for_binary_output() {
+        assert_eq!(
+            runtime_gemini_live_binary_output_close_code(
+                prodex_config::GovernanceMode::EnterpriseEnforce
+            ),
+            CloseCode::Policy
+        );
+        assert_eq!(
+            runtime_gemini_live_binary_output_close_code(
+                prodex_config::GovernanceMode::BankEnforce
+            ),
+            CloseCode::Policy
+        );
+        assert_eq!(
+            runtime_gemini_live_binary_output_close_code(prodex_config::GovernanceMode::Personal),
+            CloseCode::Unsupported
+        );
+    }
+
+    fn test_websocket_pair() -> (WsSocket<TcpStream>, WsSocket<MaybeTlsStream<TcpStream>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should expose address");
+        let client = thread::spawn(move || {
+            connect(format!("ws://{address}"))
+                .expect("client should connect")
+                .0
+        });
+        let (stream, _) = listener.accept().expect("server should accept client");
+        let bridge = tungstenite::accept(stream).expect("server handshake should succeed");
+        (bridge, client.join().expect("client thread should join"))
     }
 }

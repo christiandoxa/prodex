@@ -122,7 +122,7 @@ pub(super) fn runtime_emit_inspection_metric(
     }
 }
 
-pub(super) fn runtime_emit_inspection_denied_metric(
+pub(crate) fn runtime_emit_inspection_denied_metric(
     shared: &RuntimeRotationProxyShared,
     stage: InspectionStage,
 ) {

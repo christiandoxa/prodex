@@ -211,6 +211,41 @@ jobs:
       - name: Lint markdown docs
         run: npm run docs:lint
 
+  observability-alerts:
+    name: Prometheus alert rule tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate alert metadata and runbooks
+        run: |
+          node scripts/ci/observability-alerts-guard.mjs --self-test
+          node scripts/ci/observability-alerts-guard.mjs
+
+      - name: Check and test alert rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          promtool_image="docker.io/prom/prometheus:v3.12.0@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac"
+          mkdir -p target
+          rules_dir="$(mktemp -d "${PWD}/target/promtool.XXXXXX")"
+          sed -n '/^spec:$/,$p' deploy/observability/prodex-alerts.yaml \
+            | sed '1d; s/^  //' \
+            > "${rules_dir}/prodex-alerts.rules.yaml"
+          test -s "${rules_dir}/prodex-alerts.rules.yaml"
+          cp deploy/observability/prodex-alerts.test.yaml "${rules_dir}/"
+          docker run --rm --entrypoint /bin/promtool \
+            -v "${rules_dir}:/rules:ro" \
+            "${promtool_image}" \
+            check rules /rules/prodex-alerts.rules.yaml
+          docker run --rm --entrypoint /bin/promtool \
+            -v "${rules_dir}:/rules:ro" \
+            "${promtool_image}" \
+            test rules /rules/prodex-alerts.test.yaml
+
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -334,7 +369,7 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q --workspace --exclude prodex --all-features -- --test-threads=2 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
+          cargo test --locked -q --workspace --exclude prodex --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
           cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
           cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
 
@@ -348,14 +383,14 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands --all-features -- --test-threads=2
+          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands --all-features -- --test-threads=4
           cargo test --locked -q -p prodex --doc --all-features
 
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
         if: startsWith(matrix.suite, 'root-')
         env:
           RUST_BACKTRACE: "1"
-        run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 2 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
+        run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
   macos-workspace:
     name: macOS full workspace tests
@@ -1250,6 +1285,7 @@ jobs:
       - fmt
       - fuzz-build
       - docs-lint
+      - observability-alerts
       - secret-scan
       - windows-security
       - windows-workspace

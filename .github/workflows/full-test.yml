@@ -19,11 +19,21 @@ concurrency:
 
 jobs:
   full-test:
-    name: Full partitioned all-features tests
+    name: Full tests (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: workspace
+            label: workspace and auto-rotate
+            save_cache: true
+          - suite: prodex-app-lib
+            label: prodex-app library
+            save_cache: false
 
     steps:
       - name: Check out repository
@@ -45,16 +55,33 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+          save-if: ${{ matrix.save_cache }}
 
-      - name: Run full local test suite
+      - name: Run full test partition
         shell: bash
         env:
           RUST_BACKTRACE: "1"
         run: |
           set -euo pipefail
-          artifact_dir="${RUNNER_TEMP}/full-test-diagnostics"
+          artifact_dir="${RUNNER_TEMP}/full-test-${{ matrix.suite }}-diagnostics"
           cargo_log="${artifact_dir}/cargo-test.log"
           runtime_pointer="/tmp/prodex-runtime-latest.path"
+          suite="${{ matrix.suite }}"
+
+          case "${suite}" in
+            workspace)
+              command_description="node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib"
+              ;;
+            prodex-app-lib)
+              command_description="cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1"
+              ;;
+            *)
+              echo "unknown full-test suite: ${suite}" >&2
+              exit 2
+              ;;
+          esac
 
           rm -rf "${artifact_dir}"
           mkdir -p "${artifact_dir}"
@@ -66,7 +93,8 @@ jobs:
           run_id=${GITHUB_RUN_ID}
           run_attempt=${GITHUB_RUN_ATTEMPT}
           runner_os=${RUNNER_OS}
-          command=node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json
+          suite=${suite}
+          command=${command_description}
           started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
 
@@ -74,12 +102,22 @@ jobs:
           cargo -Vv > "${artifact_dir}/cargo-version.txt"
 
           set +e
-          node scripts/ci/full-rust-test.mjs \
-            --jobs 6 \
-            --test-threads 4 \
-            --timings \
-            --timings-json \
-            > "${cargo_log}" 2>&1
+          case "${suite}" in
+            workspace)
+              node scripts/ci/full-rust-test.mjs \
+                --jobs 6 \
+                --test-threads 4 \
+                --timings \
+                --timings-json \
+                --no-prodex-app-lib \
+                > "${cargo_log}" 2>&1
+              ;;
+            prodex-app-lib)
+              cargo test --locked -q -p prodex-app --lib --all-features -- \
+                --test-threads=1 \
+                > "${cargo_log}" 2>&1
+              ;;
+          esac
           status=$?
           set -e
 
@@ -134,7 +172,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: full-test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/full-test-diagnostics
+          name: full-test-${{ matrix.suite }}-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-test-${{ matrix.suite }}-diagnostics
           if-no-files-found: ignore
           retention-days: 14

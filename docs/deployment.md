@@ -95,7 +95,10 @@ counters. With Prometheus Operator installed, apply
 `deploy/observability/prodex-dashboard.json` into Grafana for the matching
 operations dashboard. The checked-in `ServiceMonitor` uses the dedicated viewer
 token and does not expose raw tenant, principal, request, or secret identifiers
-as metric labels.
+as metric labels. CI validates every alert's owner, escalation, runbook, and
+closure metadata, then uses the pinned Prometheus `promtool` image to compile the
+rules and execute `deploy/observability/prodex-alerts.test.yaml` against healthy
+and sustained-failure signals.
 
 ## Operational Limits
 
@@ -283,7 +286,8 @@ Multi-replica deployments should use the PostgreSQL configuration-publication
 transport after migration schema 14 is installed. Give every live consumer a
 unique stable replica ID, normally from the Kubernetes pod name through
 `PRODEX_CONFIG_PUBLICATION_REPLICA_ID`, then start it with
-`--config-publication-postgres`. The operational flow is:
+`--config-publication-postgres`. The tracked Kubernetes gateway and control-plane
+Deployments enable this transport by default. The operational flow is:
 
 ```bash
 prodex-control-plane publish-config-publication --event <path> --postgres
@@ -336,8 +340,11 @@ The `ServiceMonitor` authenticates with `PRODEX_GATEWAY_METRICS_TOKEN` from
 `prodex-gateway-secrets`, not the gateway root token. The Secret is projected
 read-only at `/run/secrets/prodex` with mode `0440`; it is not imported through
 `envFrom` and the mount does not use `subPath`, so Kubernetes atomic projection
-updates remain visible. The manifest also mounts `prodex-gateway-policy` at
-`/var/lib/prodex/policy.toml`:
+updates remain visible. The policy ConfigMaps are likewise mounted as directories
+at `/var/lib/prodex/policy-source`, without `subPath`. A hardened init container
+links `/var/lib/prodex/policy.toml` to the projected file, preserving the writable
+runtime root while keeping Kubernetes atomic ConfigMap updates visible to the
+live PostgreSQL publication consumer. The gateway policy is:
 
 ```toml
 version = 1

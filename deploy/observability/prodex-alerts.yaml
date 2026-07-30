@@ -14,126 +14,256 @@ spec:
           for: 5m
           labels:
             severity: critical
+            owner: prodex-platform
+            escalation: page
           annotations:
             summary: Prodex gateway metrics target is down
             description: Prometheus has failed to scrape a Prodex gateway target for five minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized scrape health, incident timeline, remediation, and a passing target signal.
         - alert: ProdexAuthenticationFailures
           expr: sum(rate(prodex_authn_token_validation_events_total{authn_validation_result!="accepted"}[5m])) > 0.1
           for: 10m
           labels:
             severity: warning
+            owner: prodex-security
+            escalation: ticket
           annotations:
             summary: Prodex authentication failures are sustained
             description: Token validation failures exceed 0.1 events per second for ten minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#authentication-authorization-or-tenant-isolation-anomaly
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized validation reasons, identity health, remediation, and a passing negative-path check.
         - alert: ProdexAuthorizationDenials
           expr: sum(rate(prodex_authz_decisions_total{authz_result!="allowed"}[5m])) > 0.1
           for: 10m
           labels:
             severity: warning
+            owner: prodex-security
+            escalation: ticket
           annotations:
             summary: Prodex authorization denials are sustained
             description: Authorization denials exceed 0.1 events per second for ten minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#authentication-authorization-or-tenant-isolation-anomaly
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized denial reasons, policy revision, remediation, and passing authorization checks.
         - alert: ProdexTenantIsolationViolation
           expr: sum(increase(prodex_tenant_isolation_events_total{tenant_isolation_result!="enforced"}[5m])) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex rejected a tenant-isolation violation
             description: At least one missing-tenant, cross-tenant, or tenant-mismatch request was rejected.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#authentication-authorization-or-tenant-isolation-anomaly
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized tenant-isolation evidence, containment, remediation, and passing cross-tenant denial tests.
         - alert: ProdexSecretProviderFailures
           expr: sum(increase(prodex_secret_provider_operations_total{secret_result="failed"}[10m])) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex secret-provider operation failed
             description: A runtime secret read, write, or delete failed during the last ten minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#vault-or-external-secret-provider-failure
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized provider health, lease state, rotation evidence, and a successful secret operation.
         - alert: ProdexPolicyLifecycleFailures
           expr: sum(increase(prodex_policy_lifecycle_events_total{policy_lifecycle_result="failed"}[10m])) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex policy lifecycle operation failed
             description: A governed policy persist, publish, or invalidation operation failed.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#policy-or-provider-registry-refresh-failure
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized revision state, failed operation, rollback or remediation, and successful activation evidence.
         - alert: ProdexInspectionFailures
           expr: sum(increase(prodex_inspection_events_total{inspection_outcome=~"timeout|error"}[10m])) + sum(increase(prodex_inspection_events_total{inspection_coverage="unsupported"}[10m])) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex inspection coverage degraded
             description: At least one governed inspection failed, timed out, or encountered unsupported content.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#inspection-or-classification-service-failure
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach content-free coverage metrics, adapter health, remediation, and passing supported and unsupported-path tests.
         - alert: ProdexInspectionP99LatencyHigh
           expr: histogram_quantile(0.99, sum by (le) (rate(prodex_inspection_duration_microseconds_bucket[10m]))) > 2000000
           for: 15m
           labels:
             severity: warning
+            owner: prodex-security
+            escalation: ticket
           annotations:
             summary: Prodex inspection p99 latency is high
             description: Inspection p99 latency has exceeded two seconds for fifteen minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#inspection-or-classification-service-failure
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach bounded latency histograms, dependency health, capacity remediation, and recovered p99 evidence.
         - alert: ProdexProviderFailureRatioHigh
           expr: sum(rate(prodex_provider_requests_total{provider_result!="success"}[10m])) / clamp_min(sum(rate(prodex_provider_requests_total[10m])), 0.001) > 0.05
           for: 15m
           labels:
             severity: warning
+            owner: prodex-platform
+            escalation: ticket
           annotations:
             summary: Prodex provider failure ratio is high
             description: More than five percent of provider requests have failed for fifteen minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#provider-outage-or-degraded-eligible-set
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach sanitized provider result ratios, health state, remediation, and recovered success evidence.
         - alert: ProdexProviderP99LatencyHigh
           expr: histogram_quantile(0.99, sum by (le, provider) (rate(prodex_provider_request_duration_ms_bucket[10m]))) > 30000
           for: 15m
           labels:
             severity: warning
+            owner: prodex-platform
+            escalation: ticket
           annotations:
             summary: Prodex provider p99 latency is high
             description: Provider request p99 latency has exceeded thirty seconds for fifteen minutes.
-        - alert: ProdexApiServerErrorRatioHigh
-          expr: sum(rate(prodex_api_requests_total{status_class="5xx"}[10m])) / clamp_min(sum(rate(prodex_api_requests_total[10m])), 0.001) > 0.01
-          for: 10m
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#provider-outage-or-degraded-eligible-set
+            auto_resolve: Resolves automatically when the PromQL condition is false.
+            closure_evidence: Attach provider latency histograms, transport health, remediation, and recovered p99 evidence.
+        - alert: ProdexGatewayAvailabilityFastBurn
+          expr: |
+            (
+              sum(rate(prodex_api_requests_total{status_class="5xx"}[5m]))
+                / clamp_min(sum(rate(prodex_api_requests_total[5m])), 0.001)
+            ) > 0.0144
+            and
+            (
+              sum(rate(prodex_api_requests_total{status_class="5xx"}[1h]))
+                / clamp_min(sum(rate(prodex_api_requests_total[1h])), 0.001)
+            ) > 0.0144
+          for: 2m
           labels:
             severity: critical
+            owner: prodex-platform
+            escalation: page
           annotations:
-            summary: Prodex API server-error ratio is high
-            description: More than one percent of gateway API requests have returned a server error for ten minutes.
-        - alert: ProdexApiP99LatencyHigh
-          expr: histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[10m]))) > 30000
+            summary: Prodex gateway availability error budget is burning rapidly
+            description: The 99.9% availability error budget is burning above 14.4x over both five-minute and one-hour windows.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when either burn-rate window falls below threshold.
+            closure_evidence: Attach both burn-rate windows, incident cause, remediation, and recovered availability evidence.
+        - alert: ProdexGatewayAvailabilitySlowBurn
+          expr: |
+            (
+              sum(rate(prodex_api_requests_total{status_class="5xx"}[30m]))
+                / clamp_min(sum(rate(prodex_api_requests_total[30m])), 0.001)
+            ) > 0.006
+            and
+            (
+              sum(rate(prodex_api_requests_total{status_class="5xx"}[6h]))
+                / clamp_min(sum(rate(prodex_api_requests_total[6h])), 0.001)
+            ) > 0.006
           for: 15m
           labels:
             severity: warning
+            owner: prodex-platform
+            escalation: ticket
           annotations:
-            summary: Prodex API p99 latency is high
-            description: Gateway time-to-response-commit p99 has exceeded thirty seconds for fifteen minutes.
+            summary: Prodex gateway availability error budget is burning steadily
+            description: The 99.9% availability error budget is burning above 6x over both thirty-minute and six-hour windows.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when either burn-rate window falls below threshold.
+            closure_evidence: Attach both burn-rate windows, incident cause, remediation, and recovered availability evidence.
+        - alert: ProdexApiP99LatencyFast
+          expr: |
+            histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[5m]))) > 30000
+            and
+            histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[1h]))) > 30000
+          for: 2m
+          labels:
+            severity: critical
+            owner: prodex-platform
+            escalation: page
+          annotations:
+            summary: Prodex API p99 latency is rapidly exceeding its threshold
+            description: Gateway time-to-response-commit p99 exceeds thirty seconds over both five-minute and one-hour windows.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when either latency window falls below threshold.
+            closure_evidence: Attach both latency windows, queue and dependency evidence, remediation, and recovered p99 evidence.
+        - alert: ProdexApiP99LatencySlow
+          expr: |
+            histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[30m]))) > 30000
+            and
+            histogram_quantile(0.99, sum by (le, api_route) (rate(prodex_api_request_duration_ms_bucket[6h]))) > 30000
+          for: 15m
+          labels:
+            severity: warning
+            owner: prodex-platform
+            escalation: ticket
+          annotations:
+            summary: Prodex API p99 latency is steadily exceeding its threshold
+            description: Gateway time-to-response-commit p99 exceeds thirty seconds over both thirty-minute and six-hour windows.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when either latency window falls below threshold.
+            closure_evidence: Attach both latency windows, queue and dependency evidence, remediation, and recovered p99 evidence.
         - alert: ProdexSiemOutboxLagging
           expr: max(prodex_governance_siem_outbox_oldest_pending_lag_milliseconds) > 60000
           for: 10m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex SIEM outbox is lagging
             description: The oldest pending SIEM event has been delayed for more than one minute.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#mandatory-audit-or-siem-failure
+            auto_resolve: Resolves automatically when pending lag falls below threshold.
+            closure_evidence: Attach outbox lag and delivery evidence, sink health, remediation, and recovered delivery latency.
         - alert: ProdexSiemDeadLetters
           expr: max(prodex_governance_siem_outbox_dead_lettered) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex SIEM outbox contains dead letters
             description: At least one governance audit event could not be delivered to SIEM.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#mandatory-audit-or-siem-failure
+            auto_resolve: Resolves automatically after dead letters are safely remediated and the gauge returns to zero.
+            closure_evidence: Attach preserved event IDs, retry or replay evidence, sink remediation, and a zero dead-letter gauge.
         - alert: ProdexMandatoryAuditPersistenceFailure
           expr: sum(increase(prodex_audit_events_total{audit_operation="persist",audit_result="failure"}[5m])) > 0
           for: 0m
           labels:
             severity: critical
+            owner: prodex-security
+            escalation: page
           annotations:
             summary: Prodex mandatory audit persistence failed
             description: At least one governed request could not durably commit its audit event.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#mandatory-audit-or-siem-failure
+            auto_resolve: Resolves automatically when no persistence failure remains in the evaluation window.
+            closure_evidence: Attach content-free persistence errors, durable-store health, remediation, and a successful mandatory audit commit.
         - alert: ProdexAuditQueueSaturated
           expr: max(prodex_queue_depth{queue_kind="persistence"} / clamp_min(prodex_queue_capacity{queue_kind="persistence"}, 1)) > 0.8
           for: 5m
           labels:
             severity: critical
+            owner: prodex-platform
+            escalation: page
           annotations:
             summary: Prodex audit persistence queue is saturated
             description: The bounded persistence queue has remained above eighty percent capacity for five minutes.
+            runbook_url: https://github.com/christiandoxa/prodex/blob/main/docs/enterprise-governance/20-operations-slos-and-alerts.md#local-admission-or-queue-pressure
+            auto_resolve: Resolves automatically when queue utilization falls below threshold.
+            closure_evidence: Attach queue depth and capacity, downstream latency, remediation, and sustained recovered headroom.

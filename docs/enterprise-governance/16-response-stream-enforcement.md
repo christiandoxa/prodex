@@ -15,7 +15,7 @@ post-commit termination without weakening affinity or no-mid-stream rotation.
 | HTTP streaming response | Bank mode buffers locally inspectable text/SSE output up to the existing 4 MiB response bound and performs full local masking, output-limit, keyword, and post-webhook checks before commit. Other modes retain the 4 KiB pre-commit hold and bounded incremental literal inspector | A non-bank violation found after commit terminates the stream; already released safe bytes cannot be recalled |
 | Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the same guard-then-account stream wrapper | Direct generic WebSocket and binary output remain explicit partial/unsupported coverage rather than being reported as `Full` |
 | Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and receives `426 Upgrade Required` before upgrade in enforce mode, which activates Codex's native HTTPS fallback | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
-| Gemini Live WebSocket response | Anonymous/personal and virtual-key text frames are bounded, classified/governed, token-accounted, and terminally reconciled; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
+| Gemini Live WebSocket response | Anonymous/personal and virtual-key text frames are bounded, classified/governed, token-accounted, and terminally reconciled; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output is rejected with a stable provider-stream error, unsupported coverage evidence, interrupted reconciliation, and terminal close; enforcing modes also write policy audit |
 | Usage reconciliation | The spend reader wraps the governed output, so pre-commit denial and post-commit guard errors reconcile once as interrupted while clean EOF remains completed | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
 
@@ -170,9 +170,12 @@ content and follow the response obligation before local delivery or execution.
 
 Images, audio, video, files, and binary WebSocket frames are `Partial` or
 `Unsupported` unless an active real bounded adapter inspects that modality.
-Metadata-only checks do not produce `Full` coverage. In enforcement modes,
-policy must deny, constrain to an approved local path, or explicitly allow the
-known coverage limitation.
+Metadata-only checks do not produce `Full` coverage. Gemini Live provider
+binary frames produce an explicit error and terminal close instead of being
+dropped or reported as `Full`; every mode records unsupported coverage and
+interrupted reconciliation, while enforcing modes additionally audit the close
+as a policy interruption. Other enforcing paths must deny, constrain to an
+approved local path, or explicitly allow the known coverage limitation.
 
 ## Failure Behavior
 
@@ -239,7 +242,9 @@ Existing focused tests verify that:
 - bank text/SSE coverage is upgraded to `Full` only when bounded local
   inspection is available; and
 - full buffered stream inspection masks a finding before any output is
-  released.
+  released; and
+- Gemini Live binary provider output produces a stable error and terminal
+  unsupported or policy close instead of being silently discarded.
 
 Unit regressions prove literal-prefix holdback, bounded full stream
 inspection, and policy-interrupted accounting selection. Deployment acceptance

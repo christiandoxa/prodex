@@ -161,9 +161,11 @@ window to reduce noise while catching severe incidents. Initial routing:
 - record informational events for expected bounded fallback, rollout notices,
   or transient refresh retries that remain within policy.
 
-Exact windows and thresholds belong in versioned environment alert rules. They
-must be tested with synthetic signals and reviewed after incidents; this
-document does not claim those rules are checked in today.
+The checked-in baseline now includes fast and slow availability burn windows,
+matching fast and slow API-latency windows, complete owner/escalation/runbook
+metadata, and positive plus negative `promtool` signal tests. Deployment owners
+must keep stricter or environment-specific thresholds versioned and rerun the
+same syntax and synthetic-firing gate after tuning them or after incidents.
 
 ## Operator Entry Points
 
