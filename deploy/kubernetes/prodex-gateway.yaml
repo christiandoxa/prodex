@@ -92,6 +92,14 @@ data:
     listen_addr = "0.0.0.0:4100"
     expected_host = "prodex-control-plane.prodex.svc.cluster.local:4100"
 
+    [gateway.workload_identity]
+    enabled = true
+    required_scope = "control_plane"
+    mtls_required = true
+    # Server identity chains to SERVER_CA; probe and ingress client identities chain to CLIENT_CA.
+    mtls_ca_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CLIENT_CA" }
+    tls_identity_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_TLS_IDENTITY" }
+
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
@@ -99,9 +107,16 @@ data:
     redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
-    name = "operations"
-    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+    name = "operations-maker"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_MAKER_TOKEN" }
     role = "admin"
+    tenant_id = "00000000-0000-7000-8000-000000000001"
+
+    [[gateway.admin_tokens]]
+    name = "operations-checker"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CHECKER_TOKEN" }
+    role = "admin"
+    tenant_id = "00000000-0000-7000-8000-000000000001"
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -147,9 +162,24 @@ spec:
     name: prodex-control-plane-secrets
     creationPolicy: Owner
   data:
-    - secretKey: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+    - secretKey: PRODEX_CONTROL_PLANE_MAKER_TOKEN
       remoteRef:
-        key: prodex/control-plane/admin-token
+        key: prodex/control-plane/maker-token
+    - secretKey: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+      remoteRef:
+        key: prodex/control-plane/checker-token
+    - secretKey: PRODEX_CONTROL_PLANE_CLIENT_CA
+      remoteRef:
+        key: prodex/control-plane/client-ca
+    - secretKey: PRODEX_CONTROL_PLANE_SERVER_CA
+      remoteRef:
+        key: prodex/control-plane/server-ca
+    - secretKey: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+      remoteRef:
+        key: prodex/control-plane/tls-identity
+    - secretKey: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+      remoteRef:
+        key: prodex/control-plane/probe-identity
     - secretKey: PRODEX_GATEWAY_POSTGRES_URL
       remoteRef:
         key: prodex/gateway/postgres-url
@@ -630,7 +660,7 @@ spec:
           command: ["/usr/local/bin/prodex-control-plane"]
           args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]
           ports:
-            - name: http
+            - name: https
               containerPort: 4100
           envFrom:
             - configMapRef:
@@ -641,23 +671,65 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: http
+            exec:
+              command:
+                - curl
+                - --fail
+                - --silent
+                - --show-error
+                - --cacert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA
+                - --cert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --key
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --noproxy
+                - "*"
+                - --resolve
+                - prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1
+                - https://prodex-control-plane.prodex.svc.cluster.local:4100/readyz
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
-            httpGet:
-              path: /livez
-              port: http
+            exec:
+              command:
+                - curl
+                - --fail
+                - --silent
+                - --show-error
+                - --cacert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA
+                - --cert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --key
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --noproxy
+                - "*"
+                - --resolve
+                - prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1
+                - https://prodex-control-plane.prodex.svc.cluster.local:4100/livez
             periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
           startupProbe:
-            httpGet:
-              path: /startupz
-              port: http
+            exec:
+              command:
+                - curl
+                - --fail
+                - --silent
+                - --show-error
+                - --cacert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA
+                - --cert
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --key
+                - /run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                - --noproxy
+                - "*"
+                - --resolve
+                - prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1
+                - https://prodex-control-plane.prodex.svc.cluster.local:4100/startupz
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 12
@@ -700,8 +772,18 @@ spec:
               - secret:
                   name: prodex-control-plane-secrets
                   items:
-                    - key: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
-                      path: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_MAKER_TOKEN
+                      path: PRODEX_CONTROL_PLANE_MAKER_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+                      path: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_CLIENT_CA
+                      path: PRODEX_CONTROL_PLANE_CLIENT_CA
+                    - key: PRODEX_CONTROL_PLANE_SERVER_CA
+                      path: PRODEX_CONTROL_PLANE_SERVER_CA
+                    - key: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+                      path: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+                    - key: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                      path: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
                     - key: PRODEX_GATEWAY_POSTGRES_URL
                       path: PRODEX_GATEWAY_POSTGRES_URL
                     - key: PRODEX_GATEWAY_REDIS_URL
@@ -729,9 +811,9 @@ spec:
   selector:
     app.kubernetes.io/name: prodex-control-plane
   ports:
-    - name: http
+    - name: https
       port: 4100
-      targetPort: http
+      targetPort: https
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

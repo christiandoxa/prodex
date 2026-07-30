@@ -34,7 +34,7 @@ skip a stage required by the active governance mode.
 | Identity domain | Typed issuer, audience, algorithm allowlists, human/workload principals, tenant context, scopes, role mapping, assurance, and redacted errors | Approve issuer, claims, and role mapping |
 | OIDC | Exact HTTPS discovery/JWKS origin policy, no redirects, bounded LKG, bearer verification, Authorization Code with PKCE S256, state/nonce, logout, and signed back-channel logout | Exercise IdP key rotation and outage |
 | Service identity | Workload JWT signature/issuer/audience/subject/tenant/scope verification with bounded background JWKS refresh | Operate credential issuance and rotation |
-| mTLS | Rustls server identity, client-chain verification, leaf fingerprinting, and optional JWT `cnf.x5t#S256` binding | Operate CA inventory, revocation, and rotation |
+| mTLS | Rustls server identity, client-chain verification, leaf fingerprinting, mandatory bank data-plane JWT `cnf.x5t#S256` binding, and a transport-only dedicated control-plane form | Operate CA inventory, revocation, and rotation |
 | Gateway HTTP | Canonical target/method classification, bounded headers/body/deadline/concurrency, cancellation, backpressure, and drain | Size and load for the deployed topology |
 | Application admission | One typed tenant/principal/authz/session/inspection/PDP/accounting/routing/response/audit sequence for supported routes; uninspectable enforcing WebSocket attempts receive HTTP fallback before upgrade | Validate ingress and client compatibility |
 | Browser boundary | Exact Host/Origin/CSRF, bounded shared PKCE/session state, secure cookies, token revalidation, and logout revocation | Exercise browser and IdP integration |
@@ -55,7 +55,7 @@ mode contract uses the names below.
 | `personal` | Loopback-only operation may retain current local credentials and compatibility behavior. Remote human access is not implied. | Explicitly enabled controls apply; compatibility must not be mislabeled as enterprise enforcement. |
 | `enterprise_observe` | Remote traffic is authenticated and tenant-bound before shadow governance runs. | Shadow findings are recorded without changing the legacy routing result, except existing security boundaries remain enforced. |
 | `enterprise_enforce` | All supported channels use the authenticated application boundary. | Required identity, classification, policy, admission, routing, and audit decisions deny safely when unresolved. |
-| `bank_enforce` | Internal/private listener only; remote humans require approved SSO; services require approved workload credentials and mTLS where supported by deployment. | Identity, tenant, required inspection, mandatory policy, approved registry, secret references, accounting, and durable audit fail closed according to the operation matrix. |
+| `bank_enforce` | Internal/private listener only; remote humans require approved SSO; data-plane services require approved workload JWTs bound to mTLS. A dedicated bank control plane requires native transport mTLS and at least two distinct projected admin principals per explicit tenant. | Identity, tenant, required inspection, mandatory policy, approved registry, secret references, accounting, and durable audit fail closed according to the operation matrix. |
 
 A flag that weakens a mandatory bank control must be revisioned, tenant-scoped,
 audited, explicitly authorized as break-glass, and automatically expire. It may
@@ -70,7 +70,7 @@ not be a process-local environment toggle read in request handling.
 | Browser admin | OIDC Authorization Code with PKCE through an approved IdP or identity broker | Issuer, audience, nonce/state, redirect URI, tenant, principal, authentication strength, session, CSRF, Origin, and Host | Password collection by Prodex; SAML parsing in Prodex; bearer tokens in URLs |
 | CLI and IDE human | Validated bearer token obtained through an IdP-supported secure device/login flow appropriate to that IdP contract | Issuer, audience, tenant, principal, channel, credential scope, expiry, revocation state, and session where configured | Invented password grant; tokens in argv, URLs, logs, or ordinary config |
 | Internal API service | OAuth client credential, workload identity, or another approved non-human credential verified at the gateway | Tenant, service principal, audience, scope, workload or certificate identity, expiry, and revocation | Reusing a human browser session as service identity |
-| Service-to-service in bank mode | Approved workload credential plus mTLS when the deployment supports the service path | Workload identity must agree with the authenticated TLS peer and requested tenant/scope | Trusting a caller-supplied certificate header without an authenticated trusted proxy boundary |
+| Service-to-service in bank mode | Approved workload credential plus mTLS | Workload identity must agree with the authenticated TLS peer and requested tenant/scope | Trusting a caller-supplied certificate header without an authenticated trusted proxy boundary |
 | Personal loopback client | Existing local credential boundary when explicitly in `personal` mode | Loopback binding and exact local scope | Treating local anonymous compatibility as enterprise identity |
 
 If operational SAML federation is required, an OIDC-compatible identity broker
@@ -138,6 +138,12 @@ The bank mTLS target additionally requires:
 - bounded trust-bundle and certificate rotation without accepting an unknown
   issuer during overlap;
 - redacted telemetry that reports only stable verification reasons.
+
+The typed startup validator makes this executable: bank gateway mode requires
+the data-plane workload OIDC/JWKS shape plus mTLS SecretRefs, while bank
+control-plane mode accepts only the transport-only mTLS shape and distinct
+maker/checker credentials. Resolved duplicate admin bearer values are rejected
+before the listener starts even when their configured names or SecretRefs differ.
 
 TLS termination at a proxy is acceptable only when that proxy is on a bounded
 allowlist, its connection to Prodex is authenticated, and it supplies signed or

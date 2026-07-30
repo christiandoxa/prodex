@@ -91,6 +91,10 @@ function validateServeComposition(source) {
       "previous.shutdown_and_drain(drain_timeout)",
       `${SERVE_COMPOSITION_PATH}: live reload must drain the replaced application`,
     ],
+    [
+      "server_config.tls = prodex_app::runtime_policy_gateway_tls_config()",
+      `${SERVE_COMPOSITION_PATH}: both dedicated planes must load native TLS configuration`,
+    ],
   ]) {
     if (!source.includes(needle)) errors.push(message);
   }
@@ -120,6 +124,13 @@ function validateServeComposition(source) {
       errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must not use loopback backend transport`);
     }
   }
+  if (
+    /if\s+mode\s*==\s*DedicatedServerMode::(?:DataPlane|ControlPlane)\s*\{[\s\S]{0,240}?runtime_policy_gateway_tls_config/u.test(
+      source,
+    )
+  ) {
+    errors.push(`${SERVE_COMPOSITION_PATH}: neither dedicated plane may be excluded from native TLS`);
+  }
   return errors;
 }
 
@@ -139,6 +150,7 @@ function runSelfTest() {
     let activated = candidate.clone();
     let previous = server_reload.reload_with_activation(&server_config, || applications.swap(activated));
     previous.shutdown_and_drain(drain_timeout);
+    server_config.tls = prodex_app::runtime_policy_gateway_tls_config();
   `;
   if (validateServeComposition(validServe).length !== 0) {
     throw new Error("self-test failed: valid in-process serve composition was rejected");
@@ -156,6 +168,13 @@ function runSelfTest() {
   );
   if (validateServeComposition(bypassedFront).length === 0) {
     throw new Error("self-test failed: route-isolated async front bypass was accepted");
+  }
+  const dataPlaneOnlyTls = validServe.replace(
+    "server_config.tls = prodex_app::runtime_policy_gateway_tls_config();",
+    "if mode == DedicatedServerMode::DataPlane { server_config.tls = prodex_app::runtime_policy_gateway_tls_config(); }",
+  );
+  if (validateServeComposition(dataPlaneOnlyTls).length === 0) {
+    throw new Error("self-test failed: data-plane-only TLS was accepted");
   }
 }
 

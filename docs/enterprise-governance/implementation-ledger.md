@@ -30,7 +30,7 @@ Status values are:
 | Control | Status | Source evidence |
 | --- | --- | --- |
 | Tenant-scoped immutable revisions | verified | SQLite and PostgreSQL governance lifecycle tests |
-| Maker-checker approval and CAS activation | verified | Approval quorum/replay/self-approval and concurrent activation tests |
+| Maker-checker approval and CAS activation | verified | Approval quorum/replay/self-approval, distinct resolved admin credentials, two-principal deployment guard, and concurrent activation tests |
 | Active/LKG hydration and refresh | verified | Atomic snapshot refresh and invalid-candidate preservation tests |
 | Artifact authenticity | verified | Ed25519 signatures bind tenant, kind, revision, and SHA-256 artifact checksum; create/activate/startup/refresh/LKG verification tests cover tampering and unknown keys |
 | Signing-key rotation | verified | Multiple bounded verifier keys are accepted; enforcing modes require a matching retained key |
@@ -42,7 +42,7 @@ Status values are:
 
 | Control | Status | Source evidence |
 | --- | --- | --- |
-| OIDC/workload JWT/mTLS authentication | verified | Signature, issuer, audience, scope, assurance, certificate, and negative-path tests |
+| OIDC/workload JWT/mTLS authentication | verified | Signature, issuer, audience, scope, assurance, certificate, bank data-plane JWT+mTLS, dedicated control-plane transport mTLS, and negative-path tests |
 | Tenant authorization and RLS | verified | Cross-tenant denial, PostgreSQL RLS, and context-reset tests |
 | Bound sessions and revocation | verified | Fixation/replay/expiry/concurrency tests and cross-replica revocation epoch invalidation |
 | Mandatory tamper-evident audit | verified | Bounded durable commit-ack queue, hash-chain verification, and fail-closed request tests |

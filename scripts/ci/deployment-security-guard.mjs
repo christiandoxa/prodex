@@ -123,10 +123,17 @@ const REQUIRED_CONTROL_PLANE_MARKERS = Object.freeze([
   ['args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]', "control-plane listen address and PostgreSQL config-publication consumer"],
   ["name: prodex-control-plane-policy-link", "control-plane live policy link initializer"],
   ["service_mode = \"control-plane\"", "typed control-plane runtime policy mode"],
-  ["PRODEX_CONTROL_PLANE_ADMIN_TOKEN", "projected control-plane admin token"],
+  ["PRODEX_CONTROL_PLANE_MAKER_TOKEN", "projected control-plane maker token"],
+  ["PRODEX_CONTROL_PLANE_CHECKER_TOKEN", "projected control-plane checker token"],
+  ["PRODEX_CONTROL_PLANE_CLIENT_CA", "projected control-plane client CA"],
+  ["PRODEX_CONTROL_PLANE_SERVER_CA", "projected control-plane server CA"],
+  ["PRODEX_CONTROL_PLANE_TLS_IDENTITY", "projected control-plane TLS identity"],
+  ["PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "projected control-plane probe identity"],
   ["terminationGracePeriodSeconds: 45", "control-plane termination grace period"],
   ['command: ["sh", "-c", "sleep 15"]', "control-plane pre-stop drain delay"],
   ["port: 4100", "control-plane service port"],
+  ["name: https", "control-plane TLS service port"],
+  ["Server identity chains to SERVER_CA; probe and ingress client identities chain to CLIENT_CA.", "control-plane TLS trust boundary documentation"],
 ]);
 
 const REQUIRED_BACKUP_MARKERS = Object.freeze([
@@ -481,17 +488,38 @@ export function validateDeploymentSecurity(inputs) {
       [/projected_provider\s*=\s*"kubernetes"/u, "projected Kubernetes secret provider"],
       [/(?:^|\n)\s*listen_addr\s*=\s*"0\.0\.0\.0:4100"\s*$/mu, "actual control-plane listen address"],
       [/(?:^|\n)\s*expected_host\s*=\s*"prodex-control-plane\.prodex\.svc\.cluster\.local:4100"\s*$/mu, "exact in-cluster control-plane authority"],
+      [/\[gateway\.workload_identity\]/u, "native mTLS section"],
+      [/(?:^|\n)\s*enabled\s*=\s*true\s*$/mu, "enabled workload identity transport gate"],
+      [/(?:^|\n)\s*required_scope\s*=\s*"control_plane"\s*$/mu, "control-plane workload scope"],
+      [/(?:^|\n)\s*mtls_required\s*=\s*true\s*$/mu, "mandatory client certificate"],
+      [/mtls_ca_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_CLIENT_CA"\s*\}/u, "projected mTLS client CA"],
+      [/tls_identity_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_TLS_IDENTITY"\s*\}/u, "projected TLS server identity"],
       [/\[gateway\.state\]/u, "shared state section"],
       [/(?:^|\n)\s*backend\s*=\s*"postgres"\s*$/mu, "PostgreSQL shared state backend"],
       [/postgres_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"\s*\}/u, "projected PostgreSQL URL"],
       [/redis_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_REDIS_URL"\s*\}/u, "projected Redis URL"],
-      [/\[\[gateway\.admin_tokens\]\]/u, "projected admin token binding"],
-      [/token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_ADMIN_TOKEN"\s*\}/u, "projected control-plane admin token"],
-      [/(?:^|\n)\s*role\s*=\s*"admin"\s*$/mu, "explicit admin role"],
+      [/name\s*=\s*"operations-maker"[\s\S]*?token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_MAKER_TOKEN"\s*\}/u, "projected maker admin token"],
+      [/name\s*=\s*"operations-checker"[\s\S]*?token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_CHECKER_TOKEN"\s*\}/u, "projected checker admin token"],
     ]) {
       if (!pattern.test(controlPlanePolicyConfig)) {
         checks.push(`${kubernetesPath}: control-plane policy must configure ${description}`);
       }
+    }
+    const adminTokenCount = controlPlanePolicyConfig.match(/\[\[gateway\.admin_tokens\]\]/gu)?.length ?? 0;
+    const adminRoleCount = controlPlanePolicyConfig.match(/(?:^|\n)\s*role\s*=\s*"admin"\s*$/gmu)?.length ?? 0;
+    const adminTenantIds = Array.from(
+      controlPlanePolicyConfig.matchAll(/(?:^|\n)\s*tenant_id\s*=\s*"([^"]+)"\s*$/gmu),
+      (match) => match[1],
+    );
+    if (
+      adminTokenCount !== 2 ||
+      adminRoleCount !== 2 ||
+      adminTenantIds.length !== 2 ||
+      adminTenantIds.some((tenantId) => tenantId !== "00000000-0000-7000-8000-000000000001")
+    ) {
+      checks.push(
+        `${kubernetesPath}: control-plane policy must bind exactly two admin principals to the same explicit synthetic tenant`,
+      );
     }
     if (
       /(?:^|\n)\s*(?:provider|base_url|require_auth|auth_token_ref|provider_api_key_ref)\s*=/mu.test(
@@ -502,6 +530,13 @@ export function validateDeploymentSecurity(inputs) {
       )
     ) {
       checks.push(`${kubernetesPath}: control-plane policy must not configure data-plane, SSO, or outbound capabilities`);
+    }
+    if (
+      /(?:^|\n)\s*(?:issuer|audience|jwks_url|subject_claim|tenant_claim|scope_claim)\s*=/mu.test(
+        controlPlanePolicyConfig,
+      )
+    ) {
+      checks.push(`${kubernetesPath}: control-plane mTLS policy must stay transport-only without workload JWT fields`);
     }
     if (/\b(?:postgres_url_env|redis_url_env|token_env|http_bearer_token_env)\s*=/u.test(controlPlanePolicyConfig)) {
       checks.push(`${kubernetesPath}: control-plane policy must use projected SecretRef fields, not secret environment names`);
@@ -519,7 +554,12 @@ export function validateDeploymentSecurity(inputs) {
       (match) => match[1],
     );
     const expectedSecretKeys = [
-      "PRODEX_CONTROL_PLANE_ADMIN_TOKEN",
+      "PRODEX_CONTROL_PLANE_MAKER_TOKEN",
+      "PRODEX_CONTROL_PLANE_CHECKER_TOKEN",
+      "PRODEX_CONTROL_PLANE_CLIENT_CA",
+      "PRODEX_CONTROL_PLANE_SERVER_CA",
+      "PRODEX_CONTROL_PLANE_TLS_IDENTITY",
+      "PRODEX_CONTROL_PLANE_PROBE_IDENTITY",
       "PRODEX_GATEWAY_POSTGRES_URL",
       "PRODEX_GATEWAY_REDIS_URL",
     ];
@@ -529,8 +569,24 @@ export function validateDeploymentSecurity(inputs) {
       secretKeys.some((key) => !expectedSecretKeys.includes(key))
     ) {
       checks.push(
-        `${kubernetesPath}: control-plane ExternalSecret must contain only admin, PostgreSQL, and Redis projected keys`,
+        `${kubernetesPath}: control-plane ExternalSecret must contain only maker/checker, TLS, PostgreSQL, and Redis projected keys`,
       );
+    }
+    for (const [secretKey, remoteKey] of [
+      ["PRODEX_CONTROL_PLANE_MAKER_TOKEN", "prodex/control-plane/maker-token"],
+      ["PRODEX_CONTROL_PLANE_CHECKER_TOKEN", "prodex/control-plane/checker-token"],
+      ["PRODEX_CONTROL_PLANE_CLIENT_CA", "prodex/control-plane/client-ca"],
+      ["PRODEX_CONTROL_PLANE_SERVER_CA", "prodex/control-plane/server-ca"],
+      ["PRODEX_CONTROL_PLANE_TLS_IDENTITY", "prodex/control-plane/tls-identity"],
+      ["PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "prodex/control-plane/probe-identity"],
+    ]) {
+      const binding = new RegExp(
+        `secretKey:\\s*${secretKey}\\s*\\n\\s*remoteRef:\\s*\\n\\s*key:\\s*${remoteKey.replaceAll("/", "\\/")}\\s*$`,
+        "mu",
+      );
+      if (!binding.test(controlPlaneSecrets)) {
+        checks.push(`${kubernetesPath}: control-plane ExternalSecret must bind ${secretKey} to ${remoteKey}`);
+      }
     }
   }
   const gatewayDeployment = kubernetesDocumentByKindAndName(kubernetes, "Deployment", "prodex-gateway");
@@ -638,6 +694,28 @@ export function validateDeploymentSecurity(inputs) {
     if (!/preStop:[\s\S]*?command:\s*\["sh",\s*"-c",\s*"sleep 15"\]/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must declare the pre-stop drain delay`);
     }
+    if (!/ports:\s*\n\s*-\s*name:\s*https\s*\n\s*containerPort:\s*4100\b/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must expose its native TLS port as https`);
+    }
+    for (const [probe, path] of [
+      ["readinessProbe", "readyz"],
+      ["livenessProbe", "livez"],
+      ["startupProbe", "startupz"],
+    ]) {
+      const pattern = new RegExp(
+        `${probe}:[\\s\\S]*?exec:[\\s\\S]*?--fail[\\s\\S]*?--cacert[\\s\\S]*?/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA[\\s\\S]*?--cert[\\s\\S]*?/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY[\\s\\S]*?--key[\\s\\S]*?/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY[\\s\\S]*?--noproxy[\\s\\S]*?["']?\\*["']?[\\s\\S]*?--resolve[\\s\\S]*?prodex-control-plane\\.prodex\\.svc\\.cluster\\.local:4100:127\\.0\\.0\\.1[\\s\\S]*?https://prodex-control-plane\\.prodex\\.svc\\.cluster\\.local:4100/${path}`,
+        "u",
+      );
+      if (!pattern.test(controlPlaneDeployment)) {
+        checks.push(`${kubernetesPath}: control-plane ${probe} must call /${path} with a verified mTLS probe identity`);
+      }
+    }
+    if (/\b(?:httpGet|tcpSocket):/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane probes must not bypass application health through unauthenticated HTTP or TCP checks`);
+    }
+    if (/(?:^|[\s"'])-(?:-insecure|k)(?:$|[\s"'])/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane HTTPS probes must verify the server certificate`);
+    }
     if (/envFrom:[\s\S]*?secretRef:/u.test(controlPlaneDeployment) || /secretKeyRef:/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane secrets must not be consumed through env or envFrom`);
     }
@@ -698,7 +776,12 @@ export function validateDeploymentSecurity(inputs) {
         checks.push(`${kubernetesPath}: control-plane projected Secret volume must reference prodex-control-plane-secrets`);
       }
       for (const key of [
-        "PRODEX_CONTROL_PLANE_ADMIN_TOKEN",
+        "PRODEX_CONTROL_PLANE_MAKER_TOKEN",
+        "PRODEX_CONTROL_PLANE_CHECKER_TOKEN",
+        "PRODEX_CONTROL_PLANE_CLIENT_CA",
+        "PRODEX_CONTROL_PLANE_SERVER_CA",
+        "PRODEX_CONTROL_PLANE_TLS_IDENTITY",
+        "PRODEX_CONTROL_PLANE_PROBE_IDENTITY",
         "PRODEX_GATEWAY_POSTGRES_URL",
         "PRODEX_GATEWAY_REDIS_URL",
       ]) {
@@ -710,6 +793,19 @@ export function validateDeploymentSecurity(inputs) {
     if (/prodex-gateway-secrets|prodex-gateway-policy|OPENAI_API_KEY|PRODEX_GATEWAY_TOKEN\b/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane workload must not mount gateway or provider capabilities`);
     }
+  }
+  const controlPlaneService = kubernetesDocumentByKindAndName(
+    kubernetes,
+    "Service",
+    "prodex-control-plane",
+  );
+  if (
+    !controlPlaneService ||
+    !/ports:\s*\n\s*-\s*name:\s*https\s*\n\s*port:\s*4100\s*\n\s*targetPort:\s*https\b/u.test(
+      controlPlaneService,
+    )
+  ) {
+    checks.push(`${kubernetesPath}: control-plane Service must publish the native https port`);
   }
   const controlPlanePdb = kubernetesDocumentByKindAndName(
     kubernetes,
@@ -1071,6 +1167,9 @@ spec:
         - name: prodex-control-plane
           command: ["/usr/local/bin/prodex-control-plane"]
           args: ["serve", "--listen", "0.0.0.0:4100", "--config-publication-postgres"]
+          ports:
+            - name: https
+              containerPort: 4100
           envFrom:
             - configMapRef:
                 name: prodex-control-plane-config
@@ -1079,6 +1178,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          readinessProbe:
+            exec:
+              command: ["curl", "--fail", "--cacert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA", "--cert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--key", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--noproxy", "*", "--resolve", "prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1", "https://prodex-control-plane.prodex.svc.cluster.local:4100/readyz"]
+          livenessProbe:
+            exec:
+              command: ["curl", "--fail", "--cacert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA", "--cert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--key", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--noproxy", "*", "--resolve", "prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1", "https://prodex-control-plane.prodex.svc.cluster.local:4100/livez"]
+          startupProbe:
+            exec:
+              command: ["curl", "--fail", "--cacert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA", "--cert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--key", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_PROBE_IDENTITY", "--noproxy", "*", "--resolve", "prodex-control-plane.prodex.svc.cluster.local:4100:127.0.0.1", "https://prodex-control-plane.prodex.svc.cluster.local:4100/startupz"]
           lifecycle:
             preStop:
               exec:
@@ -1107,8 +1215,18 @@ spec:
               - secret:
                   name: prodex-control-plane-secrets
                   items:
-                    - key: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
-                      path: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_MAKER_TOKEN
+                      path: PRODEX_CONTROL_PLANE_MAKER_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+                      path: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+                    - key: PRODEX_CONTROL_PLANE_CLIENT_CA
+                      path: PRODEX_CONTROL_PLANE_CLIENT_CA
+                    - key: PRODEX_CONTROL_PLANE_SERVER_CA
+                      path: PRODEX_CONTROL_PLANE_SERVER_CA
+                    - key: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+                      path: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+                    - key: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+                      path: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
                     - key: PRODEX_GATEWAY_POSTGRES_URL
                       path: PRODEX_GATEWAY_POSTGRES_URL
                     - key: PRODEX_GATEWAY_REDIS_URL
@@ -1116,6 +1234,15 @@ spec:
         - name: control-plane-policy
           configMap:
             name: prodex-control-plane-policy
+---
+kind: Service
+metadata:
+  name: prodex-control-plane
+spec:
+  ports:
+    - name: https
+      port: 4100
+      targetPort: https
 ---
 kind: PodDisruptionBudget
 metadata:
@@ -1184,15 +1311,30 @@ data:
     listen_addr = "0.0.0.0:4100"
     expected_host = "prodex-control-plane.prodex.svc.cluster.local:4100"
 
+    [gateway.workload_identity]
+    enabled = true
+    required_scope = "control_plane"
+    mtls_required = true
+    # Server identity chains to SERVER_CA; probe and ingress client identities chain to CLIENT_CA.
+    mtls_ca_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CLIENT_CA" }
+    tls_identity_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_TLS_IDENTITY" }
+
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
     redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
-    name = "operations"
-    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+    name = "operations-maker"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_MAKER_TOKEN" }
     role = "admin"
+    tenant_id = "00000000-0000-7000-8000-000000000001"
+
+    [[gateway.admin_tokens]]
+    name = "operations-checker"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CHECKER_TOKEN" }
+    role = "admin"
+    tenant_id = "00000000-0000-7000-8000-000000000001"
 ---
 kind: ExternalSecret
 metadata:
@@ -1208,7 +1350,24 @@ metadata:
   name: prodex-control-plane-secrets
 spec:
   data:
-    - secretKey: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+    - secretKey: PRODEX_CONTROL_PLANE_MAKER_TOKEN
+      remoteRef:
+        key: prodex/control-plane/maker-token
+    - secretKey: PRODEX_CONTROL_PLANE_CHECKER_TOKEN
+      remoteRef:
+        key: prodex/control-plane/checker-token
+    - secretKey: PRODEX_CONTROL_PLANE_CLIENT_CA
+      remoteRef:
+        key: prodex/control-plane/client-ca
+    - secretKey: PRODEX_CONTROL_PLANE_SERVER_CA
+      remoteRef:
+        key: prodex/control-plane/server-ca
+    - secretKey: PRODEX_CONTROL_PLANE_TLS_IDENTITY
+      remoteRef:
+        key: prodex/control-plane/tls-identity
+    - secretKey: PRODEX_CONTROL_PLANE_PROBE_IDENTITY
+      remoteRef:
+        key: prodex/control-plane/probe-identity
     - secretKey: PRODEX_GATEWAY_POSTGRES_URL
     - secretKey: PRODEX_GATEWAY_REDIS_URL
 ---
@@ -1957,7 +2116,7 @@ export function runSelfTest() {
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace('    role = "admin"', '    role = "viewer"'),
-    }).some((error) => error.includes("explicit admin role")),
+    }).some((error) => error.includes("exactly two admin principals")),
     "control-plane viewer-only token accepted",
   );
   assertSelfTest(
@@ -1987,7 +2146,7 @@ export function runSelfTest() {
         "    - secretKey: PRODEX_GATEWAY_REDIS_URL\n---\nkind: ServiceMonitor",
         "    - secretKey: PRODEX_GATEWAY_REDIS_URL\n    - secretKey: OPENAI_API_KEY\n---\nkind: ServiceMonitor",
       ),
-    }).some((error) => error.includes("must contain only admin, PostgreSQL, and Redis")),
+    }).some((error) => error.includes("must contain only maker/checker, TLS, PostgreSQL, and Redis")),
     "control-plane provider secret accepted",
   );
   assertSelfTest(
@@ -2006,6 +2165,77 @@ export function runSelfTest() {
       kubernetes: `${valid.kubernetes}\nkind: NetworkPolicy\nmetadata:\n  name: prodex-control-plane\nspec:\n  egress:\n    - to:\n        - ipBlock:\n            cidr: 0.0.0.0/0\n      ports:\n        - protocol: TCP\n          port: 443\n`,
     }).some((error) => error.includes("control-plane NetworkPolicy must not allow public provider egress")),
     "control-plane public provider egress accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("    [gateway.workload_identity]", "    [gateway.workload_identity-missing]"),
+    }).some((error) => error.includes("native mTLS section")),
+    "control-plane without native mTLS accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace('    required_scope = "control_plane"', '    required_scope = "data_plane"'),
+    }).some((error) => error.includes("control-plane workload scope")),
+    "data-plane workload scope accepted on control-plane",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "    enabled = true\n    required_scope = \"control_plane\"",
+        "    enabled = true\n    issuer = \"https://workload.example.com\"\n    required_scope = \"control_plane\"",
+      ),
+    }).some((error) => error.includes("transport-only without workload JWT fields")),
+    "control-plane mTLS with workload JWT fields accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        '    name = "operations-checker"',
+        '    name = "operations-maker"',
+      ),
+    }).some((error) => error.includes("projected checker admin token")),
+    "duplicate maker/checker principal names accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        '    tenant_id = "00000000-0000-7000-8000-000000000001"\n---',
+        '    tenant_id = "00000000-0000-7000-8000-000000000002"\n---',
+      ),
+    }).some((error) => error.includes("same explicit synthetic tenant")),
+    "cross-tenant maker/checker pair accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        'command: ["curl", "--fail", "--cacert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA", "--cert",',
+        'command: ["curl", "--fail", "--cacert", "/run/secrets/prodex/PRODEX_CONTROL_PLANE_SERVER_CA", "--identity-missing",',
+      ),
+    }).some((error) => error.includes("readinessProbe must call /readyz")),
+    "control-plane readiness probe without client identity accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace('command: ["curl", "--fail",', 'command: ["curl", "--fail", "--insecure",'),
+    }).some((error) => error.includes("must verify the server certificate")),
+    "insecure control-plane HTTPS probe accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "    - name: https\n      port: 4100\n      targetPort: https",
+        "    - name: http\n      port: 4100\n      targetPort: http",
+      ),
+    }).some((error) => error.includes("Service must publish the native https port")),
+    "plaintext control-plane Service accepted",
   );
 }
 

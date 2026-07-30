@@ -1,7 +1,7 @@
 use crate::types::{
     PRODEX_POLICY_VERSION, RuntimeGovernanceDataClassification, RuntimeGovernanceMode,
     RuntimeGovernancePolicyFailureMode, RuntimeGovernanceRolloutMode,
-    RuntimeGovernanceUnknownClassificationBehavior, RuntimePolicyFile,
+    RuntimeGovernanceUnknownClassificationBehavior, RuntimePolicyFile, RuntimePolicyServiceMode,
 };
 use crate::validate_secrets::validate_secret_policy;
 use anyhow::{Result, bail};
@@ -516,36 +516,113 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
             path.display()
         );
     }
-    let sso = &policy.gateway.sso;
-    if sso.remote_human != Some(true)
-        || sso.oidc_issuer.is_none()
-        || sso.oidc_audience.is_none()
-        || sso.required_scope.as_deref() != Some("control_plane")
-        || sso.authentication_strength.as_deref() != Some("phishing_resistant")
-        || sso
-            .reauthentication_max_age_seconds
-            .is_none_or(|seconds| seconds > 900)
+    validate_bank_workload_identity(policy, path)?;
+    match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => {
+            let sso = &policy.gateway.sso;
+            if sso.remote_human != Some(true)
+                || sso.oidc_issuer.is_none()
+                || sso.oidc_audience.is_none()
+                || sso.required_scope.as_deref() != Some("control_plane")
+                || sso.authentication_strength.as_deref() != Some("phishing_resistant")
+                || sso
+                    .reauthentication_max_age_seconds
+                    .is_none_or(|seconds| seconds > 900)
+            {
+                bail!(
+                    "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
+                    path.display()
+                );
+            }
+            let observability = &policy.gateway.observability;
+            if !observability.sinks.iter().any(|sink| sink == "siem")
+                || observability.siem_endpoint.is_none()
+                || observability.siem_bearer_token_ref.is_none()
+                || observability.siem_mtls_identity_ref.is_none()
+                || observability.siem_signing_key_ref.is_none()
+                || observability.siem_max_batch_events.is_none()
+                || observability.siem_max_batch_bytes.is_none()
+                || observability.siem_max_attempts.is_none()
+                || observability.siem_retry_base_ms.is_none()
+                || observability.siem_retry_max_ms.is_none()
+                || observability.siem_max_lag_ms.is_none()
+            {
+                bail!(
+                    "bank governance gateway mode requires a bounded SecretRef/mTLS/signing SIEM audit worker in {}",
+                    path.display()
+                );
+            }
+        }
+        RuntimePolicyServiceMode::ControlPlane => {
+            validate_bank_control_plane_admin_tokens(policy, path)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_bank_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let workload = &policy.gateway.workload_identity;
+    let required_scope = match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => "data_plane",
+        RuntimePolicyServiceMode::ControlPlane => "control_plane",
+    };
+    let oidc_shape_valid = match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => {
+            workload.issuer.is_some() && workload.audience.is_some()
+        }
+        RuntimePolicyServiceMode::ControlPlane => {
+            workload.issuer.is_none()
+                && workload.audience.is_none()
+                && workload.jwks_url.is_none()
+                && workload.jwks_origin_allowlist.is_empty()
+                && workload.subject_claim.is_none()
+                && workload.tenant_claim.is_none()
+                && workload.scope_claim.is_none()
+        }
+    };
+    if workload.enabled != Some(true)
+        || !oidc_shape_valid
+        || workload.required_scope.as_deref() != Some(required_scope)
+        || workload.mtls_required != Some(true)
+        || workload.mtls_ca_ref.is_none()
+        || workload.tls_identity_ref.is_none()
     {
         bail!(
-            "bank governance mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
+            "bank governance {} mode requires an exact {required_scope} workload identity bound to mTLS SecretRefs in {}",
+            policy.service_mode.as_str(),
             path.display()
         );
     }
-    let observability = &policy.gateway.observability;
-    if !observability.sinks.iter().any(|sink| sink == "siem")
-        || observability.siem_endpoint.is_none()
-        || observability.siem_bearer_token_ref.is_none()
-        || observability.siem_mtls_identity_ref.is_none()
-        || observability.siem_signing_key_ref.is_none()
-        || observability.siem_max_batch_events.is_none()
-        || observability.siem_max_batch_bytes.is_none()
-        || observability.siem_max_attempts.is_none()
-        || observability.siem_retry_base_ms.is_none()
-        || observability.siem_retry_max_ms.is_none()
-        || observability.siem_max_lag_ms.is_none()
+    Ok(())
+}
+
+fn validate_bank_control_plane_admin_tokens(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut principals_by_tenant =
+        BTreeMap::<&str, (BTreeSet<&str>, BTreeSet<&prodex_domain::SecretRef>)>::new();
+    for token in &policy.gateway.admin_tokens {
+        let Some(tenant_id) = token.tenant_id.as_deref() else {
+            bail!(
+                "bank governance control-plane mode requires explicit tenant_id on every admin token in {}",
+                path.display()
+            );
+        };
+        let principals = principals_by_tenant.entry(tenant_id).or_default();
+        if token.role.as_deref() == Some("admin")
+            && let Some(reference) = token.token_ref.as_ref()
+        {
+            principals.0.insert(token.name.as_str());
+            principals.1.insert(reference);
+        }
+    }
+    if principals_by_tenant.is_empty()
+        || principals_by_tenant
+            .values()
+            .any(|(names, references)| names.len() < 2 || references.len() < 2)
     {
         bail!(
-            "bank governance mode requires a bounded SecretRef/mTLS/signing SIEM audit worker in {}",
+            "bank governance control-plane mode requires at least two distinct projected admin principals per tenant for maker-checker in {}",
             path.display()
         );
     }

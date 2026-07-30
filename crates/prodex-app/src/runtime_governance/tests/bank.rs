@@ -1,5 +1,6 @@
 use super::policy_effect;
 use crate::runtime_governance::compile_runtime_governance_settings;
+use prodex_authn::VerifiedAuthenticationAssurance;
 use prodex_domain::{
     CanonicalRoute, CapabilitySet, Channel, CredentialScope, DataClassification,
     EnvironmentContext, GovernanceObligation, GovernedAction, InspectionCoverage, NetworkZone,
@@ -87,6 +88,7 @@ fn bank_snapshot_denies_unsupported_inspection() {
     let capabilities = CapabilitySet::new(Vec::new());
     let principal_attributes = PrincipalPolicyAttributes::default();
     let request_attributes = RequestPolicyAttributes::default();
+    let workload_assurance = VerifiedAuthenticationAssurance::workload(true);
     let decision = evaluate_governance_policy(
         &snapshot.application.policy,
         &PolicyInput {
@@ -117,9 +119,9 @@ fn bank_snapshot_denies_unsupported_inspection() {
             },
             environment: EnvironmentContext {
                 network_zone: NetworkZone::TrustedInternal,
-                authentication_strength: 3,
-                mfa_satisfied: true,
-                reauthentication_satisfied: true,
+                authentication_strength: workload_assurance.authentication_strength(),
+                mfa_satisfied: workload_assurance.mfa_satisfied(),
+                reauthentication_satisfied: workload_assurance.reauthentication_satisfied(),
             },
         },
     )

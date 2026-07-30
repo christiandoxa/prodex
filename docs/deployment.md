@@ -263,15 +263,30 @@ evidence before they are added to the catalog.
 
 The same manifest runs three `prodex-control-plane` replicas behind their own
 `Service`, `PodDisruptionBudget`, `HorizontalPodAutoscaler`, and restricted
-`NetworkPolicy`. The dedicated binary explicitly
-requests `service_mode = "control-plane"` and listens on `0.0.0.0:4100`; normal
-gateway startup rejects that policy. Its ExternalSecret contains only the
-projected admin token plus PostgreSQL and Redis connection references. The
-workload mounts those values as read-only files rather than importing secrets
-through `env` or `envFrom`, spreads replicas across zones and nodes, keeps at
-least two replicas available during voluntary disruption, and uses a 45-second
-termination grace period with a 15-second pre-stop delay before the bounded
-backend drain.
+`NetworkPolicy`. The dedicated binary explicitly requests
+`service_mode = "control-plane"` and listens with native Rustls mTLS on
+`0.0.0.0:4100`; normal gateway startup rejects that policy. Its ExternalSecret
+contains separate maker/checker admin credentials, a server identity, separate
+client/server CA bundles, a dedicated health-probe client identity, and PostgreSQL/Redis
+connection references. The workload mounts those values as read-only files
+rather than importing secrets through `env` or `envFrom`. Readiness, liveness,
+and startup probes call the real HTTPS application endpoints with the projected
+probe identity instead of downgrading to an unauthenticated HTTP or TCP check.
+Replicas are spread across zones and nodes, at least two remain available during
+voluntary disruption, and a 45-second termination grace period with a 15-second
+pre-stop delay precedes the bounded backend drain.
+
+`PRODEX_CONTROL_PLANE_TLS_IDENTITY` and
+`PRODEX_CONTROL_PLANE_PROBE_IDENTITY` are combined certificate/private-key PEM
+files. `PRODEX_CONTROL_PLANE_CLIENT_CA` is loaded by the server to verify the
+probe and approved ingress clients; `PRODEX_CONTROL_PLANE_SERVER_CA` is used by
+the probe to verify the server identity. Administrative clients must
+present an approved client certificate and one of the distinct bearer
+credentials. Operate issuance, rotation, expiry, and revocation through the
+deployment PKI rather than placing certificate material in the ConfigMap. After
+External Secrets projects a complete new generation, trigger the existing live
+configuration publication or a rolling restart so every Rustls listener loads
+the new identity; keep the required CA overlap until all replicas have moved.
 
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
@@ -382,6 +397,17 @@ production = true
 projected_root = "/run/secrets/prodex"
 projected_provider = "kubernetes"
 
+[gateway]
+listen_addr = "0.0.0.0:4100"
+expected_host = "prodex-control-plane.prodex.svc.cluster.local:4100"
+
+[gateway.workload_identity]
+enabled = true
+required_scope = "control_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CLIENT_CA" }
+tls_identity_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_TLS_IDENTITY" }
+
 [gateway.state]
 backend = "postgres"
 postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
@@ -389,13 +415,22 @@ postgres_tls_mode = "verify-full"
 redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
 [[gateway.admin_tokens]]
-name = "operations"
-token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+name = "operations-maker"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_MAKER_TOKEN" }
 role = "admin"
+tenant_id = "00000000-0000-7000-8000-000000000001"
+
+[[gateway.admin_tokens]]
+name = "operations-checker"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_CHECKER_TOKEN" }
+role = "admin"
+tenant_id = "00000000-0000-7000-8000-000000000001"
 ```
 
 It deliberately has no provider key, gateway root token, virtual keys, SSO,
 outbound observability, routing, request constraints, or guardrail capability.
+The workload-identity block is transport-only in this service mode: OIDC/JWKS
+issuer, audience, and claim fields are rejected.
 
 The PostgreSQL state backend keeps admin keys, SCIM users, usage counters, and
 billing ledger rows shared across Kubernetes gateway replicas. Add `tenant_id`

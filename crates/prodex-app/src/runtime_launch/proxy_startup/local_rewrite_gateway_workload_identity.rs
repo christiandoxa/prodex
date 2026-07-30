@@ -175,8 +175,16 @@ mod tests {
         RuntimeGatewayWorkloadIdentityConfig, URL_SAFE_NO_PAD,
         runtime_gateway_workload_evidence_from_verified,
     };
+    use crate::runtime_launch::proxy_startup::local_rewrite_application_boundary::{
+        RuntimeGatewayVerifiedCredential, runtime_gateway_application_data_plane_authorization,
+        runtime_gateway_application_request_context,
+    };
     use crate::runtime_launch::proxy_startup::local_rewrite_gateway_admin_auth::runtime_gateway_test_verified_oidc_token;
     use base64::Engine as _;
+    use prodex_application::ApplicationRequestDeadline;
+    use prodex_domain::{PrincipalKind, RequestId};
+    use prodex_gateway_http::CanonicalRequestTarget;
+    use std::time::{Duration, Instant};
 
     fn config(mtls_required: bool) -> RuntimeGatewayWorkloadIdentityConfig {
         RuntimeGatewayWorkloadIdentityConfig {
@@ -250,5 +258,40 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn mtls_workload_evidence_authorizes_strength_three_data_plane_boundary() {
+        let fingerprint = [7_u8; 32];
+        let evidence = runtime_gateway_workload_evidence_from_verified(
+            token(Some(fingerprint)),
+            &config(true),
+            Some(fingerprint),
+        )
+        .expect("mTLS-bound workload evidence should verify");
+        assert_eq!(evidence.assurance().authentication_strength(), 3);
+
+        let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
+        let request = runtime_gateway_application_request_context(
+            &target,
+            RequestId::new(),
+            ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30)),
+            &[],
+        )
+        .unwrap();
+        let authorized = runtime_gateway_application_data_plane_authorization(
+            &request,
+            RuntimeGatewayVerifiedCredential {
+                evidence: Some(evidence),
+                anonymous_allowed: false,
+            },
+        )
+        .expect("strength-3 workload request should cross the data-plane boundary");
+
+        assert_eq!(
+            authorized.principal().unwrap().kind,
+            PrincipalKind::ServiceAccount
+        );
+        assert_eq!(authorized.assurance().authentication_strength(), 3);
     }
 }

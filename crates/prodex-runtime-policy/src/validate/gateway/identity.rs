@@ -1,5 +1,5 @@
 use super::{validate_gateway_exact_identifier, validate_gateway_optional_scope};
-use crate::types::RuntimePolicyFile;
+use crate::types::{RuntimePolicyFile, RuntimePolicyServiceMode};
 use crate::validate_helpers::{validate_gateway_admin_role, validate_optional_u64};
 use crate::validate_secrets::validate_gateway_secret_source;
 use anyhow::{Context, Result, bail};
@@ -380,62 +380,30 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
             path.display()
         );
     }
-    let issuer = workload.issuer.as_deref().with_context(|| {
-        format!(
-            "gateway.workload_identity.issuer in {} is required",
-            path.display()
-        )
-    })?;
-    ValidatedOidcIssuer::parse(issuer).with_context(|| {
-        format!(
-            "gateway.workload_identity.issuer in {} must be a permitted HTTPS issuer",
-            path.display()
-        )
-    })?;
-    let audience = workload.audience.as_deref().with_context(|| {
-        format!(
-            "gateway.workload_identity.audience in {} is required",
-            path.display()
-        )
-    })?;
-    validate_gateway_exact_identifier(audience, path, "gateway.workload_identity.audience")?;
-    for (field, value) in [
-        ("subject_claim", workload.subject_claim.as_deref()),
-        ("tenant_claim", workload.tenant_claim.as_deref()),
-        ("scope_claim", workload.scope_claim.as_deref()),
-    ] {
-        if let Some(value) = value {
-            validate_gateway_exact_identifier(
-                value,
-                path,
-                &format!("gateway.workload_identity.{field}"),
-            )?;
-        }
-    }
-    if workload.required_scope.as_deref().unwrap_or("data_plane") != "data_plane" {
+    let (required_scope, scope_is_valid) = match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => (
+            "data_plane",
+            workload.required_scope.as_deref().unwrap_or("data_plane") == "data_plane",
+        ),
+        RuntimePolicyServiceMode::ControlPlane => (
+            "control_plane",
+            workload.required_scope.as_deref() == Some("control_plane"),
+        ),
+    };
+    if !scope_is_valid {
         bail!(
-            "gateway.workload_identity.required_scope in {} must be data_plane",
-            path.display()
+            "gateway.workload_identity.required_scope in {} must be {required_scope} for service_mode={}",
+            path.display(),
+            policy.service_mode.as_str(),
         );
     }
-    if workload.jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
-        bail!(
-            "gateway.workload_identity.jwks_origin_allowlist in {} is too large",
-            path.display()
-        );
-    }
-    OidcEndpointPolicy::with_jwks_origin_allowlist(
-        issuer,
-        workload.jwks_url.as_deref(),
-        workload.jwks_origin_allowlist.iter().map(String::as_str),
-    )
-    .with_context(|| {
-        format!(
-            "gateway.workload_identity JWKS policy in {} is invalid",
-            path.display()
-        )
-    })?;
     let mtls_required = workload.mtls_required.unwrap_or(false);
+    if policy.service_mode == RuntimePolicyServiceMode::ControlPlane && !mtls_required {
+        bail!(
+            "gateway.workload_identity in {} must enable native mTLS when service_mode=control-plane",
+            path.display()
+        );
+    }
     validate_gateway_secret_source(
         policy,
         path,
@@ -470,5 +438,70 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
             path.display()
         );
     }
+    if policy.service_mode == RuntimePolicyServiceMode::ControlPlane {
+        if workload.issuer.is_some()
+            || workload.audience.is_some()
+            || workload.jwks_url.is_some()
+            || !workload.jwks_origin_allowlist.is_empty()
+            || workload.subject_claim.is_some()
+            || workload.tenant_claim.is_some()
+            || workload.scope_claim.is_some()
+        {
+            bail!(
+                "gateway.workload_identity in {} must not configure OIDC/JWKS claims when used as a control-plane transport identity",
+                path.display()
+            );
+        }
+        return Ok(());
+    }
+    let issuer = workload.issuer.as_deref().with_context(|| {
+        format!(
+            "gateway.workload_identity.issuer in {} is required",
+            path.display()
+        )
+    })?;
+    ValidatedOidcIssuer::parse(issuer).with_context(|| {
+        format!(
+            "gateway.workload_identity.issuer in {} must be a permitted HTTPS issuer",
+            path.display()
+        )
+    })?;
+    let audience = workload.audience.as_deref().with_context(|| {
+        format!(
+            "gateway.workload_identity.audience in {} is required",
+            path.display()
+        )
+    })?;
+    validate_gateway_exact_identifier(audience, path, "gateway.workload_identity.audience")?;
+    for (field, value) in [
+        ("subject_claim", workload.subject_claim.as_deref()),
+        ("tenant_claim", workload.tenant_claim.as_deref()),
+        ("scope_claim", workload.scope_claim.as_deref()),
+    ] {
+        if let Some(value) = value {
+            validate_gateway_exact_identifier(
+                value,
+                path,
+                &format!("gateway.workload_identity.{field}"),
+            )?;
+        }
+    }
+    if workload.jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
+        bail!(
+            "gateway.workload_identity.jwks_origin_allowlist in {} is too large",
+            path.display()
+        );
+    }
+    OidcEndpointPolicy::with_jwks_origin_allowlist(
+        issuer,
+        workload.jwks_url.as_deref(),
+        workload.jwks_origin_allowlist.iter().map(String::as_str),
+    )
+    .with_context(|| {
+        format!(
+            "gateway.workload_identity JWKS policy in {} is invalid",
+            path.display()
+        )
+    })?;
     Ok(())
 }

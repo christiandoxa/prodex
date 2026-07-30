@@ -507,6 +507,9 @@
       "evidence_required": "Generated configuration matrix plus Compose/Kubernetes/container policy tests.",
       "evidence": [
         "bank_governance_deployment_matrix_fails_closed",
+        "bank_control_plane_uses_transport_mtls_and_projected_maker_checker",
+        "control_plane_accepts_only_transport_mtls_workload_identity",
+        "gateway_admin_tokens_config_rejects_duplicate_credential_values",
         "bank_runtime_listener_guard_rejects_public_or_wildcard_addresses",
         "non_loopback_server_requires_explicit_expected_host",
         "deployment-security-guard.mjs"
@@ -527,6 +530,7 @@
         "bank_response_inspection_requires_full_coverage",
         "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
         "full_stream_inspection_buffers_and_masks_before_release",
+        "mtls_workload_evidence_authorizes_strength_three_data_plane_boundary",
         "bank_governance_deployment_matrix_fails_closed",
         "enforcing_governance_rejects_missing_snapshot_or_provider_revision",
         "mandatory_transform_audit_writer_failure_is_fail_closed_and_content_free",

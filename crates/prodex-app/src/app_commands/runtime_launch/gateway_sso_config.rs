@@ -143,7 +143,8 @@ fn gateway_workload_identity_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Option<RuntimeGatewayWorkloadIdentityConfig>> {
     let workload = &policy.workload_identity;
-    if workload.enabled != Some(true) {
+    if workload.enabled != Some(true) || workload.required_scope.as_deref() == Some("control_plane")
+    {
         return Ok(None);
     }
     let issuer = workload
@@ -426,6 +427,21 @@ mod tests {
             error
                 .to_string()
                 .contains("gateway.sso.oidc_jwks_origin_allowlist")
+        );
+    }
+
+    #[test]
+    fn control_plane_mtls_does_not_start_workload_oidc() {
+        let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+        policy.workload_identity.enabled = Some(true);
+        policy.workload_identity.required_scope = Some("control_plane".to_string());
+        policy.workload_identity.mtls_required = Some(true);
+
+        assert!(
+            gateway_sso_config(&policy)
+                .unwrap()
+                .workload_identity
+                .is_none()
         );
     }
 }

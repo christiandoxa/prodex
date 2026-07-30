@@ -54,6 +54,13 @@ production = true
 projected_root = "projected"
 projected_provider = "external"
 
+[gateway.workload_identity]
+enabled = true
+required_scope = "control_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "external", name = "workload-ca" }
+tls_identity_ref = { provider = "external", name = "control-plane-tls" }
+
 [gateway.state]
 backend = "postgres"
 postgres_url_ref = { provider = "external", name = "postgres-url" }

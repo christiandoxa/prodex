@@ -51,8 +51,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2250,
-    "reason": "Runtime launch command tests remain capped after secure credential fixtures and post-exit session maintenance moved into focused sibling modules."
+    "maxLines": 2066,
+    "reason": "Runtime launch command tests remain capped after admin-token, secure credential, and post-exit session maintenance coverage moved into focused sibling modules."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
@@ -221,8 +221,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
-    "maxLines": 1234,
-    "reason": "Runtime-policy validation coverage keeps exact Ed25519 verifier roots, enforcing governance mode, bounded OIDC reauthentication, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
+    "maxLines": 1227,
+    "reason": "Runtime-policy validation coverage remains capped after control-plane and bank-mode composition tests moved into a focused sibling module."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
