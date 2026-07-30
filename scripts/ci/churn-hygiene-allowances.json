@@ -1,5 +1,20 @@
 [
   {
+    "id": "bank-control-plane-and-ci-hardening-0.373.0",
+    "requiredSubjects": [
+      "fix(enterprise): harden bank and control-plane boundaries",
+      "perf(ci): parallelize full-test critical path",
+      "chore(ci): record reviewed 0.373.0 churn"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 25,
+      "maxLines": 1750,
+      "maxFileLines": 300
+    },
+    "reason": "Reviewed the complete bank and control-plane audit across strength-three workload identity, native control-plane mTLS, per-tenant projected maker-checker credentials, resolved-token uniqueness, authenticated Kubernetes health probes, and the parallel CI/full-test critical path; verified with the full locked all-features suite, focused runtime-policy regressions, strict Clippy, complete preflight, deployment and enterprise guards, size and documentation checks, PostgreSQL proof, and tracked-diff secret and identifier scans before the 0.373.0 release."
+  },
+  {
     "id": "gateway-accounting-completion-0.371.0",
     "requiredSubjects": [
       "fix(gateway): harden usage accounting",
