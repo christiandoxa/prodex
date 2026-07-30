@@ -24,7 +24,7 @@ pub(super) fn runtime_gateway_sqlite_ledger_load(
     let sql = r#"
         SELECT phase, request_id, typed_request_id, call_id, key_name, tenant_id,
                team_id, project_id, user_id, budget_id, model, minute_epoch,
-               input_tokens, estimated_cost_microusd, created_at_epoch,
+               input_tokens, reserved_tokens, estimated_cost_microusd, created_at_epoch,
                response_status, response_bytes, output_tokens, final_cost_microusd,
                final_cost_usd, reconciled_at_epoch
         FROM prodex_gateway_billing_ledger
@@ -35,7 +35,8 @@ pub(super) fn runtime_gateway_sqlite_ledger_load(
     let rows = stmt.query_map(
         params![runtime_gateway_sqlite_u64_to_i64(limit as u64)],
         |row| {
-            let estimated_cost_microusd = runtime_gateway_sqlite_optional_i64_to_u64(row.get(13)?);
+            let reserved_tokens = runtime_gateway_sqlite_optional_i64_to_u64(row.get(13)?);
+            let estimated_cost_microusd = runtime_gateway_sqlite_optional_i64_to_u64(row.get(14)?);
             Ok(RuntimeGatewayBillingLedgerEntry {
                 object: "gateway.billing_ledger_entry".to_string(),
                 phase: row.get(0)?,
@@ -51,16 +52,17 @@ pub(super) fn runtime_gateway_sqlite_ledger_load(
                 model: row.get(10)?,
                 minute_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(11)?),
                 input_tokens: runtime_gateway_sqlite_i64_to_u64(row.get(12)?),
+                reserved_tokens,
                 estimated_cost_microusd,
                 estimated_cost_usd: estimated_cost_microusd.map(microusd_to_usd),
-                created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(14)?),
-                response_status: runtime_gateway_sqlite_optional_i64_to_u64(row.get(15)?)
+                created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(15)?),
+                response_status: runtime_gateway_sqlite_optional_i64_to_u64(row.get(16)?)
                     .and_then(|value| u16::try_from(value).ok()),
-                response_bytes: runtime_gateway_sqlite_optional_i64_to_u64(row.get(16)?),
-                output_tokens: runtime_gateway_sqlite_optional_i64_to_u64(row.get(17)?),
-                final_cost_microusd: runtime_gateway_sqlite_optional_i64_to_u64(row.get(18)?),
-                final_cost_usd: row.get(19)?,
-                reconciled_at_epoch: runtime_gateway_sqlite_optional_i64_to_u64(row.get(20)?),
+                response_bytes: runtime_gateway_sqlite_optional_i64_to_u64(row.get(17)?),
+                output_tokens: runtime_gateway_sqlite_optional_i64_to_u64(row.get(18)?),
+                final_cost_microusd: runtime_gateway_sqlite_optional_i64_to_u64(row.get(19)?),
+                final_cost_usd: row.get(20)?,
+                reconciled_at_epoch: runtime_gateway_sqlite_optional_i64_to_u64(row.get(21)?),
             })
         },
     )?;
@@ -81,7 +83,7 @@ pub(super) fn runtime_gateway_postgres_ledger_load(
     let sql = r#"
         SELECT phase, request_id, typed_request_id, call_id, key_name, tenant_id,
                team_id, project_id, user_id, budget_id, model, minute_epoch,
-               input_tokens, estimated_cost_microusd, created_at_epoch,
+               input_tokens, reserved_tokens, estimated_cost_microusd, created_at_epoch,
                response_status, response_bytes, output_tokens, final_cost_microusd,
                final_cost_usd, reconciled_at_epoch
         FROM prodex_gateway_billing_ledger
@@ -91,7 +93,8 @@ pub(super) fn runtime_gateway_postgres_ledger_load(
     let rows = client.query(sql, &[&runtime_gateway_sqlite_u64_to_i64(limit as u64)])?;
     let mut entries = Vec::new();
     for row in rows {
-        let estimated_cost_microusd = runtime_gateway_sqlite_optional_i64_to_u64(row.get(13));
+        let reserved_tokens = runtime_gateway_sqlite_optional_i64_to_u64(row.get(13));
+        let estimated_cost_microusd = runtime_gateway_sqlite_optional_i64_to_u64(row.get(14));
         entries.push(RuntimeGatewayBillingLedgerEntry {
             object: "gateway.billing_ledger_entry".to_string(),
             phase: row.get(0),
@@ -107,16 +110,17 @@ pub(super) fn runtime_gateway_postgres_ledger_load(
             model: row.get(10),
             minute_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(11)),
             input_tokens: runtime_gateway_sqlite_i64_to_u64(row.get(12)),
+            reserved_tokens,
             estimated_cost_microusd,
             estimated_cost_usd: estimated_cost_microusd.map(microusd_to_usd),
-            created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(14)),
-            response_status: runtime_gateway_sqlite_optional_i64_to_u64(row.get(15))
+            created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(15)),
+            response_status: runtime_gateway_sqlite_optional_i64_to_u64(row.get(16))
                 .and_then(|value| u16::try_from(value).ok()),
-            response_bytes: runtime_gateway_sqlite_optional_i64_to_u64(row.get(16)),
-            output_tokens: runtime_gateway_sqlite_optional_i64_to_u64(row.get(17)),
-            final_cost_microusd: runtime_gateway_sqlite_optional_i64_to_u64(row.get(18)),
-            final_cost_usd: row.get(19),
-            reconciled_at_epoch: runtime_gateway_sqlite_optional_i64_to_u64(row.get(20)),
+            response_bytes: runtime_gateway_sqlite_optional_i64_to_u64(row.get(17)),
+            output_tokens: runtime_gateway_sqlite_optional_i64_to_u64(row.get(18)),
+            final_cost_microusd: runtime_gateway_sqlite_optional_i64_to_u64(row.get(19)),
+            final_cost_usd: row.get(20),
+            reconciled_at_epoch: runtime_gateway_sqlite_optional_i64_to_u64(row.get(21)),
         });
     }
     entries.reverse();
@@ -210,10 +214,15 @@ pub(super) fn runtime_gateway_postgres_ledger_reconcile_response(
 
 #[cfg(test)]
 mod tests {
-    use super::super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
+    use super::super::local_rewrite_gateway_backend_connection::{
+        runtime_gateway_postgres_migrate_compatibility_state,
+        runtime_gateway_postgres_migrate_enterprise_state,
+        runtime_gateway_sqlite_create_current_schema_for_tests,
+    };
     use super::super::local_rewrite_gateway_ledger_types::runtime_gateway_billing_ledger_entry_from_delta;
     use super::super::local_rewrite_gateway_usage_backend::{
-        RuntimeGatewayVirtualKeyUsageDelta, runtime_gateway_sqlite_usage_apply_deltas,
+        RuntimeGatewayVirtualKeyUsageDelta, runtime_gateway_postgres_usage_apply_deltas,
+        runtime_gateway_sqlite_usage_apply_deltas,
     };
     use super::*;
 
@@ -346,7 +355,7 @@ mod tests {
                 model: "gpt-5".to_string(),
                 minute_epoch: 10,
                 input_tokens: 100,
-                reserved_tokens: 100,
+                reserved_tokens: 321,
                 estimated_cost_microusd: Some(250_000),
                 created_at_epoch: 20,
             }],
@@ -362,6 +371,7 @@ mod tests {
         assert_eq!(entry.project_id.as_deref(), Some("project-a"));
         assert_eq!(entry.user_id.as_deref(), Some("user-a"));
         assert_eq!(entry.budget_id.as_deref(), Some("budget-a"));
+        assert_eq!(entry.reserved_tokens, Some(321));
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -370,6 +380,20 @@ mod tests {
     fn sqlite_legacy_ledger_schema_is_upgraded_by_migrator_before_usage_deltas() {
         let (root, path) = temp_sqlite_ledger_path("legacy-schema");
         create_legacy_sqlite_ledger_schema(&path);
+        let legacy_call_id = format!("prodex-{}", prodex_domain::CallId::new());
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                r#"
+                INSERT INTO prodex_gateway_billing_ledger (
+                    phase, request_id, call_id, key_name, model, minute_epoch,
+                    input_tokens, estimated_cost_microusd, created_at_epoch
+                )
+                VALUES ('request', 7, ?1, 'alpha', 'gpt-5', 10, 90, 250000, 19)
+                "#,
+                [&legacy_call_id],
+            )
+            .unwrap();
         runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
 
         runtime_gateway_sqlite_usage_apply_deltas(
@@ -387,19 +411,25 @@ mod tests {
                 model: "gpt-5".to_string(),
                 minute_epoch: 10,
                 input_tokens: 100,
-                reserved_tokens: 100,
+                reserved_tokens: 654,
                 estimated_cost_microusd: Some(250_000),
                 created_at_epoch: 20,
             }],
         )
         .unwrap();
 
-        let entries = runtime_gateway_sqlite_ledger_load(&path, 1).unwrap();
-        let entry = entries.first().unwrap();
+        let entries = runtime_gateway_sqlite_ledger_load(&path, 2).unwrap();
+        let legacy = entries
+            .iter()
+            .find(|entry| entry.call_id == legacy_call_id)
+            .unwrap();
+        let entry = entries.iter().find(|entry| entry.request == 8).unwrap();
 
+        assert_eq!(legacy.reserved_tokens, None);
         assert_eq!(entry.request, 8);
         assert!(entry.request_id.is_some());
         assert_eq!(entry.tenant_id.as_deref(), Some("tenant-a"));
+        assert_eq!(entry.reserved_tokens, Some(654));
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -472,5 +502,85 @@ mod tests {
         assert_eq!(call_b_status, Some(200));
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
+    fn postgres_ledger_round_trips_reserved_tokens_and_preserves_null() {
+        let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+            .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
+        let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+        runtime_gateway_postgres_migrate_enterprise_state(&url, &tls).unwrap();
+        runtime_gateway_postgres_migrate_compatibility_state(&url, &tls).unwrap();
+
+        let key_name = format!("sql-ledger-{}", prodex_domain::VirtualKeyId::new());
+        let legacy_call_id = format!("prodex-{}", prodex_domain::CallId::new());
+        let call_id = format!("prodex-{}", prodex_domain::CallId::new());
+        let mut client = runtime_gateway_postgres_open(&url, &tls).unwrap();
+        client
+            .execute(
+                r#"
+                INSERT INTO prodex_gateway_billing_ledger (
+                    phase, request_id, call_id, key_name, model, minute_epoch,
+                    input_tokens, estimated_cost_microusd, created_at_epoch
+                )
+                VALUES ('request', 70, $1, $2, 'gpt-5', 10, 90, 250000, 19)
+                "#,
+                &[&legacy_call_id, &key_name],
+            )
+            .unwrap();
+        runtime_gateway_postgres_usage_apply_deltas(
+            &url,
+            &tls,
+            &[RuntimeGatewayVirtualKeyUsageDelta {
+                request_id: 71,
+                typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+                call_id: call_id.clone(),
+                key_name: key_name.clone(),
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                model: "gpt-5".to_string(),
+                minute_epoch: 10,
+                input_tokens: 100,
+                reserved_tokens: 777,
+                estimated_cost_microusd: Some(250_000),
+                created_at_epoch: 20,
+            }],
+        )
+        .unwrap();
+
+        let entries = runtime_gateway_postgres_ledger_load(&url, &tls, usize::MAX).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry.call_id == legacy_call_id)
+                .unwrap()
+                .reserved_tokens,
+            None
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry.call_id == call_id)
+                .unwrap()
+                .reserved_tokens,
+            Some(777)
+        );
+
+        client
+            .execute(
+                "DELETE FROM prodex_gateway_billing_ledger WHERE call_id IN ($1, $2)",
+                &[&legacy_call_id, &call_id],
+            )
+            .unwrap();
+        client
+            .execute(
+                "DELETE FROM prodex_gateway_virtual_key_usage WHERE key_name = $1",
+                &[&key_name],
+            )
+            .unwrap();
     }
 }

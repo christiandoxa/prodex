@@ -132,6 +132,12 @@
               "null"
             ]
           },
+          "reserved_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "response_bytes": {
             "type": [
               "integer",

@@ -1054,8 +1054,6 @@ fn gateway_admin_corrupt_key_store_uses_stable_error_without_parser_details() {
 fn gateway_admin_ledger_load_errors_use_stable_response_without_path_details() {
     let root = temp_root("gateway-admin-ledger-load-error");
     let paths = app_paths_for_root(root.clone());
-    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
-        .expect("ledger path directory should be created");
     let upstream = TestUpstream::start_n(0);
     let admin_token = "admin-ledger-load-error-token";
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -1092,6 +1090,8 @@ fn gateway_admin_ledger_load_errors_use_stable_response_without_path_details() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
+        .expect("ledger path directory should be created after startup");
 
     let client = reqwest::blocking::Client::new();
     for (path, code, message) in [

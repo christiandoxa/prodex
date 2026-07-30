@@ -310,7 +310,7 @@ pub(crate) fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<()>
 }
 
 #[cfg(windows)]
-fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -342,7 +342,7 @@ fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
     fs::rename(from, to)
 }
 

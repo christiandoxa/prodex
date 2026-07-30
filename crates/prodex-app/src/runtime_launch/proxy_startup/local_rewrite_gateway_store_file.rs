@@ -81,6 +81,14 @@ pub(super) fn runtime_gateway_read_regular_file(path: &Path) -> io::Result<Optio
     Ok(Some(bytes))
 }
 
+pub(super) fn runtime_gateway_state_path_is_absent(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(false),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(err) => Err(err),
+    }
+}
+
 pub(super) fn runtime_gateway_virtual_key_store_file_save(
     path: &Path,
     store: &RuntimeGatewayVirtualKeyStoreFile,
@@ -102,7 +110,7 @@ pub(super) fn runtime_gateway_write_file_atomic(
     write(&mut file)?;
     file.sync_all()?;
     drop(file);
-    std::fs::rename(tmp_path, path)?;
+    crate::runtime_store::replace_file_atomic(&tmp_path, path)?;
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
@@ -197,6 +205,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "do not touch");
         assert!(std::fs::symlink_metadata(&tmp_path).is_err());
         assert!(path.is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn save_replaces_existing_store() {
+        let root = temp_dir("replace-existing");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("gateway-virtual-keys.json");
+        std::fs::write(&path, "stale").unwrap();
+
+        runtime_gateway_virtual_key_store_file_save(
+            &path,
+            &RuntimeGatewayVirtualKeyStoreFile::default(),
+        )
+        .unwrap();
+
+        runtime_gateway_virtual_key_store_file_load(&path).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
 

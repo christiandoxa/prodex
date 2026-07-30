@@ -12,8 +12,6 @@ use std::fs;
 fn gateway_admin_ledger_rejects_duplicate_limit_query_values() {
     let root = temp_root("gateway-admin-ledger-duplicate-limit");
     let paths = app_paths_for_root(root.clone());
-    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
-        .expect("ledger path directory should be created");
     let upstream = TestUpstream::start_n(0);
     let admin_token = "admin-ledger-duplicate-limit-token";
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -50,6 +48,8 @@ fn gateway_admin_ledger_rejects_duplicate_limit_query_values() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
+        .expect("ledger path directory should be created after startup");
 
     let response = reqwest::blocking::Client::new()
         .get(format!(
@@ -69,8 +69,6 @@ fn gateway_admin_ledger_rejects_duplicate_limit_query_values() {
 fn gateway_admin_ledger_rejects_invalid_limit_query_value() {
     let root = temp_root("gateway-admin-ledger-invalid-limit");
     let paths = app_paths_for_root(root.clone());
-    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
-        .expect("ledger path directory should be created");
     let upstream = TestUpstream::start_n(0);
     let admin_token = "admin-ledger-invalid-limit-token";
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -107,6 +105,8 @@ fn gateway_admin_ledger_rejects_invalid_limit_query_value() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    fs::create_dir_all(root.join("gateway-billing-ledger.jsonl"))
+        .expect("ledger path directory should be created after startup");
 
     let response = reqwest::blocking::Client::new()
         .get(format!(

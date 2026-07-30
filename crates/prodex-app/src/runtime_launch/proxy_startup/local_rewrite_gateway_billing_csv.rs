@@ -19,6 +19,7 @@ pub(super) fn runtime_gateway_billing_ledger_csv<T: Serialize>(records: &[T]) ->
             "created_at_epoch",
             "minute_epoch",
             "input_tokens",
+            "reserved_tokens",
             "output_tokens",
             "response_status",
             "response_bytes",
@@ -48,6 +49,7 @@ pub(super) fn runtime_gateway_billing_ledger_csv<T: Serialize>(records: &[T]) ->
                 runtime_gateway_json_csv_u64(&record, "created_at_epoch"),
                 runtime_gateway_json_csv_u64(&record, "minute_epoch"),
                 runtime_gateway_json_csv_u64(&record, "input_tokens"),
+                runtime_gateway_json_csv_u64(&record, "reserved_tokens"),
                 runtime_gateway_json_csv_u64(&record, "output_tokens"),
                 runtime_gateway_json_csv_u64(&record, "response_status"),
                 runtime_gateway_json_csv_u64(&record, "response_bytes"),
@@ -228,6 +230,7 @@ mod tests {
         created_at_epoch: u64,
         minute_epoch: u64,
         input_tokens: u64,
+        reserved_tokens: Option<u64>,
         output_tokens: Option<u64>,
         response_status: Option<u16>,
     }
@@ -249,6 +252,7 @@ mod tests {
             created_at_epoch: 2,
             minute_epoch: 3,
             input_tokens: 4,
+            reserved_tokens: Some(6),
             output_tokens: Some(5),
             response_status: Some(200),
         }]);
@@ -256,6 +260,7 @@ mod tests {
             "prodex-1,prodex-request-1,\"team,\"\"a\"\"\",tenant-a,platform,,,budget-a,gpt-5.4"
         ));
         assert!(csv.starts_with("call_id,request_id,key_name,tenant_id"));
+        assert!(csv.contains("minute_epoch,input_tokens,reserved_tokens,output_tokens"));
     }
 
     #[test]
@@ -275,6 +280,7 @@ mod tests {
             created_at_epoch: 2,
             minute_epoch: 3,
             input_tokens: 4,
+            reserved_tokens: Some(6),
             output_tokens: Some(5),
             response_status: Some(200),
         }]);

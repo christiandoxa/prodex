@@ -319,6 +319,7 @@ mod tests {
             model: "gpt-5".to_string(),
             minute_epoch: 10,
             input_tokens: 100,
+            reserved_tokens: None,
             estimated_cost_microusd: None,
             estimated_cost_usd: None,
             created_at_epoch: 20,

@@ -157,6 +157,7 @@ fn sqlite_open_accepts_versioned_compatibility_schema() {
         "project_id",
         "user_id",
         "budget_id",
+        "reserved_tokens",
     ] {
         let count: i64 = conn
                 .query_row(
@@ -167,6 +168,15 @@ fn sqlite_open_accepts_versioned_compatibility_schema() {
                 .unwrap();
         assert_eq!(count, 1, "{column_name} should exist");
     }
+    let reserved_tokens_not_null: i64 = conn
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('prodex_gateway_billing_ledger')
+             WHERE name = 'reserved_tokens'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(reserved_tokens_not_null, 0);
     let virtual_key_id_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('prodex_gateway_virtual_keys') WHERE name = 'virtual_key_id'",

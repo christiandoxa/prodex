@@ -27,6 +27,8 @@ pub(super) struct RuntimeGatewayBillingLedgerEntry {
     pub(super) model: String,
     pub(super) minute_epoch: u64,
     pub(super) input_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) reserved_tokens: Option<u64>,
     pub(super) estimated_cost_microusd: Option<u64>,
     pub(super) estimated_cost_usd: Option<f64>,
     pub(super) created_at_epoch: u64,
@@ -61,6 +63,7 @@ impl fmt::Debug for RuntimeGatewayBillingLedgerEntry {
             .field("model", &"<redacted>")
             .field("minute_epoch", &"<redacted>")
             .field("input_tokens", &"<redacted>")
+            .field("reserved_tokens", &redacted_option(&self.reserved_tokens))
             .field(
                 "estimated_cost_microusd",
                 &redacted_option(&self.estimated_cost_microusd),
@@ -108,6 +111,7 @@ pub(super) fn runtime_gateway_billing_ledger_entry_from_delta(
         model: delta.model.clone(),
         minute_epoch: delta.minute_epoch,
         input_tokens: delta.input_tokens,
+        reserved_tokens: Some(delta.reserved_tokens),
         estimated_cost_microusd: delta.estimated_cost_microusd,
         estimated_cost_usd: delta.estimated_cost_microusd.map(microusd_to_usd),
         created_at_epoch: delta.created_at_epoch,
@@ -202,6 +206,7 @@ mod tests {
         assert_eq!(entry.tenant_id.as_deref(), Some("tenant-a"));
         assert_eq!(entry.team_id.as_deref(), Some("platform"));
         assert_eq!(entry.budget_id.as_deref(), Some("budget-a"));
+        assert_eq!(entry.reserved_tokens, Some(100));
         assert_eq!(entry.estimated_cost_usd, Some(0.25));
     }
 
@@ -252,6 +257,7 @@ mod tests {
             model: "gpt-secret".to_string(),
             minute_epoch: 1_700_000_000,
             input_tokens: 123,
+            reserved_tokens: Some(234),
             estimated_cost_microusd: Some(456),
             estimated_cost_usd: Some(0.000456),
             created_at_epoch: 1_700_000_001,
@@ -279,6 +285,7 @@ mod tests {
             "gpt-secret",
             "1700000000",
             "123",
+            "234",
             "456",
             "789",
         ] {
