@@ -78,6 +78,11 @@ const AUTO_ROTATE_SHARDS = Object.freeze([
     label: "super mode",
     filters: ["super_mode::"],
   },
+  {
+    id: "ping",
+    label: "ping",
+    filters: ["ping::"],
+  },
 ]);
 
 function parseArgs(argv) {
@@ -85,6 +90,8 @@ function parseArgs(argv) {
     allFeatures: false,
     dryRun: false,
     jobs: defaultJobCount(),
+    shardCount: 1,
+    shardIndex: 0,
     timings: false,
     timingsJson: false,
     timingsLimit: 10,
@@ -102,6 +109,22 @@ function parseArgs(argv) {
     }
     if (value === "--all-features") {
       args.allFeatures = true;
+      continue;
+    }
+    if (value === "--shard-count") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error("--shard-count requires a value");
+      }
+      args.shardCount = parsePositiveInteger(argv[index], "--shard-count");
+      continue;
+    }
+    if (value === "--shard-index") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error("--shard-index requires a value");
+      }
+      args.shardIndex = Number(argv[index]);
       continue;
     }
     if (value === "--dry-run") {
@@ -132,13 +155,16 @@ function parseArgs(argv) {
     throw new Error(`unknown argument: ${value}`);
   }
 
+  if (!Number.isInteger(args.shardIndex) || args.shardIndex < 0 || args.shardIndex >= args.shardCount) {
+    throw new Error(`--shard-index must be an integer between 0 and ${args.shardCount - 1}`);
+  }
   return args;
 }
 
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/auto-rotate-shards.mjs [--jobs <n>] [--all-features] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
+      "Usage: node scripts/ci/auto-rotate-shards.mjs [--jobs <n>] [--all-features] [--shard-index <n> --shard-count <n>] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
       "",
       "Runs auto_rotate integration tests as parallel shard groups.",
       "Each shard keeps its selected tests serial with --test-threads=1.",
@@ -263,7 +289,11 @@ async function main() {
     printHelp();
     return;
   }
-  await runShardsParallel(AUTO_ROTATE_SHARDS, args);
+  const selectedShards = AUTO_ROTATE_SHARDS.filter((_, index) => index % args.shardCount === args.shardIndex);
+  if (selectedShards.length === 0) {
+    throw new Error(`No auto-rotate shards selected for ${args.shardIndex}/${args.shardCount}`);
+  }
+  await runShardsParallel(selectedShards, args);
 }
 
 try {
