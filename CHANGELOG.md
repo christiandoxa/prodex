@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.371.0 - 2026-07-30
+
+### Misc
+
+- Harden usage accounting (`f688973`)
+
 ## 0.370.0 - 2026-07-30
 
 ### Misc
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited source gaps (`853f0da`)
-
-## 0.359.0 - 2026-07-27
-
-### Misc
-
-- Close audited release gaps (`0735f52`)
