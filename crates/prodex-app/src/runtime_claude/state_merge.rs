@@ -2,6 +2,7 @@ use anyhow::Result;
 use prodex_core::AppPaths;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) use prodex_runtime_claude::{
     ensure_runtime_proxy_claude_profile_link, merge_runtime_proxy_claude_directory_contents,

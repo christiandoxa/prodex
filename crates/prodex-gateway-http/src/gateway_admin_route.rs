@@ -382,6 +382,9 @@ fn governance_resource_route<'a>(segments: &[&'a str]) -> GatewayGovernanceResou
         [resource_id, "rollback"] if !resource_id.is_empty() => {
             GatewayGovernanceResourceRoute::Rollback { resource_id }
         }
+        [resource_id, "revoke"] if !resource_id.is_empty() => {
+            GatewayGovernanceResourceRoute::Revoke { resource_id }
+        }
         _ => GatewayGovernanceResourceRoute::Unknown(segments.to_vec()),
     }
 }
@@ -507,6 +510,11 @@ mod tests {
                 GatewayHttpMethod::Post,
                 "/prodex/gateway/policies/rev-1/rollback",
                 GatewayControlPlaneOperation::PolicyRollback,
+            ),
+            (
+                GatewayHttpMethod::Post,
+                "/prodex/gateway/policies/rev-1/revoke",
+                GatewayControlPlaneOperation::PolicyRevoke,
             ),
             (
                 GatewayHttpMethod::Post,

@@ -1,4 +1,10 @@
 mod audit_retention;
+mod response;
+
+use response::{
+    invalid_request, json_response_with_etag, lifecycle_error, lifecycle_repository_error,
+    repository_error,
+};
 
 use prodex_application::{
     ApplicationAuditRetentionPurgeRequest, ApplicationBreakGlassAuditRequest,
@@ -24,8 +30,7 @@ use prodex_storage::{
     GovernanceActivationResult, GovernanceArtifactKind, GovernanceArtifactValidationInput,
     GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceMutationIdempotency,
     GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
-    GovernanceRevisionWriteCommand, GovernanceSnapshot, GovernanceStatus, GovernanceWriteOutcome,
-    TenantStorageKey,
+    GovernanceRevisionWriteCommand, GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
 };
 use prodex_storage_sqlite_runtime::GovernanceSqliteRepository;
 use sha2::{Digest, Sha256};
@@ -204,17 +209,19 @@ pub(super) fn runtime_gateway_admin_policy_response(
             base_action,
             &repository,
         ),
-        ("POST", [revision_id, action @ ("activate" | "rollback")]) => activation_response(
-            captured,
-            path,
-            revision_id,
-            action,
-            resource,
-            shared,
-            admin_auth,
-            base_action,
-            &repository,
-        ),
+        ("POST", [revision_id, action @ ("activate" | "rollback" | "revoke")]) => {
+            activation_response(
+                captured,
+                path,
+                revision_id,
+                action,
+                resource,
+                shared,
+                admin_auth,
+                base_action,
+                &repository,
+            )
+        }
         ("GET" | "POST", _) => build_runtime_proxy_json_error_response(
             404,
             "governance_policy_not_found",
@@ -511,27 +518,6 @@ impl RuntimeGovernanceRepository<'_> {
                 repository,
                 runtime,
             } => runtime.block_on(repository.governance_status(tenant_id, kind)),
-        }
-    }
-
-    fn load_snapshot(
-        &self,
-        tenant_id: prodex_domain::TenantId,
-        kind: GovernanceArtifactKind,
-        validate_artifact: impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
-    ) -> Result<GovernanceSnapshot, GovernanceRepositoryError> {
-        match self {
-            Self::Sqlite(repository) => {
-                repository.load_snapshot(tenant_id, kind, validate_artifact)
-            }
-            Self::Postgres {
-                repository,
-                runtime,
-            } => runtime.block_on(repository.governance_load_snapshot(
-                tenant_id,
-                kind,
-                validate_artifact,
-            )),
         }
     }
 
@@ -1672,16 +1658,20 @@ fn activation_response(
     base_action: &ControlPlaneActionPlan,
     repository: &RuntimeGovernanceRepository<'_>,
 ) -> tiny_http::ResponseBox {
-    let body = match runtime_gateway_admin_json_body(captured) {
-        Ok(body) => body,
-        Err(response) => return response,
-    };
-    let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str) else {
-        return invalid_request();
-    };
-    let approval_id = match ApprovalId::new(approval_id.to_string()) {
-        Ok(value) => value,
-        Err(_) => return invalid_request(),
+    let approval_id = if action == "revoke" {
+        None
+    } else {
+        let body = match runtime_gateway_admin_json_body(captured) {
+            Ok(body) => body,
+            Err(response) => return response,
+        };
+        let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str) else {
+            return invalid_request();
+        };
+        match ApprovalId::new(approval_id.to_string()) {
+            Ok(value) => Some(value),
+            Err(_) => return invalid_request(),
+        }
     };
     let execution = match execution(captured, path, admin_auth, base_action) {
         Ok(execution) => execution,
@@ -1691,20 +1681,21 @@ fn activation_response(
         return build_runtime_proxy_json_error_response(
             428,
             "control_plane_if_match_required",
-            "If-Match is required for governance activation",
+            "If-Match is required for governance lifecycle mutation",
         );
     };
-    let activation_action = if action == "activate" {
-        GovernanceActivationAction::Activate
-    } else {
-        GovernanceActivationAction::Rollback
+    let activation_action = match action {
+        "activate" => GovernanceActivationAction::Activate,
+        "rollback" => GovernanceActivationAction::Rollback,
+        "revoke" => GovernanceActivationAction::Revoke,
+        _ => return invalid_request(),
     };
     let tenant_id = execution.authorized_action.tenant.tenant_id;
-    let audit_action = if action == "activate" {
-        format!("governance.{}.revision.activate", resource.label())
-    } else {
-        format!("governance.{}.revision.rollback", resource.label())
-    };
+    let audit_action = format!(
+        "governance.{}.revision.{}",
+        resource.label(),
+        activation_action.as_str()
+    );
     let audit = match audit_command(
         repository,
         &execution.authorized_action,
@@ -1717,7 +1708,7 @@ fn activation_response(
     };
     let expected_etag = (entity_tag.as_str() != "*").then(|| entity_tag.as_str().to_string());
     let activate = || {
-        ApplicationGovernanceLifecycleService::new(repository)
+        let result = ApplicationGovernanceLifecycleService::new(repository)
             .activate_revision(
                 &execution.authorized_action,
                 GovernanceActivationRequest {
@@ -1739,42 +1730,22 @@ fn activation_response(
                 },
                 |input| governance_artifact_validation_is_valid(shared, resource, input),
             )
-            .map_err(lifecycle_repository_error)
+            .map_err(lifecycle_repository_error)?;
+        Ok(result)
     };
     let activation = match shared.governance_authority.as_ref() {
         Some(authority) => authority.commit_for_tenant(tenant_id, activate),
         None => activate(),
-    };
+    }
+    .and_then(|result| {
+        match shared.refresh_committed_governance_artifact_kind(tenant_id, resource.kind()) {
+            Ok(_) => Ok(result),
+            Err(_) if action == "revoke" => Ok(result),
+            Err(error) => Err(error),
+        }
+    });
     match activation {
         Ok(result) => {
-            let snapshot = match repository.load_snapshot(tenant_id, resource.kind(), |input| {
-                governance_artifact_validation_is_valid(shared, resource, input)
-            }) {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    record_policy_lifecycle(
-                        resource,
-                        policy_activation_operation(action),
-                        PolicyLifecycleResult::Failed,
-                    );
-                    return repository_error(error);
-                }
-            };
-            if shared
-                .swap_committed_governance_artifact_kind(
-                    tenant_id,
-                    resource.kind(),
-                    &snapshot.compiled_artifact,
-                )
-                .is_err()
-            {
-                record_policy_lifecycle(
-                    resource,
-                    policy_activation_operation(action),
-                    PolicyLifecycleResult::Failed,
-                );
-                return repository_error(GovernanceRepositoryError::SnapshotUnavailable);
-            }
             record_policy_lifecycle(
                 resource,
                 policy_activation_operation(action),
@@ -1783,8 +1754,13 @@ fn activation_response(
             json_response_with_etag(
                 200,
                 serde_json::json!({
-                    "object": format!("governance.{}_activation", resource.label()),
+                    "object": format!(
+                        "governance.{}_{}",
+                        resource.label(),
+                        if action == "revoke" { "revocation" } else { "activation" }
+                    ),
                     "revision_id": result.revision_id,
+                    "active_revision_id": result.active_revision_id,
                     "last_known_good_revision_id": result.last_known_good_revision_id,
                     "etag": result.etag,
                     "replayed": result.outcome == GovernanceWriteOutcome::Replayed,
@@ -2163,106 +2139,4 @@ fn approval_state(state: prodex_domain::ApprovalState) -> &'static str {
         prodex_domain::ApprovalState::Superseded => "superseded",
         prodex_domain::ApprovalState::RolledBack => "rolled_back",
     }
-}
-
-fn lifecycle_repository_error(
-    error: ApplicationGovernanceLifecycleError,
-) -> GovernanceRepositoryError {
-    match error {
-        ApplicationGovernanceLifecycleError::InvalidAction => {
-            GovernanceRepositoryError::InvalidInput
-        }
-        ApplicationGovernanceLifecycleError::Repository(error) => error,
-    }
-}
-
-fn lifecycle_error(error: ApplicationGovernanceLifecycleError) -> tiny_http::ResponseBox {
-    repository_error(lifecycle_repository_error(error))
-}
-
-fn repository_error(error: GovernanceRepositoryError) -> tiny_http::ResponseBox {
-    let (status, code, message) = match error {
-        GovernanceRepositoryError::InvalidInput => (
-            400,
-            "governance_policy_invalid",
-            "policy governance request is invalid",
-        ),
-        GovernanceRepositoryError::TenantMismatch => (
-            403,
-            "governance_policy_forbidden",
-            "policy governance request is forbidden",
-        ),
-        GovernanceRepositoryError::NotFound => (
-            404,
-            "governance_policy_not_found",
-            "policy governance resource was not found",
-        ),
-        GovernanceRepositoryError::EtagMismatch => (
-            412,
-            "governance_policy_precondition_failed",
-            "policy governance precondition failed",
-        ),
-        GovernanceRepositoryError::ApprovalSelfAction => (
-            403,
-            "governance_policy_self_approval_forbidden",
-            "policy maker cannot approve this revision",
-        ),
-        GovernanceRepositoryError::StaleVersion => (
-            409,
-            "governance_policy_version_stale",
-            "policy approval version is stale",
-        ),
-        GovernanceRepositoryError::Conflict
-        | GovernanceRepositoryError::InvalidTransition
-        | GovernanceRepositoryError::ApprovalRequired => (
-            409,
-            "governance_policy_conflict",
-            "policy governance state conflicts with this request",
-        ),
-        GovernanceRepositoryError::SnapshotUnavailable => (
-            422,
-            "governance_policy_snapshot_invalid",
-            "policy revision could not be verified",
-        ),
-        GovernanceRepositoryError::Unsupported => (
-            501,
-            "governance_policy_operation_unsupported",
-            "policy governance operation is not supported by this backend",
-        ),
-        GovernanceRepositoryError::Database | GovernanceRepositoryError::AuditChainConflict => (
-            503,
-            "governance_policy_storage_unavailable",
-            "policy governance storage is temporarily unavailable",
-        ),
-    };
-    build_runtime_proxy_json_error_response(status, code, message)
-}
-
-fn invalid_request() -> tiny_http::ResponseBox {
-    build_runtime_proxy_json_error_response(
-        400,
-        "governance_policy_invalid",
-        "policy governance request is invalid",
-    )
-}
-
-fn json_response_with_etag(
-    status: u16,
-    value: serde_json::Value,
-    etag: &str,
-) -> tiny_http::ResponseBox {
-    let body = serde_json::to_vec_pretty(&value).unwrap_or_else(|_| b"{}".to_vec());
-    build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
-        status,
-        headers: vec![
-            (
-                "content-type".to_string(),
-                b"application/json; charset=utf-8".to_vec(),
-            ),
-            ("cache-control".to_string(), b"no-store".to_vec()),
-            ("x-content-type-options".to_string(), b"nosniff".to_vec()),
-            ("etag".to_string(), etag.as_bytes().to_vec()),
-        ],
-        body: body.into(),
-    })
 }

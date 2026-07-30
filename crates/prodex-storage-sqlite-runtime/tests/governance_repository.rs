@@ -1,5 +1,7 @@
 #[path = "governance_repository/audit_retention.rs"]
 mod audit_retention;
+#[path = "governance_repository/revision_recovery.rs"]
+mod revision_recovery;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
@@ -266,9 +268,33 @@ fn activation_request(
         tenant_id,
         kind,
         revision_id: revision_id.to_string(),
-        approval_id: approval.id.clone(),
+        approval_id: Some(approval.id.clone()),
         actor: actor.clone(),
         action,
+        expected_etag,
+        idempotency_key: IdempotencyKey::new(idempotency).unwrap(),
+        request_fingerprint: format!("request:{idempotency}"),
+        audit_outbox,
+        activated_at_unix_ms: 5_000,
+    }
+}
+
+fn revocation_request(
+    tenant_id: TenantId,
+    kind: GovernanceArtifactKind,
+    revision_id: &str,
+    actor: &Principal,
+    expected_etag: Option<String>,
+    idempotency: &str,
+    audit_outbox: AuditOutboxWriteCommand,
+) -> GovernanceActivationRequest {
+    GovernanceActivationRequest {
+        tenant_id,
+        kind,
+        revision_id: revision_id.to_string(),
+        approval_id: None,
+        actor: actor.clone(),
+        action: GovernanceActivationAction::Revoke,
         expected_etag,
         idempotency_key: IdempotencyKey::new(idempotency).unwrap(),
         request_fingerprint: format!("request:{idempotency}"),
@@ -997,108 +1023,6 @@ fn concurrent_activation_uses_etag_compare_and_swap() {
             .count(),
         1
     );
-}
-
-#[test]
-fn malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic() {
-    let tenant_id = TenantId::new();
-    let database = TestDatabase::new(&[tenant_id]);
-    let repository = database.repository();
-    let maker = principal(tenant_id);
-    let checker = principal(tenant_id);
-    let mut audit = AuditCursor::default();
-    let v1 = PolicyRevisionId::new().to_string();
-    let approval_v1 = prepare_approved_revision(
-        &repository,
-        &mut audit,
-        tenant_id,
-        GovernanceArtifactKind::Policy,
-        &v1,
-        b"valid-v1",
-        &maker,
-        &checker,
-        "policy/v1",
-    );
-    let active_v1 = repository
-        .activate_revision(
-            activation_request(
-                tenant_id,
-                GovernanceArtifactKind::Policy,
-                &v1,
-                &approval_v1,
-                &checker,
-                GovernanceActivationAction::Activate,
-                None,
-                "activate-v1",
-                audit.next(tenant_id, &checker, "governance.revision.activate"),
-            ),
-            |_| true,
-        )
-        .unwrap();
-    let v2 = PolicyRevisionId::new().to_string();
-    let approval_v2 = prepare_approved_revision(
-        &repository,
-        &mut audit,
-        tenant_id,
-        GovernanceArtifactKind::Policy,
-        &v2,
-        b"malformed-v2",
-        &maker,
-        &checker,
-        "policy/v2",
-    );
-    let active_v2 = repository
-        .activate_revision(
-            activation_request(
-                tenant_id,
-                GovernanceArtifactKind::Policy,
-                &v2,
-                &approval_v2,
-                &checker,
-                GovernanceActivationAction::Activate,
-                Some(active_v1.etag),
-                "activate-v2",
-                audit.next(tenant_id, &checker, "governance.revision.activate"),
-            ),
-            |_| true,
-        )
-        .unwrap();
-    let fallback = repository
-        .load_snapshot(tenant_id, GovernanceArtifactKind::Policy, |input| {
-            input.compiled_artifact != b"malformed-v2"
-        })
-        .unwrap();
-    assert_eq!(fallback.revision_id, v1);
-    assert_eq!(fallback.source, GovernanceSnapshotSource::LastKnownGood);
-
-    let rollback_approval = prepare_approval_for_existing(
-        &repository,
-        &mut audit,
-        tenant_id,
-        GovernanceArtifactKind::Policy,
-        ApprovalFingerprint::new(checksum(b"valid-v1")).unwrap(),
-        &maker,
-        &checker,
-        "policy/rollback-v1",
-    );
-    let rollback = repository
-        .activate_revision(
-            activation_request(
-                tenant_id,
-                GovernanceArtifactKind::Policy,
-                &v1,
-                &rollback_approval,
-                &checker,
-                GovernanceActivationAction::Rollback,
-                Some(active_v2.etag),
-                "rollback-v1",
-                audit.next(tenant_id, &checker, "governance.revision.rollback"),
-            ),
-            |_| true,
-        )
-        .unwrap();
-    assert_eq!(rollback.revision_id, v1);
-    assert_eq!(rollback.last_known_good_revision_id, v1);
 }
 
 #[test]

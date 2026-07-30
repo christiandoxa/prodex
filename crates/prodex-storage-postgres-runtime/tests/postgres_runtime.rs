@@ -28,6 +28,7 @@ use prodex_storage_postgres_runtime::{
     ReserveRejection, StoredReservationState,
 };
 use sha2::{Digest, Sha256};
+use std::str::FromStr;
 
 fn reservation_command(tenant_id: TenantId) -> AtomicReservationCommand {
     let call_id = CallId::new();
@@ -146,6 +147,7 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
         .create_pool_explicit_no_tls()
         .expect("test pool should build");
     let repository = PostgresRepository::from_pool_with_config(pool.clone(), &config);
+    let replay_repository = PostgresRepository::from_pool_with_config(pool.clone(), &config);
     let tenant_id = TenantId::new();
     create_tenant(&pool, tenant_id).await;
     let maker = governance_principal(tenant_id);
@@ -263,7 +265,7 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
                     tenant_id,
                     kind,
                     revision_id: revision_id.clone(),
-                    approval_id,
+                    approval_id: Some(approval_id.clone()),
                     actor: maker.clone(),
                     action: GovernanceActivationAction::Activate,
                     expected_etag: None,
@@ -278,14 +280,15 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
             .unwrap();
         assert_eq!(activated.kind, kind);
         assert_eq!(activated.revision_id, revision_id);
+        let active_status = repository.governance_status(tenant_id, kind).await.unwrap();
         assert_eq!(
-            repository
-                .governance_status(tenant_id, kind)
-                .await
-                .unwrap()
-                .active_revision_id
-                .as_deref(),
+            active_status.active_revision_id.as_deref(),
             Some(revision_id.as_str())
+        );
+        assert_eq!(
+            active_status.etag.as_deref(),
+            Some(activated.etag.as_str()),
+            "{label}: activation result must match committed pointer",
         );
         assert_eq!(
             repository
@@ -304,6 +307,141 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
             artifact
         );
         now += 1;
+
+        let (revocation_audit, next_digest) =
+            governance_audit(tenant_id, &maker, "governance.revision.revoke", now, digest);
+        digest = Some(next_digest);
+        let revocation = GovernanceActivationRequest {
+            tenant_id,
+            kind,
+            revision_id: revision_id.clone(),
+            approval_id: None,
+            actor: maker.clone(),
+            action: GovernanceActivationAction::Revoke,
+            expected_etag: Some(activated.etag.clone()),
+            idempotency_key: IdempotencyKey::new(format!("revoke-{label}")).unwrap(),
+            request_fingerprint: format!("revoke-request-{label}"),
+            audit_outbox: revocation_audit,
+            activated_at_unix_ms: now,
+        };
+        let (first, second) = tokio::join!(
+            repository.governance_activate_revision(revocation.clone(), |_| true),
+            replay_repository.governance_activate_revision(revocation.clone(), |_| true),
+        );
+        assert!(
+            first.is_ok() && second.is_ok(),
+            "{label}: first={:?}, second={:?}",
+            first.as_ref().map(|result| result.outcome),
+            second.as_ref().map(|result| result.outcome),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+        assert_eq!(
+            [first.outcome, second.outcome]
+                .iter()
+                .filter(|outcome| **outcome == GovernanceWriteOutcome::Applied)
+                .count(),
+            1
+        );
+        assert_eq!(
+            [first.outcome, second.outcome]
+                .iter()
+                .filter(|outcome| **outcome == GovernanceWriteOutcome::Replayed)
+                .count(),
+            1
+        );
+        let revoked = if first.outcome == GovernanceWriteOutcome::Applied {
+            &first
+        } else {
+            &second
+        };
+        assert_eq!(revoked.active_revision_id, None);
+        assert_eq!(revoked.last_known_good_revision_id, None);
+        assert_eq!(first.etag, second.etag);
+        assert_eq!(first.active_revision_id, second.active_revision_id);
+        assert_eq!(
+            first.last_known_good_revision_id,
+            second.last_known_good_revision_id
+        );
+        assert_eq!(
+            repository
+                .governance_load_snapshot(tenant_id, kind, |_| true)
+                .await,
+            Err(prodex_storage::GovernanceRepositoryError::SnapshotUnavailable)
+        );
+        assert_eq!(
+            repository
+                .governance_get_revision(tenant_id, kind, &revision_id)
+                .await
+                .unwrap()
+                .lifecycle_state,
+            "revoked"
+        );
+
+        let mut client = pool.get().await.unwrap();
+        let transaction = client.transaction().await.unwrap();
+        transaction
+            .query_one(SET_TENANT_STATEMENT.sql, &[&tenant_id.to_string()])
+            .await
+            .unwrap();
+        let table = match kind {
+            GovernanceArtifactKind::Policy => "prodex_policy_revisions",
+            GovernanceArtifactKind::ClassificationRules => "prodex_classification_rule_revisions",
+            GovernanceArtifactKind::ProviderRegistry => "prodex_provider_registry_revisions",
+            GovernanceArtifactKind::RoutingScores => "prodex_routing_score_revisions",
+        };
+        let query = format!(
+            "UPDATE {table} SET lifecycle_state = 'active'
+             WHERE tenant_id = $1 AND revision_id = $2"
+        );
+        let raw_revival = if kind == GovernanceArtifactKind::Policy {
+            transaction
+                .execute(
+                    &query,
+                    &[
+                        &tenant_id.as_uuid(),
+                        &PolicyRevisionId::from_str(&revision_id).unwrap().as_uuid(),
+                    ],
+                )
+                .await
+        } else {
+            transaction
+                .execute(&query, &[&tenant_id.as_uuid(), &revision_id])
+                .await
+        };
+        assert!(raw_revival.is_err());
+        drop(transaction);
+
+        let (reactivation_audit, _) = governance_audit(
+            tenant_id,
+            &maker,
+            "governance.revision.activate",
+            now + 1,
+            digest.clone(),
+        );
+        assert_eq!(
+            repository
+                .governance_activate_revision(
+                    GovernanceActivationRequest {
+                        tenant_id,
+                        kind,
+                        revision_id: revision_id.clone(),
+                        approval_id: Some(approval_id),
+                        actor: maker.clone(),
+                        action: GovernanceActivationAction::Activate,
+                        expected_etag: Some(revoked.etag.clone()),
+                        idempotency_key: IdempotencyKey::new(format!("reactivate-revoked-{label}"))
+                            .unwrap(),
+                        request_fingerprint: format!("reactivate-revoked-request-{label}"),
+                        audit_outbox: reactivation_audit,
+                        activated_at_unix_ms: now + 1,
+                    },
+                    |_| true,
+                )
+                .await,
+            Err(prodex_storage::GovernanceRepositoryError::Conflict)
+        );
+        now += 2;
     }
 }
 

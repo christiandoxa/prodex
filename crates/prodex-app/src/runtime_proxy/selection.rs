@@ -16,18 +16,23 @@ use self::policy::{
     runtime_affinity_selection_profile, runtime_soft_affinity_allowed,
     runtime_soft_affinity_rejection_reason,
 };
-#[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use self::policy::{
-    RuntimeCandidateAffinity, RuntimePreviousResponseNotFoundFallbackRequest,
-    RuntimePreviousResponseStaleContinuationPolicy, RuntimeResponseCandidateSelection,
-    RuntimeWebsocketReuseWatchdogPreviousResponseFallback, runtime_candidate_has_hard_affinity,
-    runtime_previous_response_not_found_fallback_policy,
-    runtime_quota_blocked_affinity_is_releasable,
-    runtime_quota_blocked_previous_response_fresh_fallback_allowed,
+    RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
+    runtime_candidate_has_hard_affinity, runtime_quota_blocked_affinity_is_releasable,
     runtime_quota_precommit_guard_reason,
-    runtime_websocket_previous_response_not_found_requires_stale_continuation,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_previous_response_reuse_is_stale,
+};
+#[cfg(test)]
+pub(crate) use self::policy::{
+    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
+    runtime_previous_response_not_found_fallback_policy,
+    runtime_quota_blocked_previous_response_fresh_fallback_allowed,
+    runtime_websocket_previous_response_not_found_requires_stale_continuation,
+};
+#[cfg(any(test, feature = "bench-support"))]
+pub(crate) use self::policy::{
+    RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 

@@ -106,13 +106,29 @@ jobs:
         run: cargo fmt --check
 
   prodex-app-lib:
-    name: prodex-app full library tests
+    name: prodex-app library tests (${{ matrix.label }})
     needs: changes
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: selection
+            label: selection and pressure
+            save_cache: true
+          - suite: admission
+            label: admission and state
+            save_cache: false
+          - suite: rotation
+            label: rotation and health
+            save_cache: false
+          - suite: remainder
+            label: remaining tests
+            save_cache: false
 
     steps:
       - name: Check out repository
@@ -130,11 +146,52 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-bin: false
+          save-if: ${{ matrix.save_cache }}
 
-      - name: Run every prodex-app library test
-        run: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1
+      - name: Run prodex-app library partition
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.suite }}" in
+            selection)
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' -- --test-threads=1
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' -- --test-threads=1
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' -- --test-threads=1
+              ;;
+            admission)
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' -- --test-threads=1
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::state::' -- --test-threads=1
+              ;;
+            rotation)
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' -- --test-threads=1
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                'main_internal_tests::runtime_proxy_selection_and_pressure::health::' -- --test-threads=1
+              ;;
+            remainder)
+              cargo test --locked -q -p prodex-app --lib --all-features -- \
+                --test-threads=1 \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::state::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' \
+                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::health::'
+              ;;
+            *)
+              echo "unknown prodex-app library suite: ${{ matrix.suite }}" >&2
+              exit 2
+              ;;
+          esac
 
       - name: Test temp-backed state with a symlinked TMPDIR
+        if: matrix.suite == 'remainder'
         shell: bash
         run: |
           set -euo pipefail
@@ -1264,6 +1321,7 @@ jobs:
     needs:
       - changes
       - fmt
+      - prodex-app-lib
       - fuzz-build
       - docs-lint
       - observability-alerts
@@ -1272,6 +1330,8 @@ jobs:
       - windows-workspace
       - macos-workspace
       - process-guard
+      - redis-integration
+      - backup-restore-drill
       - compat-replay-gate
       - supply-chain
       - release-sync

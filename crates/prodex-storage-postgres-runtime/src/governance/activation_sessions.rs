@@ -22,9 +22,23 @@ impl PostgresRepository {
         F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
     {
         let activated_at = validate_governance_activation_request(&request)?;
+        let mut validate_artifact = Some(validate_artifact);
         let mut client = self.pool.get().await.map_err(database_error)?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        let transaction = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::ReadCommitted)
+            .start()
+            .await
+            .map_err(database_error)?;
         set_tenant_context(&transaction, request.tenant_id)
+            .await
+            .map_err(database_error)?;
+        let tenant_lock = request.tenant_id.to_string();
+        transaction
+            .query_one(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                &[&tenant_lock],
+            )
             .await
             .map_err(database_error)?;
 
@@ -40,33 +54,107 @@ impl PostgresRepository {
         )
         .await?
         .ok_or(GovernanceRepositoryError::NotFound)?;
-        let validation = GovernanceArtifactValidationInput {
-            tenant_id: request.tenant_id,
-            kind: request.kind,
-            revision_id: &request.revision_id,
-            compiled_artifact: &revision.compiled_artifact,
-            authenticity: revision.authenticity.as_ref(),
-        };
-        if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-            || !validate_artifact(&validation)
+        if load_revision_lifecycle_state(
+            &transaction,
+            request.tenant_id,
+            request.kind,
+            &request.revision_id,
+        )
+        .await?
+        .as_deref()
+            == Some("revoked")
         {
-            return Err(GovernanceRepositoryError::SnapshotUnavailable);
+            return Err(GovernanceRepositoryError::Conflict);
         }
-        let approval = load_approval_tx(&transaction, request.tenant_id, &request.approval_id)
-            .await?
-            .ok_or(GovernanceRepositoryError::ApprovalRequired)?;
+        if request.action != GovernanceActivationAction::Revoke {
+            let validation = GovernanceArtifactValidationInput {
+                tenant_id: request.tenant_id,
+                kind: request.kind,
+                revision_id: &request.revision_id,
+                compiled_artifact: &revision.compiled_artifact,
+                authenticity: revision.authenticity.as_ref(),
+            };
+            if revision.checksum != artifact_checksum(&revision.compiled_artifact)
+                || !validate_artifact
+                    .take()
+                    .expect("validator must be available")(&validation)
+            {
+                return Err(GovernanceRepositoryError::SnapshotUnavailable);
+            }
+        }
+        let approval = match request.approval_id.as_ref() {
+            Some(approval_id) => {
+                load_approval_tx(&transaction, request.tenant_id, approval_id).await?
+            }
+            None => None,
+        };
+        if request.action != GovernanceActivationAction::Revoke && approval.is_none() {
+            return Err(GovernanceRepositoryError::ApprovalRequired);
+        }
         let pointer = load_pointer_for_kind(&transaction, request.tenant_id, request.kind).await?;
+        let revocation_fallback_candidate = if request.action == GovernanceActivationAction::Revoke
+        {
+            pointer
+                .as_ref()
+                .and_then(|pointer| {
+                    if pointer.active_revision_id.as_deref() == Some(request.revision_id.as_str()) {
+                        pointer.last_known_good_revision_id.as_deref()
+                    } else if pointer.last_known_good_revision_id.as_deref()
+                        == Some(request.revision_id.as_str())
+                    {
+                        pointer.active_revision_id.as_deref()
+                    } else {
+                        None
+                    }
+                })
+                .filter(|revision_id| *revision_id != request.revision_id)
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        let revocation_fallback_revision_id = if let Some(revision_id) =
+            revocation_fallback_candidate.as_deref()
+        {
+            let state = load_revision_lifecycle_state(
+                &transaction,
+                request.tenant_id,
+                request.kind,
+                revision_id,
+            )
+            .await?;
+            let fallback =
+                load_revision_row(&transaction, request.tenant_id, request.kind, revision_id)
+                    .await?;
+            let valid = fallback.is_some_and(|fallback| {
+                let validation = GovernanceArtifactValidationInput {
+                    tenant_id: request.tenant_id,
+                    kind: request.kind,
+                    revision_id,
+                    compiled_artifact: &fallback.compiled_artifact,
+                    authenticity: fallback.authenticity.as_ref(),
+                };
+                matches!(state.as_deref(), Some("active" | "superseded"))
+                    && fallback.checksum == artifact_checksum(&fallback.compiled_artifact)
+                    && validate_artifact
+                        .take()
+                        .expect("validator must be available")(&validation)
+            });
+            valid.then_some(revision_id)
+        } else {
+            None
+        };
         let plan = plan_governance_activation(
             &request,
             GovernanceActivationCurrent {
                 revision_checksum: &revision.checksum,
-                approval: &approval,
+                approval: approval.as_ref(),
                 active_revision_id: pointer
                     .as_ref()
                     .and_then(|value| value.active_revision_id.as_deref()),
                 last_known_good_revision_id: pointer
                     .as_ref()
                     .and_then(|value| value.last_known_good_revision_id.as_deref()),
+                revocation_fallback_revision_id,
                 etag: pointer.as_ref().map(|value| value.etag.as_str()),
             },
         )?;
@@ -89,10 +177,24 @@ impl PostgresRepository {
             request.tenant_id,
             request.kind,
             &request.revision_id,
-            "active",
+            plan.target_revision_state,
         )
         .await?;
-        persist_approval_transition(&transaction, &approval, &plan.activated_approval).await?;
+        if let Some(promoted) = plan.promoted_revision_id.as_deref() {
+            update_revision_state(
+                &transaction,
+                request.tenant_id,
+                request.kind,
+                promoted,
+                "active",
+            )
+            .await?;
+        }
+        if let (Some(approval), Some(activated_approval)) =
+            (approval.as_ref(), plan.activated_approval.as_ref())
+        {
+            persist_approval_transition(&transaction, approval, activated_approval).await?;
+        }
 
         let pointer_statements = postgres_governance_pointer_statements(request.kind);
         let statement = transaction
@@ -101,15 +203,25 @@ impl PostgresRepository {
             .map_err(database_error)?;
         let previous_etag = pointer.as_ref().map(|value| value.etag.clone());
         let stored = if request.kind == GovernanceArtifactKind::Policy {
-            let revision_id = policy_revision_id(&request.revision_id)?;
-            let last_known_good_id = policy_revision_id(&plan.last_known_good_revision_id)?;
+            let active_revision_id = plan
+                .active_revision_id
+                .as_deref()
+                .map(policy_revision_id)
+                .transpose()?
+                .map(|value| value.as_uuid());
+            let last_known_good_id = plan
+                .last_known_good_revision_id
+                .as_deref()
+                .map(policy_revision_id)
+                .transpose()?
+                .map(|value| value.as_uuid());
             transaction
                 .query_opt(
                     &statement,
                     &[
                         &request.tenant_id.as_uuid(),
-                        &revision_id.as_uuid(),
-                        &last_known_good_id.as_uuid(),
+                        &active_revision_id,
+                        &last_known_good_id,
                         &plan.etag,
                         &activated_at,
                         &previous_etag,
@@ -122,7 +234,7 @@ impl PostgresRepository {
                     &statement,
                     &[
                         &request.tenant_id.as_uuid(),
-                        &request.revision_id,
+                        &plan.active_revision_id,
                         &plan.last_known_good_revision_id,
                         &plan.etag,
                         &activated_at,
@@ -133,12 +245,18 @@ impl PostgresRepository {
         }
         .map_err(database_error)?;
         if stored.is_none() {
+            if let Some(replay) = load_activation_replay(&transaction, &request).await? {
+                transaction.rollback().await.map_err(database_error)?;
+                return Ok(replay);
+            }
             return Err(GovernanceRepositoryError::EtagMismatch);
         }
         insert_activation_history(
             &transaction,
             &request,
             plan.previous_active_revision_id.as_deref(),
+            plan.active_revision_id.as_deref(),
+            plan.promoted_revision_id.as_deref(),
             activated_at,
         )
         .await?;
@@ -147,8 +265,9 @@ impl PostgresRepository {
             .execute(
                 "INSERT INTO prodex_governance_mutation_idempotency (
                     tenant_id, artifact_kind, idempotency_key, request_fingerprint,
-                    action, revision_id, resulting_etag, created_at_unix_ms
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    action, revision_id, resulting_etag, resulting_active_revision_id,
+                    resulting_last_known_good_revision_id, created_at_unix_ms
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                 &[
                     &request.tenant_id.as_uuid(),
                     &artifact_kind_label(request.kind),
@@ -157,6 +276,8 @@ impl PostgresRepository {
                     &request.action.as_str(),
                     &request.revision_id,
                     &plan.etag,
+                    &plan.active_revision_id,
+                    &plan.last_known_good_revision_id,
                     &activated_at,
                 ],
             )
@@ -168,6 +289,7 @@ impl PostgresRepository {
             kind: request.kind,
             revision_id: request.revision_id,
             etag: plan.etag,
+            active_revision_id: plan.active_revision_id,
             last_known_good_revision_id: plan.last_known_good_revision_id,
         })
     }

@@ -396,12 +396,16 @@ impl<'a, R: ApplicationGovernanceRepository + ?Sized> ApplicationGovernanceLifec
             GovernanceActivationAction::Rollback => {
                 format!("governance.{label}.revision.rollback")
             }
+            GovernanceActivationAction::Revoke => {
+                format!("governance.{label}.revision.revoke")
+            }
         };
         validate_action(
             action,
             match request.action {
                 GovernanceActivationAction::Activate => ControlPlaneOperation::PolicyActivate,
                 GovernanceActivationAction::Rollback => ControlPlaneOperation::PolicyRollback,
+                GovernanceActivationAction::Revoke => ControlPlaneOperation::PolicyRevoke,
             },
             request.tenant_id,
             &request.audit_outbox,

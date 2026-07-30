@@ -16,16 +16,12 @@ pub(super) fn plan_provider_route(
 ) -> Result<Option<GovernedRoutingPlan>, RuntimeGatewayApplicationDataPlaneError> {
     let endpoint = runtime_gateway_provider_endpoint(context.route_kind)
         .ok_or(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable)?;
-    let provider_registry = shared
-        .governed_provider_registry
-        .load_full()
+    let snapshots = shared
+        .governance
         .snapshot_for(context.tenant.tenant_id)
         .ok_or(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
-    let routing_scores = shared
-        .governed_routing_scores
-        .load_full()
-        .snapshot_for(context.tenant.tenant_id)
-        .ok_or(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
+    let provider_registry = snapshots.provider_registry;
+    let routing_scores = snapshots.routing_scores;
     let runtime_snapshot =
         runtime_gateway_provider_runtime_snapshot(shared, &provider_registry, context.route_kind)?;
     let registry = provider_registry.for_tenant(context.tenant, endpoint, &runtime_snapshot);

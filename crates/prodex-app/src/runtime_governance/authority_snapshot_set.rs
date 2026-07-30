@@ -55,6 +55,7 @@ impl RuntimeGovernanceAuthoritySnapshotSet {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn policies_are_servable(
         &self,
         tenant_ids: &[prodex_domain::TenantId],

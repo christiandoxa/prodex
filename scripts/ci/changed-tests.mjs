@@ -285,7 +285,7 @@ function isEnterpriseIdBoundaryRelevantPath(filePath) {
 }
 
 function isEnterpriseDocsGuardRelevantPath(filePath) {
-  return (
+  if (
     filePath === "package.json" ||
     filePath === ".github/workflows/ci.yml" ||
     filePath === "scripts/ci/changed-tests.mjs" ||
@@ -295,7 +295,20 @@ function isEnterpriseDocsGuardRelevantPath(filePath) {
     filePath === "scripts/ci/storage-postgres-proof.mjs" ||
     filePath === "scripts/ci/test-impact-manifest.json" ||
     filePath === "docs/testing.md" ||
-    filePath === "docs/threat-model.md"
+    filePath === "docs/threat-model.md" ||
+    filePath === "crates/prodex-storage-postgres/tests/postgres_migration.rs" ||
+    filePath ===
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_invalidation.rs" ||
+    filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_openapi.json"
+  ) {
+    return true;
+  }
+
+  return (
+    filePath.startsWith("docs/enterprise-governance/") ||
+    filePath.startsWith(
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle",
+    )
   );
 }
 

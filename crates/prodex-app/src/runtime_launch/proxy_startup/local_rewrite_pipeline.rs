@@ -241,7 +241,8 @@ pub(super) fn run_runtime_local_rewrite_pipeline(
     target: prodex_gateway_http::CanonicalRequestTarget,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
-    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, &target, shared) {
+    let shared = shared.with_pinned_governance();
+    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, &target, &shared) {
         exit.finish();
     }
 }

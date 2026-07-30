@@ -101,6 +101,40 @@ const TEST_MATRIX_STATUSES = new Set([
   "partial",
   "planned",
 ]);
+const GOVERNANCE_LIFECYCLE_OPENAPI_PATH =
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_openapi.json";
+const GOVERNANCE_SECURITY_EVIDENCE_TESTS = [
+  {
+    matrixId: "SEC-POL-003",
+    testName: "gateway_policy_http_revocation_invalidates_cache_and_lkg",
+    sourcePath:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/policy.rs",
+    requiredText: '"revoke"',
+  },
+  {
+    matrixId: "SEC-POL-003",
+    testName: "governance_invalidation_notification_is_delivered_only_after_commit",
+    sourcePath: "crates/prodex-storage-postgres/tests/postgres_migration.rs",
+  },
+  ...[
+    "invalidation_payload_is_bounded_and_strict",
+    "unknown_tenant_notification_cannot_enroll_authority",
+    "notification_reloads_latest_snapshot_and_wakes_recovery_poll",
+  ].map((testName) => ({
+    matrixId: "SEC-POL-003",
+    testName,
+    sourcePath:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_invalidation.rs",
+  })),
+];
+const GOVERNANCE_REVOCATION_TEST = GOVERNANCE_SECURITY_EVIDENCE_TESTS[0];
+const GOVERNANCE_LIFECYCLE_FAMILIES = [
+  "policies",
+  "classification-rules",
+  "provider-registries",
+  "routing-scores",
+];
+const GOVERNANCE_LIFECYCLE_ACTIONS = ["activate", "rollback", "revoke"];
 
 const WORKFLOW_PATH = ".github/workflows/ci.yml";
 const PACKAGE_JSON_PATH = "package.json";
@@ -200,6 +234,88 @@ function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
       );
     }
   });
+  return errors;
+}
+
+function sourceTestBlock(source, testName) {
+  const escapedName = testName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(
+    `#\\[(?:[\\w:]+::)?test(?:\\([^\\]]*\\))?\\]\\s*(?:#\\[[^\\]]+\\]\\s*)*(?:async\\s+)?fn\\s+${escapedName}\\s*\\(`,
+    "u",
+  ).exec(source);
+  if (!match) return null;
+  const start = match.index;
+  const nextTestOffset = source
+    .slice(start + match[0].length)
+    .search(/\n#\[(?:[\w:]+::)?test(?:\([^\]]*\))?\]/u);
+  return source.slice(
+    start,
+    nextTestOffset < 0 ? source.length : start + match[0].length + nextTestOffset,
+  );
+}
+
+function validateGovernanceLifecycleEvidence(
+  matrixContent,
+  openapiContent,
+  evidenceSources,
+  matrixPath = TEST_MATRIX_PATH,
+  openapiPath = GOVERNANCE_LIFECYCLE_OPENAPI_PATH,
+) {
+  let matrix;
+  let openapi;
+  try {
+    matrix = JSON.parse(matrixContent);
+  } catch {
+    return [];
+  }
+  try {
+    openapi = JSON.parse(openapiContent);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [`${openapiPath}: invalid JSON: ${message}`];
+  }
+
+  const errors = [];
+  const row = matrix?.tests?.find((test) => test?.id === GOVERNANCE_REVOCATION_TEST.matrixId);
+  if (!row) {
+    errors.push(`${matrixPath}: missing required evidence row '${GOVERNANCE_REVOCATION_TEST.matrixId}'`);
+  } else if (["tested", "implemented"].includes(row.implementation_status)) {
+    for (const evidenceTest of GOVERNANCE_SECURITY_EVIDENCE_TESTS) {
+      if (!row.evidence?.includes(evidenceTest.testName)) {
+        errors.push(
+          `${matrixPath}: ${evidenceTest.matrixId} must cite exact repository test '${evidenceTest.testName}'`,
+        );
+      }
+      const source = evidenceSources[evidenceTest.sourcePath];
+      const testBlock = source === undefined
+        ? null
+        : sourceTestBlock(source, evidenceTest.testName);
+      if (testBlock === null) {
+        errors.push(
+          `${evidenceTest.sourcePath}: missing evidence test '${evidenceTest.testName}'`,
+        );
+      }
+      if (
+        testBlock !== null &&
+        evidenceTest.requiredText !== undefined &&
+        !testBlock.includes(evidenceTest.requiredText)
+      ) {
+        errors.push(
+          `${evidenceTest.sourcePath}: evidence test '${evidenceTest.testName}' must exercise ${evidenceTest.requiredText}`,
+        );
+      }
+    }
+  }
+
+  const paths = openapi?.paths ?? {};
+  for (const family of GOVERNANCE_LIFECYCLE_FAMILIES) {
+    for (const action of GOVERNANCE_LIFECYCLE_ACTIONS) {
+      const route = `/v1/prodex/gateway/${family}/{revision_id}/${action}`;
+      if (!Object.hasOwn(paths, route)) {
+        errors.push(`${openapiPath}: missing documented governance lifecycle route '${route}'`);
+      }
+    }
+  }
   return errors;
 }
 
@@ -430,6 +546,86 @@ function runSelfTest() {
     throw new Error("self-test failed: empty test matrix evidence accepted");
   }
 
+  const lifecycleMatrix = JSON.stringify({
+    tests: [
+      {
+        id: GOVERNANCE_REVOCATION_TEST.matrixId,
+        implementation_status: "tested",
+        evidence: GOVERNANCE_SECURITY_EVIDENCE_TESTS.map(({ testName }) => testName),
+      },
+    ],
+  });
+  const lifecyclePaths = Object.fromEntries(
+    GOVERNANCE_LIFECYCLE_FAMILIES.flatMap((family) =>
+      GOVERNANCE_LIFECYCLE_ACTIONS.map((action) => [
+        `/v1/prodex/gateway/${family}/{revision_id}/${action}`,
+        {},
+      ]),
+    ),
+  );
+  const lifecycleSources = {};
+  for (const evidenceTest of GOVERNANCE_SECURITY_EVIDENCE_TESTS) {
+    lifecycleSources[evidenceTest.sourcePath] = [
+      lifecycleSources[evidenceTest.sourcePath] ?? "",
+      `#[test]\nfn ${evidenceTest.testName}() { let action = ${evidenceTest.requiredText ?? '"evidence"'}; }`,
+    ].join("\n");
+  }
+  const lifecycleErrors = (matrix = lifecycleMatrix, sources = lifecycleSources) =>
+    validateGovernanceLifecycleEvidence(
+      matrix,
+      JSON.stringify({ paths: lifecyclePaths }),
+      sources,
+    );
+  if (lifecycleErrors().length !== 0) {
+    throw new Error("self-test failed: valid governance lifecycle evidence rejected");
+  }
+  if (
+    !lifecycleErrors(
+      lifecycleMatrix.replace(
+        GOVERNANCE_REVOCATION_TEST.testName,
+        "arbitrary non-empty evidence",
+      ),
+    ).some((error) => error.includes("must cite exact repository test"))
+  ) {
+    throw new Error("self-test failed: arbitrary governance lifecycle evidence accepted");
+  }
+  if (
+    !lifecycleErrors(
+      lifecycleMatrix,
+      {
+        ...lifecycleSources,
+        [GOVERNANCE_REVOCATION_TEST.sourcePath]: lifecycleSources[
+          GOVERNANCE_REVOCATION_TEST.sourcePath
+        ].replace("#[test]", "#[allow(dead_code)]"),
+      },
+    ).some((error) => error.includes("missing evidence test"))
+  ) {
+    throw new Error("self-test failed: non-test governance evidence symbol accepted");
+  }
+  const notificationTest = GOVERNANCE_SECURITY_EVIDENCE_TESTS[1];
+  if (
+    !lifecycleErrors(
+      lifecycleMatrix,
+      {
+        ...lifecycleSources,
+        [notificationTest.sourcePath]: lifecycleSources[notificationTest.sourcePath].replace(
+          `fn ${notificationTest.testName}`,
+          "fn unrelated_notification_test",
+        ),
+      },
+    ).some((error) => error.includes(notificationTest.testName))
+  ) {
+    throw new Error("self-test failed: missing PostgreSQL notification evidence accepted");
+  }
+  delete lifecyclePaths["/v1/prodex/gateway/policies/{revision_id}/revoke"];
+  if (
+    !lifecycleErrors().some((error) =>
+      error.includes("missing documented governance lifecycle route"),
+    )
+  ) {
+    throw new Error("self-test failed: missing governance lifecycle route accepted");
+  }
+
   const incompleteWorkflow = "name: CI\n- name: Enforce enterprise boundary guards\n  run: npm run ci:enterprise-docs-guard\n";
   const workflowErrors = validateEnterpriseWorkflow(incompleteWorkflow, "ci.yml");
   if (
@@ -567,9 +763,33 @@ function main() {
   const errors = DOCUMENTS.flatMap(validateDocument);
   errors.push(...validateRequiredArtifacts());
   const testMatrixPath = path.join(repoRoot, TEST_MATRIX_PATH);
+  let testMatrixText = null;
   if (fs.existsSync(testMatrixPath)) {
+    testMatrixText = fs.readFileSync(testMatrixPath, "utf8");
     errors.push(
-      ...validateTestMatrix(fs.readFileSync(testMatrixPath, "utf8"), TEST_MATRIX_PATH),
+      ...validateTestMatrix(testMatrixText, TEST_MATRIX_PATH),
+    );
+  }
+  const lifecycleOpenapiPath = path.join(repoRoot, GOVERNANCE_LIFECYCLE_OPENAPI_PATH);
+  const evidenceSources = {};
+  for (const { sourcePath } of GOVERNANCE_SECURITY_EVIDENCE_TESTS) {
+    if (Object.hasOwn(evidenceSources, sourcePath)) continue;
+    const fullPath = path.join(repoRoot, sourcePath);
+    if (!fs.existsSync(fullPath)) {
+      errors.push(`${sourcePath}: required governance evidence source is missing`);
+    } else {
+      evidenceSources[sourcePath] = fs.readFileSync(fullPath, "utf8");
+    }
+  }
+  if (!fs.existsSync(lifecycleOpenapiPath)) {
+    errors.push(`${GOVERNANCE_LIFECYCLE_OPENAPI_PATH}: required governance OpenAPI is missing`);
+  } else if (testMatrixText !== null) {
+    errors.push(
+      ...validateGovernanceLifecycleEvidence(
+        testMatrixText,
+        fs.readFileSync(lifecycleOpenapiPath, "utf8"),
+        evidenceSources,
+      ),
     );
   }
   errors.push(...validateForbiddenEnterpriseDocPhrases());

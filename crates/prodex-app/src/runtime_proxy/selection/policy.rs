@@ -1,13 +1,18 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::{
-    RuntimeAffinitySelectionKind, RuntimePreviousResponseNotFoundFallbackRequest,
-    RuntimePreviousResponseStaleContinuationPolicy,
-    RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
+    RuntimeAffinitySelectionKind, runtime_websocket_previous_response_reuse_is_nonreplayable,
+};
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
     runtime_previous_response_not_found_fallback_policy,
     runtime_quota_blocked_previous_response_fresh_fallback_allowed,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
-    runtime_websocket_previous_response_reuse_is_nonreplayable,
+};
+#[cfg(any(test, feature = "bench-support"))]
+pub(crate) use runtime_proxy_crate::{
+    RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 

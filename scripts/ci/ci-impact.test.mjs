@@ -194,6 +194,20 @@ test("changed-tests runs enterprise docs guard for storage postgres proof helper
   assert.ok(labels.includes("enterprise-docs-guard"));
 });
 
+test("changed-tests runs enterprise docs guard for governance evidence inputs", async () => {
+  for (const filePath of [
+    "docs/enterprise-governance/test-matrix.json",
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_openapi.json",
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_invalidation.rs",
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs",
+    "crates/prodex-storage-postgres/tests/postgres_migration.rs",
+  ]) {
+    const labels = (await buildSteps([filePath])).map((step) => step.label);
+    assert.ok(labels.includes("enterprise-docs-guard"), filePath);
+  }
+});
+
 test("changed-tests package alias check covers enterprise guard scripts", async () => {
   const steps = await buildSteps(["package.json"]);
   const packageAliasStep = steps.find((step) => step.label === "package:changed-aliases");

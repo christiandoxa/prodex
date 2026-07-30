@@ -8,7 +8,7 @@ use prodex_domain::{
     PrincipalKind, Role, TenantId,
 };
 use prodex_provider_core::ProviderId;
-use prodex_storage::{GovernanceRepositoryError, GovernanceSessionRecord};
+use prodex_storage::GovernanceSessionRecord;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -60,7 +60,7 @@ fn memory_refresh_reports_poisoned_session_state() {
 }
 
 #[test]
-fn durable_refresh_propagates_tenant_discovery_failure() {
+fn durable_refresh_recovers_poisoned_tenant_registry() {
     let tenant_ids = Arc::new(Mutex::new(BTreeSet::new()));
     let poisoned = Arc::clone(&tenant_ids);
     assert!(
@@ -76,13 +76,14 @@ fn durable_refresh_propagates_tenant_discovery_failure() {
         tenant_ids,
     };
 
-    assert_eq!(
+    assert!(authority.tenant_ids().unwrap().is_empty());
+    assert!(
         runtime_gateway_governance_session_refresh(
             &RuntimeGatewayGovernanceSessionStore::default(),
             &authority,
             None,
-        ),
-        Err(GovernanceRepositoryError::Database)
+        )
+        .is_ok()
     );
 }
 

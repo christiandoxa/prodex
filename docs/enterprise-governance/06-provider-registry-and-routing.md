@@ -168,10 +168,11 @@ gateway verifies the checksum, constructs indexes off the request path, and
 atomically swaps the last-known-good snapshot. Requests capture one snapshot at
 admission and never observe a partially refreshed registry.
 
-Provider revisions remain addressable while pinned continuations may lawfully
-refer to them. Retention is bounded by configured age and active pin references.
-A missing required pinned revision fails closed; it is not silently replaced by
-the current revision.
+Stored provider revisions remain addressable to control-plane lifecycle
+operations. The data plane publishes one compatible active/LKG bundle. Session
+pins are admission guards rather than historical lookups: a mismatch fails
+closed and the caller must start a new governed session. A missing required pin
+is never silently replaced by the current revision.
 
 ## Routing Planner Contract
 

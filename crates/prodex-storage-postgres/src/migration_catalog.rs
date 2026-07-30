@@ -230,6 +230,7 @@ BEGIN
         END IF;
     END LOOP;
 END $migration$;
+
 "#,
 };
 
@@ -869,6 +870,143 @@ ALTER TABLE prodex_governance_revision_artifacts
 "#,
 };
 
+pub const GOVERNANCE_REVOCATION_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(16),
+    phase: PostgresMigrationPhase::Expand,
+    name: "016_governance_revocation",
+    sql: r#"
+ALTER TABLE prodex_policy_activation_history
+    ADD COLUMN IF NOT EXISTS resulting_active_revision_id UUID,
+    ADD COLUMN IF NOT EXISTS promoted_revision_id UUID;
+ALTER TABLE prodex_governance_activation_history
+    ADD COLUMN IF NOT EXISTS resulting_active_revision_id TEXT,
+    ADD COLUMN IF NOT EXISTS promoted_revision_id TEXT;
+ALTER TABLE prodex_governance_mutation_idempotency
+    ADD COLUMN IF NOT EXISTS resulting_active_revision_id TEXT,
+    ADD COLUMN IF NOT EXISTS resulting_last_known_good_revision_id TEXT;
+
+ALTER TABLE prodex_policy_revisions
+    DROP CONSTRAINT IF EXISTS prodex_policy_revisions_lifecycle_state_check;
+ALTER TABLE prodex_policy_revisions
+    ADD CONSTRAINT prodex_policy_revisions_lifecycle_state_check CHECK (
+        lifecycle_state IN (
+            'draft', 'pending_approval', 'approved', 'active', 'superseded',
+            'rolled_back', 'rejected', 'expired', 'revoked'
+        )
+    ) NOT VALID;
+
+ALTER TABLE prodex_policy_activation_history
+    DROP CONSTRAINT IF EXISTS prodex_policy_activation_history_action_check;
+ALTER TABLE prodex_policy_activation_history
+    ADD CONSTRAINT prodex_policy_activation_history_action_check
+    CHECK (action IN ('activate', 'rollback', 'revoke')) NOT VALID;
+
+ALTER TABLE prodex_governance_activation_history
+    DROP CONSTRAINT IF EXISTS prodex_governance_activation_history_action_check;
+ALTER TABLE prodex_governance_activation_history
+    ADD CONSTRAINT prodex_governance_activation_history_action_check
+    CHECK (action IN ('activate', 'rollback', 'revoke')) NOT VALID;
+
+ALTER TABLE prodex_governance_mutation_idempotency
+    DROP CONSTRAINT IF EXISTS prodex_governance_mutation_idempotency_action_check;
+ALTER TABLE prodex_governance_mutation_idempotency
+    ADD CONSTRAINT prodex_governance_mutation_idempotency_action_check
+    CHECK (action IN ('activate', 'rollback', 'revoke')) NOT VALID;
+
+ALTER TABLE prodex_governance_activation_history
+    DROP CONSTRAINT IF EXISTS prodex_governance_activation_history_result_ids_bounded;
+ALTER TABLE prodex_governance_activation_history
+    ADD CONSTRAINT prodex_governance_activation_history_result_ids_bounded CHECK (
+        (resulting_active_revision_id IS NULL OR char_length(resulting_active_revision_id) BETWEEN 1 AND 128)
+        AND (promoted_revision_id IS NULL OR char_length(promoted_revision_id) BETWEEN 1 AND 128)
+    ) NOT VALID;
+ALTER TABLE prodex_governance_mutation_idempotency
+    DROP CONSTRAINT IF EXISTS prodex_governance_mutation_idempotency_result_ids_bounded;
+ALTER TABLE prodex_governance_mutation_idempotency
+    ADD CONSTRAINT prodex_governance_mutation_idempotency_result_ids_bounded CHECK (
+        (resulting_active_revision_id IS NULL OR char_length(resulting_active_revision_id) BETWEEN 1 AND 128)
+        AND (
+            resulting_last_known_good_revision_id IS NULL
+            OR char_length(resulting_last_known_good_revision_id) BETWEEN 1 AND 128
+        )
+    ) NOT VALID;
+
+CREATE OR REPLACE FUNCTION prodex_reject_revoked_governance_revision_revival()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    IF OLD.lifecycle_state = 'revoked' AND NEW.lifecycle_state <> 'revoked' THEN
+        RAISE EXCEPTION 'revoked governance revisions are terminal'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $function$;
+
+DO $migration$
+DECLARE revision_table TEXT;
+BEGIN
+    FOREACH revision_table IN ARRAY ARRAY[
+        'prodex_policy_revisions',
+        'prodex_classification_rule_revisions',
+        'prodex_provider_registry_revisions',
+        'prodex_routing_score_revisions'
+    ]
+    LOOP
+        EXECUTE format(
+            'DROP TRIGGER IF EXISTS prodex_revoked_revision_terminal ON %I',
+            revision_table
+        );
+        EXECUTE format(
+            'CREATE TRIGGER prodex_revoked_revision_terminal
+             BEFORE UPDATE OF lifecycle_state ON %I
+             FOR EACH ROW EXECUTE FUNCTION prodex_reject_revoked_governance_revision_revival()',
+            revision_table
+        );
+    END LOOP;
+END $migration$;
+
+CREATE OR REPLACE FUNCTION prodex_notify_governance_invalidation()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+DECLARE payload TEXT;
+BEGIN
+    payload := json_build_object(
+        'tenant_id', NEW.tenant_id::text,
+        'kind', TG_ARGV[0]
+    )::text;
+    IF octet_length(payload) > 256 THEN
+        RAISE EXCEPTION 'governance invalidation payload exceeds bound'
+            USING ERRCODE = 'program_limit_exceeded';
+    END IF;
+    PERFORM pg_notify('prodex_governance_invalidation', payload);
+    RETURN NEW;
+END $function$;
+
+DO $migration$
+DECLARE pointer_spec RECORD;
+BEGIN
+    FOR pointer_spec IN
+        SELECT * FROM (VALUES
+            ('prodex_policy_pointers', 'policy'),
+            ('prodex_classification_rule_pointers', 'classification_rules'),
+            ('prodex_provider_registry_pointers', 'provider_registry'),
+            ('prodex_routing_score_pointers', 'routing_scores')
+        ) AS specs(table_name, artifact_kind)
+    LOOP
+        EXECUTE format(
+            'DROP TRIGGER IF EXISTS prodex_governance_invalidation_notify ON %I',
+            pointer_spec.table_name
+        );
+        EXECUTE format(
+            'CREATE TRIGGER prodex_governance_invalidation_notify
+             AFTER INSERT OR UPDATE ON %I
+             FOR EACH ROW EXECUTE FUNCTION prodex_notify_governance_invalidation(%L)',
+            pointer_spec.table_name,
+            pointer_spec.artifact_kind
+        );
+    END LOOP;
+END $migration$;
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -885,6 +1023,7 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     AUDIT_LEGAL_HOLD_MIGRATION,
     CONFIG_PUBLICATION_TRANSPORT_MIGRATION,
     GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION,
+    GOVERNANCE_REVOCATION_MIGRATION,
 ];
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

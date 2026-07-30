@@ -412,10 +412,13 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     );
     let governed_cost = authorized_tenant.and_then(|tenant_id| {
         shared
-            .governed_provider_registry
-            .load_full()
+            .governance
             .snapshot_for(tenant_id)
-            .and_then(|snapshot| snapshot.reservation_cost_for_model(&pricing_model))
+            .and_then(|snapshot| {
+                snapshot
+                    .provider_registry
+                    .reservation_cost_for_model(&pricing_model)
+            })
     });
     let cost = runtime_provider_gateway_cost_for_request(
         shared.provider.bridge_kind(),

@@ -59,7 +59,7 @@
         "session_reuse_with_another_principal_is_revoked",
         "configured_timeouts_and_concurrency_fail_closed",
         "governance_sessions_are_monotonic_bounded_and_revocable",
-        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg hash/current-session revoke assertions",
+        "gateway_policy_http_revocation_invalidates_cache_and_lkg hash/current-session revoke assertions",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly"
       ]
     },
@@ -182,9 +182,13 @@
       "evidence_required": "Corruption, refresh race, activation acknowledgement, invalidation and LKG outage suite.",
       "evidence": [
         "malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
-        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg",
+        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
         "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
-        "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL"
+        "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL",
+        "governance_invalidation_notification_is_delivered_only_after_commit",
+        "invalidation_payload_is_bounded_and_strict",
+        "unknown_tenant_notification_cannot_enroll_authority",
+        "notification_reloads_latest_snapshot_and_wakes_recovery_poll"
       ]
     },
     {
@@ -201,7 +205,7 @@
         "detached_signature_binds_artifact_and_identity",
         "unsigned_artifacts_are_legacy_only",
         "artifact_authenticity_round_trips_through_activation_and_snapshot_validation",
-        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg signing-payload and unknown-key assertions",
+        "gateway_policy_http_revocation_invalidates_cache_and_lkg signing-payload and unknown-key assertions",
         "PostgreSQL governance activation and snapshot callbacks revalidate persisted authenticity"
       ]
     },

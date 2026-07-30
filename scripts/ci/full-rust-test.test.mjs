@@ -3,6 +3,22 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+const PRODEX_APP_PARTITION_FILTERS = Object.freeze(
+  ["selection", "pressure", "incidents", "admission", "state", "rotation", "health"].map(
+    (filter) => `main_internal_tests::runtime_proxy_selection_and_pressure::${filter}::`,
+  ),
+);
+
+function assertProdexAppPartitionCoverage(workflow) {
+  assert.equal(new Set(PRODEX_APP_PARTITION_FILTERS).size, PRODEX_APP_PARTITION_FILTERS.length);
+  for (const [index, path] of PRODEX_APP_PARTITION_FILTERS.entries()) {
+    for (const sibling of PRODEX_APP_PARTITION_FILTERS.slice(index + 1)) {
+      assert.ok(!path.includes(sibling) && !sibling.includes(path), `${path} overlaps ${sibling}`);
+    }
+    assert.equal(workflow.match(new RegExp(`'${path}'`, "g"))?.length, 2, `${path} must run once and be skipped once`);
+  }
+}
+
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
   const result = spawnSync(
     process.execPath,
@@ -49,12 +65,29 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.equal(workflow.match(/save_cache: true/g)?.length, 1);
   assert.equal(workflow.match(/save_cache: false/g)?.length, 4);
   assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
-  const partitionFilters = ["selection", "pressure", "incidents", "admission", "state", "rotation", "health"];
-  for (const filter of partitionFilters) {
-    const path = `main_internal_tests::runtime_proxy_selection_and_pressure::${filter}::`;
-    assert.equal(workflow.match(new RegExp(`'${path}'`, "g"))?.length, 2, `${path} must run once and be skipped once`);
-  }
+  assertProdexAppPartitionCoverage(workflow);
   assert.match(workflow, /prodex-app-remainder\)[\s\S]*?cargo test --locked -q -p prodex-app --lib --all-features --/);
+});
+
+test("push CI reuses the disjoint prodex-app library partitions", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const job = workflow.match(/\n  prodex-app-lib:\n([\s\S]*?)\n  fuzz-build:/)?.[1];
+  const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
+
+  assert.ok(job, "prodex-app-lib job missing");
+  assert.ok(telemetry, "ci-duration-telemetry job missing");
+  for (const suite of ["selection", "admission", "rotation", "remainder"]) {
+    assert.match(job, new RegExp(`- suite: ${suite}`));
+  }
+  assert.equal(job.match(/save_cache: true/g)?.length, 1);
+  assert.equal(job.match(/save_cache: false/g)?.length, 3);
+  assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+
+  assertProdexAppPartitionCoverage(job);
+  assert.match(job, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
+  for (const dependency of ["prodex-app-lib", "redis-integration", "backup-restore-drill"]) {
+    assert.match(telemetry, new RegExp(`- ${dependency}`));
+  }
 });
 
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {

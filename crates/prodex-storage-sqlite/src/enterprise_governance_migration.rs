@@ -427,3 +427,108 @@ ALTER TABLE prodex_governance_revision_artifacts
     ADD COLUMN artifact_signature TEXT;
 "#,
 };
+
+pub const LOCAL_GOVERNANCE_REVOCATION_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(12),
+    phase: SqliteMigrationPhase::Expand,
+    name: "012_governance_revocation",
+    sql: r#"
+ALTER TABLE prodex_policy_activation_history
+    ADD COLUMN resulting_active_revision_id TEXT
+    CHECK (resulting_active_revision_id IS NULL OR length(resulting_active_revision_id) BETWEEN 1 AND 128);
+ALTER TABLE prodex_policy_activation_history
+    ADD COLUMN promoted_revision_id TEXT
+    CHECK (promoted_revision_id IS NULL OR length(promoted_revision_id) BETWEEN 1 AND 128);
+
+ALTER TABLE prodex_governance_activation_history
+    RENAME TO prodex_governance_activation_history_v11;
+CREATE TABLE prodex_governance_activation_history (
+    tenant_id TEXT NOT NULL REFERENCES prodex_tenants(tenant_id),
+    activation_id TEXT NOT NULL,
+    artifact_kind TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    previous_revision_id TEXT,
+    action TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    resulting_active_revision_id TEXT,
+    promoted_revision_id TEXT,
+    occurred_at_unix_ms INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, activation_id),
+    UNIQUE (tenant_id, artifact_kind, idempotency_key),
+    CHECK (artifact_kind IN ('classification_rules', 'provider_registry', 'routing_scores')),
+    CHECK (action IN ('activate', 'rollback', 'revoke')),
+    CHECK (length(revision_id) BETWEEN 1 AND 128),
+    CHECK (resulting_active_revision_id IS NULL OR length(resulting_active_revision_id) BETWEEN 1 AND 128),
+    CHECK (promoted_revision_id IS NULL OR length(promoted_revision_id) BETWEEN 1 AND 128),
+    CHECK (length(idempotency_key) BETWEEN 1 AND 256),
+    CHECK (occurred_at_unix_ms >= 0)
+);
+INSERT INTO prodex_governance_activation_history (
+    tenant_id, activation_id, artifact_kind, revision_id, previous_revision_id,
+    action, actor_id, idempotency_key, occurred_at_unix_ms
+)
+SELECT tenant_id, activation_id, artifact_kind, revision_id, previous_revision_id,
+       action, actor_id, idempotency_key, occurred_at_unix_ms
+FROM prodex_governance_activation_history_v11;
+DROP TABLE prodex_governance_activation_history_v11;
+
+ALTER TABLE prodex_governance_mutation_idempotency
+    RENAME TO prodex_governance_mutation_idempotency_v11;
+CREATE TABLE prodex_governance_mutation_idempotency (
+    tenant_id TEXT NOT NULL REFERENCES prodex_tenants(tenant_id),
+    artifact_kind TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    action TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    resulting_etag TEXT NOT NULL,
+    resulting_active_revision_id TEXT,
+    resulting_last_known_good_revision_id TEXT,
+    created_at_unix_ms INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, artifact_kind, idempotency_key),
+    CHECK (artifact_kind IN ('policy', 'classification_rules', 'provider_registry', 'routing_scores')),
+    CHECK (action IN ('activate', 'rollback', 'revoke')),
+    CHECK (length(idempotency_key) BETWEEN 1 AND 256),
+    CHECK (length(request_fingerprint) BETWEEN 1 AND 256),
+    CHECK (length(revision_id) BETWEEN 1 AND 128),
+    CHECK (length(resulting_etag) BETWEEN 1 AND 128),
+    CHECK (resulting_active_revision_id IS NULL OR length(resulting_active_revision_id) BETWEEN 1 AND 128),
+    CHECK (resulting_last_known_good_revision_id IS NULL OR length(resulting_last_known_good_revision_id) BETWEEN 1 AND 128),
+    CHECK (created_at_unix_ms >= 0)
+);
+INSERT INTO prodex_governance_mutation_idempotency (
+    tenant_id, artifact_kind, idempotency_key, request_fingerprint,
+    action, revision_id, resulting_etag, created_at_unix_ms
+)
+SELECT tenant_id, artifact_kind, idempotency_key, request_fingerprint,
+       action, revision_id, resulting_etag, created_at_unix_ms
+FROM prodex_governance_mutation_idempotency_v11;
+DROP TABLE prodex_governance_mutation_idempotency_v11;
+
+CREATE TRIGGER prodex_policy_revision_revoked_terminal
+BEFORE UPDATE OF lifecycle_state ON prodex_policy_revisions
+WHEN OLD.lifecycle_state = 'revoked' AND NEW.lifecycle_state <> 'revoked'
+BEGIN
+    SELECT RAISE(ABORT, 'revoked governance revisions are terminal');
+END;
+CREATE TRIGGER prodex_classification_revision_revoked_terminal
+BEFORE UPDATE OF lifecycle_state ON prodex_classification_rule_revisions
+WHEN OLD.lifecycle_state = 'revoked' AND NEW.lifecycle_state <> 'revoked'
+BEGIN
+    SELECT RAISE(ABORT, 'revoked governance revisions are terminal');
+END;
+CREATE TRIGGER prodex_provider_registry_revision_revoked_terminal
+BEFORE UPDATE OF lifecycle_state ON prodex_provider_registry_revisions
+WHEN OLD.lifecycle_state = 'revoked' AND NEW.lifecycle_state <> 'revoked'
+BEGIN
+    SELECT RAISE(ABORT, 'revoked governance revisions are terminal');
+END;
+CREATE TRIGGER prodex_routing_score_revision_revoked_terminal
+BEFORE UPDATE OF lifecycle_state ON prodex_routing_score_revisions
+WHEN OLD.lifecycle_state = 'revoked' AND NEW.lifecycle_state <> 'revoked'
+BEGIN
+    SELECT RAISE(ABORT, 'revoked governance revisions are terminal');
+END;
+"#,
+};

@@ -67,6 +67,17 @@ pub(super) async fn load_verified_snapshot(
     source: GovernanceSnapshotSource,
     validate_artifact: &mut impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
 ) -> Result<Option<GovernanceSnapshot>, GovernanceRepositoryError> {
+    let lifecycle_state =
+        load_revision_lifecycle_state(transaction, tenant_id, kind, revision_id).await?;
+    let lifecycle_is_eligible = match source {
+        GovernanceSnapshotSource::Active => lifecycle_state.as_deref() == Some("active"),
+        GovernanceSnapshotSource::LastKnownGood => {
+            matches!(lifecycle_state.as_deref(), Some("active" | "superseded"))
+        }
+    };
+    if !lifecycle_is_eligible {
+        return Ok(None);
+    }
     let Some(revision) = load_revision_row(transaction, tenant_id, kind, revision_id).await? else {
         return Ok(None);
     };
@@ -209,7 +220,9 @@ pub(super) async fn update_revision_state(
     state: &str,
 ) -> Result<(), GovernanceRepositoryError> {
     let query = format!(
-        "UPDATE {} SET lifecycle_state = $3 WHERE tenant_id = $1 AND revision_id = $2",
+        "UPDATE {} SET lifecycle_state = $3
+         WHERE tenant_id = $1 AND revision_id = $2
+           AND (lifecycle_state <> 'revoked' OR $3 = 'revoked')",
         revision_table(kind)
     );
     let changed = if kind == GovernanceArtifactKind::Policy {
@@ -227,9 +240,41 @@ pub(super) async fn update_revision_state(
     }
     .map_err(database_error)?;
     if changed != 1 {
-        return Err(GovernanceRepositoryError::NotFound);
+        return match load_revision_lifecycle_state(transaction, tenant_id, kind, revision_id)
+            .await?
+        {
+            None => Err(GovernanceRepositoryError::NotFound),
+            Some(current) if current == "revoked" && state != "revoked" => {
+                Err(GovernanceRepositoryError::Conflict)
+            }
+            Some(_) => Err(GovernanceRepositoryError::Database),
+        };
     }
     Ok(())
+}
+
+pub(super) async fn load_revision_lifecycle_state(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    kind: GovernanceArtifactKind,
+    revision_id: &str,
+) -> Result<Option<String>, GovernanceRepositoryError> {
+    let query = format!(
+        "SELECT lifecycle_state FROM {} WHERE tenant_id = $1 AND revision_id = $2",
+        revision_table(kind)
+    );
+    let row = if kind == GovernanceArtifactKind::Policy {
+        let revision_id = policy_revision_id(revision_id)?;
+        transaction
+            .query_opt(&query, &[&tenant_id.as_uuid(), &revision_id.as_uuid()])
+            .await
+    } else {
+        transaction
+            .query_opt(&query, &[&tenant_id.as_uuid(), &revision_id])
+            .await
+    }
+    .map_err(database_error)?;
+    Ok(row.map(|row| row.get(0)))
 }
 
 pub(super) fn revision_id_from_row(
@@ -284,6 +329,8 @@ pub(super) async fn insert_activation_history(
     transaction: &Transaction<'_>,
     request: &GovernanceActivationRequest,
     previous_revision_id: Option<&str>,
+    resulting_active_revision_id: Option<&str>,
+    promoted_revision_id: Option<&str>,
     occurred_at: i64,
 ) -> Result<(), GovernanceRepositoryError> {
     let activation_id = request.audit_outbox.audit.event.id.as_uuid();
@@ -293,12 +340,21 @@ pub(super) async fn insert_activation_history(
             .map(policy_revision_id)
             .transpose()?
             .map(PolicyRevisionId::as_uuid);
+        let resulting_active_revision_id = resulting_active_revision_id
+            .map(policy_revision_id)
+            .transpose()?
+            .map(PolicyRevisionId::as_uuid);
+        let promoted_revision_id = promoted_revision_id
+            .map(policy_revision_id)
+            .transpose()?
+            .map(PolicyRevisionId::as_uuid);
         transaction
             .execute(
                 "INSERT INTO prodex_policy_activation_history (
                     tenant_id, activation_id, revision_id, previous_revision_id,
-                    action, actor_id, occurred_at_unix_ms
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    action, actor_id, resulting_active_revision_id,
+                    promoted_revision_id, occurred_at_unix_ms
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 &[
                     &request.tenant_id.as_uuid(),
                     &activation_id,
@@ -306,6 +362,8 @@ pub(super) async fn insert_activation_history(
                     &previous_revision_id,
                     &request.action.as_str(),
                     &request.actor.id.as_uuid(),
+                    &resulting_active_revision_id,
+                    &promoted_revision_id,
                     &occurred_at,
                 ],
             )
@@ -316,8 +374,9 @@ pub(super) async fn insert_activation_history(
                 "INSERT INTO prodex_governance_activation_history (
                     tenant_id, activation_id, artifact_kind, revision_id,
                     previous_revision_id, action, actor_id, idempotency_key,
+                    resulting_active_revision_id, promoted_revision_id,
                     occurred_at_unix_ms
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 &[
                     &request.tenant_id.as_uuid(),
                     &activation_id,
@@ -327,6 +386,8 @@ pub(super) async fn insert_activation_history(
                     &request.action.as_str(),
                     &request.actor.id.as_uuid(),
                     &request.idempotency_key.as_str(),
+                    &resulting_active_revision_id,
+                    &promoted_revision_id,
                     &occurred_at,
                 ],
             )
@@ -342,7 +403,8 @@ pub(super) async fn load_activation_replay(
 ) -> Result<Option<GovernanceActivationResult>, GovernanceRepositoryError> {
     let row = transaction
         .query_opt(
-            "SELECT request_fingerprint, action, revision_id, resulting_etag
+            "SELECT request_fingerprint, action, revision_id, resulting_etag,
+                    resulting_active_revision_id, resulting_last_known_good_revision_id
              FROM prodex_governance_mutation_idempotency
              WHERE tenant_id = $1 AND artifact_kind = $2 AND idempotency_key = $3",
             &[
@@ -360,23 +422,36 @@ pub(super) async fn load_activation_replay(
     let action = row.get::<_, String>(1);
     let revision_id = row.get::<_, String>(2);
     let etag = row.get::<_, String>(3);
+    let stored_active = row.get::<_, Option<String>>(4);
+    let stored_lkg = row.get::<_, Option<String>>(5);
     if fingerprint != request.request_fingerprint
         || action != request.action.as_str()
         || revision_id != request.revision_id
     {
         return Err(GovernanceRepositoryError::Conflict);
     }
-    let pointer = load_pointer_for_kind(transaction, request.tenant_id, request.kind)
-        .await?
-        .ok_or(GovernanceRepositoryError::Database)?;
+    let (active_revision_id, last_known_good_revision_id) = if action
+        == GovernanceActivationAction::Revoke.as_str()
+        || stored_active.is_some()
+        || stored_lkg.is_some()
+    {
+        (stored_active, stored_lkg)
+    } else {
+        let pointer = load_pointer_for_kind(transaction, request.tenant_id, request.kind)
+            .await?
+            .ok_or(GovernanceRepositoryError::Database)?;
+        (
+            pointer.active_revision_id,
+            pointer.last_known_good_revision_id,
+        )
+    };
     Ok(Some(GovernanceActivationResult {
         outcome: GovernanceWriteOutcome::Replayed,
         kind: request.kind,
         revision_id,
         etag,
-        last_known_good_revision_id: pointer
-            .last_known_good_revision_id
-            .ok_or(GovernanceRepositoryError::Database)?,
+        active_revision_id,
+        last_known_good_revision_id,
     }))
 }
 

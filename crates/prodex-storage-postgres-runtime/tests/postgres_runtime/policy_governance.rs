@@ -172,7 +172,7 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         tenant_id,
         kind: GovernanceArtifactKind::Policy,
         revision_id: revision_id.to_string(),
-        approval_id,
+        approval_id: Some(approval_id),
         actor: maker.clone(),
         action: GovernanceActivationAction::Activate,
         expected_etag: None,

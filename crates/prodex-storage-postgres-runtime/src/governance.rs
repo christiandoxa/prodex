@@ -28,15 +28,15 @@ use prodex_storage::{
     GOVERNANCE_AUDIT_LEGAL_HOLD_DELETE_APPLIED_IDEMPOTENCY_RESPONSE,
     GOVERNANCE_AUDIT_LEGAL_HOLD_DELETE_NOT_FOUND_IDEMPOTENCY_RESPONSE,
     GOVERNANCE_AUDIT_LEGAL_HOLD_UPSERT_IDEMPOTENCY_RESPONSE,
-    GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE, GovernanceActivationCurrent,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactAuthenticity,
-    GovernanceArtifactKind, GovernanceArtifactValidationInput, GovernanceAuditExportRecord,
-    GovernanceAuditIntegrityHealth, GovernanceMutationIdempotency, GovernanceOutboxHealth,
-    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
-    GovernanceSessionRecord, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
-    GovernanceSessionUpsertOutcome, GovernanceSnapshot, GovernanceSnapshotSource, GovernanceStatus,
-    GovernanceWriteOutcome, IdempotencyRecordLookupRow, IdempotencyRecordLookupRowStatus,
-    SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy,
+    GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE, GovernanceActivationAction,
+    GovernanceActivationCurrent, GovernanceActivationRequest, GovernanceActivationResult,
+    GovernanceArtifactAuthenticity, GovernanceArtifactKind, GovernanceArtifactValidationInput,
+    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceMutationIdempotency,
+    GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
+    GovernanceRevisionWriteCommand, GovernanceSessionRecord, GovernanceSessionRevokeCommand,
+    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, GovernanceSnapshot,
+    GovernanceSnapshotSource, GovernanceStatus, GovernanceWriteOutcome, IdempotencyRecordLookupRow,
+    IdempotencyRecordLookupRowStatus, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy,
     decode_governance_audit_retention_purge_idempotency_response, denied_approval_audit_outbox,
     encode_governance_audit_retention_purge_idempotency_response,
     governance_support::{
@@ -56,7 +56,7 @@ use prodex_storage_postgres::{
     APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, INSERT_GOVERNANCE_REVISION_ARTIFACT_STATEMENT,
     LOAD_GOVERNANCE_REVISION_ARTIFACT_STATEMENT, postgres_governance_pointer_statements,
 };
-use tokio_postgres::Row;
+use tokio_postgres::{IsolationLevel, Row};
 use uuid::Uuid;
 
 use super::{PostgresRepository, set_tenant_context};

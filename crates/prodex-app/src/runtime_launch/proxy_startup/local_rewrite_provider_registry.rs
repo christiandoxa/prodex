@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod tenant_snapshot_set;
 mod validation;
 use validation::runtime_gateway_model_costs_are_authoritative;
 
@@ -466,33 +467,6 @@ impl<T> Clone for RuntimeGatewayTenantSnapshotSet<T> {
             tenant_snapshots: self.tenant_snapshots.clone(),
             fallback: self.fallback.clone(),
         }
-    }
-}
-
-impl<T> RuntimeGatewayTenantSnapshotSet<T> {
-    pub(super) fn bootstrap(snapshot: T, allow_fallback: bool) -> Self {
-        Self {
-            tenant_snapshots: BTreeMap::new(),
-            fallback: allow_fallback.then(|| Arc::new(snapshot)),
-        }
-    }
-
-    pub(super) fn snapshot_for(&self, tenant_id: TenantId) -> Option<Arc<T>> {
-        self.tenant_snapshots
-            .get(&tenant_id)
-            .cloned()
-            .or_else(|| self.fallback.clone())
-    }
-
-    pub(super) fn with_tenant_snapshot(&self, tenant_id: TenantId, snapshot: T) -> Result<Self> {
-        if !self.tenant_snapshots.contains_key(&tenant_id)
-            && self.tenant_snapshots.len() >= MAX_RUNTIME_GATEWAY_PROVIDER_REGISTRY_TENANTS
-        {
-            anyhow::bail!("provider registry tenant limit exceeded");
-        }
-        let mut next = self.clone();
-        next.tenant_snapshots.insert(tenant_id, Arc::new(snapshot));
-        Ok(next)
     }
 }
 

@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1794,
+    "maxLines": 1793,
     "reason": "Data-plane authorization, bounded HTTP policy projection, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
@@ -186,23 +186,18 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1526,
-    "reason": "Gateway launch composes durable tenant discovery, signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and observable SIEM workers; policy refresh is split out and the file remains capped until authority bootstrap moves."
+    "maxLines": 1288,
+    "reason": "Gateway launch composes signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, and observable SIEM workers after governance refresh and atomic publication moved to focused ownership."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 2268,
-    "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, and payload-free HTTP flow remain capped after retention operations moved to focused ownership."
+    "maxLines": 2142,
+    "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, and payload-free HTTP flow remain capped after retention and HTTP response helpers moved to focused ownership; the shared revoke publication path stays beside activation to preserve one transactional cache boundary."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
     "maxLines": 1134,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
-    "maxLines": 945,
-    "reason": "Lifecycle HTTP coverage exercises signing-payload generation, signature rejection, execution-approval quorum, denial audit, idempotent replay, and content-free responses after the four-artifact matrix moved to a focused module."
   },
   {
     "file": "crates/prodex-config/src/lib.rs",
@@ -226,13 +221,13 @@
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 1560,
-    "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency, session revocation, audit integrity, export, and SIEM behavior after retention tests moved to a focused module."
+    "maxLines": 1484,
+    "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency, session revocation, audit integrity, export, and SIEM behavior after retention and revision-recovery tests moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1377,
-    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; authoritative pricing validation is split out and this cap is ratcheted until adapter projection moves."
+    "maxLines": 1351,
+    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; tenant snapshot mutation and authoritative pricing validation are split out."
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",
@@ -261,12 +256,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 930,
-    "reason": "The ordered PostgreSQL migration catalog keeps immutable SQL revisions, including governance artifact authenticity, and schema-version planning together until historical migration constants move to versioned fixture files."
-  },
-  {
-    "file": "crates/prodex-storage/src/governance.rs",
-    "maxLines": 875,
-    "reason": "Governance storage contracts keep detached artifact authenticity, revision lifecycle, approval, session, audit, and outbox commands in one backend-neutral boundary after idempotency response contracts moved to a focused module."
+    "maxLines": 1069,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable, declarative SQL revisions beside schema-version planning; splitting a published migration across source files would make the append-only history harder to review and verify."
   }
 ]
