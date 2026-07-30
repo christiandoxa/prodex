@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.370.0 - 2026-07-30
+
+### Misc
+
+- Harden cross-platform tooling and CI (`f95887c`)
+
 ## 0.369.0 - 2026-07-29
 
 ### Misc
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited release gaps (`0735f52`)
-
-## 0.358.0 - 2026-07-27
-
-### Runtime
-
-- Close provider and runtime audit gaps (`65f5028`)
