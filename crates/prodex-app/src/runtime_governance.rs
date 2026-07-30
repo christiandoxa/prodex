@@ -28,6 +28,7 @@ pub(crate) const MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS: usize = 64;
 pub(crate) struct RuntimeGovernanceAuthoritySnapshot {
     pub(crate) application: ApplicationGovernanceSnapshot,
     pub(crate) config: prodex_config::GovernanceConfig,
+    pub(crate) provider_registry_revision: u64,
     pub(crate) routing_score_revision: u64,
 }
 
@@ -36,6 +37,10 @@ impl std::fmt::Debug for RuntimeGovernanceAuthoritySnapshot {
         f.debug_struct("RuntimeGovernanceAuthoritySnapshot")
             .field("application", &self.application)
             .field("mode", &self.config.mode)
+            .field(
+                "provider_registry_revision",
+                &self.provider_registry_revision,
+            )
             .field("routing_score_revision", &self.routing_score_revision)
             .finish()
     }
@@ -94,6 +99,7 @@ pub(crate) fn compile_runtime_governance_settings(
     Ok(RuntimeGovernanceAuthoritySnapshot {
         application: build_runtime_governance_snapshot(settings)?,
         config: runtime_governance_config(settings),
+        provider_registry_revision: settings.provider_registry_revision.unwrap_or(1),
         routing_score_revision: settings.routing_score_revision.unwrap_or(1),
     })
 }

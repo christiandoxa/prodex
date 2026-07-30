@@ -1222,11 +1222,12 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
                     .chain(routing.fallbacks.iter())
                     .nth(attempt_index)
                     .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
-                let provider_registry = shared.governed_provider_registry.load_full();
-                let routing_scores = shared.governed_routing_scores.load_full();
-                let provider_registry = provider_registry
+                let snapshots = shared
+                    .governance
                     .snapshot_for(routing.tenant.tenant_id)
                     .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
+                let provider_registry = snapshots.provider_registry;
+                let routing_scores = snapshots.routing_scores;
                 let route_matches = if attempt_index == 0 {
                     provider_registry.matches_route(routing, invocation.route.endpoint)
                 } else {
@@ -1238,9 +1239,7 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
                 };
                 if invocation.route.provider != routing.primary.provider
                     || !route_matches
-                    || !routing_scores
-                        .snapshot_for(routing.tenant.tenant_id)
-                        .is_some_and(|snapshot| snapshot.revision == routing.score_revision)
+                    || routing_scores.revision != routing.score_revision
                 {
                     return Err(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider);
                 }
@@ -1503,9 +1502,9 @@ mod tests {
             parent.split("\n#[cfg(test)]\nmod tests").next().unwrap(),
             decision.split("\n#[cfg(test)]\nmod tests").next().unwrap(),
         );
-        assert!(hot_path.contains("governance_snapshot"));
-        assert!(hot_path.contains(".load_full()"));
+        assert!(hot_path.contains(".governance") && hot_path.contains(".snapshot_for("));
         assert!(!hot_path.contains("GovernanceSqliteRepository"));
+        assert!(!hot_path.contains(".governance_snapshots") && !hot_path.contains(".load_full()"));
         assert!(!hot_path.contains("governance_load_snapshot"));
         assert!(!hot_path.contains(".load_snapshot("));
     }

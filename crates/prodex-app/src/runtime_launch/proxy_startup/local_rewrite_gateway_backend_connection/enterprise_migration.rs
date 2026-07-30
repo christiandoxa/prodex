@@ -271,6 +271,13 @@ fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
 fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
     if runtime_gateway_sqlite_table_has_column(
         conn,
+        "prodex_governance_mutation_idempotency",
+        "resulting_active_revision_id",
+    )? {
+        return Ok(12);
+    }
+    if runtime_gateway_sqlite_table_has_column(
+        conn,
         "prodex_governance_revision_artifacts",
         "signature_key_id",
     )? {
@@ -315,6 +322,13 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
 }
 
 fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
+    if runtime_gateway_postgres_table_has_column(
+        client,
+        "prodex_governance_mutation_idempotency",
+        "resulting_active_revision_id",
+    )? {
+        return Ok(16);
+    }
     if runtime_gateway_postgres_table_has_column(
         client,
         "prodex_governance_revision_artifacts",

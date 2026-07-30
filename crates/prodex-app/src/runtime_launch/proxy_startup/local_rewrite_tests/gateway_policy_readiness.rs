@@ -34,6 +34,8 @@ struct BankGatewayFixture {
     upstream: TestUpstream,
 }
 
+const VALID_FAR_FUTURE_UNIX_MS: u64 = 4_102_444_800_000;
+
 #[test]
 fn bank_readyz_and_data_plane_fail_closed_when_policy_expires() {
     let expires_at = now_unix_ms().saturating_add(2_000);
@@ -49,7 +51,7 @@ fn bank_readyz_and_data_plane_fail_closed_when_policy_expires() {
 
 #[test]
 fn bank_readyz_and_data_plane_fail_closed_when_authority_invalidates_policy() {
-    let fixture = start_bank_gateway("gateway-bank-policy-invalidation", u64::MAX);
+    let fixture = start_bank_gateway("gateway-bank-policy-invalidation", VALID_FAR_FUTURE_UNIX_MS);
     assert_ready(&fixture.proxy, true, "ok");
 
     Connection::open(&fixture.database_path)
@@ -69,7 +71,87 @@ fn bank_readyz_and_data_plane_fail_closed_when_authority_invalidates_policy() {
     assert_policy_request_is_unavailable(&fixture);
 }
 
+#[test]
+fn bank_readyz_fails_when_classification_rules_are_invalidated() {
+    assert_bank_readyz_fails_when_artifact_is_invalidated(
+        "gateway-bank-classification-invalidation",
+        GovernanceArtifactKind::ClassificationRules,
+    );
+}
+
+#[test]
+fn bank_readyz_fails_when_provider_registry_is_invalidated() {
+    assert_bank_readyz_fails_when_artifact_is_invalidated(
+        "gateway-bank-provider-invalidation",
+        GovernanceArtifactKind::ProviderRegistry,
+    );
+}
+
+#[test]
+fn bank_readyz_fails_when_routing_scores_are_invalidated() {
+    assert_bank_readyz_fails_when_artifact_is_invalidated(
+        "gateway-bank-routing-invalidation",
+        GovernanceArtifactKind::RoutingScores,
+    );
+}
+
+#[test]
+fn bank_bootstrap_uses_compatible_lkg_when_active_revision_mismatches_bundle() {
+    for (name, kind) in [
+        (
+            "gateway-bank-policy-incompatible",
+            GovernanceArtifactKind::Policy,
+        ),
+        (
+            "gateway-bank-classification-mismatch",
+            GovernanceArtifactKind::ClassificationRules,
+        ),
+        (
+            "gateway-bank-provider-mismatch",
+            GovernanceArtifactKind::ProviderRegistry,
+        ),
+        (
+            "gateway-bank-routing-mismatch",
+            GovernanceArtifactKind::RoutingScores,
+        ),
+    ] {
+        let fixture =
+            start_bank_gateway_with_mismatched_active(name, VALID_FAR_FUTURE_UNIX_MS, Some(kind));
+        assert_ready(&fixture.proxy, true, "ok");
+    }
+}
+
+fn assert_bank_readyz_fails_when_artifact_is_invalidated(name: &str, kind: GovernanceArtifactKind) {
+    let fixture = start_bank_gateway(name, VALID_FAR_FUTURE_UNIX_MS);
+    assert_ready(&fixture.proxy, true, "ok");
+
+    Connection::open(&fixture.database_path)
+        .unwrap()
+        .execute(
+            &format!(
+                "UPDATE {} SET active_revision_id = 'invalidated', \
+                 last_known_good_revision_id = 'invalidated' WHERE tenant_id = ?1",
+                pointer_table(kind),
+            ),
+            [fixture.tenant_id.to_string()],
+        )
+        .unwrap();
+
+    let body = wait_for_readiness(&fixture.proxy, false, Duration::from_secs(8));
+    assert_eq!(body["status"], "governance_policy_unavailable");
+    assert_eq!(body["governance_policy_available"], false);
+    assert_liveness_stays_up(&fixture.proxy);
+}
+
 fn start_bank_gateway(name: &str, policy_valid_until_unix_ms: u64) -> BankGatewayFixture {
+    start_bank_gateway_with_mismatched_active(name, policy_valid_until_unix_ms, None)
+}
+
+fn start_bank_gateway_with_mismatched_active(
+    name: &str,
+    policy_valid_until_unix_ms: u64,
+    mismatched_active: Option<GovernanceArtifactKind>,
+) -> BankGatewayFixture {
     let root = temp_root(name);
     let paths = app_paths_for_root(root.clone());
     let database_path = root.join("gateway.sqlite");
@@ -121,6 +203,9 @@ fn start_bank_gateway(name: &str, policy_valid_until_unix_ms: u64) -> BankGatewa
     };
     let artifacts = bank_artifacts(&settings);
     seed_authority(&database_path, tenant_id, &signing_key, &artifacts);
+    if let Some(kind) = mismatched_active {
+        seed_mismatched_active_revision(&database_path, tenant_id, &signing_key, &artifacts, kind);
+    }
 
     let mut runtime_config = RuntimeConfig::offline_default(&paths).unwrap();
     runtime_config.governance = crate::runtime_governance::runtime_governance_config(&settings);
@@ -200,6 +285,8 @@ fn bank_artifacts(
     .iter()
     .map(|byte| format!("{byte:02x}"))
     .collect::<String>();
+    let mut policy_settings = settings.clone();
+    policy_settings.classification_checksum = Some(classification_checksum.clone());
     let classification = serde_json::to_vec(&serde_json::json!({
         "schema_version": 1,
         "detector_revision": "detector-v1",
@@ -271,7 +358,7 @@ fn bank_artifacts(
         (
             GovernanceArtifactKind::Policy,
             settings.policy_revision.unwrap().to_string(),
-            serde_json::to_vec(settings).unwrap(),
+            serde_json::to_vec(&policy_settings).unwrap(),
         ),
         (
             GovernanceArtifactKind::ClassificationRules,
@@ -307,26 +394,14 @@ fn seed_authority(
         )
         .unwrap();
     for (kind, revision, artifact) in artifacts {
-        let signature = signing_key.sign(&governance_support::artifact_signature_message(
-            tenant_id, *kind, revision, artifact,
-        ));
-        connection
-            .execute(
-                "INSERT INTO prodex_governance_revision_artifacts
-                 (tenant_id, artifact_kind, revision_id, artifact_checksum, compiled_artifact,
-                  created_by, created_at_unix_ms, signature_key_id, artifact_signature)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'test-authority', ?7)",
-                params![
-                    tenant_id.to_string(),
-                    artifact_kind_label(*kind),
-                    revision,
-                    governance_support::artifact_checksum(artifact),
-                    artifact,
-                    PrincipalId::new().to_string(),
-                    STANDARD.encode(signature.as_ref()),
-                ],
-            )
-            .unwrap();
+        seed_revision(
+            &connection,
+            tenant_id,
+            signing_key,
+            *kind,
+            revision,
+            artifact,
+        );
         connection
             .execute(
                 &format!(
@@ -338,6 +413,133 @@ fn seed_authority(
             )
             .unwrap();
     }
+}
+
+fn seed_mismatched_active_revision(
+    database_path: &Path,
+    tenant_id: TenantId,
+    signing_key: &Ed25519KeyPair,
+    artifacts: &[(GovernanceArtifactKind, String, Vec<u8>)],
+    kind: GovernanceArtifactKind,
+) {
+    let (_, lkg_revision, artifact) = artifacts
+        .iter()
+        .find(|(candidate, _, _)| *candidate == kind)
+        .unwrap();
+    let active_revision = match kind {
+        GovernanceArtifactKind::Policy => prodex_domain::PolicyRevisionId::new().to_string(),
+        GovernanceArtifactKind::ClassificationRules => "classification-v2".to_string(),
+        GovernanceArtifactKind::ProviderRegistry | GovernanceArtifactKind::RoutingScores => {
+            "2".to_string()
+        }
+    };
+    let mismatched_artifact = if kind == GovernanceArtifactKind::Policy {
+        let mut settings =
+            serde_json::from_slice::<RuntimePolicyGovernanceSettings>(artifact).unwrap();
+        let revision = active_revision.parse().unwrap();
+        settings.policy_revision = Some(revision);
+        settings.active_policy_revision = Some(revision);
+        settings.classification_revision = Some("classification-v2".to_string());
+        settings.classification_checksum = Some("classification-v2".to_string());
+        settings.provider_registry_revision = Some(2);
+        settings.routing_score_revision = Some(2);
+        serde_json::to_vec(&settings).unwrap()
+    } else {
+        let mut artifact = artifact.clone();
+        artifact.push(b' ');
+        artifact
+    };
+    let connection = Connection::open(database_path).unwrap();
+    connection
+        .execute(
+            &format!(
+                "UPDATE {} SET lifecycle_state = 'superseded' \
+                 WHERE tenant_id = ?1 AND revision_id = ?2",
+                revision_table(kind),
+            ),
+            params![tenant_id.to_string(), lkg_revision],
+        )
+        .unwrap();
+    seed_revision(
+        &connection,
+        tenant_id,
+        signing_key,
+        kind,
+        &active_revision,
+        &mismatched_artifact,
+    );
+    connection
+        .execute(
+            &format!(
+                "UPDATE {} SET active_revision_id = ?2, last_known_good_revision_id = ?3, \
+                 etag = 'etag-mismatch', updated_at_unix_ms = 2 WHERE tenant_id = ?1",
+                pointer_table(kind),
+            ),
+            params![tenant_id.to_string(), active_revision, lkg_revision],
+        )
+        .unwrap();
+}
+
+fn seed_revision(
+    connection: &Connection,
+    tenant_id: TenantId,
+    signing_key: &Ed25519KeyPair,
+    kind: GovernanceArtifactKind,
+    revision: &str,
+    artifact: &[u8],
+) {
+    let checksum = governance_support::artifact_checksum(artifact);
+    let created_by = PrincipalId::new().to_string();
+    let signature = signing_key.sign(&governance_support::artifact_signature_message(
+        tenant_id, kind, revision, artifact,
+    ));
+    connection
+        .execute(
+            "INSERT INTO prodex_governance_revision_artifacts
+             (tenant_id, artifact_kind, revision_id, artifact_checksum, compiled_artifact,
+              created_by, created_at_unix_ms, signature_key_id, artifact_signature)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'test-authority', ?7)",
+            params![
+                tenant_id.to_string(),
+                artifact_kind_label(kind),
+                revision,
+                checksum,
+                artifact,
+                created_by,
+                STANDARD.encode(signature.as_ref()),
+            ],
+        )
+        .unwrap();
+    match kind {
+        GovernanceArtifactKind::Policy => connection.execute(
+            "INSERT INTO prodex_policy_revisions (
+                tenant_id, revision_id, artifact_checksum, compiled_metadata,
+                lifecycle_state, created_by, created_at_unix_ms
+             ) VALUES (?1, ?2, ?3, '{}', 'active', ?4, 1)",
+            params![tenant_id.to_string(), revision, checksum, created_by],
+        ),
+        GovernanceArtifactKind::ClassificationRules => connection.execute(
+            "INSERT INTO prodex_classification_rule_revisions (
+                tenant_id, revision_id, artifact_checksum, compiled_metadata,
+                lifecycle_state, created_at_unix_ms
+             ) VALUES (?1, ?2, ?3, '{}', 'active', 1)",
+            params![tenant_id.to_string(), revision, checksum],
+        ),
+        GovernanceArtifactKind::ProviderRegistry => connection.execute(
+            "INSERT INTO prodex_provider_registry_revisions (
+                tenant_id, revision_id, artifact_checksum, lifecycle_state, created_at_unix_ms
+             ) VALUES (?1, ?2, ?3, 'active', 1)",
+            params![tenant_id.to_string(), revision, checksum],
+        ),
+        GovernanceArtifactKind::RoutingScores => connection.execute(
+            "INSERT INTO prodex_routing_score_revisions (
+                tenant_id, revision_id, artifact_checksum, fixed_point_weights,
+                lifecycle_state, created_at_unix_ms
+             ) VALUES (?1, ?2, ?3, '{}', 'active', 1)",
+            params![tenant_id.to_string(), revision, checksum],
+        ),
+    }
+    .unwrap();
 }
 
 fn artifact_kind_label(kind: GovernanceArtifactKind) -> &'static str {
@@ -355,6 +557,15 @@ fn pointer_table(kind: GovernanceArtifactKind) -> &'static str {
         GovernanceArtifactKind::ClassificationRules => "prodex_classification_rule_pointers",
         GovernanceArtifactKind::ProviderRegistry => "prodex_provider_registry_pointers",
         GovernanceArtifactKind::RoutingScores => "prodex_routing_score_pointers",
+    }
+}
+
+fn revision_table(kind: GovernanceArtifactKind) -> &'static str {
+    match kind {
+        GovernanceArtifactKind::Policy => "prodex_policy_revisions",
+        GovernanceArtifactKind::ClassificationRules => "prodex_classification_rule_revisions",
+        GovernanceArtifactKind::ProviderRegistry => "prodex_provider_registry_revisions",
+        GovernanceArtifactKind::RoutingScores => "prodex_routing_score_revisions",
     }
 }
 

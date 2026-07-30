@@ -1,5 +1,4 @@
 use super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
-use super::super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet;
 use super::super::local_rewrite_copilot::RuntimeCopilotOAuthPool;
 use super::super::local_rewrite_gateway_admin_auth::RuntimeGatewayOidcJwksSnapshot;
 use super::super::local_rewrite_gateway_browser::RuntimeGatewayBrowserState;
@@ -18,10 +17,8 @@ use super::super::local_rewrite_governance_session::RuntimeGatewayGovernanceSess
 use super::super::local_rewrite_options::{
     RuntimeLocalRewriteProviderOptions, RuntimeProjectedProviderCredential,
 };
-use super::super::local_rewrite_provider_registry::{
-    RuntimeGatewayProviderPricing, RuntimeGatewayProviderRegistrySnapshotSet,
-    RuntimeGatewayRoutingScoresSnapshotSet,
-};
+use super::super::local_rewrite_provider_registry::RuntimeGatewayProviderPricing;
+use super::governance_bundle::RuntimeGovernanceSnapshotBundleSet;
 use super::{
     RuntimeGatewayOidcHttpCacheEntry, RuntimeGatewayRouteLoadState,
     RuntimeGatewayVirtualKeyUsageState, RuntimeGovernanceAuthority, RuntimeLocalRewriteModelMemory,
@@ -45,14 +42,9 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) model_memory: RuntimeLocalRewriteModelMemory,
     pub(in super::super) governance_sessions: RuntimeGatewayGovernanceSessionStore,
     pub(in super::super) governance_audit_writer: RuntimeGovernanceAuditWriter,
-    pub(in super::super) governed_provider_registry:
-        Arc<ArcSwap<RuntimeGatewayProviderRegistrySnapshotSet>>,
-    pub(in super::super) governed_routing_scores:
-        Arc<ArcSwap<RuntimeGatewayRoutingScoresSnapshotSet>>,
-    pub(in super::super) classification_rules: Arc<ArcSwap<RuntimeClassificationRulesSnapshotSet>>,
-    pub(in super::super) governance_snapshot:
-        Arc<ArcSwap<crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet>>,
+    pub(in super::super) governance_snapshots: Arc<ArcSwap<RuntimeGovernanceSnapshotBundleSet>>,
     pub(in super::super) governance_authority: Option<RuntimeGovernanceAuthority>,
+    pub(in super::super) governance_refresh_requested: Arc<AtomicBool>,
     pub(in super::super) api_key_cursor: Arc<AtomicUsize>,
     pub(in super::super) client: reqwest::blocking::Client,
     pub(in super::super) gateway_oidc_http_cache:
@@ -89,6 +81,7 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
 #[derive(Clone)]
 pub(in super::super) struct RuntimeLocalRewriteRequestContext {
     pub(in super::super) process: Arc<RuntimeLocalRewriteProcessServices>,
+    pub(in super::super) governance: Arc<RuntimeGovernanceSnapshotBundleSet>,
     pub(in super::super) upstream_base_url: String,
     pub(in super::super) provider: Arc<RuntimeLocalRewriteProviderOptions>,
     pub(in super::super) provider_credential: Option<RuntimeProjectedProviderCredential>,
@@ -119,6 +112,7 @@ impl RuntimeLocalRewriteRequestContext {
     ) -> Self {
         Self {
             process: Arc::clone(&self.process),
+            governance: Arc::clone(&self.governance),
             upstream_base_url: self.upstream_base_url.clone(),
             provider: Arc::clone(&snapshot.provider),
             provider_credential: snapshot.provider_credential.clone(),
@@ -140,6 +134,7 @@ impl RuntimeLocalRewriteRequestContext {
     ) -> Self {
         Self {
             process: Arc::clone(&self.process),
+            governance: Arc::clone(&self.governance),
             upstream_base_url,
             provider: Arc::new(provider),
             provider_credential: Some(provider_credential),
@@ -161,6 +156,12 @@ impl RuntimeLocalRewriteRequestContext {
         selected.governed_pricing = governed_pricing;
         selected
     }
+
+    pub(in super::super) fn with_pinned_governance(&self) -> Self {
+        let mut pinned = self.clone();
+        pinned.governance = self.process.governance_snapshots.load_full();
+        pinned
+    }
 }
 
 #[cfg(test)]
@@ -172,7 +173,7 @@ mod tests {
             .split("fn with_selected_upstream")
             .nth(1)
             .unwrap()
-            .split("\n    }\n}")
+            .split("fn with_governed_pricing")
             .next()
             .unwrap();
 

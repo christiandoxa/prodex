@@ -1,17 +1,49 @@
 use postgres::NoTls;
+use postgres::fallible_iterator::FallibleIterator;
 use prodex_storage_postgres::{
     APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION,
     ENTERPRISE_GOVERNANCE_MIGRATION, GOVERNANCE_LIFECYCLE_MIGRATION,
-    GOVERNANCE_SESSION_INDEX_MIGRATION, GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
-    INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS, SIEM_OUTBOX_LEASING_MIGRATION,
+    GOVERNANCE_REVOCATION_MIGRATION, GOVERNANCE_SESSION_INDEX_MIGRATION,
+    GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION, INITIAL_TENANT_ACCOUNTING_MIGRATION,
+    POSTGRES_MIGRATIONS, SIEM_OUTBOX_LEASING_MIGRATION,
     TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION, postgres_governance_pointer_statements,
 };
+use std::time::Duration;
 
 #[test]
 fn migration_creates_only_missing_rls_policies() {
     let sql = INITIAL_TENANT_ACCOUNTING_MIGRATION.sql;
     assert!(sql.contains("FROM pg_policies"));
     assert!(sql.contains("policyname = tenant_table || '_tenant_isolation'"));
+}
+
+#[test]
+fn governance_revocation_is_terminal_and_notifies_every_pointer_family() {
+    let sql = GOVERNANCE_REVOCATION_MIGRATION.sql;
+    assert_eq!(
+        prodex_storage::GOVERNANCE_INVALIDATION_CHANNEL,
+        "prodex_governance_invalidation"
+    );
+    assert_eq!(
+        prodex_storage::MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES,
+        256
+    );
+    assert!(sql.contains("prodex_reject_revoked_governance_revision_revival"));
+    assert!(sql.contains("prodex_notify_governance_invalidation"));
+    assert!(sql.contains("pg_notify('prodex_governance_invalidation', payload)"));
+    assert!(sql.contains("octet_length(payload) > 256"));
+    for (table, kind) in [
+        ("prodex_policy_pointers", "policy"),
+        (
+            "prodex_classification_rule_pointers",
+            "classification_rules",
+        ),
+        ("prodex_provider_registry_pointers", "provider_registry"),
+        ("prodex_routing_score_pointers", "routing_scores"),
+    ] {
+        assert!(sql.contains(table), "missing notify trigger table {table}");
+        assert!(sql.contains(kind), "missing notify payload kind {kind}");
+    }
 }
 
 #[test]
@@ -84,6 +116,18 @@ fn governance_postgres_port_uses_atomic_audit_outbox_and_pointer_cas() {
     ] {
         let statements = postgres_governance_pointer_statements(kind);
         assert!(statements.load.sql.contains("FOR UPDATE"));
+        assert!(
+            statements
+                .compare_and_swap
+                .sql
+                .contains("VALUES ($1, $2, $3, $4, $5)")
+        );
+        assert!(
+            !statements
+                .compare_and_swap
+                .sql
+                .contains("WHERE $6::text IS NULL")
+        );
         assert!(statements.compare_and_swap.sql.contains(".etag = $6"));
         assert!(statements.compare_and_swap.sql.contains("RETURNING etag"));
     }
@@ -287,4 +331,87 @@ fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
         .expect("request counter column should be inspectable")
         .get(0);
     assert!(request_count_column);
+}
+
+#[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
+fn governance_invalidation_notification_is_delivered_only_after_commit() {
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
+    let mut writer = postgres::Client::connect(&url, NoTls).expect("postgres should connect");
+    writer
+        .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        .expect("postgres schema should reset");
+    for migration in POSTGRES_MIGRATIONS {
+        writer
+            .batch_execute(migration.sql)
+            .expect("migration should apply");
+    }
+    let tenant_id: prodex_domain::TenantId =
+        "00000000-0000-7000-8000-000000000051".parse().unwrap();
+    writer
+        .execute(
+            "INSERT INTO prodex_tenants (
+                tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms
+             ) VALUES ($1::uuid, 'Notification Test', 1, 1)",
+            &[&tenant_id.as_uuid()],
+        )
+        .expect("tenant should insert");
+    writer
+        .query_one(
+            "SELECT set_config('prodex.tenant_id', $1, false)",
+            &[&tenant_id.to_string()],
+        )
+        .expect("tenant context should set");
+
+    let mut listener = postgres::Client::connect(&url, NoTls).expect("listener should connect");
+    listener
+        .batch_execute(&format!(
+            "LISTEN {}",
+            prodex_storage::GOVERNANCE_INVALIDATION_CHANNEL
+        ))
+        .expect("listener should subscribe");
+
+    let mut transaction = writer.transaction().expect("transaction should open");
+    transaction
+        .execute(
+            "INSERT INTO prodex_routing_score_pointers (
+                tenant_id, active_revision_id, last_known_good_revision_id,
+                etag, updated_at_unix_ms
+             ) VALUES ($1::uuid, NULL, NULL, 'etag-1', 1)",
+            &[&tenant_id.as_uuid()],
+        )
+        .expect("pointer should insert");
+    assert!(
+        listener
+            .notifications()
+            .timeout_iter(Duration::from_millis(100))
+            .next()
+            .expect("notification wait should succeed")
+            .is_none(),
+        "notification escaped before transaction commit"
+    );
+    transaction.commit().expect("transaction should commit");
+
+    let notification = listener
+        .notifications()
+        .timeout_iter(Duration::from_secs(2))
+        .next()
+        .expect("notification wait should succeed")
+        .expect("committed pointer should notify");
+    assert_eq!(
+        notification.channel(),
+        prodex_storage::GOVERNANCE_INVALIDATION_CHANNEL
+    );
+    assert!(
+        notification.payload().len() <= prodex_storage::MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES
+    );
+    assert_eq!(
+        notification
+            .payload()
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>(),
+        format!(r#"{{"tenant_id":"{tenant_id}","kind":"routing_scores"}}"#)
+    );
 }

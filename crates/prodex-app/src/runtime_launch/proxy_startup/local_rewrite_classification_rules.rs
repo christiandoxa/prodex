@@ -164,6 +164,14 @@ impl RuntimeClassificationRulesSnapshotSet {
         next.tenant_snapshots.insert(tenant_id, Arc::new(snapshot));
         Ok(next)
     }
+
+    pub(super) fn without_tenant_snapshot(&self, tenant_id: TenantId) -> Option<Self> {
+        self.tenant_snapshots.contains_key(&tenant_id).then(|| {
+            let mut next = self.clone();
+            next.tenant_snapshots.remove(&tenant_id);
+            next
+        })
+    }
 }
 
 pub(super) fn compile_runtime_classification_rules_artifact(
@@ -274,24 +282,18 @@ pub(super) fn apply_runtime_gateway_classification_to_request(
         );
     };
     let governance = shared
-        .governance_snapshot
-        .load_full()
+        .governance
         .snapshot_for(tenant_id)
         .context("tenant governance policy snapshot is unavailable")?;
-    let classification = shared
-        .classification_rules
-        .load_full()
-        .snapshot_for(tenant_id)
-        .context("tenant classification rules snapshot is unavailable")?;
     apply_runtime_presidio_redaction_to_request_with_rules(
         request_id,
         request,
         &shared.runtime_shared,
         legacy_local_enabled,
         Some(tenant_id),
-        &governance.config,
-        classification.patterns(),
-        classification.detector_revision(),
+        &governance.policy.config,
+        governance.classification.patterns(),
+        governance.classification.detector_revision(),
     )
 }
 
@@ -312,24 +314,18 @@ pub(super) fn apply_runtime_gateway_classification_to_websocket_text<'a>(
         );
     };
     let governance = shared
-        .governance_snapshot
-        .load_full()
+        .governance
         .snapshot_for(tenant_id)
         .context("tenant governance policy snapshot is unavailable")?;
-    let classification = shared
-        .classification_rules
-        .load_full()
-        .snapshot_for(tenant_id)
-        .context("tenant classification rules snapshot is unavailable")?;
     apply_runtime_presidio_redaction_to_websocket_text_with_rules(
         request_id,
         text,
         &shared.runtime_shared,
         legacy_local_enabled,
         Some(tenant_id),
-        &governance.config,
-        classification.patterns(),
-        classification.detector_revision(),
+        &governance.policy.config,
+        governance.classification.patterns(),
+        governance.classification.detector_revision(),
     )
 }
 
@@ -572,10 +568,13 @@ mod tests {
             .next()
             .unwrap();
 
-        assert!(boundary.contains(".load_full()"));
+        assert!(boundary.contains(".governance"));
+        assert!(boundary.contains(".snapshot_for(tenant_id)"));
         for forbidden in [
             "GovernanceSqliteRepository",
             "PostgresRepository",
+            ".governance_snapshots",
+            ".load_full()",
             ".load_snapshot(",
             "governance_load_snapshot",
         ] {

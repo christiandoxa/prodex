@@ -67,19 +67,13 @@ pub(super) fn runtime_gateway_governance_decision(
         .principal()
         .ok_or(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)?;
     let snapshot = shared
-        .governance_snapshot
-        .load_full()
+        .governance
         .snapshot_for(tenant.tenant_id)
         .ok_or(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
-    let classification = shared
-        .classification_rules
-        .load_full()
-        .snapshot_for(tenant.tenant_id)
-        .ok_or(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
-    let governance_config = snapshot.config;
+    let governance_config = snapshot.policy.config;
     let application_snapshot = ApplicationGovernanceSnapshot {
-        classification_rules: classification.classification_rules().clone(),
-        policy: snapshot.application.policy.clone(),
+        classification_rules: snapshot.classification.classification_rules().clone(),
+        policy: snapshot.policy.application.policy.clone(),
     };
 
     let context = build_governance_context(

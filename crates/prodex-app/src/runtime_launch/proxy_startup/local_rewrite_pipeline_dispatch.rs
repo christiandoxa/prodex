@@ -566,7 +566,7 @@ pub(super) fn runtime_gateway_operational_probe_response(
     let overloaded = runtime_proxy_local_overload_pressure_active(&shared.runtime_shared);
     let draining = shared.gateway_draining.load(Ordering::SeqCst);
     let credentials_stale = shared.gateway_credentials.refresh_is_stale();
-    let governance_policy_available = runtime_gateway_mandatory_policy_available(shared);
+    let governance_policy_available = runtime_gateway_mandatory_governance_available(shared);
     let ready = probe != "readyz"
         || (!overloaded && !draining && !credentials_stale && governance_policy_available);
     let state = if ready {
@@ -620,7 +620,7 @@ pub(super) fn runtime_gateway_operational_probe_response(
     ))
 }
 
-fn runtime_gateway_mandatory_policy_available(shared: &RuntimeLocalRewriteProxyShared) -> bool {
+fn runtime_gateway_mandatory_governance_available(shared: &RuntimeLocalRewriteProxyShared) -> bool {
     if !shared
         .runtime_shared
         .runtime_config
@@ -636,7 +636,7 @@ fn runtime_gateway_mandatory_policy_available(shared: &RuntimeLocalRewriteProxyS
     let Ok(tenant_ids) = authority.tenant_ids() else {
         return false;
     };
-    shared.governance_snapshot.load().policies_are_servable(
+    shared.governance.policies_are_servable(
         &tenant_ids,
         super::super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis(),
     )

@@ -1,18 +1,21 @@
 use super::*;
 use runtime_anthropic_crate as anthropic;
 
+pub(super) use anthropic::{
+    RuntimeAnthropicServerToolUsage, RuntimeAnthropicServerTools, RuntimeAnthropicSseReader,
+    runtime_anthropic_buffered_reply_parts, runtime_anthropic_error_type_for_status,
+};
+
+#[cfg(test)]
 #[allow(unused_imports)]
 pub(super) use anthropic::{
     RUNTIME_PROXY_ANTHROPIC_MEMORY_TOOL_INSTRUCTIONS, RuntimeAnthropicMcpServer,
     RuntimeAnthropicNativeClientToolCall, RuntimeAnthropicNativeClientToolKind,
-    RuntimeAnthropicRegisteredServerTool, RuntimeAnthropicServerToolUsage,
-    RuntimeAnthropicServerTools, RuntimeAnthropicSseReader, RuntimeAnthropicStreamToolUse,
-    RuntimeAnthropicTranslatedTools, runtime_anthropic_buffered_reply_parts,
-    runtime_anthropic_code_execution_request_count_from_output,
+    RuntimeAnthropicRegisteredServerTool, RuntimeAnthropicStreamToolUse,
+    RuntimeAnthropicTranslatedTools, runtime_anthropic_code_execution_request_count_from_output,
     runtime_anthropic_computer_key_combo_from_output_action,
     runtime_anthropic_computer_tool_input_from_output_item,
     runtime_anthropic_computer_tool_use_block_from_output_item,
-    runtime_anthropic_error_type_for_status,
     runtime_anthropic_mcp_approval_request_block_from_output_item,
     runtime_anthropic_mcp_call_blocks_from_output_item,
     runtime_anthropic_mcp_list_tools_block_from_output_item,

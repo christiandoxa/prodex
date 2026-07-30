@@ -43,13 +43,7 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
         .application
         .as_ref()
         .and_then(|authorized| authorized.tenant_context())
-        .is_some_and(|tenant| {
-            shared
-                .governance_snapshot
-                .load()
-                .snapshot_for(tenant.tenant_id)
-                .is_none()
-        })
+        .is_some_and(|tenant| shared.governance.snapshot_for(tenant.tenant_id).is_none())
     {
         return Err(request
             .state

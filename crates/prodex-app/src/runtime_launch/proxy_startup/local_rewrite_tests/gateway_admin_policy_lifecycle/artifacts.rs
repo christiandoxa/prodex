@@ -289,6 +289,7 @@ fn gateway_governance_artifacts_use_generic_maker_checker_lifecycle() {
         "activate",
     );
     assert_eq!(activated.status().as_u16(), 200);
+    let etag = activated.headers()["etag"].to_str().unwrap().to_string();
     let status: serde_json::Value = client
         .get(format!("{base}/status"))
         .bearer_auth("routing-checker-token")
@@ -298,6 +299,40 @@ fn gateway_governance_artifacts_use_generic_maker_checker_lifecycle() {
         .unwrap();
     assert_eq!(status["active_revision_id"], revision);
     assert_eq!(status["object"], "governance.routing_scores_status");
+
+    let revoked = activate(
+        &client,
+        &base,
+        "routing-checker-token",
+        &revision,
+        &approval,
+        &etag,
+        "routing-revoke-v7",
+        "revoke",
+    );
+    assert_eq!(revoked.status().as_u16(), 200);
+    let revoked_etag = revoked.headers()["etag"].to_str().unwrap().to_string();
+    let revoked: serde_json::Value = revoked.json().unwrap();
+    assert_eq!(revoked["active_revision_id"], serde_json::Value::Null);
+    assert_eq!(
+        revoked["last_known_good_revision_id"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        activate(
+            &client,
+            &base,
+            "routing-checker-token",
+            &revision,
+            &approval,
+            &revoked_etag,
+            "routing-reactivate-revoked-v7",
+            "activate",
+        )
+        .status()
+        .as_u16(),
+        409
+    );
 }
 
 pub(super) fn create_revision(

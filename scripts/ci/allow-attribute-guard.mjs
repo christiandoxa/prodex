@@ -7,7 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 0,
-  "unused_imports": 5,
+  "unused_imports": 3,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
   "clippy::too_many_arguments": 35,
@@ -18,8 +18,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 0;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
-  "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use queue::note_runtime_probe_refresh_progress;",
-  "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use startup::runtime_profiles_needing_startup_probe_refresh;",
   "unused_imports|crates/prodex-app/src/runtime_claude/config.rs|pub(crate) use prodex_runtime_claude::{",
   "unused_imports|crates/prodex-app/src/runtime_claude/state_merge.rs|pub(crate) use prodex_runtime_claude::{",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeResponsesReply {",

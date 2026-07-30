@@ -110,7 +110,7 @@ fn governance_activation_requires_exact_approved_fingerprint_and_preserves_lkg()
         tenant_id,
         kind: GovernanceArtifactKind::Policy,
         revision_id: prodex_domain::PolicyRevisionId::new().to_string(),
-        approval_id: approval.id.clone(),
+        approval_id: Some(approval.id.clone()),
         actor: actor.clone(),
         action: GovernanceActivationAction::Activate,
         expected_etag: Some("etag-v1".to_string()),
@@ -123,20 +123,66 @@ fn governance_activation_requires_exact_approved_fingerprint_and_preserves_lkg()
         &request,
         GovernanceActivationCurrent {
             revision_checksum: fingerprint.as_str(),
-            approval: &approval,
+            approval: Some(&approval),
             active_revision_id: Some("policy-v1"),
             last_known_good_revision_id: None,
+            revocation_fallback_revision_id: None,
             etag: Some("etag-v1"),
         },
     )
     .unwrap();
 
-    assert_eq!(plan.last_known_good_revision_id, "policy-v1");
+    assert_eq!(
+        plan.last_known_good_revision_id.as_deref(),
+        Some("policy-v1")
+    );
     assert_eq!(plan.previous_revision_state, Some("superseded"));
     assert_eq!(
-        plan.activated_approval.state,
+        plan.activated_approval.unwrap().state,
         prodex_domain::ApprovalState::Active
     );
+}
+
+#[test]
+fn governance_revocation_needs_no_approval_and_only_promotes_validated_fallback() {
+    let tenant_id = TenantId::new();
+    let fingerprint = ApprovalFingerprint::new("sha256:fixture").unwrap();
+    let (_, actor) = approved(tenant_id, fingerprint.clone());
+    let revision_id = prodex_domain::PolicyRevisionId::new().to_string();
+    let request = GovernanceActivationRequest {
+        tenant_id,
+        kind: GovernanceArtifactKind::Policy,
+        revision_id: revision_id.clone(),
+        approval_id: None,
+        actor: actor.clone(),
+        action: GovernanceActivationAction::Revoke,
+        expected_etag: Some("etag-v2".to_string()),
+        idempotency_key: IdempotencyKey::new("revoke-v2").unwrap(),
+        request_fingerprint: "request-revoke-v2".to_string(),
+        audit_outbox: audit(tenant_id, &actor),
+        activated_at_unix_ms: 300,
+    };
+    let plan = plan_governance_activation(
+        &request,
+        GovernanceActivationCurrent {
+            revision_checksum: fingerprint.as_str(),
+            approval: None,
+            active_revision_id: Some(&revision_id),
+            last_known_good_revision_id: Some("policy-v1"),
+            revocation_fallback_revision_id: Some("policy-v1"),
+            etag: Some("etag-v2"),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.active_revision_id.as_deref(), Some("policy-v1"));
+    assert_eq!(
+        plan.last_known_good_revision_id.as_deref(),
+        Some("policy-v1")
+    );
+    assert_eq!(plan.target_revision_state, "revoked");
+    assert_eq!(plan.promoted_revision_id.as_deref(), Some("policy-v1"));
+    assert_eq!(plan.activated_approval, None);
 }
 
 #[test]

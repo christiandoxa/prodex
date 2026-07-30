@@ -108,7 +108,7 @@ macro_rules! pointer_statements {
                 "INSERT INTO ",
                 $table,
                 " (tenant_id, active_revision_id, last_known_good_revision_id, etag, updated_at_unix_ms) ",
-                "SELECT $1, $2, $3, $4, $5 WHERE $6::text IS NULL ",
+                "VALUES ($1, $2, $3, $4, $5) ",
                 "ON CONFLICT (tenant_id) DO UPDATE SET ",
                 "active_revision_id = EXCLUDED.active_revision_id, ",
                 "last_known_good_revision_id = EXCLUDED.last_known_good_revision_id, ",

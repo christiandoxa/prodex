@@ -15,7 +15,9 @@ Store mutable drafts separately from immutable, checksum-addressed revisions.
 Submission freezes and validates the candidate. Independent approval binds
 tenant, revision/checksum, policy kind, approver role, quorum and expiry; the
 maker cannot count as checker. Activation atomically updates active/LKG history
-with audit and outbox records under optimistic concurrency. Rollback activates
+with audit and SIEM-outbox records under optimistic concurrency. PostgreSQL
+pointer changes also queue a transactional, non-durable cache notification;
+authoritative pointer polling recovers missed notifications. Rollback activates
 a previous immutable approved revision; invalidated/revoked revisions remain
 ineligible. Gateways acknowledge revision changes and reject unknown mandatory
 schema semantics.
@@ -30,8 +32,11 @@ Every race, rejection, activation, rollback and failed attempt is audited.
 
 Prodex implements immutable signed governance revisions, approval transitions,
 maker-checker/quorum enforcement, optimistic activation, active/LKG pointers,
-rollback, audit and outbox contracts. Evidence includes
+rollback, audit and SIEM-outbox contracts, PostgreSQL notification fanout, and
+authoritative polling recovery. A durable cache-invalidation outbox with
+per-replica acknowledgement remains a target rather than a current claim.
+Evidence includes
 `maker_checker_quorum_and_activation_are_enforced`,
-`gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg`, the
+`gateway_policy_http_revocation_invalidates_cache_and_lkg`, the
 SQLite governance repository lifecycle suite, and the live PostgreSQL all-kind
 lifecycle proof.

@@ -86,9 +86,10 @@ pub fn denied_approval_audit_outbox(
 #[derive(Clone, Copy)]
 pub struct GovernanceActivationCurrent<'a> {
     pub revision_checksum: &'a str,
-    pub approval: &'a ApprovalRecord,
+    pub approval: Option<&'a ApprovalRecord>,
     pub active_revision_id: Option<&'a str>,
     pub last_known_good_revision_id: Option<&'a str>,
+    pub revocation_fallback_revision_id: Option<&'a str>,
     pub etag: Option<&'a str>,
 }
 
@@ -99,6 +100,7 @@ impl fmt::Debug for GovernanceActivationCurrent<'_> {
             .field("approval", &"<redacted>")
             .field("active_revision_id", &"<redacted>")
             .field("last_known_good_revision_id", &"<redacted>")
+            .field("revocation_fallback_revision_id", &"<redacted>")
             .field("etag", &"<redacted>")
             .finish()
     }
@@ -107,19 +109,25 @@ impl fmt::Debug for GovernanceActivationCurrent<'_> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct GovernanceActivationPlan {
     pub previous_active_revision_id: Option<String>,
-    pub last_known_good_revision_id: String,
+    pub active_revision_id: Option<String>,
+    pub last_known_good_revision_id: Option<String>,
     pub etag: String,
     pub previous_revision_state: Option<&'static str>,
-    pub activated_approval: ApprovalRecord,
+    pub target_revision_state: &'static str,
+    pub promoted_revision_id: Option<String>,
+    pub activated_approval: Option<ApprovalRecord>,
 }
 
 impl fmt::Debug for GovernanceActivationPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GovernanceActivationPlan")
             .field("previous_active_revision_id", &"<redacted>")
+            .field("active_revision_id", &"<redacted>")
             .field("last_known_good_revision_id", &"<redacted>")
             .field("etag", &"<redacted>")
             .field("previous_revision_state", &self.previous_revision_state)
+            .field("target_revision_state", &self.target_revision_state)
+            .field("promoted_revision_id", &"<redacted>")
             .field("activated_approval", &"<redacted>")
             .finish()
     }
@@ -130,15 +138,22 @@ pub fn plan_governance_activation(
     current: GovernanceActivationCurrent<'_>,
 ) -> Result<GovernanceActivationPlan, GovernanceRepositoryError> {
     crate::governance_support::validate_governance_activation_request(request)?;
-    if current.approval.tenant_id != request.tenant_id {
+    if current
+        .approval
+        .is_some_and(|approval| approval.tenant_id != request.tenant_id)
+    {
         return Err(GovernanceRepositoryError::TenantMismatch);
     }
-    if current.approval.state != ApprovalState::Approved
-        || current.approval.kind
-            != crate::governance_support::approval_kind_for_artifact(request.kind)
-        || current.approval.fingerprint.as_str() != current.revision_checksum
-    {
-        return Err(GovernanceRepositoryError::ApprovalRequired);
+    if request.action != GovernanceActivationAction::Revoke {
+        let approval = current
+            .approval
+            .ok_or(GovernanceRepositoryError::ApprovalRequired)?;
+        if approval.state != ApprovalState::Approved
+            || approval.kind != crate::governance_support::approval_kind_for_artifact(request.kind)
+            || approval.fingerprint.as_str() != current.revision_checksum
+        {
+            return Err(GovernanceRepositoryError::ApprovalRequired);
+        }
     }
     if current.etag != request.expected_etag.as_deref() {
         return Err(GovernanceRepositoryError::EtagMismatch);
@@ -150,35 +165,80 @@ pub fn plan_governance_activation(
     }
 
     let previous_active_revision_id = current.active_revision_id.map(str::to_owned);
-    let last_known_good_revision_id = match request.action {
-        GovernanceActivationAction::Activate => previous_active_revision_id
-            .clone()
-            .or_else(|| current.last_known_good_revision_id.map(str::to_owned))
-            .unwrap_or_else(|| request.revision_id.clone()),
-        GovernanceActivationAction::Rollback => request.revision_id.clone(),
+    let (active_revision_id, last_known_good_revision_id, promoted_revision_id) = match request
+        .action
+    {
+        GovernanceActivationAction::Activate => {
+            let last_known_good = previous_active_revision_id
+                .clone()
+                .or_else(|| current.last_known_good_revision_id.map(str::to_owned))
+                .unwrap_or_else(|| request.revision_id.clone());
+            (
+                Some(request.revision_id.clone()),
+                Some(last_known_good),
+                None,
+            )
+        }
+        GovernanceActivationAction::Rollback => (
+            Some(request.revision_id.clone()),
+            Some(request.revision_id.clone()),
+            None,
+        ),
+        GovernanceActivationAction::Revoke => {
+            if current.active_revision_id == Some(request.revision_id.as_str()) {
+                let fallback = current.revocation_fallback_revision_id.map(str::to_owned);
+                (fallback.clone(), fallback.clone(), fallback)
+            } else {
+                let active = current.active_revision_id.map(str::to_owned);
+                let last_known_good =
+                    if current.last_known_good_revision_id == Some(request.revision_id.as_str()) {
+                        current.revocation_fallback_revision_id.map(str::to_owned)
+                    } else {
+                        current.last_known_good_revision_id.map(str::to_owned)
+                    };
+                (active, last_known_good, None)
+            }
+        }
     };
-    let activated_approval = transition_approval(ApprovalTransitionRequest {
-        record: current.approval,
-        actor: &request.actor,
-        action: ApprovalAction::Activate,
-        expected_version: current.approval.version,
-        now_unix_ms: request.activated_at_unix_ms,
-        reason: None,
-    })
-    .map_err(|_| GovernanceRepositoryError::ApprovalRequired)?
-    .record;
-    let previous_revision_state = current
-        .active_revision_id
-        .filter(|previous| *previous != request.revision_id)
-        .map(|_| match request.action {
-            GovernanceActivationAction::Activate => "superseded",
-            GovernanceActivationAction::Rollback => "rolled_back",
-        });
+    let activated_approval = current
+        .approval
+        .filter(|_| request.action != GovernanceActivationAction::Revoke)
+        .map(|approval| {
+            transition_approval(ApprovalTransitionRequest {
+                record: approval,
+                actor: &request.actor,
+                action: ApprovalAction::Activate,
+                expected_version: approval.version,
+                now_unix_ms: request.activated_at_unix_ms,
+                reason: None,
+            })
+            .map(|transition| transition.record)
+            .map_err(|_| GovernanceRepositoryError::ApprovalRequired)
+        })
+        .transpose()?;
+    let previous_revision_state = match request.action {
+        GovernanceActivationAction::Activate => current
+            .active_revision_id
+            .filter(|previous| *previous != request.revision_id)
+            .map(|_| "superseded"),
+        GovernanceActivationAction::Rollback => current
+            .active_revision_id
+            .filter(|previous| *previous != request.revision_id)
+            .map(|_| "rolled_back"),
+        GovernanceActivationAction::Revoke => None,
+    };
     Ok(GovernanceActivationPlan {
         previous_active_revision_id,
+        active_revision_id,
         last_known_good_revision_id,
         etag: crate::governance_support::activation_etag(request, current.etag),
         previous_revision_state,
+        target_revision_state: if request.action == GovernanceActivationAction::Revoke {
+            "revoked"
+        } else {
+            "active"
+        },
+        promoted_revision_id,
         activated_approval,
     })
 }

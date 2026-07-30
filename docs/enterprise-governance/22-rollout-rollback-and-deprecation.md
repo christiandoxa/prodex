@@ -222,7 +222,11 @@ For each production promotion:
    replicas and immutable snapshots.
 8. Drain old replicas: readiness fails first, new admission stops, unary and
    streams finish within bounds, and no mid-stream rotation occurs.
-9. Mark completion only after replica convergence, reconciliation, audit/SIEM,
+9. Do not enable governance revoke while any serving replica predates the
+   PostgreSQL invalidation listener and authoritative refresh contract. The
+   database terminal-state trigger protects storage during a mixed-version
+   rollout, but cannot purge an old process's loaded cache.
+10. Mark completion only after replica convergence, reconciliation, audit/SIEM,
    and SLO evidence. Do not contract schema in the same change.
 
 The existing Kubernetes pre-stop delay, termination grace, topology spread,

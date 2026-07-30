@@ -80,7 +80,7 @@ mod tests {
     const COMPONENTS_DIGEST: &str =
         "79758e5e9d777571b798e57a400aa41635077fee1a2e154d6bc8dfd59514e0f1";
     const DOCUMENT_DIGEST: &str =
-        "77bc2a0d8172e0b4b0fa5609b1cbee4f2b41bde86d801b1036232faa88173599";
+        "960fbc41fc862c7dcaa7fde9df54f74cbdbbf604b121212d8e169a0c5325dc2f";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -167,6 +167,7 @@ mod tests {
             ),
             ("/v1/prodex/gateway/policies/{revision_id}/activate", "post"),
             ("/v1/prodex/gateway/policies/{revision_id}/rollback", "post"),
+            ("/v1/prodex/gateway/policies/{revision_id}/revoke", "post"),
         ] {
             assert!(
                 spec["paths"][path][method]["responses"]["501"].is_object(),
@@ -331,6 +332,7 @@ mod tests {
             "/v1/prodex/gateway/policies/{revision_id}/approvals/{approval_id}/votes",
             "/v1/prodex/gateway/policies/{revision_id}/activate",
             "/v1/prodex/gateway/policies/{revision_id}/rollback",
+            "/v1/prodex/gateway/policies/{revision_id}/revoke",
             "/v1/prodex/gateway/governance/outbox",
             "/v1/prodex/gateway/governance/outbox/claim",
             "/v1/prodex/gateway/governance/audit/integrity",
@@ -340,7 +342,7 @@ mod tests {
                 "missing policy lifecycle path {path}"
             );
         }
-        for action in ["activate", "rollback"] {
+        for action in ["activate", "rollback", "revoke"] {
             let post =
                 &paths[format!("/v1/prodex/gateway/policies/{{revision_id}}/{action}")]["post"];
             let names = post["parameters"]
@@ -374,11 +376,20 @@ mod tests {
                 "/{revision_id}/approvals/{approval_id}/votes",
                 "/{revision_id}/activate",
                 "/{revision_id}/rollback",
+                "/{revision_id}/revoke",
             ] {
                 let path = format!("/v1/prodex/gateway/{resource}{suffix}");
                 assert!(paths[&path].is_object(), "missing governance path {path}");
             }
         }
+        let create_revision_schema = &paths["/v1/prodex/gateway/policies"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]["properties"]["revision_id"];
+        assert_eq!(create_revision_schema["type"], "string");
+        assert!(create_revision_schema.get("format").is_none());
+        let lifecycle_revision_schema = &paths["/v1/prodex/gateway/policies/{revision_id}/revoke"]
+            ["post"]["parameters"][0]["schema"];
+        assert_eq!(lifecycle_revision_schema["type"], "string");
+        assert!(lifecycle_revision_schema.get("format").is_none());
     }
 
     #[test]

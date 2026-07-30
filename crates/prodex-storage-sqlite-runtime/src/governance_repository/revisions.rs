@@ -73,13 +73,21 @@ pub(super) fn update_revision_state(
     let changed = transaction
         .execute(
             &format!(
-                "UPDATE {table} SET lifecycle_state = ?3 WHERE tenant_id = ?1 AND revision_id = ?2"
+                "UPDATE {table} SET lifecycle_state = ?3
+                 WHERE tenant_id = ?1 AND revision_id = ?2
+                   AND (lifecycle_state <> 'revoked' OR ?3 = 'revoked')"
             ),
             params![tenant_id.to_string(), revision_id, state],
         )
         .map_err(database_error)?;
     if changed != 1 {
-        return Err(GovernanceRepositoryError::NotFound);
+        return match load_revision_lifecycle_state(transaction, tenant_id, kind, revision_id)? {
+            None => Err(GovernanceRepositoryError::NotFound),
+            Some(current) if current == "revoked" && state != "revoked" => {
+                Err(GovernanceRepositoryError::Conflict)
+            }
+            Some(_) => Err(GovernanceRepositoryError::Database),
+        };
     }
     Ok(())
 }
@@ -165,6 +173,25 @@ pub(super) fn revision_id_for_fingerprint(
         .map_err(database_error)
 }
 
+pub(super) fn load_revision_lifecycle_state(
+    connection: &Connection,
+    tenant_id: TenantId,
+    kind: GovernanceArtifactKind,
+    revision_id: &str,
+) -> Result<Option<String>, GovernanceRepositoryError> {
+    connection
+        .query_row(
+            &format!(
+                "SELECT lifecycle_state FROM {} WHERE tenant_id = ?1 AND revision_id = ?2",
+                revision_table(kind)
+            ),
+            params![tenant_id.to_string(), revision_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(database_error)
+}
+
 pub(super) fn load_pointer(
     connection: &Connection,
     tenant_id: TenantId,
@@ -195,8 +222,8 @@ pub(super) fn store_pointer(
     transaction: &Transaction<'_>,
     tenant_id: TenantId,
     kind: GovernanceArtifactKind,
-    active_revision_id: &str,
-    last_known_good_revision_id: &str,
+    active_revision_id: Option<&str>,
+    last_known_good_revision_id: Option<&str>,
     etag: &str,
     updated_at: i64,
     previous: Option<&GovernancePointer>,
@@ -250,6 +277,8 @@ pub(super) fn insert_activation_history(
     transaction: &Transaction<'_>,
     request: &GovernanceActivationRequest,
     previous_revision_id: Option<&str>,
+    resulting_active_revision_id: Option<&str>,
+    promoted_revision_id: Option<&str>,
     occurred_at: i64,
 ) -> Result<(), GovernanceRepositoryError> {
     let event_id = request.audit_outbox.audit.event.id.to_string();
@@ -257,8 +286,9 @@ pub(super) fn insert_activation_history(
         transaction.execute(
             "INSERT INTO prodex_policy_activation_history (
                     tenant_id, activation_id, revision_id, previous_revision_id,
-                    action, actor_id, occurred_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    action, actor_id, resulting_active_revision_id,
+                    promoted_revision_id, occurred_at_unix_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 request.tenant_id.to_string(),
                 event_id,
@@ -266,6 +296,8 @@ pub(super) fn insert_activation_history(
                 previous_revision_id,
                 request.action.as_str(),
                 request.actor.id.to_string(),
+                resulting_active_revision_id,
+                promoted_revision_id,
                 occurred_at,
             ],
         )
@@ -274,8 +306,9 @@ pub(super) fn insert_activation_history(
             "INSERT INTO prodex_governance_activation_history (
                     tenant_id, activation_id, artifact_kind, revision_id,
                     previous_revision_id, action, actor_id, idempotency_key,
+                    resulting_active_revision_id, promoted_revision_id,
                     occurred_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 request.tenant_id.to_string(),
                 event_id,
@@ -285,6 +318,8 @@ pub(super) fn insert_activation_history(
                 request.action.as_str(),
                 request.actor.id.to_string(),
                 request.idempotency_key.as_str(),
+                resulting_active_revision_id,
+                promoted_revision_id,
                 occurred_at,
             ],
         )
@@ -299,7 +334,8 @@ pub(super) fn load_activation_replay(
 ) -> Result<Option<GovernanceActivationResult>, GovernanceRepositoryError> {
     let row = connection
         .query_row(
-            "SELECT request_fingerprint, action, revision_id, resulting_etag
+            "SELECT request_fingerprint, action, revision_id, resulting_etag,
+                    resulting_active_revision_id, resulting_last_known_good_revision_id
              FROM prodex_governance_mutation_idempotency
              WHERE tenant_id = ?1 AND artifact_kind = ?2 AND idempotency_key = ?3",
             params![
@@ -313,12 +349,14 @@ pub(super) fn load_activation_replay(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()
         .map_err(database_error)?;
-    let Some((fingerprint, action, revision_id, etag)) = row else {
+    let Some((fingerprint, action, revision_id, etag, stored_active, stored_lkg)) = row else {
         return Ok(None);
     };
     if fingerprint != request.request_fingerprint
@@ -327,16 +365,27 @@ pub(super) fn load_activation_replay(
     {
         return Err(GovernanceRepositoryError::Conflict);
     }
-    let pointer = load_pointer(connection, request.tenant_id, request.kind)?
-        .ok_or(GovernanceRepositoryError::Database)?;
+    let (active_revision_id, last_known_good_revision_id) = if action
+        == GovernanceActivationAction::Revoke.as_str()
+        || stored_active.is_some()
+        || stored_lkg.is_some()
+    {
+        (stored_active, stored_lkg)
+    } else {
+        let pointer = load_pointer(connection, request.tenant_id, request.kind)?
+            .ok_or(GovernanceRepositoryError::Database)?;
+        (
+            pointer.active_revision_id,
+            pointer.last_known_good_revision_id,
+        )
+    };
     Ok(Some(GovernanceActivationResult {
         outcome: GovernanceWriteOutcome::Replayed,
         kind: request.kind,
         revision_id,
         etag,
-        last_known_good_revision_id: pointer
-            .last_known_good_revision_id
-            .ok_or(GovernanceRepositoryError::Database)?,
+        active_revision_id,
+        last_known_good_revision_id,
     }))
 }
 
@@ -348,6 +397,16 @@ pub(super) fn load_verified_snapshot(
     source: GovernanceSnapshotSource,
     validate_artifact: &mut impl FnMut(&GovernanceArtifactValidationInput<'_>) -> bool,
 ) -> Result<Option<GovernanceSnapshot>, GovernanceRepositoryError> {
+    let lifecycle_state = load_revision_lifecycle_state(connection, tenant_id, kind, revision_id)?;
+    let lifecycle_is_eligible = match source {
+        GovernanceSnapshotSource::Active => lifecycle_state.as_deref() == Some("active"),
+        GovernanceSnapshotSource::LastKnownGood => {
+            matches!(lifecycle_state.as_deref(), Some("active" | "superseded"))
+        }
+    };
+    if !lifecycle_is_eligible {
+        return Ok(None);
+    }
     let Some(revision) = load_revision_row(connection, tenant_id, kind, revision_id)? else {
         return Ok(None);
     };
