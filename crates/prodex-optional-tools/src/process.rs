@@ -88,7 +88,7 @@ fn read_bounded(mut reader: impl std::io::Read) -> std::io::Result<(Vec<u8>, boo
     Ok((retained, truncated))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

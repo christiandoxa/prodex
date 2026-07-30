@@ -14,6 +14,12 @@ Prodex test speed should come from process-level sharding first, not from making
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
+Native macOS and Windows jobs run the workspace suite without the large
+`prodex-app` library test binary; Linux owns that full serial suite. The same
+Linux job cheaply reruns the overlay and Smart Context persistence regressions
+through a private symlinked `TMPDIR`, matching the macOS temp-path alias that
+previously exposed non-canonical test fixture paths.
+
 ## CI Impact Gating
 
 The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress.
@@ -155,11 +161,11 @@ Use `npm run test:gemini-schema` after changing Gemini request, response, SSE, t
 
 Use `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` only on machines with configured Gemini credentials. The default path sends one exact-response smoke request. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` to cover exact shell output, file edits, `apply_patch`, reference-repo clone/inspection, optional-tool update discipline, semantic compact, and explicit `exec resume`; add `PRODEX_LIVE_GEMINI_MCP=1` or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when that environment should also exercise MCP or image-input paths. The live smoke compares the final Codex agent message exactly, so Gemini narration or bridge leakage fails the gate.
 
-Use `npm run ci:runtime-load-smoke` for the bounded CI/scheduled load smoke. It reuses the load harness in mock-only baseline mode with low request count, zero tolerated request errors, zero admission pressure, and a strict p95 TTFT threshold. For local end-to-end proxy coverage after `cargo build`, run `npm run ci:runtime-load-smoke -- --mode proxy --prodex ./target/debug/prodex`; proxy mode relaxes the TTFT threshold enough to avoid machine-specific flakes while still checking error and admission gates.
+Use `npm run ci:runtime-load-smoke` for the bounded load smoke. CI builds `prodex` with allocation instrumentation and runs proxy mode against the local mock upstream, requiring authenticated broker readiness plus valid baseline/end performance metrics before applying the request-error, admission-pressure, and p95 TTFT gates. The command defaults to mock-only mode for quick local checks; after `cargo build`, run `npm run ci:runtime-load-smoke -- --mode proxy --prodex ./target/debug/prodex` for local end-to-end proxy coverage.
 
 ## Manual Runtime Load
 
-Use the load harness under [tests/load](../tests/load) for local runtime proxy load and stress checks. It is intentionally manual and not part of CI. The harness has a ChatGPT-like mock upstream, a load driver, and scenario defaults for baseline, stress, spike, and soak runs.
+Use the load harness under [tests/load](../tests/load) for local runtime proxy load and stress checks. CI runs its bounded baseline proxy smoke; the broader stress, spike, and soak scenarios remain manual. The harness has a ChatGPT-like mock upstream, a load driver, and scenario defaults for baseline, stress, spike, and soak runs.
 
 Baseline mock-only smoke:
 

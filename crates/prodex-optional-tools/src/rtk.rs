@@ -11,25 +11,33 @@ const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 const RTK_STATE_DIR_NAME: &str = "rtk";
 
 pub fn configure_rtk_codex_home(codex_home: &Path) -> Result<()> {
+    let rtk = find_path_command("rtk");
+    configure_rtk_codex_home_with_command(codex_home, rtk.as_deref())
+}
+
+pub(crate) fn configure_rtk_codex_home_with_command(
+    codex_home: &Path,
+    rtk: Option<&Path>,
+) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let rtk_md_path = codex_home.join(RTK_MD);
     write_text_file(&rtk_md_path, PRODEX_RTK_CODEX_AWARENESS)?;
     ensure_agents_reference(codex_home, &rtk_md_path)?;
-    configure_rtk_wrapper(codex_home)
+    configure_rtk_wrapper(codex_home, rtk)
 }
 
-fn configure_rtk_wrapper(codex_home: &Path) -> Result<()> {
+fn configure_rtk_wrapper(codex_home: &Path, rtk: Option<&Path>) -> Result<()> {
     let bin_dir = codex_home.join("bin");
     fs::create_dir_all(&bin_dir)
         .with_context(|| format!("failed to create {}", bin_dir.display()))?;
-    let Some(rtk) = find_path_command("rtk") else {
+    let Some(rtk) = rtk else {
         write_unavailable_command_wrapper(&wrapper_path(&bin_dir, "rtk"), "rtk")?;
         write_unavailable_command_wrapper(&wrapper_path(&bin_dir, "prodex-rtk"), "rtk")?;
         return Ok(());
     };
-    write_shell_wrapper(&wrapper_path(&bin_dir, "rtk"), &rtk, &[])?;
-    write_shell_wrapper(&wrapper_path(&bin_dir, "prodex-rtk"), &rtk, &[])?;
-    configure_rtk_command_wrappers(&bin_dir, &rtk)?;
+    write_shell_wrapper(&wrapper_path(&bin_dir, "rtk"), rtk, &[])?;
+    write_shell_wrapper(&wrapper_path(&bin_dir, "prodex-rtk"), rtk, &[])?;
+    configure_rtk_command_wrappers(&bin_dir, rtk)?;
     Ok(())
 }
 

@@ -18,6 +18,7 @@ const MAX_REQUEST_TIMEOUT_MS = 120_000;
 const MAX_SCENARIO_CONCURRENCY = 256;
 const MAX_SCENARIO_REQUESTS = 100_000;
 const MAX_SCENARIO_DURATION_SECONDS = 3_600;
+const BROKER_HEALTH_PATH = "/__prodex/runtime/health";
 const BROKER_METRICS_PATH = "/__prodex/runtime/metrics";
 const BROKER_ADMIN_TOKEN_HEADER = "X-Prodex-Admin-Token";
 const BROKER_ALLOCATION_FIELDS = [
@@ -401,6 +402,10 @@ function selfTestScenarios(scenarios) {
     }),
   );
   assert.throws(() => clientConfig({ client: { readDelayMs: MAX_CLIENT_READ_DELAY_MS + 1 } }, {}));
+  assert.deepEqual(brokerHealthProbeOptions("test-admin-token"), {
+    healthPath: BROKER_HEALTH_PATH,
+    headers: { [BROKER_ADMIN_TOKEN_HEADER]: "test-admin-token" },
+  });
   assert.deepEqual(
     waitDurationEvidence(
       { waitTotalNs: 100, waitCount: 2, waitMaxNs: 80 },
@@ -439,6 +444,7 @@ function selfTestScenarios(scenarios) {
     },
   });
   assert.equal(brokerAllocationSnapshot({}).status, "unsupported");
+  assert.throws(() => brokerPerformanceSnapshot({}), /missing valid wait-duration counters/);
   assert.equal(
     brokerAllocationSnapshot({
       allocation: {
@@ -829,21 +835,30 @@ function allocationPerRequestEvidence(start, end, proxyStarted, attemptedRequest
 
 async function readBrokerPerformanceMetrics(proxy) {
   if (!proxy) return null;
-  try {
-    const response = await fetch(`${proxy.root}${BROKER_METRICS_PATH}`, {
-      headers: { [BROKER_ADMIN_TOKEN_HEADER]: proxy.adminToken },
-    });
-    if (!response.ok) return null;
-    const metrics = await response.json();
-    return {
-      allocation: brokerAllocationSnapshot(metrics),
-      admissionWait: brokerWaitDuration(metrics, "admission_wait"),
-      longLivedQueueWait: brokerWaitDuration(metrics, "long_lived_queue_wait"),
-      runtimeStateLockWait: brokerWaitDuration(metrics, "runtime_state_lock_wait"),
-    };
-  } catch {
-    return null;
+  const response = await fetch(`${proxy.root}${BROKER_METRICS_PATH}`, {
+    headers: { [BROKER_ADMIN_TOKEN_HEADER]: proxy.adminToken },
+  });
+  if (!response.ok) {
+    throw new Error(`runtime broker metrics returned HTTP ${response.status}`);
   }
+  return brokerPerformanceSnapshot(await response.json());
+}
+
+function brokerPerformanceSnapshot(metrics) {
+  const snapshot = {
+    allocation: brokerAllocationSnapshot(metrics),
+    admissionWait: brokerWaitDuration(metrics, "admission_wait"),
+    longLivedQueueWait: brokerWaitDuration(metrics, "long_lived_queue_wait"),
+    runtimeStateLockWait: brokerWaitDuration(metrics, "runtime_state_lock_wait"),
+  };
+  if (
+    !snapshot.admissionWait ||
+    !snapshot.longLivedQueueWait ||
+    !snapshot.runtimeStateLockWait
+  ) {
+    throw new Error("runtime broker metrics are missing valid wait-duration counters");
+  }
+  return snapshot;
 }
 
 function performanceEvidence(proxyStarted, metricsStart, metricsEnd, attemptedRequests) {
@@ -959,8 +974,7 @@ async function waitForHealth(
   url,
   child,
   spawnError,
-  healthPath = "/health",
-  processName = "prodex broker",
+  { healthPath = "/health", processName = "prodex broker", headers = {} } = {},
 ) {
   const deadline = Date.now() + 15_000;
   let lastError = null;
@@ -974,10 +988,11 @@ async function waitForHealth(
       );
     }
     try {
-      const response = await fetch(`${url}${healthPath}`);
+      const response = await fetch(`${url}${healthPath}`, { headers });
       if (response.ok) {
         return;
       }
+      lastError = new Error(`${processName} health endpoint returned HTTP ${response.status}`);
     } catch (error) {
       lastError = error;
     }
@@ -986,7 +1001,16 @@ async function waitForHealth(
   throw new Error(`${processName} health check timed out: ${lastError?.message ?? "no response"}`);
 }
 
+function brokerHealthProbeOptions(adminToken) {
+  return {
+    healthPath: BROKER_HEALTH_PATH,
+    headers: { [BROKER_ADMIN_TOKEN_HEADER]: adminToken },
+  };
+}
+
 async function startProxy(args, upstreamBaseUrl) {
+  const ownsProdexHome = !args.prodexHome;
+  const ownsRuntimeLogDir = !args.runtimeLogDir;
   const root = args.prodexHome
     ? path.resolve(args.prodexHome)
     : await mkdtemp(path.join(os.tmpdir(), "prodex-load-home-"));
@@ -1032,7 +1056,23 @@ async function startProxy(args, upstreamBaseUrl) {
   child.stdout.on("data", (chunk) => process.stdout.write(chunk));
   child.stderr.on("data", (chunk) => process.stderr.write(chunk));
   const proxyRoot = `http://${listenAddr}`;
-  await waitForHealth(proxyRoot, child, () => childSpawnError);
+  try {
+    await waitForHealth(
+      proxyRoot,
+      child,
+      () => childSpawnError,
+      brokerHealthProbeOptions(bootstrap.admin_token),
+    );
+  } catch (error) {
+    await stopChild(child);
+    if (ownsRuntimeLogDir) {
+      await rm(runtimeLogDir, { recursive: true, force: true });
+    }
+    if (ownsProdexHome) {
+      await rm(root, { recursive: true, force: true });
+    }
+    throw error;
+  }
   args.runtimeLogDir = runtimeLogDir;
   return {
     child,
@@ -1087,8 +1127,7 @@ async function startGateway(args, upstreamBaseUrl) {
           gatewayRoot,
           child,
           () => childSpawnError,
-          "/readyz",
-          "prodex gateway",
+          { healthPath: "/readyz", processName: "prodex gateway" },
         );
         args.runtimeLogDir = runtimeLogDir;
         return {

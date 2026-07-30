@@ -2,14 +2,17 @@ use super::*;
 
 #[test]
 fn desktop_plan_persists_proxy_config_and_shares_chat_state() {
-    let root = env::temp_dir().join(format!(
-        "prodex-desktop-plan-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let root = env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory should resolve")
+        .join(format!(
+            "prodex-desktop-plan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
     let base_home = root.join("base");
     create_codex_home_if_missing(&base_home).expect("base home should exist");
     std::fs::write(base_home.join("config.toml"), "model = 'gpt-5'\n")
@@ -94,14 +97,17 @@ fn desktop_plan_persists_proxy_config_and_shares_chat_state() {
 
 #[test]
 fn super_overlay_shares_profile_chat_state() {
-    let root = env::temp_dir().join(format!(
-        "prodex-super-chat-state-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let root = env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory should resolve")
+        .join(format!(
+            "prodex-super-chat-state-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
     let base_home = root.join("shared-codex");
     create_codex_home_if_missing(&base_home).expect("base home should exist");
     std::fs::write(base_home.join("state_5.sqlite"), "shared chat index")

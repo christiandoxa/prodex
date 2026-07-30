@@ -95,6 +95,7 @@ pub(crate) fn runtime_broker_lease_path_is_regular_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::PathBuf;
 
     #[test]
@@ -163,6 +164,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(unix)]
     fn test_paths(root: PathBuf) -> AppPaths {
         AppPaths {
             state_file: root.join("state.json"),

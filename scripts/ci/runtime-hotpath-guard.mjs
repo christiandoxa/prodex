@@ -513,8 +513,8 @@ const ALLOWLIST = Object.freeze([
     name: "smart-context-offline-doctor-io",
     file: "crates/prodex-app/src/runtime_proxy/smart_context/self_test.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::(?:read|write|remove_dir_all)\s*\(/,
-    maxHits: 3,
+    pattern: /\bfs::(?:canonicalize|read|write|remove_dir_all)\s*\(/,
+    maxHits: 4,
     reason: "explicit bounded offline doctor self-test verifies encrypted persistence and corruption handling",
   },
   {

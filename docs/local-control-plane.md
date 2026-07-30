@@ -12,7 +12,7 @@ Current design:
 - make setup conservative: generate exact safe commands instead of writing provider secrets or mutating Codex config;
 - show an empty-state onboarding path that works before any profile exists.
 
-This keeps the dashboard a Codex-focused local control plane. Direct provider mutation can be added later behind the same API shapes, but masked secrets must never be accepted as real values.
+This keeps the dashboard a Codex-focused local control plane. Masked secrets must never be accepted as real values.
 
 ## Gateway Route Workbench
 

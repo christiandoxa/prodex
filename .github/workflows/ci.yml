@@ -125,6 +125,21 @@ jobs:
       - name: Run every prodex-app library test
         run: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1
 
+      - name: Test temp-backed state with a symlinked TMPDIR
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_root="$(mktemp -d)"
+          trap 'find "${tmp_root}" -depth -delete' EXIT
+          mkdir -m 700 "${tmp_root}/real"
+          ln -s "${tmp_root}/real" "${tmp_root}/alias"
+          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1
+          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+            --lib --all-features \
+            'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
+            -- --test-threads=1
+
   fuzz-build:
     needs: changes
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -245,6 +260,13 @@ jobs:
       - name: Test native broker capability persistence
         run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
 
+      - name: Run Windows runtime launch regressions
+        timeout-minutes: 10
+        env:
+          RUST_BACKTRACE: "1"
+          RUST_TEST_NOCAPTURE: "1"
+        run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
+
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -288,13 +310,6 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
-
-      - name: Run Windows runtime launch regressions
-        timeout-minutes: 10
-        env:
-          RUST_BACKTRACE: "1"
-          RUST_TEST_NOCAPTURE: "1"
-        run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
 
       - name: Run full Windows Rust suite
         env:
@@ -1000,11 +1015,26 @@ jobs:
     needs: changes
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -1012,8 +1042,11 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Run lightweight runtime load smoke
-        run: npm run ci:runtime-load-smoke
+      - name: Build instrumented runtime load binary
+        run: cargo build --locked --features allocation-bench-support --bin prodex
+
+      - name: Run runtime proxy load smoke
+        run: npm run ci:runtime-load-smoke -- --mode proxy --prodex target/debug/prodex
 
   runtime-stress:
     name: Runtime stress (${{ matrix.label }})

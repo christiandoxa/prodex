@@ -12,7 +12,7 @@ pub(crate) struct RuntimeBrokerSmartContextOptions {
 }
 
 impl RuntimeBrokerSmartContextOptions {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn disabled() -> Self {
         Self {
             enabled: false,
@@ -45,7 +45,7 @@ struct RuntimeBrokerWaitOptions {
     ready_timeout: Duration,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     client: &Client,
     paths: &AppPaths,
@@ -127,7 +127,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
     Ok(None)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn find_compatible_runtime_broker_registry(
     client: &Client,
     paths: &AppPaths,

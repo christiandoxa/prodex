@@ -1,6 +1,7 @@
 use super::*;
 use anyhow::{Context, bail};
 use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +14,7 @@ pub(crate) fn runtime_smart_context_offline_self_test()
 -> anyhow::Result<RuntimeSmartContextSelfTestStatus> {
     runtime_smart_context_self_test_exact_and_rollout()?;
     let tokenizer_family = runtime_smart_context_self_test_transform()?;
-    runtime_smart_context_self_test_persistence()?;
+    runtime_smart_context_self_test_persistence(&std::env::temp_dir())?;
     Ok(RuntimeSmartContextSelfTestStatus {
         tokenizer_family,
         detail: format!(
@@ -129,15 +130,17 @@ fn runtime_smart_context_self_test_transform() -> anyhow::Result<&'static str> {
     Ok(family)
 }
 
-fn runtime_smart_context_self_test_persistence() -> anyhow::Result<()> {
+fn runtime_smart_context_self_test_persistence(temp_dir: &Path) -> anyhow::Result<()> {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "prodex-smart-context-doctor-{}-{unique}",
-        std::process::id()
-    ));
+    let root = fs::canonicalize(temp_dir)
+        .context("failed to canonicalize Smart Context self-test temp directory")?
+        .join(format!(
+            "prodex-smart-context-doctor-{}-{unique}",
+            std::process::id()
+        ));
     let result = (|| {
         let scope = runtime_proxy_crate::ContextScopeId::new(
             "doctor-tenant",
@@ -194,3 +197,7 @@ fn offline_self_test_covers_runtime_readiness_without_network() {
     assert_eq!(status.tokenizer_family, "o200k_base");
     assert!(status.detail.contains("corruption=detected"));
 }
+
+#[cfg(all(test, unix))]
+#[path = "self_test_tests.rs"]
+mod tests;

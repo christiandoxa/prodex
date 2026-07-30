@@ -136,7 +136,6 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         }
 
         let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
-        prodex_optional_tools::configure_rtk_codex_home(&overlay_home)?;
         prodex_optional_tools::configure_super_optimizer_codex_home_with_presidio(
             &overlay_home,
             presidio_enabled,

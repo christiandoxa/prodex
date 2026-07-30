@@ -33,6 +33,12 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     .into_iter()
     .collect::<OptionalToolSet>();
     let plan = resolve_optional_tools(&selected, &OptionalToolSet::default());
+    let rtk = plan
+        .activations
+        .iter()
+        .find(|activation| activation.tool.descriptor.id == OptionalToolId::Rtk)
+        .and_then(|activation| activation.tool.path.as_deref());
+    crate::rtk::configure_rtk_codex_home_with_command(codex_home, rtk)?;
     configure_selected_optimizer_codex_home(codex_home, &plan.activations, presidio_enabled)
 }
 
@@ -46,7 +52,10 @@ pub fn activate_optional_tools_for_codex(
             OptionalToolId::Caveman => {
                 crate::activate_caveman_for_codex(codex_home, &activation.tool)?;
             }
-            OptionalToolId::Rtk => crate::configure_rtk_codex_home(codex_home)?,
+            OptionalToolId::Rtk => crate::rtk::configure_rtk_codex_home_with_command(
+                codex_home,
+                activation.tool.path.as_deref(),
+            )?,
             _ => {}
         }
     }
