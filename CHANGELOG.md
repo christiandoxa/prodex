@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.373.0 - 2026-07-30
+
+### Misc
+
+- Harden bank and control-plane boundaries (`8449b93`)
+
 ## 0.372.0 - 2026-07-30
 
 ### Misc
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden runtime compatibility edge cases (`ec50608`)
-
-## 0.361.0 - 2026-07-28
-
-### Runtime
-
-- Close audited implementation gaps (`6200d1d`)
