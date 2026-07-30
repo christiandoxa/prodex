@@ -6,15 +6,32 @@ use anyhow::{Context, Result};
 use redis::Commands;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, types::Type};
 
+#[path = "local_rewrite_gateway_usage_backend_redis_legacy.rs"]
+mod redis_legacy_migration;
+
 use super::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_open, runtime_gateway_redis_connection, runtime_gateway_sqlite_open,
 };
 use super::local_rewrite_gateway_ledger_types::runtime_gateway_billing_ledger_entry_from_delta;
 use super::local_rewrite_gateway_redis_ledger::{
-    runtime_gateway_redis_append_ledger_deltas, runtime_gateway_redis_ledger_load,
+    runtime_gateway_redis_ledger_call_index_key, runtime_gateway_redis_ledger_entry_id,
+    runtime_gateway_redis_ledger_entry_key, runtime_gateway_redis_ledger_id_index_key,
+    runtime_gateway_redis_ledger_index_key,
+    runtime_gateway_redis_migrate_legacy_ledger_from_connection,
 };
 use super::local_rewrite_gateway_sqlite_utils::{
     runtime_gateway_sqlite_optional_u64_to_i64, runtime_gateway_sqlite_u64_to_i64,
+};
+use redis_legacy_migration::runtime_gateway_redis_migrate_legacy_usage_from_connection;
+#[cfg(test)]
+use redis_legacy_migration::{
+    RUNTIME_GATEWAY_REDIS_LEGACY_USAGE_BEGIN_SCRIPT,
+    RUNTIME_GATEWAY_REDIS_LEGACY_USAGE_FINALIZE_SCRIPT,
+    RUNTIME_GATEWAY_REDIS_LEGACY_USAGE_MIGRATE_SCRIPT,
+    RUNTIME_GATEWAY_REDIS_LEGACY_USAGE_MIGRATION_MARKER_VALUE,
+    runtime_gateway_redis_legacy_usage_fingerprint, runtime_gateway_redis_usage_migrated_keys_key,
+    runtime_gateway_redis_usage_migration_in_progress_key,
+    runtime_gateway_redis_usage_migration_marker_key,
 };
 
 #[derive(Clone)]
@@ -123,25 +140,16 @@ pub(super) fn runtime_gateway_redis_usage_load(
     redis_key: &str,
 ) -> Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>> {
     let mut conn = runtime_gateway_redis_connection(url)?;
+    runtime_gateway_redis_migrate_legacy_usage_from_connection(&mut conn, redis_key)?;
     let index_key = runtime_gateway_redis_usage_index_key(redis_key);
     let names: Vec<String> = conn.smembers(&index_key)?;
-    if names.is_empty() {
-        let payload: Option<String> = conn.get(redis_key)?;
-        let Some(payload) = payload else {
-            return Ok(BTreeMap::new());
-        };
-        return serde_json::from_str::<
-            BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
-        >(&payload)
-        .context("failed to parse legacy gateway redis virtual key usage");
-    }
-
     let mut usage = BTreeMap::new();
+
     for name in names {
         let hash_key = runtime_gateway_redis_usage_hash_key(redis_key, &name);
         let fields: BTreeMap<String, String> = conn.hgetall(&hash_key)?;
         if fields.is_empty() {
-            continue;
+            anyhow::bail!("gateway redis usage index references a missing counter");
         }
         usage.insert(name, runtime_gateway_redis_usage_from_hash(&fields)?);
     }
@@ -196,9 +204,9 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
                 INSERT OR IGNORE INTO prodex_gateway_billing_ledger (
                     phase, request_id, typed_request_id, call_id, key_name,
                     tenant_id, team_id, project_id, user_id, budget_id, model, minute_epoch,
-                    input_tokens, estimated_cost_microusd, created_at_epoch
+                    input_tokens, reserved_tokens, estimated_cost_microusd, created_at_epoch
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                 "#,
             params![
                 ledger.phase,
@@ -214,6 +222,7 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
                 ledger.model,
                 runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
                 runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                runtime_gateway_sqlite_optional_u64_to_i64(ledger.reserved_tokens),
                 runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
                 runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
             ],
@@ -295,6 +304,7 @@ pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
                 &ledger.model,
                 &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
                 &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                &runtime_gateway_sqlite_optional_u64_to_i64(ledger.reserved_tokens),
                 &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
                 &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
             ],
@@ -307,7 +317,7 @@ pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
             &[
                 &delta.key_name,
                 &runtime_gateway_sqlite_u64_to_i64(delta.minute_epoch),
-                &runtime_gateway_sqlite_u64_to_i64(delta.input_tokens),
+                &runtime_gateway_sqlite_u64_to_i64(delta.reserved_tokens),
                 &runtime_gateway_sqlite_u64_to_i64(delta.estimated_cost_microusd.unwrap_or(0)),
             ],
         )?;
@@ -342,75 +352,194 @@ const RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL: &str = r#"
             INSERT INTO prodex_gateway_billing_ledger (
                 phase, request_id, typed_request_id, call_id, key_name,
                 tenant_id, team_id, project_id, user_id, budget_id, model, minute_epoch,
-                input_tokens, estimated_cost_microusd, created_at_epoch
+                input_tokens, reserved_tokens, estimated_cost_microusd, created_at_epoch
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT(call_id, key_name, phase) DO NOTHING
             "#;
 
-pub(super) fn runtime_gateway_redis_usage_apply_deltas<G>(
-    url: &str,
-    usage_key: &str,
-    _usage_lock_key: &str,
-    ledger_key: &str,
-    ledger_lock_key: &str,
-    token_generator: G,
-    deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
-) -> Result<()>
-where
-    G: FnOnce() -> Result<String>,
-{
-    let mut seen_requests = runtime_gateway_redis_ledger_load(url, ledger_key, usize::MAX)?
-        .into_iter()
-        .filter(|entry| entry.phase == "request")
-        .map(|entry| (entry.request, entry.key_name.to_ascii_lowercase()))
-        .collect::<std::collections::BTreeSet<_>>();
-    let unique_deltas = deltas
-        .iter()
-        .filter(|&delta| {
-            seen_requests.insert((delta.request_id, delta.key_name.to_ascii_lowercase()))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if unique_deltas.is_empty() {
-        return Ok(());
-    }
-    let mut conn = runtime_gateway_redis_connection(url)?;
-    let script = r#"
-        redis.call('SADD', KEYS[1], ARGV[1])
-        local current_minute = redis.call('HGET', KEYS[2], 'minute_epoch')
-        if current_minute ~= false and tonumber(current_minute) ~= tonumber(ARGV[2]) then
-            redis.call('HSET', KEYS[2], 'requests_this_minute', 0, 'tokens_this_minute', 0)
+const RUNTIME_GATEWAY_REDIS_USAGE_APPLY_SCRIPT: &str = r#"
+        local function valid_type(key, expected)
+            local actual = redis.call('TYPE', key).ok
+            return actual == 'none' or actual == expected
         end
-        redis.call('HSET', KEYS[2], 'minute_epoch', ARGV[2])
-        redis.call('HINCRBY', KEYS[2], 'requests_this_minute', 1)
-        redis.call('HINCRBY', KEYS[2], 'tokens_this_minute', ARGV[3])
-        redis.call('HINCRBY', KEYS[2], 'requests_total', 1)
-        redis.call('HINCRBY', KEYS[2], 'spend_microusd', ARGV[4])
+        if not valid_type(KEYS[1], 'set')
+            or not valid_type(KEYS[2], 'hash')
+            or not valid_type(KEYS[3], 'list')
+            or not valid_type(KEYS[4], 'set')
+            or not valid_type(KEYS[5], 'string')
+            or not valid_type(KEYS[6], 'set') then
+            return redis.error_reply('WRONGTYPE gateway accounting key')
+        end
+        local usage_member = redis.call('SISMEMBER', KEYS[1], ARGV[1])
+        local usage_exists = redis.call('EXISTS', KEYS[2])
+        if usage_member ~= usage_exists then
+            return redis.error_reply('gateway accounting usage index is inconsistent')
+        end
+        local function ledger_identity(payload)
+            local decoded, entry = pcall(cjson.decode, payload)
+            if not decoded or type(entry) ~= 'table'
+                or type(entry.call_id) ~= 'string'
+                or type(entry.key_name) ~= 'string'
+                or type(entry.phase) ~= 'string' then
+                return nil
+            end
+            return string.len(entry.call_id) .. ':' .. entry.call_id
+                .. string.len(entry.key_name) .. ':' .. entry.key_name
+                .. string.len(entry.phase) .. ':' .. entry.phase
+        end
+        local entry_exists = redis.call('EXISTS', KEYS[5])
+        local call_member = redis.call('SISMEMBER', KEYS[4], ARGV[5])
+        local global_member = redis.call('SISMEMBER', KEYS[6], ARGV[5])
+        if entry_exists == 1 then
+            local existing_payload = redis.call('GET', KEYS[5])
+            if usage_exists ~= 1 or call_member ~= 1 or global_member ~= 1
+                or ledger_identity(existing_payload) ~= ARGV[5] then
+                return redis.error_reply('gateway accounting ledger index is inconsistent')
+            end
+            return 0
+        end
+        if call_member ~= 0 or global_member ~= 0 then
+            return redis.error_reply('gateway accounting ledger index is inconsistent')
+        end
+
+        local function normalize(value)
+            if value == false or value == nil or value == '' then
+                return '0'
+            end
+            if string.match(value, '^%d+$') == nil then
+                return nil
+            end
+            value = string.gsub(value, '^0+', '')
+            if value == '' then
+                return '0'
+            end
+            return value
+        end
+        local function add_decimal(left, right)
+            left = normalize(left)
+            right = normalize(right)
+            if left == nil or right == nil then
+                return nil
+            end
+            local result = ''
+            local carry = 0
+            local left_index = string.len(left)
+            local right_index = string.len(right)
+            while left_index > 0 or right_index > 0 or carry > 0 do
+                local left_digit = 0
+                local right_digit = 0
+                if left_index > 0 then
+                    left_digit = string.byte(left, left_index) - 48
+                    left_index = left_index - 1
+                end
+                if right_index > 0 then
+                    right_digit = string.byte(right, right_index) - 48
+                    right_index = right_index - 1
+                end
+                local total = left_digit + right_digit + carry
+                result = string.char(48 + (total % 10)) .. result
+                carry = math.floor(total / 10)
+            end
+            if string.len(result) > 19
+                or (string.len(result) == 19 and result > '9223372036854775807') then
+                return nil
+            end
+            return result
+        end
+
+        local current_minute = '0'
+        local current_requests = '0'
+        local current_tokens = '0'
+        local current_total = '0'
+        local current_spend = '0'
+        if redis.call('EXISTS', KEYS[2]) == 1 then
+            current_minute = redis.call('HGET', KEYS[2], 'minute_epoch')
+            current_requests = redis.call('HGET', KEYS[2], 'requests_this_minute')
+            current_tokens = redis.call('HGET', KEYS[2], 'tokens_this_minute')
+            current_total = redis.call('HGET', KEYS[2], 'requests_total')
+            current_spend = redis.call('HGET', KEYS[2], 'spend_microusd')
+        end
+        current_minute = normalize(current_minute)
+        current_requests = normalize(current_requests)
+        current_tokens = normalize(current_tokens)
+        current_total = normalize(current_total)
+        current_spend = normalize(current_spend)
+        local minute = normalize(ARGV[2])
+        local reserved_tokens = normalize(ARGV[3])
+        local spend = normalize(ARGV[4])
+        if current_minute == nil or current_requests == nil or current_tokens == nil
+            or current_total == nil or current_spend == nil or minute == nil
+            or reserved_tokens == nil or spend == nil then
+            return redis.error_reply('gateway accounting counter is malformed')
+        end
+
+        local next_requests = '1'
+        local next_tokens = reserved_tokens
+        if current_minute == minute then
+            next_requests = add_decimal(current_requests, '1')
+            next_tokens = add_decimal(current_tokens, reserved_tokens)
+        end
+        local next_total = add_decimal(current_total, '1')
+        local next_spend = add_decimal(current_spend, spend)
+        if next_requests == nil or next_tokens == nil or next_total == nil or next_spend == nil then
+            return redis.error_reply('gateway accounting counter overflow')
+        end
+
+        redis.call('SET', KEYS[5], ARGV[6])
+        redis.call('RPUSH', KEYS[3], ARGV[5])
+        redis.call('SADD', KEYS[4], ARGV[5])
+        redis.call('SADD', KEYS[6], ARGV[5])
+        redis.call('SADD', KEYS[1], ARGV[1])
+        redis.call(
+            'HSET', KEYS[2],
+            'minute_epoch', minute,
+            'requests_this_minute', next_requests,
+            'tokens_this_minute', next_tokens,
+            'requests_total', next_total,
+            'spend_microusd', next_spend
+        )
         return 1
         "#;
-    let index_key = runtime_gateway_redis_usage_index_key(usage_key);
-    for delta in &unique_deltas {
-        let hash_key = runtime_gateway_redis_usage_hash_key(usage_key, &delta.key_name);
+
+pub(super) fn runtime_gateway_redis_usage_apply_deltas(
+    url: &str,
+    usage_key: &str,
+    ledger_key: &str,
+    deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
+) -> Result<()> {
+    let mut conn = runtime_gateway_redis_connection(url)?;
+    runtime_gateway_redis_migrate_legacy_ledger_from_connection(&mut conn, ledger_key)?;
+    runtime_gateway_redis_migrate_legacy_usage_from_connection(&mut conn, usage_key)?;
+    let usage_index_key = runtime_gateway_redis_usage_index_key(usage_key);
+    let ledger_index_key = runtime_gateway_redis_ledger_index_key(ledger_key);
+    let ledger_id_index_key = runtime_gateway_redis_ledger_id_index_key(ledger_key);
+    for delta in deltas {
+        let usage_hash_key = runtime_gateway_redis_usage_hash_key(usage_key, &delta.key_name);
         let spend_microusd = delta.estimated_cost_microusd.unwrap_or_default();
+        let entry = runtime_gateway_billing_ledger_entry_from_delta(delta);
+        let entry_id = runtime_gateway_redis_ledger_entry_id(&entry);
+        let entry_key = runtime_gateway_redis_ledger_entry_key(ledger_key, &entry_id);
+        let call_index_key =
+            runtime_gateway_redis_ledger_call_index_key(ledger_key, &entry.call_id);
+        let payload = serde_json::to_string(&entry)?;
         let _: i32 = redis::cmd("EVAL")
-            .arg(script)
-            .arg(2)
-            .arg(&index_key)
-            .arg(&hash_key)
+            .arg(RUNTIME_GATEWAY_REDIS_USAGE_APPLY_SCRIPT)
+            .arg(6)
+            .arg(&usage_index_key)
+            .arg(&usage_hash_key)
+            .arg(&ledger_index_key)
+            .arg(&call_index_key)
+            .arg(&entry_key)
+            .arg(&ledger_id_index_key)
             .arg(&delta.key_name)
             .arg(runtime_gateway_sqlite_u64_to_i64(delta.minute_epoch))
-            .arg(runtime_gateway_sqlite_u64_to_i64(delta.input_tokens))
+            .arg(runtime_gateway_sqlite_u64_to_i64(delta.reserved_tokens))
             .arg(runtime_gateway_sqlite_u64_to_i64(spend_microusd))
+            .arg(&entry_id)
+            .arg(payload)
             .query(&mut conn)?;
     }
-    runtime_gateway_redis_append_ledger_deltas(
-        url,
-        ledger_key,
-        ledger_lock_key,
-        token_generator,
-        &unique_deltas,
-    )?;
     Ok(())
 }
 
@@ -454,219 +583,5 @@ fn runtime_gateway_postgres_usage_u64(row: &postgres::Row, index: usize) -> Resu
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
-    use super::super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_u64_to_i64;
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("prodex-gateway-usage-{name}-{stamp}"))
-    }
-
-    #[test]
-    fn sqlite_usage_load_reads_usage_rows() {
-        let root = temp_dir("sqlite");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("state.sqlite");
-        runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
-        let conn = runtime_gateway_sqlite_open(&path).unwrap();
-        conn.execute(
-            r#"
-            INSERT INTO prodex_gateway_virtual_key_usage (
-                key_name, minute_epoch, requests_this_minute, tokens_this_minute,
-                requests_total, spend_microusd
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-            rusqlite::params![
-                "alpha",
-                runtime_gateway_sqlite_u64_to_i64(10),
-                runtime_gateway_sqlite_u64_to_i64(1),
-                runtime_gateway_sqlite_u64_to_i64(20),
-                runtime_gateway_sqlite_u64_to_i64(2),
-                runtime_gateway_sqlite_u64_to_i64(300),
-            ],
-        )
-        .unwrap();
-
-        let usage = runtime_gateway_sqlite_usage_load(&path).unwrap();
-        assert_eq!(usage["alpha"].minute_epoch, 10);
-        assert_eq!(usage["alpha"].spend_microusd, 300);
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn redis_usage_hash_helpers_round_trip_usage_fields() {
-        let mut fields = BTreeMap::new();
-        fields.insert("minute_epoch".to_string(), "42".to_string());
-        fields.insert("requests_this_minute".to_string(), "3".to_string());
-        fields.insert("tokens_this_minute".to_string(), "144".to_string());
-        fields.insert("requests_total".to_string(), "9".to_string());
-        fields.insert("spend_microusd".to_string(), "1700".to_string());
-
-        let usage = runtime_gateway_redis_usage_from_hash(&fields).unwrap();
-
-        assert_eq!(usage.minute_epoch, 42);
-        assert_eq!(usage.requests_this_minute, 3);
-        assert_eq!(usage.tokens_this_minute, 144);
-        assert_eq!(usage.requests_total, 9);
-        assert_eq!(usage.spend_microusd, 1700);
-    }
-
-    #[test]
-    fn redis_usage_hash_rejects_malformed_counter_fields() {
-        for (field, value, message) in [
-            (
-                "requests_total",
-                "not-a-number",
-                "gateway redis usage field requests_total must be an unsigned integer",
-            ),
-            (
-                "spend_microusd",
-                " 1700 ",
-                "gateway redis usage field spend_microusd must not contain whitespace",
-            ),
-        ] {
-            let mut fields = BTreeMap::new();
-            fields.insert("minute_epoch".to_string(), "42".to_string());
-            fields.insert("requests_this_minute".to_string(), "3".to_string());
-            fields.insert("tokens_this_minute".to_string(), "144".to_string());
-            fields.insert("requests_total".to_string(), "9".to_string());
-            fields.insert("spend_microusd".to_string(), "1700".to_string());
-            fields.insert(field.to_string(), value.to_string());
-
-            let err = runtime_gateway_redis_usage_from_hash(&fields).unwrap_err();
-
-            assert!(err.to_string().contains(message), "{err:?}");
-        }
-    }
-
-    #[test]
-    fn usage_delta_debug_output_redacts_accounting_fields() {
-        let delta = RuntimeGatewayVirtualKeyUsageDelta {
-            request_id: 42,
-            typed_request_id: "prodex-request-delta-secret".to_string(),
-            call_id: "prodex-call-delta-secret".to_string(),
-            key_name: "sk-delta-secret".to_string(),
-            tenant_id: Some("tenant-delta-secret".to_string()),
-            team_id: Some("team-delta-secret".to_string()),
-            project_id: Some("project-delta-secret".to_string()),
-            user_id: Some("user-delta-secret".to_string()),
-            budget_id: Some("budget-delta-secret".to_string()),
-            model: "gpt-delta-secret".to_string(),
-            minute_epoch: 1_700_000_000,
-            input_tokens: 123,
-            reserved_tokens: 456,
-            estimated_cost_microusd: Some(789),
-            created_at_epoch: 1_700_000_001,
-        };
-        let rendered = format!("{delta:?}");
-
-        assert!(rendered.contains("RuntimeGatewayVirtualKeyUsageDelta"));
-        assert!(rendered.contains("<redacted>"));
-        for raw in [
-            "prodex-request-delta-secret",
-            "prodex-call-delta-secret",
-            "sk-delta-secret",
-            "tenant-delta-secret",
-            "team-delta-secret",
-            "project-delta-secret",
-            "user-delta-secret",
-            "budget-delta-secret",
-            "gpt-delta-secret",
-            "1700000000",
-            "123",
-            "456",
-            "789",
-        ] {
-            assert!(!rendered.contains(raw), "{rendered}");
-        }
-    }
-
-    #[test]
-    fn redis_usage_hash_keys_are_per_virtual_key() {
-        assert_eq!(
-            runtime_gateway_redis_usage_index_key("prodex:gateway:virtual_key_usage"),
-            "prodex:gateway:virtual_key_usage:keys"
-        );
-        assert_eq!(
-            runtime_gateway_redis_usage_hash_key("prodex:gateway:virtual_key_usage", "team-a"),
-            "prodex:gateway:virtual_key_usage:key:team-a"
-        );
-    }
-
-    #[test]
-    fn redis_usage_backend_does_not_write_whole_usage_json_blob() {
-        let source = include_str!("local_rewrite_gateway_usage_backend.rs");
-        let set_blob = ["conn.set", "(redis_key"].join("");
-        let whole_usage_json = ["serde_json::to_string", "(usage"].join("");
-        let hincrby = ["HINC", "RBY"].join("");
-
-        assert!(!source.contains(&set_blob));
-        assert!(!source.contains(&whole_usage_json));
-        assert!(source.contains(&hincrby));
-    }
-
-    #[test]
-    fn postgres_usage_upsert_increments_counters_atomically() {
-        assert!(RUNTIME_GATEWAY_POSTGRES_USAGE_UPSERT_SQL.contains("ON CONFLICT(key_name)"));
-        assert!(RUNTIME_GATEWAY_POSTGRES_USAGE_UPSERT_SQL.contains("requests_total + 1"));
-        assert!(
-            RUNTIME_GATEWAY_POSTGRES_USAGE_UPSERT_SQL
-                .contains("spend_microusd + EXCLUDED.spend_microusd")
-        );
-        assert!(!RUNTIME_GATEWAY_POSTGRES_USAGE_UPSERT_SQL.contains("FOR UPDATE"));
-    }
-
-    #[test]
-    fn postgres_ledger_insert_conflict_target_uses_call_id() {
-        for column in [
-            "typed_request_id",
-            "tenant_id",
-            "team_id",
-            "project_id",
-            "user_id",
-            "budget_id",
-        ] {
-            assert!(RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL.contains(column));
-        }
-        assert!(
-            RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL
-                .contains("ON CONFLICT(call_id, key_name, phase) DO NOTHING")
-        );
-        assert!(
-            !RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL
-                .contains("ON CONFLICT(request_id, key_name, phase)")
-        );
-    }
-
-    #[test]
-    fn sqlite_usage_load_rejects_negative_usage_rows() {
-        let root = temp_dir("sqlite-negative");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("state.sqlite");
-        runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
-        let conn = runtime_gateway_sqlite_open(&path).unwrap();
-        conn.execute(
-            r#"
-            INSERT INTO prodex_gateway_virtual_key_usage (
-                key_name, minute_epoch, requests_this_minute, tokens_this_minute,
-                requests_total, spend_microusd
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-            rusqlite::params!["alpha", 10_i64, 1_i64, 20_i64, -1_i64, 300_i64],
-        )
-        .unwrap();
-
-        assert!(runtime_gateway_sqlite_usage_load(&path).is_err());
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
+#[path = "local_rewrite_gateway_usage_backend_tests.rs"]
+mod tests;

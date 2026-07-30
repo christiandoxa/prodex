@@ -27,6 +27,17 @@ ConfigMaps or Git.
 The file backend stores state under `PRODEX_HOME` and audit/runtime logs under
 their configured directories.
 
+Its billing ledger and migration baseline together form the accounting source,
+and the usage snapshot is derived from that state. Back up the ledger, the
+usage snapshot, and `gateway-virtual-key-usage.ledger-baseline.json` in one
+stopped-service or filesystem-snapshot boundary. The baseline preserves
+counters created before ledger-derived rebuilding was introduced and binds
+them to the ordered ledger identity prefix. Mixing snapshots or reordering that
+prefix fails closed even when its entry count is unchanged. A malformed
+non-empty ledger record fails closed on load; do not delete or skip it to make
+restore appear healthy. A never-used file backend may have all three accounting
+files absent; preserve that zero state instead of synthesizing placeholders.
+
 If the same deployment also uses the shared config-publication transport,
 snapshot that shared transport root in the same maintenance window as gateway
 state and compact fully acknowledged records after successful drills with:
@@ -61,6 +72,8 @@ Drill acceptance:
 - `/readyz` is healthy after restore.
 - admin key list returns expected tenant/key metadata.
 - ledger query returns the latest known billing rows.
+- usage totals rebuilt from the ledger and migration baseline match the
+  pre-backup snapshot.
 - if shared config-publication transport is enabled, intended gateway replicas
   can still consume or recognize restored publication records correctly.
 

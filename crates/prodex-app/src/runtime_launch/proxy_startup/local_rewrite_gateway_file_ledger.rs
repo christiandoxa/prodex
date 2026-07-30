@@ -9,15 +9,25 @@ use super::local_rewrite_gateway_ledger_types::{
     RuntimeGatewayBillingLedgerEntry, runtime_gateway_apply_response_to_ledger_entry,
     runtime_gateway_billing_ledger_entry_from_delta, runtime_gateway_billing_ledger_entry_identity,
 };
+use super::local_rewrite_gateway_store_file::runtime_gateway_write_file_atomic;
 use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
 
 const RUNTIME_GATEWAY_LEDGER_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
+#[cfg(test)]
 pub(super) fn runtime_gateway_file_ledger_append_deltas(
     path: &Path,
     deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
-) -> std::io::Result<()> {
+) -> std::io::Result<Vec<RuntimeGatewayBillingLedgerEntry>> {
+    runtime_gateway_file_ledger_append_deltas_after_load(path, deltas, |_| Ok(()))
+}
+
+pub(super) fn runtime_gateway_file_ledger_append_deltas_after_load(
+    path: &Path,
+    deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
+    after_load: impl FnOnce(&[RuntimeGatewayBillingLedgerEntry]) -> std::io::Result<()>,
+) -> std::io::Result<Vec<RuntimeGatewayBillingLedgerEntry>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -29,42 +39,30 @@ pub(super) fn runtime_gateway_file_ledger_append_deltas(
         .truncate(false)
         .open(lock_path)?;
     lock_file.lock_exclusive()?;
-    let mut seen = runtime_gateway_file_ledger_entry_ids(path)?;
-    let mut file = open_gateway_ledger_append_file(path)?;
+    let mut entries = runtime_gateway_file_ledger_load(path, usize::MAX)?;
+    after_load(&entries)?;
+    let mut seen = entries
+        .iter()
+        .map(runtime_gateway_file_ledger_entry_id)
+        .collect::<BTreeSet<_>>();
+    let mut changed = false;
     for delta in deltas {
         let entry = runtime_gateway_billing_ledger_entry_from_delta(delta);
         if !seen.insert(runtime_gateway_file_ledger_entry_id(&entry)) {
             continue;
         }
-        serde_json::to_writer(&mut file, &entry).map_err(std::io::Error::other)?;
-        file.write_all(b"\n")?;
+        entries.push(entry);
+        changed = true;
+    }
+    if changed {
+        runtime_gateway_file_ledger_write(path, &entries)?;
     }
     let _ = lock_file.unlock();
-    Ok(())
+    Ok(entries)
 }
 
 fn runtime_gateway_file_ledger_entry_id(entry: &RuntimeGatewayBillingLedgerEntry) -> String {
     runtime_gateway_billing_ledger_entry_identity(entry)
-}
-
-fn runtime_gateway_file_ledger_entry_ids(path: &Path) -> std::io::Result<BTreeSet<String>> {
-    let mut reader = match open_gateway_ledger_reader(path)? {
-        Some(reader) => reader,
-        None => return Ok(BTreeSet::new()),
-    };
-    let mut ids = BTreeSet::new();
-    for line in reader.by_ref().lines() {
-        let line = line?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Ok(entry) = serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(trimmed) {
-            ids.insert(runtime_gateway_file_ledger_entry_id(&entry));
-        }
-    }
-    ensure_gateway_ledger_reader_within_limit(path, &reader)?;
-    Ok(ids)
 }
 
 fn open_gateway_ledger_reader(
@@ -83,50 +81,6 @@ fn open_gateway_ledger_reader(
     Ok(Some(BufReader::new(file.take(
         RUNTIME_GATEWAY_LEDGER_FILE_MAX_BYTES.saturating_add(1),
     ))))
-}
-
-fn open_gateway_ledger_append_file(path: &Path) -> std::io::Result<File> {
-    let existing_metadata = gateway_ledger_metadata(path)?;
-    let mut options = OpenOptions::new();
-    options.append(true);
-    if existing_metadata.is_some() {
-        options.create(false);
-    } else {
-        options.create_new(true);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let file = prodex_core::open_regular_file_with_options_no_follow(path, &mut options)?;
-    if let Some(metadata) = existing_metadata
-        && !prodex_core::opened_file_matches_path(&metadata, path, &file)?
-    {
-        return Err(std::io::Error::other(format!(
-            "gateway ledger path changed while opening {}",
-            path.display()
-        )));
-    }
-    Ok(file)
-}
-
-fn open_gateway_ledger_temp_file(path: &Path) -> std::io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    match options.open(path) {
-        Ok(file) => Ok(file),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            std::fs::remove_file(path)?;
-            options.open(path)
-        }
-        Err(err) => Err(err),
-    }
 }
 
 fn gateway_ledger_metadata(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
@@ -202,23 +156,9 @@ fn runtime_gateway_file_ledger_reconcile_response_locked(
     event: &RuntimeProviderGatewaySpendEvent,
     reconciled_at_epoch: u64,
 ) -> std::io::Result<bool> {
-    let mut reader = match open_gateway_ledger_reader(path)? {
-        Some(reader) => reader,
-        None => return Ok(false),
-    };
-    let tmp_path = path.with_extension("jsonl.tmp");
-    let mut output = open_gateway_ledger_temp_file(&tmp_path)?;
+    let mut entries = runtime_gateway_file_ledger_load(path, usize::MAX)?;
     let mut changed = false;
-    for line in reader.by_ref().lines() {
-        let line = line?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(mut entry) = serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(trimmed)
-        else {
-            continue;
-        };
+    for entry in &mut entries {
         if entry.call_id != event.call_id
             || entry.phase != "request"
             || event
@@ -227,25 +167,31 @@ fn runtime_gateway_file_ledger_reconcile_response_locked(
                 .is_some_and(|key_name| !entry.key_name.eq_ignore_ascii_case(key_name))
             || event.tenant_id.as_deref() != entry.tenant_id.as_deref()
         {
-            serde_json::to_writer(&mut output, &entry).map_err(std::io::Error::other)?;
-            output.write_all(b"\n")?;
             continue;
         }
-        runtime_gateway_apply_response_to_ledger_entry(&mut entry, event, reconciled_at_epoch);
-        serde_json::to_writer(&mut output, &entry).map_err(std::io::Error::other)?;
-        output.write_all(b"\n")?;
+        runtime_gateway_apply_response_to_ledger_entry(entry, event, reconciled_at_epoch);
         changed = true;
     }
-    ensure_gateway_ledger_reader_within_limit(path, &reader)?;
     if changed {
-        output.sync_all()?;
-        drop(output);
-        std::fs::rename(tmp_path, path)?;
-    } else {
-        drop(output);
-        let _ = std::fs::remove_file(tmp_path);
+        runtime_gateway_file_ledger_write(path, &entries)?;
     }
     Ok(changed)
+}
+
+fn runtime_gateway_file_ledger_write(
+    path: &Path,
+    entries: &[RuntimeGatewayBillingLedgerEntry],
+) -> std::io::Result<()> {
+    // ponytail: bounded 64 MiB rewrite buys atomicity; use SQLite when file-ledger throughput matters.
+    let mut payload = Vec::new();
+    for entry in entries {
+        serde_json::to_writer(&mut payload, entry).map_err(std::io::Error::other)?;
+        payload.push(b'\n');
+        if payload.len() as u64 > RUNTIME_GATEWAY_LEDGER_FILE_MAX_BYTES {
+            return Err(gateway_ledger_size_error(path));
+        }
+    }
+    runtime_gateway_write_file_atomic(path, "jsonl.tmp", |file| file.write_all(&payload))
 }
 
 pub(super) fn runtime_gateway_file_ledger_load(
@@ -257,17 +203,26 @@ pub(super) fn runtime_gateway_file_ledger_load(
         None => return Ok(Vec::new()),
     };
     let mut entries = Vec::new();
-    for line in reader.by_ref().lines() {
+    for (index, line) in reader.by_ref().lines().enumerate() {
         let line = line?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        if let Ok(entry) = serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(trimmed) {
-            entries.push(entry);
-            if entries.len() > limit {
-                entries.remove(0);
-            }
+        let entry =
+            serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(trimmed).map_err(|err| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "invalid gateway ledger entry at {}:{}: {err}",
+                        path.display(),
+                        index + 1
+                    ),
+                )
+            })?;
+        entries.push(entry);
+        if entries.len() > limit {
+            entries.remove(0);
         }
     }
     ensure_gateway_ledger_reader_within_limit(path, &reader)?;
@@ -352,9 +307,7 @@ mod tests {
         duplicate.input_tokens = 200;
 
         runtime_gateway_file_ledger_append_deltas(&path, &[delta]).unwrap();
-        runtime_gateway_file_ledger_append_deltas(&path, &[duplicate]).unwrap();
-
-        let entries = runtime_gateway_file_ledger_load(&path, usize::MAX).unwrap();
+        let entries = runtime_gateway_file_ledger_append_deltas(&path, &[duplicate]).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key_name, "Alpha");
 
@@ -398,11 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn file_ledger_entry_ids_streams_existing_jsonl_ids() {
-        let root = temp_dir("entry-ids");
+    fn malformed_file_ledger_fails_closed_without_rewrite() {
+        let root = temp_dir("malformed");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("ledger.jsonl");
-        let mut entry =
+        let entry =
             runtime_gateway_billing_ledger_entry_from_delta(&RuntimeGatewayVirtualKeyUsageDelta {
                 request_id: 1,
                 typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
@@ -428,16 +381,32 @@ mod tests {
         writeln!(file, "not-json").unwrap();
         serde_json::to_writer(&mut file, &entry).unwrap();
         file.write_all(b"\n").unwrap();
-        entry.key_name = "Beta".to_string();
-        serde_json::to_writer(&mut file, &entry).unwrap();
-        file.write_all(b"\n").unwrap();
+        drop(file);
+        let original = std::fs::read(&path).unwrap();
 
-        let ids = runtime_gateway_file_ledger_entry_ids(&path).unwrap();
+        let err = runtime_gateway_file_ledger_load(&path, usize::MAX).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains(":1"));
 
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&runtime_gateway_file_ledger_entry_id(&entry)));
-        entry.key_name = "Alpha".to_string();
-        assert!(ids.contains(&runtime_gateway_file_ledger_entry_id(&entry)));
+        let delta = RuntimeGatewayVirtualKeyUsageDelta {
+            request_id: 2,
+            typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
+            key_name: "Beta".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            model: "gpt-5".to_string(),
+            minute_epoch: 10,
+            input_tokens: 100,
+            reserved_tokens: 100,
+            estimated_cost_microusd: Some(250_000),
+            created_at_epoch: 20,
+        };
+        assert!(runtime_gateway_file_ledger_append_deltas(&path, &[delta]).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -475,8 +444,6 @@ mod tests {
             serde_json::to_writer(&mut file, &entry).unwrap();
             file.write_all(b"\n").unwrap();
         }
-        writeln!(file, "not-json").unwrap();
-
         let entries = runtime_gateway_file_ledger_load(&path, 2).unwrap();
 
         assert_eq!(
@@ -523,7 +490,6 @@ mod tests {
             serde_json::to_writer(&mut file, &entry).unwrap();
             file.write_all(b"\n").unwrap();
         }
-        writeln!(file, "not-json").unwrap();
         let event = RuntimeProviderGatewaySpendEvent {
             event: "gateway_spend",
             phase: "response",

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use postgres::Client as PostgresClient;
 use rusqlite::{Connection, OptionalExtension};
 
-const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 4;
+const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 5;
 const RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL: &str = r#"
     SET lock_timeout = '30s';
     SELECT pg_advisory_lock(hashtextextended('prodex.gateway.schema.migrations', 0));
@@ -25,10 +25,21 @@ const RUNTIME_GATEWAY_POSTGRES_SCHEMA_MIGRATIONS_TABLE_SQL: &str = r#"
             );
             "#;
 
+mod compatibility_columns;
 mod enterprise_migration;
 #[cfg(test)]
 #[path = "local_rewrite_gateway_backend_connection/enterprise_migration/tests.rs"]
 mod enterprise_migration_tests;
+use compatibility_columns::{
+    runtime_gateway_postgres_add_ledger_reserved_tokens_column,
+    runtime_gateway_postgres_add_ledger_scope_columns,
+    runtime_gateway_postgres_add_scim_organization_columns,
+    runtime_gateway_postgres_add_virtual_key_id_column,
+    runtime_gateway_sqlite_add_ledger_reserved_tokens_column,
+    runtime_gateway_sqlite_add_ledger_scope_columns,
+    runtime_gateway_sqlite_add_scim_organization_columns,
+    runtime_gateway_sqlite_add_virtual_key_id_column,
+};
 pub(crate) use enterprise_migration::{
     runtime_gateway_postgres_migrate_enterprise_state,
     runtime_gateway_sqlite_migrate_enterprise_state,
@@ -44,7 +55,7 @@ struct RuntimeGatewayCompatibilityMigration {
     sql: &'static str,
 }
 
-const RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibilityMigration; 4] = [
+const RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibilityMigration; 5] = [
     RuntimeGatewayCompatibilityMigration {
         version: 1,
         name: "001_gateway_compatibility_schema",
@@ -101,6 +112,7 @@ const RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibil
                 model TEXT NOT NULL,
                 minute_epoch INTEGER NOT NULL,
                 input_tokens INTEGER NOT NULL,
+                reserved_tokens INTEGER,
                 estimated_cost_microusd INTEGER,
                 created_at_epoch INTEGER NOT NULL,
                 response_status INTEGER,
@@ -134,8 +146,13 @@ const RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibil
         name: "004_gateway_scim_organization_attributes",
         sql: "",
     },
+    RuntimeGatewayCompatibilityMigration {
+        version: 5,
+        name: "005_gateway_ledger_reserved_tokens",
+        sql: "",
+    },
 ];
-const RUNTIME_GATEWAY_POSTGRES_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibilityMigration; 4] = [
+const RUNTIME_GATEWAY_POSTGRES_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatibilityMigration; 5] = [
     RuntimeGatewayCompatibilityMigration {
         version: 1,
         name: "001_gateway_compatibility_schema",
@@ -192,6 +209,7 @@ const RUNTIME_GATEWAY_POSTGRES_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatib
                 model TEXT NOT NULL,
                 minute_epoch BIGINT NOT NULL,
                 input_tokens BIGINT NOT NULL,
+                reserved_tokens BIGINT,
                 estimated_cost_microusd BIGINT,
                 created_at_epoch BIGINT NOT NULL,
                 response_status BIGINT,
@@ -223,6 +241,11 @@ const RUNTIME_GATEWAY_POSTGRES_COMPATIBILITY_MIGRATIONS: [RuntimeGatewayCompatib
     RuntimeGatewayCompatibilityMigration {
         version: 4,
         name: "004_gateway_scim_organization_attributes",
+        sql: "",
+    },
+    RuntimeGatewayCompatibilityMigration {
+        version: 5,
+        name: "005_gateway_ledger_reserved_tokens",
         sql: "",
     },
 ];
@@ -396,6 +419,12 @@ fn runtime_gateway_sqlite_apply_compatibility_migration(
                 migration.name
             )
         }),
+        5 => runtime_gateway_sqlite_add_ledger_reserved_tokens_column(conn).with_context(|| {
+            format!(
+                "failed to apply gateway sqlite compatibility migration {}",
+                migration.name
+            )
+        }),
         other => bail!("unsupported gateway sqlite compatibility migration {other}"),
     }
 }
@@ -429,117 +458,14 @@ fn runtime_gateway_postgres_apply_compatibility_migration(
                 migration.name
             )
         }),
+        5 => runtime_gateway_postgres_add_ledger_reserved_tokens_column(tx).with_context(|| {
+            format!(
+                "failed to apply gateway postgres compatibility migration {}",
+                migration.name
+            )
+        }),
         other => bail!("unsupported gateway postgres compatibility migration {other}"),
     }
-}
-
-fn runtime_gateway_sqlite_add_ledger_scope_columns(conn: &Connection) -> Result<()> {
-    for (column_name, column_definition) in [
-        ("typed_request_id", "TEXT"),
-        ("tenant_id", "TEXT"),
-        ("team_id", "TEXT"),
-        ("project_id", "TEXT"),
-        ("user_id", "TEXT"),
-        ("budget_id", "TEXT"),
-    ] {
-        if runtime_gateway_sqlite_table_has_column(
-            conn,
-            "prodex_gateway_billing_ledger",
-            column_name,
-        )? {
-            continue;
-        }
-        conn.execute_batch(&format!(
-            "ALTER TABLE prodex_gateway_billing_ledger ADD COLUMN {column_name} {column_definition};"
-        ))?;
-    }
-    Ok(())
-}
-
-fn runtime_gateway_postgres_add_ledger_scope_columns(
-    tx: &mut postgres::Transaction<'_>,
-) -> Result<()> {
-    tx.batch_execute(
-        r#"
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS typed_request_id TEXT;
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS tenant_id TEXT;
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS team_id TEXT;
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS project_id TEXT;
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS user_id TEXT;
-        ALTER TABLE prodex_gateway_billing_ledger
-            ADD COLUMN IF NOT EXISTS budget_id TEXT;
-        "#,
-    )?;
-    Ok(())
-}
-
-fn runtime_gateway_sqlite_add_virtual_key_id_column(conn: &Connection) -> Result<()> {
-    let table_exists: bool = conn.query_row(
-        "SELECT EXISTS(
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'table'
-              AND name = 'prodex_gateway_virtual_keys'
-        )",
-        [],
-        |row| row.get(0),
-    )?;
-    if !table_exists {
-        return Ok(());
-    }
-    if !runtime_gateway_sqlite_table_has_column(
-        conn,
-        "prodex_gateway_virtual_keys",
-        "virtual_key_id",
-    )? {
-        conn.execute_batch(
-            "ALTER TABLE prodex_gateway_virtual_keys ADD COLUMN virtual_key_id TEXT;",
-        )?;
-    }
-    Ok(())
-}
-
-fn runtime_gateway_postgres_add_virtual_key_id_column(
-    tx: &mut postgres::Transaction<'_>,
-) -> Result<()> {
-    tx.batch_execute(
-        "ALTER TABLE prodex_gateway_virtual_keys ADD COLUMN IF NOT EXISTS virtual_key_id TEXT;",
-    )?;
-    Ok(())
-}
-
-fn runtime_gateway_sqlite_add_scim_organization_columns(conn: &Connection) -> Result<()> {
-    for (column_name, column_definition) in [
-        ("group_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
-        ("department_id", "TEXT"),
-    ] {
-        if !runtime_gateway_sqlite_table_has_column(conn, "prodex_gateway_scim_users", column_name)?
-        {
-            conn.execute_batch(&format!(
-                "ALTER TABLE prodex_gateway_scim_users ADD COLUMN {column_name} {column_definition};"
-            ))?;
-        }
-    }
-    Ok(())
-}
-
-fn runtime_gateway_postgres_add_scim_organization_columns(
-    tx: &mut postgres::Transaction<'_>,
-) -> Result<()> {
-    tx.batch_execute(
-        r#"
-        ALTER TABLE prodex_gateway_scim_users
-            ADD COLUMN IF NOT EXISTS group_ids_json TEXT NOT NULL DEFAULT '[]';
-        ALTER TABLE prodex_gateway_scim_users
-            ADD COLUMN IF NOT EXISTS department_id TEXT;
-        "#,
-    )?;
-    Ok(())
 }
 
 fn runtime_gateway_sqlite_observed_schema_version(conn: &Connection) -> Result<Option<i64>> {

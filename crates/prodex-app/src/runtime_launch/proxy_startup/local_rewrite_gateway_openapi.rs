@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "c2400ae0ae697f55ecdb969515aad49ebe4a6c28b5ad361934ebf88f41ed6326";
+        "79758e5e9d777571b798e57a400aa41635077fee1a2e154d6bc8dfd59514e0f1";
     const DOCUMENT_DIGEST: &str =
-        "2a1514dd27cbeb3641e6f6bb7f044a33034b5ff710277560497f4711c9806aed";
+        "77bc2a0d8172e0b4b0fa5609b1cbee4f2b41bde86d801b1036232faa88173599";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -135,6 +135,17 @@ mod tests {
     fn openapi_components_contract_is_stable() {
         let spec = runtime_gateway_openapi_spec_for_mount(CANONICAL_MOUNT_PATH);
         assert_eq!(digest(&spec["components"]), COMPONENTS_DIGEST);
+        let ledger = &spec["components"]["schemas"]["GatewayBillingLedgerEntry"];
+        assert_eq!(
+            ledger["properties"]["reserved_tokens"]["type"],
+            serde_json::json!(["integer", "null"])
+        );
+        assert!(
+            !ledger["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("reserved_tokens"))
+        );
     }
 
     #[test]

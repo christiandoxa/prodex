@@ -20,7 +20,7 @@ Status values are:
 | Immutable request governance context | verified | Application boundary guard and redacted governance types |
 | Hard-eligible deterministic provider routing | verified | Governed routing planner, permutation properties, and eligible-set fallback tests |
 | Continuation affinity and pre-commit-only rotation | verified | Response/turn/session binding regressions and post-commit no-retry tests |
-| Reservation-based usage accounting | verified | Atomic PostgreSQL/Redis accounting and reconciliation tests |
+| Reservation-based usage accounting | verified | Transactional SQLite/PostgreSQL, idempotent Redis Lua, and atomic file-ledger rebuild/reconciliation tests |
 | Response inspection before commitment | verified | Bounded full inspection for enforcing text/SSE and randomized incremental chunk tests |
 | WebSocket enforcement boundary | verified | Off/observe transparency plus explicit HTTP `426` fallback when full inspection cannot be guaranteed |
 | Bounded admission and backpressure | verified | Global, lane, profile, queue, and request-size limit tests |

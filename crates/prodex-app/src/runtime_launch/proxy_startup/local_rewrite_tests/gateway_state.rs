@@ -183,7 +183,7 @@ fn gateway_invalid_usage_store_fails_closed_on_startup() {
 }
 
 #[test]
-fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
+fn gateway_usage_delta_store_merges_batches_and_dedupes_call_id() {
     let root = temp_root("gateway-usage-delta-merge");
     let path = root.join("gateway-virtual-key-usage.json");
     let ledger_path = root.join("gateway-billing-ledger.jsonl");
@@ -221,7 +221,7 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
         &[RuntimeGatewayVirtualKeyUsageDelta {
             request_id: 2,
             typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
-            call_id: call_id_2,
+            call_id: call_id_2.clone(),
             key_name: "team-a".to_string(),
             tenant_id: None,
             team_id: None,
@@ -240,9 +240,9 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
     runtime_gateway_virtual_key_usage_apply_deltas(
         &state_store,
         &[RuntimeGatewayVirtualKeyUsageDelta {
-            request_id: 2,
+            request_id: 3,
             typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
-            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
+            call_id: call_id_2,
             key_name: "team-a".to_string(),
             tenant_id: None,
             team_id: None,
@@ -271,7 +271,7 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
 }
 
 #[test]
-fn gateway_sqlite_usage_deltas_are_idempotent_by_request_id() {
+fn gateway_sqlite_usage_deltas_are_idempotent_by_call_id() {
     let root = temp_root("gateway-sqlite-usage-idempotent");
     let db_path = root.join("gateway-state.sqlite");
     runtime_gateway_sqlite_create_current_schema_for_tests(&db_path)
