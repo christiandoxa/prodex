@@ -1,5 +1,20 @@
 [
   {
+    "id": "gateway-accounting-completion-0.371.0",
+    "requiredSubjects": [
+      "fix(gateway): harden usage accounting",
+      "ci: shard Windows test workload",
+      "chore(ci): record reviewed 0.371.0 churn"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 30,
+      "maxLines": 3800,
+      "maxFileLines": 700
+    },
+    "reason": "Reviewed the complete gateway accounting audit across fail-closed file recovery, reserved-token SQL compatibility, idempotent Redis usage and ledger migration, exact OpenAPI and CSV exposure, and three-way Windows test sharding; verified with focused file/SQLite/PostgreSQL/Redis regressions, six live Redis migration and atomicity tests, the full locked all-features suite, strict Clippy, preflight boundary and size guards, dependency and secret audits, an optimized locked build, and three independent final reviews before the 0.371.0 release."
+  },
+  {
     "id": "atomic-governance-mutation-lifecycle-0.365.0",
     "requiredSubjects": [
       "fix(governance): complete atomic mutation lifecycle"
