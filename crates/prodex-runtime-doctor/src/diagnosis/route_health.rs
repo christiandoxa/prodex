@@ -33,6 +33,59 @@ fn runtime_doctor_parse_i64_field(fields: &BTreeMap<String, String>, key: &str) 
     fields.get(key)?.parse().ok()
 }
 
+fn runtime_doctor_apply_route_marker_fields(
+    summary: &RuntimeDoctorSummary,
+    entry: &mut RuntimeDoctorRouteHealthSummary,
+) {
+    if let Some(fields) =
+        runtime_doctor_route_marker_fields(summary, "profile_health", &entry.profile, &entry.route)
+    {
+        entry.health_score = runtime_doctor_parse_u32_field(fields, "score").or(entry.health_score);
+        entry.health_reason = fields.get("reason").cloned();
+    }
+    if let Some(fields) = runtime_doctor_route_marker_fields(
+        summary,
+        "profile_bad_pairing",
+        &entry.profile,
+        &entry.route,
+    ) {
+        entry.bad_pairing_score =
+            runtime_doctor_parse_u32_field(fields, "score").or(entry.bad_pairing_score);
+        entry.bad_pairing_reason = fields.get("reason").cloned();
+    }
+    if let Some(fields) =
+        runtime_doctor_route_marker_fields(summary, "profile_latency", &entry.profile, &entry.route)
+    {
+        entry.latency_score =
+            runtime_doctor_parse_u32_field(fields, "score").or(entry.latency_score);
+        entry.latency_reason = fields.get("reason").cloned();
+    }
+    if let Some(fields) = runtime_doctor_route_marker_fields(
+        summary,
+        "profile_circuit_open",
+        &entry.profile,
+        &entry.route,
+    ) {
+        entry.circuit_state = Some("open".to_string());
+        entry.circuit_until =
+            runtime_doctor_parse_i64_field(fields, "until").or(entry.circuit_until);
+        entry.circuit_reason = fields.get("reason").cloned();
+    }
+    if let Some(fields) = runtime_doctor_route_marker_fields(
+        summary,
+        "profile_transport_backoff",
+        &entry.profile,
+        &entry.route,
+    ) {
+        entry.transport_backoff_until =
+            runtime_doctor_parse_i64_field(fields, "until").or(entry.transport_backoff_until);
+        entry.transport_backoff_context = fields
+            .get("context")
+            .or_else(|| fields.get("reason"))
+            .cloned();
+    }
+}
+
 pub(super) fn runtime_doctor_route_health(
     summary: &RuntimeDoctorSummary,
 ) -> Vec<RuntimeDoctorRouteHealthSummary> {
@@ -78,60 +131,7 @@ pub(super) fn runtime_doctor_route_health(
     }
 
     for entry in routes.values_mut() {
-        if let Some(fields) = runtime_doctor_route_marker_fields(
-            summary,
-            "profile_health",
-            &entry.profile,
-            &entry.route,
-        ) {
-            entry.health_score =
-                runtime_doctor_parse_u32_field(fields, "score").or(entry.health_score);
-            entry.health_reason = fields.get("reason").cloned();
-        }
-        if let Some(fields) = runtime_doctor_route_marker_fields(
-            summary,
-            "profile_bad_pairing",
-            &entry.profile,
-            &entry.route,
-        ) {
-            entry.bad_pairing_score =
-                runtime_doctor_parse_u32_field(fields, "score").or(entry.bad_pairing_score);
-            entry.bad_pairing_reason = fields.get("reason").cloned();
-        }
-        if let Some(fields) = runtime_doctor_route_marker_fields(
-            summary,
-            "profile_latency",
-            &entry.profile,
-            &entry.route,
-        ) {
-            entry.latency_score =
-                runtime_doctor_parse_u32_field(fields, "score").or(entry.latency_score);
-            entry.latency_reason = fields.get("reason").cloned();
-        }
-        if let Some(fields) = runtime_doctor_route_marker_fields(
-            summary,
-            "profile_circuit_open",
-            &entry.profile,
-            &entry.route,
-        ) {
-            entry.circuit_state = Some("open".to_string());
-            entry.circuit_until =
-                runtime_doctor_parse_i64_field(fields, "until").or(entry.circuit_until);
-            entry.circuit_reason = fields.get("reason").cloned();
-        }
-        if let Some(fields) = runtime_doctor_route_marker_fields(
-            summary,
-            "profile_transport_backoff",
-            &entry.profile,
-            &entry.route,
-        ) {
-            entry.transport_backoff_until =
-                runtime_doctor_parse_i64_field(fields, "until").or(entry.transport_backoff_until);
-            entry.transport_backoff_context = fields
-                .get("context")
-                .or_else(|| fields.get("reason"))
-                .cloned();
-        }
+        runtime_doctor_apply_route_marker_fields(summary, entry);
     }
 
     let mut routes = routes.into_values().collect::<Vec<_>>();

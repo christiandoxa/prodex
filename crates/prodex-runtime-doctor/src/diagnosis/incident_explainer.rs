@@ -53,6 +53,24 @@ fn runtime_doctor_incident(
     }
 }
 
+fn runtime_doctor_quota_incident_cause(summary: &RuntimeDoctorSummary) -> &'static str {
+    if [
+        "quota_blocked",
+        "quota_critical_floor_before_send",
+        "responses_pre_send_skip",
+        "websocket_pre_send_skip",
+    ]
+    .iter()
+    .any(|marker| runtime_doctor_marker_count(summary, marker) > 0)
+    {
+        "Quota guard blocked or skipped near-exhausted sends before commit."
+    } else if summary.quota_freshness_pressure == "stale_risk" {
+        "Quota snapshots or background probes may be stale under selection pressure."
+    } else {
+        "Quota-related backoff or upstream usage-limit markers were observed."
+    }
+}
+
 pub fn runtime_doctor_incident_explainer(
     summary: &RuntimeDoctorSummary,
 ) -> Vec<RuntimeDoctorIncidentExplanation> {
@@ -206,20 +224,9 @@ pub fn runtime_doctor_incident_explainer(
     ];
     let quota_count = runtime_doctor_incident_marker_total(summary, &quota_markers);
     if quota_count > 0 || summary.quota_freshness_pressure == "stale_risk" {
-        let cause = if runtime_doctor_marker_count(summary, "quota_blocked") > 0
-            || runtime_doctor_marker_count(summary, "quota_critical_floor_before_send") > 0
-            || runtime_doctor_marker_count(summary, "responses_pre_send_skip") > 0
-            || runtime_doctor_marker_count(summary, "websocket_pre_send_skip") > 0
-        {
-            "Quota guard blocked or skipped near-exhausted sends before commit."
-        } else if summary.quota_freshness_pressure == "stale_risk" {
-            "Quota snapshots or background probes may be stale under selection pressure."
-        } else {
-            "Quota-related backoff or upstream usage-limit markers were observed."
-        };
         incidents.push(runtime_doctor_incident(
             "quota_pressure",
-            cause,
+            runtime_doctor_quota_incident_cause(summary),
             vec![
                 Some(format!("quota_markers={quota_count}")),
                 runtime_doctor_incident_marker_evidence(summary, "quota_blocked"),
