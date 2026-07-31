@@ -42,16 +42,17 @@ test("auto-rotate CI shard index must be in range", () => {
   assert.match(result.stderr, /--shard-index must be an integer between 0 and 1/);
 });
 
-test("Windows CI runs three test partitions with one cache writer", () => {
+test("Windows CI runs four test partitions with one cache writer", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const block = workflow.match(/\n  windows-workspace:\n([\s\S]*?)\n  macos-workspace:/)?.[1];
   assert.ok(block, "windows-workspace job missing");
 
   assert.match(block, /- suite: members/);
+  assert.match(block, /- suite: app/);
   assert.match(block, /- suite: root-0/);
   assert.match(block, /- suite: root-1/);
   assert.equal(block.match(/save_cache: true/g)?.length, 1);
-  assert.equal(block.match(/save_cache: false/g)?.length, 2);
+  assert.equal(block.match(/save_cache: false/g)?.length, 3);
   assert.match(block, /CARGO_INCREMENTAL: "0"/);
   assert.match(block, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.equal(block.match(/shell: bash/g)?.length, 2);
@@ -62,6 +63,7 @@ test("Windows CI runs three test partitions with one cache writer", () => {
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
   assert.match(block, /--workspace --exclude prodex --exclude prodex-app --all-features -- --test-threads=4/);
+  assert.match(block, /-p prodex-app --all-features -- --test-threads=4/);
   assert.match(block, /Build Windows installer fixture binary[\s\S]*?if: matrix\.suite == 'root-1'/);
   assert.match(block, /Test Windows installer[\s\S]*?if: matrix\.suite == 'root-1'/);
   assert.match(block, /--all-features --jobs 4 --shard-index/);
