@@ -138,68 +138,11 @@ pub fn plan_governance_activation(
     current: GovernanceActivationCurrent<'_>,
 ) -> Result<GovernanceActivationPlan, GovernanceRepositoryError> {
     crate::governance_support::validate_governance_activation_request(request)?;
-    if current
-        .approval
-        .is_some_and(|approval| approval.tenant_id != request.tenant_id)
-    {
-        return Err(GovernanceRepositoryError::TenantMismatch);
-    }
-    if request.action != GovernanceActivationAction::Revoke {
-        let approval = current
-            .approval
-            .ok_or(GovernanceRepositoryError::ApprovalRequired)?;
-        if approval.state != ApprovalState::Approved
-            || approval.kind != crate::governance_support::approval_kind_for_artifact(request.kind)
-            || approval.fingerprint.as_str() != current.revision_checksum
-        {
-            return Err(GovernanceRepositoryError::ApprovalRequired);
-        }
-    }
-    if current.etag != request.expected_etag.as_deref() {
-        return Err(GovernanceRepositoryError::EtagMismatch);
-    }
-    if request.action == GovernanceActivationAction::Rollback
-        && current.last_known_good_revision_id != Some(request.revision_id.as_str())
-    {
-        return Err(GovernanceRepositoryError::Conflict);
-    }
+    validate_governance_activation_current(request, current)?;
 
     let previous_active_revision_id = current.active_revision_id.map(str::to_owned);
-    let (active_revision_id, last_known_good_revision_id, promoted_revision_id) = match request
-        .action
-    {
-        GovernanceActivationAction::Activate => {
-            let last_known_good = previous_active_revision_id
-                .clone()
-                .or_else(|| current.last_known_good_revision_id.map(str::to_owned))
-                .unwrap_or_else(|| request.revision_id.clone());
-            (
-                Some(request.revision_id.clone()),
-                Some(last_known_good),
-                None,
-            )
-        }
-        GovernanceActivationAction::Rollback => (
-            Some(request.revision_id.clone()),
-            Some(request.revision_id.clone()),
-            None,
-        ),
-        GovernanceActivationAction::Revoke => {
-            if current.active_revision_id == Some(request.revision_id.as_str()) {
-                let fallback = current.revocation_fallback_revision_id.map(str::to_owned);
-                (fallback.clone(), fallback.clone(), fallback)
-            } else {
-                let active = current.active_revision_id.map(str::to_owned);
-                let last_known_good =
-                    if current.last_known_good_revision_id == Some(request.revision_id.as_str()) {
-                        current.revocation_fallback_revision_id.map(str::to_owned)
-                    } else {
-                        current.last_known_good_revision_id.map(str::to_owned)
-                    };
-                (active, last_known_good, None)
-            }
-        }
-    };
+    let (active_revision_id, last_known_good_revision_id, promoted_revision_id) =
+        governance_activation_revisions(request, current, previous_active_revision_id.as_deref());
     let activated_approval = current
         .approval
         .filter(|_| request.action != GovernanceActivationAction::Revoke)
@@ -241,4 +184,76 @@ pub fn plan_governance_activation(
         promoted_revision_id,
         activated_approval,
     })
+}
+
+fn validate_governance_activation_current(
+    request: &GovernanceActivationRequest,
+    current: GovernanceActivationCurrent<'_>,
+) -> Result<(), GovernanceRepositoryError> {
+    if current
+        .approval
+        .is_some_and(|approval| approval.tenant_id != request.tenant_id)
+    {
+        return Err(GovernanceRepositoryError::TenantMismatch);
+    }
+    if request.action != GovernanceActivationAction::Revoke {
+        let approval = current
+            .approval
+            .ok_or(GovernanceRepositoryError::ApprovalRequired)?;
+        if approval.state != ApprovalState::Approved
+            || approval.kind != crate::governance_support::approval_kind_for_artifact(request.kind)
+            || approval.fingerprint.as_str() != current.revision_checksum
+        {
+            return Err(GovernanceRepositoryError::ApprovalRequired);
+        }
+    }
+    if current.etag != request.expected_etag.as_deref() {
+        return Err(GovernanceRepositoryError::EtagMismatch);
+    }
+    if request.action == GovernanceActivationAction::Rollback
+        && current.last_known_good_revision_id != Some(request.revision_id.as_str())
+    {
+        return Err(GovernanceRepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+fn governance_activation_revisions(
+    request: &GovernanceActivationRequest,
+    current: GovernanceActivationCurrent<'_>,
+    previous_active_revision_id: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match request.action {
+        GovernanceActivationAction::Activate => {
+            let last_known_good = previous_active_revision_id
+                .map(str::to_owned)
+                .or_else(|| current.last_known_good_revision_id.map(str::to_owned))
+                .unwrap_or_else(|| request.revision_id.clone());
+            (
+                Some(request.revision_id.clone()),
+                Some(last_known_good),
+                None,
+            )
+        }
+        GovernanceActivationAction::Rollback => (
+            Some(request.revision_id.clone()),
+            Some(request.revision_id.clone()),
+            None,
+        ),
+        GovernanceActivationAction::Revoke => {
+            if current.active_revision_id == Some(request.revision_id.as_str()) {
+                let fallback = current.revocation_fallback_revision_id.map(str::to_owned);
+                (fallback.clone(), fallback.clone(), fallback)
+            } else {
+                let active = current.active_revision_id.map(str::to_owned);
+                let last_known_good =
+                    if current.last_known_good_revision_id == Some(request.revision_id.as_str()) {
+                        current.revocation_fallback_revision_id.map(str::to_owned)
+                    } else {
+                        current.last_known_good_revision_id.map(str::to_owned)
+                    };
+                (active, last_known_good, None)
+            }
+        }
+    }
 }

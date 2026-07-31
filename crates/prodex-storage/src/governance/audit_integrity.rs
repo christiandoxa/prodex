@@ -87,26 +87,40 @@ pub fn verify_governance_audit_integrity_with_retention_anchor(
     )
     .unwrap_or(u64::MAX);
 
-    if records.is_empty() {
-        valid &= root.is_none() && chain_head_count == 0;
-    } else if let Some(mut current) = root {
-        let mut visited = HashSet::with_capacity(records.len());
-        while visited.insert(current.clone()) {
-            let Some(next) = child_by_previous.get(&current) else {
-                break;
-            };
-            current = next.clone();
-        }
-        valid &= visited.len() == records.len() && chain_head_count == 1;
-    } else {
-        valid = false;
-    }
+    valid &= governance_audit_chain_is_complete(
+        records.len(),
+        root,
+        &child_by_previous,
+        chain_head_count,
+    );
 
     GovernanceAuditIntegrityHealth {
         event_count,
         chain_head_count,
         chain_valid: valid,
     }
+}
+
+fn governance_audit_chain_is_complete(
+    record_count: usize,
+    root: Option<String>,
+    child_by_previous: &std::collections::HashMap<String, String>,
+    chain_head_count: u64,
+) -> bool {
+    if record_count == 0 {
+        return root.is_none() && chain_head_count == 0;
+    }
+    let Some(mut current) = root else {
+        return false;
+    };
+    let mut visited = std::collections::HashSet::with_capacity(record_count);
+    while visited.insert(current.clone()) {
+        let Some(next) = child_by_previous.get(&current) else {
+            break;
+        };
+        current = next.clone();
+    }
+    visited.len() == record_count && chain_head_count == 1
 }
 
 fn audit_record_digest_is_valid(tenant_id: TenantId, record: &GovernanceAuditExportRecord) -> bool {
