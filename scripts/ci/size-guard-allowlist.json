@@ -86,7 +86,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1073,
+    "maxLines": 1068,
     "reason": "Provider-aware runtime and gateway argument parsing remains capped after typed optional-tool selection and Super launch conversion moved to a focused module."
   },
   {
@@ -200,11 +200,6 @@
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {
-    "file": "crates/prodex-config/src/lib.rs",
-    "maxLines": 892,
-    "reason": "Typed deployment configuration validates governance mode floors, anonymous compatibility, and enterprise topology contracts."
-  },
-  {
     "file": "crates/prodex-provider-spi/tests/governed_routing.rs",
     "maxLines": 1041,
     "reason": "Governed routing security coverage keeps hard filters, runtime health/quota/load signals, deterministic score, eligible fallback, affinity, revocation, and bounds in one matrix."
@@ -236,8 +231,8 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 1176,
-    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, atomic edge/application reload barriers, body limits, bounded upgrade lifetimes, and graceful drain."
+    "maxLines": 1110,
+    "reason": "The async gateway server owns transport peer trust, atomic edge/application reload barriers, bounded upgrade lifetimes, and graceful drain after ingress parsing and browser edge validation moved to a focused module."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",
@@ -246,17 +241,17 @@
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",
-    "maxLines": 965,
-    "reason": "Transactional PostgreSQL signed governance revision, bounded tenant discovery, approval, status, and snapshot operations remain capped after retention persistence moved to a focused module."
+    "maxLines": 934,
+    "reason": "Transactional PostgreSQL signed governance revision, bounded tenant discovery, approval, status, and snapshot operations remain capped after retention persistence and shared row/idempotency helpers moved to focused modules."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",
-    "maxLines": 966,
+    "maxLines": 960,
     "reason": "PostgreSQL runtime pool, TLS, accounting reservation, idempotency, recovery, and retry orchestration remain capped until accounting execution moves behind its focused repository module."
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 1069,
-    "reason": "The ordered PostgreSQL migration catalog keeps immutable, declarative SQL revisions beside schema-version planning; splitting a published migration across source files would make the append-only history harder to review and verify."
+    "maxLines": 1077,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata beside schema-version planning; migration 17 SQL lives in a versioned sidecar so its durable invalidation schema remains reviewable without growing Rust source."
   }
 ]

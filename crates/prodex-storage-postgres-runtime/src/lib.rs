@@ -10,14 +10,14 @@ use std::{fmt, future::Future, time::Duration};
 mod governance;
 mod tls;
 mod types;
-pub use governance::{
-    GovernanceInvalidationOutboxCleanup, PostgresGovernanceInvalidation, PostgresSiemOutboxClaim,
-};
+pub use governance::PostgresSiemOutboxClaim;
+pub use governance::{GovernanceInvalidationOutboxCleanup, PostgresGovernanceInvalidation};
 pub use tls::{PostgresTlsConfig, PostgresTlsMode, connect_blocking};
 pub use types::{
     ExpiredReservationCandidate, IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome,
     ReserveRejection, StoredReservation, StoredReservationState,
 };
+use types::{from_i64, to_i64};
 
 use deadpool_postgres::{
     Config as DeadpoolConfig, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime, SslMode,
@@ -954,14 +954,6 @@ fn usage_to_i64(amount: UsageAmount) -> Result<SignedUsageAmount, PostgresRuntim
         tokens: to_i64(amount.tokens)?,
         cost_micros: to_i64(amount.cost_micros)?,
     })
-}
-
-fn to_i64(value: u64) -> Result<i64, PostgresRuntimeError> {
-    i64::try_from(value).map_err(|_| PostgresRuntimeError::NumericOverflow)
-}
-
-fn from_i64(value: i64) -> Result<u64, PostgresRuntimeError> {
-    u64::try_from(value).map_err(|_| PostgresRuntimeError::InvalidDatabaseState)
 }
 
 #[cfg(test)]

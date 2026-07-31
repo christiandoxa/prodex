@@ -92,6 +92,9 @@ impl std::fmt::Debug for PostgresSiemOutboxClaim {
 mod activation_sessions;
 mod outbox_claims;
 mod repository_core;
+mod repository_helpers;
+
+use repository_helpers::*;
 
 impl PostgresRepository {
     async fn governance_timeout<T>(
