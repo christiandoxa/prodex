@@ -50,12 +50,15 @@ refs:
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
 and Redis indexes include both Linux amd64 and arm64 manifests. Syft and
-Gitleaks CI images are also tag-and-digest pinned. Dependabot owns Dockerfile
-and Compose refreshes. The release workflow scans the locally built image with
-digest-pinned Trivy 0.72.0, failing on fixable high/critical vulnerabilities,
-then publishes an attested GHCR image and renders the Kubernetes release asset
-from that exact registry digest. The checked-in manifest keeps a non-deployable
-digest placeholder so an old digest cannot be mistaken for the current release.
+Gitleaks CI images are also tag-and-digest pinned. The Rust quality job uses
+SonarQube Community Build `26.7.0.124771-community` at manifest digest
+`sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3`.
+Dependabot owns Dockerfile and Compose refreshes. The release workflow scans
+the locally built image with digest-pinned Trivy 0.72.0, failing on fixable
+high/critical vulnerabilities, then publishes an attested GHCR image and
+renders the Kubernetes release asset from that exact registry digest. The
+checked-in manifest keeps a non-deployable digest placeholder so an old digest
+cannot be mistaken for the current release.
 
 Primary pin sources:
 
@@ -63,29 +66,34 @@ Primary pin sources:
 - [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain)
 - [Swatinem/rust-cache](https://github.com/Swatinem/rust-cache)
 - [mozilla-actions/sccache-action](https://github.com/mozilla-actions/sccache-action)
+- [SonarQube Docker Official Image](https://hub.docker.com/_/sonarqube)
+- [SonarQube for VS Code supported languages](https://docs.sonarsource.com/sonarqube-for-vs-code/using/rules/)
 - [Docker Official Images](https://github.com/docker-library/official-images)
 - [Syft](https://github.com/anchore/syft)
 - [Gitleaks](https://github.com/gitleaks/gitleaks)
 
 ## Required gates
 
-The `supply-chain` CI job runs production-only JSON Clippy plus all-target
-Clippy gates, `cargo audit`, all configured `cargo deny` checks, pinned
-`cargo-machete 0.9.2`, and source SBOM generation. The production Clippy
-report uses `cargo clippy --locked --workspace --exclude prodex-bench-support
---lib --bins --all-features --message-format=json -- -D warnings` and writes
-the ignored `target/sonar/clippy-report.json`; the all-target Clippy gate remains
-separate. Sonar scans only Rust under `src` and `crates`, excluding dedicated
-test modules and directories, fixtures, test support, generated/vendor/build
+The `rust-quality` and `supply-chain` jobs run in parallel. `rust-quality`
+generates the production-only Clippy JSON report, enforces zero Clippy warnings
+across all targets, and imports that report into a job-local SonarQube Community
+Build instance. Its token is generated inside the ephemeral runner, masked,
+and revoked before the job exits; no Sonar repository secret or variable is
+required. The production report uses `cargo clippy --locked --workspace
+--exclude prodex-bench-support --lib --bins --all-features
+--message-format=json -- -D warnings` and writes the ignored
+`target/sonar/clippy-report.json`.
+
+Sonar scans only Rust under `src` and `crates`, excluding dedicated test
+modules and directories, fixtures, test support, generated/vendor/build
 content, and `crates/prodex-bench-support`; production runtime self-test code
-remains indexed. After the quality gate completes, CI queries the analyzed
-branch or pull request and fails unless it has zero unresolved Sonar issues.
-It runs the live Sonar scan
-only when repository configuration provides `SONAR_TOKEN`,
-`SONAR_PROJECT_KEY`, and either `SONAR_HOST_URL` or `SONAR_ORGANIZATION`;
-partial configuration fails closed, while absent configuration reports the
-activation boundary and leaves the production Clippy gate active. Keep these
-values in GitHub Actions secrets/variables, not tracked files.
+remains indexed. CI requires both an `OK` quality gate and zero unresolved
+issues. SonarQube for VS Code is not used as this gate: its official language
+list does not include Rust, and its analysis is editor-triggered rather than a
+deterministic headless CI interface.
+
+The parallel `supply-chain` job runs `cargo audit`, all configured `cargo deny`
+checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
 `deny.toml` allows only the licenses present in the reviewed lockfile, denies
 wildcard dependencies and OpenSSL/native-tls, and treats duplicate versions as
 errors. Every duplicate exception names one exact older version, its current
