@@ -92,68 +92,8 @@ pub fn runtime_anthropic_web_search_blocks_from_output_item(
         })
         .unwrap_or_default();
 
-    let mut seen_urls = BTreeSet::new();
-    let mut results = Vec::new();
-    if let Some(sources) = item
-        .get("action")
-        .and_then(|action| action.get("sources"))
-        .and_then(serde_json::Value::as_array)
-    {
-        for source in sources {
-            let Some(url) = source
-                .get("url")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                continue;
-            };
-            if !seen_urls.insert(url.to_string()) {
-                continue;
-            }
-            let mut result = serde_json::Map::new();
-            result.insert(
-                "type".to_string(),
-                serde_json::Value::String("web_search_result".to_string()),
-            );
-            result.insert(
-                "url".to_string(),
-                serde_json::Value::String(url.to_string()),
-            );
-            if let Some(title) = source
-                .get("title")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .or_else(|| annotation_titles_by_url.get(url).map(String::as_str))
-            {
-                result.insert(
-                    "title".to_string(),
-                    serde_json::Value::String(title.to_string()),
-                );
-            }
-            for key in [
-                "encrypted_content",
-                "page_age",
-                "snippet",
-                "summary",
-                "text",
-            ] {
-                if let Some(value) = source
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
-                    result.insert(
-                        key.to_string(),
-                        serde_json::Value::String(value.to_string()),
-                    );
-                }
-            }
-            results.push(serde_json::Value::Object(result));
-        }
-    }
+    let (mut results, mut seen_urls) =
+        runtime_anthropic_web_search_results_from_sources(item, annotation_titles_by_url);
     if results.is_empty() {
         for (url, title) in annotation_titles_by_url {
             if !seen_urls.insert(url.clone()) {
@@ -183,4 +123,75 @@ pub fn runtime_anthropic_web_search_blocks_from_output_item(
             "content": results,
         }),
     ]
+}
+
+fn runtime_anthropic_web_search_results_from_sources(
+    item: &serde_json::Value,
+    annotation_titles_by_url: &BTreeMap<String, String>,
+) -> (Vec<serde_json::Value>, BTreeSet<String>) {
+    let Some(sources) = item
+        .get("action")
+        .and_then(|action| action.get("sources"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return (Vec::new(), BTreeSet::new());
+    };
+    let mut seen_urls = BTreeSet::new();
+    let mut results = Vec::new();
+    for source in sources {
+        let Some(url) = source
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if !seen_urls.insert(url.to_string()) {
+            continue;
+        }
+        let mut result = serde_json::Map::from_iter([
+            (
+                "type".to_string(),
+                serde_json::Value::String("web_search_result".to_string()),
+            ),
+            (
+                "url".to_string(),
+                serde_json::Value::String(url.to_string()),
+            ),
+        ]);
+        if let Some(title) = source
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| annotation_titles_by_url.get(url).map(String::as_str))
+        {
+            result.insert(
+                "title".to_string(),
+                serde_json::Value::String(title.to_string()),
+            );
+        }
+        for key in [
+            "encrypted_content",
+            "page_age",
+            "snippet",
+            "summary",
+            "text",
+        ] {
+            if let Some(value) = source
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                result.insert(
+                    key.to_string(),
+                    serde_json::Value::String(value.to_string()),
+                );
+            }
+        }
+        results.push(serde_json::Value::Object(result));
+    }
+    (results, seen_urls)
 }

@@ -305,43 +305,29 @@ pub fn runtime_buffered_response_ids(parts: &RuntimeBufferedResponseParts) -> Ve
     }
 
     let mut response_ids = Vec::new();
-    let mut line = Vec::new();
     let mut data_lines = Vec::new();
-    let push_data_lines = |data_lines: &mut Vec<String>, response_ids: &mut Vec<String>| {
-        if let Some(value) = parse_runtime_sse_payload(data_lines) {
-            for response_id in extract_runtime_response_ids_from_value(&value) {
-                push_runtime_response_id(response_ids, Some(&response_id));
-            }
-        }
-        data_lines.clear();
-    };
-
-    for byte in &parts.body {
-        line.push(*byte);
-        if *byte != b'\n' {
-            continue;
-        }
-        let line_text = String::from_utf8_lossy(&line);
-        let trimmed = line_text.trim_end_matches(['\r', '\n']);
+    for line in parts.body.split(|byte| *byte == b'\n') {
+        let line_text = String::from_utf8_lossy(line);
+        let trimmed = line_text.trim_end_matches('\r');
         if trimmed.is_empty() {
-            push_data_lines(&mut data_lines, &mut response_ids);
-            line.clear();
+            push_runtime_sse_response_ids(&mut data_lines, &mut response_ids);
             continue;
         }
         if let Some(payload) = trimmed.strip_prefix("data:") {
             data_lines.push(payload.trim_start().to_string());
         }
-        line.clear();
     }
-    if !line.is_empty() {
-        let line_text = String::from_utf8_lossy(&line);
-        let trimmed = line_text.trim_end_matches(['\r', '\n']);
-        if let Some(payload) = trimmed.strip_prefix("data:") {
-            data_lines.push(payload.trim_start().to_string());
+    push_runtime_sse_response_ids(&mut data_lines, &mut response_ids);
+    response_ids
+}
+
+fn push_runtime_sse_response_ids(data_lines: &mut Vec<String>, response_ids: &mut Vec<String>) {
+    if let Some(value) = parse_runtime_sse_payload(data_lines) {
+        for response_id in extract_runtime_response_ids_from_value(&value) {
+            push_runtime_response_id(response_ids, Some(&response_id));
         }
     }
-    push_data_lines(&mut data_lines, &mut response_ids);
-    response_ids
+    data_lines.clear();
 }
 
 pub fn runtime_request_for_anthropic_server_tool_followup(

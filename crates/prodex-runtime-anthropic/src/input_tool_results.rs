@@ -159,41 +159,14 @@ pub fn runtime_proxy_translate_anthropic_tool_result_content(
     let mut content_blocks = Vec::new();
 
     for item in items {
-        match item.get("type").and_then(serde_json::Value::as_str) {
-            Some("tool_reference") => {
-                if let Some(tool_name) = item
-                    .get("tool_name")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
-                    tool_references.push(tool_name.to_string());
-                } else {
-                    structured_blocks.push(item.clone());
-                }
-                content_blocks.push(item.clone());
-            }
-            Some("image") => {
-                if let Some(part) = runtime_proxy_translate_anthropic_image_part(item) {
-                    image_parts.push(part);
-                }
-            }
-            _ => {
-                if let Some(text) = runtime_proxy_translate_anthropic_text_from_block(item) {
-                    text_parts.push(text);
-                    content_blocks.push(item.clone());
-                    if item.get("type").and_then(serde_json::Value::as_str) == Some("document")
-                        || item.get("type").and_then(serde_json::Value::as_str)
-                            == Some("web_fetch_result")
-                    {
-                        structured_blocks.push(item.clone());
-                    }
-                } else {
-                    structured_blocks.push(item.clone());
-                    content_blocks.push(item.clone());
-                }
-            }
-        }
+        runtime_proxy_collect_anthropic_tool_result_item(
+            item,
+            &mut text_parts,
+            &mut tool_references,
+            &mut structured_blocks,
+            &mut image_parts,
+            &mut content_blocks,
+        );
     }
 
     let text = text_parts.join("\n");
@@ -225,6 +198,49 @@ pub fn runtime_proxy_translate_anthropic_tool_result_content(
     }
 
     (serde_json::Value::Object(output).to_string(), image_parts)
+}
+
+fn runtime_proxy_collect_anthropic_tool_result_item(
+    item: &serde_json::Value,
+    text_parts: &mut Vec<String>,
+    tool_references: &mut Vec<String>,
+    structured_blocks: &mut Vec<serde_json::Value>,
+    image_parts: &mut Vec<serde_json::Value>,
+    content_blocks: &mut Vec<serde_json::Value>,
+) {
+    let item_type = item.get("type").and_then(serde_json::Value::as_str);
+    match item_type {
+        Some("tool_reference") => {
+            if let Some(tool_name) = item
+                .get("tool_name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                tool_references.push(tool_name.to_string());
+            } else {
+                structured_blocks.push(item.clone());
+            }
+            content_blocks.push(item.clone());
+        }
+        Some("image") => {
+            if let Some(part) = runtime_proxy_translate_anthropic_image_part(item) {
+                image_parts.push(part);
+            }
+        }
+        _ => {
+            let Some(text) = runtime_proxy_translate_anthropic_text_from_block(item) else {
+                structured_blocks.push(item.clone());
+                content_blocks.push(item.clone());
+                return;
+            };
+            text_parts.push(text);
+            content_blocks.push(item.clone());
+            if matches!(item_type, Some("document" | "web_fetch_result")) {
+                structured_blocks.push(item.clone());
+            }
+        }
+    }
 }
 
 pub fn runtime_proxy_extract_balanced_json_array_bounds(

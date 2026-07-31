@@ -377,44 +377,12 @@ pub fn runtime_proxy_translate_anthropic_user_content_blocks(
     let mut saw_image = false;
 
     for block in blocks {
-        if block.get("type").and_then(serde_json::Value::as_str) == Some("mcp_approval_response") {
-            continue;
-        }
-        if block.get("type").and_then(serde_json::Value::as_str) == Some("image") {
-            if !saw_image {
-                for text in text_blocks.drain(..) {
-                    parts.push(serde_json::json!({
-                        "type": "input_text",
-                        "text": text,
-                    }));
-                }
-            }
-            saw_image = true;
-            if let Some(part) = runtime_proxy_translate_anthropic_image_part(block) {
-                parts.push(part);
-            }
-            continue;
-        }
-
-        if let Some(text) = runtime_proxy_translate_anthropic_text_from_block(block) {
-            if saw_image {
-                parts.push(serde_json::json!({
-                    "type": "input_text",
-                    "text": text,
-                }));
-            } else {
-                text_blocks.push(text);
-            }
-        } else if let Some(text) = runtime_proxy_translate_anthropic_block_fallback_text(block) {
-            if saw_image {
-                parts.push(serde_json::json!({
-                    "type": "input_text",
-                    "text": text,
-                }));
-            } else {
-                text_blocks.push(text);
-            }
-        }
+        runtime_proxy_collect_anthropic_user_content_block(
+            block,
+            &mut text_blocks,
+            &mut parts,
+            &mut saw_image,
+        );
     }
 
     if saw_image {
@@ -423,6 +391,55 @@ pub fn runtime_proxy_translate_anthropic_user_content_blocks(
         let text = text_blocks.join("\n");
         (!text.is_empty()).then_some(serde_json::Value::String(text))
     }
+}
+
+fn runtime_proxy_collect_anthropic_user_content_block(
+    block: &serde_json::Value,
+    text_blocks: &mut Vec<String>,
+    parts: &mut Vec<serde_json::Value>,
+    saw_image: &mut bool,
+) {
+    match block.get("type").and_then(serde_json::Value::as_str) {
+        Some("mcp_approval_response") => {}
+        Some("image") => {
+            if !*saw_image {
+                runtime_proxy_flush_anthropic_input_text(text_blocks, parts);
+            }
+            *saw_image = true;
+            if let Some(part) = runtime_proxy_translate_anthropic_image_part(block) {
+                parts.push(part);
+            }
+        }
+        _ => {
+            let text = runtime_proxy_translate_anthropic_text_from_block(block)
+                .or_else(|| runtime_proxy_translate_anthropic_block_fallback_text(block));
+            if let Some(text) = text {
+                if *saw_image {
+                    parts.push(runtime_proxy_anthropic_input_text(text));
+                } else {
+                    text_blocks.push(text);
+                }
+            }
+        }
+    }
+}
+
+fn runtime_proxy_flush_anthropic_input_text(
+    text_blocks: &mut Vec<String>,
+    parts: &mut Vec<serde_json::Value>,
+) {
+    parts.extend(
+        text_blocks
+            .drain(..)
+            .map(runtime_proxy_anthropic_input_text),
+    );
+}
+
+fn runtime_proxy_anthropic_input_text(text: String) -> serde_json::Value {
+    serde_json::json!({
+        "type": "input_text",
+        "text": text,
+    })
 }
 
 pub fn runtime_proxy_translate_anthropic_text_blocks(blocks: &[serde_json::Value]) -> String {
