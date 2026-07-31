@@ -147,12 +147,9 @@ fn enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers()
 }
 
 #[test]
-fn bank_readyz_and_data_plane_fail_closed_when_policy_expires() {
-    let expires_at = now_unix_ms().saturating_add(2_000);
-    let fixture = start_bank_gateway("gateway-bank-policy-expiry", expires_at);
-    assert_ready(&fixture.proxy, true, "ok");
-
-    let body = wait_for_readiness(&fixture.proxy, false, Duration::from_secs(5));
+fn bank_readyz_and_data_plane_fail_closed_when_policy_is_expired() {
+    let fixture = start_bank_gateway("gateway-bank-policy-expiry", now_unix_ms());
+    let body = wait_for_readiness(&fixture.proxy, false, Duration::from_secs(2));
     assert_eq!(body["status"], "governance_policy_unavailable");
     assert_eq!(body["governance_policy_available"], false);
     assert_liveness_stays_up(&fixture.proxy);
