@@ -99,9 +99,7 @@ use crate::runtime_proxy::{
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
-use prodex_application::{
-    ApplicationInspectionPlan, ApplicationRequestContextError, ApplicationRequestDeadline,
-};
+use prodex_application::{ApplicationInspectionPlan, ApplicationRequestDeadline};
 use prodex_domain::{RequestId, ReservationReconciliationReason};
 use prodex_observability::ApiAdmissionResult;
 use runtime_proxy_crate::{

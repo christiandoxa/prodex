@@ -67,16 +67,18 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "local-rewrite-launch-worker-pool-threads",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    file:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/background_workers.rs",
     id: "blocking-thread-spawn",
     pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
-    maxHits: 5,
+    maxHits: 3,
     reason:
-      "bounded local rewrite, governance refresh and SIEM workers created during launch, outside request commit paths",
+      "bounded OIDC and SIEM workers created during launch, outside request commit paths",
   },
   {
     name: "governance-audit-launch-worker",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_audit.rs",
+    file:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_audit/writer.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
     maxHits: 1,
@@ -101,7 +103,8 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "governance-refresh-worker",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_refresh.rs",
+    file:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_refresh/worker.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
     maxHits: 1,
@@ -116,33 +119,6 @@ const ALLOWLIST = Object.freeze([
     maxHits: 2,
     reason:
       "single bounded backend-specific reservation recovery worker created during gateway launch, outside request and stream paths",
-  },
-  {
-    name: "local-rewrite-gateway-openoptions-import",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    id: "blocking-file-open",
-    pattern: /\buse std::fs::OpenOptions;/,
-    maxHits: 1,
-    reason:
-      "OpenOptions is used by gateway admin and background state stores, not by upstream stream forwarding",
-  },
-  {
-    name: "local-rewrite-gateway-file-state-io",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    id: "blocking-disk-io",
-    pattern: /\bstd::fs::(?:read|write|create_dir_all|rename)\s*\(/,
-    maxHits: 17,
-    reason:
-      "gateway file backend I/O is limited to admin/config loading, ledger reconciliation, and background usage persistence outside stream commit",
-  },
-  {
-    name: "local-rewrite-gateway-background-save",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    id: "spawn-blocking",
-    pattern: /\bspawn_blocking\s*\(/,
-    maxHits: 2,
-    reason:
-      "gateway ledger and usage saves are moved onto the bounded blocking pool after request admission",
   },
   {
     name: "in-process-gateway-bounded-worker",

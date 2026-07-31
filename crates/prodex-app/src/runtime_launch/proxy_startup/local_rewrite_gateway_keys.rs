@@ -55,8 +55,7 @@ use std::collections::BTreeMap;
 #[path = "local_rewrite_gateway_keys/store.rs"]
 mod store;
 pub(super) use store::{
-    RuntimeGatewayVirtualKeySnapshot, runtime_gateway_request_header_virtual_key,
-    runtime_gateway_virtual_key_admission_snapshot,
+    runtime_gateway_request_header_virtual_key, runtime_gateway_virtual_key_admission_snapshot,
     runtime_gateway_virtual_key_entries_from_sources, runtime_gateway_virtual_key_entries_is_empty,
     runtime_gateway_virtual_key_store_load_strict,
 };

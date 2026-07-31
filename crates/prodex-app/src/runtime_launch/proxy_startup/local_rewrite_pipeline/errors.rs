@@ -1,7 +1,8 @@
 use super::*;
 use prodex_application::ApplicationRequestContextError;
 
-pub(super) fn runtime_local_rewrite_request_timeout_response() -> tiny_http::ResponseBox {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_request_timeout_response()
+-> tiny_http::ResponseBox {
     build_runtime_proxy_json_error_response(
         504,
         "request_timeout",
@@ -9,7 +10,7 @@ pub(super) fn runtime_local_rewrite_request_timeout_response() -> tiny_http::Res
     )
 }
 
-pub(super) fn runtime_local_rewrite_application_context_rejection(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_application_context_rejection(
     error: ApplicationRequestContextError,
 ) -> tiny_http::ResponseBox {
     let ApplicationRequestContextError::Trace(error) = error else {

@@ -285,7 +285,7 @@ fn artifact_kind_label(kind: GovernanceArtifactKind) -> &'static str {
     }
 }
 
-fn pointer_table(kind: GovernanceArtifactKind) -> &'static str {
+pub(super) fn pointer_table(kind: GovernanceArtifactKind) -> &'static str {
     match kind {
         GovernanceArtifactKind::Policy => "prodex_policy_pointers",
         GovernanceArtifactKind::ClassificationRules => "prodex_classification_rule_pointers",

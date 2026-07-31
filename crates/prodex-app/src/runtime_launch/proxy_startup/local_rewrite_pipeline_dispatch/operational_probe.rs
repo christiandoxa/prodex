@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn runtime_gateway_operational_probe_response(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_operational_probe_response(
     method: &str,
     request_path: &str,
     shared: &RuntimeLocalRewriteProxyShared,

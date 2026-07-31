@@ -170,11 +170,12 @@ fn runtime_gateway_siem_sqlite_loop(
 fn spawn_runtime_gateway_siem_worker(
     shared: &RuntimeLocalRewriteProxyShared,
     shutdown: &Arc<AtomicBool>,
-) -> Result<Option<thread::JoinHandle<()>>> {
+    worker_threads: &mut Vec<thread::JoinHandle<()>>,
+) -> Result<()> {
     let Some(siem_worker) = shared.gateway_observability.siem_worker.clone() else {
-        return Ok(None);
+        return Ok(());
     };
-    let worker = match &shared.gateway_state_store {
+    match &shared.gateway_state_store {
         RuntimeGatewayStateStore::Postgres { .. } => {
             let repository = shared
                 .gateway_postgres_repository
@@ -184,7 +185,7 @@ fn spawn_runtime_gateway_siem_worker(
             let runtime = shared.runtime_shared.async_runtime.handle().clone();
             let shutdown = Arc::clone(shutdown);
             let log_path = shared.runtime_shared.log_path.clone();
-            thread::spawn(move || {
+            worker_threads.push(thread::spawn(move || {
                 runtime_gateway_siem_postgres_loop(
                     siem_worker,
                     repository,
@@ -193,22 +194,22 @@ fn spawn_runtime_gateway_siem_worker(
                     shutdown,
                     log_path,
                 )
-            })
+            }));
         }
         RuntimeGatewayStateStore::Sqlite { path } => {
             let repository = prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
                 .map_err(|_| anyhow::anyhow!("failed to open the SIEM governance outbox"))?;
             let shutdown = Arc::clone(shutdown);
             let log_path = shared.runtime_shared.log_path.clone();
-            thread::spawn(move || {
+            worker_threads.push(thread::spawn(move || {
                 runtime_gateway_siem_sqlite_loop(siem_worker, repository, shutdown, log_path)
-            })
+            }));
         }
         RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
             anyhow::bail!("configured SIEM worker requires a durable governance outbox")
         }
-    };
-    Ok(Some(worker))
+    }
+    Ok(())
 }
 
 fn runtime_gateway_spawn_core_workers(
@@ -244,9 +245,7 @@ fn runtime_gateway_spawn_core_workers(
     if let Some(worker) = spawn_runtime_gateway_governance_refresh_worker(shared, shutdown) {
         worker_threads.push(worker);
     }
-    if let Some(worker) = spawn_runtime_gateway_siem_worker(shared, shutdown)? {
-        worker_threads.push(worker);
-    }
+    spawn_runtime_gateway_siem_worker(shared, shutdown, worker_threads)?;
     Ok(())
 }
 
