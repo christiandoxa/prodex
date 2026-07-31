@@ -18,17 +18,17 @@ function runPlanner(...args) {
 
 test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(), []);
-  assert.equal(PRODEX_APP_LIB_SHARDS.length, 8);
+  assert.equal(PRODEX_APP_LIB_SHARDS.length, 11);
   assert.deepEqual(
-    PRODEX_APP_LIB_SHARDS.filter((shard) => shard.filter).map((shard) => shard.filter),
+    PRODEX_APP_LIB_SHARDS.filter((shard) => shard.filters).flatMap((shard) => shard.filters),
     PRODEX_APP_LIB_FILTERS,
   );
   assert.deepEqual(PRODEX_APP_LIB_SHARDS.at(-1).skipFilters, PRODEX_APP_LIB_FILTERS);
 
   const appMatrix = githubMatrix();
   const fullMatrix = githubMatrix({ includeWorkspace: true });
-  assert.equal(appMatrix.include.length, 8);
-  assert.equal(fullMatrix.include.length, 9);
+  assert.equal(appMatrix.include.length, 11);
+  assert.equal(fullMatrix.include.length, 12);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include[0].suite, "workspace");
@@ -37,7 +37,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
 test("shard planner dry-run and matrix output are compile-free", () => {
   const dryRun = runPlanner("--dry-run");
   assert.equal(dryRun.status, 0, dryRun.stderr);
-  assert.match(dryRun.stdout, /dry-run: 9 full-test shard\(s\)/);
+  assert.match(dryRun.stdout, /dry-run: 12 full-test shard\(s\)/);
   assert.match(dryRun.stdout, /selection: cargo test .*--test-threads=1/);
   assert.match(dryRun.stdout, /remainder: cargo test .*--skip/);
 
@@ -57,6 +57,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(workflow, /prodex_app_matrix: \$\{\{ steps\.prodex-app-matrix\.outputs\.matrix \}\}/);
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\) \}\}/);
   assert.match(workflow, /PRODEX_APP_SKIP_FILTERS/);
+  assert.match(workflow, /PRODEX_APP_FILTERS/);
   assert.match(workflow, /--test-threads=1/);
   assert.match(workflow, /prodex-app shard matched no tests/);
   assert.match(fullWorkflow, /full_test_shards:/);
@@ -70,6 +71,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
     "secret-scan",
     "windows-security",
     "windows-workspace",
+    "windows-prodex-app",
     "redis-integration",
     "backup-restore-drill",
     "process-guard",
