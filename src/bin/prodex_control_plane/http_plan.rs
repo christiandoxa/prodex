@@ -4,7 +4,7 @@ use prodex::{OtlpLogAttribute, otlp_http_log_export_status};
 use prodex_application::{
     ApplicationControlPlaneAuditCorrelationErrorStatus,
     ApplicationControlPlaneAuditEmissionSpanErrorStatus, ApplicationControlPlaneAuditErrorStatus,
-    ApplicationControlPlaneAuditPersistenceSpanErrorStatus,
+    ApplicationControlPlaneAuditPersistenceSpanErrorStatus, ApplicationControlPlaneAuditPlan,
     ApplicationControlPlaneAuditStoragePlan, ApplicationControlPlaneHttpRouteErrorStatus,
     plan_application_control_plane_audit_correlation_error_response,
     plan_application_control_plane_audit_correlation_from_http,
@@ -86,6 +86,127 @@ impl Drop for ControlPlaneHttpHeaderFile {
 
 impl ZeroizeOnDrop for ControlPlaneHttpHeaderFile {}
 
+type ControlPlaneHttpPlanStep<T> = Result<T, Result<String, String>>;
+
+fn control_plane_http_audit_json(
+    plan: Option<&ApplicationControlPlaneAuditPlan>,
+) -> serde_json::Value {
+    let Some(plan) = plan else {
+        return serde_json::json!({ "required": false });
+    };
+    let (audit_outcome, audit_action, audit_partition_tenant_id) = match &plan.decision {
+        prodex_control_plane::ControlPlaneDecision::Authorized(action) => (
+            action.audit_event.outcome,
+            action.audit_event.action.as_str(),
+            action.audit_write.tenant_partition_key,
+        ),
+        prodex_control_plane::ControlPlaneDecision::Denied {
+            audit_event,
+            audit_write,
+            ..
+        } => (
+            audit_event.outcome,
+            audit_event.action.as_str(),
+            audit_write.tenant_partition_key,
+        ),
+    };
+    serde_json::json!({
+        "required": true,
+        "storage_backend": application_control_plane_audit_storage_backend_label(&plan.audit_storage),
+        "audit_action": audit_action,
+        "audit_outcome": audit_outcome,
+        "audit_partition_tenant_id": audit_partition_tenant_id,
+    })
+}
+
+fn plan_control_plane_http_audit_correlation(
+    audit_plan: Option<&ApplicationControlPlaneAuditPlan>,
+    request_id: RequestId,
+    call_id: Option<CallId>,
+    operation: ControlPlaneOperation,
+    http: &GatewayHttpRequestMeta,
+) -> ControlPlaneHttpPlanStep<serde_json::Value> {
+    let Some(audit_plan) = audit_plan else {
+        return Ok(serde_json::Value::Null);
+    };
+    let correlation_plan = match plan_application_control_plane_audit_correlation_from_http(
+        prodex_application::ApplicationControlPlaneAuditCorrelationRequest {
+            request_id,
+            call_id,
+            http_policy: GatewayHttpPolicy::production_default(),
+            http: http.clone(),
+            audit: audit_plan.clone(),
+        },
+    ) {
+        Ok(plan) => plan,
+        Err(error) => {
+            let response = plan_application_control_plane_audit_correlation_error_response(&error);
+            return Err(encode_control_plane_http_plan_operation_failure(
+                operation,
+                application_control_plane_audit_correlation_status_label(response.status),
+                response.code,
+                response.message,
+                "control-plane audit correlation error",
+                http,
+            ));
+        }
+    };
+    let emission = match plan_application_control_plane_audit_emission_span(
+        prodex_application::ApplicationControlPlaneAuditEmissionSpanRequest {
+            correlation: correlation_plan.correlation.clone(),
+        },
+    ) {
+        Ok(plan) => serde_json::json!({
+            "name": plan.span.descriptor.name,
+            "kind": format!("{:?}", plan.span.descriptor.kind).to_ascii_lowercase(),
+        }),
+        Err(error) => {
+            let response =
+                plan_application_control_plane_audit_emission_span_error_response(&error);
+            return Err(encode_control_plane_http_plan_operation_failure(
+                operation,
+                application_control_plane_audit_emission_span_status_label(response.status),
+                response.code,
+                response.message,
+                "control-plane audit emission span error",
+                http,
+            ));
+        }
+    };
+    let persistence = match plan_application_control_plane_audit_persistence_span(
+        prodex_application::ApplicationControlPlaneAuditPersistenceSpanRequest {
+            correlation: correlation_plan.correlation.clone(),
+            audit_storage: audit_plan.audit_storage.clone(),
+        },
+    ) {
+        Ok(plan) => serde_json::json!({
+            "name": plan.span.descriptor.name,
+            "kind": format!("{:?}", plan.span.descriptor.kind).to_ascii_lowercase(),
+        }),
+        Err(error) => {
+            let response =
+                plan_application_control_plane_audit_persistence_span_error_response(&error);
+            return Err(encode_control_plane_http_plan_operation_failure(
+                operation,
+                application_control_plane_audit_persistence_span_status_label(response.status),
+                response.code,
+                response.message,
+                "control-plane audit persistence span error",
+                http,
+            ));
+        }
+    };
+    Ok(serde_json::json!({
+        "request_id": correlation_plan.correlation.request_id,
+        "call_id": correlation_plan.correlation.call_id,
+        "trace_id": correlation_plan.correlation.trace_id.as_ref().map(|trace_id| trace_id.as_str()),
+        "tenant_id": correlation_plan.correlation.tenant_id,
+        "audit_event_id": correlation_plan.correlation.audit_event_id,
+        "emission_span": emission,
+        "persistence_span": persistence,
+    }))
+}
+
 pub(super) fn run(request_path: &Path) -> Result<String, String> {
     let request = load_control_plane_http_plan_request(request_path)?;
     let (path, query) = split_path_and_query(&request.path);
@@ -149,115 +270,16 @@ pub(super) fn run(request_path: &Path) -> Result<String, String> {
     } else {
         None
     };
-    let audit = if let Some(plan) = audit_plan.as_ref() {
-        let (audit_outcome, audit_action, audit_partition_tenant_id) = match &plan.decision {
-            prodex_control_plane::ControlPlaneDecision::Authorized(action) => (
-                action.audit_event.outcome,
-                action.audit_event.action.as_str(),
-                action.audit_write.tenant_partition_key,
-            ),
-            prodex_control_plane::ControlPlaneDecision::Denied {
-                audit_event,
-                audit_write,
-                ..
-            } => (
-                audit_event.outcome,
-                audit_event.action.as_str(),
-                audit_write.tenant_partition_key,
-            ),
-        };
-        serde_json::json!({
-            "required": true,
-            "storage_backend": application_control_plane_audit_storage_backend_label(&plan.audit_storage),
-            "audit_action": audit_action,
-            "audit_outcome": audit_outcome,
-            "audit_partition_tenant_id": audit_partition_tenant_id,
-        })
-    } else {
-        serde_json::json!({ "required": false })
-    };
-    let audit_correlation = if let Some(audit_plan) = audit_plan.clone() {
-        let request_id = request.request_id.unwrap_or_default();
-        let call_id = request.call_id;
-        let correlation_plan = match plan_application_control_plane_audit_correlation_from_http(
-            prodex_application::ApplicationControlPlaneAuditCorrelationRequest {
-                request_id,
-                call_id,
-                http_policy: GatewayHttpPolicy::production_default(),
-                http: http.clone(),
-                audit: audit_plan.clone(),
-            },
-        ) {
-            Ok(plan) => plan,
-            Err(error) => {
-                let response =
-                    plan_application_control_plane_audit_correlation_error_response(&error);
-                return encode_control_plane_http_plan_operation_failure(
-                    route.operation,
-                    application_control_plane_audit_correlation_status_label(response.status),
-                    response.code,
-                    response.message,
-                    "control-plane audit correlation error",
-                    &http,
-                );
-            }
-        };
-        let emission = match plan_application_control_plane_audit_emission_span(
-            prodex_application::ApplicationControlPlaneAuditEmissionSpanRequest {
-                correlation: correlation_plan.correlation.clone(),
-            },
-        ) {
-            Ok(plan) => serde_json::json!({
-                "name": plan.span.descriptor.name,
-                "kind": format!("{:?}", plan.span.descriptor.kind).to_ascii_lowercase(),
-            }),
-            Err(error) => {
-                let response =
-                    plan_application_control_plane_audit_emission_span_error_response(&error);
-                return encode_control_plane_http_plan_operation_failure(
-                    route.operation,
-                    application_control_plane_audit_emission_span_status_label(response.status),
-                    response.code,
-                    response.message,
-                    "control-plane audit emission span error",
-                    &http,
-                );
-            }
-        };
-        let persistence = match plan_application_control_plane_audit_persistence_span(
-            prodex_application::ApplicationControlPlaneAuditPersistenceSpanRequest {
-                correlation: correlation_plan.correlation.clone(),
-                audit_storage: audit_plan.audit_storage,
-            },
-        ) {
-            Ok(plan) => serde_json::json!({
-                "name": plan.span.descriptor.name,
-                "kind": format!("{:?}", plan.span.descriptor.kind).to_ascii_lowercase(),
-            }),
-            Err(error) => {
-                let response =
-                    plan_application_control_plane_audit_persistence_span_error_response(&error);
-                return encode_control_plane_http_plan_operation_failure(
-                    route.operation,
-                    application_control_plane_audit_persistence_span_status_label(response.status),
-                    response.code,
-                    response.message,
-                    "control-plane audit persistence span error",
-                    &http,
-                );
-            }
-        };
-        serde_json::json!({
-            "request_id": correlation_plan.correlation.request_id,
-            "call_id": correlation_plan.correlation.call_id,
-            "trace_id": correlation_plan.correlation.trace_id.as_ref().map(|trace_id| trace_id.as_str()),
-            "tenant_id": correlation_plan.correlation.tenant_id,
-            "audit_event_id": correlation_plan.correlation.audit_event_id,
-            "emission_span": emission,
-            "persistence_span": persistence,
-        })
-    } else {
-        serde_json::Value::Null
+    let audit = control_plane_http_audit_json(audit_plan.as_ref());
+    let audit_correlation = match plan_control_plane_http_audit_correlation(
+        audit_plan.as_ref(),
+        request.request_id.unwrap_or_default(),
+        request.call_id,
+        route.operation,
+        &http,
+    ) {
+        Ok(correlation) => correlation,
+        Err(response) => return response,
     };
     let idempotency = if route.http.requires_idempotency {
         let body_digest = request.body_digest.ok_or_else(|| {
