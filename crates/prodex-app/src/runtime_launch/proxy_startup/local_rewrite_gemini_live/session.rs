@@ -316,8 +316,7 @@ where
                         &mut output_inspector,
                         response_obligations,
                         (accounting, &mut *usage),
-                        shared,
-                        authorized,
+                        (shared, authorized),
                     )? {
                         return Ok(());
                     }
@@ -401,8 +400,7 @@ where
                         output_inspector,
                         response_obligations,
                         (accounting, &mut *usage),
-                        shared,
-                        authorized,
+                        (shared, authorized),
                     )? {
                         return Ok(());
                     }
@@ -455,13 +453,16 @@ fn runtime_gemini_live_send_guarded_json<S>(
         &RuntimeGatewayRealtimeAccountingPlan,
         &mut RuntimeGatewayRealtimeUsage,
     ),
-    shared: &RuntimeLocalRewriteProxyShared,
-    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
+    shared_and_authorized: (
+        &RuntimeLocalRewriteProxyShared,
+        Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
+    ),
 ) -> Result<bool>
 where
     S: Read + Write,
 {
     let (accounting, usage) = accounting_and_usage;
+    let (shared, authorized) = shared_and_authorized;
     let text = value.to_string();
     let within_session_limit = runtime_gemini_live_observe_output(&text, accounting, usage);
     let reason = if !within_session_limit {

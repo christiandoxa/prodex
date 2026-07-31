@@ -16,7 +16,7 @@ const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[
 const SONAR_ACTION =
   "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0";
 const PRODUCTION_CLIPPY_COMMAND =
-  "cargo clippy --locked --workspace --lib --bins --all-features --message-format=json -- -D warnings";
+  "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
   "**/test/**",
   "**/tests/**",
@@ -26,9 +26,17 @@ const SONAR_EXCLUSIONS = [
   "**/generated/**",
   "**/vendor/**",
   "**/target/**",
-  "**/*_test.rs",
+  "**/fixtures/**",
+  "**/test_support/**",
+  "**/test_support.rs",
+  "**/test.rs",
+  "**/tests.rs",
   "**/*_tests.rs",
-  "**/test_*.rs",
+  "**/tests_*.rs",
+  "**/*_test/**",
+  "**/*_tests/**",
+  "crates/prodex-app/src/runtime_config/test_compat.rs",
+  "crates/prodex-bench-support/**",
 ];
 
 function workflowJob(contents, name) {
@@ -99,7 +107,8 @@ export function validateSonarConfiguration(workflowContents, properties) {
   const violations = [];
   for (const marker of [
     PRODUCTION_CLIPPY_COMMAND,
-    "> sonar-clippy.json",
+    "mkdir -p target/sonar",
+    "> target/sonar/clippy-report.json",
     "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
     "id: sonar-config",
     "SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}",
@@ -109,6 +118,11 @@ export function validateSonarConfiguration(workflowContents, properties) {
     "Sonar scan activation boundary",
     "if: ${{ steps.sonar-config.outputs.enabled == 'true' }}",
     SONAR_ACTION,
+    "Require zero Sonar issues",
+    "/api/qualitygates/project_status",
+    "/api/issues/search",
+    '--data-urlencode "resolved=false"',
+    'if [ "${total}" -ne 0 ]',
   ]) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: supply-chain job missing ${marker}`);
@@ -120,8 +134,8 @@ export function validateSonarConfiguration(workflowContents, properties) {
   for (const marker of [
     "sonar.sources=src,crates",
     "sonar.inclusions=src/**/*.rs,crates/**/*.rs",
-    "sonar.rust.clippy.enable=false",
-    "sonar.rust.clippyReport.reportPaths=sonar-clippy.json",
+    "sonar.rust.clippy.enabled=false",
+    "sonar.rust.clippyReport.reportPaths=target/sonar/clippy-report.json",
     "sonar.qualitygate.wait=true",
   ]) {
     if (!properties.includes(marker)) {
@@ -131,6 +145,11 @@ export function validateSonarConfiguration(workflowContents, properties) {
   for (const exclusion of SONAR_EXCLUSIONS) {
     if (!properties.includes(exclusion)) {
       violations.push(`sonar-project.properties: missing exclusion ${exclusion}`);
+    }
+  }
+  for (const unsafeExclusion of ["**/*_test.rs", "**/test_*.rs", "**/self_test.rs"]) {
+    if (properties.includes(unsafeExclusion)) {
+      violations.push(`sonar-project.properties: production self-test excluded by ${unsafeExclusion}`);
     }
   }
   for (const marker of ["sonar.projectKey=", "sonar.organization=", "sonar.host.url=", "SONAR_TOKEN="]) {
@@ -432,7 +451,9 @@ function selfTest() {
   const sonarWorkflow = `jobs:
   supply-chain:
     steps:
-      - run: ${PRODUCTION_CLIPPY_COMMAND} > sonar-clippy.json
+      - run: |
+          mkdir -p target/sonar
+          ${PRODUCTION_CLIPPY_COMMAND} > target/sonar/clippy-report.json
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - id: sonar-config
         env:
@@ -443,14 +464,20 @@ function selfTest() {
         run: echo "Sonar scan activation boundary"
       - if: \${{ steps.sonar-config.outputs.enabled == 'true' }}
         uses: ${SONAR_ACTION}
+      - name: Require zero Sonar issues
+        if: \${{ steps.sonar-config.outputs.enabled == 'true' }}
+        run: |
+          curl /api/qualitygates/project_status
+          curl --data-urlencode "resolved=false" /api/issues/search
+          if [ "\${total}" -ne 0 ]; then exit 1; fi
   other:
     steps: []
 `;
   const sonarProperties = `sonar.sources=src,crates
 sonar.inclusions=src/**/*.rs,crates/**/*.rs
 sonar.exclusions=${SONAR_EXCLUSIONS.join(",")}
-sonar.rust.clippy.enable=false
-sonar.rust.clippyReport.reportPaths=sonar-clippy.json
+sonar.rust.clippy.enabled=false
+sonar.rust.clippyReport.reportPaths=target/sonar/clippy-report.json
 sonar.qualitygate.wait=true
 `;
   assert.deepEqual(validateSonarConfiguration(sonarWorkflow, sonarProperties), []);
@@ -469,7 +496,21 @@ sonar.qualitygate.wait=true
   assert.equal(
     validateSonarConfiguration(
       sonarWorkflow,
-      sonarProperties.replace("sonar.rust.clippyReport.reportPaths=sonar-clippy.json", ""),
+      sonarProperties.replace("**/*_tests.rs", "**/*_test.rs"),
+    ).length,
+    2,
+  );
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow,
+      sonarProperties.replace("sonar.rust.clippyReport.reportPaths=target/sonar/clippy-report.json", ""),
+    ).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow,
+      sonarProperties.replace("sonar.rust.clippy.enabled=false", "sonar.rust.clippy.enable=false"),
     ).length,
     1,
   );

@@ -280,18 +280,20 @@ fn start_bank_gateway_with_options(
         mismatched_active,
         upstream,
         gateway_guardrails,
-        RuntimeGovernanceMode::BankEnforce,
-        RuntimeGovernanceDataClassification::Public,
-        vec![RuntimeGovernancePolicyRule {
-            id: "test.allow-api".to_string(),
-            condition: RuntimeGovernancePolicyRuleCondition {
-                channel: Some(RuntimeGovernancePolicyChannel::Api),
-                ..Default::default()
-            },
-            effect: RuntimeGovernancePolicyEffect::Allow,
-            obligations: Vec::new(),
-            reason_code: "policy.test_allow".to_string(),
-        }],
+        (
+            RuntimeGovernanceMode::BankEnforce,
+            RuntimeGovernanceDataClassification::Public,
+            vec![RuntimeGovernancePolicyRule {
+                id: "test.allow-api".to_string(),
+                condition: RuntimeGovernancePolicyRuleCondition {
+                    channel: Some(RuntimeGovernancePolicyChannel::Api),
+                    ..Default::default()
+                },
+                effect: RuntimeGovernancePolicyEffect::Allow,
+                obligations: Vec::new(),
+                reason_code: "policy.test_allow".to_string(),
+            }],
+        ),
     )
 }
 
@@ -308,18 +310,20 @@ fn start_enterprise_gateway_with_options(
         mismatched_active,
         upstream,
         gateway_guardrails,
-        RuntimeGovernanceMode::EnterpriseEnforce,
-        RuntimeGovernanceDataClassification::Public,
-        vec![RuntimeGovernancePolicyRule {
-            id: "test.allow-api".to_string(),
-            condition: RuntimeGovernancePolicyRuleCondition {
-                channel: Some(RuntimeGovernancePolicyChannel::Api),
-                ..Default::default()
-            },
-            effect: RuntimeGovernancePolicyEffect::Allow,
-            obligations: Vec::new(),
-            reason_code: "policy.test_allow".to_string(),
-        }],
+        (
+            RuntimeGovernanceMode::EnterpriseEnforce,
+            RuntimeGovernanceDataClassification::Public,
+            vec![RuntimeGovernancePolicyRule {
+                id: "test.allow-api".to_string(),
+                condition: RuntimeGovernancePolicyRuleCondition {
+                    channel: Some(RuntimeGovernancePolicyChannel::Api),
+                    ..Default::default()
+                },
+                effect: RuntimeGovernancePolicyEffect::Allow,
+                obligations: Vec::new(),
+                reason_code: "policy.test_allow".to_string(),
+            }],
+        ),
     )
 }
 
@@ -329,10 +333,13 @@ fn start_gateway_with_options(
     mismatched_active: Option<GovernanceArtifactKind>,
     upstream: TestUpstream,
     gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
-    mode: RuntimeGovernanceMode,
-    classification_default: RuntimeGovernanceDataClassification,
-    policy_rules: Vec<RuntimeGovernancePolicyRule>,
+    governance: (
+        RuntimeGovernanceMode,
+        RuntimeGovernanceDataClassification,
+        Vec<RuntimeGovernancePolicyRule>,
+    ),
 ) -> BankGatewayFixture {
+    let (mode, classification_default, policy_rules) = governance;
     let root = temp_root(name);
     let paths = app_paths_for_root(root.clone());
     let database_path = root.join("gateway.sqlite");
