@@ -176,12 +176,9 @@ pub(super) fn runtime_gateway_admin_update_key_response(
     if let Some(response) = policy_key_mutation_denied(shared, admin_auth, name, "update_key") {
         return response;
     }
-    let intent = match force_rotate && captured.body.is_empty() {
-        true => RuntimeGatewayKeyMutationIntent::default(),
-        false => match RuntimeGatewayKeyMutationIntent::parse(&captured.body) {
-            Ok(intent) => intent,
-            Err(error) => return error.into_response(),
-        },
+    let intent = match runtime_gateway_admin_key_update_intent(captured, force_rotate) {
+        Ok(intent) => intent,
+        Err(response) => return response,
     };
     let requested_operation = if force_rotate || intent.rotates_secret() {
         ControlPlaneOperation::VirtualKeyRotateSecret
@@ -198,6 +195,40 @@ pub(super) fn runtime_gateway_admin_update_key_response(
         Ok(execution) => execution,
         Err(response) => return response,
     };
+    let returned_token = match runtime_gateway_admin_apply_key_update(
+        name,
+        captured,
+        shared,
+        admin_auth,
+        execution,
+        &intent,
+        force_rotate,
+    ) {
+        Ok(token) => token,
+        Err(response) => return response,
+    };
+    runtime_gateway_admin_updated_key_response(name, shared, returned_token)
+}
+
+fn runtime_gateway_admin_key_update_intent(
+    captured: &RuntimeProxyRequest,
+    force_rotate: bool,
+) -> Result<RuntimeGatewayKeyMutationIntent, tiny_http::ResponseBox> {
+    if force_rotate && captured.body.is_empty() {
+        return Ok(RuntimeGatewayKeyMutationIntent::default());
+    }
+    RuntimeGatewayKeyMutationIntent::parse(&captured.body).map_err(|error| error.into_response())
+}
+
+fn runtime_gateway_admin_apply_key_update(
+    name: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    execution: RuntimeGatewayAdminMutationExecution,
+    intent: &RuntimeGatewayKeyMutationIntent,
+    force_rotate: bool,
+) -> Result<Option<Zeroizing<String>>, tiny_http::ResponseBox> {
     let RuntimeGatewayAdminMutationExecution {
         authorized_action,
         governance,
@@ -261,30 +292,32 @@ pub(super) fn runtime_gateway_admin_update_key_response(
         }
         Ok(())
     });
-    match result {
-        Ok(()) => {
-            let entry = match runtime_gateway_virtual_key_entry_by_name(shared, name) {
-                Ok(Some(entry)) => entry,
-                Ok(None) | Err(()) => return runtime_gateway_admin_state_unavailable_response(),
-            };
-            let Ok(usage) = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage)
-            else {
-                return runtime_gateway_admin_state_unavailable_response();
-            };
-            runtime_gateway_admin_json_response(
-                200,
-                serde_json::json!({
-                    "object": "gateway.key",
-                    "key": runtime_gateway_admin_key_json(
-                        &entry,
-                        usage.get(&entry.key.name).cloned(),
-                    ),
-                    "token": returned_token.as_ref().map(|token| token.as_str()),
-                }),
-            )
-        }
-        Err(response) => response,
-    }
+    result.map(|()| returned_token)
+}
+
+fn runtime_gateway_admin_updated_key_response(
+    name: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    returned_token: Option<Zeroizing<String>>,
+) -> tiny_http::ResponseBox {
+    let entry = match runtime_gateway_virtual_key_entry_by_name(shared, name) {
+        Ok(Some(entry)) => entry,
+        Ok(None) | Err(()) => return runtime_gateway_admin_state_unavailable_response(),
+    };
+    let Ok(usage) = runtime_gateway_admin_state_snapshot(&shared.gateway_usage.usage) else {
+        return runtime_gateway_admin_state_unavailable_response();
+    };
+    runtime_gateway_admin_json_response(
+        200,
+        serde_json::json!({
+            "object": "gateway.key",
+            "key": runtime_gateway_admin_key_json(
+                &entry,
+                usage.get(&entry.key.name).cloned(),
+            ),
+            "token": returned_token.as_ref().map(|token| token.as_str()),
+        }),
+    )
 }
 
 pub(super) fn runtime_gateway_admin_delete_key_response(

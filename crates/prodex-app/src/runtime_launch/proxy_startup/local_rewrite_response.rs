@@ -114,6 +114,201 @@ fn runtime_gateway_audit_unavailable_response() -> tiny_http::ResponseBox {
     )
 }
 
+fn runtime_gateway_response_policy_blocked(
+    shared: &RuntimeLocalRewriteProxyShared,
+    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+    request_id: u64,
+    action: &str,
+    reason: &str,
+    code: &str,
+    message: &str,
+) -> tiny_http::ResponseBox {
+    if runtime_gateway_audit_response_blocked(shared, audit_context, request_id, action, reason)
+        .is_err()
+    {
+        return runtime_gateway_audit_unavailable_response();
+    }
+    build_runtime_proxy_json_error_response(403, code, message)
+}
+
+fn runtime_gateway_apply_buffered_inspection(
+    parts: &mut RuntimeHeapTrimmedBufferedResponseParts,
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    obligations: Option<&prodex_application::ApplicationResponseObligationPlan>,
+    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+) -> Option<tiny_http::ResponseBox> {
+    if !(200..300).contains(&parts.status)
+        || !obligations.is_some_and(|plan| plan.inspection_required)
+    {
+        return None;
+    }
+    match crate::runtime_proxy::presidio::local::runtime_local_inspect_and_mask(
+        parts.body.as_slice().to_vec(),
+    ) {
+        Ok(inspected) => {
+            if obligations.is_some_and(|plan| {
+                plan.enforce
+                    && plan.require_full_inspection
+                    && inspected.coverage != prodex_domain::InspectionCoverage::Full
+            }) {
+                return Some(runtime_gateway_response_policy_blocked(
+                    shared,
+                    audit_context,
+                    request_id,
+                    "response_inspection_failed",
+                    "response_inspection_incomplete",
+                    "response_inspection_incomplete",
+                    "gateway response policy denied this response",
+                ));
+            }
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_response_inspection",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("coverage", inspected.coverage.as_str()),
+                        runtime_proxy_log_field(
+                            "finding_count",
+                            inspected.findings.len().to_string(),
+                        ),
+                        runtime_proxy_log_field("changed", inspected.changed.to_string()),
+                    ],
+                ),
+            );
+            parts.body = inspected.body.into();
+        }
+        Err(_) if obligations.is_some_and(|plan| plan.enforce) => {
+            return Some(runtime_gateway_response_policy_blocked(
+                shared,
+                audit_context,
+                request_id,
+                "response_inspection_failed",
+                "response_inspection_unsupported",
+                "response_inspection_unsupported",
+                "gateway response policy denied this response",
+            ));
+        }
+        Err(_) => runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_response_inspection",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("coverage", "unsupported"),
+                    runtime_proxy_log_field("finding_count", "0"),
+                    runtime_proxy_log_field("changed", "false"),
+                ],
+            ),
+        ),
+    }
+    None
+}
+
+fn runtime_gateway_apply_buffered_output_limit(
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    obligations: Option<&prodex_application::ApplicationResponseObligationPlan>,
+    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+) -> Option<tiny_http::ResponseBox> {
+    if !(200..300).contains(&parts.status) {
+        return None;
+    }
+    let plan = obligations?;
+    let limit = plan.maximum_output_tokens?;
+    let output_tokens = u32::try_from(parts.body.len().saturating_add(3) / 4).unwrap_or(u32::MAX);
+    if !plan.enforce || output_tokens <= limit {
+        return None;
+    }
+    Some(runtime_gateway_response_policy_blocked(
+        shared,
+        audit_context,
+        request_id,
+        "response_obligation_blocked",
+        "output_token_limit_exceeded",
+        "output_token_limit_exceeded",
+        "gateway response policy denied this response",
+    ))
+}
+
+fn runtime_gateway_apply_buffered_guardrails(
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+) -> Option<tiny_http::ResponseBox> {
+    if !(200..300).contains(&parts.status) {
+        return None;
+    }
+    if let Some(block) = runtime_proxy_crate::runtime_gateway_response_guardrail_block(
+        &parts.body,
+        &shared.gateway_guardrails,
+    ) {
+        if runtime_gateway_audit_response_blocked(
+            shared,
+            audit_context,
+            request_id,
+            "response_guardrail_blocked",
+            block.kind.as_str(),
+        )
+        .is_err()
+        {
+            return Some(runtime_gateway_audit_unavailable_response());
+        }
+        crate::runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_guardrail_response_blocked",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("reason", block.kind.as_str()),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
+                ],
+            ),
+        );
+        return Some(build_runtime_proxy_json_error_response(
+            403,
+            "policy_violation",
+            "gateway guardrail blocked this response",
+        ));
+    }
+    let block = runtime_gateway_guardrail_webhook_block("post", request_id, &parts.body, shared)?;
+    if runtime_gateway_audit_response_blocked(
+        shared,
+        audit_context,
+        request_id,
+        "response_guardrail_webhook_blocked",
+        block.reason.as_str(),
+    )
+    .is_err()
+    {
+        return Some(runtime_gateway_audit_unavailable_response());
+    }
+    crate::runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_guardrail_webhook_blocked",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("phase", "post"),
+                runtime_proxy_log_field("reason", block.reason.as_str()),
+                runtime_proxy_log_field("matched_value_redacted", "true"),
+            ],
+        ),
+    );
+    Some(build_runtime_proxy_json_error_response(
+        403,
+        "policy_violation",
+        "gateway guardrail webhook blocked this response",
+    ))
+}
+
 pub(super) fn runtime_local_rewrite_response_with_call_id(
     parts: RuntimeHeapTrimmedBufferedResponseParts,
     request_id: u64,
@@ -133,183 +328,30 @@ pub(super) fn runtime_local_rewrite_governed_response_with_call_id(
     shared: &RuntimeLocalRewriteProxyShared,
     governance: RuntimeGatewayResponseGovernance,
 ) -> tiny_http::ResponseBox {
-    let obligations = governance.obligations;
-    if (200..300).contains(&parts.status)
-        && obligations.is_some_and(|plan| plan.inspection_required)
-    {
-        match crate::runtime_proxy::presidio::local::runtime_local_inspect_and_mask(
-            parts.body.as_slice().to_vec(),
-        ) {
-            Ok(inspected) => {
-                if obligations.is_some_and(|plan| {
-                    plan.enforce
-                        && plan.require_full_inspection
-                        && inspected.coverage != prodex_domain::InspectionCoverage::Full
-                }) {
-                    if runtime_gateway_audit_response_blocked(
-                        shared,
-                        governance.audit_context.as_ref(),
-                        request_id,
-                        "response_inspection_failed",
-                        "response_inspection_incomplete",
-                    )
-                    .is_err()
-                    {
-                        return runtime_gateway_audit_unavailable_response();
-                    }
-                    return build_runtime_proxy_json_error_response(
-                        403,
-                        "response_inspection_incomplete",
-                        "gateway response policy denied this response",
-                    );
-                }
-                runtime_proxy_log(
-                    &shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "gateway_response_inspection",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "http"),
-                            runtime_proxy_log_field("coverage", inspected.coverage.as_str()),
-                            runtime_proxy_log_field(
-                                "finding_count",
-                                inspected.findings.len().to_string(),
-                            ),
-                            runtime_proxy_log_field("changed", inspected.changed.to_string()),
-                        ],
-                    ),
-                );
-                parts.body = inspected.body.into();
-            }
-            Err(_) if obligations.is_some_and(|plan| plan.enforce) => {
-                if runtime_gateway_audit_response_blocked(
-                    shared,
-                    governance.audit_context.as_ref(),
-                    request_id,
-                    "response_inspection_failed",
-                    "response_inspection_unsupported",
-                )
-                .is_err()
-                {
-                    return runtime_gateway_audit_unavailable_response();
-                }
-                return build_runtime_proxy_json_error_response(
-                    403,
-                    "response_inspection_unsupported",
-                    "gateway response policy denied this response",
-                );
-            }
-            Err(_) => {
-                runtime_proxy_log(
-                    &shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "gateway_response_inspection",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "http"),
-                            runtime_proxy_log_field("coverage", "unsupported"),
-                            runtime_proxy_log_field("finding_count", "0"),
-                            runtime_proxy_log_field("changed", "false"),
-                        ],
-                    ),
-                );
-            }
-        }
+    let obligations = governance.obligations.as_ref();
+    let audit_context = governance.audit_context.as_ref();
+    if let Some(response) = runtime_gateway_apply_buffered_inspection(
+        &mut parts,
+        request_id,
+        shared,
+        obligations,
+        audit_context,
+    ) {
+        return response;
     }
-    if (200..300).contains(&parts.status)
-        && obligations.is_some_and(|plan| {
-            plan.enforce
-                && plan.maximum_output_tokens.is_some_and(|limit| {
-                    u32::try_from(parts.body.len().saturating_add(3) / 4).unwrap_or(u32::MAX)
-                        > limit
-                })
-        })
-    {
-        if runtime_gateway_audit_response_blocked(
-            shared,
-            governance.audit_context.as_ref(),
-            request_id,
-            "response_obligation_blocked",
-            "output_token_limit_exceeded",
-        )
-        .is_err()
-        {
-            return runtime_gateway_audit_unavailable_response();
-        }
-        return build_runtime_proxy_json_error_response(
-            403,
-            "output_token_limit_exceeded",
-            "gateway response policy denied this response",
-        );
+    if let Some(response) = runtime_gateway_apply_buffered_output_limit(
+        &parts,
+        request_id,
+        shared,
+        obligations,
+        audit_context,
+    ) {
+        return response;
     }
-    if (200..300).contains(&parts.status)
-        && let Some(block) = runtime_proxy_crate::runtime_gateway_response_guardrail_block(
-            &parts.body,
-            &shared.gateway_guardrails,
-        )
+    if let Some(response) =
+        runtime_gateway_apply_buffered_guardrails(&parts, request_id, shared, audit_context)
     {
-        if runtime_gateway_audit_response_blocked(
-            shared,
-            governance.audit_context.as_ref(),
-            request_id,
-            "response_guardrail_blocked",
-            block.kind.as_str(),
-        )
-        .is_err()
-        {
-            return runtime_gateway_audit_unavailable_response();
-        }
-        crate::runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_guardrail_response_blocked",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("reason", block.kind.as_str()),
-                    runtime_proxy_log_field("matched_value_redacted", "true"),
-                ],
-            ),
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "policy_violation",
-            "gateway guardrail blocked this response",
-        );
-    }
-    if (200..300).contains(&parts.status)
-        && let Some(block) =
-            runtime_gateway_guardrail_webhook_block("post", request_id, &parts.body, shared)
-    {
-        if runtime_gateway_audit_response_blocked(
-            shared,
-            governance.audit_context.as_ref(),
-            request_id,
-            "response_guardrail_webhook_blocked",
-            block.reason.as_str(),
-        )
-        .is_err()
-        {
-            return runtime_gateway_audit_unavailable_response();
-        }
-        crate::runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_guardrail_webhook_blocked",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("phase", "post"),
-                    runtime_proxy_log_field("reason", block.reason.as_str()),
-                    runtime_proxy_log_field("matched_value_redacted", "true"),
-                ],
-            ),
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "policy_violation",
-            "gateway guardrail webhook blocked this response",
-        );
+        return response;
     }
     if let Some(header_name) = shared.gateway_call_id_header.as_deref() {
         parts.headers.push((

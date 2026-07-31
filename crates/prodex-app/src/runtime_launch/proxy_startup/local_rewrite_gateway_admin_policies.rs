@@ -41,7 +41,9 @@ use super::local_rewrite_application_boundary::{
     runtime_gateway_admin_control_plane_action_for_operation, runtime_gateway_now_unix_ms,
 };
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
-use super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation_execution;
+use super::local_rewrite_gateway_admin_execution::{
+    RuntimeGatewayAdminMutationExecution, runtime_gateway_admin_mutation_execution,
+};
 use super::local_rewrite_gateway_admin_policy_resource::{
     RuntimeGovernanceResource, policy_activation_operation, record_policy_lifecycle,
 };
@@ -64,12 +66,71 @@ pub(super) fn runtime_gateway_admin_policy_response(
     admin_auth: &RuntimeGatewayAdminAuth,
     base_action: &ControlPlaneActionPlan,
 ) -> Option<tiny_http::ResponseBox> {
+    if let Some(response) = runtime_gateway_admin_special_policy_response(
+        captured,
+        path,
+        admin_prefix,
+        shared,
+        admin_auth,
+        base_action,
+    ) {
+        return Some(response);
+    }
+    runtime_gateway_admin_resource_response(
+        captured,
+        path,
+        admin_prefix,
+        shared,
+        admin_auth,
+        base_action,
+    )
+}
+
+fn runtime_gateway_admin_special_policy_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+) -> Option<tiny_http::ResponseBox> {
     let outbox = format!("{admin_prefix}/governance/outbox");
     let audit_integrity = format!("{admin_prefix}/governance/audit/integrity");
     let audit_export = format!("{admin_prefix}/audit/exports");
     if path == audit_export {
         return Some(audit_export_response(captured, shared, base_action));
     }
+    if path == audit_integrity {
+        return Some(audit_integrity_response(captured, shared, base_action));
+    }
+    if path == outbox || path == format!("{outbox}/claim") {
+        return Some(outbox_response(
+            captured,
+            path,
+            &outbox,
+            shared,
+            admin_auth,
+            base_action,
+        ));
+    }
+    runtime_gateway_admin_special_repository_response(
+        captured,
+        path,
+        admin_prefix,
+        shared,
+        admin_auth,
+        base_action,
+    )
+}
+
+fn runtime_gateway_admin_special_repository_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+) -> Option<tiny_http::ResponseBox> {
     let audit_retention = format!("{admin_prefix}/audit/retention");
     if path == format!("{audit_retention}/holds")
         || path.starts_with(&(format!("{audit_retention}/holds/")))
@@ -87,19 +148,6 @@ pub(super) fn runtime_gateway_admin_policy_response(
             admin_auth,
             base_action,
             &repository,
-        ));
-    }
-    if path == audit_integrity {
-        return Some(audit_integrity_response(captured, shared, base_action));
-    }
-    if path == outbox || path == format!("{outbox}/claim") {
-        return Some(outbox_response(
-            captured,
-            path,
-            &outbox,
-            shared,
-            admin_auth,
-            base_action,
         ));
     }
     let execution_approvals = format!("{admin_prefix}/execution-approvals");
@@ -132,6 +180,17 @@ pub(super) fn runtime_gateway_admin_policy_response(
             &repository,
         ));
     }
+    None
+}
+
+fn runtime_gateway_admin_resource_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+) -> Option<tiny_http::ResponseBox> {
     let (resource, resource_path) =
         RuntimeGovernanceResource::ALL
             .into_iter()
@@ -1082,108 +1141,19 @@ fn execution_approval_response(
         .unwrap_or_default();
     let tenant_id = base_action.tenant.tenant_id;
     match (method.as_str(), segments.as_slice()) {
-        ("GET", []) => match repository.list_execution_approvals(tenant_id) {
-            Ok(approvals) => runtime_gateway_admin_json_response(
-                200,
-                serde_json::json!({
-                    "object": "governance.execution_approval.list",
-                    "data": approvals.into_iter().map(execution_approval_json).collect::<Vec<_>>(),
-                }),
-            ),
-            Err(error) => repository_error(error),
-        },
+        ("GET", []) => execution_approval_list_response(repository, tenant_id),
         ("GET", [approval_id]) => {
-            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
-                Ok(approval_id) => approval_id,
-                Err(_) => return invalid_request(),
-            };
-            match repository.get_approval(tenant_id, &approval_id) {
-                Ok(approval) if approval.kind == ApprovalKind::Execution => {
-                    runtime_gateway_admin_json_response(200, execution_approval_json(approval))
-                }
-                Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
-                Err(error) => repository_error(error),
-            }
+            execution_approval_get_response(repository, tenant_id, approval_id)
         }
-        ("POST", [approval_id, "votes"]) => {
-            let body = match runtime_gateway_admin_json_body(captured) {
-                Ok(body) => body,
-                Err(response) => return response,
-            };
-            let Some(expected_version) = body
-                .get("expected_version")
-                .and_then(serde_json::Value::as_u64)
-            else {
-                return invalid_request();
-            };
-            let action = match body.get("decision").and_then(serde_json::Value::as_str) {
-                Some("approve") => ApprovalAction::Approve,
-                Some("reject") => ApprovalAction::Reject,
-                Some("cancel") => ApprovalAction::Cancel,
-                _ => return invalid_request(),
-            };
-            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
-                Ok(approval_id) => approval_id,
-                Err(_) => return invalid_request(),
-            };
-            let execution = match execution(captured, path, admin_auth, base_action) {
-                Ok(execution) => execution,
-                Err(response) => return response,
-            };
-            let audit = match execution_approval_audit_command(
-                repository,
-                &execution.authorized_action,
-                &approval_id,
-                match action {
-                    ApprovalAction::Approve => "governance.execution_approval.approve",
-                    ApprovalAction::Reject => "governance.execution_approval.reject",
-                    ApprovalAction::Cancel => "governance.execution_approval.cancel",
-                    _ => unreachable!(),
-                },
-            ) {
-                Ok(audit) => audit,
-                Err(error) => return repository_error(error),
-            };
-            let reason = match action {
-                ApprovalAction::Reject => {
-                    Some(ApprovalReasonCode::new("approval.rejected").unwrap())
-                }
-                ApprovalAction::Cancel => {
-                    Some(ApprovalReasonCode::new("approval.cancelled").unwrap())
-                }
-                _ => None,
-            };
-            match ApplicationExecutionApprovalService::new(repository).review_idempotent(
-                ApprovalVoteRequest {
-                    tenant_id,
-                    approval_id: approval_id.clone(),
-                    actor: actor(&execution.authorized_action),
-                    expected_version,
-                    now_unix_ms: execution.atomic_write.completed_at_unix_ms,
-                    reason,
-                    audit_outbox: audit,
-                },
-                action,
-                ApprovalVoteIdempotency {
-                    operation: execution.atomic_write.operation.clone(),
-                    started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
-                },
-            ) {
-                Ok(ApprovalVoteMutationOutcome::Applied(approval)) => {
-                    runtime_gateway_admin_json_response(200, execution_approval_json(approval))
-                }
-                Ok(ApprovalVoteMutationOutcome::Replayed(snapshot)) => {
-                    runtime_gateway_admin_json_response(
-                        200,
-                        execution_approval_snapshot_json(&approval_id, snapshot),
-                    )
-                }
-                Err(ApplicationGovernanceLifecycleError::Repository(error)) => {
-                    repository_error(error)
-                }
-                Err(_) => repository_error(GovernanceRepositoryError::InvalidInput),
-            }
-        }
+        ("POST", [approval_id, "votes"]) => execution_approval_vote_response(
+            captured,
+            path,
+            approval_id,
+            admin_auth,
+            base_action,
+            tenant_id,
+            repository,
+        ),
         ("GET" | "POST", _) => build_runtime_proxy_json_error_response(
             404,
             "execution_approval_not_found",
@@ -1194,6 +1164,121 @@ fn execution_approval_response(
             "control_plane_method_not_allowed",
             "HTTP method is not allowed for this governance route",
         ),
+    }
+}
+
+fn execution_approval_list_response(
+    repository: &RuntimeGovernanceRepository<'_>,
+    tenant_id: prodex_domain::TenantId,
+) -> tiny_http::ResponseBox {
+    match repository.list_execution_approvals(tenant_id) {
+        Ok(approvals) => runtime_gateway_admin_json_response(
+            200,
+            serde_json::json!({
+                "object": "governance.execution_approval.list",
+                "data": approvals.into_iter().map(execution_approval_json).collect::<Vec<_>>(),
+            }),
+        ),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn execution_approval_get_response(
+    repository: &RuntimeGovernanceRepository<'_>,
+    tenant_id: prodex_domain::TenantId,
+    approval_id: &str,
+) -> tiny_http::ResponseBox {
+    let approval_id = match ApprovalId::new(approval_id.to_string()) {
+        Ok(approval_id) => approval_id,
+        Err(_) => return invalid_request(),
+    };
+    match repository.get_approval(tenant_id, &approval_id) {
+        Ok(approval) if approval.kind == ApprovalKind::Execution => {
+            runtime_gateway_admin_json_response(200, execution_approval_json(approval))
+        }
+        Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn execution_approval_vote_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    approval_id: &str,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    tenant_id: prodex_domain::TenantId,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let body = match runtime_gateway_admin_json_body(captured) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let Some(expected_version) = body
+        .get("expected_version")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return invalid_request();
+    };
+    let action = match body.get("decision").and_then(serde_json::Value::as_str) {
+        Some("approve") => ApprovalAction::Approve,
+        Some("reject") => ApprovalAction::Reject,
+        Some("cancel") => ApprovalAction::Cancel,
+        _ => return invalid_request(),
+    };
+    let approval_id = match ApprovalId::new(approval_id.to_string()) {
+        Ok(approval_id) => approval_id,
+        Err(_) => return invalid_request(),
+    };
+    let execution = match execution(captured, path, admin_auth, base_action) {
+        Ok(execution) => execution,
+        Err(response) => return response,
+    };
+    let audit_action = match action {
+        ApprovalAction::Approve => "governance.execution_approval.approve",
+        ApprovalAction::Reject => "governance.execution_approval.reject",
+        ApprovalAction::Cancel => "governance.execution_approval.cancel",
+        _ => unreachable!(),
+    };
+    let audit = match execution_approval_audit_command(
+        repository,
+        &execution.authorized_action,
+        &approval_id,
+        audit_action,
+    ) {
+        Ok(audit) => audit,
+        Err(error) => return repository_error(error),
+    };
+    let reason = match action {
+        ApprovalAction::Reject => Some(ApprovalReasonCode::new("approval.rejected").unwrap()),
+        ApprovalAction::Cancel => Some(ApprovalReasonCode::new("approval.cancelled").unwrap()),
+        _ => None,
+    };
+    match ApplicationExecutionApprovalService::new(repository).review_idempotent(
+        ApprovalVoteRequest {
+            tenant_id,
+            approval_id: approval_id.clone(),
+            actor: actor(&execution.authorized_action),
+            expected_version,
+            now_unix_ms: execution.atomic_write.completed_at_unix_ms,
+            reason,
+            audit_outbox: audit,
+        },
+        action,
+        ApprovalVoteIdempotency {
+            operation: execution.atomic_write.operation.clone(),
+            started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
+        },
+    ) {
+        Ok(ApprovalVoteMutationOutcome::Applied(approval)) => {
+            runtime_gateway_admin_json_response(200, execution_approval_json(approval))
+        }
+        Ok(ApprovalVoteMutationOutcome::Replayed(snapshot)) => runtime_gateway_admin_json_response(
+            200,
+            execution_approval_snapshot_json(&approval_id, snapshot),
+        ),
+        Err(ApplicationGovernanceLifecycleError::Repository(error)) => repository_error(error),
+        Err(_) => repository_error(GovernanceRepositoryError::InvalidInput),
     }
 }
 
@@ -1216,125 +1301,17 @@ fn break_glass_approval_response(
         })
         .unwrap_or_default();
     let tenant_id = base_action.tenant.tenant_id;
+    let context = RuntimeBreakGlassResponseContext {
+        captured,
+        path,
+        admin_auth,
+        base_action,
+        repository,
+    };
     match (method.as_str(), segments.as_slice()) {
-        ("GET", []) => match repository.list_approvals(tenant_id, ApprovalKind::BreakGlass) {
-            Ok(approvals) => runtime_gateway_admin_json_response(
-                200,
-                serde_json::json!({
-                    "object": "governance.break_glass_approval.list",
-                    "data": approvals.into_iter().map(break_glass_approval_json).collect::<Vec<_>>(),
-                }),
-            ),
-            Err(error) => repository_error(error),
-        },
-        ("POST", []) => {
-            let body = match runtime_gateway_admin_json_body(captured) {
-                Ok(body) => body,
-                Err(response) => return response,
-            };
-            let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str)
-            else {
-                return invalid_request();
-            };
-            let reason = match body
-                .get("reason_code")
-                .and_then(serde_json::Value::as_str)
-                .map(ApprovalReasonCode::new)
-            {
-                Some(Ok(reason)) => reason,
-                _ => return invalid_request(),
-            };
-            let Some(expires_at_unix_ms) = body
-                .get("expires_at_unix_ms")
-                .and_then(serde_json::Value::as_u64)
-            else {
-                return invalid_request();
-            };
-            let required_quorum = body
-                .get("required_quorum")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|value| u8::try_from(value).ok())
-                .unwrap_or(ApprovalKind::BreakGlass.minimum_quorum());
-            let now = runtime_gateway_now_unix_ms();
-            if expires_at_unix_ms <= now || expires_at_unix_ms > now.saturating_add(3_600_000) {
-                return invalid_request();
-            }
-            let approval_id = match ApprovalId::new(approval_id.to_string()) {
-                Ok(approval_id) => approval_id,
-                Err(_) => return invalid_request(),
-            };
-            let scope = match ApprovalScope::new(format!("audit_retention:{}", reason.as_str())) {
-                Ok(scope) => scope,
-                Err(_) => return invalid_request(),
-            };
-            let fingerprint = match ApprovalFingerprint::new(artifact_fingerprint(
-                format!("{}:{}:{}", tenant_id, scope.as_str(), expires_at_unix_ms).as_bytes(),
-            )) {
-                Ok(fingerprint) => fingerprint,
-                Err(_) => return invalid_request(),
-            };
-            let execution = match execution(captured, path, admin_auth, base_action) {
-                Ok(execution) => execution,
-                Err(response) => return response,
-            };
-            let approval = match ApprovalRecord::pending(
-                approval_id.clone(),
-                tenant_id,
-                ApprovalKind::BreakGlass,
-                scope,
-                fingerprint,
-                execution.authorized_action.audit_event.principal_id,
-                required_quorum,
-                expires_at_unix_ms,
-            ) {
-                Ok(approval) => approval,
-                Err(_) => return invalid_request(),
-            };
-            let audit = match control_plane_audit_command(
-                repository,
-                &execution.authorized_action,
-                "governance.break_glass_approval.create",
-                "break_glass_approval",
-                Some(approval_id.as_str()),
-            ) {
-                Ok(audit) => audit,
-                Err(error) => return repository_error(error),
-            };
-            match repository.create_approval_idempotent(
-                approval.clone(),
-                audit,
-                GovernanceMutationIdempotency {
-                    operation: execution.atomic_write.operation,
-                    started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
-                },
-            ) {
-                Ok(outcome) => runtime_gateway_admin_json_response(
-                    if outcome == GovernanceWriteOutcome::Applied {
-                        201
-                    } else {
-                        200
-                    },
-                    serde_json::json!({
-                        "approval": break_glass_approval_json(approval),
-                        "replayed": outcome == GovernanceWriteOutcome::Replayed,
-                    }),
-                ),
-                Err(error) => repository_error(error),
-            }
-        }
-        ("GET", [approval_id]) => {
-            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
-                Ok(approval_id) => approval_id,
-                Err(_) => return invalid_request(),
-            };
-            match repository.get_approval(tenant_id, &approval_id) {
-                Ok(approval) if approval.kind == ApprovalKind::BreakGlass => {
-                    runtime_gateway_admin_json_response(200, break_glass_approval_json(approval))
-                }
-                Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
-                Err(error) => repository_error(error),
-            }
-        }
+        ("GET", []) => break_glass_list_response(repository, tenant_id),
+        ("POST", []) => break_glass_create_response(&context, tenant_id),
+        ("GET", [approval_id]) => break_glass_get_response(repository, tenant_id, approval_id),
         ("POST", [approval_id, action @ ("votes" | "activate" | "revoke")]) => {
             break_glass_transition_response(
                 captured,
@@ -1356,6 +1333,151 @@ fn break_glass_approval_response(
             "control_plane_method_not_allowed",
             "HTTP method is not allowed for this break-glass route",
         ),
+    }
+}
+
+struct RuntimeBreakGlassResponseContext<'a> {
+    captured: &'a RuntimeProxyRequest,
+    path: &'a str,
+    admin_auth: &'a RuntimeGatewayAdminAuth,
+    base_action: &'a ControlPlaneActionPlan,
+    repository: &'a RuntimeGovernanceRepository<'a>,
+}
+
+fn break_glass_list_response(
+    repository: &RuntimeGovernanceRepository<'_>,
+    tenant_id: prodex_domain::TenantId,
+) -> tiny_http::ResponseBox {
+    match repository.list_approvals(tenant_id, ApprovalKind::BreakGlass) {
+        Ok(approvals) => runtime_gateway_admin_json_response(
+            200,
+            serde_json::json!({
+                "object": "governance.break_glass_approval.list",
+                "data": approvals.into_iter().map(break_glass_approval_json).collect::<Vec<_>>(),
+            }),
+        ),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn break_glass_get_response(
+    repository: &RuntimeGovernanceRepository<'_>,
+    tenant_id: prodex_domain::TenantId,
+    approval_id: &str,
+) -> tiny_http::ResponseBox {
+    let approval_id = match ApprovalId::new(approval_id.to_string()) {
+        Ok(approval_id) => approval_id,
+        Err(_) => return invalid_request(),
+    };
+    match repository.get_approval(tenant_id, &approval_id) {
+        Ok(approval) if approval.kind == ApprovalKind::BreakGlass => {
+            runtime_gateway_admin_json_response(200, break_glass_approval_json(approval))
+        }
+        Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn break_glass_create_response(
+    context: &RuntimeBreakGlassResponseContext<'_>,
+    tenant_id: prodex_domain::TenantId,
+) -> tiny_http::ResponseBox {
+    let body = match runtime_gateway_admin_json_body(context.captured) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str) else {
+        return invalid_request();
+    };
+    let reason = match body
+        .get("reason_code")
+        .and_then(serde_json::Value::as_str)
+        .map(ApprovalReasonCode::new)
+    {
+        Some(Ok(reason)) => reason,
+        _ => return invalid_request(),
+    };
+    let Some(expires_at_unix_ms) = body
+        .get("expires_at_unix_ms")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return invalid_request();
+    };
+    let required_quorum = body
+        .get("required_quorum")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+        .unwrap_or(ApprovalKind::BreakGlass.minimum_quorum());
+    let now = runtime_gateway_now_unix_ms();
+    if expires_at_unix_ms <= now || expires_at_unix_ms > now.saturating_add(3_600_000) {
+        return invalid_request();
+    }
+    let approval_id = match ApprovalId::new(approval_id.to_string()) {
+        Ok(approval_id) => approval_id,
+        Err(_) => return invalid_request(),
+    };
+    let scope = match ApprovalScope::new(format!("audit_retention:{}", reason.as_str())) {
+        Ok(scope) => scope,
+        Err(_) => return invalid_request(),
+    };
+    let fingerprint = match ApprovalFingerprint::new(artifact_fingerprint(
+        format!("{}:{}:{}", tenant_id, scope.as_str(), expires_at_unix_ms).as_bytes(),
+    )) {
+        Ok(fingerprint) => fingerprint,
+        Err(_) => return invalid_request(),
+    };
+    let execution = match execution(
+        context.captured,
+        context.path,
+        context.admin_auth,
+        context.base_action,
+    ) {
+        Ok(execution) => execution,
+        Err(response) => return response,
+    };
+    let approval = match ApprovalRecord::pending(
+        approval_id.clone(),
+        tenant_id,
+        ApprovalKind::BreakGlass,
+        scope,
+        fingerprint,
+        execution.authorized_action.audit_event.principal_id,
+        required_quorum,
+        expires_at_unix_ms,
+    ) {
+        Ok(approval) => approval,
+        Err(_) => return invalid_request(),
+    };
+    let audit = match control_plane_audit_command(
+        context.repository,
+        &execution.authorized_action,
+        "governance.break_glass_approval.create",
+        "break_glass_approval",
+        Some(approval_id.as_str()),
+    ) {
+        Ok(audit) => audit,
+        Err(error) => return repository_error(error),
+    };
+    match context.repository.create_approval_idempotent(
+        approval.clone(),
+        audit,
+        GovernanceMutationIdempotency {
+            operation: execution.atomic_write.operation,
+            started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
+        },
+    ) {
+        Ok(outcome) => runtime_gateway_admin_json_response(
+            if outcome == GovernanceWriteOutcome::Applied {
+                201
+            } else {
+                200
+            },
+            serde_json::json!({
+                "approval": break_glass_approval_json(approval),
+                "replayed": outcome == GovernanceWriteOutcome::Replayed,
+            }),
+        ),
+        Err(error) => repository_error(error),
     }
 }
 
@@ -1658,20 +1780,9 @@ fn activation_response(
     base_action: &ControlPlaneActionPlan,
     repository: &RuntimeGovernanceRepository<'_>,
 ) -> tiny_http::ResponseBox {
-    let approval_id = if action == "revoke" {
-        None
-    } else {
-        let body = match runtime_gateway_admin_json_body(captured) {
-            Ok(body) => body,
-            Err(response) => return response,
-        };
-        let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str) else {
-            return invalid_request();
-        };
-        match ApprovalId::new(approval_id.to_string()) {
-            Ok(value) => Some(value),
-            Err(_) => return invalid_request(),
-        }
+    let approval_id = match runtime_gateway_activation_approval_id(captured, action) {
+        Ok(approval_id) => approval_id,
+        Err(response) => return response,
     };
     let execution = match execution(captured, path, admin_auth, base_action) {
         Ok(execution) => execution,
@@ -1690,7 +1801,6 @@ fn activation_response(
         "revoke" => GovernanceActivationAction::Revoke,
         _ => return invalid_request(),
     };
-    let tenant_id = execution.authorized_action.tenant.tenant_id;
     let audit_action = format!(
         "governance.{}.revision.{}",
         resource.label(),
@@ -1707,43 +1817,112 @@ fn activation_response(
         Err(error) => return repository_error(error),
     };
     let expected_etag = (entity_tag.as_str() != "*").then(|| entity_tag.as_str().to_string());
-    let activate = || {
-        let result = ApplicationGovernanceLifecycleService::new(repository)
-            .activate_revision(
-                &execution.authorized_action,
-                GovernanceActivationRequest {
-                    tenant_id,
-                    kind: resource.kind(),
-                    revision_id: revision_id.to_string(),
-                    approval_id,
-                    actor: actor(&execution.authorized_action),
-                    action: activation_action,
-                    expected_etag,
-                    idempotency_key: execution.atomic_write.operation.key.clone(),
-                    request_fingerprint: execution
-                        .atomic_write
-                        .operation
-                        .request_fingerprint
-                        .clone(),
-                    audit_outbox: audit,
-                    activated_at_unix_ms: execution.atomic_write.completed_at_unix_ms,
-                },
-                |input| governance_artifact_validation_is_valid(shared, resource, input),
-            )
-            .map_err(lifecycle_repository_error)?;
-        Ok(result)
+    let activation = runtime_gateway_activation_result(RuntimeGatewayActivationContext {
+        shared,
+        repository,
+        execution: &execution,
+        resource,
+        revision_id,
+        action,
+        approval_id,
+        activation_action,
+        expected_etag,
+        audit,
+    });
+    runtime_gateway_activation_outcome_response(resource, action, activation)
+}
+
+fn runtime_gateway_activation_approval_id(
+    captured: &RuntimeProxyRequest,
+    action: &str,
+) -> Result<Option<ApprovalId>, tiny_http::ResponseBox> {
+    if action == "revoke" {
+        return Ok(None);
+    }
+    let body = runtime_gateway_admin_json_body(captured)?;
+    let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str) else {
+        return Err(invalid_request());
     };
+    ApprovalId::new(approval_id.to_string())
+        .map(Some)
+        .map_err(|_| invalid_request())
+}
+
+fn runtime_gateway_activation_result(
+    activation_context: RuntimeGatewayActivationContext<'_>,
+) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
+    let tenant_id = activation_context
+        .execution
+        .authorized_action
+        .tenant
+        .tenant_id;
+    let shared = activation_context.shared;
+    let activate = || runtime_gateway_activate_revision(&activation_context);
     let activation = match shared.governance_authority.as_ref() {
         Some(authority) => authority.commit_for_tenant(tenant_id, activate),
         None => activate(),
-    }
-    .and_then(|result| {
-        match shared.refresh_committed_governance_artifact_kind(tenant_id, resource.kind()) {
+    };
+    activation.and_then(|result| {
+        match shared.refresh_committed_governance_artifact_kind(
+            tenant_id,
+            activation_context.resource.kind(),
+        ) {
             Ok(_) => Ok(result),
-            Err(_) if action == "revoke" => Ok(result),
+            Err(_) if activation_context.action == "revoke" => Ok(result),
             Err(error) => Err(error),
         }
-    });
+    })
+}
+
+struct RuntimeGatewayActivationContext<'a> {
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    repository: &'a RuntimeGovernanceRepository<'a>,
+    execution: &'a RuntimeGatewayAdminMutationExecution,
+    resource: RuntimeGovernanceResource,
+    revision_id: &'a str,
+    action: &'a str,
+    approval_id: Option<ApprovalId>,
+    activation_action: GovernanceActivationAction,
+    expected_etag: Option<String>,
+    audit: AuditOutboxWriteCommand,
+}
+
+fn runtime_gateway_activate_revision(
+    context: &RuntimeGatewayActivationContext<'_>,
+) -> Result<GovernanceActivationResult, GovernanceRepositoryError> {
+    ApplicationGovernanceLifecycleService::new(context.repository)
+        .activate_revision(
+            &context.execution.authorized_action,
+            GovernanceActivationRequest {
+                tenant_id: context.execution.authorized_action.tenant.tenant_id,
+                kind: context.resource.kind(),
+                revision_id: context.revision_id.to_string(),
+                approval_id: context.approval_id.clone(),
+                actor: actor(&context.execution.authorized_action),
+                action: context.activation_action,
+                expected_etag: context.expected_etag.clone(),
+                idempotency_key: context.execution.atomic_write.operation.key.clone(),
+                request_fingerprint: context
+                    .execution
+                    .atomic_write
+                    .operation
+                    .request_fingerprint
+                    .clone(),
+                audit_outbox: context.audit.clone(),
+                activated_at_unix_ms: context.execution.atomic_write.completed_at_unix_ms,
+            },
+            |input| {
+                governance_artifact_validation_is_valid(context.shared, context.resource, input)
+            },
+        )
+        .map_err(lifecycle_repository_error)
+}
+
+fn runtime_gateway_activation_outcome_response(
+    resource: RuntimeGovernanceResource,
+    action: &str,
+    activation: Result<GovernanceActivationResult, GovernanceRepositoryError>,
+) -> tiny_http::ResponseBox {
     match activation {
         Ok(result) => {
             record_policy_lifecycle(
@@ -1810,71 +1989,7 @@ fn outbox_response(
     base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
     if path == format!("{outbox}/claim") {
-        return if captured.method.eq_ignore_ascii_case("POST") {
-            if let Err(response) = execution(captured, path, admin_auth, base_action) {
-                return response;
-            }
-            let Some(worker) = shared.gateway_observability.siem_worker.as_ref() else {
-                return build_runtime_proxy_json_error_response(
-                    503,
-                    "governance_outbox_exporter_unavailable",
-                    "SIEM outbox exporter is not configured",
-                );
-            };
-            let tenant_id = base_action.tenant.tenant_id;
-            let now_unix_ms = runtime_gateway_now_unix_ms();
-            match &shared.gateway_state_store {
-                RuntimeGatewayStateStore::Postgres { .. } => {
-                    let Some(repository) = shared.gateway_postgres_repository.as_ref() else {
-                        return repository_error(GovernanceRepositoryError::Database);
-                    };
-                    match worker.run_once_postgres(
-                        repository,
-                        shared.runtime_shared.async_runtime.handle(),
-                        &[tenant_id],
-                        now_unix_ms,
-                    ) {
-                        Ok(()) => runtime_gateway_admin_json_response(
-                            200,
-                            serde_json::json!({
-                                "object": "governance.siem_outbox_claim",
-                                "status": "completed",
-                            }),
-                        ),
-                        Err(error) => repository_error(error),
-                    }
-                }
-                RuntimeGatewayStateStore::Sqlite { path } => {
-                    let repository =
-                        match prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
-                        {
-                            Ok(repository) => repository,
-                            Err(error) => return repository_error(error),
-                        };
-                    match worker.run_once(&repository, now_unix_ms) {
-                        Ok(report) => runtime_gateway_admin_json_response(
-                            200,
-                            serde_json::json!({
-                                "object": "governance.siem_outbox_claim",
-                                "status": "completed",
-                                "selected": report.selected,
-                                "delivered": report.delivered,
-                                "retried": report.retried,
-                                "dead_lettered": report.dead_lettered,
-                            }),
-                        ),
-                        Err(error) => repository_error(error),
-                    }
-                }
-                _ => repository_error(GovernanceRepositoryError::Unsupported),
-            }
-        } else {
-            build_runtime_proxy_json_error_response(
-                405,
-                "control_plane_method_not_allowed",
-                "HTTP method is not allowed for this governance outbox route",
-            )
-        };
+        return outbox_claim_response(captured, path, shared, admin_auth, base_action);
     }
     if !captured.method.eq_ignore_ascii_case("GET") {
         return build_runtime_proxy_json_error_response(
@@ -1883,11 +1998,101 @@ fn outbox_response(
             "HTTP method is not allowed for this governance outbox route",
         );
     }
+    outbox_health_response(shared, base_action.tenant.tenant_id)
+}
+
+fn outbox_claim_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+) -> tiny_http::ResponseBox {
+    if !captured.method.eq_ignore_ascii_case("POST") {
+        return build_runtime_proxy_json_error_response(
+            405,
+            "control_plane_method_not_allowed",
+            "HTTP method is not allowed for this governance outbox route",
+        );
+    }
+    if let Err(response) = execution(captured, path, admin_auth, base_action) {
+        return response;
+    }
+    if shared.gateway_observability.siem_worker.is_none() {
+        return build_runtime_proxy_json_error_response(
+            503,
+            "governance_outbox_exporter_unavailable",
+            "SIEM outbox exporter is not configured",
+        );
+    }
+    outbox_claim_store_response(shared, base_action.tenant.tenant_id)
+}
+
+fn outbox_claim_store_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    tenant_id: prodex_domain::TenantId,
+) -> tiny_http::ResponseBox {
+    let worker = shared
+        .gateway_observability
+        .siem_worker
+        .as_ref()
+        .expect("checked before store dispatch");
+    let now_unix_ms = runtime_gateway_now_unix_ms();
+    match &shared.gateway_state_store {
+        RuntimeGatewayStateStore::Postgres { .. } => {
+            let Some(repository) = shared.gateway_postgres_repository.as_ref() else {
+                return repository_error(GovernanceRepositoryError::Database);
+            };
+            match worker.run_once_postgres(
+                repository,
+                shared.runtime_shared.async_runtime.handle(),
+                &[tenant_id],
+                now_unix_ms,
+            ) {
+                Ok(()) => runtime_gateway_admin_json_response(
+                    200,
+                    serde_json::json!({
+                        "object": "governance.siem_outbox_claim",
+                        "status": "completed",
+                    }),
+                ),
+                Err(error) => repository_error(error),
+            }
+        }
+        RuntimeGatewayStateStore::Sqlite { path } => {
+            let repository =
+                match prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path) {
+                    Ok(repository) => repository,
+                    Err(error) => return repository_error(error),
+                };
+            match worker.run_once(&repository, now_unix_ms) {
+                Ok(report) => runtime_gateway_admin_json_response(
+                    200,
+                    serde_json::json!({
+                        "object": "governance.siem_outbox_claim",
+                        "status": "completed",
+                        "selected": report.selected,
+                        "delivered": report.delivered,
+                        "retried": report.retried,
+                        "dead_lettered": report.dead_lettered,
+                    }),
+                ),
+                Err(error) => repository_error(error),
+            }
+        }
+        _ => repository_error(GovernanceRepositoryError::Unsupported),
+    }
+}
+
+fn outbox_health_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    tenant_id: prodex_domain::TenantId,
+) -> tiny_http::ResponseBox {
     let repository = match repository(shared) {
         Ok(repository) => repository,
         Err(response) => return response,
     };
-    match repository.outbox_health(base_action.tenant.tenant_id) {
+    match repository.outbox_health(tenant_id) {
         Ok(health) => runtime_gateway_admin_json_response(
             200,
             serde_json::json!({

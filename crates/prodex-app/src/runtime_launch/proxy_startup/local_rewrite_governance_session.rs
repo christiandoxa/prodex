@@ -472,117 +472,179 @@ fn runtime_gateway_governance_session_bank(
     fail_closed_on_revocation_error: bool,
     shutdown: Arc<AtomicBool>,
 ) {
-    if runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref()).is_err()
+    let mut revocation_epochs = runtime_gateway_governance_session_initial_refresh(
+        &store,
+        &authority,
+        sqlite.as_ref(),
+        fail_closed_on_revocation_error,
+    );
+    let mut refreshed_at = std::time::Instant::now();
+    let mut revocations_polled_at = std::time::Instant::now();
+    while !shutdown.load(Ordering::SeqCst) {
+        if !runtime_gateway_governance_session_receive(&receiver, &authority, sqlite.as_ref()) {
+            break;
+        }
+        runtime_gateway_governance_session_flush_touches(&store, &authority, sqlite.as_ref());
+        runtime_gateway_governance_session_poll_revocations(
+            &store,
+            &authority,
+            sqlite.as_ref(),
+            fail_closed_on_revocation_error,
+            &mut revocation_epochs,
+            &mut revocations_polled_at,
+            &mut refreshed_at,
+        );
+        runtime_gateway_governance_session_refresh_if_due(
+            &store,
+            &authority,
+            sqlite.as_ref(),
+            fail_closed_on_revocation_error,
+            &mut refreshed_at,
+        );
+    }
+}
+
+fn runtime_gateway_governance_session_initial_refresh(
+    store: &RuntimeGatewayGovernanceSessionStore,
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    fail_closed_on_revocation_error: bool,
+) -> BTreeMap<TenantId, u64> {
+    if runtime_gateway_governance_session_refresh(store, authority, sqlite).is_err()
         && fail_closed_on_revocation_error
     {
-        runtime_gateway_governance_sessions_mark_unavailable(&store);
+        runtime_gateway_governance_sessions_mark_unavailable(store);
     }
     let mut revocation_epochs = BTreeMap::new();
     if runtime_gateway_governance_session_revocation_changed(
-        &authority,
-        sqlite.as_ref(),
+        authority,
+        sqlite,
         &mut revocation_epochs,
     )
     .is_err()
         && fail_closed_on_revocation_error
     {
-        runtime_gateway_governance_sessions_mark_unavailable(&store);
+        runtime_gateway_governance_sessions_mark_unavailable(store);
     }
-    let mut refreshed_at = std::time::Instant::now();
-    let mut revocations_polled_at = std::time::Instant::now();
-    while !shutdown.load(Ordering::SeqCst) {
-        match receiver.recv_timeout(RUNTIME_GATEWAY_GOVERNANCE_SESSION_POLL_INTERVAL) {
-            Ok(RuntimeGatewayGovernanceSessionBankCommand::Admit {
-                command,
-                acknowledge,
-            }) => {
-                let result =
-                    runtime_gateway_governance_session_upsert(&authority, sqlite.as_ref(), command);
-                let _ = acknowledge.send(result);
-            }
-            Ok(RuntimeGatewayGovernanceSessionBankCommand::Revoke {
+    revocation_epochs
+}
+
+fn runtime_gateway_governance_session_receive(
+    receiver: &Receiver<RuntimeGatewayGovernanceSessionBankCommand>,
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+) -> bool {
+    match receiver.recv_timeout(RUNTIME_GATEWAY_GOVERNANCE_SESSION_POLL_INTERVAL) {
+        Ok(RuntimeGatewayGovernanceSessionBankCommand::Admit {
+            command,
+            acknowledge,
+        }) => {
+            let result = runtime_gateway_governance_session_upsert(authority, sqlite, command);
+            let _ = acknowledge.send(result);
+            true
+        }
+        Ok(RuntimeGatewayGovernanceSessionBankCommand::Revoke {
+            tenant,
+            session_id_hash,
+            actor,
+            reason_code,
+            acknowledge,
+        }) => {
+            let result = runtime_gateway_governance_session_revoke(
+                authority,
+                sqlite,
                 tenant,
                 session_id_hash,
                 actor,
                 reason_code,
-                acknowledge,
-            }) => {
-                let result = runtime_gateway_governance_session_revoke(
-                    &authority,
-                    sqlite.as_ref(),
-                    tenant,
-                    session_id_hash,
-                    actor,
-                    reason_code,
-                );
-                let _ = acknowledge.send(result);
-            }
-            Ok(RuntimeGatewayGovernanceSessionBankCommand::Wake)
-            | Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
+            );
+            let _ = acknowledge.send(result);
+            true
         }
-        let touches = {
-            let Ok(mut state) = store.0.state.lock() else {
-                continue;
-            };
-            std::mem::take(&mut state.pending_touches)
+        Ok(RuntimeGatewayGovernanceSessionBankCommand::Wake) | Err(RecvTimeoutError::Timeout) => {
+            true
+        }
+        Err(RecvTimeoutError::Disconnected) => false,
+    }
+}
+
+fn runtime_gateway_governance_session_flush_touches(
+    store: &RuntimeGatewayGovernanceSessionStore,
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+) {
+    let touches = {
+        let Ok(mut state) = store.0.state.lock() else {
+            return;
         };
-        for (key, command) in touches {
-            if runtime_gateway_governance_session_upsert(
-                &authority,
-                sqlite.as_ref(),
-                command.clone(),
-            )
-            .is_err()
-                && let Ok(mut state) = store.0.state.lock()
-                && state.pending_touches.len() < RUNTIME_GATEWAY_GOVERNANCE_SESSION_LIMIT
-            {
-                state.pending_touches.insert(key, command);
-            }
-        }
-        if revocations_polled_at.elapsed() >= RUNTIME_GATEWAY_GOVERNANCE_REVOCATION_POLL_INTERVAL {
-            match runtime_gateway_governance_session_revocation_changed(
-                &authority,
-                sqlite.as_ref(),
-                &mut revocation_epochs,
-            ) {
-                Ok(true) => {
-                    if fail_closed_on_revocation_error {
-                        runtime_gateway_governance_sessions_mark_unavailable(&store);
-                    }
-                    if runtime_gateway_governance_session_refresh(
-                        &store,
-                        &authority,
-                        sqlite.as_ref(),
-                    )
-                    .is_err()
-                        && fail_closed_on_revocation_error
-                    {
-                        runtime_gateway_governance_sessions_mark_unavailable(&store);
-                    }
-                    refreshed_at = std::time::Instant::now();
-                }
-                Ok(false) => {}
-                Err(_) if fail_closed_on_revocation_error => {
-                    runtime_gateway_governance_sessions_mark_unavailable(&store);
-                }
-                Err(_) => {}
-            }
-            revocations_polled_at = std::time::Instant::now();
-        }
-        if refreshed_at.elapsed() >= RUNTIME_GATEWAY_GOVERNANCE_SESSION_REFRESH_INTERVAL {
-            if fail_closed_on_revocation_error {
-                runtime_gateway_governance_sessions_mark_unavailable(&store);
-            }
-            if runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref())
-                .is_err()
-                && fail_closed_on_revocation_error
-            {
-                runtime_gateway_governance_sessions_mark_unavailable(&store);
-            }
-            refreshed_at = std::time::Instant::now();
+        std::mem::take(&mut state.pending_touches)
+    };
+    for (key, command) in touches {
+        if runtime_gateway_governance_session_upsert(authority, sqlite, command.clone()).is_err()
+            && let Ok(mut state) = store.0.state.lock()
+            && state.pending_touches.len() < RUNTIME_GATEWAY_GOVERNANCE_SESSION_LIMIT
+        {
+            state.pending_touches.insert(key, command);
         }
     }
+}
+
+fn runtime_gateway_governance_session_poll_revocations(
+    store: &RuntimeGatewayGovernanceSessionStore,
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    fail_closed_on_revocation_error: bool,
+    revocation_epochs: &mut BTreeMap<TenantId, u64>,
+    polled_at: &mut std::time::Instant,
+    refreshed_at: &mut std::time::Instant,
+) {
+    if polled_at.elapsed() < RUNTIME_GATEWAY_GOVERNANCE_REVOCATION_POLL_INTERVAL {
+        return;
+    }
+    match runtime_gateway_governance_session_revocation_changed(
+        authority,
+        sqlite,
+        revocation_epochs,
+    ) {
+        Ok(true) => {
+            if fail_closed_on_revocation_error {
+                runtime_gateway_governance_sessions_mark_unavailable(store);
+            }
+            if runtime_gateway_governance_session_refresh(store, authority, sqlite).is_err()
+                && fail_closed_on_revocation_error
+            {
+                runtime_gateway_governance_sessions_mark_unavailable(store);
+            }
+            *refreshed_at = std::time::Instant::now();
+        }
+        Ok(false) => {}
+        Err(_) if fail_closed_on_revocation_error => {
+            runtime_gateway_governance_sessions_mark_unavailable(store);
+        }
+        Err(_) => {}
+    }
+    *polled_at = std::time::Instant::now();
+}
+
+fn runtime_gateway_governance_session_refresh_if_due(
+    store: &RuntimeGatewayGovernanceSessionStore,
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    fail_closed_on_revocation_error: bool,
+    refreshed_at: &mut std::time::Instant,
+) {
+    if refreshed_at.elapsed() < RUNTIME_GATEWAY_GOVERNANCE_SESSION_REFRESH_INTERVAL {
+        return;
+    }
+    if fail_closed_on_revocation_error {
+        runtime_gateway_governance_sessions_mark_unavailable(store);
+    }
+    if runtime_gateway_governance_session_refresh(store, authority, sqlite).is_err()
+        && fail_closed_on_revocation_error
+    {
+        runtime_gateway_governance_sessions_mark_unavailable(store);
+    }
+    *refreshed_at = std::time::Instant::now();
 }
 
 fn runtime_gateway_governance_session_revocation_changed(

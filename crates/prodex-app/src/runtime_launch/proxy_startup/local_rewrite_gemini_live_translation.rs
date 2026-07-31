@@ -227,15 +227,7 @@ impl RuntimeGeminiLiveState {
             events.push(gemini_provider_core_live_error_event(error));
         }
         if self.suppress_current_turn {
-            let turn_complete = gemini_provider_core_live_server_turn_complete(&value);
-            if turn_complete {
-                self.suppress_current_turn = false;
-                self.response_created = false;
-                self.input_transcript.clear();
-                self.output_transcript.clear();
-                self.output_text.clear();
-                self.advance_turn();
-            }
+            let turn_complete = self.translate_suppressed_server_message(&value);
             return Ok(RuntimeGeminiLiveServerTranslation {
                 events,
                 setup_complete,
@@ -243,156 +235,205 @@ impl RuntimeGeminiLiveState {
             });
         }
         if let Some(tool_call) = gemini_provider_core_live_field(&value, "toolCall", "tool_call") {
-            events.extend(self.ensure_response_created());
-            if let Some(function_calls) =
-                gemini_provider_core_live_field(tool_call, "functionCalls", "function_calls")
-                    .and_then(serde_json::Value::as_array)
-            {
-                for function_call in function_calls {
-                    let call_id = function_call
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                        .unwrap_or_else(runtime_gemini_live_call_id);
-                    let name = function_call
-                        .get("name")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("tool_call");
-                    self.tool_names_by_call_id
-                        .insert(call_id.clone(), name.to_string());
-                    let args = function_call
-                        .get("args")
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!({}));
-                    events.push(gemini_provider_core_live_function_call_done_event(
-                        &call_id, name, &args,
-                    ));
-                }
-            }
+            events.extend(self.translate_tool_call(tool_call));
         }
         let mut turn_complete = false;
         if let Some(content) =
             gemini_provider_core_live_field(&value, "serverContent", "server_content")
         {
-            if gemini_provider_core_live_field(content, "interrupted", "interrupted")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                events.push(gemini_provider_core_live_response_cancelled_event(
-                    &self.response_id,
-                ));
-            }
-            if let Some(text) = gemini_provider_core_live_transcription_text(
-                content,
-                "inputTranscription",
-                "input_transcription",
-            ) {
-                let delta =
-                    gemini_provider_core_live_transcript_delta(&self.input_transcript, text);
-                self.input_transcript = text.to_string();
-                if !delta.is_empty() {
-                    events.push(
-                        gemini_provider_core_live_input_audio_transcription_delta_event(
-                            &self.item_id,
-                            delta,
-                        ),
-                    );
-                }
-            }
-            if let Some(text) = gemini_provider_core_live_transcription_text(
-                content,
-                "outputTranscription",
-                "output_transcription",
-            ) {
-                events.extend(self.ensure_response_created());
-                let delta =
-                    gemini_provider_core_live_transcript_delta(&self.output_transcript, text);
-                self.output_transcript = text.to_string();
-                if !delta.is_empty() {
-                    events.push(
-                        gemini_provider_core_live_output_audio_transcript_delta_event(
-                            &self.item_id,
-                            &self.response_id,
-                            delta,
-                        ),
-                    );
-                }
-            }
-            if let Some(parts) = gemini_provider_core_live_field(content, "modelTurn", "model_turn")
-                .and_then(|turn| turn.get("parts"))
-                .and_then(serde_json::Value::as_array)
-            {
-                events.extend(self.ensure_response_created());
-                for part in parts {
-                    if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
-                        self.output_text.push_str(text);
-                        events.push(gemini_provider_core_live_output_text_delta_event(
-                            &self.item_id,
-                            &self.response_id,
-                            text,
-                        ));
-                    }
-                    if let Some(inline) =
-                        gemini_provider_core_live_field(part, "inlineData", "inline_data")
-                        && let Some(data) = inline.get("data").and_then(serde_json::Value::as_str)
-                    {
-                        let sample_rate = inline
-                            .get("mimeType")
-                            .or_else(|| inline.get("mime_type"))
-                            .and_then(serde_json::Value::as_str)
-                            .and_then(runtime_gemini_live_audio_rate_from_mime)
-                            .unwrap_or(self.output_audio_rate);
-                        self.output_audio_rate = sample_rate;
-                        events.push(gemini_provider_core_live_output_audio_delta_event(
-                            &self.item_id,
-                            &self.response_id,
-                            data,
-                            sample_rate,
-                        ));
-                    }
-                }
-            }
-            turn_complete = gemini_provider_core_live_server_turn_complete(&value);
-            if turn_complete {
-                if !self.input_transcript.is_empty() {
-                    events.push(
-                        gemini_provider_core_live_input_audio_transcription_completed_event(
-                            &self.item_id,
-                            &self.input_transcript,
-                        ),
-                    );
-                }
-                if !self.output_transcript.is_empty() {
-                    events.push(
-                        gemini_provider_core_live_output_audio_transcript_done_event(
-                            &self.item_id,
-                            &self.response_id,
-                            &self.output_transcript,
-                        ),
-                    );
-                }
-                if !self.output_text.is_empty() {
-                    events.push(gemini_provider_core_live_output_text_done_event(
-                        &self.item_id,
-                        &self.response_id,
-                        &self.output_text,
-                    ));
-                }
-                events.push(gemini_provider_core_live_response_done_event(
-                    &self.response_id,
-                ));
-                self.response_created = false;
-                self.input_transcript.clear();
-                self.output_transcript.clear();
-                self.output_text.clear();
-                self.advance_turn();
-            }
+            turn_complete = self.translate_server_content(&value, content, &mut events);
         }
         Ok(RuntimeGeminiLiveServerTranslation {
             events,
             setup_complete,
             turn_complete,
         })
+    }
+
+    fn translate_suppressed_server_message(&mut self, value: &serde_json::Value) -> bool {
+        let turn_complete = gemini_provider_core_live_server_turn_complete(value);
+        if turn_complete {
+            self.suppress_current_turn = false;
+            self.response_created = false;
+            self.input_transcript.clear();
+            self.output_transcript.clear();
+            self.output_text.clear();
+            self.advance_turn();
+        }
+        turn_complete
+    }
+
+    fn translate_tool_call(&mut self, tool_call: &serde_json::Value) -> Vec<serde_json::Value> {
+        let mut events = self.ensure_response_created();
+        let Some(function_calls) =
+            gemini_provider_core_live_field(tool_call, "functionCalls", "function_calls")
+                .and_then(serde_json::Value::as_array)
+        else {
+            return events;
+        };
+        for function_call in function_calls {
+            let call_id = function_call
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(runtime_gemini_live_call_id);
+            let name = function_call
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("tool_call");
+            self.tool_names_by_call_id
+                .insert(call_id.clone(), name.to_string());
+            let args = function_call
+                .get("args")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            events.push(gemini_provider_core_live_function_call_done_event(
+                &call_id, name, &args,
+            ));
+        }
+        events
+    }
+
+    fn translate_server_content(
+        &mut self,
+        value: &serde_json::Value,
+        content: &serde_json::Value,
+        events: &mut Vec<serde_json::Value>,
+    ) -> bool {
+        if gemini_provider_core_live_field(content, "interrupted", "interrupted")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            events.push(gemini_provider_core_live_response_cancelled_event(
+                &self.response_id,
+            ));
+        }
+        self.translate_transcript(content, events, "inputTranscription", true);
+        self.translate_transcript(content, events, "outputTranscription", false);
+        if let Some(parts) = gemini_provider_core_live_field(content, "modelTurn", "model_turn")
+            .and_then(|turn| turn.get("parts"))
+            .and_then(serde_json::Value::as_array)
+        {
+            events.extend(self.translate_model_turn(parts));
+        }
+        if !gemini_provider_core_live_server_turn_complete(value) {
+            return false;
+        }
+        self.complete_server_turn(events);
+        true
+    }
+
+    fn translate_transcript(
+        &mut self,
+        content: &serde_json::Value,
+        events: &mut Vec<serde_json::Value>,
+        field: &str,
+        input: bool,
+    ) {
+        let alternate = if input {
+            "input_transcription"
+        } else {
+            "output_transcription"
+        };
+        let Some(text) = gemini_provider_core_live_transcription_text(content, field, alternate)
+        else {
+            return;
+        };
+        if input {
+            let delta = gemini_provider_core_live_transcript_delta(&self.input_transcript, text);
+            self.input_transcript = text.to_string();
+            if !delta.is_empty() {
+                events.push(
+                    gemini_provider_core_live_input_audio_transcription_delta_event(
+                        &self.item_id,
+                        delta,
+                    ),
+                );
+            }
+        } else {
+            events.extend(self.ensure_response_created());
+            let delta = gemini_provider_core_live_transcript_delta(&self.output_transcript, text);
+            self.output_transcript = text.to_string();
+            if !delta.is_empty() {
+                events.push(
+                    gemini_provider_core_live_output_audio_transcript_delta_event(
+                        &self.item_id,
+                        &self.response_id,
+                        delta,
+                    ),
+                );
+            }
+        }
+    }
+
+    fn translate_model_turn(&mut self, parts: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        let mut events = self.ensure_response_created();
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
+                self.output_text.push_str(text);
+                events.push(gemini_provider_core_live_output_text_delta_event(
+                    &self.item_id,
+                    &self.response_id,
+                    text,
+                ));
+            }
+            let Some(inline) = gemini_provider_core_live_field(part, "inlineData", "inline_data")
+            else {
+                continue;
+            };
+            let Some(data) = inline.get("data").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let sample_rate = inline
+                .get("mimeType")
+                .or_else(|| inline.get("mime_type"))
+                .and_then(serde_json::Value::as_str)
+                .and_then(runtime_gemini_live_audio_rate_from_mime)
+                .unwrap_or(self.output_audio_rate);
+            self.output_audio_rate = sample_rate;
+            events.push(gemini_provider_core_live_output_audio_delta_event(
+                &self.item_id,
+                &self.response_id,
+                data,
+                sample_rate,
+            ));
+        }
+        events
+    }
+
+    fn complete_server_turn(&mut self, events: &mut Vec<serde_json::Value>) {
+        if !self.input_transcript.is_empty() {
+            events.push(
+                gemini_provider_core_live_input_audio_transcription_completed_event(
+                    &self.item_id,
+                    &self.input_transcript,
+                ),
+            );
+        }
+        if !self.output_transcript.is_empty() {
+            events.push(
+                gemini_provider_core_live_output_audio_transcript_done_event(
+                    &self.item_id,
+                    &self.response_id,
+                    &self.output_transcript,
+                ),
+            );
+        }
+        if !self.output_text.is_empty() {
+            events.push(gemini_provider_core_live_output_text_done_event(
+                &self.item_id,
+                &self.response_id,
+                &self.output_text,
+            ));
+        }
+        events.push(gemini_provider_core_live_response_done_event(
+            &self.response_id,
+        ));
+        self.response_created = false;
+        self.input_transcript.clear();
+        self.output_transcript.clear();
+        self.output_text.clear();
+        self.advance_turn();
     }
 
     fn ensure_response_created(&mut self) -> Vec<serde_json::Value> {

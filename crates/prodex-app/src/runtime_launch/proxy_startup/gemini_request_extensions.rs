@@ -93,12 +93,14 @@ fn runtime_gemini_active_extension_manifests_from_roots_with_config(
             break;
         }
         if root.join("gemini-extension.json").is_file() {
-            if let Some(manifest) =
-                runtime_gemini_load_extension_manifest(root, root.parent(), cwd, config)
-                && seen.insert(manifest.name.to_ascii_lowercase())
-            {
-                manifests.push(manifest);
-            }
+            runtime_gemini_add_extension_manifest(
+                root,
+                root.parent(),
+                cwd,
+                config,
+                &mut manifests,
+                &mut seen,
+            );
             continue;
         }
         let Ok(entries) = fs::read_dir(root) else {
@@ -112,16 +114,35 @@ fn runtime_gemini_active_extension_manifests_from_roots_with_config(
             if !directory.is_dir() || !directory.join("gemini-extension.json").is_file() {
                 continue;
             }
-            if let Some(manifest) =
-                runtime_gemini_load_extension_manifest(&directory, Some(root), cwd, config)
-                && seen.insert(manifest.name.to_ascii_lowercase())
-            {
-                manifests.push(manifest);
-            }
+            runtime_gemini_add_extension_manifest(
+                &directory,
+                Some(root),
+                cwd,
+                config,
+                &mut manifests,
+                &mut seen,
+            );
         }
     }
     manifests.sort_by(|left, right| left.name.cmp(&right.name));
     manifests
+}
+
+fn runtime_gemini_add_extension_manifest(
+    directory: &Path,
+    root: Option<&Path>,
+    cwd: Option<&Path>,
+    config: Option<&RuntimeGeminiConfig>,
+    manifests: &mut Vec<RuntimeGeminiExtensionManifest>,
+    seen: &mut BTreeSet<String>,
+) {
+    let Some(manifest) = runtime_gemini_load_extension_manifest(directory, root, cwd, config)
+    else {
+        return;
+    };
+    if seen.insert(manifest.name.to_ascii_lowercase()) {
+        manifests.push(manifest);
+    }
 }
 
 fn runtime_gemini_load_extension_manifest(

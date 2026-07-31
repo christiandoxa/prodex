@@ -1,4 +1,5 @@
 use super::super::local_rewrite::RUNTIME_LOCAL_REWRITE_PROFILE;
+use super::super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
 use super::super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
 use super::super::local_rewrite_upstream::runtime_local_rewrite_route_kind;
 use super::{
@@ -190,102 +191,8 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         .application_admission
         .routing()
         .map_or(1, |routing| 1 + routing.fallbacks.len());
-    let provider_dispatch =
-        runtime_gateway_application_provider_dispatch(&request.application_admission, shared);
-    let (mut primary_dispatch, mut last_error) = match provider_dispatch {
-        Ok(dispatch) => (Some(dispatch), None),
-        Err(error) => (None, Some(anyhow::anyhow!(error))),
-    };
-    let mut selected_response = None;
-    for attempt_index in 0..candidate_count {
-        if request.state.deadline_expired() {
-            break;
-        }
-        let provider_dispatch = if attempt_index == 0 {
-            let Some(dispatch) = primary_dispatch.take() else {
-                continue;
-            };
-            dispatch
-        } else {
-            match runtime_gateway_application_provider_dispatch_attempt(
-                &request.application_admission,
-                shared,
-                attempt_index,
-            ) {
-                Ok(dispatch) => dispatch,
-                Err(error) => {
-                    last_error = Some(anyhow::anyhow!(error));
-                    continue;
-                }
-            }
-        };
-        let selected_provider = provider_dispatch.provider();
-        let profile_name = if selected_provider == shared.provider.bridge_kind().provider_id() {
-            RUNTIME_LOCAL_REWRITE_PROFILE
-        } else {
-            selected_provider.label()
-        };
-        let route_kind = runtime_local_rewrite_route_kind(provider_dispatch.endpoint());
-        let selected_shared = provider_dispatch.selected_shared(shared);
-        let started_at = Instant::now();
-        let result = send_runtime_local_rewrite_upstream_request(
-            request.state.request_id,
-            &request.captured,
-            &selected_shared,
-            &provider_dispatch,
-        );
-        runtime_local_rewrite_record_provider_metric(
-            selected_shared.provider.bridge_kind(),
-            &result,
-            started_at.elapsed(),
-        );
-        runtime_local_rewrite_record_provider_health(
-            shared,
-            profile_name,
-            route_kind,
-            selected_shared.provider.bridge_kind(),
-            &result,
-        );
-        match result {
-            Ok(response)
-                if runtime_local_rewrite_buffered_provider_fallback_class(
-                    &response,
-                    selected_shared.provider.bridge_kind(),
-                )
-                .is_some_and(|class| {
-                    runtime_gateway_application_provider_retry_precommit(
-                        ProviderRetryCause::NextProvider,
-                        class,
-                        attempt_index,
-                        candidate_count,
-                    )
-                }) =>
-            {
-                last_error = Some(anyhow::anyhow!("provider precommit fallback"));
-            }
-            Ok(response) => {
-                if let Some(guard) = request.state.guards.route_load.as_mut() {
-                    guard.mark_status(response.status());
-                }
-                selected_response = Some((response, selected_shared));
-                break;
-            }
-            Err(error)
-                if runtime_gateway_application_provider_retry_precommit(
-                    ProviderRetryCause::NextProvider,
-                    ProviderErrorClass::Transient,
-                    attempt_index,
-                    candidate_count,
-                ) =>
-            {
-                last_error = Some(error);
-            }
-            Err(error) => {
-                last_error = Some(error);
-                break;
-            }
-        }
-    }
+    let (selected_response, last_error) =
+        runtime_local_rewrite_try_provider_candidates(&mut request, shared, candidate_count);
     if request.state.deadline_expired() {
         if let Some(guard) = request.state.guards.route_load.as_mut() {
             guard.mark_error();
@@ -328,6 +235,149 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         response_governance,
     );
     Ok(())
+}
+
+enum RuntimeLocalRewriteProviderAttempt {
+    Success(
+        RuntimeLocalRewriteUpstreamResult,
+        RuntimeLocalRewriteProxyShared,
+    ),
+    Retry(anyhow::Error),
+    Stop(anyhow::Error),
+}
+
+fn runtime_local_rewrite_try_provider_candidates(
+    request: &mut RuntimeLocalRewriteDispatchReadyRequest<'_>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    candidate_count: usize,
+) -> (
+    Option<(
+        RuntimeLocalRewriteUpstreamResult,
+        RuntimeLocalRewriteProxyShared,
+    )>,
+    Option<anyhow::Error>,
+) {
+    let (mut primary_dispatch, mut last_error) =
+        match runtime_gateway_application_provider_dispatch(&request.application_admission, shared)
+        {
+            Ok(dispatch) => (Some(dispatch), None),
+            Err(error) => (None, Some(anyhow::anyhow!(error))),
+        };
+    for attempt_index in 0..candidate_count {
+        if request.state.deadline_expired() {
+            break;
+        }
+        if attempt_index == 0 && primary_dispatch.is_none() {
+            continue;
+        }
+        match runtime_local_rewrite_provider_attempt(
+            request,
+            shared,
+            attempt_index,
+            candidate_count,
+            &mut primary_dispatch,
+        ) {
+            RuntimeLocalRewriteProviderAttempt::Success(response, selected_shared) => {
+                if let Some(guard) = request.state.guards.route_load.as_mut() {
+                    guard.mark_status(response.status());
+                }
+                return (Some((response, selected_shared)), last_error);
+            }
+            RuntimeLocalRewriteProviderAttempt::Retry(error) => last_error = Some(error),
+            RuntimeLocalRewriteProviderAttempt::Stop(error) => {
+                last_error = Some(error);
+                break;
+            }
+        }
+    }
+    (None, last_error)
+}
+
+fn runtime_local_rewrite_provider_attempt(
+    request: &RuntimeLocalRewriteDispatchReadyRequest<'_>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    attempt_index: usize,
+    candidate_count: usize,
+    primary_dispatch: &mut Option<RuntimeGatewayApplicationProviderDispatch<'_>>,
+) -> RuntimeLocalRewriteProviderAttempt {
+    let provider_dispatch = if attempt_index == 0 {
+        let Some(dispatch) = primary_dispatch.take() else {
+            return RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(
+                "provider dispatch unavailable"
+            ));
+        };
+        dispatch
+    } else {
+        match runtime_gateway_application_provider_dispatch_attempt(
+            &request.application_admission,
+            shared,
+            attempt_index,
+        ) {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                return RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(error));
+            }
+        }
+    };
+    let selected_provider = provider_dispatch.provider();
+    let profile_name = if selected_provider == shared.provider.bridge_kind().provider_id() {
+        RUNTIME_LOCAL_REWRITE_PROFILE
+    } else {
+        selected_provider.label()
+    };
+    let route_kind = runtime_local_rewrite_route_kind(provider_dispatch.endpoint());
+    let selected_shared = provider_dispatch.selected_shared(shared);
+    let started_at = Instant::now();
+    let result = send_runtime_local_rewrite_upstream_request(
+        request.state.request_id,
+        &request.captured,
+        &selected_shared,
+        &provider_dispatch,
+    );
+    runtime_local_rewrite_record_provider_metric(
+        selected_shared.provider.bridge_kind(),
+        &result,
+        started_at.elapsed(),
+    );
+    runtime_local_rewrite_record_provider_health(
+        shared,
+        profile_name,
+        route_kind,
+        selected_shared.provider.bridge_kind(),
+        &result,
+    );
+    match result {
+        Ok(response)
+            if runtime_local_rewrite_buffered_provider_fallback_class(
+                &response,
+                selected_shared.provider.bridge_kind(),
+            )
+            .is_some_and(|class| {
+                runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::NextProvider,
+                    class,
+                    attempt_index,
+                    candidate_count,
+                )
+            }) =>
+        {
+            RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(
+                "provider precommit fallback"
+            ))
+        }
+        Ok(response) => RuntimeLocalRewriteProviderAttempt::Success(response, selected_shared),
+        Err(error)
+            if runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::NextProvider,
+                ProviderErrorClass::Transient,
+                attempt_index,
+                candidate_count,
+            ) =>
+        {
+            RuntimeLocalRewriteProviderAttempt::Retry(error)
+        }
+        Err(error) => RuntimeLocalRewriteProviderAttempt::Stop(error),
+    }
 }
 
 fn runtime_local_rewrite_record_provider_health(
@@ -563,6 +613,52 @@ pub(super) fn runtime_gateway_operational_probe_response(
     if method != "GET" && method != "HEAD" {
         return Some(runtime_gateway_probe_method_rejection(probe));
     }
+    let probe_state = runtime_gateway_operational_probe_state(shared, probe);
+    let (probe_metric, result_metric) =
+        runtime_gateway_operational_probe_metrics(probe, &probe_state);
+    crate::record_runtime_health_probe_metric(probe_metric, result_metric);
+    let body = serde_json::json!({
+        "object": "gateway.health",
+        "probe": probe,
+        "status": probe_state.status,
+        "ready": probe_state.ready,
+        "local_overload": probe_state.overloaded,
+        "draining": probe_state.draining,
+        "credentials_stale": probe_state.credentials_stale,
+        "governance_audit_available": probe_state.governance_audit_available,
+        "governance_policy_available": probe_state.governance_policy_available,
+        "policy_version": shared.gateway_policy_version,
+        "active_requests": shared.runtime_shared.active_request_count.load(Ordering::SeqCst),
+        "active_request_limit": shared.runtime_shared.active_request_limit,
+    })
+    .to_string();
+    Some(build_runtime_proxy_response_from_parts(
+        RuntimeHeapTrimmedBufferedResponseParts {
+            status: if probe_state.ready { 200 } else { 503 },
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: if method == "HEAD" {
+                Vec::new().into()
+            } else {
+                body.into_bytes().into()
+            },
+        },
+    ))
+}
+
+struct RuntimeGatewayOperationalProbeState {
+    status: &'static str,
+    ready: bool,
+    overloaded: bool,
+    draining: bool,
+    credentials_stale: bool,
+    governance_audit_available: bool,
+    governance_policy_available: bool,
+}
+
+fn runtime_gateway_operational_probe_state(
+    shared: &RuntimeLocalRewriteProxyShared,
+    probe: &str,
+) -> RuntimeGatewayOperationalProbeState {
     let overloaded = runtime_proxy_local_overload_pressure_active(&shared.runtime_shared);
     let draining = shared.gateway_draining.load(Ordering::SeqCst);
     let credentials_stale = shared.gateway_credentials.refresh_is_stale();
@@ -575,7 +671,7 @@ pub(super) fn runtime_gateway_operational_probe_response(
             && !credentials_stale
             && governance_policy_available
             && governance_audit_available);
-    let state = if ready {
+    let status = if ready {
         "ok"
     } else if draining {
         "draining"
@@ -588,49 +684,41 @@ pub(super) fn runtime_gateway_operational_probe_response(
     } else {
         "overloaded"
     };
+    RuntimeGatewayOperationalProbeState {
+        status,
+        ready,
+        overloaded,
+        draining,
+        credentials_stale,
+        governance_audit_available,
+        governance_policy_available,
+    }
+}
+
+fn runtime_gateway_operational_probe_metrics(
+    probe: &str,
+    state: &RuntimeGatewayOperationalProbeState,
+) -> (
+    prodex_observability::HealthProbeKind,
+    prodex_observability::HealthProbeResult,
+) {
     let probe_metric = match probe {
         "livez" => prodex_observability::HealthProbeKind::Live,
         "readyz" => prodex_observability::HealthProbeKind::Ready,
         _ => prodex_observability::HealthProbeKind::Startup,
     };
-    let result_metric = if draining {
+    let result_metric = if state.draining {
         prodex_observability::HealthProbeResult::Draining
-    } else if overloaded
-        || credentials_stale
-        || !governance_policy_available
-        || !governance_audit_available
+    } else if state.overloaded
+        || state.credentials_stale
+        || !state.governance_policy_available
+        || !state.governance_audit_available
     {
         prodex_observability::HealthProbeResult::Degraded
     } else {
         prodex_observability::HealthProbeResult::Passing
     };
-    crate::record_runtime_health_probe_metric(probe_metric, result_metric);
-    let body = serde_json::json!({
-        "object": "gateway.health",
-        "probe": probe,
-        "status": state,
-        "ready": ready,
-        "local_overload": overloaded,
-        "draining": draining,
-        "credentials_stale": credentials_stale,
-        "governance_audit_available": governance_audit_available,
-        "governance_policy_available": governance_policy_available,
-        "policy_version": shared.gateway_policy_version,
-        "active_requests": shared.runtime_shared.active_request_count.load(Ordering::SeqCst),
-        "active_request_limit": shared.runtime_shared.active_request_limit,
-    })
-    .to_string();
-    Some(build_runtime_proxy_response_from_parts(
-        RuntimeHeapTrimmedBufferedResponseParts {
-            status: if ready { 200 } else { 503 },
-            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
-            body: if method == "HEAD" {
-                Vec::new().into()
-            } else {
-                body.into_bytes().into()
-            },
-        },
-    ))
+    (probe_metric, result_metric)
 }
 
 fn runtime_gateway_mandatory_governance_available(shared: &RuntimeLocalRewriteProxyShared) -> bool {

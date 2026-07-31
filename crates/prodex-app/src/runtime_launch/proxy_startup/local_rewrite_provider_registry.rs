@@ -710,135 +710,19 @@ fn compile_runtime_gateway_provider_registry(
     artifact: RuntimeGatewayProviderRegistryArtifact,
     context: &RuntimeGatewayAttachedProviderRegistryContext,
 ) -> Result<RuntimeGatewayGovernedProviderRegistrySnapshot> {
-    if !matches!(
-        artifact.schema_version,
-        RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
-            | RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
-    ) || artifact.revision == 0
-        || artifact.pricing_revision == 0
-        || artifact.descriptors.is_empty()
-        || artifact.descriptors.len() > MAX_GOVERNED_ROUTING_CANDIDATES
-    {
-        anyhow::bail!("provider registry artifact header is invalid");
-    }
-
+    runtime_gateway_validate_provider_registry_header(&artifact)?;
     let authoritative_pricing =
         artifact.schema_version == RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION;
     let mut descriptors = Vec::with_capacity(artifact.descriptors.len());
     for (index, descriptor) in artifact.descriptors.into_iter().enumerate() {
-        if descriptor.revision == 0
-            || descriptor.pricing_revision == 0
-            || descriptor.pricing_revision != artifact.pricing_revision
-            || !descriptor.credential_ref.is_well_formed()
-            || descriptor.endpoints.is_empty()
-            || descriptor.endpoints.len() > prodex_provider_core::ALL_PROVIDER_ENDPOINTS.len()
-            || descriptor.regions.is_empty()
-            || descriptor.regions.len() > MAX_GOVERNED_PROVIDER_REGIONS
-            || artifact_descriptors_duplicate_provider(&descriptors, descriptor.provider)
-            || values_have_duplicate(&descriptor.endpoints)
-            || [
-                descriptor.cost,
-                descriptor.latency,
-                descriptor.risk,
-                descriptor.priority,
-            ]
-            .into_iter()
-            .any(|value| value > prodex_provider_spi::ROUTING_SCORE_SCALE)
-            || descriptor.model_costs.len() > MAX_RUNTIME_GATEWAY_PROVIDER_PRICED_MODELS
-            || (authoritative_pricing
-                && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs))
-            || (!descriptor.model_costs.is_empty()
-                && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs))
-        {
-            anyhow::bail!("provider registry descriptor is invalid");
-        }
-        if descriptor.provider == context.provider {
-            if !descriptor.executable
-                || descriptor.credential_ref != context.credential_ref
-                || descriptor
-                    .endpoints
-                    .iter()
-                    .any(|endpoint| !context.endpoints.contains(endpoint))
-                || !descriptor
-                    .capabilities
-                    .missing_from(&context.capabilities)
-                    .is_empty()
-            {
-                anyhow::bail!("attached provider registry descriptor is invalid");
-            }
-        } else if descriptor.executable {
-            let Some(projected_credential) = context.projected_credential.as_ref() else {
-                anyhow::bail!("heterogeneous provider requires projected credentials");
-            };
-            if projected_credential.reference().provider() != descriptor.credential_ref.provider()
-                || descriptor.upstream_base_url.as_deref().is_none_or(|value| {
-                    crate::validate_credential_free_http_url(
-                        value,
-                        "provider registry upstream base URL",
-                    )
-                    .is_err()
-                })
-                || runtime_gateway_projected_provider_options(
-                    descriptor.provider,
-                    descriptor.upstream_base_url.as_deref().unwrap_or_default(),
-                )
-                .is_none()
-            {
-                anyhow::bail!("unsupported provider adapter cannot be executable");
-            }
-            let adapter = provider_adapter(descriptor.provider);
-            if descriptor.endpoints.iter().any(|endpoint| {
-                !adapter.supported_endpoints().contains(endpoint)
-                    || !runtime_gateway_provider_capability_is_executable(
-                        adapter.capability_status(*endpoint),
-                    )
-            }) || !descriptor
-                .capabilities
-                .missing_from(&runtime_gateway_provider_executable_capabilities(
-                    descriptor.provider,
-                ))
-                .is_empty()
-            {
-                anyhow::bail!("unsupported provider capability cannot be executable");
-            }
-        }
-        let mut regions = Vec::with_capacity(descriptor.regions.len());
-        for region in descriptor.regions {
-            let region = PolicySelector::new(region)
-                .context("provider registry region selector is invalid")?;
-            if regions.contains(&region) {
-                anyhow::bail!("provider registry region selector is duplicated");
-            }
-            regions.push(region);
-        }
-        let model_costs = descriptor
-            .model_costs
-            .into_iter()
-            .map(|(model, cost)| (model, cost.runtime_cost()))
-            .collect();
-        descriptors.push(RuntimeGatewayCompiledProviderDescriptor {
-            revision: descriptor.revision,
-            pricing_revision: descriptor.pricing_revision,
-            provider: descriptor.provider,
-            credential_ref: descriptor.credential_ref,
-            enabled: descriptor.enabled,
-            revoked: descriptor.revoked,
-            executable: descriptor.executable,
-            upstream_base_url: descriptor.upstream_base_url,
-            endpoints: descriptor.endpoints,
-            capabilities: descriptor.capabilities,
-            regions,
-            local_execution: descriptor.local_execution,
-            trust_tier: descriptor.trust_tier.into(),
-            maximum_classification: descriptor.maximum_classification,
-            retention_seconds: descriptor.retention_seconds,
-            training_use: descriptor.training_use,
-            model_costs: Arc::new(model_costs),
-            cost: descriptor.cost,
-            latency: descriptor.latency,
-            risk: descriptor.risk,
-            priority: descriptor.priority,
-        });
+        runtime_gateway_validate_provider_registry_descriptor(
+            &descriptor,
+            artifact.pricing_revision,
+            authoritative_pricing,
+            &descriptors,
+            context,
+        )?;
+        descriptors.push(runtime_gateway_compile_provider_descriptor(descriptor)?);
         debug_assert_eq!(descriptors.len(), index + 1);
     }
     if !descriptors
@@ -854,6 +738,216 @@ fn compile_runtime_gateway_provider_registry(
         projected_credential: context.projected_credential.clone(),
         descriptors,
     })
+}
+
+fn runtime_gateway_validate_provider_registry_header(
+    artifact: &RuntimeGatewayProviderRegistryArtifact,
+) -> Result<()> {
+    if !matches!(
+        artifact.schema_version,
+        RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
+            | RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
+    ) || artifact.revision == 0
+        || artifact.pricing_revision == 0
+        || artifact.descriptors.is_empty()
+        || artifact.descriptors.len() > MAX_GOVERNED_ROUTING_CANDIDATES
+    {
+        anyhow::bail!("provider registry artifact header is invalid");
+    }
+    Ok(())
+}
+
+fn runtime_gateway_validate_provider_registry_descriptor(
+    descriptor: &RuntimeGatewayProviderRegistryDescriptorArtifact,
+    pricing_revision: u64,
+    authoritative_pricing: bool,
+    descriptors: &[RuntimeGatewayCompiledProviderDescriptor],
+    context: &RuntimeGatewayAttachedProviderRegistryContext,
+) -> Result<()> {
+    runtime_gateway_validate_provider_descriptor_shape(
+        descriptor,
+        pricing_revision,
+        authoritative_pricing,
+        descriptors,
+    )?;
+    runtime_gateway_validate_provider_descriptor_attachment(descriptor, context)
+}
+
+fn runtime_gateway_validate_provider_descriptor_shape(
+    descriptor: &RuntimeGatewayProviderRegistryDescriptorArtifact,
+    pricing_revision: u64,
+    authoritative_pricing: bool,
+    descriptors: &[RuntimeGatewayCompiledProviderDescriptor],
+) -> Result<()> {
+    if descriptor.revision == 0
+        || descriptor.pricing_revision == 0
+        || descriptor.pricing_revision != pricing_revision
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if !descriptor.credential_ref.is_well_formed()
+        || descriptor.endpoints.is_empty()
+        || descriptor.endpoints.len() > prodex_provider_core::ALL_PROVIDER_ENDPOINTS.len()
+        || descriptor.regions.is_empty()
+        || descriptor.regions.len() > MAX_GOVERNED_PROVIDER_REGIONS
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if artifact_descriptors_duplicate_provider(descriptors, descriptor.provider)
+        || values_have_duplicate(&descriptor.endpoints)
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if [
+        descriptor.cost,
+        descriptor.latency,
+        descriptor.risk,
+        descriptor.priority,
+    ]
+    .into_iter()
+    .any(|value| value > prodex_provider_spi::ROUTING_SCORE_SCALE)
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if descriptor.model_costs.len() > MAX_RUNTIME_GATEWAY_PROVIDER_PRICED_MODELS {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if authoritative_pricing
+        && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs)
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    if !descriptor.model_costs.is_empty()
+        && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs)
+    {
+        anyhow::bail!("provider registry descriptor is invalid");
+    }
+    Ok(())
+}
+
+fn runtime_gateway_validate_provider_descriptor_attachment(
+    descriptor: &RuntimeGatewayProviderRegistryDescriptorArtifact,
+    context: &RuntimeGatewayAttachedProviderRegistryContext,
+) -> Result<()> {
+    if descriptor.provider == context.provider {
+        if !descriptor.executable {
+            anyhow::bail!("attached provider registry descriptor is invalid");
+        }
+        if descriptor.credential_ref != context.credential_ref {
+            anyhow::bail!("attached provider registry descriptor is invalid");
+        }
+        if descriptor
+            .endpoints
+            .iter()
+            .any(|endpoint| !context.endpoints.contains(endpoint))
+        {
+            anyhow::bail!("attached provider registry descriptor is invalid");
+        }
+        if !descriptor
+            .capabilities
+            .missing_from(&context.capabilities)
+            .is_empty()
+        {
+            anyhow::bail!("attached provider registry descriptor is invalid");
+        }
+        return Ok(());
+    }
+    if !descriptor.executable {
+        return Ok(());
+    }
+    runtime_gateway_validate_projected_provider_descriptor(descriptor, context)
+}
+
+fn runtime_gateway_validate_projected_provider_descriptor(
+    descriptor: &RuntimeGatewayProviderRegistryDescriptorArtifact,
+    context: &RuntimeGatewayAttachedProviderRegistryContext,
+) -> Result<()> {
+    let Some(projected_credential) = context.projected_credential.as_ref() else {
+        anyhow::bail!("heterogeneous provider requires projected credentials");
+    };
+    if projected_credential.reference().provider() != descriptor.credential_ref.provider() {
+        anyhow::bail!("unsupported provider adapter cannot be executable");
+    }
+    if descriptor.upstream_base_url.as_deref().is_none_or(|value| {
+        crate::validate_credential_free_http_url(value, "provider registry upstream base URL")
+            .is_err()
+    }) {
+        anyhow::bail!("unsupported provider adapter cannot be executable");
+    }
+    if runtime_gateway_projected_provider_options(
+        descriptor.provider,
+        descriptor.upstream_base_url.as_deref().unwrap_or_default(),
+    )
+    .is_none()
+    {
+        anyhow::bail!("unsupported provider adapter cannot be executable");
+    }
+    let adapter = provider_adapter(descriptor.provider);
+    if descriptor.endpoints.iter().any(|endpoint| {
+        !adapter.supported_endpoints().contains(endpoint)
+            || !runtime_gateway_provider_capability_is_executable(
+                adapter.capability_status(*endpoint),
+            )
+    }) {
+        anyhow::bail!("unsupported provider capability cannot be executable");
+    }
+    if !descriptor
+        .capabilities
+        .missing_from(&runtime_gateway_provider_executable_capabilities(
+            descriptor.provider,
+        ))
+        .is_empty()
+    {
+        anyhow::bail!("unsupported provider capability cannot be executable");
+    }
+    Ok(())
+}
+
+fn runtime_gateway_compile_provider_descriptor(
+    descriptor: RuntimeGatewayProviderRegistryDescriptorArtifact,
+) -> Result<RuntimeGatewayCompiledProviderDescriptor> {
+    let regions = runtime_gateway_compile_provider_regions(descriptor.regions)?;
+    let model_costs = descriptor
+        .model_costs
+        .into_iter()
+        .map(|(model, cost)| (model, cost.runtime_cost()))
+        .collect();
+    Ok(RuntimeGatewayCompiledProviderDescriptor {
+        revision: descriptor.revision,
+        pricing_revision: descriptor.pricing_revision,
+        provider: descriptor.provider,
+        credential_ref: descriptor.credential_ref,
+        enabled: descriptor.enabled,
+        revoked: descriptor.revoked,
+        executable: descriptor.executable,
+        upstream_base_url: descriptor.upstream_base_url,
+        endpoints: descriptor.endpoints,
+        capabilities: descriptor.capabilities,
+        regions,
+        local_execution: descriptor.local_execution,
+        trust_tier: descriptor.trust_tier.into(),
+        maximum_classification: descriptor.maximum_classification,
+        retention_seconds: descriptor.retention_seconds,
+        training_use: descriptor.training_use,
+        model_costs: Arc::new(model_costs),
+        cost: descriptor.cost,
+        latency: descriptor.latency,
+        risk: descriptor.risk,
+        priority: descriptor.priority,
+    })
+}
+
+fn runtime_gateway_compile_provider_regions(regions: Vec<String>) -> Result<Vec<PolicySelector>> {
+    let mut compiled = Vec::with_capacity(regions.len());
+    for region in regions {
+        let region =
+            PolicySelector::new(region).context("provider registry region selector is invalid")?;
+        if compiled.contains(&region) {
+            anyhow::bail!("provider registry region selector is duplicated");
+        }
+        compiled.push(region);
+    }
+    Ok(compiled)
 }
 
 fn runtime_gateway_provider_catalog_has_pricing(provider: ProviderId) -> bool {

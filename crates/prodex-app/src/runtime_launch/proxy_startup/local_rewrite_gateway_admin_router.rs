@@ -217,7 +217,109 @@ fn runtime_gateway_admin_dispatch(
     let authorized_action = preauthorized.control_plane_action();
     let method = captured.method.to_ascii_uppercase();
 
+    if let Some(response) =
+        runtime_gateway_admin_static_dispatch(&route, captured, shared, admin_auth)
+    {
+        return response;
+    }
     match route {
+        GatewayAdminRoute::Governance { .. }
+        | GatewayAdminRoute::GovernanceOutbox
+        | GatewayAdminRoute::GovernanceOutboxClaim
+        | GatewayAdminRoute::GovernanceAuditIntegrity
+        | GatewayAdminRoute::AuditExports
+        | GatewayAdminRoute::AuditRetentionHolds
+        | GatewayAdminRoute::AuditRetentionHold { .. }
+        | GatewayAdminRoute::AuditRetentionPurge => match authorized_action {
+            Some(base_action) => runtime_gateway_admin_policy_dispatch(
+                captured,
+                path,
+                admin_prefix,
+                shared,
+                admin_auth,
+                base_action,
+            ),
+            None => runtime_gateway_admin_missing_action_response(),
+        },
+        GatewayAdminRoute::SessionRevoke { .. } | GatewayAdminRoute::SessionUnknown(_) => {
+            runtime_gateway_admin_session_dispatch(
+                captured,
+                path,
+                admin_prefix,
+                shared,
+                admin_auth,
+                authorized_action,
+            )
+        }
+        GatewayAdminRoute::Keys => runtime_gateway_admin_keys_dispatch(
+            method.as_str(),
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::Key { key_name } => runtime_gateway_admin_key_response(
+            key_name,
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::KeyUnknown(_) => {
+            runtime_gateway_admin_key_response("", captured, shared, admin_auth, authorized_action)
+        }
+        GatewayAdminRoute::KeySecret { key_name } => runtime_gateway_admin_key_secret_dispatch(
+            key_name,
+            method.as_str(),
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::ScimUsers => runtime_gateway_admin_scim_users_dispatch(
+            method.as_str(),
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::ScimUser { user_id } => runtime_gateway_admin_scim_user_dispatch(
+            user_id,
+            method.as_str(),
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::ScimUnknown(_) => build_runtime_proxy_json_error_response(
+            404,
+            "scim_user_not_found",
+            "gateway SCIM user was not found",
+        ),
+        GatewayAdminRoute::Dashboard
+        | GatewayAdminRoute::OpenApi
+        | GatewayAdminRoute::Metrics
+        | GatewayAdminRoute::Providers
+        | GatewayAdminRoute::Observability
+        | GatewayAdminRoute::Guardrails
+        | GatewayAdminRoute::RouteExplain
+        | GatewayAdminRoute::Usage
+        | GatewayAdminRoute::Ledger
+        | GatewayAdminRoute::LedgerCsv
+        | GatewayAdminRoute::LedgerSummary
+        | GatewayAdminRoute::LedgerSummaryCsv => {
+            unreachable!("static gateway admin route was not dispatched")
+        }
+    }
+}
+
+fn runtime_gateway_admin_static_dispatch(
+    route: &GatewayAdminRoute<'_>,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> Option<tiny_http::ResponseBox> {
+    Some(match route {
         GatewayAdminRoute::Dashboard => runtime_gateway_admin_dashboard_response(shared),
         GatewayAdminRoute::OpenApi => {
             runtime_gateway_admin_json_response(200, runtime_gateway_openapi_spec(shared))
@@ -253,145 +355,182 @@ fn runtime_gateway_admin_dispatch(
         GatewayAdminRoute::LedgerSummaryCsv => {
             runtime_gateway_admin_ledger_summary_csv_response(shared, admin_auth)
         }
-        GatewayAdminRoute::Governance { .. }
-        | GatewayAdminRoute::GovernanceOutbox
-        | GatewayAdminRoute::GovernanceOutboxClaim
-        | GatewayAdminRoute::GovernanceAuditIntegrity
-        | GatewayAdminRoute::AuditExports
-        | GatewayAdminRoute::AuditRetentionHolds
-        | GatewayAdminRoute::AuditRetentionHold { .. }
-        | GatewayAdminRoute::AuditRetentionPurge => match authorized_action {
-            Some(base_action) => runtime_gateway_admin_policy_response(
-                captured,
-                path,
-                admin_prefix,
-                shared,
-                admin_auth,
-                base_action,
-            )
-            .unwrap_or_else(|| {
-                build_runtime_proxy_json_error_response(
-                    404,
-                    "governance_policy_not_found",
-                    "policy governance resource was not found",
-                )
-            }),
-            None => runtime_gateway_admin_missing_action_response(),
-        },
-        GatewayAdminRoute::SessionRevoke { .. } | GatewayAdminRoute::SessionUnknown(_) => {
-            match authorized_action {
-                Some(base_action) => runtime_gateway_admin_session_response(
-                    captured,
-                    path,
-                    admin_prefix,
-                    shared,
-                    admin_auth,
-                    base_action,
-                )
-                .unwrap_or_else(|| {
-                    build_runtime_proxy_json_error_response(
-                        404,
-                        "governance_session_not_found",
-                        "session governance resource was not found",
-                    )
-                }),
-                None => runtime_gateway_admin_missing_action_response(),
-            }
-        }
-        GatewayAdminRoute::Keys => match method.as_str() {
-            "GET" => runtime_gateway_admin_keys_response(shared, "gateway.keys", admin_auth),
-            "POST" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_create_key_response(
-                    captured,
-                    shared,
-                    admin_auth,
-                    base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
+        _ => return None,
+    })
+}
+
+fn runtime_gateway_admin_policy_dispatch(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &prodex_control_plane::ControlPlaneActionPlan,
+) -> tiny_http::ResponseBox {
+    runtime_gateway_admin_policy_response(
+        captured,
+        path,
+        admin_prefix,
+        shared,
+        admin_auth,
+        base_action,
+    )
+    .unwrap_or_else(|| {
+        build_runtime_proxy_json_error_response(
+            404,
+            "governance_policy_not_found",
+            "policy governance resource was not found",
+        )
+    })
+}
+
+fn runtime_gateway_admin_session_dispatch(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    let Some(base_action) = authorized_action else {
+        return runtime_gateway_admin_missing_action_response();
+    };
+    runtime_gateway_admin_session_response(
+        captured,
+        path,
+        admin_prefix,
+        shared,
+        admin_auth,
+        base_action,
+    )
+    .unwrap_or_else(|| {
+        build_runtime_proxy_json_error_response(
+            404,
+            "governance_session_not_found",
+            "session governance resource was not found",
+        )
+    })
+}
+
+fn runtime_gateway_admin_keys_dispatch(
+    method: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    match method {
+        "GET" => runtime_gateway_admin_keys_response(shared, "gateway.keys", admin_auth),
+        "POST" => authorized_action.map_or_else(
+            runtime_gateway_admin_missing_action_response,
+            |base_action| {
+                runtime_gateway_admin_create_key_response(captured, shared, admin_auth, base_action)
             },
-            _ => build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway keys endpoint supports GET and POST",
-            ),
-        },
-        GatewayAdminRoute::Key { key_name } => runtime_gateway_admin_key_response(
-            key_name,
-            captured,
-            shared,
-            admin_auth,
-            authorized_action,
         ),
-        GatewayAdminRoute::KeyUnknown(_) => {
-            runtime_gateway_admin_key_response("", captured, shared, admin_auth, authorized_action)
-        }
-        GatewayAdminRoute::KeySecret { key_name } => match method.as_str() {
-            "POST" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_update_key_response(
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "gateway keys endpoint supports GET and POST",
+        ),
+    }
+}
+
+fn runtime_gateway_admin_key_secret_dispatch(
+    key_name: &str,
+    method: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    match method {
+        "POST" => authorized_action.map_or_else(
+            runtime_gateway_admin_missing_action_response,
+            |base_action| {
+                runtime_gateway_admin_update_key_response(
                     key_name,
                     captured,
                     shared,
                     admin_auth,
                     base_action,
                     true,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
+                )
             },
-            _ => build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway key secret endpoint requires POST",
-            ),
-        },
-        GatewayAdminRoute::ScimUsers => match method.as_str() {
-            "GET" => runtime_gateway_admin_scim_list_users_response(shared, admin_auth),
-            "POST" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_create_user_response(
+        ),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "gateway key secret endpoint requires POST",
+        ),
+    }
+}
+
+fn runtime_gateway_admin_scim_users_dispatch(
+    method: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    match method {
+        "GET" => runtime_gateway_admin_scim_list_users_response(shared, admin_auth),
+        "POST" => authorized_action.map_or_else(
+            runtime_gateway_admin_missing_action_response,
+            |base_action| {
+                runtime_gateway_admin_scim_create_user_response(
                     captured,
                     shared,
                     admin_auth,
                     base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
+                )
             },
-            _ => build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway SCIM Users endpoint supports GET and POST",
-            ),
-        },
-        GatewayAdminRoute::ScimUser { user_id } => match method.as_str() {
-            "GET" => runtime_gateway_admin_scim_get_user_response(user_id, shared, admin_auth),
-            "PATCH" | "PUT" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_update_user_response(
+        ),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "gateway SCIM Users endpoint supports GET and POST",
+        ),
+    }
+}
+
+fn runtime_gateway_admin_scim_user_dispatch(
+    user_id: &str,
+    method: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    match method {
+        "GET" => runtime_gateway_admin_scim_get_user_response(user_id, shared, admin_auth),
+        "PATCH" | "PUT" => authorized_action.map_or_else(
+            runtime_gateway_admin_missing_action_response,
+            |base_action| {
+                runtime_gateway_admin_scim_update_user_response(
                     user_id,
                     captured,
                     shared,
                     admin_auth,
                     base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
+                )
             },
-            "DELETE" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_delete_user_response(
+        ),
+        "DELETE" => authorized_action.map_or_else(
+            runtime_gateway_admin_missing_action_response,
+            |base_action| {
+                runtime_gateway_admin_scim_delete_user_response(
                     user_id,
                     captured,
                     shared,
                     admin_auth,
                     base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
+                )
             },
-            _ => build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway SCIM User endpoint supports GET, PATCH, PUT, and DELETE",
-            ),
-        },
-        GatewayAdminRoute::ScimUnknown(_) => build_runtime_proxy_json_error_response(
-            404,
-            "scim_user_not_found",
-            "gateway SCIM user was not found",
+        ),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "gateway SCIM User endpoint supports GET, PATCH, PUT, and DELETE",
         ),
     }
 }
