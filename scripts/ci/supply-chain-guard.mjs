@@ -205,10 +205,11 @@ export function validateReleaseMalwareGate(contents) {
 
 export function validateReleaseContainerPublication(contents) {
   const verify = workflowJob(contents, "verify-ci");
+  const build = workflowJob(contents, "build");
   const container = workflowJob(contents, "publish-container");
   const release = workflowJob(contents, "publish-github-release");
-  if (!verify || !container || !release) {
-    return [".github/workflows/standalone-release.yml: missing verify, container, or release publish job"];
+  if (!verify || !build || !container || !release) {
+    return [".github/workflows/standalone-release.yml: missing verify, build, container, or release publish job"];
   }
   const violations = [];
   for (const marker of [
@@ -218,6 +219,21 @@ export function validateReleaseContainerPublication(contents) {
   ]) {
     if (!verify.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release target safety missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    "persist-credentials: false",
+    "cargo install cross --version 0.2.5 --locked",
+    "unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
+    "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
+    "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908",
+    "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95",
+    "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125",
+    "VERSION=v1.0.77",
+    "claude-install.sh\" 2.1.220",
+  ]) {
+    if (!build.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release build pin missing ${marker}`);
     }
   }
   for (const marker of [

@@ -165,6 +165,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -190,7 +192,7 @@ jobs:
             exit 0
           fi
           for attempt in 1 2 3; do
-            if CARGO_HTTP_MULTIPLEXING=false cargo install cross --locked; then
+            if CARGO_HTTP_MULTIPLEXING=false cargo install cross --version 0.2.5 --locked; then
               exit 0
             fi
             if [ "${attempt}" = "3" ]; then
@@ -287,21 +289,23 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Install current native clients
+      - name: Install pinned native clients
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           mkdir -p "${HOME}/.local/bin"
-          npm install --global @google/gemini-cli
+          npm install --global --ignore-scripts @google/gemini-cli@0.53.0
           curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/kiro-install.sh" https://cli.kiro.dev/install
-          bash "${RUNNER_TEMP}/kiro-install.sh" --force
           curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install
-          PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
           curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
-          bash "${RUNNER_TEMP}/claude-install.sh" stable
+          echo "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
+          echo "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
+          echo "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
+          bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
+          VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
+          bash "${RUNNER_TEMP}/claude-install.sh" 2.1.220
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
       - name: Verify client discovery and direct-native guards
