@@ -242,27 +242,7 @@ impl RuntimeSmartContextArtifactStore {
 
     fn refresh_loaded_artifact_indexes(&mut self) {
         for artifact in self.artifacts.values_mut() {
-            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
-                artifact.line_index.as_ref(),
-            );
-            if refresh_line_index || artifact.chunk_index.is_none() {
-                let line_index = if refresh_line_index {
-                    runtime_smart_context_artifact_line_index(&artifact.text)
-                } else {
-                    artifact.line_index.clone().unwrap_or_else(|| {
-                        runtime_smart_context_artifact_line_index(&artifact.text)
-                    })
-                };
-                if refresh_line_index || artifact.line_index.is_none() {
-                    artifact.line_index = Some(line_index.clone());
-                }
-                if refresh_line_index || artifact.chunk_index.is_none() {
-                    artifact.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
-                        &artifact.text,
-                        &line_index,
-                    ));
-                }
-            }
+            refresh_loaded_artifact_index(artifact);
         }
     }
 
@@ -287,6 +267,29 @@ impl RuntimeSmartContextArtifactStore {
             }
         }
     }
+}
+
+fn refresh_loaded_artifact_index(artifact: &mut super::super::RuntimeSmartContextArtifact) {
+    let refresh_line_index =
+        runtime_smart_context_artifact_line_index_needs_refresh(artifact.line_index.as_ref());
+    if !refresh_line_index && artifact.chunk_index.is_some() {
+        return;
+    }
+    let line_index = if refresh_line_index {
+        runtime_smart_context_artifact_line_index(&artifact.text)
+    } else {
+        artifact
+            .line_index
+            .clone()
+            .unwrap_or_else(|| runtime_smart_context_artifact_line_index(&artifact.text))
+    };
+    if refresh_line_index || artifact.line_index.is_none() {
+        artifact.line_index = Some(line_index.clone());
+    }
+    artifact.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+        &artifact.text,
+        &line_index,
+    ));
 }
 
 fn valid_loaded_artifact(
