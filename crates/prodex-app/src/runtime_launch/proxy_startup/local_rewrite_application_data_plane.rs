@@ -1165,8 +1165,12 @@ mod tests {
         let decision = include_str!("local_rewrite_application_data_plane/governance_decision.rs");
         let hot_path = format!(
             "{}\n{}",
-            parent.split("\n#[cfg(test)]\nmod tests").next().unwrap(),
-            decision.split("\n#[cfg(test)]\nmod tests").next().unwrap(),
+            parent
+                .rsplit_once("\n#[cfg(test)]")
+                .map_or(parent, |(source, _)| source),
+            decision
+                .rsplit_once("\n#[cfg(test)]")
+                .map_or(decision, |(source, _)| source),
         );
         assert!(hot_path.contains(".governance") && hot_path.contains(".snapshot_for("));
         assert!(!hot_path.contains("GovernanceSqliteRepository"));

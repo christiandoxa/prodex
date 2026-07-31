@@ -34,15 +34,30 @@ fn gemini_runtime_settings_paths_follow_cli_precedence() {
     let home = PathBuf::from("/tmp/prodex-gemini-home");
     let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
     let paths = runtime_gemini_settings_paths_for(Some(&home), Some(&cwd));
+    let system_settings = {
+        #[cfg(target_os = "macos")]
+        {
+            PathBuf::from("/Library/Application Support/GeminiCli/settings.json")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            PathBuf::from(r"C:\ProgramData\gemini-cli\settings.json")
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            PathBuf::from("/etc/gemini-cli/settings.json")
+        }
+    };
+    let system_defaults = system_settings
+        .parent()
+        .expect("system settings path should have a parent")
+        .join("system-defaults.json");
     let repo_settings = PathBuf::from("/tmp/prodex-gemini-workspace/repo")
         .join(".gemini")
         .join("settings.json");
     let sub_settings = cwd.join(".gemini").join("settings.json");
 
-    assert_eq!(
-        paths[0],
-        PathBuf::from("/etc/gemini-cli/system-defaults.json")
-    );
+    assert_eq!(paths[0], system_defaults);
     assert_eq!(paths[1], home.join(".gemini").join("settings.json"));
     assert!(
         paths.iter().position(|path| path == &repo_settings)
@@ -52,10 +67,7 @@ fn gemini_runtime_settings_paths_follow_cli_precedence() {
         paths.get(paths.len().saturating_sub(2)),
         Some(&cwd.join(".gemini").join("settings.local.json"))
     );
-    assert_eq!(
-        paths.last(),
-        Some(&PathBuf::from("/etc/gemini-cli/settings.json"))
-    );
+    assert_eq!(paths.last(), Some(&system_settings));
     assert_eq!(
         paths.len(),
         paths.iter().collect::<BTreeSet<_>>().len(),

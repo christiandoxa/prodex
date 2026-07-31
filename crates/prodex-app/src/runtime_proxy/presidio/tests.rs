@@ -147,12 +147,15 @@ fn runtime_presidio_detector_failure_matrix_is_bounded_and_content_preserving() 
             FailureCase::Unavailable => {
                 let listener = TcpListener::bind("127.0.0.1:0").unwrap();
                 let url = format!("http://{}", listener.local_addr().unwrap());
-                drop(listener);
+                let handle = thread::spawn(move || {
+                    let (stream, _) = listener.accept().unwrap();
+                    drop(stream);
+                });
                 (
                     br#"{"input":"synthetic-unavailable"}"#.to_vec(),
                     url,
                     1_000,
-                    None,
+                    Some(handle),
                     InspectionOutcome::Error,
                     "failed to call Presidio Analyzer",
                 )

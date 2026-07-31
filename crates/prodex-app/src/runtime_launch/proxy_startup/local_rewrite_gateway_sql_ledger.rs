@@ -332,6 +332,7 @@ mod tests {
             vec![1, 2]
         );
 
+        drop(conn);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -501,6 +502,7 @@ mod tests {
         assert_eq!(call_a_status, None);
         assert_eq!(call_b_status, Some(200));
 
+        drop(conn);
         std::fs::remove_dir_all(root).unwrap();
     }
 

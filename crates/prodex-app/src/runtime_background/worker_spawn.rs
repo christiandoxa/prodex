@@ -181,9 +181,8 @@ mod tests {
     #[test]
     fn runtime_background_worker_spawn_logs_panic_to_runtime_log() {
         let log_path = std::env::temp_dir().join(format!(
-            "prodex-background-worker-panic-{}-{}.log",
-            std::process::id(),
-            thread::current().name().unwrap_or("unnamed")
+            "prodex-background-worker-panic-{}.log",
+            std::process::id()
         ));
         crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
 
@@ -219,9 +218,8 @@ mod tests {
     #[test]
     fn supervised_worker_restarts_after_panic_until_shutdown() {
         let log_path = std::env::temp_dir().join(format!(
-            "prodex-supervised-worker-{}-{}.log",
-            std::process::id(),
-            thread::current().name().unwrap_or("unnamed")
+            "prodex-supervised-worker-{}.log",
+            std::process::id()
         ));
         crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
         let shutdown = Arc::new(AtomicBool::new(false));

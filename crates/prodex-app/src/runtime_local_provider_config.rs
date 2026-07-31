@@ -216,7 +216,14 @@ mod tests {
             })
             .and_then(|arg| arg.strip_prefix("model_catalog_json=").map(str::to_string))
             .expect("model_catalog_json override should be present");
-        PathBuf::from(value.trim_matches('"'))
+        let document = toml::from_str::<toml::Value>(&format!("value = {value}"))
+            .expect("model_catalog_json override should be valid TOML");
+        PathBuf::from(
+            document
+                .get("value")
+                .and_then(toml::Value::as_str)
+                .expect("model_catalog_json override should be a string"),
+        )
     }
 
     fn catalog_efforts(path: &Path) -> Vec<String> {

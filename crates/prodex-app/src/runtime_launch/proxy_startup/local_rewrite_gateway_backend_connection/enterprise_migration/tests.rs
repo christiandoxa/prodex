@@ -47,6 +47,7 @@ fn sqlite_enterprise_migrations_are_versioned_and_idempotent() {
     assert_eq!(count, i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0));
     assert_eq!(max_version, i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0));
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -76,6 +77,7 @@ fn sqlite_enterprise_migrator_bootstraps_legacy_current_schema() {
         .unwrap();
     assert_eq!(count, plan.migrations.len() as i64);
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -438,6 +440,7 @@ fn sqlite_enterprise_migration_failure_rolls_back_its_ddl_and_ledger_row() {
     assert_eq!(legacy_column_count, 1);
     assert_eq!(renamed_column_count, 0);
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 

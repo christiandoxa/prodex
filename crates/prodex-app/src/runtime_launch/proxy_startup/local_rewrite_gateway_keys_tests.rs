@@ -251,5 +251,6 @@ fn sqlite_durable_reservation_rejects_second_concurrent_claim_on_same_budget_sco
     assert_eq!(reserved_tokens, 22);
     assert_eq!(reserved_cost_micros, 42);
 
+    drop(conn);
     let _ = std::fs::remove_dir_all(root);
 }

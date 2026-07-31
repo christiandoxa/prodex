@@ -204,6 +204,7 @@ fn sqlite_open_accepts_versioned_compatibility_schema() {
         .unwrap();
     assert_eq!(enterprise_count, 1);
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -275,6 +276,7 @@ fn sqlite_compatibility_migrations_are_versioned_and_idempotent() {
     );
     assert_eq!(max_version, RUNTIME_GATEWAY_SCHEMA_VERSION);
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 

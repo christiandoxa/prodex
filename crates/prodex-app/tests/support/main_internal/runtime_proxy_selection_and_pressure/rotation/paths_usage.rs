@@ -27,15 +27,17 @@ fn app_paths_discover_uses_native_codex_home_for_default_shared_codex_home() {
     let temp_dir = TestDir::isolated();
     let home_dir = temp_dir.path.join("home");
     let prodex_home = temp_dir.path.join("prodex");
-    let home_dir_string = home_dir.to_string_lossy().to_string();
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
-    let _home = TestEnvVarGuard::set("HOME", &home_dir_string);
+    let _home_guards = TestEnvVarGuard::set_home(&home_dir);
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
     let _shared = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
+    let native_codex_home = dirs::home_dir()
+        .expect("native home should resolve")
+        .join(".codex");
 
     let paths = AppPaths::discover().expect("paths should resolve");
     assert_eq!(paths.root, prodex_home);
-    assert_eq!(paths.shared_codex_root, home_dir.join(".codex"));
+    assert_eq!(paths.shared_codex_root, native_codex_home);
     assert_eq!(paths.legacy_shared_codex_root, paths.root.join("shared"));
 }
 

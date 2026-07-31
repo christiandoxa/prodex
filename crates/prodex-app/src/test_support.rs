@@ -1,5 +1,6 @@
 use std::env;
 use std::ffi::OsString;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 // ponytail: Migrate remaining cases to injected readers if this blocks parallel tests.
@@ -56,6 +57,26 @@ impl TestEnvVarGuard {
             _lock: Some(lock),
             key: Some(key),
             previous,
+        }
+    }
+
+    pub(crate) fn set_home(path: &Path) -> (Self, Self) {
+        let value = path.to_string_lossy();
+        let userprofile = Self::set("USERPROFILE", &value);
+        let home = Self::set("HOME", &value);
+        // Drop the nested guard first so the lock owner protects both restorations.
+        (home, userprofile)
+    }
+
+    pub(crate) fn set_test_shared_codex_home(path: &Path) -> Self {
+        #[cfg(windows)]
+        {
+            return Self::set("PRODEX_SHARED_CODEX_HOME", &path.to_string_lossy());
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            Self::unset("PRODEX_SHARED_CODEX_HOME")
         }
     }
 

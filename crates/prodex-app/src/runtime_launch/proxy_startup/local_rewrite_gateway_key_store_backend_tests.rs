@@ -185,6 +185,7 @@ fn sqlite_key_store_rejects_malformed_allowed_models_json() {
     .unwrap();
     assert!(runtime_gateway_sqlite_load_key_store(&path).is_err());
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -234,6 +235,7 @@ fn sqlite_key_store_rejects_malformed_boolean_fields() {
             .contains("Conversion error from type Integer at index: 9"),
         "{err:?}"
     );
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -283,6 +285,7 @@ fn sqlite_key_store_rejects_negative_numeric_fields() {
             .contains("Conversion error from type Integer at index: 14"),
         "{err:?}"
     );
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -362,6 +365,7 @@ fn sqlite_key_store_round_trips_keys_and_scim_users() {
         Some("research")
     );
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
