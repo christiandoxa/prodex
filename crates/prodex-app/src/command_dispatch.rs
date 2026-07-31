@@ -171,7 +171,9 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        command_is_native_dry_run, command_should_show_update_notice, parse_cli_command_from,
+    };
 
     #[test]
     fn native_dry_run_skips_startup_side_effects() {
