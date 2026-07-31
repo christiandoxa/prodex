@@ -5,32 +5,20 @@ use super::{
 use crate::runtime_background::try_spawn_runtime_supervised_worker;
 use crate::runtime_core_shared::runtime_proxy_log_to_path;
 use postgres::fallible_iterator::FallibleIterator;
-use prodex_domain::TenantId;
 use prodex_storage::{
-    GOVERNANCE_INVALIDATION_CHANNEL, GovernanceArtifactKind, GovernanceRepositoryError,
+    GOVERNANCE_INVALIDATION_CHANNEL, GovernanceRepositoryError,
     MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES,
 };
-use serde::Deserialize;
+use prodex_storage_postgres_runtime::PostgresGovernanceInvalidation;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+const GOVERNANCE_INVALIDATION_BATCH: u16 = 64;
 const GOVERNANCE_INVALIDATION_LISTEN_TIMEOUT: Duration = Duration::from_millis(250);
+const GOVERNANCE_INVALIDATION_OUTBOX_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const GOVERNANCE_INVALIDATION_RECONNECT_DELAY: Duration = Duration::from_secs(5);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct GovernanceInvalidation {
-    tenant_id: TenantId,
-    kind: GovernanceArtifactKind,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GovernanceInvalidationPayload {
-    tenant_id: String,
-    kind: String,
-}
 
 pub(super) fn spawn_runtime_gateway_governance_invalidation_worker(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -47,6 +35,7 @@ pub(super) fn spawn_runtime_gateway_governance_invalidation_worker(
     }
     let url = url.clone();
     let tls = tls.clone();
+    let replica_id = format!("gateway-{}", uuid::Uuid::now_v7());
     let shared = shared.clone();
     let shutdown = Arc::clone(shutdown);
     let log_path = shared.runtime_shared.log_path.clone();
@@ -55,7 +44,9 @@ pub(super) fn spawn_runtime_gateway_governance_invalidation_worker(
         log_path,
         Arc::clone(&shutdown),
         move || {
-            if listen_for_governance_invalidations(&url, &tls, &shared, &shutdown).is_err() {
+            if listen_for_governance_invalidations(&url, &tls, &replica_id, &shared, &shutdown)
+                .is_err()
+            {
                 runtime_proxy_log_to_path(
                     &shared.runtime_shared.log_path,
                     "governance_invalidation_listener status=error action=reconnect",
@@ -70,6 +61,7 @@ pub(super) fn spawn_runtime_gateway_governance_invalidation_worker(
 fn listen_for_governance_invalidations(
     url: &str,
     tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
+    replica_id: &str,
     shared: &RuntimeLocalRewriteProxyShared,
     shutdown: &AtomicBool,
 ) -> Result<(), ()> {
@@ -77,82 +69,117 @@ fn listen_for_governance_invalidations(
     client
         .batch_execute(&format!("LISTEN {GOVERNANCE_INVALIDATION_CHANNEL}"))
         .map_err(|_| ())?;
+    drain_governance_invalidation_outbox(replica_id, shared);
+    let mut last_poll = Instant::now();
     while !shutdown.load(Ordering::Acquire) {
         let notification = client
             .notifications()
             .timeout_iter(GOVERNANCE_INVALIDATION_LISTEN_TIMEOUT)
             .next()
             .map_err(|_| ())?;
-        let Some(notification) = notification else {
-            if client.is_closed() {
-                return Err(());
-            }
-            continue;
-        };
-        if notification.channel() != GOVERNANCE_INVALIDATION_CHANNEL {
-            continue;
+        let hinted = notification.is_some_and(|notification| {
+            notification.channel() == GOVERNANCE_INVALIDATION_CHANNEL
+                && valid_governance_invalidation_hint(notification.payload())
+        });
+        if !hinted && client.is_closed() {
+            return Err(());
         }
-        let Some(invalidation) = parse_governance_invalidation(notification.payload()) else {
-            continue;
-        };
-        let Some(authority) = shared.governance_authority.as_ref() else {
-            continue;
-        };
-        if !invalidation_targets_known_tenant(authority, &invalidation) {
-            continue;
-        }
-        if apply_governance_invalidation(
-            &invalidation,
-            &shared.governance_refresh_requested,
-            |event| shared.refresh_committed_governance_artifact_kind(event.tenant_id, event.kind),
-        )
-        .is_err()
-        {
-            runtime_proxy_log_to_path(
-                &shared.runtime_shared.log_path,
-                "governance_invalidation_listener status=error action=poll_fallback",
-            );
+        if hinted || last_poll.elapsed() >= GOVERNANCE_INVALIDATION_OUTBOX_POLL_INTERVAL {
+            drain_governance_invalidation_outbox(replica_id, shared);
+            last_poll = Instant::now();
         }
     }
     Ok(())
 }
 
-fn invalidation_targets_known_tenant(
-    authority: &RuntimeGovernanceAuthority,
-    invalidation: &GovernanceInvalidation,
-) -> bool {
-    authority
-        .tenant_ids()
-        .is_ok_and(|tenant_ids| tenant_ids.contains(&invalidation.tenant_id))
+fn drain_governance_invalidation_outbox(replica_id: &str, shared: &RuntimeLocalRewriteProxyShared) {
+    let Some(
+        authority @ RuntimeGovernanceAuthority::Postgres {
+            repository,
+            runtime,
+            ..
+        },
+    ) = shared.governance_authority.as_ref()
+    else {
+        return;
+    };
+    let tenant_ids = match authority.tenant_ids() {
+        Ok(tenant_ids) => tenant_ids,
+        Err(_) => {
+            log_poll_fallback(shared);
+            return;
+        }
+    };
+    let mut failed = false;
+    for tenant_id in tenant_ids {
+        let events = match runtime.block_on(repository.governance_poll_invalidation_outbox(
+            tenant_id,
+            replica_id,
+            GOVERNANCE_INVALIDATION_BATCH,
+        )) {
+            Ok(events) => events,
+            Err(_) => {
+                failed = true;
+                continue;
+            }
+        };
+        for event in events {
+            if process_governance_invalidation_event(
+                event,
+                &shared.governance_refresh_requested,
+                |event| {
+                    shared.refresh_committed_governance_artifact_kind(event.tenant_id, event.kind)
+                },
+                |event| {
+                    runtime.block_on(
+                        repository.governance_ack_invalidation_outbox_event(replica_id, event),
+                    )
+                },
+            )
+            .is_err()
+            {
+                failed = true;
+            }
+        }
+        if runtime
+            .block_on(repository.governance_compact_invalidation_outbox(tenant_id))
+            .is_err()
+        {
+            failed = true;
+        }
+    }
+    if failed {
+        log_poll_fallback(shared);
+    }
 }
 
-fn apply_governance_invalidation(
-    invalidation: &GovernanceInvalidation,
+fn process_governance_invalidation_event(
+    event: PostgresGovernanceInvalidation,
     refresh_requested: &AtomicBool,
     refresh: impl FnOnce(
-        GovernanceInvalidation,
+        PostgresGovernanceInvalidation,
     )
         -> Result<RuntimeGovernanceArtifactRefreshOutcome, GovernanceRepositoryError>,
+    acknowledge: impl FnOnce(PostgresGovernanceInvalidation) -> Result<(), GovernanceRepositoryError>,
 ) -> Result<(), ()> {
-    let result = refresh(*invalidation);
+    let result = refresh(event);
     refresh_requested.store(true, Ordering::Release);
-    result.map(|_| ()).map_err(|_| ())
+    result.map_err(|_| ())?;
+    acknowledge(event).map_err(|_| ())
 }
 
-fn parse_governance_invalidation(payload: &str) -> Option<GovernanceInvalidation> {
-    if payload.is_empty() || payload.len() > MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES {
-        return None;
-    }
-    let payload: GovernanceInvalidationPayload = serde_json::from_str(payload).ok()?;
-    let tenant_id = payload.tenant_id.parse().ok()?;
-    let kind = match payload.kind.as_str() {
-        "policy" => GovernanceArtifactKind::Policy,
-        "classification_rules" => GovernanceArtifactKind::ClassificationRules,
-        "provider_registry" => GovernanceArtifactKind::ProviderRegistry,
-        "routing_scores" => GovernanceArtifactKind::RoutingScores,
-        _ => return None,
-    };
-    Some(GovernanceInvalidation { tenant_id, kind })
+fn valid_governance_invalidation_hint(payload: &str) -> bool {
+    !payload.is_empty() && payload.len() <= MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES
+}
+
+fn log_poll_fallback(shared: &RuntimeLocalRewriteProxyShared) {
+    shared
+        .governance_refresh_requested
+        .store(true, Ordering::Release);
+    runtime_proxy_log_to_path(
+        &shared.runtime_shared.log_path,
+        "governance_invalidation_outbox status=error action=poll_fallback",
+    );
 }
 
 fn wait_for_reconnect(shutdown: &AtomicBool) {
@@ -170,93 +197,68 @@ fn wait_for_reconnect(shutdown: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-    use std::sync::Mutex;
+    use prodex_domain::TenantId;
+    use prodex_storage::GovernanceArtifactKind;
 
-    fn tenant_id() -> TenantId {
-        "00000000-0000-4000-8000-000000000001".parse().unwrap()
-    }
-
-    #[test]
-    fn invalidation_payload_is_bounded_and_strict() {
-        for (label, kind) in [
-            ("policy", GovernanceArtifactKind::Policy),
-            (
-                "classification_rules",
-                GovernanceArtifactKind::ClassificationRules,
-            ),
-            (
-                "provider_registry",
-                GovernanceArtifactKind::ProviderRegistry,
-            ),
-            ("routing_scores", GovernanceArtifactKind::RoutingScores),
-        ] {
-            let payload = format!(r#"{{"tenant_id":"{}","kind":"{label}"}}"#, tenant_id());
-            assert_eq!(
-                parse_governance_invalidation(&payload),
-                Some(GovernanceInvalidation {
-                    tenant_id: tenant_id(),
-                    kind,
-                })
-            );
+    fn event() -> PostgresGovernanceInvalidation {
+        PostgresGovernanceInvalidation {
+            event_id: 1,
+            tenant_id: "00000000-0000-4000-8000-000000000001"
+                .parse::<TenantId>()
+                .unwrap(),
+            kind: GovernanceArtifactKind::Policy,
         }
-        assert!(parse_governance_invalidation("{}").is_none());
-        assert!(
-            parse_governance_invalidation(
-                r#"{"tenant_id":"bad","kind":"policy","unexpected":true}"#
-            )
-            .is_none()
-        );
-        assert!(
-            parse_governance_invalidation(
-                &"x".repeat(MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES + 1)
-            )
-            .is_none()
-        );
     }
 
     #[test]
-    fn unknown_tenant_notification_cannot_enroll_authority() {
-        let known = tenant_id();
-        let authority = RuntimeGovernanceAuthority::Sqlite {
-            path: "unused.sqlite".into(),
-            tenant_ids: Arc::new(Mutex::new(BTreeSet::from([known]))),
-        };
-        let unknown = GovernanceInvalidation {
-            tenant_id: TenantId::new(),
-            kind: GovernanceArtifactKind::Policy,
-        };
-
-        assert!(!invalidation_targets_known_tenant(&authority, &unknown));
-        assert_eq!(authority.tenant_ids().unwrap(), vec![known]);
+    fn notify_payload_is_only_a_bounded_wakeup_hint() {
+        assert!(valid_governance_invalidation_hint("not-authoritative-json"));
+        assert!(!valid_governance_invalidation_hint(""));
+        assert!(!valid_governance_invalidation_hint(
+            &"x".repeat(MAX_GOVERNANCE_INVALIDATION_PAYLOAD_BYTES + 1)
+        ));
     }
 
     #[test]
-    fn notification_reloads_latest_snapshot_and_wakes_recovery_poll() {
-        let invalidation = GovernanceInvalidation {
-            tenant_id: tenant_id(),
-            kind: GovernanceArtifactKind::Policy,
-        };
+    fn durable_event_is_acknowledged_only_after_refresh() {
         let refresh_requested = AtomicBool::new(false);
-        let mut cached_revision = "revoked-revision";
-        let authoritative_revision = "promoted-fallback";
-
-        apply_governance_invalidation(&invalidation, &refresh_requested, |event| {
-            assert_eq!(event, invalidation);
-            cached_revision = authoritative_revision;
-            Ok(RuntimeGovernanceArtifactRefreshOutcome::Published)
-        })
+        let refreshed = Arc::new(AtomicBool::new(false));
+        let refreshed_for_refresh = Arc::clone(&refreshed);
+        let refreshed_for_ack = Arc::clone(&refreshed);
+        let mut acknowledged = false;
+        process_governance_invalidation_event(
+            event(),
+            &refresh_requested,
+            |_| {
+                refreshed_for_refresh.store(true, Ordering::Release);
+                Ok(RuntimeGovernanceArtifactRefreshOutcome::Invalidated)
+            },
+            |_| {
+                assert!(refreshed_for_ack.load(Ordering::Acquire));
+                acknowledged = true;
+                Ok(())
+            },
+        )
         .unwrap();
-
-        assert_eq!(cached_revision, "promoted-fallback");
+        assert!(acknowledged);
         assert!(refresh_requested.load(Ordering::Acquire));
 
-        cached_revision = "later-activation";
-        apply_governance_invalidation(&invalidation, &refresh_requested, |_| {
-            cached_revision = "later-activation";
-            Ok(RuntimeGovernanceArtifactRefreshOutcome::Published)
-        })
-        .unwrap();
-        assert_eq!(cached_revision, "later-activation");
+        acknowledged = false;
+        assert!(
+            process_governance_invalidation_event(
+                event(),
+                &refresh_requested,
+                |_| Err(GovernanceRepositoryError::Database),
+                |_| {
+                    acknowledged = true;
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            !acknowledged,
+            "failed refresh must remain pending for recovery"
+        );
     }
 }

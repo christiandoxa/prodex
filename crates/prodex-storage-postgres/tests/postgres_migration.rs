@@ -2,10 +2,10 @@ use postgres::NoTls;
 use postgres::fallible_iterator::FallibleIterator;
 use prodex_storage_postgres::{
     APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION,
-    ENTERPRISE_GOVERNANCE_MIGRATION, GOVERNANCE_LIFECYCLE_MIGRATION,
-    GOVERNANCE_REVOCATION_MIGRATION, GOVERNANCE_SESSION_INDEX_MIGRATION,
-    GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION, INITIAL_TENANT_ACCOUNTING_MIGRATION,
-    POSTGRES_MIGRATIONS, SIEM_OUTBOX_LEASING_MIGRATION,
+    ENTERPRISE_GOVERNANCE_MIGRATION, GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION,
+    GOVERNANCE_LIFECYCLE_MIGRATION, GOVERNANCE_REVOCATION_MIGRATION,
+    GOVERNANCE_SESSION_INDEX_MIGRATION, GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
+    INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS, SIEM_OUTBOX_LEASING_MIGRATION,
     TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION, postgres_governance_pointer_statements,
 };
 use std::time::Duration;
@@ -44,6 +44,30 @@ fn governance_revocation_is_terminal_and_notifies_every_pointer_family() {
         assert!(sql.contains(table), "missing notify trigger table {table}");
         assert!(sql.contains(kind), "missing notify payload kind {kind}");
     }
+}
+
+#[test]
+fn governance_invalidation_outbox_is_bounded_tenant_scoped_and_transactional() {
+    let sql = GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION.sql;
+    for table in [
+        "prodex_governance_invalidation_outbox",
+        "prodex_governance_invalidation_replicas",
+        "prodex_governance_invalidation_acks",
+    ] {
+        assert!(sql.contains(&format!("CREATE TABLE IF NOT EXISTS {table}")));
+        assert!(sql.contains(table));
+    }
+    assert!(sql.contains("INSERT INTO prodex_governance_invalidation_outbox"));
+    assert!(sql.contains("event_id BIGINT GENERATED ALWAYS AS IDENTITY"));
+    assert!(sql.contains("PRIMARY KEY (tenant_id, event_id)"));
+    assert!(sql.contains("FOREIGN KEY (tenant_id, replica_id)"));
+    assert!(sql.contains("FOREIGN KEY (tenant_id, event_id)"));
+    assert!(sql.contains("ALTER TABLE %I FORCE ROW LEVEL SECURITY"));
+    assert!(sql.contains("current_setting(''prodex.tenant_id'', true)::uuid"));
+    assert!(sql.contains("WITH CHECK"));
+    assert!(sql.contains("char_length(replica_id) BETWEEN 1 AND 128"));
+    assert!(sql.contains("pg_notify('prodex_governance_invalidation', payload)"));
+    assert!(sql.contains("octet_length(payload) > 256"));
 }
 
 #[test]
@@ -372,6 +396,51 @@ fn governance_invalidation_notification_is_delivered_only_after_commit() {
         ))
         .expect("listener should subscribe");
 
+    let mut rollback = writer
+        .transaction()
+        .expect("rollback transaction should open");
+    rollback
+        .execute(
+            "INSERT INTO prodex_routing_score_pointers (
+                tenant_id, active_revision_id, last_known_good_revision_id,
+                etag, updated_at_unix_ms
+             ) VALUES ($1::uuid, NULL, NULL, 'etag-rollback', 1)",
+            &[&tenant_id.as_uuid()],
+        )
+        .expect("rollback pointer should insert");
+    assert_eq!(
+        rollback
+            .query_one(
+                "SELECT COUNT(*) FROM prodex_governance_invalidation_outbox WHERE tenant_id = $1",
+                &[&tenant_id.as_uuid()],
+            )
+            .expect("rollback outbox event should be visible in transaction")
+            .get::<_, i64>(0),
+        1
+    );
+    rollback
+        .rollback()
+        .expect("pointer transaction should roll back");
+    assert_eq!(
+        writer
+            .query_one(
+                "SELECT COUNT(*) FROM prodex_governance_invalidation_outbox WHERE tenant_id = $1",
+                &[&tenant_id.as_uuid()],
+            )
+            .expect("rolled back outbox should be queryable")
+            .get::<_, i64>(0),
+        0
+    );
+    assert!(
+        listener
+            .notifications()
+            .timeout_iter(Duration::from_millis(100))
+            .next()
+            .expect("rollback notification wait should succeed")
+            .is_none(),
+        "rolled back pointer must not notify"
+    );
+
     let mut transaction = writer.transaction().expect("transaction should open");
     transaction
         .execute(
@@ -382,6 +451,14 @@ fn governance_invalidation_notification_is_delivered_only_after_commit() {
             &[&tenant_id.as_uuid()],
         )
         .expect("pointer should insert");
+    let queued: i64 = transaction
+        .query_one(
+            "SELECT COUNT(*) FROM prodex_governance_invalidation_outbox WHERE tenant_id = $1",
+            &[&tenant_id.as_uuid()],
+        )
+        .expect("outbox event should be in the pointer transaction")
+        .get(0);
+    assert_eq!(queued, 1);
     assert!(
         listener
             .notifications()
