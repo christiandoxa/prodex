@@ -6,13 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 909,
+    "maxLines": 905,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
-  },
-  {
-    "file": "crates/prodex-app/src/profile_commands/copilot.rs",
-    "maxLines": 985,
-    "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, legacy token fallback, and bounded HTTP response reads remain capped while auth refresh is split from profile import ownership."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
