@@ -186,9 +186,10 @@
         "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
         "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL",
         "governance_invalidation_notification_is_delivered_only_after_commit",
-        "invalidation_payload_is_bounded_and_strict",
-        "unknown_tenant_notification_cannot_enroll_authority",
-        "notification_reloads_latest_snapshot_and_wakes_recovery_poll"
+        "governance_invalidation_outbox_is_bounded_tenant_scoped_and_transactional",
+        "notify_payload_is_only_a_bounded_wakeup_hint",
+        "durable_event_is_acknowledged_only_after_refresh",
+        "governance_invalidation_outbox_converges_replicas_and_compacts_safely"
       ]
     },
     {
@@ -324,7 +325,8 @@
         "explicit_quota_codes_rotate_only_before_commit",
         "transient_5xx_retries_only_before_commit",
         "provider_retry_boundary_marks_irreversible_stages_committed",
-        "provider_fallback_requires_explicit_rate_limit_or_retryable_precommit_error"
+        "provider_fallback_requires_explicit_rate_limit_or_retryable_precommit_error",
+        "enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers"
       ]
     },
     {
@@ -376,6 +378,22 @@
         "outbox_worker_delivers_through_the_bounded_exporter_port",
         "PostgreSQL claim-token lease and separate finalize transactions passed live",
         "SQLite exporter outage, retry and dead-letter tests"
+      ]
+    },
+    {
+      "id": "SEC-AUD-004",
+      "phase": 5,
+      "threat": "A committed response loses its mandatory outcome audit while the gateway continues admitting unauditable work or retries the provider.",
+      "control": "Bounded durable reconciliation with an availability latch that degrades readiness and fails new governed data-plane admission closed; reconciliation overflow stays poisoned until restart.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "stream_fault_injection",
+      "expected": "Committed output is never retried or rotated; failed audit is reconciled before readiness and admission recover, and overflow never reports false recovery.",
+      "implementation_status": "tested",
+      "evidence_required": "Committed SSE failure/recovery, bounded-overflow and WebSocket audit-context regressions.",
+      "evidence": [
+        "enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers",
+        "reconciliation_queue_overflow_never_reports_recovery",
+        "websocket_guardrail_preserves_authorized_audit_context"
       ]
     },
     {

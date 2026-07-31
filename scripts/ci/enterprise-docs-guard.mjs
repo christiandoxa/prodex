@@ -116,16 +116,26 @@ const GOVERNANCE_SECURITY_EVIDENCE_TESTS = [
     testName: "governance_invalidation_notification_is_delivered_only_after_commit",
     sourcePath: "crates/prodex-storage-postgres/tests/postgres_migration.rs",
   },
+  {
+    matrixId: "SEC-POL-003",
+    testName: "governance_invalidation_outbox_is_bounded_tenant_scoped_and_transactional",
+    sourcePath: "crates/prodex-storage-postgres/tests/postgres_migration.rs",
+  },
   ...[
-    "invalidation_payload_is_bounded_and_strict",
-    "unknown_tenant_notification_cannot_enroll_authority",
-    "notification_reloads_latest_snapshot_and_wakes_recovery_poll",
+    "notify_payload_is_only_a_bounded_wakeup_hint",
+    "durable_event_is_acknowledged_only_after_refresh",
   ].map((testName) => ({
     matrixId: "SEC-POL-003",
     testName,
     sourcePath:
       "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite/governance_invalidation.rs",
   })),
+  {
+    matrixId: "SEC-POL-003",
+    testName: "governance_invalidation_outbox_converges_replicas_and_compacts_safely",
+    sourcePath:
+      "crates/prodex-storage-postgres-runtime/tests/postgres_runtime/invalidation_outbox.rs",
+  },
 ];
 const GOVERNANCE_REVOCATION_TEST = GOVERNANCE_SECURITY_EVIDENCE_TESTS[0];
 const GOVERNANCE_LIFECYCLE_FAMILIES = [

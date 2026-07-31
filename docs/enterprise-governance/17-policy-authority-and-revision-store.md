@@ -27,7 +27,7 @@ normative in this document.
 | Snapshot integrity | Immutable revisions, SHA-256 digests, detached Ed25519 signatures, activation state, active/LKG pointers, approval quorum, and stable repository errors; tenant/kind/revision/checksum binding is reverified on every lifecycle load. | Private signing-key custody and rotation ceremony are deployment responsibilities. |
 | Configuration publication | `prodex-application` provides policy governance services over tenant-bound revision, approval, activation, rollback, revoke, and snapshot repository operations. | Runtime operational configuration remains separate from governance policy authority. |
 | Runtime policy | `prodex-runtime-policy` parses, validates, caches, reloads, and invalidates the local runtime policy file. | The runtime file remains operational configuration. It is not the revisioned tenant policy store or the sole PDP source. |
-| Runtime governance invalidation | PostgreSQL pointer changes transactionally emit a bounded tenant/kind `NOTIFY`; a connected current gateway listener best-effort refreshes immediately under the same process-wide publish lock, fails closed on refresh errors, and wakes the bounded pointer poll. | PostgreSQL `NOTIFY` is not durable and startup/disconnect races can miss it. The authoritative poll bounds convergence to its configured interval. A durable invalidation outbox with per-replica acknowledgement remains a target. |
+| Runtime governance invalidation | PostgreSQL pointer changes transactionally append a tenant/kind outbox event and emit a bounded `NOTIFY` wake-up. Each gateway replica replays unacknowledged events at startup and on a bounded poll, refreshes the authoritative snapshot before acknowledging, and compacts only events acknowledged by every live replica while retaining the latest head per artifact kind. | `NOTIFY` remains only a latency hint. PostgreSQL availability, replica-lease expiry, and deployment convergence alerts remain operational responsibilities. |
 | Control-plane authorization | `prodex-control-plane` and the application layer enforce tenant, role, credential scope, idempotency, maker-checker separation, and append-only audit planning for lifecycle mutations. | Deployment-specific role and identity mappings remain operator-owned. |
 | Break glass | Durable approval records enforce reason, scope, expiry, quorum, maker-checker separation, revocation, and bounded consumption through the governance repositories. | Environment-owned review and incident procedures remain deployment responsibilities. |
 | Durable storage | SQLite and PostgreSQL repositories implement revisions, approvals, votes, activation history, active/LKG snapshots, execution approvals, audit chaining, and SIEM outbox state. | File and Redis are intentionally unsupported governance authorities; production PostgreSQL HA remains deployment evidence. |
@@ -125,7 +125,7 @@ parse
 -> canonical fingerprint and mandatory detached signature verification in enforcement modes
 -> persist immutable revision
 -> submit and collect approval
--> atomically activate with mandatory audit, SIEM outbox, and pointer-change notification
+-> atomically activate with mandatory audit, SIEM outbox, and invalidation outbox event
 -> gateways load, verify, and atomically swap
 -> promote only a verified, successfully loaded revision to LKG
 ~~~
@@ -230,7 +230,7 @@ The minimum conceptual schema is:
 | `execution_approvals` | Optional metadata-only request authorization with expiry and one-time consumption state. |
 | `break_glass_grants` and `uses` | Approved bounded grant plus append-only atomic use records and review status. |
 | `control_idempotency` | Tenant, operation, key, request fingerprint, state, and bounded stored result metadata. |
-| `governance_invalidation_outbox` | Target durable revision notification and per-replica acknowledgement model; it is not implemented as a durable cache-fanout outbox today and is never the policy authority. |
+| `governance_invalidation_outbox` | Durable tenant/kind cache-fanout events with bounded per-replica leases and acknowledgements. It accelerates convergence but is never the policy authority. |
 
 Every tenant-owned table has a tenant key, tenant-scoped primary/unique and
 foreign keys, bounded text/binary lengths, explicit status checks, and
@@ -249,8 +249,9 @@ Activation is one authoritative transaction:
 4. Append activation history and the mandatory audit chain event.
 5. Advance the active pointer while retaining the previous proven LKG pointer.
 6. Insert the durable SIEM outbox record and update the pointer. On PostgreSQL,
-   a pointer trigger transactionally queues a bounded tenant/kind `NOTIFY` for
-   delivery after commit; the notification itself is not durable.
+   the pointer trigger appends a durable tenant/kind invalidation event in the
+   same transaction and queues a bounded `NOTIFY` wake-up for delivery after
+   commit.
 7. Commit all records or none.
 
 An ambiguous commit result is resolved by idempotency key and request
@@ -259,10 +260,13 @@ fingerprint before retry. No retry creates a second activation or approval use.
 ## Last-Known-Good Runtime Contract
 
 Gateways refresh policy snapshots in bounded background work. A request path
-does not query the policy store. Current PostgreSQL replicas also listen for
-transactional pointer-change notifications and immediately perform the same
-authoritative refresh. The five-second pointer poll recovers missed or
-disconnected notifications; it is not evidence that `NOTIFY` is durable.
+does not query the policy store. PostgreSQL replicas register an expiring
+replica identity, replay unacknowledged invalidation events at startup and on a
+bounded poll, and use transactional pointer-change notifications only to wake
+that replay early. An event is acknowledged only after the same authoritative
+refresh succeeds. Safe compaction removes events acknowledged by every live
+replica while retaining the latest event for each artifact kind so a restarted
+replica can rebuild from the current head.
 
 1. A refresh reads the active revision and all pinned dependencies.
 2. It verifies tenant binding, schema and compiler compatibility, digest,
@@ -294,9 +298,9 @@ and acknowledgement sequence; it does not rewrite history.
 | Approval service or quorum unavailable | No high-risk activation. | No high-risk activation. | Fail the mutation closed. | Fail the mutation closed and alert. |
 | Candidate parse, compile, fingerprint, signature, or dependency verification fails | Reject candidate. | Reject candidate. | Reject candidate; retain LKG. | Reject candidate; retain LKG and alert on attempted activation. |
 | Mandatory audit or transactional outbox insert fails during mutation | Roll back mutation where the governed store is used. | Roll back mutation. | Roll back mutation. | Roll back mutation; no approval, activation, rollback, or break-glass use is acknowledged. |
-| Pointer notification is delayed or missed after a committed lifecycle mutation | The authoritative poll repairs the cache; local behavior is otherwise unchanged. | Continue the prior shadow snapshot only until the bounded verified poll. | The handling replica publishes before acknowledging the mutation; notified replicas best-effort refresh immediately, and with reachable healthy PostgreSQL a missed listener event converges by the bounded authoritative poll. Existing requests retain their captured snapshot. | Same, while a refresh error invalidates the signaled cache entry and affects readiness. |
+| Pointer wake-up is delayed or missed after a committed lifecycle mutation | The authoritative poll repairs the cache; local behavior is otherwise unchanged. | Continue the prior shadow snapshot only until bounded outbox replay refreshes it. | The handling replica publishes before acknowledging the mutation; every live replica replays the durable event, refreshes before acknowledging, and retains failed events for retry. Existing requests retain their captured snapshot. | Same, while a refresh error keeps the event unacknowledged, invalidates the signaled cache entry, and affects readiness. |
 | Database commit result is unknown | Resolve by tenant/idempotency key before retry. | Same. | Same; never issue a second activation or consume approval twice. | Same, with operator alert after bounded resolution attempts. |
-| Active revision explicitly invalidated | Ignore in disabled mode. | Stop observing with that revision when the handling path or bounded refresh observes the commit. | Stop new use immediately on the handling or notified replica; with reachable healthy PostgreSQL, every current replica converges no later than the bounded authoritative poll. Use a distinct valid LKG only if invalidation scope permits. | Same convergence contract; invalidate the signaled local cache and fail readiness when authoritative refresh is unavailable or no permitted revision exists. |
+| Active revision explicitly invalidated | Ignore in disabled mode. | Stop observing with that revision when the handling path or bounded refresh observes the commit. | Stop new use immediately on the handling or replaying replica; with reachable healthy PostgreSQL, every live replica converges through bounded outbox replay. Use a distinct valid LKG only if invalidation scope permits. | Same convergence contract; keep failed events pending, invalidate the signaled local cache, and fail readiness when authoritative refresh is unavailable or no permitted revision exists. |
 | Break-glass grant store, audit, expiry, or use counter unavailable | Deny break-glass use. | Deny break-glass use. | Deny break-glass use. | Deny break-glass use and alert. |
 | Execution approval cannot be atomically consumed | Do not dispatch the approved execution. | Do not treat approval as satisfied. | Deny dispatch. | Deny dispatch and alert on replay or ambiguity. |
 
@@ -305,7 +309,7 @@ reviewer identity, or another tenant's state. Richer internal reasons remain
 bounded and redacted in audit.
 
 Revoke must remain disabled during a mixed-version rollout until every serving
-replica runs the notification listener and authoritative refresh contract.
+replica runs the outbox replay listener and authoritative refresh contract.
 Schema terminality prevents an older writer from reviving a revoked revision,
 but it cannot invalidate an older process's already-loaded cache. Old replicas
 must therefore be drained before operators enable revoke.

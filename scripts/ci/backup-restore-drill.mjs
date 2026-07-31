@@ -127,6 +127,15 @@ INSERT INTO prodex_governance_activation_history VALUES
 INSERT INTO prodex_governance_mutation_idempotency VALUES
   ('${tenantA}', 'policy', 'policy-activate-a', 'request-a', 'activate', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', 1000),
   ('${tenantB}', 'policy', 'policy-activate-b', 'request-b', 'activate', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', 1000);
+INSERT INTO prodex_governance_invalidation_replicas VALUES
+  ('${tenantA}', 'drill-replica', 1000, 1000),
+  ('${tenantB}', 'drill-replica', 1000, 1000);
+INSERT INTO prodex_governance_invalidation_acks (
+  tenant_id, replica_id, event_id, delivered_at_unix_ms
+)
+SELECT tenant_id, 'drill-replica', MAX(event_id), 1100
+FROM prodex_governance_invalidation_outbox
+GROUP BY tenant_id;
 `;
 
 const fingerprintSql = String.raw`
@@ -164,6 +173,9 @@ SELECT json_build_object(
   'routing_score_pointers', (SELECT COUNT(*) FROM prodex_routing_score_pointers),
   'governance_activations', (SELECT COUNT(*) FROM prodex_governance_activation_history),
   'governance_idempotency_rows', (SELECT COUNT(*) FROM prodex_governance_mutation_idempotency),
+  'governance_invalidation_events', (SELECT COUNT(*) FROM prodex_governance_invalidation_outbox),
+  'governance_invalidation_replicas', (SELECT COUNT(*) FROM prodex_governance_invalidation_replicas),
+  'governance_invalidation_acks', (SELECT COUNT(*) FROM prodex_governance_invalidation_acks),
   'committed_tokens', (SELECT SUM(committed_tokens) FROM prodex_budget_counters),
   'ledger_tokens', (SELECT SUM(tokens) FROM prodex_usage_ledger),
   'unique_ledger_rows', (SELECT COUNT(DISTINCT (tenant_id, reservation_id, event_kind)) FROM prodex_usage_ledger),
@@ -231,6 +243,13 @@ SELECT json_build_object(
       JOIN prodex_routing_score_revisions revision
         ON revision.tenant_id = pointer.tenant_id
        AND revision.revision_id = pointer.active_revision_id)
+  ),
+  'governance_invalidation_ack_links', (
+    SELECT COUNT(*) FROM prodex_governance_invalidation_acks acknowledgement
+    JOIN prodex_governance_invalidation_outbox event
+      USING (tenant_id, event_id)
+    JOIN prodex_governance_invalidation_replicas replica
+      USING (tenant_id, replica_id)
   )
 )::text;
 `;
@@ -274,11 +293,13 @@ BEGIN
     'prodex_session_revocations', 'prodex_siem_outbox', 'prodex_siem_dead_letters',
     'prodex_governance_revision_artifacts', 'prodex_classification_rule_pointers',
     'prodex_provider_registry_pointers', 'prodex_routing_score_pointers',
-    'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency'
+    'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency',
+    'prodex_governance_invalidation_outbox',
+    'prodex_governance_invalidation_replicas', 'prodex_governance_invalidation_acks'
   ] LOOP
     EXECUTE format('SELECT COUNT(*) FROM %I', tenant_table) INTO visible_rows;
-    IF visible_rows <> 1 THEN
-      RAISE EXCEPTION 'tenant isolation failed for %', tenant_table;
+    IF visible_rows < 1 THEN
+      RAISE EXCEPTION 'tenant-scoped restore data missing for %', tenant_table;
     END IF;
     EXECUTE format('SELECT COUNT(*) FROM %I WHERE tenant_id = $1', tenant_table)
       INTO visible_rows USING '${tenantB}'::uuid;
@@ -304,7 +325,7 @@ BEGIN
   END;
 END $check$;
 SELECT json_build_object(
-  'tenant_tables_checked', 32,
+  'tenant_tables_checked', 35,
   'cross_tenant_reads_blocked', true,
   'cross_tenant_writes_blocked', true,
   'forced_governance_tables', (
@@ -319,7 +340,9 @@ SELECT json_build_object(
         'prodex_session_revocations', 'prodex_siem_outbox', 'prodex_siem_dead_letters',
         'prodex_governance_revision_artifacts', 'prodex_classification_rule_pointers',
         'prodex_provider_registry_pointers', 'prodex_routing_score_pointers',
-        'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency'
+        'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency',
+        'prodex_governance_invalidation_outbox',
+        'prodex_governance_invalidation_replicas', 'prodex_governance_invalidation_acks'
       ])
       AND relforcerowsecurity
   )
@@ -638,17 +661,20 @@ async function runManagedDrill() {
       restoredFingerprint.committed_tokens === 40 &&
       restoredFingerprint.ledger_tokens === 40 &&
       restoredFingerprint.ledger_rows === restoredFingerprint.unique_ledger_rows;
-    const tenantDataComplete = [
-      "tenants", "virtual_keys", "service_identities", "users", "role_bindings",
-      "provider_credentials", "budget_counters", "budget_policies", "reservations",
-      "ledger_rows", "audit_rows", "idempotency_rows", "policy_revisions",
-      "policy_pointers", "policy_activations", "approvals", "approval_votes",
-      "classification_revisions", "provider_registry_revisions", "pricing_revisions",
-      "provider_descriptors", "routing_score_revisions", "governance_sessions",
-      "session_revocations", "siem_outbox_rows", "siem_dead_letter_rows",
-      "governance_artifacts", "classification_pointers", "provider_registry_pointers",
-      "routing_score_pointers", "governance_activations", "governance_idempotency_rows",
-    ].every((field) => restoredFingerprint[field] === 2);
+    const tenantDataComplete =
+      [
+        "tenants", "virtual_keys", "service_identities", "users", "role_bindings",
+        "provider_credentials", "budget_counters", "budget_policies", "reservations",
+        "ledger_rows", "audit_rows", "idempotency_rows", "policy_revisions",
+        "policy_pointers", "policy_activations", "approvals", "approval_votes",
+        "classification_revisions", "provider_registry_revisions", "pricing_revisions",
+        "provider_descriptors", "routing_score_revisions", "governance_sessions",
+        "session_revocations", "siem_outbox_rows", "siem_dead_letter_rows",
+        "governance_artifacts", "classification_pointers", "provider_registry_pointers",
+        "routing_score_pointers", "governance_activations", "governance_idempotency_rows",
+        "governance_invalidation_replicas", "governance_invalidation_acks",
+      ].every((field) => restoredFingerprint[field] === 2) &&
+      restoredFingerprint.governance_invalidation_events === 8;
     const governanceReferencesValid =
       restoredFingerprint.policy_pointer_links === 2 &&
       restoredFingerprint.provider_pricing_links === 2 &&
@@ -658,10 +684,11 @@ async function runManagedDrill() {
       restoredFingerprint.siem_audit_links === 4 &&
       restoredFingerprint.audit_chain_valid_rows === restoredFingerprint.audit_rows &&
       restoredFingerprint.governance_artifact_links === 2 &&
-      restoredFingerprint.governance_pointer_links === 6;
+      restoredFingerprint.governance_pointer_links === 6 &&
+      restoredFingerprint.governance_invalidation_ack_links === 2;
     const rlsIsolated =
-      rls.tenant_tables_checked === 32 &&
-      rls.forced_governance_tables === 20 &&
+      rls.tenant_tables_checked === 35 &&
+      rls.forced_governance_tables === 23 &&
       rls.cross_tenant_reads_blocked === true &&
       rls.cross_tenant_writes_blocked === true;
     const assessment = assessDrill({
