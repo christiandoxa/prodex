@@ -172,6 +172,7 @@ fn gateway_release_secret_canaries_only_reach_the_authorized_upstream() {
     let upstream_body = String::from_utf8(upstream.body_rx.recv().unwrap()).unwrap();
     assert!(upstream_body.contains(&prompt_canary));
 
+    assert!(proxy.shutdown_and_drain(std::time::Duration::from_secs(2)));
     drop(proxy);
     assert_files_exclude_canaries(
         &root,

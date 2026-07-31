@@ -144,7 +144,7 @@ mod tests {
     use super::super::*;
 
     #[test]
-    fn build_plan_cleans_overlay_when_optional_tool_preflight_fails() {
+    fn build_plan_cleans_overlay_when_config_preflight_fails() {
         let root = env::temp_dir()
             .canonicalize()
             .expect("temporary directory should resolve")
@@ -160,7 +160,7 @@ mod tests {
         let shared_home = root.join("shared");
         std::fs::create_dir_all(&base_home).expect("base home should exist");
         std::fs::create_dir_all(&shared_home).expect("shared home should exist");
-        std::fs::write(base_home.join("config.toml"), "mcp_servers = \"invalid\"\n")
+        std::fs::write(base_home.join("config.toml"), "mcp_servers =\n")
             .expect("config should be written");
 
         let command = parse_cli_command_from(["prodex", "playwright", "exec", "hi"])
@@ -187,7 +187,7 @@ mod tests {
 
         let error = super::build_plan(&strategy, &prepared, None).unwrap_err();
 
-        assert!(error.to_string().contains("mcp_servers"));
+        assert!(error.to_string().contains("config.toml"));
         assert!(
             std::fs::read_dir(&prepared.paths.managed_profiles_root)
                 .expect("managed profile root should exist")

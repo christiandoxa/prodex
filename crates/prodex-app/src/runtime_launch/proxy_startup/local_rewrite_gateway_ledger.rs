@@ -580,6 +580,7 @@ mod tests {
         assert_eq!(committed_rows, 1);
         assert_eq!(released_rows, 0);
 
+        drop(conn);
         std::fs::remove_dir_all(root).expect("test root should clean up");
     }
 

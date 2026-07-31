@@ -44,10 +44,35 @@ fn runtime_gateway_test_secret(value: &str) -> RuntimeGatewaySecret {
     ))
 }
 
+fn write_fake_kiro_agent(root: &Path, name: &str, body: &str) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let script = root.join(format!("{name}.py"));
+        fs::write(&script, body).expect("fake kiro agent should be written");
+        let launcher = root.join(format!("{name}.cmd"));
+        fs::write(
+            &launcher,
+            format!("@echo off\r\npython \"%~dp0{name}.py\" %*\r\n"),
+        )
+        .expect("fake kiro agent launcher should be written");
+        launcher
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = root.join(name);
+        fs::write(&script, body).expect("fake kiro agent should be written");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("permissions should update");
+        script
+    }
+}
+
 fn write_fake_kiro_runtime_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-runtime");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-runtime",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -64,21 +89,12 @@ print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro runtime agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_runtime_agent_no_prompt_assert(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-runtime-noassert");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-runtime-noassert",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -93,21 +109,12 @@ print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro runtime agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_streaming_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-streaming");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-streaming",
         r#"#!/usr/bin/env python3
 import json, sys, time
 first = json.loads(sys.stdin.readline())
@@ -123,21 +130,12 @@ time.sleep(0.1)
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro streaming agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_continuity_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-continuity");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-continuity",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -159,21 +157,12 @@ print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro continuity agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_tool_continuity_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-tool-continuity");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-tool-continuity",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -194,21 +183,12 @@ else:
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro tool continuity agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_streaming_tool_update_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-streaming-tool-update");
-    fs::write(
-        &script,
+    write_fake_kiro_agent(
+        root,
+        "fake-kiro-streaming-tool-update",
         r#"#!/usr/bin/env python3
 import json, sys, time
 first = json.loads(sys.stdin.readline())
@@ -225,15 +205,6 @@ print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro streaming tool update agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 #[test]

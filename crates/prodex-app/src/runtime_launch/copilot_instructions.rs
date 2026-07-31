@@ -48,7 +48,7 @@ pub(crate) fn runtime_copilot_workspace_custom_instructions(root: &Path) -> Resu
             output.push_str("\n\n");
         }
         output.push_str("## ");
-        output.push_str(&relative.to_string_lossy());
+        output.push_str(&relative.to_string_lossy().replace('\\', "/"));
         output.push('\n');
         output.push_str(content);
         total_bytes = total_bytes.saturating_add(content.len());

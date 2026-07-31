@@ -324,6 +324,10 @@ fn app_server_broker_upstream_schema_cases() -> Vec<AppServerBrokerUpstreamSchem
     .expect("upstream schema replay cases should parse")
 }
 
+fn app_server_broker_generated_text_fixture(fixture: &'static str) -> String {
+    fixture.replace("\r\n", "\n")
+}
+
 fn app_server_broker_upstream_schema_replay_fixture() -> &'static str {
     include_str!("../../fixtures/compat_replay/app_server_broker_upstream_schema_replay.txt")
 }
@@ -335,10 +339,10 @@ fn app_server_broker_upstream_schema_expected_report_fixture() -> serde_json::Va
     .expect("broker upstream schema stdio preview expected report fixture should parse")
 }
 
-fn app_server_broker_upstream_schema_expected_stream_fixture() -> &'static str {
-    include_str!(
+fn app_server_broker_upstream_schema_expected_stream_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
         "../../fixtures/compat_replay/app_server_broker_upstream_schema_expected_stream.jsonl"
-    )
+    ))
 }
 
 fn app_server_broker_upstream_schema_passthrough_expected_stdout_fixture() -> &'static str {
@@ -347,10 +351,10 @@ fn app_server_broker_upstream_schema_passthrough_expected_stdout_fixture() -> &'
     )
 }
 
-fn app_server_broker_upstream_schema_passthrough_expected_stderr_fixture() -> &'static str {
-    include_str!(
+fn app_server_broker_upstream_schema_passthrough_expected_stderr_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
         "../../fixtures/compat_replay/app_server_broker_upstream_schema_passthrough_expected_stderr.jsonl"
-    )
+    ))
 }
 
 fn app_server_broker_upstream_schema_expected_runtime_log_fixture(
@@ -1162,8 +1166,10 @@ fn app_server_broker_stdio_preview_expected_report_fixture() -> serde_json::Valu
     .expect("broker stdio preview expected report fixture should parse")
 }
 
-fn app_server_broker_stdio_preview_expected_stream_fixture() -> &'static str {
-    include_str!("../../fixtures/compat_replay/app_server_broker_stdio_preview_expected_stream.jsonl")
+fn app_server_broker_stdio_preview_expected_stream_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
+        "../../fixtures/compat_replay/app_server_broker_stdio_preview_expected_stream.jsonl"
+    ))
 }
 
 fn app_server_broker_stdio_preview_malformed_replay_fixture() -> &'static str {
@@ -1179,10 +1185,10 @@ fn app_server_broker_stdio_preview_malformed_expected_report_fixture() -> serde_
     .expect("broker malformed stdio preview expected report fixture should parse")
 }
 
-fn app_server_broker_stdio_preview_malformed_expected_stream_fixture() -> &'static str {
-    include_str!(
+fn app_server_broker_stdio_preview_malformed_expected_stream_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
         "../../fixtures/compat_replay/app_server_broker_stdio_preview_malformed_expected_stream.jsonl"
-    )
+    ))
 }
 
 fn app_server_broker_stdio_preview_wire_replay_fixture() -> &'static str {
@@ -1196,8 +1202,10 @@ fn app_server_broker_stdio_preview_wire_expected_report_fixture() -> serde_json:
     .expect("broker wire-format stdio preview expected report fixture should parse")
 }
 
-fn app_server_broker_stdio_preview_wire_expected_stream_fixture() -> &'static str {
-    include_str!("../../fixtures/compat_replay/app_server_broker_stdio_preview_wire_expected_stream.jsonl")
+fn app_server_broker_stdio_preview_wire_expected_stream_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
+        "../../fixtures/compat_replay/app_server_broker_stdio_preview_wire_expected_stream.jsonl"
+    ))
 }
 
 fn app_server_broker_stdio_preview_lifecycle_replay_fixture() -> &'static str {
@@ -1211,10 +1219,10 @@ fn app_server_broker_stdio_preview_lifecycle_expected_report_fixture() -> serde_
     .expect("broker lifecycle stdio preview expected report fixture should parse")
 }
 
-fn app_server_broker_stdio_preview_lifecycle_expected_stream_fixture() -> &'static str {
-    include_str!(
+fn app_server_broker_stdio_preview_lifecycle_expected_stream_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
         "../../fixtures/compat_replay/app_server_broker_stdio_preview_lifecycle_expected_stream.jsonl"
-    )
+    ))
 }
 
 fn app_server_broker_stdio_preview_lifecycle_passthrough_expected_stdout_fixture() -> &'static str {
@@ -1223,10 +1231,10 @@ fn app_server_broker_stdio_preview_lifecycle_passthrough_expected_stdout_fixture
     )
 }
 
-fn app_server_broker_stdio_preview_lifecycle_passthrough_expected_stderr_fixture() -> &'static str {
-    include_str!(
+fn app_server_broker_stdio_preview_lifecycle_passthrough_expected_stderr_fixture() -> String {
+    app_server_broker_generated_text_fixture(include_str!(
         "../../fixtures/compat_replay/app_server_broker_stdio_preview_lifecycle_passthrough_expected_stderr.jsonl"
-    )
+    ))
 }
 
 struct AppServerBrokerRuntimeLogTestDir {

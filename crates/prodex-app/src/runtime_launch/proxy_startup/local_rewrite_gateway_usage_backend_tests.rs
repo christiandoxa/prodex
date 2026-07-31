@@ -46,6 +46,7 @@ fn sqlite_usage_load_reads_usage_rows() {
     assert_eq!(usage["alpha"].minute_epoch, 10);
     assert_eq!(usage["alpha"].spend_microusd, 300);
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -160,5 +161,6 @@ fn sqlite_usage_load_rejects_negative_usage_rows() {
 
     assert!(runtime_gateway_sqlite_usage_load(&path).is_err());
 
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }

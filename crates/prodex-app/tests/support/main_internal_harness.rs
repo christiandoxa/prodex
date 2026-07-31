@@ -104,13 +104,13 @@ fn prepare_managed_codex_home_links_native_codex_history_and_sessions_by_default
     let temp_dir = TestDir::new();
     let home_dir = temp_dir.path.join("home");
     let prodex_home = temp_dir.path.join("prodex");
+    let native_codex_home = home_dir.join(".codex");
     create_codex_home_if_missing(&home_dir).expect("home dir should be created");
     create_codex_home_if_missing(&prodex_home).expect("prodex dir should be created");
-    let _home_guard = TestEnvVarGuard::set("HOME", &home_dir.display().to_string());
+    let _home_guards = TestEnvVarGuard::set_home(&home_dir);
     let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
-    let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
+    let shared_override_guard = TestEnvVarGuard::set_test_shared_codex_home(&native_codex_home);
 
-    let native_codex_home = home_dir.join(".codex");
     let native_session_dir = native_codex_home.join("sessions/2026/04/02");
     create_codex_home_if_missing(&native_session_dir)
         .expect("native session dir should be created");
@@ -126,6 +126,8 @@ fn prepare_managed_codex_home_links_native_codex_history_and_sessions_by_default
     .expect("first native session should be written");
 
     let paths = AppPaths::discover().expect("app paths should resolve");
+    drop(shared_override_guard);
+    let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
     assert_eq!(paths.shared_codex_root, native_codex_home);
 
     let profile_home = paths.root.join("profiles/main");
@@ -178,13 +180,13 @@ fn prepare_managed_codex_home_migrates_previous_prodex_default_shared_home_into_
     let temp_dir = TestDir::new();
     let home_dir = temp_dir.path.join("home");
     let prodex_home = temp_dir.path.join("prodex");
+    let native_codex_home = home_dir.join(".codex");
     create_codex_home_if_missing(&home_dir).expect("home dir should be created");
     create_codex_home_if_missing(&prodex_home).expect("prodex dir should be created");
-    let _home_guard = TestEnvVarGuard::set("HOME", &home_dir.display().to_string());
+    let _home_guards = TestEnvVarGuard::set_home(&home_dir);
     let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
-    let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
+    let shared_override_guard = TestEnvVarGuard::set_test_shared_codex_home(&native_codex_home);
 
-    let native_codex_home = home_dir.join(".codex");
     let previous_prodex_shared_home = prodex_home.join(".codex");
     create_codex_home_if_missing(&native_codex_home).expect("native Codex home should be created");
     create_codex_home_if_missing(&previous_prodex_shared_home)
@@ -211,6 +213,8 @@ fn prepare_managed_codex_home_migrates_previous_prodex_default_shared_home_into_
         .expect("previous Prodex session should be written");
 
     let paths = AppPaths::discover().expect("app paths should resolve");
+    drop(shared_override_guard);
+    let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
     assert_eq!(paths.shared_codex_root, native_codex_home);
 
     let profile_home = paths.root.join("profiles/main");

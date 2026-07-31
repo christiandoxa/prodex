@@ -15,6 +15,11 @@ pub(super) fn runtime_gemini_glob_root(pattern: &str) -> PathBuf {
             }
             continue;
         }
+        #[cfg(windows)]
+        if root.as_os_str().is_empty() && component.len() == 2 && component.as_bytes()[1] == b':' {
+            root.push(format!("{component}{}", std::path::MAIN_SEPARATOR));
+            continue;
+        }
         root.push(component);
     }
     if root.as_os_str().is_empty() {
@@ -86,4 +91,17 @@ pub(super) fn runtime_gemini_glob_segment_matches(pattern: &[u8], text: &[u8]) -
                 && runtime_gemini_glob_segment_matches(tail, text_tail)
         }),
     }
+}
+
+#[test]
+fn gemini_glob_root_preserves_absolute_path_root() {
+    let root = std::env::temp_dir().join("prodex-gemini-glob-root");
+    let pattern = format!(
+        "{}{}**{}*.txt",
+        root.display(),
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR
+    );
+
+    assert_eq!(runtime_gemini_glob_root(&pattern), root);
 }

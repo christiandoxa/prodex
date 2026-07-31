@@ -306,6 +306,9 @@ impl RuntimeProxyBackend {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("failed to set runtime proxy backend stream blocking");
                         let responses_accounts_flag = Arc::clone(&responses_accounts_flag);
                         let responses_headers_flag = Arc::clone(&responses_headers_flag);
                         let responses_bodies_flag = Arc::clone(&responses_bodies_flag);

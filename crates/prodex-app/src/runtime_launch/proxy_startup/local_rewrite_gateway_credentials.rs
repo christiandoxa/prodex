@@ -469,7 +469,7 @@ mod tests {
             .split("fn runtime_gateway_pin_request_credentials")
             .nth(1)
             .unwrap()
-            .split("\n}\n")
+            .split("\n}")
             .next()
             .unwrap();
 

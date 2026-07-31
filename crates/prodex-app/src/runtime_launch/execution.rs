@@ -161,9 +161,17 @@ mod tests {
         let cleanup_path = root.join("overlay-home");
         fs::create_dir_all(&cleanup_path).unwrap();
 
+        let (shell, shell_arg) = if cfg!(windows) {
+            (
+                std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
+                OsString::from("/C"),
+            )
+        } else {
+            (OsString::from("/bin/sh"), OsString::from("-c"))
+        };
         let plan = RuntimeLaunchPlan::new(
-            ChildProcessPlan::new(OsString::from("/bin/sh"), root.join("codex-home"))
-                .with_args(vec![OsString::from("-c"), OsString::from("exit 0")]),
+            ChildProcessPlan::new(shell, root.join("codex-home"))
+                .with_args(vec![shell_arg, OsString::from("exit 0")]),
         )
         .with_cleanup_path(cleanup_path.clone());
 

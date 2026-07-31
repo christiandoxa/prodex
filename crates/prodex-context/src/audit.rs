@@ -4,7 +4,7 @@ mod render;
 mod types;
 
 use std::cmp::Reverse;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use anyhow::Result;
 use redaction::redaction_display_os;
@@ -38,10 +38,24 @@ pub fn collect_context_static_duplicate_report(
 }
 
 fn context_relative_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    context_relative_path_if_under_root(root, path)
+        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn context_relative_path_if_under_root(root: &Path, path: &Path) -> Option<String> {
+    if let Some(relative) = path
+        .strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+    {
+        return Some(relative.to_string_lossy().replace('\\', "/"));
+    }
+
+    let canonical_root = fs::canonicalize(root).ok()?;
+    path.strip_prefix(canonical_root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
 }
 
 pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<ContextAuditReport> {
@@ -210,11 +224,7 @@ fn record_context_audit_error(
 }
 
 fn context_audit_error_path(root: &Path, path: &Path) -> String {
-    let relative = path
-        .strip_prefix(root)
-        .ok()
-        .filter(|path| !path.as_os_str().is_empty())
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
+    let relative = context_relative_path_if_under_root(root, path)
         .unwrap_or_else(|| "<outside audit root>".to_string());
     relative.chars().flat_map(char::escape_default).collect()
 }
