@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::{
     Arc, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc::{SyncSender, TrySendError, sync_channel},
+    mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -95,6 +95,59 @@ struct OtlpHttpLogSinkStats {
     shutdown_dropped: AtomicU64,
 }
 
+fn record_otlp_http_export_failure(stats: &OtlpHttpLogSinkStats, failed: bool) {
+    if !failed {
+        return;
+    }
+    let count = stats.export_failed.fetch_add(1, Ordering::Relaxed) + 1;
+    if count.is_power_of_two() {
+        eprintln!("prodex_otlp_log_export_degraded reason=exporter_unavailable count={count}");
+    }
+}
+
+fn report_otlp_http_queue_pressure(stats: &OtlpHttpLogSinkStats, next_queue_full_report: &mut u64) {
+    let queue_full = stats.queue_full.load(Ordering::Relaxed);
+    if queue_full < *next_queue_full_report {
+        return;
+    }
+    eprintln!("prodex_otlp_log_export_degraded reason=queue_full count={queue_full}");
+    while *next_queue_full_report <= queue_full {
+        let next = next_queue_full_report.saturating_mul(2);
+        if next == *next_queue_full_report {
+            break;
+        }
+        *next_queue_full_report = next;
+    }
+}
+
+fn run_otlp_http_log_worker(
+    receiver: Receiver<OtlpHttpLogEvent>,
+    config: OtlpHttpLogExportConfig,
+    service_name: &'static str,
+    scope_name: &'static str,
+    shutdown: Arc<AtomicBool>,
+    stats: Arc<OtlpHttpLogSinkStats>,
+) {
+    let mut next_queue_full_report = 1;
+    while let Ok(event) = receiver.recv() {
+        let failed = export_otlp_http_log(
+            &config,
+            service_name,
+            scope_name,
+            event.event_name,
+            event.attributes,
+        )
+        .is_err();
+        record_otlp_http_export_failure(&stats, failed);
+        report_otlp_http_queue_pressure(&stats, &mut next_queue_full_report);
+        if failed && shutdown.load(Ordering::Relaxed) {
+            let dropped = receiver.try_iter().count() as u64;
+            stats.shutdown_dropped.fetch_add(dropped, Ordering::Relaxed);
+            break;
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct OtlpHttpLogSinkStatsSnapshot {
     queue_full: u64,
@@ -134,45 +187,14 @@ impl OtlpHttpLogSink {
         let worker = std::thread::Builder::new()
             .name("prodex-otlp-log-export".to_string())
             .spawn(move || {
-                let mut next_queue_full_report = 1;
-                while let Ok(event) = receiver.recv() {
-                    let failed = export_otlp_http_log(
-                        &config,
-                        service_name,
-                        scope_name,
-                        event.event_name,
-                        event.attributes,
-                    )
-                    .is_err();
-                    if failed {
-                        let count = worker_stats.export_failed.fetch_add(1, Ordering::Relaxed) + 1;
-                        if count.is_power_of_two() {
-                            eprintln!(
-                                "prodex_otlp_log_export_degraded reason=exporter_unavailable count={count}"
-                            );
-                        }
-                    }
-                    let queue_full = worker_stats.queue_full.load(Ordering::Relaxed);
-                    if queue_full >= next_queue_full_report {
-                        eprintln!(
-                            "prodex_otlp_log_export_degraded reason=queue_full count={queue_full}"
-                        );
-                        while next_queue_full_report <= queue_full {
-                            let next = next_queue_full_report.saturating_mul(2);
-                            if next == next_queue_full_report {
-                                break;
-                            }
-                            next_queue_full_report = next;
-                        }
-                    }
-                    if failed && worker_shutdown.load(Ordering::Relaxed) {
-                        let dropped = receiver.try_iter().count() as u64;
-                        worker_stats
-                            .shutdown_dropped
-                            .fetch_add(dropped, Ordering::Relaxed);
-                        break;
-                    }
-                }
+                run_otlp_http_log_worker(
+                    receiver,
+                    config,
+                    service_name,
+                    scope_name,
+                    worker_shutdown,
+                    worker_stats,
+                );
             })
             .map_err(|err| format!("failed to start OTLP log exporter: {err}"))?;
         Ok(Self {
