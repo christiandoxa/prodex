@@ -66,25 +66,14 @@ pub fn smart_context_transform_rewrite_safety_score(
     let average_body_ratio_percent_value =
         smart_context_rewrite_telemetry_average_body_ratio_percent(&recent);
     let average_body_ratio_percent = Some(average_body_ratio_percent_value);
-    let mut reasons = Vec::new();
+    let mut reasons = smart_context_transform_unsafe_reasons(
+        fallback_samples,
+        unsafe_samples,
+        quality_risk_samples,
+        weak_savings_samples,
+    );
 
-    if fallback_samples > 0
-        || unsafe_samples > 0
-        || quality_risk_samples > 0
-        || weak_savings_samples > 0
-    {
-        if fallback_samples > 0 {
-            reasons.push(SmartContextTransformRewriteSafetyReason::FallbackObserved);
-        }
-        if unsafe_samples > 0 {
-            reasons.push(SmartContextTransformRewriteSafetyReason::UnsafeSample);
-        }
-        if quality_risk_samples > 0 {
-            reasons.push(SmartContextTransformRewriteSafetyReason::TaskQualityRegression);
-        }
-        if weak_savings_samples > 0 {
-            reasons.push(SmartContextTransformRewriteSafetyReason::WeakSavings);
-        }
+    if !reasons.is_empty() {
         return SmartContextTransformRewriteSafetyScore {
             category,
             decision: SmartContextRewriteBudgetDecision::Tighten,
@@ -161,6 +150,28 @@ pub fn smart_context_transform_rewrite_safety_score(
         average_body_ratio_percent,
         reasons,
     }
+}
+
+fn smart_context_transform_unsafe_reasons(
+    fallback_samples: usize,
+    unsafe_samples: usize,
+    quality_risk_samples: usize,
+    weak_savings_samples: usize,
+) -> Vec<SmartContextTransformRewriteSafetyReason> {
+    let mut reasons = Vec::new();
+    if fallback_samples > 0 {
+        reasons.push(SmartContextTransformRewriteSafetyReason::FallbackObserved);
+    }
+    if unsafe_samples > 0 {
+        reasons.push(SmartContextTransformRewriteSafetyReason::UnsafeSample);
+    }
+    if quality_risk_samples > 0 {
+        reasons.push(SmartContextTransformRewriteSafetyReason::TaskQualityRegression);
+    }
+    if weak_savings_samples > 0 {
+        reasons.push(SmartContextTransformRewriteSafetyReason::WeakSavings);
+    }
+    reasons
 }
 
 pub fn smart_context_per_transform_rewrite_safety_scores(

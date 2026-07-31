@@ -83,121 +83,61 @@ pub fn local_bridge_classify_request(
         .map(|(path, _)| path)
         .unwrap_or(path_and_query);
 
-    let route = match path {
-        LOCAL_BRIDGE_HEALTH_PATH => {
-            if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Health
-        }
-        path if path == LOCAL_BRIDGE_MODELS_PATH
-            || path
-                .strip_prefix("/v1/models/")
-                .is_some_and(|id| !id.is_empty()) =>
-        {
-            if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Models
-        }
-        LOCAL_BRIDGE_RESPONSES_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Responses
-        }
-        LOCAL_BRIDGE_CHAT_COMPLETIONS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::ChatCompletions
-        }
-        LOCAL_BRIDGE_EMBEDDINGS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Embeddings
-        }
-        LOCAL_BRIDGE_IMAGES_GENERATIONS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::ImagesGenerations
-        }
-        LOCAL_BRIDGE_IMAGES_EDITS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::ImagesEdits
-        }
-        LOCAL_BRIDGE_IMAGES_VARIATIONS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::ImagesVariations
-        }
-        LOCAL_BRIDGE_AUDIO_SPEECH_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::AudioSpeech
-        }
-        LOCAL_BRIDGE_AUDIO_TRANSCRIPTIONS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::AudioTranscriptions
-        }
-        LOCAL_BRIDGE_AUDIO_TRANSLATIONS_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::AudioTranslations
-        }
-        LOCAL_BRIDGE_BATCHES_PATH => {
-            if !method.eq_ignore_ascii_case("POST") && !method.eq_ignore_ascii_case("GET") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Batches
-        }
-        path if path
-            .strip_prefix("/v1/batches/")
-            .is_some_and(|suffix| !suffix.is_empty()) =>
-        {
-            if !method.eq_ignore_ascii_case("GET")
-                && !method.eq_ignore_ascii_case("POST")
-                && !method.eq_ignore_ascii_case("DELETE")
-            {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Batch
-        }
-        LOCAL_BRIDGE_RERANK_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Rerank
-        }
-        LOCAL_BRIDGE_A2A_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::A2a
-        }
-        LOCAL_BRIDGE_MESSAGES_PATH => {
-            if !method.eq_ignore_ascii_case("POST") {
-                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
-            }
-            LocalBridgeRoute::Messages
-        }
-        _ => return Err(LocalBridgeRequestRejection::PathNotFound),
-    };
+    let route = local_bridge_route(path).ok_or(LocalBridgeRequestRejection::PathNotFound)?;
+    if !local_bridge_method_is_allowed(route, method) {
+        return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+    }
 
     Ok(LocalBridgeRequestClass {
         route,
         method: method.to_ascii_uppercase(),
         path: path.to_string(),
     })
+}
+
+fn local_bridge_route(path: &str) -> Option<LocalBridgeRoute> {
+    match path {
+        LOCAL_BRIDGE_HEALTH_PATH => Some(LocalBridgeRoute::Health),
+        path if path == LOCAL_BRIDGE_MODELS_PATH
+            || path
+                .strip_prefix("/v1/models/")
+                .is_some_and(|id| !id.is_empty()) =>
+        {
+            Some(LocalBridgeRoute::Models)
+        }
+        LOCAL_BRIDGE_RESPONSES_PATH => Some(LocalBridgeRoute::Responses),
+        LOCAL_BRIDGE_CHAT_COMPLETIONS_PATH => Some(LocalBridgeRoute::ChatCompletions),
+        LOCAL_BRIDGE_EMBEDDINGS_PATH => Some(LocalBridgeRoute::Embeddings),
+        LOCAL_BRIDGE_IMAGES_GENERATIONS_PATH => Some(LocalBridgeRoute::ImagesGenerations),
+        LOCAL_BRIDGE_IMAGES_EDITS_PATH => Some(LocalBridgeRoute::ImagesEdits),
+        LOCAL_BRIDGE_IMAGES_VARIATIONS_PATH => Some(LocalBridgeRoute::ImagesVariations),
+        LOCAL_BRIDGE_AUDIO_SPEECH_PATH => Some(LocalBridgeRoute::AudioSpeech),
+        LOCAL_BRIDGE_AUDIO_TRANSCRIPTIONS_PATH => Some(LocalBridgeRoute::AudioTranscriptions),
+        LOCAL_BRIDGE_AUDIO_TRANSLATIONS_PATH => Some(LocalBridgeRoute::AudioTranslations),
+        LOCAL_BRIDGE_BATCHES_PATH => Some(LocalBridgeRoute::Batches),
+        path if path
+            .strip_prefix("/v1/batches/")
+            .is_some_and(|suffix| !suffix.is_empty()) =>
+        {
+            Some(LocalBridgeRoute::Batch)
+        }
+        LOCAL_BRIDGE_RERANK_PATH => Some(LocalBridgeRoute::Rerank),
+        LOCAL_BRIDGE_A2A_PATH => Some(LocalBridgeRoute::A2a),
+        LOCAL_BRIDGE_MESSAGES_PATH => Some(LocalBridgeRoute::Messages),
+        _ => None,
+    }
+}
+
+fn local_bridge_method_is_allowed(route: LocalBridgeRoute, method: &str) -> bool {
+    let allowed = match route {
+        LocalBridgeRoute::Health | LocalBridgeRoute::Models => &["GET", "HEAD"][..],
+        LocalBridgeRoute::Batches => &["POST", "GET"][..],
+        LocalBridgeRoute::Batch => &["GET", "POST", "DELETE"][..],
+        _ => &["POST"][..],
+    };
+    allowed
+        .iter()
+        .any(|allowed| method.eq_ignore_ascii_case(allowed))
 }
 
 pub fn local_bridge_is_allowed_request(method: &str, path_and_query: &str) -> bool {

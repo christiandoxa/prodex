@@ -83,20 +83,13 @@ pub fn runtime_gateway_plan_route_with_constraints(
 ) -> Result<RuntimeGatewayConstraintRoutePlan, ProviderRequestLimitError> {
     let hard_affinity = input.hard_affinity_required || input.hard_affinity_model.is_some();
     if !input.policy.enabled {
-        let mut plan = legacy_route_plan(provider, endpoint, body, &input, hard_affinity);
-        if input.hard_affinity_required && input.hard_affinity_model.is_none() {
-            let reason = ProviderRequestConstraintDecision::AffinityOwnerUnavailable;
-            plan.alias_chain = vec![plan.requested_model.clone()];
-            plan.concrete_candidates.clear();
-            plan.selected_model = None;
-            plan.upstream_attempt_model = None;
-            plan.body_rewrite_required = false;
-            plan.adjustment = None;
-            plan.no_route_reason = Some(reason);
-            plan.adaptive_decision = None;
-            plan.trace = affinity_owner_unavailable_trace(endpoint, &plan.requested_model);
-        }
-        return Ok(plan);
+        return Ok(legacy_constraint_route_plan(
+            provider,
+            endpoint,
+            body,
+            &input,
+            hard_affinity,
+        ));
     }
     let RuntimeGatewayConstraintPlanInput {
         aliases,
@@ -131,96 +124,37 @@ pub fn runtime_gateway_plan_route_with_constraints(
         additional_features,
     )?;
     if hard_affinity_required && hard_affinity_model.is_none() {
-        let reason = ProviderRequestConstraintDecision::AffinityOwnerUnavailable;
-        let trace = affinity_owner_unavailable_trace(endpoint, &requested_model);
-        return Ok(RuntimeGatewayConstraintRoutePlan {
-            requested_model: requested_model.clone(),
-            alias_chain: vec![requested_model],
-            concrete_candidates: Vec::new(),
+        return Ok(affinity_owner_unavailable_plan(
+            endpoint,
+            requested_model,
             requirements,
-            selected_model: None,
-            upstream_attempt_model: None,
-            body_rewrite_required: false,
-            adjustment: None,
-            no_route_reason: Some(reason),
-            trace,
-            truncated: false,
-            selection_pool_truncated: false,
-            omitted_candidates: 0,
-            adaptive_decision: None,
-        });
+        ));
     }
     let alias = aliases
         .iter()
         .find(|alias| alias.alias == requested_model && !alias.models.is_empty());
-    let mut alias_chain = vec![requested_model.clone()];
-    let mut alias_chain_truncated = false;
-    let (mut concrete_models, selection_pool_omitted) = if let Some(model) = hard_affinity_model {
-        concrete_models(provider, endpoint, std::iter::once(model))
-    } else if let Some(alias) = alias {
-        let visible_models =
-            crate::RUNTIME_ROUTE_DECISION_TRACE_MAX_CANDIDATES.saturating_sub(alias_chain.len());
-        alias_chain_truncated = alias.models.len() > visible_models;
-        alias_chain.extend(alias.models.iter().take(visible_models).cloned());
-        concrete_models(provider, endpoint, alias.models.iter().map(String::as_str))
-    } else {
-        concrete_models(
+    let (concrete_models, selection_pool_omitted, alias_chain, alias_chain_truncated) =
+        resolve_constraint_models(
             provider,
             endpoint,
-            std::iter::once(requested_model.as_str()),
-        )
-    };
-    if hard_affinity {
-        concrete_models.truncate(1);
-    }
+            &requested_model,
+            alias,
+            hard_affinity_model,
+            hard_affinity,
+        );
 
     let mut candidates = concrete_models
         .into_iter()
         .enumerate()
         .map(|(original_order, model)| {
-            let mut candidate_requirements = requirements.clone();
-            let translated_reasoning_reserve = (provider == ProviderId::Gemini)
-                .then(|| {
-                    if matches!(
-                        candidate_requirements.reasoning_effort,
-                        Some(ProviderReasoningEffort::None | ProviderReasoningEffort::Minimal)
-                    ) {
-                        Some(0)
-                    } else if gemini_provider_core_model_uses_thinking_level(&model) {
-                        None
-                    } else {
-                        configured_reasoning_reserve_tokens
-                    }
-                })
-                .flatten();
-            if let Some(translated_reserve) = translated_reasoning_reserve {
-                candidate_requirements.reasoning_reserve_tokens = Some(translated_reserve);
-                candidate_requirements.total_required_tokens = candidate_requirements
-                    .estimated_input_tokens
-                    .saturating_add(
-                        candidate_requirements
-                            .explicit_output_tokens
-                            .unwrap_or_default(),
-                    )
-                    .saturating_add(translated_reserve);
-            }
-            let evaluation = evaluate_provider_request_constraints(
+            evaluate_constraint_candidate(
                 provider,
-                &model,
-                &candidate_requirements,
-                policy,
-            );
-            let model = evaluation
-                .requirements
-                .resolved_upstream_model
-                .clone()
-                .unwrap_or(model);
-            RuntimeGatewayConstraintCandidate {
                 model,
                 original_order,
-                selected: false,
-                evaluation,
-            }
+                &requirements,
+                configured_reasoning_reserve_tokens,
+                policy,
+            )
         })
         .collect::<Vec<_>>();
     let combo_route = !hard_affinity
@@ -239,21 +173,14 @@ pub fn runtime_gateway_plan_route_with_constraints(
         .map(|candidate| candidate.model.clone())
         .collect::<Vec<_>>();
 
-    let baseline_selected_model = if eligible_models.is_empty() {
-        None
-    } else if hard_affinity || eligible_models.len() == 1 {
-        eligible_models.first().cloned()
-    } else if let Some(alias) = alias {
-        runtime_gateway_route_selected_model_from_models(
-            alias,
-            &eligible_models,
-            diagnostic_seed,
-            model_state,
-            requirements.total_required_tokens,
-        )
-    } else {
-        Some(format!("combo:{}", eligible_models.join(",")))
-    };
+    let baseline_selected_model = baseline_constraint_selected_model(
+        &eligible_models,
+        hard_affinity,
+        alias,
+        diagnostic_seed,
+        model_state,
+        requirements.total_required_tokens,
+    );
     let adaptive_decision = alias.and_then(|alias| {
         adaptive_route_decision(
             adaptive_config,
@@ -332,6 +259,155 @@ pub fn runtime_gateway_plan_route_with_constraints(
         omitted_candidates,
         adaptive_decision,
     })
+}
+
+fn legacy_constraint_route_plan(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    body: &[u8],
+    input: &RuntimeGatewayConstraintPlanInput<'_>,
+    hard_affinity: bool,
+) -> RuntimeGatewayConstraintRoutePlan {
+    let mut plan = legacy_route_plan(provider, endpoint, body, input, hard_affinity);
+    if input.hard_affinity_required && input.hard_affinity_model.is_none() {
+        let reason = ProviderRequestConstraintDecision::AffinityOwnerUnavailable;
+        plan.alias_chain = vec![plan.requested_model.clone()];
+        plan.concrete_candidates.clear();
+        plan.selected_model = None;
+        plan.upstream_attempt_model = None;
+        plan.body_rewrite_required = false;
+        plan.adjustment = None;
+        plan.no_route_reason = Some(reason);
+        plan.adaptive_decision = None;
+        plan.trace = affinity_owner_unavailable_trace(endpoint, &plan.requested_model);
+    }
+    plan
+}
+
+fn affinity_owner_unavailable_plan(
+    endpoint: ProviderEndpoint,
+    requested_model: String,
+    requirements: ProviderRequestRequirements,
+) -> RuntimeGatewayConstraintRoutePlan {
+    let reason = ProviderRequestConstraintDecision::AffinityOwnerUnavailable;
+    let trace = affinity_owner_unavailable_trace(endpoint, &requested_model);
+    RuntimeGatewayConstraintRoutePlan {
+        requested_model: requested_model.clone(),
+        alias_chain: vec![requested_model],
+        concrete_candidates: Vec::new(),
+        requirements,
+        selected_model: None,
+        upstream_attempt_model: None,
+        body_rewrite_required: false,
+        adjustment: None,
+        no_route_reason: Some(reason),
+        trace,
+        truncated: false,
+        selection_pool_truncated: false,
+        omitted_candidates: 0,
+        adaptive_decision: None,
+    }
+}
+
+fn resolve_constraint_models(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    requested_model: &str,
+    alias: Option<&RuntimeGatewayRouteAlias>,
+    hard_affinity_model: Option<&str>,
+    hard_affinity: bool,
+) -> (Vec<String>, usize, Vec<String>, bool) {
+    let mut alias_chain = vec![requested_model.to_string()];
+    let mut alias_chain_truncated = false;
+    let (mut models, omitted) = if let Some(model) = hard_affinity_model {
+        concrete_models(provider, endpoint, std::iter::once(model))
+    } else if let Some(alias) = alias {
+        let visible_models =
+            crate::RUNTIME_ROUTE_DECISION_TRACE_MAX_CANDIDATES.saturating_sub(alias_chain.len());
+        alias_chain_truncated = alias.models.len() > visible_models;
+        alias_chain.extend(alias.models.iter().take(visible_models).cloned());
+        concrete_models(provider, endpoint, alias.models.iter().map(String::as_str))
+    } else {
+        concrete_models(provider, endpoint, std::iter::once(requested_model))
+    };
+    if hard_affinity {
+        models.truncate(1);
+    }
+    (models, omitted, alias_chain, alias_chain_truncated)
+}
+
+fn evaluate_constraint_candidate(
+    provider: ProviderId,
+    model: String,
+    original_order: usize,
+    requirements: &ProviderRequestRequirements,
+    configured_reasoning_reserve_tokens: Option<u64>,
+    policy: ProviderRequestConstraintPolicy,
+) -> RuntimeGatewayConstraintCandidate {
+    let mut candidate_requirements = requirements.clone();
+    let translated_reasoning_reserve = (provider == ProviderId::Gemini)
+        .then(|| {
+            if matches!(
+                candidate_requirements.reasoning_effort,
+                Some(ProviderReasoningEffort::None | ProviderReasoningEffort::Minimal)
+            ) {
+                Some(0)
+            } else if gemini_provider_core_model_uses_thinking_level(&model) {
+                None
+            } else {
+                configured_reasoning_reserve_tokens
+            }
+        })
+        .flatten();
+    if let Some(translated_reserve) = translated_reasoning_reserve {
+        candidate_requirements.reasoning_reserve_tokens = Some(translated_reserve);
+        candidate_requirements.total_required_tokens = candidate_requirements
+            .estimated_input_tokens
+            .saturating_add(
+                candidate_requirements
+                    .explicit_output_tokens
+                    .unwrap_or_default(),
+            )
+            .saturating_add(translated_reserve);
+    }
+    let evaluation =
+        evaluate_provider_request_constraints(provider, &model, &candidate_requirements, policy);
+    let model = evaluation
+        .requirements
+        .resolved_upstream_model
+        .clone()
+        .unwrap_or(model);
+    RuntimeGatewayConstraintCandidate {
+        model,
+        original_order,
+        selected: false,
+        evaluation,
+    }
+}
+
+fn baseline_constraint_selected_model(
+    eligible_models: &[String],
+    hard_affinity: bool,
+    alias: Option<&RuntimeGatewayRouteAlias>,
+    diagnostic_seed: u64,
+    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
+    required_tokens: u64,
+) -> Option<String> {
+    if eligible_models.is_empty() {
+        None
+    } else if hard_affinity || eligible_models.len() == 1 {
+        eligible_models.first().cloned()
+    } else if let Some(alias) = alias {
+        runtime_gateway_route_selected_model_from_models(
+            alias,
+            eligible_models,
+            diagnostic_seed,
+            model_state,
+            required_tokens,
+        )
+    } else {
+        Some(format!("combo:{}", eligible_models.join(",")))
+    }
 }
 
 fn adaptive_route_decision(
@@ -480,18 +556,13 @@ fn concrete_models<'a>(
         } else {
             provider_model_fallback_chain(provider, configured_model)
         };
-        for model in if chain.is_empty() {
+        let chain = if chain.is_empty() {
             vec![configured_model.to_string()]
         } else {
             chain
-        } {
-            if seen.insert(model.to_ascii_lowercase()) {
-                if models.len() < RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES {
-                    models.push(model);
-                } else {
-                    return (models, 1);
-                }
-            }
+        };
+        if append_concrete_models(&mut seen, &mut models, chain) {
+            return (models, 1);
         }
         if endpoint == ProviderEndpoint::Embeddings {
             break;
@@ -502,6 +573,23 @@ fn concrete_models<'a>(
         }
     }
     (models, 0)
+}
+
+fn append_concrete_models(
+    seen: &mut BTreeSet<String>,
+    models: &mut Vec<String>,
+    chain: Vec<String>,
+) -> bool {
+    for model in chain {
+        if !seen.insert(model.to_ascii_lowercase()) {
+            continue;
+        }
+        if models.len() == RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES {
+            return true;
+        }
+        models.push(model);
+    }
+    false
 }
 
 fn exact_attempt_model(provider: ProviderId, selected_model: &str) -> String {

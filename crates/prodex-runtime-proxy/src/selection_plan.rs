@@ -216,50 +216,8 @@ impl RuntimeOptimisticCurrentCandidatePredicate {
         input: RuntimeOptimisticCurrentCandidateInput<'_>,
     ) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
         match self {
-            Self::Availability => {
-                if input.auth_failure_active {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
-                } else if input.in_selection_backoff {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
-                } else if input.circuit_open {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
-                } else if input.health_score > 0 {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
-                } else if input.performance_score > 0 {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
-                } else {
-                    None
-                }
-            }
-            Self::QuotaEvidence => {
-                let missing =
-                    input.has_alternative_quota_compatible_profile && input.quota_source.is_none();
-                let stale = input.has_alternative_quota_compatible_profile
-                    && matches!(
-                        input.route_kind,
-                        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-                    )
-                    && !matches!(
-                        input.quota_source,
-                        Some(RuntimeSelectionQuotaSource::LiveProbe)
-                    );
-                if missing {
-                    Some(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
-                } else if stale {
-                    Some(
-                        if matches!(
-                            input.quota_source,
-                            Some(RuntimeSelectionQuotaSource::PersistedSnapshot)
-                        ) {
-                            RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota
-                        } else {
-                            RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable
-                        },
-                    )
-                } else {
-                    None
-                }
-            }
+            Self::Availability => optimistic_current_availability_rejection(input),
+            Self::QuotaEvidence => optimistic_current_quota_rejection(input),
             Self::QuotaBand => {
                 let unknown_allowed = input.quota_summary.route_band
                     == RuntimeSelectionQuotaPressureBand::Unknown
@@ -289,6 +247,55 @@ impl RuntimeOptimisticCurrentCandidatePredicate {
                     != Some(input.current_profile))
             .then_some(RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity),
         }
+    }
+}
+
+fn optimistic_current_availability_rejection(
+    input: RuntimeOptimisticCurrentCandidateInput<'_>,
+) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
+    if input.auth_failure_active {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
+    } else if input.in_selection_backoff {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
+    } else if input.circuit_open {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
+    } else if input.health_score > 0 {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
+    } else if input.performance_score > 0 {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
+    } else {
+        None
+    }
+}
+
+fn optimistic_current_quota_rejection(
+    input: RuntimeOptimisticCurrentCandidateInput<'_>,
+) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
+    let missing = input.has_alternative_quota_compatible_profile && input.quota_source.is_none();
+    let stale = input.has_alternative_quota_compatible_profile
+        && matches!(
+            input.route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        )
+        && !matches!(
+            input.quota_source,
+            Some(RuntimeSelectionQuotaSource::LiveProbe)
+        );
+    if missing {
+        Some(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
+    } else if stale {
+        Some(
+            if matches!(
+                input.quota_source,
+                Some(RuntimeSelectionQuotaSource::PersistedSnapshot)
+            ) {
+                RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota
+            } else {
+                RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable
+            },
+        )
+    } else {
+        None
     }
 }
 

@@ -95,57 +95,19 @@ pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteD
             .then(|| candidates.first().map(|candidate| candidate.model.as_str()))
             .flatten(),
         hard_affinity,
-        if hard_affinity {
-            if selected_index.is_some() {
-                RuntimeRouteAffinityOutcome::Retained
-            } else {
-                RuntimeRouteAffinityOutcome::Exhausted
-            }
-        } else {
-            RuntimeRouteAffinityOutcome::NotApplicable
-        },
+        trace_affinity_outcome(hard_affinity, selected_index),
     );
     let candidate_order = selected_index
         .into_iter()
         .chain((0..candidates.len()).filter(|index| Some(*index) != selected_index));
     for index in candidate_order {
-        let candidate = &candidates[index];
-        let reason =
-            (candidate.evaluation.decision != ProviderRequestConstraintDecision::Compatible).then(
-                || RuntimeRouteDecisionReason::from_label(candidate.evaluation.decision.as_str()),
-            );
-        let mut input = RuntimeRouteCandidateDecisionInput::eligible(
-            candidate.original_order,
-            if hard_affinity {
-                RuntimeRouteCandidateClass::Affinity
-            } else {
-                RuntimeRouteCandidateClass::Fallback
-            },
+        record_constraint_trace_candidate(
+            &mut builder,
+            &candidates[index],
+            provider,
+            hard_affinity,
+            model_state,
         );
-        input.provider = Some(provider.label().to_string());
-        input.model = Some(candidate.model.clone());
-        input.hard_affinity = hard_affinity;
-        input.eligibility = if candidate.evaluation.eligible {
-            RuntimeRouteCandidateEligibility::Eligible
-        } else {
-            RuntimeRouteCandidateEligibility::Rejected
-        };
-        input.rejection_stage = (!candidate.evaluation.eligible).then_some(
-            if candidate.evaluation.decision
-                == ProviderRequestConstraintDecision::EndpointUnsupported
-            {
-                RuntimeRouteDecisionStage::EndpointCapability
-            } else {
-                RuntimeRouteDecisionStage::RequestConstraints
-            },
-        );
-        input.reason = reason;
-        input.selected = candidate.selected;
-        input.inflight_count = model_state
-            .get(&candidate.model)
-            .map(|state| state.in_flight);
-        input.diagnostics = trace_diagnostics(&candidate.evaluation);
-        builder.record_candidate(&candidate.model, input);
     }
     let endpoint_supported = candidates.iter().any(|candidate| {
         candidate.evaluation.decision != ProviderRequestConstraintDecision::EndpointUnsupported
@@ -173,15 +135,74 @@ pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteD
         builder.set_resolved_model(selected_model);
     }
     builder.finish(
-        if selected_index.is_some() {
-            RuntimeRouteDecisionTerminalOutcome::Selected
-        } else if hard_affinity {
-            RuntimeRouteDecisionTerminalOutcome::AffinityExhausted
-        } else {
-            RuntimeRouteDecisionTerminalOutcome::NoCandidate
-        },
+        trace_terminal_outcome(selected_index, hard_affinity),
         no_route_reason.map(|reason| RuntimeRouteDecisionReason::from_label(reason.as_str())),
     )
+}
+
+fn trace_affinity_outcome(
+    hard_affinity: bool,
+    selected_index: Option<usize>,
+) -> RuntimeRouteAffinityOutcome {
+    match (hard_affinity, selected_index) {
+        (true, Some(_)) => RuntimeRouteAffinityOutcome::Retained,
+        (true, None) => RuntimeRouteAffinityOutcome::Exhausted,
+        (false, _) => RuntimeRouteAffinityOutcome::NotApplicable,
+    }
+}
+
+fn record_constraint_trace_candidate(
+    builder: &mut RuntimeRouteDecisionTraceBuilder,
+    candidate: &RuntimeGatewayConstraintCandidate,
+    provider: ProviderId,
+    hard_affinity: bool,
+    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
+) {
+    let reason = (candidate.evaluation.decision != ProviderRequestConstraintDecision::Compatible)
+        .then(|| RuntimeRouteDecisionReason::from_label(candidate.evaluation.decision.as_str()));
+    let mut input = RuntimeRouteCandidateDecisionInput::eligible(
+        candidate.original_order,
+        if hard_affinity {
+            RuntimeRouteCandidateClass::Affinity
+        } else {
+            RuntimeRouteCandidateClass::Fallback
+        },
+    );
+    input.provider = Some(provider.label().to_string());
+    input.model = Some(candidate.model.clone());
+    input.hard_affinity = hard_affinity;
+    input.eligibility = if candidate.evaluation.eligible {
+        RuntimeRouteCandidateEligibility::Eligible
+    } else {
+        RuntimeRouteCandidateEligibility::Rejected
+    };
+    input.rejection_stage = (!candidate.evaluation.eligible).then_some(
+        if candidate.evaluation.decision == ProviderRequestConstraintDecision::EndpointUnsupported {
+            RuntimeRouteDecisionStage::EndpointCapability
+        } else {
+            RuntimeRouteDecisionStage::RequestConstraints
+        },
+    );
+    input.reason = reason;
+    input.selected = candidate.selected;
+    input.inflight_count = model_state
+        .get(&candidate.model)
+        .map(|state| state.in_flight);
+    input.diagnostics = trace_diagnostics(&candidate.evaluation);
+    builder.record_candidate(&candidate.model, input);
+}
+
+fn trace_terminal_outcome(
+    selected_index: Option<usize>,
+    hard_affinity: bool,
+) -> RuntimeRouteDecisionTerminalOutcome {
+    if selected_index.is_some() {
+        RuntimeRouteDecisionTerminalOutcome::Selected
+    } else if hard_affinity {
+        RuntimeRouteDecisionTerminalOutcome::AffinityExhausted
+    } else {
+        RuntimeRouteDecisionTerminalOutcome::NoCandidate
+    }
 }
 
 fn trace_diagnostics(

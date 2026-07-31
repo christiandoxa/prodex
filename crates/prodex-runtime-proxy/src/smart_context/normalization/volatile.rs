@@ -9,46 +9,8 @@ pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, st
     while index < text.len() {
         let rest = &text[index..];
         let previous = smart_context_previous_char(text, index);
-
-        if let Some(len) = smart_context_ansi_escape_len(rest) {
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some(len) = smart_context_temp_path_len(rest) {
-            normalized.push_str("<tmp-path>");
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some(len) = smart_context_timestamp_len(rest, previous) {
-            normalized.push_str("<timestamp>");
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some(len) = smart_context_progress_counter_len(rest, previous) {
-            normalized.push_str("<progress>");
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some((len, replacement)) =
-            smart_context_labeled_random_id_replacement(rest, previous)
-        {
+        if let Some((len, replacement)) = smart_context_command_output_replacement(rest, previous) {
             normalized.push_str(&replacement);
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some(len) = smart_context_uuid_len(rest, previous) {
-            normalized.push_str("<id>");
-            index += len;
-            changed = true;
-            continue;
-        }
-        if let Some(len) = smart_context_duration_len(rest, previous) {
-            normalized.push_str("<duration>");
             index += len;
             changed = true;
             continue;
@@ -64,6 +26,31 @@ pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, st
     } else {
         Cow::Borrowed(text)
     }
+}
+
+fn smart_context_command_output_replacement(
+    text: &str,
+    previous: Option<char>,
+) -> Option<(usize, Cow<'static, str>)> {
+    if let Some(len) = smart_context_ansi_escape_len(text) {
+        return Some((len, Cow::Borrowed("")));
+    }
+    if let Some(len) = smart_context_temp_path_len(text) {
+        return Some((len, Cow::Borrowed("<tmp-path>")));
+    }
+    if let Some(len) = smart_context_timestamp_len(text, previous) {
+        return Some((len, Cow::Borrowed("<timestamp>")));
+    }
+    if let Some(len) = smart_context_progress_counter_len(text, previous) {
+        return Some((len, Cow::Borrowed("<progress>")));
+    }
+    if let Some((len, replacement)) = smart_context_labeled_random_id_replacement(text, previous) {
+        return Some((len, Cow::Owned(replacement)));
+    }
+    if let Some(len) = smart_context_uuid_len(text, previous) {
+        return Some((len, Cow::Borrowed("<id>")));
+    }
+    smart_context_duration_len(text, previous).map(|len| (len, Cow::Borrowed("<duration>")))
 }
 
 pub fn smart_context_normalize_volatile_static_context(text: &str) -> Cow<'_, str> {
@@ -218,21 +205,28 @@ pub(in crate::smart_context) fn smart_context_timestamp_len(
     }
 
     let bytes = text.as_bytes();
-    if bytes.len() < 16
-        || !smart_context_ascii_digits(bytes, 0, 4)
-        || bytes[4] != b'-'
-        || !smart_context_ascii_digits(bytes, 5, 2)
-        || bytes[7] != b'-'
-        || !smart_context_ascii_digits(bytes, 8, 2)
-        || !matches!(bytes[10], b'T' | b' ')
-        || !smart_context_ascii_digits(bytes, 11, 2)
-        || bytes[13] != b':'
-        || !smart_context_ascii_digits(bytes, 14, 2)
-    {
+    if !smart_context_timestamp_prefix_is_valid(bytes) {
         return None;
     }
+    let index = smart_context_timestamp_seconds_end(bytes, 16)?;
+    let index = smart_context_timestamp_timezone_end(bytes, index)?;
+    smart_context_after_token_boundary(text, index).then_some(index)
+}
 
-    let mut index = 16usize;
+fn smart_context_timestamp_prefix_is_valid(bytes: &[u8]) -> bool {
+    bytes.len() >= 16
+        && smart_context_ascii_digits(bytes, 0, 4)
+        && bytes[4] == b'-'
+        && smart_context_ascii_digits(bytes, 5, 2)
+        && bytes[7] == b'-'
+        && smart_context_ascii_digits(bytes, 8, 2)
+        && matches!(bytes[10], b'T' | b' ')
+        && smart_context_ascii_digits(bytes, 11, 2)
+        && bytes[13] == b':'
+        && smart_context_ascii_digits(bytes, 14, 2)
+}
+
+fn smart_context_timestamp_seconds_end(bytes: &[u8], mut index: usize) -> Option<usize> {
     if bytes.get(index) == Some(&b':') {
         if !smart_context_ascii_digits(bytes, index + 1, 2) {
             return None;
@@ -249,7 +243,10 @@ pub(in crate::smart_context) fn smart_context_timestamp_len(
             }
         }
     }
+    Some(index)
+}
 
+fn smart_context_timestamp_timezone_end(bytes: &[u8], mut index: usize) -> Option<usize> {
     if bytes.get(index) == Some(&b'Z') {
         index += 1;
     } else if matches!(bytes.get(index), Some(b'+') | Some(b'-')) {
@@ -266,8 +263,7 @@ pub(in crate::smart_context) fn smart_context_timestamp_len(
             index += 2;
         }
     }
-
-    smart_context_after_token_boundary(text, index).then_some(index)
+    Some(index)
 }
 
 pub(in crate::smart_context) fn smart_context_progress_counter_len(
@@ -501,6 +497,16 @@ pub(in crate::smart_context) fn smart_context_random_id_value_looks_volatile_for
         return false;
     }
 
+    let Some((alpha, digit, hex_like, entropy_marks)) =
+        smart_context_random_id_characteristics(value)
+    else {
+        return false;
+    };
+
+    (hex_like && value.len() >= 16) || (alpha && digit && (value.len() >= 16 || entropy_marks > 0))
+}
+
+fn smart_context_random_id_characteristics(value: &str) -> Option<(bool, bool, bool, usize)> {
     let mut alpha = false;
     let mut digit = false;
     let mut hex_like = true;
@@ -516,11 +522,10 @@ pub(in crate::smart_context) fn smart_context_random_id_value_looks_volatile_for
         } else if matches!(ch, '_' | '-' | '.' | ':') {
             entropy_marks += 1;
         } else {
-            return false;
+            return None;
         }
     }
-
-    (hex_like && value.len() >= 16) || (alpha && digit && (value.len() >= 16 || entropy_marks > 0))
+    Some((alpha, digit, hex_like, entropy_marks))
 }
 
 pub(in crate::smart_context) fn smart_context_uuid_token_exact(value: &str) -> bool {

@@ -140,9 +140,69 @@ pub fn smart_context_candidate_score(
 pub fn smart_context_select_context_candidates(
     input: SmartContextCandidateSelectionInput,
 ) -> SmartContextCandidateSelection {
+    let SmartContextCandidateSelectionInput {
+        candidates,
+        token_budget,
+        minimum_allocations,
+        debug_scores,
+    } = input;
+    let (candidates_by_id, mut omitted) = smart_context_deduplicate_candidates(candidates);
+    let mut state = SmartContextCandidateSelectionState::default();
+    let mut scores_by_id = candidates_by_id
+        .values()
+        .map(|candidate| {
+            (
+                candidate.id.clone(),
+                smart_context_candidate_score(candidate),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    smart_context_select_mandatory_candidates(
+        &candidates_by_id,
+        &mut state,
+        token_budget,
+        &mut omitted,
+    );
+    smart_context_select_minimum_allocations(
+        &minimum_allocations,
+        &candidates_by_id,
+        &scores_by_id,
+        &mut state,
+        token_budget,
+        &mut omitted,
+    );
+    smart_context_fill_candidate_budget(
+        &candidates_by_id,
+        &mut scores_by_id,
+        &mut state,
+        token_budget,
+        &mut omitted,
+    );
+    smart_context_record_unselected_candidates(&candidates_by_id, &state, &mut omitted);
+    let mut scores = if debug_scores {
+        scores_by_id.into_values().collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    scores.sort_by(|left, right| left.id.cmp(&right.id));
+
+    SmartContextCandidateSelection {
+        selected_ids: state.selected_ids,
+        omitted,
+        used_tokens: state.used_tokens,
+        scores,
+    }
+}
+
+fn smart_context_deduplicate_candidates(
+    candidates: Vec<SmartContextContextCandidate>,
+) -> (
+    BTreeMap<String, SmartContextContextCandidate>,
+    Vec<SmartContextCandidateOmission>,
+) {
     let mut candidates_by_id = BTreeMap::<String, SmartContextContextCandidate>::new();
     let mut omitted = Vec::new();
-    for candidate in input.candidates {
+    for candidate in candidates {
         if candidate.token_cost == 0 {
             omitted.push(SmartContextCandidateOmission {
                 id: candidate.id,
@@ -160,46 +220,52 @@ pub fn smart_context_select_context_candidates(
             });
         }
     }
+    (candidates_by_id, omitted)
+}
 
-    let mut state = SmartContextCandidateSelectionState::default();
-    let mut scores_by_id = candidates_by_id
-        .values()
-        .map(|candidate| {
-            (
-                candidate.id.clone(),
-                smart_context_candidate_score(candidate),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
+fn smart_context_select_mandatory_candidates(
+    candidates_by_id: &BTreeMap<String, SmartContextContextCandidate>,
+    state: &mut SmartContextCandidateSelectionState,
+    token_budget: u64,
+    omitted: &mut Vec<SmartContextCandidateOmission>,
+) {
     for candidate in candidates_by_id
         .values()
         .filter(|candidate| candidate.mandatory)
     {
-        if !state.try_select(candidate, input.token_budget) {
+        if !state.try_select(candidate, token_budget) {
             omitted.push(SmartContextCandidateOmission {
                 id: candidate.id.clone(),
                 reason: SmartContextCandidateRejectionReason::BudgetExceeded,
             });
         }
     }
+}
 
-    for minimum in &input.minimum_allocations {
+fn smart_context_select_minimum_allocations(
+    minimum_allocations: &[SmartContextCandidateMinimumAllocation],
+    candidates_by_id: &BTreeMap<String, SmartContextContextCandidate>,
+    scores_by_id: &BTreeMap<String, SmartContextCandidateScore>,
+    state: &mut SmartContextCandidateSelectionState,
+    token_budget: u64,
+    omitted: &mut Vec<SmartContextCandidateOmission>,
+) {
+    for minimum in minimum_allocations {
         let mut allocation_used = smart_context_selected_allocation_tokens(
             *minimum,
             &state.selected_set,
-            &candidates_by_id,
+            candidates_by_id,
         );
         while allocation_used < minimum.min_tokens {
             let Some(candidate) = smart_context_best_candidate_for_allocation(
-                &candidates_by_id,
-                &scores_by_id,
-                &state,
+                candidates_by_id,
+                scores_by_id,
+                state,
                 minimum.allocation,
             ) else {
                 break;
             };
-            if !state.try_select(candidate, input.token_budget) {
+            if !state.try_select(candidate, token_budget) {
                 omitted.push(SmartContextCandidateOmission {
                     id: candidate.id.clone(),
                     reason: SmartContextCandidateRejectionReason::MinimumAllocationBudgetExceeded,
@@ -210,11 +276,18 @@ pub fn smart_context_select_context_candidates(
             allocation_used = allocation_used.saturating_add(candidate.token_cost);
         }
     }
+}
 
-    while let Some(candidate) =
-        smart_context_best_candidate(&candidates_by_id, &scores_by_id, &state)
+fn smart_context_fill_candidate_budget(
+    candidates_by_id: &BTreeMap<String, SmartContextContextCandidate>,
+    scores_by_id: &mut BTreeMap<String, SmartContextCandidateScore>,
+    state: &mut SmartContextCandidateSelectionState,
+    token_budget: u64,
+    omitted: &mut Vec<SmartContextCandidateOmission>,
+) {
+    while let Some(candidate) = smart_context_best_candidate(candidates_by_id, scores_by_id, state)
     {
-        if !state.try_select(candidate, input.token_budget) {
+        if !state.try_select(candidate, token_budget) {
             omitted.push(SmartContextCandidateOmission {
                 id: candidate.id.clone(),
                 reason: SmartContextCandidateRejectionReason::BudgetExceeded,
@@ -223,7 +296,13 @@ pub fn smart_context_select_context_candidates(
             scores_by_id.remove(&candidate.id);
         }
     }
+}
 
+fn smart_context_record_unselected_candidates(
+    candidates_by_id: &BTreeMap<String, SmartContextContextCandidate>,
+    state: &SmartContextCandidateSelectionState,
+    omitted: &mut Vec<SmartContextCandidateOmission>,
+) {
     for id in candidates_by_id.keys() {
         if !state.selected_set.contains(id) && !omitted.iter().any(|omission| omission.id == *id) {
             omitted.push(SmartContextCandidateOmission {
@@ -231,19 +310,6 @@ pub fn smart_context_select_context_candidates(
                 reason: SmartContextCandidateRejectionReason::BudgetExceeded,
             });
         }
-    }
-    let mut scores = if input.debug_scores {
-        scores_by_id.into_values().collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-    scores.sort_by(|left, right| left.id.cmp(&right.id));
-
-    SmartContextCandidateSelection {
-        selected_ids: state.selected_ids,
-        omitted,
-        used_tokens: state.used_tokens,
-        scores,
     }
 }
 
