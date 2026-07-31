@@ -795,8 +795,9 @@ jobs:
             fi
             sleep 5
           done
+          local_admin="admin"
           token_name="prodex-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          response="$(curl --fail --silent --show-error --user admin:admin --request POST \
+          response="$(curl --fail --silent --show-error --user "${local_admin}:${local_admin}" --request POST \
             --data-urlencode "name=${token_name}" \
             "${SONAR_HOST_URL}/api/user_tokens/generate")"
           token="$(jq -er '.token' <<<"${response}")"
@@ -840,7 +841,8 @@ jobs:
         if: ${{ always() && env.SONAR_TOKEN_NAME != '' }}
         shell: bash
         run: |
-          curl --fail --silent --show-error --user admin:admin --request POST \
+          local_admin="admin"
+          curl --fail --silent --show-error --user "${local_admin}:${local_admin}" --request POST \
             --data-urlencode "name=${SONAR_TOKEN_NAME}" \
             "${SONAR_HOST_URL}/api/user_tokens/revoke" >/dev/null
 
