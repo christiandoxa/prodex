@@ -1,6 +1,18 @@
 use super::log_stream::looks_like_log_stream_output;
 use super::*;
 
+type MetadataCommandDetector = fn(&[String], usize, &str) -> Option<CommandOutputKind>;
+
+const METADATA_COMMAND_DETECTORS: [MetadataCommandDetector; 7] = [
+    infer_metadata_build_command,
+    infer_metadata_stream_command,
+    infer_metadata_language_command,
+    infer_metadata_cargo_command,
+    infer_metadata_git_command,
+    infer_metadata_docker_command,
+    infer_metadata_package_command,
+];
+
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let lines = command_lines(input);
     detect_command_output_kind_from_lines(&lines)
@@ -118,32 +130,13 @@ pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<Command
 fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<CommandOutputKind> {
     for index in 0..tokens.len() {
         let command = command_metadata_token_command_name(&tokens[index]);
-        if let Some(kind) = infer_metadata_direct_command(command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_build_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_stream_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_language_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_cargo_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_git_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_docker_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if let Some(kind) = infer_metadata_package_command(tokens, index, command) {
-            return Some(kind);
-        }
-        if command == "docker-compose" {
-            return Some(CommandOutputKind::NoisySuccess);
+        let inferred = infer_metadata_direct_command(command).or_else(|| {
+            METADATA_COMMAND_DETECTORS
+                .iter()
+                .find_map(|detect| detect(tokens, index, command))
+        });
+        if inferred.is_some() {
+            return inferred;
         }
     }
     None
@@ -183,6 +176,7 @@ fn infer_metadata_direct_command(command: &str) -> Option<CommandOutputKind> {
             | "c8"
             | "vite"
             | "next"
+            | "docker-compose"
     ) {
         Some(CommandOutputKind::NoisySuccess)
     } else {

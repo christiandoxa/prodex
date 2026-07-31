@@ -273,14 +273,7 @@ fn apply_security_obligation(
 ) {
     match obligation {
         GovernanceObligation::RequireResponseInspection => {
-            accumulator.inspection_required = true;
-            if context.response_inspection_coverage == InspectionCoverage::Unsupported {
-                violations.push(ApplicationObligationViolation::ResponseInspectionUnsupported);
-            } else if context.mode == ApplicationObligationMode::BankEnforce
-                && context.response_inspection_coverage != InspectionCoverage::Full
-            {
-                violations.push(ApplicationObligationViolation::ResponseInspectionIncomplete);
-            }
+            apply_response_inspection_obligation(context, accumulator, violations);
         }
         GovernanceObligation::SessionIdleTimeoutSeconds(limit) => {
             if context.session.idle_seconds > u64::from(*limit) {
@@ -311,6 +304,21 @@ fn apply_security_obligation(
             violations.push(ApplicationObligationViolation::ApprovalRequired);
         }
         _ => {}
+    }
+}
+
+fn apply_response_inspection_obligation(
+    context: &ApplicationObligationContext<'_>,
+    accumulator: &mut ApplicationObligationAccumulator<'_>,
+    violations: &mut Vec<ApplicationObligationViolation>,
+) {
+    accumulator.inspection_required = true;
+    if context.response_inspection_coverage == InspectionCoverage::Unsupported {
+        violations.push(ApplicationObligationViolation::ResponseInspectionUnsupported);
+    } else if context.mode == ApplicationObligationMode::BankEnforce
+        && context.response_inspection_coverage != InspectionCoverage::Full
+    {
+        violations.push(ApplicationObligationViolation::ResponseInspectionIncomplete);
     }
 }
 

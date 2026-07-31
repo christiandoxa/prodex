@@ -632,6 +632,16 @@ fn append_provider_obligation_rejection_reasons(
     obligations: &[GovernanceObligation],
     reasons: &mut Vec<GovernedHardFilterReason>,
 ) {
+    append_provider_selector_rejection_reasons(provider, obligations, reasons);
+    append_provider_trust_rejection_reasons(provider, obligations, reasons);
+    append_provider_data_handling_rejection_reasons(provider, obligations, reasons);
+}
+
+fn append_provider_selector_rejection_reasons(
+    provider: &GovernedProviderDescriptor,
+    obligations: &[GovernanceObligation],
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
     let has_allow_list = obligations
         .iter()
         .any(|item| matches!(item, GovernanceObligation::AllowProvider(_)));
@@ -641,6 +651,20 @@ fn append_provider_obligation_rejection_reasons(
     let denied = obligations.iter().any(|item| {
         matches!(item, GovernanceObligation::DenyProvider(selector) if selector_matches_provider(selector, provider.provider))
     });
+
+    if has_allow_list && !allow_list_match {
+        reasons.push(GovernedHardFilterReason::ProviderNotAllowed);
+    }
+    if denied {
+        reasons.push(GovernedHardFilterReason::ProviderDenied);
+    }
+}
+
+fn append_provider_trust_rejection_reasons(
+    provider: &GovernedProviderDescriptor,
+    obligations: &[GovernanceObligation],
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
     let minimum_trust = obligations.iter().filter_map(|item| match item {
         GovernanceObligation::MinimumProviderTrust(tier) => Some(*tier),
         _ => None,
@@ -652,17 +676,7 @@ fn append_provider_obligation_rejection_reasons(
             .any(|offered| selectors_overlap(required, offered)),
         _ => true,
     });
-    let maximum_retention = obligations.iter().filter_map(|item| match item {
-        GovernanceObligation::RetentionSeconds(seconds) => Some(*seconds),
-        _ => None,
-    });
 
-    if has_allow_list && !allow_list_match {
-        reasons.push(GovernedHardFilterReason::ProviderNotAllowed);
-    }
-    if denied {
-        reasons.push(GovernedHardFilterReason::ProviderDenied);
-    }
     if minimum_trust
         .max()
         .is_some_and(|required| provider.trust_tier < required)
@@ -672,6 +686,18 @@ fn append_provider_obligation_rejection_reasons(
     if !regions_match {
         reasons.push(GovernedHardFilterReason::RegionUnavailable);
     }
+}
+
+fn append_provider_data_handling_rejection_reasons(
+    provider: &GovernedProviderDescriptor,
+    obligations: &[GovernanceObligation],
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
+    let maximum_retention = obligations.iter().filter_map(|item| match item {
+        GovernanceObligation::RetentionSeconds(seconds) => Some(*seconds),
+        _ => None,
+    });
+
     if obligations.contains(&GovernanceObligation::RequireLocalExecution)
         && !provider.local_execution
     {
