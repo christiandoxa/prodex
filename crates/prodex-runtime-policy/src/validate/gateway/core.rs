@@ -18,6 +18,16 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
         "gateway.provider_api_key_ref",
         policy.gateway.provider_api_key_ref.as_ref(),
     )?;
+    validate_production_gateway_auth(policy, path)?;
+    validate_gateway_network(policy, path)?;
+    validate_gateway_replicas(policy, path)?;
+    validate_gateway_provider(policy, path)?;
+    validate_gateway_base_url(policy, path)?;
+    validate_gateway_trusted_proxies(policy, path)?;
+    Ok(())
+}
+
+fn validate_production_gateway_auth(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if policy.secrets.production && policy.service_mode == RuntimePolicyServiceMode::Gateway {
         if policy.gateway.require_auth != Some(true) {
             bail!(
@@ -38,6 +48,10 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
             );
         }
     }
+    Ok(())
+}
+
+fn validate_gateway_network(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if let Some(listen_addr) = policy.gateway.listen_addr.as_deref() {
         validate_gateway_exact_identifier(listen_addr, path, "gateway.listen_addr")?;
         let loopback = listen_addr
@@ -58,6 +72,10 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
             path.display()
         );
     }
+    Ok(())
+}
+
+fn validate_gateway_replicas(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if policy
         .gateway
         .replica_count
@@ -79,6 +97,10 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
             path.display()
         );
     }
+    Ok(())
+}
+
+fn validate_gateway_provider(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if let Some(provider) = policy.gateway.provider.as_deref() {
         validate_gateway_exact_identifier(provider, path, "gateway.provider")?;
         match provider.to_ascii_lowercase().as_str() {
@@ -90,6 +112,10 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
             ),
         }
     }
+    Ok(())
+}
+
+fn validate_gateway_base_url(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if let Some(base_url) = policy.gateway.base_url.as_deref() {
         if base_url.is_empty() {
             bail!("gateway.base_url in {} cannot be empty", path.display());
@@ -101,6 +127,10 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
             );
         }
     }
+    Ok(())
+}
+
+fn validate_gateway_trusted_proxies(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     if policy.gateway.trusted_proxies.len() > 16 {
         bail!(
             "gateway.trusted_proxies in {} must contain at most 16 exact IP addresses",

@@ -1,6 +1,7 @@
 use crate::types::{
     PRODEX_POLICY_VERSION, RuntimeGovernanceDataClassification, RuntimeGovernanceMode,
-    RuntimeGovernancePolicyFailureMode, RuntimeGovernanceRolloutMode,
+    RuntimeGovernancePolicyEffect, RuntimeGovernancePolicyFailureMode,
+    RuntimeGovernancePolicyObligation, RuntimeGovernancePolicyRule, RuntimeGovernanceRolloutMode,
     RuntimeGovernanceUnknownClassificationBehavior, RuntimePolicyFile, RuntimePolicyServiceMode,
 };
 use crate::validate_secrets::validate_secret_policy;
@@ -9,6 +10,11 @@ use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD},
 };
+use prodex_domain::{
+    CanonicalRoute, GovernancePolicyRuleId, MAX_GOVERNANCE_POLICY_RULES, MAX_POLICY_OBLIGATIONS,
+    PolicyReasonCode, PolicySelector,
+};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 pub const MAX_GOVERNANCE_INSPECTION_PATTERNS: usize = 64;
@@ -99,11 +105,7 @@ pub fn validate_runtime_governance_settings(
     validate_governance_inspection_patterns(governance, path)?;
     validate_governance_policy_rules(governance, path)?;
     validate_governance_session(governance, path)?;
-    let enforcing = matches!(
-        governance.mode,
-        RuntimeGovernanceMode::EnterpriseEnforce | RuntimeGovernanceMode::BankEnforce
-    );
-    if enforcing
+    if governance_is_enforcing(governance)
         && [
             governance.inspection,
             governance.classification,
@@ -118,99 +120,122 @@ pub fn validate_runtime_governance_settings(
             path.display()
         );
     }
-    if enforcing && !governance.mandatory_audit {
+    if governance_is_enforcing(governance) && !governance.mandatory_audit {
         bail!(
             "enforcing governance mode requires mandatory audit in {}",
             path.display()
         );
     }
     if governance.mode == RuntimeGovernanceMode::BankEnforce {
-        if governance.anonymous_data_plane {
-            bail!(
-                "bank governance mode forbids anonymous data-plane access in {}",
-                path.display()
-            );
-        }
-        if governance.raw_secret_sources {
-            bail!(
-                "bank governance mode requires secret references in {}",
-                path.display()
-            );
-        }
+        validate_bank_governance_settings(governance, path)?;
     }
-    if enforcing {
-        if governance.policy_revision.is_none()
-            || governance
-                .policy_valid_until_unix_ms
-                .is_none_or(|value| value == 0)
-            || governance
-                .classification_revision
-                .as_deref()
-                .is_none_or(|value| !governance_token_is_valid(value))
-            || governance
-                .classification_checksum
-                .as_deref()
-                .is_none_or(|value| !governance_token_is_valid(value))
-            || governance
-                .provider_registry_revision
-                .is_none_or(|value| value == 0)
-            || governance
-                .routing_score_revision
-                .is_none_or(|value| value == 0)
-        {
-            bail!(
-                "enforcing governance mode requires valid immutable snapshot revisions in {}",
-                path.display()
-            );
-        }
-        let Some(provider) = governance.provider.as_ref() else {
-            bail!(
-                "enforcing governance mode requires an approved provider registry entry in {}",
-                path.display()
-            );
-        };
-        if provider.descriptor_revision == 0
-            || provider.regions.is_empty()
-            || provider.regions.len() > 16
-            || provider
-                .regions
-                .iter()
-                .any(|region| !governance_token_is_valid(region))
-        {
-            bail!(
-                "governance provider registry entry is invalid in {}",
-                path.display()
-            );
-        }
-        if governance.mode == RuntimeGovernanceMode::BankEnforce
-            && (provider.trust_tier < crate::types::RuntimeGovernanceProviderTrustTier::Enterprise
-                || provider.training_use
-                || provider.retention_seconds != 0)
-        {
-            bail!(
-                "bank governance mode requires an approved no-retention provider in {}",
-                path.display()
-            );
-        }
-        if governance.classification_unknown != RuntimeGovernanceUnknownClassificationBehavior::Deny
-            || governance.policy_failure_mode != RuntimeGovernancePolicyFailureMode::Closed
-            || governance.active_policy_revision.is_none()
-            || governance.active_policy_revision != governance.policy_revision
-        {
-            bail!(
-                "enforcing governance mode requires deny-on-unknown classification, fail-closed policy, and matching active policy revision in {}",
-                path.display()
-            );
-        }
-        if governance.session.absolute_timeout_seconds.is_none()
-            || governance.session.idle_timeout_seconds.is_none()
-            || governance.session.max_concurrent.is_none()
-        {
-            bail!(
-                "enforcing governance mode requires explicit bounded session controls in {}",
-                path.display()
-            );
-        }
+    if governance_is_enforcing(governance) {
+        validate_enforcing_governance_settings(governance, path)?;
+    }
+    Ok(())
+}
+
+fn governance_is_enforcing(governance: &crate::types::RuntimePolicyGovernanceSettings) -> bool {
+    matches!(
+        governance.mode,
+        RuntimeGovernanceMode::EnterpriseEnforce | RuntimeGovernanceMode::BankEnforce
+    )
+}
+
+fn validate_bank_governance_settings(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
+    if governance.anonymous_data_plane {
+        bail!(
+            "bank governance mode forbids anonymous data-plane access in {}",
+            path.display()
+        );
+    }
+    if governance.raw_secret_sources {
+        bail!(
+            "bank governance mode requires secret references in {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_enforcing_governance_settings(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
+    if governance.policy_revision.is_none()
+        || governance
+            .policy_valid_until_unix_ms
+            .is_none_or(|value| value == 0)
+        || governance
+            .classification_revision
+            .as_deref()
+            .is_none_or(|value| !governance_token_is_valid(value))
+        || governance
+            .classification_checksum
+            .as_deref()
+            .is_none_or(|value| !governance_token_is_valid(value))
+        || governance
+            .provider_registry_revision
+            .is_none_or(|value| value == 0)
+        || governance
+            .routing_score_revision
+            .is_none_or(|value| value == 0)
+    {
+        bail!(
+            "enforcing governance mode requires valid immutable snapshot revisions in {}",
+            path.display()
+        );
+    }
+    let Some(provider) = governance.provider.as_ref() else {
+        bail!(
+            "enforcing governance mode requires an approved provider registry entry in {}",
+            path.display()
+        );
+    };
+    if provider.descriptor_revision == 0
+        || provider.regions.is_empty()
+        || provider.regions.len() > 16
+        || provider
+            .regions
+            .iter()
+            .any(|region| !governance_token_is_valid(region))
+    {
+        bail!(
+            "governance provider registry entry is invalid in {}",
+            path.display()
+        );
+    }
+    if governance.mode == RuntimeGovernanceMode::BankEnforce
+        && (provider.trust_tier < crate::types::RuntimeGovernanceProviderTrustTier::Enterprise
+            || provider.training_use
+            || provider.retention_seconds != 0)
+    {
+        bail!(
+            "bank governance mode requires an approved no-retention provider in {}",
+            path.display()
+        );
+    }
+    if governance.classification_unknown != RuntimeGovernanceUnknownClassificationBehavior::Deny
+        || governance.policy_failure_mode != RuntimeGovernancePolicyFailureMode::Closed
+        || governance.active_policy_revision.is_none()
+        || governance.active_policy_revision != governance.policy_revision
+    {
+        bail!(
+            "enforcing governance mode requires deny-on-unknown classification, fail-closed policy, and matching active policy revision in {}",
+            path.display()
+        );
+    }
+    if governance.session.absolute_timeout_seconds.is_none()
+        || governance.session.idle_timeout_seconds.is_none()
+        || governance.session.max_concurrent.is_none()
+    {
+        bail!(
+            "enforcing governance mode requires explicit bounded session controls in {}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -289,13 +314,6 @@ fn validate_governance_policy_rules(
     governance: &crate::types::RuntimePolicyGovernanceSettings,
     path: &Path,
 ) -> Result<()> {
-    use crate::types::{RuntimeGovernancePolicyEffect, RuntimeGovernancePolicyObligation};
-    use prodex_domain::{
-        CanonicalRoute, GovernancePolicyRuleId, MAX_GOVERNANCE_POLICY_RULES,
-        MAX_POLICY_OBLIGATIONS, PolicyReasonCode, PolicySelector,
-    };
-    use std::collections::BTreeSet;
-
     if governance.policy_rules.len() > MAX_GOVERNANCE_POLICY_RULES {
         bail!(
             "governance policy rule count exceeds {} in {}",
@@ -305,110 +323,127 @@ fn validate_governance_policy_rules(
     }
     let mut identities = BTreeSet::new();
     for rule in &governance.policy_rules {
-        if GovernancePolicyRuleId::new(&rule.id).is_err()
-            || PolicyReasonCode::new(&rule.reason_code).is_err()
-            || !identities.insert(rule.id.as_str())
-            || rule.id.starts_with("builtin.")
-            || rule
-                .condition
-                .route
-                .as_deref()
-                .is_some_and(|route| CanonicalRoute::new(route).is_err())
-        {
-            bail!(
-                "governance policy rule identity or condition is invalid in {}",
-                path.display()
-            );
-        }
-        if rule
+        validate_governance_policy_rule(rule, &mut identities, path)?;
+    }
+    Ok(())
+}
+
+fn validate_governance_policy_rule<'a>(
+    rule: &'a RuntimeGovernancePolicyRule,
+    identities: &mut BTreeSet<&'a str>,
+    path: &Path,
+) -> Result<()> {
+    if GovernancePolicyRuleId::new(&rule.id).is_err()
+        || PolicyReasonCode::new(&rule.reason_code).is_err()
+        || !identities.insert(rule.id.as_str())
+        || rule.id.starts_with("builtin.")
+        || rule
             .condition
-            .channel
-            .is_some_and(|channel| channel != crate::types::RuntimeGovernancePolicyChannel::Api)
-        {
+            .route
+            .as_deref()
+            .is_some_and(|route| CanonicalRoute::new(route).is_err())
+    {
+        bail!(
+            "governance policy rule identity or condition is invalid in {}",
+            path.display()
+        );
+    }
+    if rule
+        .condition
+        .channel
+        .is_some_and(|channel| channel != crate::types::RuntimeGovernancePolicyChannel::Api)
+    {
+        bail!(
+            "gateway governance policy channel selector must be api in {}",
+            path.display()
+        );
+    }
+    if rule
+        .condition
+        .minimum_authentication_strength
+        .is_some_and(|strength| !(1..=3).contains(&strength))
+    {
+        bail!(
+            "gateway governance policy authentication strength must be between 1 and 3 in {}",
+            path.display()
+        );
+    }
+    for selector in [
+        rule.condition.team_id.as_deref(),
+        rule.condition.project_id.as_deref(),
+        rule.condition.user_id.as_deref(),
+        rule.condition.group_id.as_deref(),
+        rule.condition.department_id.as_deref(),
+        rule.condition.requested_model.as_deref(),
+        rule.condition.requested_tool.as_deref(),
+        rule.condition.break_glass_scope.as_deref(),
+    ] {
+        if selector.is_some_and(|selector| PolicySelector::new(selector).is_err()) {
             bail!(
-                "gateway governance policy channel selector must be api in {}",
+                "governance policy attribute selector is invalid in {}",
                 path.display()
             );
         }
-        if rule
-            .condition
-            .minimum_authentication_strength
-            .is_some_and(|strength| !(1..=3).contains(&strength))
-        {
-            bail!(
-                "gateway governance policy authentication strength must be between 1 and 3 in {}",
-                path.display()
-            );
-        }
-        for selector in [
-            rule.condition.team_id.as_deref(),
-            rule.condition.project_id.as_deref(),
-            rule.condition.user_id.as_deref(),
-            rule.condition.group_id.as_deref(),
-            rule.condition.department_id.as_deref(),
-            rule.condition.requested_model.as_deref(),
-            rule.condition.requested_tool.as_deref(),
-            rule.condition.break_glass_scope.as_deref(),
-        ] {
-            if selector.is_some_and(|selector| PolicySelector::new(selector).is_err()) {
-                bail!(
-                    "governance policy attribute selector is invalid in {}",
-                    path.display()
-                );
-            }
-        }
-        if rule.obligations.len() > MAX_POLICY_OBLIGATIONS {
-            bail!(
-                "governance policy obligation count exceeds {} in {}",
-                MAX_POLICY_OBLIGATIONS,
-                path.display()
-            );
-        }
-        if rule.effect == RuntimeGovernancePolicyEffect::Deny && !rule.obligations.is_empty() {
-            bail!(
-                "governance deny policy rules cannot carry obligations in {}",
-                path.display()
-            );
-        }
-        for obligation in &rule.obligations {
-            if matches!(
-                obligation,
-                RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value }
-                    if !(1..=3).contains(value)
-            ) {
-                bail!(
-                    "gateway governance policy obligation authentication strength must be between 1 and 3 in {}",
-                    path.display()
-                );
-            }
-            let selector = match obligation {
-                RuntimeGovernancePolicyObligation::AllowProvider { selector }
-                | RuntimeGovernancePolicyObligation::DenyProvider { selector }
-                | RuntimeGovernancePolicyObligation::RequireRegion { selector }
-                | RuntimeGovernancePolicyObligation::AllowTool { selector }
-                | RuntimeGovernancePolicyObligation::AllowModel { selector } => Some(selector),
-                _ => None,
-            };
-            if selector.is_some_and(|selector| PolicySelector::new(selector).is_err()) {
-                bail!(
-                    "governance policy obligation selector is invalid in {}",
-                    path.display()
-                );
-            }
-            if matches!(
-                obligation,
-                RuntimeGovernancePolicyObligation::MaxInputTokens { value: 0 }
-                    | RuntimeGovernancePolicyObligation::MaxOutputTokens { value: 0 }
-                    | RuntimeGovernancePolicyObligation::MaxContextTokens { value: 0 }
-                    | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value: 0 }
-                    | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value: 0 }
-            ) {
-                bail!(
-                    "governance policy obligation bound must be non-zero in {}",
-                    path.display()
-                );
-            }
-        }
+    }
+    if rule.obligations.len() > MAX_POLICY_OBLIGATIONS {
+        bail!(
+            "governance policy obligation count exceeds {} in {}",
+            MAX_POLICY_OBLIGATIONS,
+            path.display()
+        );
+    }
+    if rule.effect == RuntimeGovernancePolicyEffect::Deny && !rule.obligations.is_empty() {
+        bail!(
+            "governance deny policy rules cannot carry obligations in {}",
+            path.display()
+        );
+    }
+    for obligation in &rule.obligations {
+        validate_governance_policy_obligation(obligation, path)?;
+    }
+    Ok(())
+}
+
+fn validate_governance_policy_obligation(
+    obligation: &RuntimeGovernancePolicyObligation,
+    path: &Path,
+) -> Result<()> {
+    if matches!(
+        obligation,
+        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value }
+            if !(1..=3).contains(value)
+    ) {
+        bail!(
+            "gateway governance policy obligation authentication strength must be between 1 and 3 in {}",
+            path.display()
+        );
+    }
+    let selector = match obligation {
+        RuntimeGovernancePolicyObligation::AllowProvider { selector }
+        | RuntimeGovernancePolicyObligation::DenyProvider { selector }
+        | RuntimeGovernancePolicyObligation::RequireRegion { selector }
+        | RuntimeGovernancePolicyObligation::AllowTool { selector }
+        | RuntimeGovernancePolicyObligation::AllowModel { selector } => Some(selector),
+        _ => None,
+    };
+    if selector.is_some_and(|selector| PolicySelector::new(selector).is_err()) {
+        bail!(
+            "governance policy obligation selector is invalid in {}",
+            path.display()
+        );
+    }
+    if matches!(
+        obligation,
+        RuntimeGovernancePolicyObligation::MaxInputTokens { value: 0 }
+            | RuntimeGovernancePolicyObligation::MaxOutputTokens { value: 0 }
+            | RuntimeGovernancePolicyObligation::MaxContextTokens { value: 0 }
+            | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value: 0 }
+            | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value: 0 }
+    ) {
+        bail!(
+            "governance policy obligation bound must be non-zero in {}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -518,44 +553,47 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
     }
     validate_bank_workload_identity(policy, path)?;
     match policy.service_mode {
-        RuntimePolicyServiceMode::Gateway => {
-            let sso = &policy.gateway.sso;
-            if sso.remote_human != Some(true)
-                || sso.oidc_issuer.is_none()
-                || sso.oidc_audience.is_none()
-                || sso.required_scope.as_deref() != Some("control_plane")
-                || sso.authentication_strength.as_deref() != Some("phishing_resistant")
-                || sso
-                    .reauthentication_max_age_seconds
-                    .is_none_or(|seconds| seconds > 900)
-            {
-                bail!(
-                    "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
-                    path.display()
-                );
-            }
-            let observability = &policy.gateway.observability;
-            if !observability.sinks.iter().any(|sink| sink == "siem")
-                || observability.siem_endpoint.is_none()
-                || observability.siem_bearer_token_ref.is_none()
-                || observability.siem_mtls_identity_ref.is_none()
-                || observability.siem_signing_key_ref.is_none()
-                || observability.siem_max_batch_events.is_none()
-                || observability.siem_max_batch_bytes.is_none()
-                || observability.siem_max_attempts.is_none()
-                || observability.siem_retry_base_ms.is_none()
-                || observability.siem_retry_max_ms.is_none()
-                || observability.siem_max_lag_ms.is_none()
-            {
-                bail!(
-                    "bank governance gateway mode requires a bounded SecretRef/mTLS/signing SIEM audit worker in {}",
-                    path.display()
-                );
-            }
-        }
+        RuntimePolicyServiceMode::Gateway => validate_bank_gateway_mode(policy, path)?,
         RuntimePolicyServiceMode::ControlPlane => {
             validate_bank_control_plane_admin_tokens(policy, path)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_bank_gateway_mode(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let sso = &policy.gateway.sso;
+    if sso.remote_human != Some(true)
+        || sso.oidc_issuer.is_none()
+        || sso.oidc_audience.is_none()
+        || sso.required_scope.as_deref() != Some("control_plane")
+        || sso.authentication_strength.as_deref() != Some("phishing_resistant")
+        || sso
+            .reauthentication_max_age_seconds
+            .is_none_or(|seconds| seconds > 900)
+    {
+        bail!(
+            "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
+            path.display()
+        );
+    }
+    let observability = &policy.gateway.observability;
+    if !observability.sinks.iter().any(|sink| sink == "siem")
+        || observability.siem_endpoint.is_none()
+        || observability.siem_bearer_token_ref.is_none()
+        || observability.siem_mtls_identity_ref.is_none()
+        || observability.siem_signing_key_ref.is_none()
+        || observability.siem_max_batch_events.is_none()
+        || observability.siem_max_batch_bytes.is_none()
+        || observability.siem_max_attempts.is_none()
+        || observability.siem_retry_base_ms.is_none()
+        || observability.siem_retry_max_ms.is_none()
+        || observability.siem_max_lag_ms.is_none()
+    {
+        bail!(
+            "bank governance gateway mode requires a bounded SecretRef/mTLS/signing SIEM audit worker in {}",
+            path.display()
+        );
     }
     Ok(())
 }
