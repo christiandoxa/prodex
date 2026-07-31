@@ -163,6 +163,10 @@ pub(super) fn rust_noise_label(line: &str) -> Option<&'static str> {
         return None;
     }
 
+    rust_compilation_noise_label(trimmed).or_else(|| rust_test_noise_label(trimmed))
+}
+
+fn rust_compilation_noise_label(trimmed: &str) -> Option<&'static str> {
     if trimmed.starts_with("Compiling ") {
         Some("compiling")
     } else if trimmed.starts_with("Checking ") {
@@ -179,7 +183,13 @@ pub(super) fn rust_noise_label(line: &str) -> Option<&'static str> {
         Some("generated_docs")
     } else if trimmed.starts_with("Finished ") {
         Some("finished")
-    } else if trimmed.starts_with("Running ") {
+    } else {
+        None
+    }
+}
+
+fn rust_test_noise_label(trimmed: &str) -> Option<&'static str> {
+    if trimmed.starts_with("Running ") {
         Some("running_targets")
     } else if trimmed.starts_with("Doc-tests ") {
         Some("doc_tests")
@@ -307,6 +317,11 @@ fn noisy_success_go_test_label(trimmed: &str, lower: &str) -> Option<&'static st
 }
 
 fn noisy_success_test_summary_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    noisy_success_test_count_label(trimmed, lower)
+        .or_else(|| noisy_success_test_timing_label(lower))
+}
+
+fn noisy_success_test_count_label(trimmed: &str, lower: &str) -> Option<&'static str> {
     if lower.starts_with("test suites:") && lower.contains("passed") {
         Some("test_suites")
     } else if lower.starts_with("tests:") && lower.contains("passed") {
@@ -321,7 +336,13 @@ fn noisy_success_test_summary_label(trimmed: &str, lower: &str) -> Option<&'stat
         Some("snapshots")
     } else if lower.starts_with("test files") && lower.contains("passed") {
         Some("test_files")
-    } else if lower.starts_with("duration") {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_test_timing_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("duration") {
         Some("test_duration")
     } else if lower.starts_with("time:") {
         Some("test_time")
@@ -335,6 +356,13 @@ fn noisy_success_test_summary_label(trimmed: &str, lower: &str) -> Option<&'stat
 }
 
 fn noisy_success_build_label(lower: &str) -> Option<&'static str> {
+    noisy_success_generic_build_label(lower)
+        .or_else(|| noisy_success_gradle_build_label(lower))
+        .or_else(|| noisy_success_container_build_label(lower))
+        .or_else(|| noisy_success_runner_build_label(lower))
+}
+
+fn noisy_success_generic_build_label(lower: &str) -> Option<&'static str> {
     if lower.starts_with("build successful")
         || lower.starts_with("build success")
         || lower.starts_with("[info] build success")
@@ -359,9 +387,18 @@ fn noisy_success_build_label(lower: &str) -> Option<&'static str> {
         Some("nx_summary")
     } else if lower.starts_with("tasks:") && lower.contains("successful") {
         Some("turbo_summary")
-    } else if lower.contains("actionable tasks:") || lower.contains("actionable task:") {
-        Some("gradle_tasks")
-    } else if lower.starts_with("[info] total time:")
+    } else {
+        None
+    }
+}
+
+fn noisy_success_gradle_build_label(lower: &str) -> Option<&'static str> {
+    (lower.contains("actionable tasks:") || lower.contains("actionable task:"))
+        .then_some("gradle_tasks")
+}
+
+fn noisy_success_container_build_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("[info] total time:")
         || lower.starts_with("[info] finished at:")
         || lower.starts_with("[info] tests run:")
     {
@@ -383,7 +420,13 @@ fn noisy_success_build_label(lower: &str) -> Option<&'static str> {
         || lower.contains("naming to ")
     {
         Some("docker_summary")
-    } else if lower.starts_with("running ") && lower.contains(" tests using ") {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_runner_build_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("running ") && lower.contains(" tests using ") {
         Some("playwright_running")
     } else if lower.contains(" passed (") && lower.chars().any(|ch| ch.is_ascii_digit()) {
         Some("test_summary")
@@ -393,6 +436,11 @@ fn noisy_success_build_label(lower: &str) -> Option<&'static str> {
 }
 
 fn noisy_success_package_label(lower: &str) -> Option<&'static str> {
+    noisy_success_registry_package_label(lower)
+        .or_else(|| noisy_success_installer_package_label(lower))
+}
+
+fn noisy_success_registry_package_label(lower: &str) -> Option<&'static str> {
     if lower.starts_with("added ") && lower.contains(" package") {
         Some("packages_added")
     } else if lower.starts_with("audited ") && lower.contains(" package") {
@@ -408,7 +456,13 @@ fn noisy_success_package_label(lower: &str) -> Option<&'static str> {
     } else if lower.starts_with("lockfile is up to date") || lower.starts_with("already up to date")
     {
         Some("packages_up_to_date")
-    } else if lower.starts_with("requirement already satisfied")
+    } else {
+        None
+    }
+}
+
+fn noisy_success_installer_package_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("requirement already satisfied")
         || lower.starts_with("successfully installed")
         || lower.starts_with("installing collected packages")
         || (lower.starts_with("resolved ") && lower.contains(" package"))
