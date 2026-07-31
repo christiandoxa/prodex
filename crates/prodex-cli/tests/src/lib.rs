@@ -244,6 +244,16 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
     );
 }
 #[test]
+fn super_model_without_provider_selects_codex_model() {
+    let args =
+        parse_super_as_runtime_tools(&["prodex", "s", "--model", "gpt-test", "exec", "review"]);
+
+    assert!(rendered_codex_args(&args).contains(&"model=\"gpt-test\"".to_string()));
+    assert_eq!(args.external_provider, None);
+    assert_eq!(args.base_url, None);
+    assert!(!args.skip_quota_check);
+}
+#[test]
 fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     let args = parse_super_as_runtime_tools(&[
         "prodex",

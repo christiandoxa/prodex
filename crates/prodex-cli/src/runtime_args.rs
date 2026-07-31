@@ -238,13 +238,8 @@ pub struct SuperArgs {
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
     #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
     pub api_key: Option<String>,
-    /// Model id to use with --url or --provider.
-    #[arg(
-        long = "model",
-        visible_alias = "local-model",
-        value_name = "MODEL",
-        requires = "provider_or_url"
-    )]
+    /// Model id to use with Codex, --url, or --provider.
+    #[arg(long = "model", visible_alias = "local-model", value_name = "MODEL")]
     pub local_model: Option<String>,
     /// Context window advertised to Codex when using --url or --provider.
     #[arg(

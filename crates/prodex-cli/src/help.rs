@@ -135,6 +135,7 @@ Notes:
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super
+  prodex super --model gpt-5.3-codex
   prodex super --url http://127.0.0.1:8131
   prodex super deepseek --model deepseek-v4-pro
   prodex super gemini

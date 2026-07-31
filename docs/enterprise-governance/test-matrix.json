@@ -420,13 +420,13 @@
       "control": "Versioned migrations plus authenticated AES-256-GCM backup, isolated restore and governance-link verification.",
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "migration_restore_integration",
-      "expected": "Old/new supported images interoperate and restored durable state preserves isolation, hashes and pointers.",
-      "implementation_status": "tested",
-      "evidence_required": "SQLite/PostgreSQL forward/back compatibility, export/import and point-in-time restore drill.",
+      "expected": "Old/new supported images interoperate and an isolated logical restore preserves isolation, hashes and pointers; deployment PITR remains separately validated.",
+      "implementation_status": "partial",
+      "evidence_required": "SQLite/PostgreSQL forward/back compatibility and encrypted logical dump/restore evidence. Target-environment WAL/PITR and approved RPO evidence remain required.",
       "evidence": [
         "all_governance_artifact_kinds_use_revisioned_authority",
         "governance migration catalog tests",
-        "npm run ci:backup-restore-drill: final synthetic RPO 2.076 s, RTO 1.506 s, governance fingerprint and audit-link verification"
+        "npm run ci:backup-restore-drill: encrypted logical dump/restore, post-backup exclusion marker, recovery-point age, restore time, governance fingerprint and audit-link verification"
       ]
     },
     {

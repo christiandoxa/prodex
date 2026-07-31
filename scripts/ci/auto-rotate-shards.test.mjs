@@ -52,14 +52,18 @@ test("Windows CI runs three test partitions with one cache writer", () => {
   assert.match(block, /- suite: root-1/);
   assert.equal(block.match(/save_cache: true/g)?.length, 1);
   assert.equal(block.match(/save_cache: false/g)?.length, 2);
+  assert.match(block, /CARGO_INCREMENTAL: "0"/);
+  assert.match(block, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.equal(block.match(/shell: bash/g)?.length, 2);
-  assert.match(block, /--workspace --exclude prodex/);
+  assert.match(block, /--workspace --exclude prodex --exclude prodex-app/);
   assert.match(
     block,
     /-p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands/,
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
-  assert.match(block, /--workspace --exclude prodex --all-features -- --test-threads=4/);
+  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --all-features -- --test-threads=4/);
+  assert.match(block, /Build Windows installer fixture binary[\s\S]*?if: matrix\.suite == 'root-1'/);
+  assert.match(block, /Test Windows installer[\s\S]*?if: matrix\.suite == 'root-1'/);
   assert.match(block, /--all-features --jobs 4 --shard-index/);
   assert.match(block, /--shard-index \$\{\{ matrix\.auto_rotate_shard \}\} --shard-count 2/);
 });

@@ -23,9 +23,9 @@ test("parseThreshold accepts positive values and rejects invalid limits", () => 
 test("assessDrill reports every recovery invariant failure", () => {
   assert.deepEqual(
     assessDrill({
-      rpoSeconds: 61,
+      recoveryPointAgeSeconds: 61,
       rtoSeconds: 301,
-      maxRpoSeconds: 60,
+      maxRecoveryPointAgeSeconds: 60,
       maxRtoSeconds: 300,
       fingerprintsMatch: false,
       postBackupMarkerAbsent: false,
@@ -37,7 +37,7 @@ test("assessDrill reports every recovery invariant failure", () => {
     {
       passed: false,
       failures: [
-        "rpo_exceeded",
+        "recovery_point_age_exceeded",
         "rto_exceeded",
         "fingerprint_mismatch",
         "post_backup_marker_restored",
@@ -53,9 +53,9 @@ test("assessDrill reports every recovery invariant failure", () => {
 test("assessDrill accepts an intact restore within thresholds", () => {
   assert.deepEqual(
     assessDrill({
-      rpoSeconds: 1,
+      recoveryPointAgeSeconds: 1,
       rtoSeconds: 2,
-      maxRpoSeconds: 60,
+      maxRecoveryPointAgeSeconds: 60,
       maxRtoSeconds: 300,
       fingerprintsMatch: true,
       postBackupMarkerAbsent: true,

@@ -155,7 +155,7 @@ Drill acceptance:
 Run the same recovery gate used by CI:
 
 ```bash
-PRODEX_BACKUP_DRILL_MAX_RPO_SECONDS=60 \
+PRODEX_BACKUP_DRILL_MAX_RECOVERY_POINT_AGE_SECONDS=60 \
 PRODEX_BACKUP_DRILL_MAX_RTO_SECONDS=300 \
 npm run ci:backup-restore-drill
 ```
@@ -163,8 +163,11 @@ npm run ci:backup-restore-drill
 The command requires Docker plus `psql`, starts disposable PostgreSQL source
 and restore databases, invokes
 the external migrator, seeds synthetic tenant/accounting records, dumps and
-restores them, and verifies all twelve RLS-protected tables. It also proves that
+restores them, and verifies every tenant-scoped table covered by the drill. It also proves that
 a write made after the backup is absent from the restored recovery point.
+Its recovery-point-age threshold bounds stale logical backups; it is not a WAL
+PITR or production RPO measurement. Validate production RPO separately against
+the deployment's acknowledged-write cutoff and restored PITR coordinate.
 
 Redacted evidence is written atomically to
 `target/backup-restore-drill/evidence.json`. Archive that JSON in the regulated
