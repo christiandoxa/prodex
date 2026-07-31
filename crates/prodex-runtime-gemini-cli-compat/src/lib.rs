@@ -180,61 +180,7 @@ fn configure_gemini_mcp_server(
     );
     let vars = GeminiCompatVars::new(source_directory, cwd).with_env(extension_env);
 
-    if let Some(url) = json_string(server, &["httpUrl", "http_url", "url"]) {
-        codex_server.insert("url".to_string(), toml::Value::String(vars.expand(&url)));
-        insert_optional_string(
-            &mut codex_server,
-            "bearer_token_env_var",
-            json_string(
-                server,
-                &[
-                    "bearerTokenEnvVar",
-                    "bearer_token_env_var",
-                    "oauthTokenEnvVar",
-                ],
-            )
-            .as_deref(),
-            &vars,
-        );
-        insert_string_map(
-            &mut codex_server,
-            "http_headers",
-            server
-                .get("http_headers")
-                .or_else(|| server.get("httpHeaders"))
-                .or_else(|| server.get("headers")),
-            &vars,
-        );
-        insert_string_map(
-            &mut codex_server,
-            "env_http_headers",
-            server
-                .get("env_http_headers")
-                .or_else(|| server.get("envHttpHeaders")),
-            &vars,
-        );
-    } else if let Some(command) = json_string(server, &["command", "cmd"]) {
-        codex_server.insert(
-            "command".to_string(),
-            toml::Value::String(vars.expand(&command)),
-        );
-        if let Some(args) = json_string_array(server.get("args")) {
-            codex_server.insert(
-                "args".to_string(),
-                toml::Value::Array(
-                    args.into_iter()
-                        .map(|arg| toml::Value::String(vars.expand(&arg)))
-                        .collect(),
-                ),
-            );
-        }
-        insert_optional_string(
-            &mut codex_server,
-            "cwd",
-            json_string(server, &["cwd", "workingDirectory", "working_directory"]).as_deref(),
-            &vars,
-        );
-    } else {
+    if !configure_gemini_mcp_transport(&mut codex_server, server, &vars) {
         return;
     }
 
@@ -292,8 +238,85 @@ fn configure_gemini_mcp_server(
         );
     }
 
+    configure_gemini_mcp_environment(&mut codex_server, server, extension_env, &vars);
+
+    mcp_servers.insert(server_name.to_string(), toml::Value::Table(codex_server));
+}
+
+fn configure_gemini_mcp_transport(
+    codex_server: &mut toml::Table,
+    server: &serde_json::Map<String, serde_json::Value>,
+    vars: &GeminiCompatVars,
+) -> bool {
+    if let Some(url) = json_string(server, &["httpUrl", "http_url", "url"]) {
+        codex_server.insert("url".to_string(), toml::Value::String(vars.expand(&url)));
+        insert_optional_string(
+            codex_server,
+            "bearer_token_env_var",
+            json_string(
+                server,
+                &[
+                    "bearerTokenEnvVar",
+                    "bearer_token_env_var",
+                    "oauthTokenEnvVar",
+                ],
+            )
+            .as_deref(),
+            vars,
+        );
+        insert_string_map(
+            codex_server,
+            "http_headers",
+            server
+                .get("http_headers")
+                .or_else(|| server.get("httpHeaders"))
+                .or_else(|| server.get("headers")),
+            vars,
+        );
+        insert_string_map(
+            codex_server,
+            "env_http_headers",
+            server
+                .get("env_http_headers")
+                .or_else(|| server.get("envHttpHeaders")),
+            vars,
+        );
+        return true;
+    }
+    let Some(command) = json_string(server, &["command", "cmd"]) else {
+        return false;
+    };
+    codex_server.insert(
+        "command".to_string(),
+        toml::Value::String(vars.expand(&command)),
+    );
+    if let Some(args) = json_string_array(server.get("args")) {
+        codex_server.insert(
+            "args".to_string(),
+            toml::Value::Array(
+                args.into_iter()
+                    .map(|arg| toml::Value::String(vars.expand(&arg)))
+                    .collect(),
+            ),
+        );
+    }
+    insert_optional_string(
+        codex_server,
+        "cwd",
+        json_string(server, &["cwd", "workingDirectory", "working_directory"]).as_deref(),
+        vars,
+    );
+    true
+}
+
+fn configure_gemini_mcp_environment(
+    codex_server: &mut toml::Table,
+    server: &serde_json::Map<String, serde_json::Value>,
+    extension_env: &BTreeMap<String, String>,
+    vars: &GeminiCompatVars,
+) {
     let mut env_table = toml::Table::new();
-    insert_env_map(&mut env_table, server.get("env"), &vars);
+    insert_env_map(&mut env_table, server.get("env"), vars);
     for name in json_string_array(
         server
             .get("envVars")
@@ -320,8 +343,6 @@ fn configure_gemini_mcp_server(
     if !env_table.is_empty() {
         codex_server.insert("env".to_string(), toml::Value::Table(env_table));
     }
-
-    mcp_servers.insert(server_name.to_string(), toml::Value::Table(codex_server));
 }
 
 pub(crate) fn extension_skill_dirs(extension: &GeminiExtension) -> Vec<PathBuf> {
@@ -368,35 +389,16 @@ fn active_extension_manifests_from_roots(
         if manifests.len() >= GEMINI_EXTENSION_SCAN_LIMIT {
             break;
         }
-        if path_has_symlink_component(root) {
-            continue;
-        }
-        if root.join("gemini-extension.json").is_file() {
-            if let Some(manifest) = load_extension_manifest(root, root.parent(), cwd)
-                && seen.insert(manifest.name.to_ascii_lowercase())
-            {
-                manifests.push(manifest);
-            }
-            continue;
-        }
-        let Ok(entries) = fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        for directory in extension_manifest_directories(root) {
             if manifests.len() >= GEMINI_EXTENSION_SCAN_LIMIT {
                 break;
             }
-            let directory = entry.path();
-            let Ok(metadata) = fs::symlink_metadata(&directory) else {
-                continue;
+            let manifest_root = if directory == *root {
+                root.parent()
+            } else {
+                Some(root.as_path())
             };
-            if metadata.file_type().is_symlink()
-                || !metadata.is_dir()
-                || !directory.join("gemini-extension.json").is_file()
-            {
-                continue;
-            }
-            if let Some(manifest) = load_extension_manifest(&directory, Some(root), cwd)
+            if let Some(manifest) = load_extension_manifest(&directory, manifest_root, cwd)
                 && seen.insert(manifest.name.to_ascii_lowercase())
             {
                 manifests.push(manifest);
@@ -405,6 +407,30 @@ fn active_extension_manifests_from_roots(
     }
     manifests.sort_by(|left, right| left.name.cmp(&right.name));
     manifests
+}
+
+fn extension_manifest_directories(root: &Path) -> Vec<PathBuf> {
+    if path_has_symlink_component(root) {
+        return Vec::new();
+    }
+    if root.join("gemini-extension.json").is_file() {
+        return vec![root.to_path_buf()];
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|directory| {
+            fs::symlink_metadata(directory).is_ok_and(|metadata| {
+                !metadata.file_type().is_symlink()
+                    && metadata.is_dir()
+                    && directory.join("gemini-extension.json").is_file()
+            })
+        })
+        .take(GEMINI_EXTENSION_SCAN_LIMIT)
+        .collect()
 }
 
 fn load_extension_manifest(

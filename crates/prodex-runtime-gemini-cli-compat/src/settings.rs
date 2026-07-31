@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::iter::Peekable;
 use std::path::{Path, PathBuf};
+use std::str::Chars;
 
 const GEMINI_SETTINGS_FILE_LIMIT: usize = 512 * 1024;
 
@@ -184,36 +186,40 @@ fn strip_json_comments(text: &str) -> String {
             output.push(ch);
             continue;
         }
-        if ch == '/' {
-            match chars.peek().copied() {
-                Some('/') => {
-                    let _ = chars.next();
-                    for next in chars.by_ref() {
-                        if next == '\n' {
-                            output.push('\n');
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                Some('*') => {
-                    let _ = chars.next();
-                    let mut previous = '\0';
-                    for next in chars.by_ref() {
-                        if previous == '*' && next == '/' {
-                            break;
-                        }
-                        if next == '\n' {
-                            output.push('\n');
-                        }
-                        previous = next;
-                    }
-                    continue;
-                }
-                _ => {}
-            }
+        if ch == '/' && strip_json_comment(&mut chars, &mut output) {
+            continue;
         }
         output.push(ch);
     }
     output
+}
+
+fn strip_json_comment(chars: &mut Peekable<Chars<'_>>, output: &mut String) -> bool {
+    match chars.peek().copied() {
+        Some('/') => {
+            let _ = chars.next();
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    output.push('\n');
+                    break;
+                }
+            }
+            true
+        }
+        Some('*') => {
+            let _ = chars.next();
+            let mut previous = '\0';
+            for next in chars.by_ref() {
+                if previous == '*' && next == '/' {
+                    break;
+                }
+                if next == '\n' {
+                    output.push('\n');
+                }
+                previous = next;
+            }
+            true
+        }
+        _ => false,
+    }
 }

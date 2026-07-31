@@ -194,23 +194,8 @@ impl RuntimeProxyCookieJar {
         secure_request: bool,
         request_headers: &[(String, String)],
     ) -> Option<String> {
-        let mut caller_segments = Vec::new();
-        let mut caller_names = BTreeSet::new();
-        for (name, value) in request_headers {
-            if !name.eq_ignore_ascii_case("cookie") {
-                continue;
-            }
-            for segment in value.split(';') {
-                let segment = segment.trim();
-                if segment.is_empty() {
-                    continue;
-                }
-                if let Some(cookie_name) = runtime_proxy_cookie_name_from_pair(segment) {
-                    caller_names.insert(cookie_name.to_string());
-                }
-                caller_segments.push(segment.to_string());
-            }
-        }
+        let (mut caller_segments, caller_names) =
+            runtime_proxy_cookie_caller_segments(request_headers);
 
         let key = RuntimeProxyCookieKey {
             namespace: namespace.to_string(),
@@ -242,15 +227,6 @@ impl RuntimeProxyCookieJar {
                         .then_with(|| left.name.cmp(&right.name))
                 });
                 for entry in matching {
-                    if caller_names.contains(entry.name.as_str()) {
-                        continue;
-                    }
-                    if entry.secure && !secure_request {
-                        continue;
-                    }
-                    if !runtime_proxy_cookie_path_matches(path, &entry.path) {
-                        continue;
-                    }
                     relayed_segments.push(format!("{}={}", entry.name, entry.value));
                 }
             }
@@ -259,6 +235,29 @@ impl RuntimeProxyCookieJar {
         caller_segments.extend(relayed_segments);
         (!caller_segments.is_empty()).then(|| caller_segments.join("; "))
     }
+}
+
+fn runtime_proxy_cookie_caller_segments(
+    request_headers: &[(String, String)],
+) -> (Vec<String>, BTreeSet<String>) {
+    let mut segments = Vec::new();
+    let mut names = BTreeSet::new();
+    for (_, value) in request_headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+    {
+        for segment in value
+            .split(';')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if let Some(name) = runtime_proxy_cookie_name_from_pair(segment) {
+                names.insert(name.to_string());
+            }
+            segments.push(segment.to_string());
+        }
+    }
+    (segments, names)
 }
 
 enum RuntimeProxyCookieChange {
@@ -290,43 +289,14 @@ impl RuntimeProxyCookieChange {
         let mut expires_at = None;
         let mut delete = false;
         for attr in parts {
-            let attr = attr.trim();
-            if attr.eq_ignore_ascii_case("secure") {
-                secure = true;
-                continue;
-            }
-            let Some((attr_name, attr_value)) = attr.split_once('=') else {
-                continue;
-            };
-            let attr_name = attr_name.trim();
-            let attr_value = attr_value.trim();
-            if attr_name.eq_ignore_ascii_case("path") {
-                if attr_value.starts_with('/')
-                    && !attr_value.contains(['\r', '\n'])
-                    && attr_value.len() <= RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES
-                {
-                    path = attr_value.to_string();
-                }
-            } else if attr_name.eq_ignore_ascii_case("max-age") {
-                if let Ok(seconds) = attr_value.parse::<i64>() {
-                    if seconds <= 0 {
-                        delete = true;
-                    } else {
-                        expires_at = Some(
-                            now.checked_add(Duration::from_secs(seconds as u64))
-                                .unwrap_or(now),
-                        );
-                    }
-                }
-            } else if attr_name.eq_ignore_ascii_case("expires")
-                && let Some(expires) = runtime_proxy_cookie_parse_expires(attr_value)
-            {
-                if expires <= now {
-                    delete = true;
-                } else {
-                    expires_at = Some(expires);
-                }
-            }
+            runtime_proxy_cookie_apply_attribute(
+                attr.trim(),
+                &mut path,
+                &mut secure,
+                &mut expires_at,
+                &mut delete,
+                now,
+            );
         }
 
         if secure && !secure_origin {
@@ -348,6 +318,65 @@ impl RuntimeProxyCookieChange {
             expires_at,
             updated_at: now,
         }))
+    }
+}
+
+fn runtime_proxy_cookie_apply_attribute(
+    attr: &str,
+    path: &mut String,
+    secure: &mut bool,
+    expires_at: &mut Option<SystemTime>,
+    delete: &mut bool,
+    now: SystemTime,
+) {
+    if attr.eq_ignore_ascii_case("secure") {
+        *secure = true;
+        return;
+    }
+    let Some((name, value)) = attr.split_once('=') else {
+        return;
+    };
+    let value = value.trim();
+    if name.trim().eq_ignore_ascii_case("path") {
+        if value.starts_with('/')
+            && !value.contains(['\r', '\n'])
+            && value.len() <= RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES
+        {
+            *path = value.to_string();
+        }
+        return;
+    }
+    if name.trim().eq_ignore_ascii_case("max-age") {
+        runtime_proxy_cookie_apply_max_age(value, expires_at, delete, now);
+        return;
+    }
+    if name.trim().eq_ignore_ascii_case("expires")
+        && let Some(expires) = runtime_proxy_cookie_parse_expires(value)
+    {
+        if expires <= now {
+            *delete = true;
+        } else {
+            *expires_at = Some(expires);
+        }
+    }
+}
+
+fn runtime_proxy_cookie_apply_max_age(
+    value: &str,
+    expires_at: &mut Option<SystemTime>,
+    delete: &mut bool,
+    now: SystemTime,
+) {
+    let Ok(seconds) = value.parse::<i64>() else {
+        return;
+    };
+    if seconds <= 0 {
+        *delete = true;
+    } else {
+        *expires_at = Some(
+            now.checked_add(Duration::from_secs(seconds as u64))
+                .unwrap_or(now),
+        );
     }
 }
 
