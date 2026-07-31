@@ -11,6 +11,9 @@ use crate::{
 };
 use prodex_core::path_is_strictly_under_root;
 
+mod home_action_validation;
+use home_action_validation::validate_home_actions;
+
 pub(crate) struct ProfileLifecycleLock {
     _lock: crate::JsonFileLock,
 }
@@ -276,54 +279,90 @@ pub(crate) fn recover_profile_lifecycle_journals_locked(
         };
 
         if committed {
-            finish_home_actions(&plan.home_actions, true)?;
-            cleanup_auth_journal_temporary_homes(&auth_journals)?;
-            if journal.operation == "remove" {
-                recovery.completed_removal_profiles.extend(
-                    plan.profile_states
-                        .iter()
-                        .map(|profile| profile.name.clone()),
-                );
-                recovery.pending_removal_journals.push(path);
-                recovery.recovered += 1;
-                continue;
-            }
-            let auth_state = persisted_state
-                .as_ref()
-                .context("committed profile lifecycle has no persisted state")?;
-            remove_lifecycle_journal(&path)?;
-            for (journal_path, _) in auth_journals {
-                super::import::lifecycle_support::cleanup_profile_import_auth_journal(
-                    paths,
-                    auth_state,
-                    &journal_path,
-                )?;
-            }
+            finish_committed_lifecycle(
+                paths,
+                path,
+                &journal.operation,
+                &plan,
+                persisted_state.as_ref(),
+                &auth_journals,
+                &mut recovery,
+            )?;
         } else {
-            let removed_profiles = restore_lifecycle_state(state, &plan)?;
-            let auth_updates = auth_journals
-                .iter()
-                .map(|(journal_path, journal)| {
-                    super::import::lifecycle_support::imported_auth_update_from_journal(
-                        paths,
-                        state,
-                        journal_path,
-                        journal,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
-            super::import::rollback_imported_auth_updates(state, &auth_updates)?;
-            finish_home_actions(&plan.home_actions, false)?;
-            cleanup_auth_journal_temporary_homes(&auth_journals)?;
-            save_rolled_back_lifecycle_state(paths, state, &removed_profiles)?;
-            remove_lifecycle_journal(&path)?;
-            for (journal_path, _) in auth_journals {
-                prodex_profile_export::cleanup_profile_import_auth_update_journal(&journal_path);
-            }
+            rollback_lifecycle(paths, state, &path, &plan, &auth_journals)?;
         }
         recovery.recovered += 1;
     }
     Ok(recovery)
+}
+
+fn finish_committed_lifecycle(
+    paths: &AppPaths,
+    path: PathBuf,
+    operation: &str,
+    plan: &ProfileLifecyclePlan,
+    persisted_state: Option<&AppState>,
+    auth_journals: &[(
+        PathBuf,
+        prodex_profile_export::ImportedExistingProfileAuthUpdateJournal,
+    )],
+    recovery: &mut ProfileLifecycleRecovery,
+) -> Result<()> {
+    finish_home_actions(&plan.home_actions, true)?;
+    cleanup_auth_journal_temporary_homes(auth_journals)?;
+    if operation == "remove" {
+        recovery.completed_removal_profiles.extend(
+            plan.profile_states
+                .iter()
+                .map(|profile| profile.name.clone()),
+        );
+        recovery.pending_removal_journals.push(path);
+        return Ok(());
+    }
+    let auth_state =
+        persisted_state.context("committed profile lifecycle has no persisted state")?;
+    remove_lifecycle_journal(&path)?;
+    for (journal_path, _) in auth_journals {
+        super::import::lifecycle_support::cleanup_profile_import_auth_journal(
+            paths,
+            auth_state,
+            journal_path,
+        )?;
+    }
+    Ok(())
+}
+
+fn rollback_lifecycle(
+    paths: &AppPaths,
+    state: &mut AppState,
+    path: &Path,
+    plan: &ProfileLifecyclePlan,
+    auth_journals: &[(
+        PathBuf,
+        prodex_profile_export::ImportedExistingProfileAuthUpdateJournal,
+    )],
+) -> Result<()> {
+    let removed_profiles = restore_lifecycle_state(state, plan)?;
+    let auth_updates = auth_journals
+        .iter()
+        .map(|(journal_path, journal)| {
+            super::import::lifecycle_support::imported_auth_update_from_journal(
+                paths,
+                state,
+                journal_path,
+                journal,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    super::import::rollback_imported_auth_updates(state, &auth_updates)?;
+    finish_home_actions(&plan.home_actions, false)?;
+    cleanup_auth_journal_temporary_homes(auth_journals)?;
+    save_rolled_back_lifecycle_state(paths, state, &removed_profiles)?;
+    remove_lifecycle_journal(path)?;
+    for (journal_path, _) in auth_journals {
+        prodex_profile_export::cleanup_profile_import_auth_update_journal(journal_path);
+    }
+    Ok(())
 }
 
 pub(super) fn lifecycle_referenced_auth_journals(paths: &AppPaths) -> Result<BTreeSet<PathBuf>> {
@@ -521,38 +560,7 @@ fn validate_plan(paths: &AppPaths, operation: &str, plan: &ProfileLifecyclePlan)
     {
         prodex_profile_identity::validate_profile_name(active_profile)?;
     }
-    for action in &plan.home_actions {
-        match action {
-            ProfileLifecycleHomeAction::Promote {
-                source,
-                destination,
-                ..
-            } => {
-                validate_temporary_home_path(paths, Path::new(source), "promote source")?;
-                validate_managed_path(paths, Path::new(destination), "promote destination")?;
-            }
-            ProfileLifecycleHomeAction::Create { path } => {
-                validate_managed_path(paths, Path::new(path), "create path")?;
-            }
-            ProfileLifecycleHomeAction::Cleanup { path } => {
-                validate_temporary_home_path(paths, Path::new(path), "cleanup path")?;
-            }
-            ProfileLifecycleHomeAction::Quarantine { source, quarantine } => {
-                validate_managed_path(paths, Path::new(source), "quarantine source")?;
-                validate_managed_path(paths, Path::new(quarantine), "quarantine path")?;
-                if !Path::new(quarantine)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(".remove-"))
-                {
-                    bail!(
-                        "profile lifecycle quarantine path {} is invalid",
-                        quarantine
-                    );
-                }
-            }
-        }
-    }
+    validate_home_actions(paths, &plan.home_actions)?;
     Ok(())
 }
 
@@ -656,17 +664,21 @@ fn finish_home_actions(actions: &[ProfileLifecycleHomeAction], committed: bool) 
                 remove_home(Path::new(path))?;
             }
             ProfileLifecycleHomeAction::Quarantine { source, quarantine } => {
-                if committed {
-                    remove_home(Path::new(quarantine))?;
-                } else if !Path::new(source).exists() && Path::new(quarantine).exists() {
-                    fs::rename(quarantine, source).with_context(|| {
-                        format!("failed to restore quarantined profile home {}", source)
-                    })?;
-                } else if Path::new(source).exists() && Path::new(quarantine).exists() {
-                    remove_home(Path::new(quarantine))?;
-                }
+                finish_quarantine_home(source, quarantine, committed)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn finish_quarantine_home(source: &str, quarantine: &str, committed: bool) -> Result<()> {
+    if committed {
+        remove_home(Path::new(quarantine))?;
+    } else if !Path::new(source).exists() && Path::new(quarantine).exists() {
+        fs::rename(quarantine, source)
+            .with_context(|| format!("failed to restore quarantined profile home {}", source))?;
+    } else if Path::new(source).exists() && Path::new(quarantine).exists() {
+        remove_home(Path::new(quarantine))?;
     }
     Ok(())
 }

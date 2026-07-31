@@ -459,7 +459,7 @@ fn native_copilot_cli_runtime_request_enables_provider_proxy() {
 }
 
 #[test]
-fn native_cli_build_plan_cleans_overlay_when_optimizer_preflight_fails() {
+fn native_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
     let root = std::env::temp_dir()
         .canonicalize()
         .expect("temporary directory should resolve")
@@ -475,7 +475,7 @@ fn native_cli_build_plan_cleans_overlay_when_optimizer_preflight_fails() {
     let shared_home = root.join("shared");
     std::fs::create_dir_all(&base_home).expect("base home should exist");
     std::fs::create_dir_all(&shared_home).expect("shared home should exist");
-    std::fs::write(base_home.join("config.toml"), "features = \"invalid\"\n")
+    std::fs::write(base_home.join("config.toml"), "model = \"fixture\"\n")
         .expect("config should be written");
 
     let mut args = native_cli_super_args();
@@ -502,7 +502,11 @@ fn native_cli_build_plan_cleans_overlay_when_optimizer_preflight_fails() {
 
     let error = strategy.build_plan(&prepared, None).unwrap_err();
 
-    assert!(error.to_string().contains("features"));
+    assert!(
+        error
+            .to_string()
+            .contains("Gemini CLI launch requires a local runtime proxy")
+    );
     assert!(
         std::fs::read_dir(&prepared.paths.managed_profiles_root)
             .expect("managed profile root should exist")

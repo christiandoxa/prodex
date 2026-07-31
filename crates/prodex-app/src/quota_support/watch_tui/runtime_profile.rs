@@ -92,21 +92,25 @@ fn watch_profile_quota_tui(
             continue;
         }
 
-        if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
-            .context("failed to poll quota TUI input")?
-        {
-            match event::read().context("failed to read quota TUI input")? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    if quota_watch_quit_key(key) {
-                        return Ok(());
-                    }
-                }
-                Event::Resize(_, _) => {
-                    redraw_needed = true;
-                }
-                _ => {}
-            }
+        if profile_quota_tui_should_quit(&mut redraw_needed)? {
+            return Ok(());
         }
+    }
+}
+
+fn profile_quota_tui_should_quit(redraw_needed: &mut bool) -> Result<bool> {
+    if !event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
+        .context("failed to poll quota TUI input")?
+    {
+        return Ok(false);
+    }
+    match event::read().context("failed to read quota TUI input")? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => Ok(quota_watch_quit_key(key)),
+        Event::Resize(_, _) => {
+            *redraw_needed = true;
+            Ok(false)
+        }
+        _ => Ok(false),
     }
 }
 

@@ -16,8 +16,9 @@ use duplicates::{
 };
 pub(crate) use files::collect_context_files;
 use files::{
-    CONTEXT_AUDIT_ROOTS, CONTEXT_WALK_MAX_BYTES, ContextReadRoot, collect_context_files_for_audit,
-    is_auditable_context_file, is_static_duplicate_context_file, read_context_file_bounded,
+    CONTEXT_AUDIT_ROOTS, CONTEXT_WALK_MAX_BYTES, ContextFileText, ContextReadRoot,
+    collect_context_files_for_audit, is_auditable_context_file, is_static_duplicate_context_file,
+    read_context_file_bounded,
 };
 pub(crate) use render::format_count;
 pub use render::render_context_audit_report_with_width;
@@ -74,42 +75,15 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
     let mut duplicate_candidates = Vec::new();
     let mut read_bytes = 0_u64;
     for path in paths {
-        let is_auditable = match is_auditable_context_file(&path) {
-            Ok(is_auditable) => is_auditable,
-            Err(_) => {
-                record_context_audit_error(
-                    root,
-                    &path,
-                    "metadata",
-                    "could not inspect file metadata; check permissions or whether the file was removed or changed during the audit",
-                    &mut errors,
-                    &mut hidden_errors,
-                );
-                continue;
-            }
-        };
-        if !is_auditable {
+        let Some(opened) = read_context_audit_file(
+            root,
+            read_root.as_ref(),
+            &path,
+            &mut errors,
+            &mut hidden_errors,
+        )?
+        else {
             continue;
-        }
-        let Some(read_root) = read_root.as_ref() else {
-            continue;
-        };
-        read_root.validate()?;
-        let opened = read_context_file_bounded(read_root, &path);
-        read_root.validate()?;
-        let opened = match opened {
-            Ok(opened) => opened,
-            Err(_) => {
-                record_context_audit_error(
-                    root,
-                    &path,
-                    "read",
-                    "could not read bounded UTF-8 content; check permissions, file size, encoding, or whether the file changed during the audit",
-                    &mut errors,
-                    &mut hidden_errors,
-                );
-                continue;
-            }
         };
         read_bytes = read_bytes.saturating_add(opened.text.len() as u64);
         if read_bytes > CONTEXT_WALK_MAX_BYTES {
@@ -164,6 +138,52 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
         hidden_errors,
         static_duplicates,
     })
+}
+
+fn read_context_audit_file(
+    root: &Path,
+    read_root: Option<&ContextReadRoot>,
+    path: &Path,
+    errors: &mut Vec<ContextAuditError>,
+    hidden_errors: &mut usize,
+) -> Result<Option<ContextFileText>> {
+    let is_auditable = match is_auditable_context_file(path) {
+        Ok(is_auditable) => is_auditable,
+        Err(_) => {
+            record_context_audit_error(
+                root,
+                path,
+                "metadata",
+                "could not inspect file metadata; check permissions or whether the file was removed or changed during the audit",
+                errors,
+                hidden_errors,
+            );
+            return Ok(None);
+        }
+    };
+    if !is_auditable {
+        return Ok(None);
+    }
+    let Some(read_root) = read_root else {
+        return Ok(None);
+    };
+    read_root.validate()?;
+    let opened = read_context_file_bounded(read_root, path);
+    read_root.validate()?;
+    match opened {
+        Ok(opened) => Ok(Some(opened)),
+        Err(_) => {
+            record_context_audit_error(
+                root,
+                path,
+                "read",
+                "could not read bounded UTF-8 content; check permissions, file size, encoding, or whether the file changed during the audit",
+                errors,
+                hidden_errors,
+            );
+            Ok(None)
+        }
+    }
 }
 
 pub(super) fn safe_path(path: &Path) -> String {

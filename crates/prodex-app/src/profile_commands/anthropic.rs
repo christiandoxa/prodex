@@ -45,127 +45,30 @@ pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<(
             .then(|| name.clone())
     });
     let (profile_name, updated_existing) = match existing_profile_name {
-        Some(existing) if args.name.is_none() => {
-            let profile = state
-                .profiles
-                .get(&existing)
-                .with_context(|| format!("profile '{}' is missing", existing))?
-                .clone();
-            let credentials = read_optional_secret_text_file(
-                &source_config_dir.join(crate::CLAUDE_CREDENTIALS_FILE),
-            )?
-            .context("Claude credentials file is missing")?;
-            let desired_profile = ProfileEntry {
-                email: account.clone(),
-                provider: ProfileProvider::Anthropic {
-                    account: account.clone(),
-                    auth_method: auth_method.clone(),
-                },
-                ..profile.clone()
-            };
-            let next_active_profile = if args.activate {
-                Some(existing.clone())
-            } else {
-                state.active_profile.clone()
-            };
-            let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        Some(existing) if args.name.is_none() => (
+            update_existing_claude_profile(
                 &paths,
-                "import",
-                &state,
+                &mut state,
+                &source_config_dir,
                 &existing,
-                &desired_profile,
-                next_active_profile,
-                ProfileAuthUpdate {
-                    next_auth_json: None,
-                    next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
-                    next_secret_files: vec![
-                        prodex_profile_export::ImportedExistingProfileFileUpdate {
-                            path: crate::CLAUDE_CREDENTIALS_FILE.to_string(),
-                            text: Some(credentials),
-                        },
-                    ],
-                    previous_secret_file_paths: &[crate::CLAUDE_CREDENTIALS_FILE],
-                    temporary_home: None,
-                },
-            )?;
-            prepare_profile_codex_home(&paths, &profile)?;
-            copy_claude_oauth_credentials(&source_config_dir, &profile.codex_home)?;
-            let profile = state
-                .profiles
-                .get_mut(&existing)
-                .with_context(|| format!("profile '{}' is missing", existing))?;
-            profile.email = account.clone();
-            profile.provider = ProfileProvider::Anthropic {
-                account: account.clone(),
-                auth_method: auth_method.clone(),
-            };
-            if args.activate {
-                state.active_profile = Some(existing.clone());
-            }
-            state.save(&paths)?;
-            cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
-            (existing, true)
-        }
-        _ => {
-            let profile_name = match args.name.as_deref() {
-                Some(name) => {
-                    prodex_profile_identity::validate_profile_name(name)?;
-                    name.to_string()
-                }
-                None => default_anthropic_profile_name(&paths, &state, account.as_deref()),
-            };
-            if state.profiles.contains_key(&profile_name) {
-                bail!("profile '{}' already exists", profile_name);
-            }
-            let codex_home = managed_profile_home_path(&paths, &profile_name)?;
-            ensure_path_is_unique(&state, &codex_home)?;
-            if codex_home.exists() {
-                bail!(
-                    "managed profile home {} already exists",
-                    codex_home.display()
-                );
-            }
-            let desired_profile = ProfileEntry {
-                codex_home: codex_home.clone(),
-                managed: true,
-                email: account.clone(),
-                provider: ProfileProvider::Anthropic {
-                    account: account.clone(),
-                    auth_method: auth_method.clone(),
-                },
-            };
-            let next_active_profile = if args.activate || state.active_profile.is_none() {
-                Some(profile_name.clone())
-            } else {
-                state.active_profile.clone()
-            };
-            let lifecycle_path = write_profile_lifecycle_plan(
+                &account,
+                &auth_method,
+                args.activate,
+            )?,
+            true,
+        ),
+        _ => (
+            add_new_claude_profile(
                 &paths,
-                "import",
-                &ProfileLifecyclePlan {
-                    profile_states: vec![lifecycle_profile_state(
-                        &profile_name,
-                        None,
-                        Some(&desired_profile),
-                    )?],
-                    previous_active_profile: state.active_profile.clone(),
-                    next_active_profile,
-                    home_actions: vec![ProfileLifecycleHomeAction::Create {
-                        path: codex_home.display().to_string(),
-                    }],
-                    auth_journal_paths: Vec::new(),
-                },
-            )?;
-            prepare_managed_codex_home(&paths, &codex_home)?;
-            copy_claude_oauth_credentials(&source_config_dir, &codex_home)?;
-            state.profiles.insert(profile_name.clone(), desired_profile);
-            if args.activate || state.active_profile.is_none() {
-                state.active_profile = Some(profile_name.clone());
-            }
-            state.save(&paths)?;
-            prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
-            (profile_name, false)
-        }
+                &mut state,
+                &source_config_dir,
+                args.name.as_deref(),
+                &account,
+                &auth_method,
+                args.activate,
+            )?,
+            false,
+        ),
     };
 
     print_profile_panel(
@@ -192,6 +95,140 @@ pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<(
         ],
     )?;
     Ok(())
+}
+
+fn update_existing_claude_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    source_config_dir: &Path,
+    existing: &str,
+    account: &Option<String>,
+    auth_method: &Option<String>,
+    activate: bool,
+) -> Result<String> {
+    let profile = state
+        .profiles
+        .get(existing)
+        .with_context(|| format!("profile '{}' is missing", existing))?
+        .clone();
+    let credentials =
+        read_optional_secret_text_file(&source_config_dir.join(crate::CLAUDE_CREDENTIALS_FILE))?
+            .context("Claude credentials file is missing")?;
+    let desired_profile = ProfileEntry {
+        email: account.clone(),
+        provider: ProfileProvider::Anthropic {
+            account: account.clone(),
+            auth_method: auth_method.clone(),
+        },
+        ..profile.clone()
+    };
+    let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        paths,
+        "import",
+        state,
+        existing,
+        &desired_profile,
+        if activate {
+            Some(existing.to_string())
+        } else {
+            state.active_profile.clone()
+        },
+        ProfileAuthUpdate {
+            next_auth_json: None,
+            next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+            next_secret_files: vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
+                path: crate::CLAUDE_CREDENTIALS_FILE.to_string(),
+                text: Some(credentials),
+            }],
+            previous_secret_file_paths: &[crate::CLAUDE_CREDENTIALS_FILE],
+            temporary_home: None,
+        },
+    )?;
+    prepare_profile_codex_home(paths, &profile)?;
+    copy_claude_oauth_credentials(source_config_dir, &profile.codex_home)?;
+    let profile = state
+        .profiles
+        .get_mut(existing)
+        .with_context(|| format!("profile '{}' is missing", existing))?;
+    profile.email = account.clone();
+    profile.provider = ProfileProvider::Anthropic {
+        account: account.clone(),
+        auth_method: auth_method.clone(),
+    };
+    if activate {
+        state.active_profile = Some(existing.to_string());
+    }
+    state.save(paths)?;
+    cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
+    Ok(existing.to_string())
+}
+
+fn add_new_claude_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    source_config_dir: &Path,
+    requested_name: Option<&str>,
+    account: &Option<String>,
+    auth_method: &Option<String>,
+    activate: bool,
+) -> Result<String> {
+    let profile_name = match requested_name {
+        Some(name) => {
+            prodex_profile_identity::validate_profile_name(name)?;
+            name.to_string()
+        }
+        None => default_anthropic_profile_name(paths, state, account.as_deref()),
+    };
+    if state.profiles.contains_key(&profile_name) {
+        bail!("profile '{}' already exists", profile_name);
+    }
+    let codex_home = managed_profile_home_path(paths, &profile_name)?;
+    ensure_path_is_unique(state, &codex_home)?;
+    if codex_home.exists() {
+        bail!(
+            "managed profile home {} already exists",
+            codex_home.display()
+        );
+    }
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: account.clone(),
+        provider: ProfileProvider::Anthropic {
+            account: account.clone(),
+            auth_method: auth_method.clone(),
+        },
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        paths,
+        "import",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &profile_name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: if activate || state.active_profile.is_none() {
+                Some(profile_name.clone())
+            } else {
+                state.active_profile.clone()
+            },
+            home_actions: vec![ProfileLifecycleHomeAction::Create {
+                path: codex_home.display().to_string(),
+            }],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
+    prepare_managed_codex_home(paths, &codex_home)?;
+    copy_claude_oauth_credentials(source_config_dir, &codex_home)?;
+    state.profiles.insert(profile_name.clone(), desired_profile);
+    if activate || state.active_profile.is_none() {
+        state.active_profile = Some(profile_name.clone());
+    }
+    state.save(paths)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
+    Ok(profile_name)
 }
 
 fn default_anthropic_profile_name(

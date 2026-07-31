@@ -7,25 +7,25 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::env;
 use std::io::{self, IsTerminal};
+use std::path::Path;
 use terminal_ui::{
     tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
     tui_secondary_style, tui_title_style,
 };
 
 use super::import_export::{
-    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
-    acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
-    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
-    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
+    ProfileAuthUpdate, acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
+    load_profile_state_with_profile_recovery_locked, prepare_existing_profile_lifecycle,
 };
 use crate::{
-    AddProfileArgs, AppPaths, AppStateIoExt, ProfileEntry, ProfileProvider, ProfileProviderExt,
-    ProfileSelector, absolutize, audit_log_event, collect_profile_summaries, copy_codex_home,
-    create_codex_home_if_missing, default_codex_home, ensure_path_is_unique,
-    fetch_profile_identity, find_profile_by_identity, managed_profile_home_path,
-    prepare_managed_codex_home, print_panel, read_auth_json_text,
+    AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileProviderExt, ProfileSelector,
+    absolutize, audit_log_event, collect_profile_summaries, default_codex_home,
+    fetch_profile_identity, find_profile_by_identity, print_panel, read_auth_json_text,
     repair_missing_active_profile_and_save, resolve_profile_name, update_existing_profile_auth,
 };
+
+mod add_profile;
+use add_profile::add_new_profile_to_state;
 
 #[derive(Debug, Clone)]
 struct ProfilePanel {
@@ -74,151 +74,26 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         .as_ref()
         .and_then(|identity| identity.email.clone());
 
-    if let Some(source) = source_home.as_deref()
-        && let Some(identity) = source_identity.as_ref()
-        && let Some(email) = identity.email.as_deref()
-        && let Some(profile_name) = find_profile_by_identity(&mut state, identity)?
-        && let Ok(Some(auth_json)) = read_auth_json_text(source)
-    {
-        let mut desired_profile = state
-            .profiles
-            .get(&profile_name)
-            .with_context(|| format!("profile '{}' is missing", profile_name))?
-            .clone();
-        desired_profile.email = Some(email.to_string());
-        let next_active_profile = if activate_profile {
-            Some(profile_name.clone())
-        } else {
-            state.active_profile.clone()
-        };
-        let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
-            &paths,
-            "manage",
-            &state,
-            &profile_name,
-            &desired_profile,
-            next_active_profile,
-            ProfileAuthUpdate {
-                next_auth_json: Some(auth_json.clone()),
-                next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
-                next_secret_files: Vec::new(),
-                previous_secret_file_paths: &[],
-                temporary_home: None,
-            },
-        )?;
-        let updated = update_existing_profile_auth(
-            &paths,
-            &mut state,
-            &profile_name,
-            Some(email),
-            &auth_json,
-            activate_profile,
-        )?;
-        let updated_profile_name = updated.profile_name.clone();
-        let updated_codex_home = updated.codex_home.clone();
-        state.save(&paths)?;
-        audit_log_event(
-            "profile",
-            "add",
-            "success",
-            serde_json::json!({
-                "profile_name": updated_profile_name.clone(),
-                "requested_name": args.name.clone(),
-                "duplicate_email": true,
-                "email": email,
-                "updated_token_only": true,
-                "source_home": source.display().to_string(),
-                "codex_home": updated_codex_home.display().to_string(),
-                "activated": state.active_profile.as_deref() == Some(updated_profile_name.as_str()),
-            }),
-        )?;
-
-        let mut fields = vec![
-            (
-                "Result".to_string(),
-                format!(
-                    "Detected duplicate account {email}. Updated auth token for profile '{}'.",
-                    updated_profile_name
-                ),
-            ),
-            ("Account".to_string(), email.to_string()),
-            ("Profile".to_string(), updated.profile_name.clone()),
-            (
-                "CODEX_HOME".to_string(),
-                updated_codex_home.display().to_string(),
-            ),
-            (
-                "Storage".to_string(),
-                "Existing profile token updated.".to_string(),
-            ),
-        ];
-        if state.active_profile.as_deref() == Some(updated.profile_name.as_str()) {
-            fields.push(("Active".to_string(), updated.profile_name));
-        }
-        print_profile_panel("Profile Updated", &fields)?;
-        cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
+    if update_duplicate_profile_if_needed(
+        &paths,
+        &mut state,
+        &args.name,
+        source_home.as_deref(),
+        source_identity.as_ref(),
+        activate_profile,
+    )? {
         return Ok(());
     }
 
-    let codex_home = match args.codex_home {
-        Some(path) => absolutize(path)?,
-        None => managed_profile_home_path(&paths, &args.name)?,
-    };
-
-    ensure_path_is_unique(&state, &codex_home)?;
-    if managed && codex_home.exists() {
-        bail!(
-            "managed profile home {} already exists",
-            codex_home.display()
-        );
-    }
-    let desired_profile = ProfileEntry {
-        codex_home: codex_home.clone(),
-        managed,
-        email: source_email,
-        provider: ProfileProvider::Openai,
-    };
-    let lifecycle_path = write_profile_lifecycle_plan(
+    let (codex_home, lifecycle_path) = add_new_profile_to_state(
         &paths,
-        "manage",
-        &ProfileLifecyclePlan {
-            profile_states: vec![lifecycle_profile_state(
-                &args.name,
-                None,
-                Some(&desired_profile),
-            )?],
-            previous_active_profile: state.active_profile.clone(),
-            next_active_profile: if activate_profile {
-                Some(args.name.clone())
-            } else {
-                state.active_profile.clone()
-            },
-            home_actions: managed
-                .then(|| ProfileLifecycleHomeAction::Create {
-                    path: codex_home.display().to_string(),
-                })
-                .into_iter()
-                .collect(),
-            auth_journal_paths: Vec::new(),
-        },
+        &mut state,
+        &args,
+        source_home.as_deref(),
+        source_email,
+        managed,
+        activate_profile,
     )?;
-
-    if let Some(source) = source_home.as_deref() {
-        if managed {
-            copy_codex_home(source, &codex_home)?;
-        }
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
-    if managed {
-        prepare_managed_codex_home(&paths, &codex_home)?;
-    }
-
-    state.profiles.insert(args.name.clone(), desired_profile);
-
-    if activate_profile {
-        state.active_profile = Some(args.name.clone());
-    }
 
     state.save(&paths)?;
     audit_log_event(
@@ -259,6 +134,109 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
 
     Ok(())
+}
+
+fn update_duplicate_profile_if_needed(
+    paths: &AppPaths,
+    state: &mut AppState,
+    requested_name: &str,
+    source_home: Option<&Path>,
+    source_identity: Option<&prodex_profile_identity::ProfileIdentity>,
+    activate_profile: bool,
+) -> Result<bool> {
+    let Some(source) = source_home else {
+        return Ok(false);
+    };
+    let Some(identity) = source_identity else {
+        return Ok(false);
+    };
+    let Some(email) = identity.email.as_deref() else {
+        return Ok(false);
+    };
+    let Some(profile_name) = find_profile_by_identity(state, identity)? else {
+        return Ok(false);
+    };
+    let Ok(Some(auth_json)) = read_auth_json_text(source) else {
+        return Ok(false);
+    };
+
+    let mut desired_profile = state
+        .profiles
+        .get(&profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?
+        .clone();
+    desired_profile.email = Some(email.to_string());
+    let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        paths,
+        "manage",
+        state,
+        &profile_name,
+        &desired_profile,
+        if activate_profile {
+            Some(profile_name.clone())
+        } else {
+            state.active_profile.clone()
+        },
+        ProfileAuthUpdate {
+            next_auth_json: Some(auth_json.clone()),
+            next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+            next_secret_files: Vec::new(),
+            previous_secret_file_paths: &[],
+            temporary_home: None,
+        },
+    )?;
+    let updated = update_existing_profile_auth(
+        paths,
+        state,
+        &profile_name,
+        Some(email),
+        &auth_json,
+        activate_profile,
+    )?;
+    let updated_profile_name = updated.profile_name.clone();
+    let updated_codex_home = updated.codex_home.clone();
+    state.save(paths)?;
+    audit_log_event(
+        "profile",
+        "add",
+        "success",
+        serde_json::json!({
+            "profile_name": updated_profile_name.clone(),
+            "requested_name": requested_name,
+            "duplicate_email": true,
+            "email": email,
+            "updated_token_only": true,
+            "source_home": source.display().to_string(),
+            "codex_home": updated_codex_home.display().to_string(),
+            "activated": state.active_profile.as_deref() == Some(updated_profile_name.as_str()),
+        }),
+    )?;
+
+    let mut fields = vec![
+        (
+            "Result".to_string(),
+            format!(
+                "Detected duplicate account {email}. Updated auth token for profile '{}'.",
+                updated_profile_name
+            ),
+        ),
+        ("Account".to_string(), email.to_string()),
+        ("Profile".to_string(), updated.profile_name.clone()),
+        (
+            "CODEX_HOME".to_string(),
+            updated_codex_home.display().to_string(),
+        ),
+        (
+            "Storage".to_string(),
+            "Existing profile token updated.".to_string(),
+        ),
+    ];
+    if state.active_profile.as_deref() == Some(updated.profile_name.as_str()) {
+        fields.push(("Active".to_string(), updated.profile_name));
+    }
+    print_profile_panel("Profile Updated", &fields)?;
+    cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
+    Ok(true)
 }
 
 pub(crate) fn handle_list_profiles() -> Result<()> {
