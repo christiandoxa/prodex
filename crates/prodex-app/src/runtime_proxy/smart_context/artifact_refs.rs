@@ -129,13 +129,7 @@ fn runtime_smart_context_collect_artifact_aliases_from_value(
     aliases: &mut BTreeMap<String, String>,
 ) {
     if let Some(text) = value.as_str() {
-        if text.contains('@') && text.contains('=') {
-            for token in runtime_smart_context_artifact_ref_tokens(text) {
-                if let Some((alias, id)) = runtime_smart_context_parse_artifact_alias(token) {
-                    aliases.entry(alias).or_insert(id);
-                }
-            }
-        }
+        runtime_smart_context_collect_artifact_aliases_from_text(text, aliases);
         return;
     }
     if let Some(items) = value.as_array() {
@@ -148,6 +142,21 @@ fn runtime_smart_context_collect_artifact_aliases_from_value(
         for item in object.values() {
             runtime_smart_context_collect_artifact_aliases_from_value(item, aliases);
         }
+    }
+}
+
+fn runtime_smart_context_collect_artifact_aliases_from_text(
+    text: &str,
+    aliases: &mut BTreeMap<String, String>,
+) {
+    if !text.contains('@') || !text.contains('=') {
+        return;
+    }
+    for (alias, id) in runtime_smart_context_artifact_ref_tokens(text)
+        .into_iter()
+        .filter_map(runtime_smart_context_parse_artifact_alias)
+    {
+        aliases.entry(alias).or_insert(id);
     }
 }
 

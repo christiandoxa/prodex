@@ -155,27 +155,13 @@ impl RuntimeKiroAcpTurnStateBuilder {
             return;
         }
         if let Some(existing) = self.tool_calls.get_mut(index) {
-            if title.is_some() {
-                existing.title = title;
-            }
-            if status.is_some() {
-                existing.status = status;
-            }
-            if kind.is_some() {
-                existing.kind = kind;
-            }
-            if raw_input.is_some() {
-                existing.raw_input = raw_input;
-            }
-            if raw_output.is_some() {
-                existing.raw_output = raw_output;
-            }
-            if content.is_some() {
-                existing.content = content;
-            }
-            if locations.is_some() {
-                existing.locations = locations;
-            }
+            runtime_kiro_acp_replace_if_present(&mut existing.title, title);
+            runtime_kiro_acp_replace_if_present(&mut existing.status, status);
+            runtime_kiro_acp_replace_if_present(&mut existing.kind, kind);
+            runtime_kiro_acp_replace_if_present(&mut existing.raw_input, raw_input);
+            runtime_kiro_acp_replace_if_present(&mut existing.raw_output, raw_output);
+            runtime_kiro_acp_replace_if_present(&mut existing.content, content);
+            runtime_kiro_acp_replace_if_present(&mut existing.locations, locations);
         }
     }
 
@@ -199,6 +185,12 @@ impl RuntimeKiroAcpTurnStateBuilder {
             session_updated_at: self.session_updated_at,
             tool_calls: self.tool_calls,
         }
+    }
+}
+
+fn runtime_kiro_acp_replace_if_present<T>(target: &mut Option<T>, value: Option<T>) {
+    if value.is_some() {
+        *target = value;
     }
 }
 
