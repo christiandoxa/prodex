@@ -1,4 +1,4 @@
-use super::*;
+use super::{ProviderWireFormat, RuntimeProviderBridgeKind, path_without_query, provider_adapter};
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_upstream_url(
     base_url: &str,
