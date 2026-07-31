@@ -25,41 +25,11 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
             shared.log_path.clone(),
             Arc::clone(shutdown),
             move || {
-                loop {
-                    let request = receiver
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .recv();
-                    match request {
-                        Ok(request) => {
-                            let (mutex, condvar) = shared.lane_admission.wait();
-                            let guard = mutex
-                                .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner());
-                            condvar.notify_all();
-                            drop(guard);
-                            let result =
-                                crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                                    handle_runtime_rotation_proxy_request(request, &shared);
-                                });
-                            if let Err(panic) = result {
-                                runtime_proxy_log(
-                                    &shared,
-                                    format!(
-                                        "runtime_proxy_worker_panic lane=long_lived panic={}",
-                                        crate::runtime_panic::runtime_panic_payload_label(
-                                            panic.as_ref()
-                                        )
-                                    ),
-                                );
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                    if worker_shutdown.load(Ordering::SeqCst) {
-                        break;
-                    }
-                }
+                runtime_rotation_long_lived_worker_loop(
+                    Arc::clone(&receiver),
+                    shared.clone(),
+                    Arc::clone(&worker_shutdown),
+                );
             },
         )?);
     }
@@ -74,73 +44,121 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
             shared.log_path.clone(),
             Arc::clone(shutdown),
             move || {
-                loop {
-                    match server.recv() {
-                        Ok(request) => {
-                            let websocket = is_tiny_http_websocket_upgrade(&request);
-                            let long_lived =
-                                runtime_proxy_request_is_long_lived(request.url(), websocket);
-                            if long_lived {
-                                match enqueue_runtime_proxy_long_lived_request_with_wait(
-                                    &long_lived_sender,
-                                    request,
-                                    &shared,
-                                ) {
-                                    Ok(()) => {}
-                                    Err((RuntimeProxyQueueRejection::Full, request)) => {
-                                        mark_runtime_proxy_local_overload(
-                                            &shared,
-                                            "long_lived_queue_full",
-                                        );
-                                        reject_runtime_proxy_overloaded_request(
-                                            request,
-                                            &shared,
-                                            "long_lived_queue_full",
-                                        );
-                                    }
-                                    Err((RuntimeProxyQueueRejection::Disconnected, request)) => {
-                                        mark_runtime_proxy_local_overload(
-                                            &shared,
-                                            "long_lived_queue_disconnected",
-                                        );
-                                        reject_runtime_proxy_overloaded_request(
-                                            request,
-                                            &shared,
-                                            "long_lived_queue_disconnected",
-                                        );
-                                    }
-                                }
-                            } else {
-                                let result =
-                                    crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                                        handle_runtime_rotation_proxy_request(request, &shared);
-                                    });
-                                if let Err(panic) = result {
-                                    runtime_proxy_log(
-                                        &shared,
-                                        format!(
-                                            "runtime_proxy_worker_panic lane=standard panic={}",
-                                            crate::runtime_panic::runtime_panic_payload_label(
-                                                panic.as_ref()
-                                            )
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                        Err(_) if worker_shutdown.load(Ordering::SeqCst) => break,
-                        Err(_) => break,
-                    }
-                    if worker_shutdown.load(Ordering::SeqCst) {
-                        break;
-                    }
-                }
+                runtime_rotation_accept_worker_loop(
+                    Arc::clone(&server),
+                    long_lived_sender.clone(),
+                    shared.clone(),
+                    Arc::clone(&worker_shutdown),
+                );
             },
         )?);
     }
 
     startup_guard.disarm();
     Ok(worker_threads)
+}
+
+fn runtime_rotation_long_lived_worker_loop(
+    receiver: Arc<Mutex<mpsc::Receiver<tiny_http::Request>>>,
+    shared: RuntimeRotationProxyShared,
+    shutdown: Arc<AtomicBool>,
+) {
+    loop {
+        let request = receiver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .recv();
+        let Ok(request) = request else {
+            break;
+        };
+        runtime_rotation_handle_long_lived_request(request, &shared);
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+}
+
+fn runtime_rotation_handle_long_lived_request(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let (mutex, condvar) = shared.lane_admission.wait();
+    let guard = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    condvar.notify_all();
+    drop(guard);
+    runtime_rotation_handle_request_with_panic_log(request, shared, "long_lived");
+}
+
+fn runtime_rotation_accept_worker_loop(
+    server: Arc<TinyServer>,
+    long_lived_sender: mpsc::SyncSender<tiny_http::Request>,
+    shared: RuntimeRotationProxyShared,
+    shutdown: Arc<AtomicBool>,
+) {
+    loop {
+        let Ok(request) = server.recv() else {
+            break;
+        };
+        runtime_rotation_dispatch_received_request(request, &long_lived_sender, &shared);
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+}
+
+fn runtime_rotation_dispatch_received_request(
+    request: tiny_http::Request,
+    long_lived_sender: &mpsc::SyncSender<tiny_http::Request>,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let websocket = is_tiny_http_websocket_upgrade(&request);
+    if !runtime_proxy_request_is_long_lived(request.url(), websocket) {
+        runtime_rotation_handle_request_with_panic_log(request, shared, "standard");
+        return;
+    }
+    match enqueue_runtime_proxy_long_lived_request_with_wait(long_lived_sender, request, shared) {
+        Ok(()) => {}
+        Err((RuntimeProxyQueueRejection::Full, request)) => {
+            runtime_rotation_reject_queued_request(request, shared, "long_lived_queue_full");
+        }
+        Err((RuntimeProxyQueueRejection::Disconnected, request)) => {
+            runtime_rotation_reject_queued_request(
+                request,
+                shared,
+                "long_lived_queue_disconnected",
+            );
+        }
+    }
+}
+
+fn runtime_rotation_reject_queued_request(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    reason: &str,
+) {
+    mark_runtime_proxy_local_overload(shared, reason);
+    reject_runtime_proxy_overloaded_request(request, shared, reason);
+}
+
+fn runtime_rotation_handle_request_with_panic_log(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    lane: &str,
+) {
+    let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
+        handle_runtime_rotation_proxy_request(request, shared);
+    });
+    if let Err(panic) = result {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_worker_panic lane={lane} panic={}",
+                crate::runtime_panic::runtime_panic_payload_label(panic.as_ref())
+            ),
+        );
+    }
 }
 
 struct RuntimeRotationWorkerStartupGuard<'a> {

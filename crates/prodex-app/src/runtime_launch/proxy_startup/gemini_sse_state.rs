@@ -184,32 +184,13 @@ impl RuntimeGeminiSseState {
                 .into_iter()
                 .collect::<Vec<_>>();
         }
-        let metadata = gemini_provider_core_stream_chunk_metadata(&self.response_id, value);
-        if let Some(id) = metadata.response_id {
-            self.response_id = id;
-        }
-        if let Some(model) = metadata.model {
-            self.model = Some(model);
-        }
-        if let Some(usage) = metadata.usage {
-            self.usage = Some(usage);
-        }
-        if let Some(metadata) = metadata.response_metadata {
-            self.metadata = Some(runtime_gemini_merge_metadata(
-                self.metadata.take(),
-                metadata.clone(),
-            ));
-        }
         if let Some((code, message)) = gemini_provider_core_prompt_feedback_failure(value) {
             return self
                 .failed_event(&code, &message)
                 .into_iter()
                 .collect::<Vec<_>>();
         }
-        let finish_reason = metadata.finish_reason;
-        if let Some(reason) = finish_reason.clone() {
-            self.finish_reason = Some(reason);
-        }
+        let finish_reason = self.apply_chunk_metadata(value);
         let mut events = Vec::new();
         if !self.created {
             let sequence_number = self.next_sequence_number();
@@ -234,97 +215,161 @@ impl RuntimeGeminiSseState {
         let Some(parts) = gemini_provider_core_stream_candidate_parts(value) else {
             return events;
         };
-        for (part_index, part) in parts.iter().enumerate() {
-            if let Some(text) = gemini_provider_core_stream_part_text(part) {
-                if gemini_provider_core_stream_part_is_thought(part) {
-                    self.reasoning_content.push_str(text);
-                    events.extend(self.reasoning_delta_events(text));
-                } else if let Some(text) = gemini_provider_core_visible_text_from_part(part) {
-                    if self.command_output_only || self.forced_output_text.is_some() {
-                        continue;
-                    }
-                    if !gemini_provider_core_text_echoes_internal_instruction(
-                        &text,
-                        &self.internal_instruction_corpus,
-                    ) {
-                        events.extend(self.observe_output_text(&text));
-                    }
-                }
-            }
-            if let Some(content_item) = gemini_provider_core_media_content_item_from_part(part) {
-                if !self.media_content_items.contains(&content_item) {
-                    self.media_content_items.push(content_item);
-                }
-                if !self.native_parts.contains(part) {
-                    self.native_parts.push(part.clone());
-                }
-            }
-            if gemini_provider_core_stream_part_has_video_metadata(part)
-                && !self.native_parts.contains(part)
-            {
-                self.native_parts.push(part.clone());
-            }
-            if let Some(text) = gemini_provider_core_text_from_special_part(part)
-                && !self.command_output_only
-                && self.forced_output_text.is_none()
-            {
-                events.extend(self.observe_output_text(&text));
-            }
-            if let Some(item) = gemini_provider_core_image_generation_call_item_from_part(
-                &self.response_id,
-                part_index,
-                part,
-            ) {
-                let item_id = item.get("id").and_then(serde_json::Value::as_str);
-                if let Some(existing) = self.image_generation_items.iter_mut().find(|existing| {
-                    existing.get("id").and_then(serde_json::Value::as_str) == item_id
-                }) {
-                    *existing = item;
-                } else {
-                    self.image_generation_items.push(item);
-                }
-            }
-            if let Some(function_call) = gemini_provider_core_stream_part_function_call(part) {
-                if self.forced_output_text.is_some() {
-                    continue;
-                }
-                events.extend(self.flush_pending_output_text_events());
-                let thought_signature = gemini_provider_core_thought_signature(part)
-                    .or_else(|| gemini_provider_core_thought_signature(function_call));
-                events.extend(self.observe_function_call(
-                    part_index,
-                    function_call,
-                    thought_signature,
-                ));
-            }
-        }
+        events.extend(self.observe_candidate_parts(parts));
         if let Some(reason) = finish_reason {
-            if let Some(text) = gemini_provider_core_citation_text(value) {
-                events.extend(self.observe_citation_text(text));
+            return self.observe_finish(value, &reason, events);
+        }
+        events
+    }
+
+    fn apply_chunk_metadata(&mut self, value: &serde_json::Value) -> Option<String> {
+        let metadata = gemini_provider_core_stream_chunk_metadata(&self.response_id, value);
+        if let Some(id) = metadata.response_id {
+            self.response_id = id;
+        }
+        if let Some(model) = metadata.model {
+            self.model = Some(model);
+        }
+        if let Some(usage) = metadata.usage {
+            self.usage = Some(usage);
+        }
+        if let Some(metadata) = metadata.response_metadata {
+            self.metadata = Some(runtime_gemini_merge_metadata(
+                self.metadata.take(),
+                metadata,
+            ));
+        }
+        if let Some(reason) = metadata.finish_reason.clone() {
+            self.finish_reason = Some(reason);
+        }
+        metadata.finish_reason
+    }
+
+    fn observe_candidate_parts(&mut self, parts: &[serde_json::Value]) -> Vec<String> {
+        let mut events = Vec::new();
+        for (part_index, part) in parts.iter().enumerate() {
+            events.extend(self.observe_candidate_part(part_index, part));
+        }
+        events
+    }
+
+    fn observe_candidate_part(
+        &mut self,
+        part_index: usize,
+        part: &serde_json::Value,
+    ) -> Vec<String> {
+        let mut events = self.observe_part_text(part);
+        if let Some(content_item) = gemini_provider_core_media_content_item_from_part(part) {
+            if !self.media_content_items.contains(&content_item) {
+                self.media_content_items.push(content_item);
             }
-            if let Some((reason, message)) = gemini_provider_core_finish_reason_incomplete(&reason)
-            {
-                events.extend(self.flush_pending_output_text_events());
-                events.extend(self.complete_tool_call_events());
-                events.extend(self.complete_output_text_item_events());
-                events.extend(self.complete_media_item_events());
-                events.extend(self.complete_image_generation_item_events());
-                if let Some(event) = self.incomplete_event(&reason, &message) {
-                    events.push(event);
-                }
-                return events;
+            self.add_native_part(part);
+        }
+        if gemini_provider_core_stream_part_has_video_metadata(part) {
+            self.add_native_part(part);
+        }
+        if let Some(text) = gemini_provider_core_text_from_special_part(part)
+            && !self.command_output_only
+            && self.forced_output_text.is_none()
+        {
+            events.extend(self.observe_output_text(&text));
+        }
+        self.observe_image_generation(part_index, part);
+        if let Some(function_call) = gemini_provider_core_stream_part_function_call(part)
+            && self.forced_output_text.is_none()
+        {
+            events.extend(self.flush_pending_output_text_events());
+            let thought_signature = gemini_provider_core_thought_signature(part)
+                .or_else(|| gemini_provider_core_thought_signature(function_call));
+            events.extend(self.observe_function_call(part_index, function_call, thought_signature));
+        }
+        events
+    }
+
+    fn observe_part_text(&mut self, part: &serde_json::Value) -> Vec<String> {
+        let Some(text) = gemini_provider_core_stream_part_text(part) else {
+            return Vec::new();
+        };
+        if gemini_provider_core_stream_part_is_thought(part) {
+            self.reasoning_content.push_str(text);
+            return self.reasoning_delta_events(text);
+        }
+        let Some(text) = gemini_provider_core_visible_text_from_part(part) else {
+            return Vec::new();
+        };
+        if self.command_output_only || self.forced_output_text.is_some() {
+            return Vec::new();
+        }
+        if gemini_provider_core_text_echoes_internal_instruction(
+            &text,
+            &self.internal_instruction_corpus,
+        ) {
+            return Vec::new();
+        }
+        self.observe_output_text(&text)
+    }
+
+    fn add_native_part(&mut self, part: &serde_json::Value) {
+        if !self.native_parts.contains(part) {
+            self.native_parts.push(part.clone());
+        }
+    }
+
+    fn observe_image_generation(&mut self, part_index: usize, part: &serde_json::Value) {
+        let Some(item) = gemini_provider_core_image_generation_call_item_from_part(
+            &self.response_id,
+            part_index,
+            part,
+        ) else {
+            return;
+        };
+        let item_id = item.get("id").and_then(serde_json::Value::as_str);
+        if let Some(existing) = self
+            .image_generation_items
+            .iter_mut()
+            .find(|existing| existing.get("id").and_then(serde_json::Value::as_str) == item_id)
+        {
+            *existing = item;
+        } else {
+            self.image_generation_items.push(item);
+        }
+    }
+
+    fn observe_finish(
+        &mut self,
+        value: &serde_json::Value,
+        reason: &str,
+        mut events: Vec<String>,
+    ) -> Vec<String> {
+        if let Some(text) = gemini_provider_core_citation_text(value) {
+            events.extend(self.observe_citation_text(text));
+        }
+        if let Some((reason, message)) = gemini_provider_core_finish_reason_incomplete(reason) {
+            events.extend(self.finish_incomplete(&reason, &message));
+            return events;
+        }
+        if let Some((code, message)) = gemini_provider_core_finish_reason_failure(reason) {
+            events.extend(self.flush_pending_output_text_events());
+            if let Some(event) = self.failed_event(&code, &message) {
+                events.push(event);
             }
-            if let Some((code, message)) = gemini_provider_core_finish_reason_failure(&reason) {
-                events.extend(self.flush_pending_output_text_events());
-                if let Some(event) = self.failed_event(&code, &message) {
-                    events.push(event);
-                }
-                return events;
-            }
-            events.extend(self.complete_tool_call_events());
-            if !self.tool_calls.is_empty() {
-                self.store_conversation_snapshot();
-            }
+            return events;
+        }
+        events.extend(self.complete_tool_call_events());
+        if !self.tool_calls.is_empty() {
+            self.store_conversation_snapshot();
+        }
+        events
+    }
+
+    fn finish_incomplete(&mut self, reason: &str, message: &str) -> Vec<String> {
+        let mut events = self.flush_pending_output_text_events();
+        events.extend(self.complete_tool_call_events());
+        events.extend(self.complete_output_text_item_events());
+        events.extend(self.complete_media_item_events());
+        events.extend(self.complete_image_generation_item_events());
+        if let Some(event) = self.incomplete_event(reason, message) {
+            events.push(event);
         }
         events
     }

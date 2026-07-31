@@ -1213,76 +1213,13 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
 {
     match &admission.0 {
         RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. } => {
-            let invocation = &plan.admission.provider_invocation;
-            let mut execution = None;
-            let mut pricing = None;
-            let mut provider_override = None;
-            if let Some(routing) = routing.as_ref() {
-                let selected_route = std::iter::once(&routing.primary)
-                    .chain(routing.fallbacks.iter())
-                    .nth(attempt_index)
-                    .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
-                let snapshots = shared
-                    .governance
-                    .snapshot_for(routing.tenant.tenant_id)
-                    .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
-                let provider_registry = snapshots.provider_registry;
-                let routing_scores = snapshots.routing_scores;
-                let route_matches = if attempt_index == 0 {
-                    provider_registry.matches_route(routing, invocation.route.endpoint)
-                } else {
-                    provider_registry.matches_governed_route(
-                        routing.registry_revision,
-                        selected_route,
-                        invocation.route.endpoint,
-                    )
-                };
-                if invocation.route.provider != routing.primary.provider
-                    || !route_matches
-                    || routing_scores.revision != routing.score_revision
-                {
-                    return Err(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider);
-                }
-                if selected_route.provider != shared.provider.bridge_kind().provider_id() {
-                    execution = Some(
-                        provider_registry
-                            .execution_for_route(selected_route, invocation.route.endpoint)
-                            .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?,
-                    );
-                }
-                pricing =
-                    provider_registry.pricing_for_route(selected_route, invocation.route.endpoint);
-                provider_override = Some(selected_route.provider);
-            }
-            if shared
-                .runtime_shared
-                .runtime_config
-                .governance
-                .mode
-                .is_enforcing()
-            {
-                if !shared
-                    .runtime_shared
-                    .runtime_config
-                    .governance
-                    .mandatory_audit
-                    || plan.governance.policy.effect != PolicyEffect::Allow
-                {
-                    return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
-                }
-                if routing.is_none() {
-                    return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
-                }
-            }
-            Ok(RuntimeGatewayApplicationProviderDispatch {
-                kind: RuntimeGatewayApplicationProviderDispatchKind::Application(
-                    &plan.admission.provider_invocation,
-                ),
-                inspection: admission.inspection(),
-                execution,
-                pricing,
-                provider_override,
-            })
+            runtime_gateway_application_tenant_provider_dispatch_attempt(
+                admission,
+                plan,
+                routing,
+                shared,
+                attempt_index,
+            )
         }
         RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { invocation, .. } => {
             if !shared
@@ -1305,6 +1242,102 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
             })
         }
     }
+}
+
+fn runtime_gateway_application_tenant_provider_dispatch_attempt<'a>(
+    admission: &'a RuntimeGatewayApplicationAdmission,
+    plan: &'a ApplicationDataPlanePlan,
+    routing: &'a Option<Box<GovernedRoutingPlan>>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    attempt_index: usize,
+) -> Result<RuntimeGatewayApplicationProviderDispatch<'a>, RuntimeGatewayApplicationDataPlaneError>
+{
+    let (execution, pricing, provider_override) = runtime_gateway_application_route_execution(
+        &plan.admission.provider_invocation,
+        routing,
+        shared,
+        attempt_index,
+    )?;
+    if shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .mode
+        .is_enforcing()
+        && (!shared
+            .runtime_shared
+            .runtime_config
+            .governance
+            .mandatory_audit
+            || plan.governance.policy.effect != PolicyEffect::Allow
+            || routing.is_none())
+    {
+        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
+    }
+    Ok(RuntimeGatewayApplicationProviderDispatch {
+        kind: RuntimeGatewayApplicationProviderDispatchKind::Application(
+            &plan.admission.provider_invocation,
+        ),
+        inspection: admission.inspection(),
+        execution,
+        pricing,
+        provider_override,
+    })
+}
+
+type RuntimeGatewayApplicationRouteExecution = (
+    Option<super::local_rewrite_provider_registry::RuntimeGatewayProviderExecution>,
+    Option<super::local_rewrite_provider_registry::RuntimeGatewayProviderPricing>,
+    Option<ProviderId>,
+);
+
+fn runtime_gateway_application_route_execution(
+    invocation: &ProviderInvocation,
+    routing: &Option<Box<GovernedRoutingPlan>>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    attempt_index: usize,
+) -> Result<RuntimeGatewayApplicationRouteExecution, RuntimeGatewayApplicationDataPlaneError> {
+    let Some(routing) = routing.as_deref() else {
+        return Ok((None, None, None));
+    };
+    let selected_route = std::iter::once(&routing.primary)
+        .chain(routing.fallbacks.iter())
+        .nth(attempt_index)
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
+    let snapshots = shared
+        .governance
+        .snapshot_for(routing.tenant.tenant_id)
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?;
+    let provider_registry = snapshots.provider_registry;
+    let route_matches = if attempt_index == 0 {
+        provider_registry.matches_route(routing, invocation.route.endpoint)
+    } else {
+        provider_registry.matches_governed_route(
+            routing.registry_revision,
+            selected_route,
+            invocation.route.endpoint,
+        )
+    };
+    if invocation.route.provider != routing.primary.provider
+        || !route_matches
+        || snapshots.routing_scores.revision != routing.score_revision
+    {
+        return Err(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider);
+    }
+    let execution = if selected_route.provider == shared.provider.bridge_kind().provider_id() {
+        None
+    } else {
+        Some(
+            provider_registry
+                .execution_for_route(selected_route, invocation.route.endpoint)
+                .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?,
+        )
+    };
+    Ok((
+        execution,
+        provider_registry.pricing_for_route(selected_route, invocation.route.endpoint),
+        Some(selected_route.provider),
+    ))
 }
 
 pub(super) fn runtime_gateway_application_provider_retry_precommit(

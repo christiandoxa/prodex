@@ -107,168 +107,8 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     })?;
     let request_body_for_spend = body.clone();
     let mut upstream_request = shared.client.request(method, upstream_url);
-    match auth {
-        RuntimeLocalRewritePreparedAuth::Anthropic {
-            auth,
-            native_messages,
-        } => {
-            upstream_request = upstream_request
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(
-                    reqwest::header::ACCEPT,
-                    "text/event-stream, application/json",
-                );
-            if native_messages {
-                upstream_request =
-                    upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
-            }
-            match auth {
-                RuntimeAnthropicAuth::Projected => {
-                    upstream_request = if native_messages {
-                        runtime_local_rewrite_apply_projected_header(
-                            shared,
-                            upstream_request,
-                            "x-api-key",
-                        )?
-                    } else {
-                        runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
-                    };
-                }
-                _ => {
-                    upstream_request = runtime_local_rewrite_apply_direct_anthropic_auth(
-                        upstream_request,
-                        auth,
-                        native_messages,
-                    )
-                    .expect("non-projected Anthropic auth builds request");
-                }
-            }
-            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
-                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
-            }
-        }
-        RuntimeLocalRewritePreparedAuth::Copilot { api_key } => {
-            upstream_request = upstream_request
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(
-                    reqwest::header::ACCEPT,
-                    "text/event-stream, application/json",
-                )
-                .header("copilot-integration-id", "copilot-developer-cli")
-                .header("openai-intent", "conversation-panel")
-                .header("x-github-api-version", "2025-04-01")
-                .header("x-request-id", format!("prodex-{}", RequestId::new()))
-                .header("X-Initiator", runtime_copilot_initiator_header(request))
-                .header(
-                    reqwest::header::USER_AGENT,
-                    "copilot/1.0.65 (client/github/cli)",
-                );
-            upstream_request = match api_key {
-                Some(api_key) => upstream_request.bearer_auth(api_key),
-                None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
-            };
-            if runtime_copilot_request_has_vision_input(&body) {
-                upstream_request = upstream_request.header("copilot-vision-request", "true");
-            }
-        }
-        RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => {
-            let replacing_openai_auth = api_key.is_some()
-                || request.headers.iter().any(|(name, value)| {
-                    name.eq_ignore_ascii_case("authorization")
-                        && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
-                });
-            upstream_request = runtime_local_rewrite_copy_openai_headers(
-                request,
-                upstream_request,
-                replacing_openai_auth,
-            );
-            if let Some(api_key) = api_key {
-                upstream_request = upstream_request.bearer_auth(api_key);
-            }
-        }
-        RuntimeLocalRewritePreparedAuth::OpenAiProjected => {
-            upstream_request =
-                runtime_local_rewrite_copy_openai_headers(request, upstream_request, true);
-            upstream_request =
-                runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?;
-        }
-        RuntimeLocalRewritePreparedAuth::DeepSeek {
-            api_key,
-            native_messages,
-        } => {
-            upstream_request = upstream_request
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(
-                    reqwest::header::ACCEPT,
-                    "text/event-stream, application/json",
-                );
-            if native_messages {
-                upstream_request =
-                    upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
-            }
-            upstream_request = match (api_key, native_messages) {
-                (Some(api_key), true) => upstream_request.header("x-api-key", api_key),
-                (Some(api_key), false) => upstream_request.bearer_auth(api_key),
-                (None, true) => runtime_local_rewrite_apply_projected_header(
-                    shared,
-                    upstream_request,
-                    "x-api-key",
-                )?,
-                (None, false) => {
-                    runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
-                }
-            };
-            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
-                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
-            }
-        }
-        RuntimeLocalRewritePreparedAuth::Gemini { auth } => {
-            upstream_request = upstream_request
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(
-                    reqwest::header::ACCEPT,
-                    "text/event-stream, application/json",
-                );
-            match auth {
-                RuntimeGeminiAuth::ApiKey { api_key } => {
-                    upstream_request = upstream_request.header("x-goog-api-key", api_key);
-                }
-                RuntimeGeminiAuth::OAuth { access_token, .. } => {
-                    upstream_request = upstream_request.bearer_auth(access_token);
-                }
-                RuntimeGeminiAuth::Projected => {
-                    upstream_request = runtime_local_rewrite_apply_projected_header(
-                        shared,
-                        upstream_request,
-                        "x-goog-api-key",
-                    )?;
-                }
-            }
-            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
-                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
-            }
-        }
-        RuntimeLocalRewritePreparedAuth::GeminiOpenAi { api_key } => {
-            upstream_request = upstream_request
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .header(
-                    reqwest::header::ACCEPT,
-                    "text/event-stream, application/json",
-                );
-            upstream_request = match api_key {
-                Some(api_key) => upstream_request.bearer_auth(api_key),
-                None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
-            };
-            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
-                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
-            }
-        }
-    }
+    upstream_request =
+        runtime_local_rewrite_apply_prepared_auth(upstream_request, request, shared, &body, auth)?;
     if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
         upstream_request = runtime_local_rewrite_trace_context_headers(upstream_request, request);
     }
@@ -362,6 +202,232 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         ),
     );
     Ok(response)
+}
+
+fn runtime_local_rewrite_apply_prepared_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    body: &[u8],
+    auth: RuntimeLocalRewritePreparedAuth<'_>,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    match auth {
+        RuntimeLocalRewritePreparedAuth::Anthropic {
+            auth,
+            native_messages,
+        } => runtime_local_rewrite_apply_anthropic_auth(
+            upstream_request,
+            request,
+            shared,
+            auth,
+            native_messages,
+        ),
+        RuntimeLocalRewritePreparedAuth::Copilot { api_key } => {
+            runtime_local_rewrite_apply_copilot_auth(
+                upstream_request,
+                request,
+                shared,
+                body,
+                api_key,
+            )
+        }
+        RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => Ok(
+            runtime_local_rewrite_apply_openai_auth(upstream_request, request, shared, api_key),
+        ),
+        RuntimeLocalRewritePreparedAuth::OpenAiProjected => {
+            runtime_local_rewrite_apply_openai_projected_auth(upstream_request, request, shared)
+        }
+        RuntimeLocalRewritePreparedAuth::DeepSeek {
+            api_key,
+            native_messages,
+        } => runtime_local_rewrite_apply_deepseek_auth(
+            upstream_request,
+            request,
+            shared,
+            api_key,
+            native_messages,
+        ),
+        RuntimeLocalRewritePreparedAuth::Gemini { auth } => {
+            runtime_local_rewrite_apply_gemini_auth(upstream_request, request, shared, auth)
+        }
+        RuntimeLocalRewritePreparedAuth::GeminiOpenAi { api_key } => {
+            runtime_local_rewrite_apply_gemini_openai_auth(
+                upstream_request,
+                request,
+                shared,
+                api_key,
+            )
+        }
+    }
+}
+
+fn runtime_local_rewrite_provider_headers(
+    request: reqwest::blocking::RequestBuilder,
+) -> reqwest::blocking::RequestBuilder {
+    request
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .header(
+            reqwest::header::ACCEPT,
+            "text/event-stream, application/json",
+        )
+}
+
+fn runtime_local_rewrite_apply_anthropic_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    auth: &RuntimeAnthropicAuth,
+    native_messages: bool,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
+    if native_messages {
+        upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
+    }
+    upstream_request = match auth {
+        RuntimeAnthropicAuth::Projected if native_messages => {
+            runtime_local_rewrite_apply_projected_header(shared, upstream_request, "x-api-key")?
+        }
+        RuntimeAnthropicAuth::Projected => {
+            runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
+        }
+        _ => runtime_local_rewrite_apply_direct_anthropic_auth(
+            upstream_request,
+            auth,
+            native_messages,
+        )
+        .expect("non-projected Anthropic auth builds request"),
+    };
+    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+        upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    Ok(upstream_request)
+}
+
+fn runtime_local_rewrite_apply_copilot_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    body: &[u8],
+    api_key: Option<&str>,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request)
+        .header("copilot-integration-id", "copilot-developer-cli")
+        .header("openai-intent", "conversation-panel")
+        .header("x-github-api-version", "2025-04-01")
+        .header("x-request-id", format!("prodex-{}", RequestId::new()))
+        .header("X-Initiator", runtime_copilot_initiator_header(request))
+        .header(
+            reqwest::header::USER_AGENT,
+            "copilot/1.0.65 (client/github/cli)",
+        );
+    upstream_request = match api_key {
+        Some(api_key) => upstream_request.bearer_auth(api_key),
+        None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
+    };
+    if runtime_copilot_request_has_vision_input(body) {
+        upstream_request = upstream_request.header("copilot-vision-request", "true");
+    }
+    Ok(upstream_request)
+}
+
+fn runtime_local_rewrite_apply_openai_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_key: Option<&str>,
+) -> reqwest::blocking::RequestBuilder {
+    let replacing_openai_auth = api_key.is_some()
+        || request.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization")
+                && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
+        });
+    let mut upstream_request =
+        runtime_local_rewrite_copy_openai_headers(request, upstream_request, replacing_openai_auth);
+    if let Some(api_key) = api_key {
+        upstream_request = upstream_request.bearer_auth(api_key);
+    }
+    upstream_request
+}
+
+fn runtime_local_rewrite_apply_openai_projected_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let upstream_request =
+        runtime_local_rewrite_copy_openai_headers(request, upstream_request, true);
+    runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)
+}
+
+fn runtime_local_rewrite_apply_deepseek_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_key: Option<&str>,
+    native_messages: bool,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
+    if native_messages {
+        upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
+    }
+    upstream_request = match (api_key, native_messages) {
+        (Some(api_key), true) => upstream_request.header("x-api-key", api_key),
+        (Some(api_key), false) => upstream_request.bearer_auth(api_key),
+        (None, true) => {
+            runtime_local_rewrite_apply_projected_header(shared, upstream_request, "x-api-key")?
+        }
+        (None, false) => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
+    };
+    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+        upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    Ok(upstream_request)
+}
+
+fn runtime_local_rewrite_apply_gemini_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    auth: &RuntimeGeminiAuth,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
+    match auth {
+        RuntimeGeminiAuth::ApiKey { api_key } => {
+            upstream_request = upstream_request.header("x-goog-api-key", api_key);
+        }
+        RuntimeGeminiAuth::OAuth { access_token, .. } => {
+            upstream_request = upstream_request.bearer_auth(access_token);
+        }
+        RuntimeGeminiAuth::Projected => {
+            upstream_request = runtime_local_rewrite_apply_projected_header(
+                shared,
+                upstream_request,
+                "x-goog-api-key",
+            )?;
+        }
+    }
+    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+        upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    Ok(upstream_request)
+}
+
+fn runtime_local_rewrite_apply_gemini_openai_auth(
+    upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_key: Option<&str>,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
+    upstream_request = match api_key {
+        Some(api_key) => upstream_request.bearer_auth(api_key),
+        None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
+    };
+    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+        upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    Ok(upstream_request)
 }
 
 fn runtime_local_rewrite_apply_direct_anthropic_auth(

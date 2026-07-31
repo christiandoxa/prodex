@@ -200,6 +200,16 @@ impl RuntimeDeepSeekSseState {
                 .into_iter()
                 .collect::<Vec<_>>();
         }
+        self.apply_chunk_metadata(value);
+        let mut events = self.response_created_events();
+        let Some(choice) = deepseek_provider_core_stream_first_choice(value) else {
+            return events;
+        };
+        events.extend(self.observe_choice(value, choice));
+        events
+    }
+
+    fn apply_chunk_metadata(&mut self, value: &serde_json::Value) {
         if let Some(id) = deepseek_provider_core_stream_response_id_from_chunk(
             runtime_provider_label(self.provider_kind),
             &self.response_id,
@@ -223,22 +233,30 @@ impl RuntimeDeepSeekSseState {
         if let Some(usage) = metadata.usage {
             self.usage = Some(usage);
         }
-        let mut events = Vec::new();
-        if !self.created {
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.created",
-                deepseek_provider_core_response_created_event(
-                    sequence_number,
-                    self.created_at,
-                    &self.response_id,
-                ),
-            ));
-            self.created = true;
+    }
+
+    fn response_created_events(&mut self) -> Vec<String> {
+        if self.created {
+            return Vec::new();
         }
-        let Some(choice) = deepseek_provider_core_stream_first_choice(value) else {
-            return events;
-        };
+        let sequence_number = self.next_sequence_number();
+        self.created = true;
+        vec![self.event(
+            "response.created",
+            deepseek_provider_core_response_created_event(
+                sequence_number,
+                self.created_at,
+                &self.response_id,
+            ),
+        )]
+    }
+
+    fn observe_choice(
+        &mut self,
+        value: &serde_json::Value,
+        choice: &serde_json::Value,
+    ) -> Vec<String> {
+        let mut events = Vec::new();
         let choice_metadata = deepseek_provider_core_stream_choice_metadata(choice);
         if let Some(logprobs) = choice_metadata.logprobs {
             self.logprobs = Some(logprobs);
@@ -253,47 +271,55 @@ impl RuntimeDeepSeekSseState {
         self.annotations
             .extend(choice_delta.annotations.iter().cloned());
         if let Some(text) = choice_delta.content.as_deref() {
-            if let Some(event) = self.output_text_item_added_event() {
-                events.push(event);
-            }
-            self.output_text.push_str(text);
-            let sequence_number = self.next_sequence_number();
-            let upstream_value = deepseek_provider_core_stream_text_delta_source(text);
-            if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
-                self.provider_kind,
-                &upstream_value,
-                sequence_number,
-                self.created_at,
-                &self.response_id,
-            ) {
-                events.push(self.event(&event_name, data));
-            } else {
-                events.push(self.event(
-                    "response.output_text.delta",
-                    deepseek_provider_core_output_text_delta_event(
-                        sequence_number,
-                        self.created_at,
-                        &self.response_id,
-                        text,
-                    ),
-                ));
-            }
+            events.extend(self.observe_content_delta(text));
         }
         for tool_call in &choice_delta.tool_calls {
             events.extend(self.observe_tool_call_delta(tool_call));
         }
         if let Some(finish_reason) = choice_metadata.finish_reason {
-            self.finish_reason = Some(finish_reason);
-            if let Err(message) = self.validate_tool_call_arguments() {
-                if let Some(event) = self.failed_event("invalid_tool_call_arguments", &message) {
-                    events.push(event);
-                }
-                return events;
-            }
-            events.extend(self.complete_tool_call_events());
-            if !self.tool_calls.is_empty() {
-                self.store_conversation_snapshot();
-            }
+            events.extend(self.observe_finish(finish_reason));
+        }
+        events
+    }
+
+    fn observe_content_delta(&mut self, text: &str) -> Vec<String> {
+        let mut events: Vec<String> = self.output_text_item_added_event().into_iter().collect();
+        self.output_text.push_str(text);
+        let sequence_number = self.next_sequence_number();
+        let upstream_value = deepseek_provider_core_stream_text_delta_source(text);
+        if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
+            self.provider_kind,
+            &upstream_value,
+            sequence_number,
+            self.created_at,
+            &self.response_id,
+        ) {
+            events.push(self.event(&event_name, data));
+        } else {
+            events.push(self.event(
+                "response.output_text.delta",
+                deepseek_provider_core_output_text_delta_event(
+                    sequence_number,
+                    self.created_at,
+                    &self.response_id,
+                    text,
+                ),
+            ));
+        }
+        events
+    }
+
+    fn observe_finish(&mut self, finish_reason: String) -> Vec<String> {
+        self.finish_reason = Some(finish_reason);
+        if let Err(message) = self.validate_tool_call_arguments() {
+            return self
+                .failed_event("invalid_tool_call_arguments", &message)
+                .into_iter()
+                .collect();
+        }
+        let events = self.complete_tool_call_events();
+        if !self.tool_calls.is_empty() {
+            self.store_conversation_snapshot();
         }
         events
     }

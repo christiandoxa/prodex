@@ -76,6 +76,20 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
     }
 }
 
+struct RuntimeDeepSeekResponseAttemptContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    conversations: &'a super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore,
+    base_body: &'a [u8],
+    model_chain: &'a [String],
+    chat_upstream_url: &'a str,
+    messages_upstream_url: &'a str,
+    api_key_attempt_count: usize,
+    strict_tools: bool,
+    web_search_mode: super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode,
+}
+
 fn send_runtime_deepseek_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -121,114 +135,72 @@ fn send_runtime_deepseek_responses_request(
     let messages_upstream_url =
         runtime_deepseek_anthropic_messages_upstream_url(&shared.upstream_base_url);
     let conversations = shared.deepseek_conversations_for_request(request);
+    let context = RuntimeDeepSeekResponseAttemptContext {
+        request_id,
+        request,
+        shared,
+        conversations: &conversations,
+        base_body: &model_selection.body,
+        model_chain: &model_chain,
+        chat_upstream_url: &chat_upstream_url,
+        messages_upstream_url: &messages_upstream_url,
+        api_key_attempt_count,
+        strict_tools,
+        web_search_mode,
+    };
+    runtime_deepseek_response_attempts(&context, api_key_attempts)
+}
+
+fn runtime_deepseek_response_attempts(
+    context: &RuntimeDeepSeekResponseAttemptContext<'_>,
+    api_key_attempts: Vec<(String, Option<&str>)>,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
-        for (model_index, model) in model_chain.iter().enumerate() {
-            let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
-            let conformance = runtime_provider_request_conformance_result(
-                RuntimeProviderBridgeKind::DeepSeek,
-                request,
-                &model_body,
-            );
-            if let Some(result) = conformance.as_ref() {
-                runtime_provider_log_request_conformance(
-                    &shared.runtime_shared,
-                    request_id,
-                    RuntimeProviderBridgeKind::DeepSeek,
-                    result,
-                );
-            }
-            let mut translated = runtime_deepseek_chat_request_body_with_options(
-                &model_body,
-                &conversations,
-                RuntimeDeepSeekRewriteOptions {
-                    strict_tools,
-                    web_search_mode,
-                },
-            )?;
-            if deepseek_provider_core_simple_request(&model_body, |previous_response_id| {
-                conversations.contains(previous_response_id)
-            }) && let Some(body) = conformance
-                .as_ref()
-                .and_then(core_deepseek_provider_core_request_body)
-            {
-                translated.body = body;
-            }
-            let native_messages = runtime_deepseek_uses_native_web_search(
-                web_search_mode,
-                translated.body.as_slice(),
-            );
-            let upstream_body = if native_messages {
-                let mut input = ProviderTransformInput::new(
-                    ProviderEndpoint::Responses,
-                    translated.body.clone(),
-                );
-                input.model = Some(model.clone());
-                let result = translate_openai_chat_request_to_anthropic_messages(input);
-                runtime_provider_log_request_conformance(
-                    &shared.runtime_shared,
-                    request_id,
-                    RuntimeProviderBridgeKind::DeepSeek,
-                    &result,
-                );
-                let Some(body) = provider_core_rewritten_body(Some(&result)) else {
-                    return Ok(runtime_deepseek_native_translation_incompatible());
-                };
-                body
-            } else {
-                translated.body
+        for (model_index, model) in context.model_chain.iter().enumerate() {
+            let model_body = runtime_provider_request_body_with_model(context.base_body, model);
+            let Some(prepared) =
+                runtime_deepseek_prepare_model_request(context, &model_body, model)?
+            else {
+                return Ok(runtime_deepseek_native_translation_incompatible());
             };
-            let send_result =
-                send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
-                    RuntimeLocalRewriteSearchFallbackRequest {
-                        request_id,
-                        request,
-                        shared,
-                        upstream_url: if native_messages {
-                            &messages_upstream_url
-                        } else {
-                            &chat_upstream_url
-                        },
-                        body: upstream_body,
-                        provider_kind: RuntimeProviderBridgeKind::DeepSeek,
-                        auth_label: &api_key_label,
-                        model,
-                        auth_factory: || RuntimeLocalRewritePreparedAuth::DeepSeek {
-                            api_key,
-                            native_messages,
-                        },
-                    },
-                )?;
-            let (status, parts, class) = match send_result {
-                RuntimeLocalRewritePreparedSendResult::Live(response) => {
+            let (status, parts, class) = match runtime_deepseek_send_model_attempt(
+                context,
+                &api_key_label,
+                model,
+                api_key,
+                prepared,
+            )? {
+                RuntimeDeepSeekModelAttempt::Live {
+                    response,
+                    native_messages,
+                    pending,
+                } => {
                     return Ok(runtime_deepseek_live_result(
                         response,
                         native_messages,
-                        RuntimeDeepSeekPendingRequest {
-                            messages: translated.messages,
-                            response_metadata: translated.response_metadata,
-                        },
+                        pending,
                     ));
                 }
-                RuntimeLocalRewritePreparedSendResult::Error {
+                RuntimeDeepSeekModelAttempt::Error {
                     status,
                     parts,
                     class,
                 } => (status, parts, class),
             };
-            if model_index + 1 < model_chain.len()
+            if model_index + 1 < context.model_chain.len()
                 && runtime_gateway_application_provider_retry_precommit(
                     ProviderRetryCause::NextModel,
                     class,
                     model_index,
-                    model_chain.len(),
+                    context.model_chain.len(),
                 )
             {
                 runtime_proxy_log(
-                    &shared.runtime_shared,
+                    &context.shared.runtime_shared,
                     runtime_proxy_structured_log_message(
                         "local_rewrite_provider_model_fallback",
                         [
-                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("request", context.request_id.to_string()),
                             runtime_proxy_log_field(
                                 "provider",
                                 runtime_provider_label(RuntimeProviderBridgeKind::DeepSeek),
@@ -237,7 +209,7 @@ fn send_runtime_deepseek_responses_request(
                             runtime_proxy_log_field("from_model", model.as_str()),
                             runtime_proxy_log_field(
                                 "to_model",
-                                model_chain[model_index + 1].as_str(),
+                                context.model_chain[model_index + 1].as_str(),
                             ),
                             runtime_proxy_log_field("status", status.to_string()),
                             runtime_proxy_log_field("class", format!("{class:?}")),
@@ -250,18 +222,158 @@ fn send_runtime_deepseek_responses_request(
                 ProviderRetryCause::RotateCredential,
                 class,
                 api_key_index,
-                api_key_attempt_count,
+                context.api_key_attempt_count,
             ) {
-                runtime_deepseek_log_auth_rotate(shared, request_id, &api_key_label, status, class);
+                runtime_deepseek_log_auth_rotate(
+                    context.shared,
+                    context.request_id,
+                    &api_key_label,
+                    status,
+                    class,
+                );
                 break;
             }
             return Ok(runtime_deepseek_buffered_result(parts));
         }
-        if api_key_index + 1 < api_key_attempt_count {
+        if api_key_index + 1 < context.api_key_attempt_count {
             continue;
         }
     }
     anyhow::bail!("no DeepSeek model attempts were available");
+}
+
+struct RuntimeDeepSeekPreparedModelRequest {
+    body: Vec<u8>,
+    native_messages: bool,
+    pending: RuntimeDeepSeekPendingRequest,
+}
+
+enum RuntimeDeepSeekModelAttempt {
+    Live {
+        response: reqwest::blocking::Response,
+        native_messages: bool,
+        pending: RuntimeDeepSeekPendingRequest,
+    },
+    Error {
+        status: u16,
+        parts: RuntimeHeapTrimmedBufferedResponseParts,
+        class: RuntimeProviderErrorClass,
+    },
+}
+
+fn runtime_deepseek_prepare_model_request(
+    context: &RuntimeDeepSeekResponseAttemptContext<'_>,
+    model_body: &[u8],
+    model: &str,
+) -> Result<Option<RuntimeDeepSeekPreparedModelRequest>> {
+    let conformance = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        context.request,
+        model_body,
+    );
+    if let Some(result) = conformance.as_ref() {
+        runtime_provider_log_request_conformance(
+            &context.shared.runtime_shared,
+            context.request_id,
+            RuntimeProviderBridgeKind::DeepSeek,
+            result,
+        );
+    }
+    let mut translated = runtime_deepseek_chat_request_body_with_options(
+        model_body,
+        context.conversations,
+        RuntimeDeepSeekRewriteOptions {
+            strict_tools: context.strict_tools,
+            web_search_mode: context.web_search_mode,
+        },
+    )?;
+    if deepseek_provider_core_simple_request(model_body, |previous_response_id| {
+        context.conversations.contains(previous_response_id)
+    }) && let Some(body) = conformance
+        .as_ref()
+        .and_then(core_deepseek_provider_core_request_body)
+    {
+        translated.body = body;
+    }
+    let native_messages = runtime_deepseek_uses_native_web_search(
+        context.web_search_mode,
+        translated.body.as_slice(),
+    );
+    let body = if native_messages {
+        let mut input =
+            ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
+        input.model = Some(model.to_string());
+        let result = translate_openai_chat_request_to_anthropic_messages(input);
+        runtime_provider_log_request_conformance(
+            &context.shared.runtime_shared,
+            context.request_id,
+            RuntimeProviderBridgeKind::DeepSeek,
+            &result,
+        );
+        let Some(body) = provider_core_rewritten_body(Some(&result)) else {
+            return Ok(None);
+        };
+        body
+    } else {
+        translated.body
+    };
+    Ok(Some(RuntimeDeepSeekPreparedModelRequest {
+        body,
+        native_messages,
+        pending: RuntimeDeepSeekPendingRequest {
+            messages: translated.messages,
+            response_metadata: translated.response_metadata,
+        },
+    }))
+}
+
+fn runtime_deepseek_send_model_attempt(
+    context: &RuntimeDeepSeekResponseAttemptContext<'_>,
+    api_key_label: &str,
+    model: &str,
+    api_key: Option<&str>,
+    prepared: RuntimeDeepSeekPreparedModelRequest,
+) -> Result<RuntimeDeepSeekModelAttempt> {
+    let native_messages = prepared.native_messages;
+    let pending = prepared.pending;
+    let send_result = send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
+        RuntimeLocalRewriteSearchFallbackRequest {
+            request_id: context.request_id,
+            request: context.request,
+            shared: context.shared,
+            upstream_url: if native_messages {
+                context.messages_upstream_url
+            } else {
+                context.chat_upstream_url
+            },
+            body: prepared.body,
+            provider_kind: RuntimeProviderBridgeKind::DeepSeek,
+            auth_label: api_key_label,
+            model,
+            auth_factory: || RuntimeLocalRewritePreparedAuth::DeepSeek {
+                api_key,
+                native_messages,
+            },
+        },
+    )?;
+    Ok(match send_result {
+        RuntimeLocalRewritePreparedSendResult::Live(response) => {
+            RuntimeDeepSeekModelAttempt::Live {
+                response,
+                native_messages,
+                pending,
+            }
+        }
+        RuntimeLocalRewritePreparedSendResult::Error {
+            status,
+            parts,
+            class,
+        } => RuntimeDeepSeekModelAttempt::Error {
+            status,
+            parts,
+            class,
+        },
+    })
 }
 
 fn send_runtime_deepseek_passthrough_request(

@@ -75,77 +75,87 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
         ),
     );
     worker_threads.push(thread::spawn(move || {
-        while !shutdown.load(Ordering::SeqCst) {
-            match listener.accept() {
-                Ok((stream, _peer)) => {
-                    let request_shared = runtime_gateway_pin_request_credentials(&shared);
-                    let request_id = runtime_proxy_next_request_id(&shared.runtime_shared);
-                    let guard = match acquire_runtime_proxy_active_request_slot_with_wait(
-                        &shared.runtime_shared,
-                        "websocket",
-                        "/v1/realtime",
-                    ) {
-                        Ok(guard) => guard,
-                        Err(_) => {
-                            mark_runtime_proxy_local_overload(
-                                &shared.runtime_shared,
-                                "gemini_live_sidecar_admission",
-                            );
-                            continue;
-                        }
-                    };
-                    let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                        if let Err(err) = handle_runtime_gemini_live_tcp_stream(
-                            request_id,
-                            stream,
-                            &request_shared,
-                        ) {
-                            runtime_proxy_log(
-                                &request_shared.runtime_shared,
-                                runtime_proxy_structured_log_message(
-                                    "local_rewrite_gemini_live_sidecar_error",
-                                    [
-                                        runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field(
-                                            "error",
-                                            runtime_gemini_live_redacted_log_error(&err),
-                                        ),
-                                    ],
-                                ),
-                            );
-                        }
-                    });
-                    drop(guard);
-                    if let Err(panic) = result {
-                        runtime_proxy_log(
-                            &shared.runtime_shared,
-                            format!(
-                                "runtime_proxy_worker_panic lane=gemini_live_sidecar panic={}",
-                                crate::runtime_panic::runtime_panic_payload_label(panic.as_ref())
-                            ),
-                        );
-                    }
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(GEMINI_LIVE_IDLE_SLEEP);
-                }
-                Err(err) => {
-                    runtime_proxy_log(
-                        &shared.runtime_shared,
-                        runtime_proxy_structured_log_message(
-                            "local_rewrite_gemini_live_sidecar_accept_error",
-                            [runtime_proxy_log_field(
-                                "error",
-                                runtime_gemini_live_redacted_log_text(&err.to_string()),
-                            )],
-                        ),
-                    );
-                    thread::sleep(Duration::from_millis(50));
-                }
-            }
-        }
+        runtime_gemini_live_sidecar_worker(listener, shared, shutdown);
     }));
     Ok(listen_addr)
+}
+
+fn runtime_gemini_live_sidecar_worker(
+    listener: TcpListener,
+    shared: RuntimeLocalRewriteProxyShared,
+    shutdown: Arc<AtomicBool>,
+) {
+    while !shutdown.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _peer)) => runtime_gemini_live_sidecar_connection(stream, &shared),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(GEMINI_LIVE_IDLE_SLEEP);
+            }
+            Err(err) => {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_gemini_live_sidecar_accept_error",
+                        [runtime_proxy_log_field(
+                            "error",
+                            runtime_gemini_live_redacted_log_text(&err.to_string()),
+                        )],
+                    ),
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+fn runtime_gemini_live_sidecar_connection(
+    stream: TcpStream,
+    shared: &RuntimeLocalRewriteProxyShared,
+) {
+    let request_shared = runtime_gateway_pin_request_credentials(shared);
+    let request_id = runtime_proxy_next_request_id(&shared.runtime_shared);
+    let guard = match acquire_runtime_proxy_active_request_slot_with_wait(
+        &shared.runtime_shared,
+        "websocket",
+        "/v1/realtime",
+    ) {
+        Ok(guard) => guard,
+        Err(_) => {
+            mark_runtime_proxy_local_overload(
+                &shared.runtime_shared,
+                "gemini_live_sidecar_admission",
+            );
+            return;
+        }
+    };
+    let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
+        if let Err(err) = handle_runtime_gemini_live_tcp_stream(request_id, stream, &request_shared)
+        {
+            runtime_proxy_log(
+                &request_shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_live_sidecar_error",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_gemini_live_redacted_log_error(&err),
+                        ),
+                    ],
+                ),
+            );
+        }
+    });
+    drop(guard);
+    if let Err(panic) = result {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            format!(
+                "runtime_proxy_worker_panic lane=gemini_live_sidecar panic={}",
+                crate::runtime_panic::runtime_panic_payload_label(panic.as_ref())
+            ),
+        );
+    }
 }
 
 pub(super) fn handle_runtime_gemini_live_websocket_request(

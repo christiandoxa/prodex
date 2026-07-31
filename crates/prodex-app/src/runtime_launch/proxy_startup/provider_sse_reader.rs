@@ -83,69 +83,80 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
         while self.pending_offset >= self.pending.len() && !self.state.eof() {
             self.pending.clear();
             self.pending_offset = 0;
-            let data_lines = match read_runtime_provider_sse_data_lines_with_limits(
-                &mut self.reader,
-                self.line_max_bytes,
-                self.event_max_bytes,
-            ) {
-                Ok(data_lines) => data_lines,
-                Err(err) => {
-                    self.fail_stream(err)?;
-                    break;
-                }
-            };
-            let Some(data_lines) = data_lines else {
-                if !self.accumulated_json.trim().is_empty() {
-                    if let Some(events) = self.flush_accumulated_json() {
-                        self.pending = events.into_bytes();
-                        continue;
-                    }
-                    if let Some(event) = self
-                        .state
-                        .failed_event("provider_stream_error", "incomplete JSON segment")
-                    {
-                        self.pending = event.into_bytes();
-                    }
-                    self.state.set_eof(true);
-                    break;
-                }
-                if let Some(event) = self.state.complete_event() {
-                    self.pending = event.into_bytes();
-                }
-                self.state.set_eof(true);
+            if !self.fill_pending_event()? {
                 break;
-            };
-            if data_lines.iter().any(|data| data.trim() == "[DONE]") {
-                if !self.accumulated_json.trim().is_empty() {
-                    if let Some(events) = self.flush_accumulated_json() {
-                        self.pending.extend_from_slice(events.as_bytes());
-                    } else if let Some(event) = self
-                        .state
-                        .failed_event("provider_stream_error", "incomplete JSON segment")
-                    {
-                        self.pending.extend_from_slice(event.as_bytes());
-                        self.state.set_eof(true);
-                        break;
-                    }
-                }
-                if let Some(event) = self.state.complete_event() {
-                    self.pending.extend_from_slice(event.as_bytes());
-                }
-                self.state.set_eof(true);
-                break;
-            }
-            let events = match self.observe_sse_data_lines(&data_lines) {
-                Ok(events) => events,
-                Err(err) => {
-                    self.fail_stream(err)?;
-                    break;
-                }
-            };
-            for event in events {
-                self.pending.extend_from_slice(event.as_bytes());
             }
         }
         Ok(())
+    }
+
+    fn fill_pending_event(&mut self) -> io::Result<bool> {
+        let data_lines = match read_runtime_provider_sse_data_lines_with_limits(
+            &mut self.reader,
+            self.line_max_bytes,
+            self.event_max_bytes,
+        ) {
+            Ok(data_lines) => data_lines,
+            Err(err) => {
+                self.fail_stream(err)?;
+                return Ok(false);
+            }
+        };
+        let Some(data_lines) = data_lines else {
+            return Ok(self.finish_at_eof());
+        };
+        if data_lines.iter().any(|data| data.trim() == "[DONE]") {
+            self.finish_done_event();
+            return Ok(false);
+        }
+        let events = match self.observe_sse_data_lines(&data_lines) {
+            Ok(events) => events,
+            Err(err) => {
+                self.fail_stream(err)?;
+                return Ok(false);
+            }
+        };
+        self.pending
+            .extend(events.into_iter().flat_map(|event| event.into_bytes()));
+        Ok(true)
+    }
+
+    fn finish_at_eof(&mut self) -> bool {
+        if !self.accumulated_json.trim().is_empty() {
+            if let Some(events) = self.flush_accumulated_json() {
+                self.pending = events.into_bytes();
+                return true;
+            }
+            if let Some(event) = self
+                .state
+                .failed_event("provider_stream_error", "incomplete JSON segment")
+            {
+                self.pending = event.into_bytes();
+            }
+        } else if let Some(event) = self.state.complete_event() {
+            self.pending = event.into_bytes();
+        }
+        self.state.set_eof(true);
+        false
+    }
+
+    fn finish_done_event(&mut self) {
+        if !self.accumulated_json.trim().is_empty() {
+            if let Some(events) = self.flush_accumulated_json() {
+                self.pending.extend_from_slice(events.as_bytes());
+            } else if let Some(event) = self
+                .state
+                .failed_event("provider_stream_error", "incomplete JSON segment")
+            {
+                self.pending.extend_from_slice(event.as_bytes());
+                self.state.set_eof(true);
+                return;
+            }
+        }
+        if let Some(event) = self.state.complete_event() {
+            self.pending.extend_from_slice(event.as_bytes());
+        }
+        self.state.set_eof(true);
     }
 
     fn observe_sse_data_lines(&mut self, data_lines: &[String]) -> io::Result<Vec<String>> {
@@ -154,26 +165,7 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
             return Ok(events);
         }
 
-        let mut separate_values = Vec::new();
-        for line in data_lines {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                separate_values.clear();
-                break;
-            };
-            separate_values.push(value);
-        }
-        if !separate_values.is_empty() {
-            let mut events = Vec::new();
-            for value in separate_values {
-                if let Some(observer) = &self.observer {
-                    observer(&value);
-                }
-                events.extend(self.state.observe_value(&value));
-            }
+        if let Some(events) = self.observe_separate_json_values(data_lines) {
             return Ok(events);
         }
 
@@ -191,6 +183,31 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
             .flush_accumulated_json()
             .map(|events| vec![events])
             .unwrap_or_default())
+    }
+
+    fn observe_separate_json_values(&mut self, data_lines: &[String]) -> Option<Vec<String>> {
+        let mut values = Vec::new();
+        for line in data_lines {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                return None;
+            };
+            values.push(value);
+        }
+        if values.is_empty() {
+            return None;
+        }
+        let mut events = Vec::new();
+        for value in values {
+            if let Some(observer) = &self.observer {
+                observer(&value);
+            }
+            events.extend(self.state.observe_value(&value));
+        }
+        Some(events)
     }
 
     fn observe_json_text(&mut self, data: &str) -> Option<Vec<String>> {
@@ -262,21 +279,36 @@ fn read_runtime_provider_sse_data_lines_with_limits<R: BufRead>(
             };
         }
         let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            if data_lines.is_empty() {
-                continue;
-            }
+        if runtime_provider_sse_append_data_line(
+            line,
+            &mut data_lines,
+            &mut event_bytes,
+            event_max_bytes,
+        )? {
             return Ok(Some(data_lines));
         }
-        if let Some(data) = line.strip_prefix("data:") {
-            let data = data.trim_start();
-            event_bytes = event_bytes.saturating_add(data.len()).saturating_add(1);
-            if event_bytes > event_max_bytes {
-                return Err(runtime_provider_sse_limit_error("event", event_max_bytes));
-            }
-            data_lines.push(data.to_string());
-        }
     }
+}
+
+fn runtime_provider_sse_append_data_line(
+    line: &str,
+    data_lines: &mut Vec<String>,
+    event_bytes: &mut usize,
+    event_max_bytes: usize,
+) -> io::Result<bool> {
+    if line.is_empty() {
+        return Ok(!data_lines.is_empty());
+    }
+    let Some(data) = line.strip_prefix("data:") else {
+        return Ok(false);
+    };
+    let data = data.trim_start();
+    *event_bytes = event_bytes.saturating_add(data.len()).saturating_add(1);
+    if *event_bytes > event_max_bytes {
+        return Err(runtime_provider_sse_limit_error("event", event_max_bytes));
+    }
+    data_lines.push(data.to_string());
+    Ok(false)
 }
 
 fn runtime_provider_sse_limit_error(kind: &str, max_bytes: usize) -> io::Error {

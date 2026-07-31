@@ -49,43 +49,9 @@ pub(super) fn runtime_gemini_peek_stream_for_retry(
             .read(&mut byte)
             .context("failed to read Gemini stream precommit prefix")?;
         if read == 0 {
-            if !line.is_empty() {
-                let decision =
-                    runtime_gemini_precommit_process_line(&line, &mut data_lines, &mut probe);
-                if let RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) = decision {
-                    return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
-                        response,
-                        prefix,
-                        reason,
-                    });
-                }
-                line.clear();
-            }
-            if !data_lines.is_empty() {
-                match runtime_gemini_precommit_decision_for_data_lines(&data_lines, &mut probe) {
-                    RuntimeGeminiPrecommitDecision::Commit => {
-                        return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
-                    }
-                    RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) => {
-                        return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
-                            response,
-                            prefix,
-                            reason,
-                        });
-                    }
-                    RuntimeGeminiPrecommitDecision::Continue => {}
-                }
-            }
-            let reason = if probe.visible_output || probe.reasoning_output {
-                return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
-            } else {
-                "gemini_empty_response".to_string()
-            };
-            return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
-                response,
-                prefix,
-                reason,
-            });
+            return runtime_gemini_precommit_eof_decision(
+                response, prefix, line, data_lines, &mut probe,
+            );
         }
 
         prefix.push(byte[0]);
@@ -112,6 +78,48 @@ pub(super) fn runtime_gemini_peek_stream_for_retry(
         }
         line.clear();
     }
+}
+
+fn runtime_gemini_precommit_eof_decision(
+    response: reqwest::blocking::Response,
+    prefix: Vec<u8>,
+    line: Vec<u8>,
+    mut data_lines: Vec<String>,
+    probe: &mut RuntimeGeminiPrecommitProbe,
+) -> Result<RuntimeGeminiPrecommitPeek> {
+    if !line.is_empty()
+        && let RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) =
+            runtime_gemini_precommit_process_line(&line, &mut data_lines, probe)
+    {
+        return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+            response,
+            prefix,
+            reason,
+        });
+    }
+    if !data_lines.is_empty() {
+        match runtime_gemini_precommit_decision_for_data_lines(&data_lines, probe) {
+            RuntimeGeminiPrecommitDecision::Commit => {
+                return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+            }
+            RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) => {
+                return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                    response,
+                    prefix,
+                    reason,
+                });
+            }
+            RuntimeGeminiPrecommitDecision::Continue => {}
+        }
+    }
+    if probe.visible_output || probe.reasoning_output {
+        return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+    }
+    Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+        response,
+        prefix,
+        reason: "gemini_empty_response".to_string(),
+    })
 }
 
 fn runtime_gemini_precommit_process_line(

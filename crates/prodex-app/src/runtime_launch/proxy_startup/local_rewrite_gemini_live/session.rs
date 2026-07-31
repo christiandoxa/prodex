@@ -30,6 +30,20 @@ use tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 const GEMINI_LIVE_BINARY_OUTPUT_UNSUPPORTED_MESSAGE: &str =
     "Gemini Live provider returned unsupported binary websocket output.";
 
+struct RuntimeGeminiLiveProcessContext<'a, 'auth, S>
+where
+    S: Read + Write,
+{
+    request_id: u64,
+    local_socket: &'a mut WsSocket<S>,
+    state: &'a mut RuntimeGeminiLiveState,
+    output_inspector: &'a mut RuntimeGatewayIncrementalInspector,
+    accounting: &'a RuntimeGatewayRealtimeAccountingPlan,
+    usage: &'a mut RuntimeGatewayRealtimeUsage,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    authorized: Option<&'a prodex_application::ApplicationAuthorizedRequestContext<'auth>>,
+}
+
 pub(super) fn runtime_gemini_live_session<S>(
     request_id: u64,
     local_socket: &mut WsSocket<S>,
@@ -74,77 +88,22 @@ where
         }
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
-                let inspected = super::super::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_websocket_text(
+                let mut context = RuntimeGeminiLiveProcessContext {
                     request_id,
-                    text.as_ref(),
-                    shared,
-                    shared.gateway_guardrails.pii_redaction,
-                    authorized
-                        .and_then(|authorized| authorized.tenant_context())
-                        .map(|tenant| tenant.tenant_id),
-                )?;
-                let response_obligations = match runtime_gateway_application_websocket_governance(
-                    authorized,
-                    inspected.text.as_ref(),
-                    shared,
-                    network_zone,
-                    &inspected.inspection,
-                ) {
-                    Ok(obligations) => obligations,
-                    Err(_) => {
-                        usage.policy_interrupted = true;
-                        let _ = local_socket.close(Some(CloseFrame {
-                            code: CloseCode::Policy,
-                            reason: "request denied by policy".into(),
-                        }));
-                        return Ok(());
-                    }
-                };
-                if !runtime_gemini_live_accept_input(inspected.text.as_ref(), accounting, usage) {
-                    runtime_gateway_guardrail_websocket_block(
-                        request_id,
-                        shared,
-                        authorized,
-                        "realtime_session_token_limit_exceeded",
-                    );
-                    let _ = local_socket.close(Some(CloseFrame {
-                        code: CloseCode::Policy,
-                        reason: "session token limit exceeded".into(),
-                    }));
-                    return Ok(());
-                }
-                let translated = state.translate_client_message(inspected.text.as_ref())?;
-                for event in translated.local_events {
-                    runtime_gemini_live_send_json(local_socket, event)?;
-                }
-                for message in translated.upstream_messages {
-                    upstream_socket
-                        .send(WsMessage::Text(message.to_string().into()))
-                        .context("failed to send Gemini Live upstream message")?;
-                }
-                let timeout = if translated.wait_for_setup {
-                    Duration::from_secs(15)
-                } else if translated.wait_for_turn {
-                    Duration::from_secs(60)
-                } else {
-                    Duration::from_millis(10)
-                };
-                runtime_gemini_live_drain_upstream(
-                    request_id,
-                    upstream_socket,
                     local_socket,
-                    &mut state,
-                    &mut output_inspector,
-                    response_obligations,
+                    state: &mut state,
+                    output_inspector: &mut output_inspector,
                     accounting,
                     usage,
                     shared,
                     authorized,
-                    timeout,
-                    translated.wait_for_setup,
-                    translated.wait_for_turn,
-                )?;
-                if usage.policy_interrupted {
+                };
+                if runtime_gemini_live_process_session_text(
+                    &mut context,
+                    text.as_ref(),
+                    upstream_socket,
+                    network_zone,
+                )? {
                     return Ok(());
                 }
             }
@@ -180,6 +139,91 @@ where
     }
 }
 
+fn runtime_gemini_live_process_session_text<S>(
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
+    text: &str,
+    upstream_socket: &mut RuntimeUpstreamWebSocket,
+    network_zone: prodex_domain::NetworkZone,
+) -> Result<bool>
+where
+    S: Read + Write,
+{
+    let inspected = super::super::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_websocket_text(
+        context.request_id,
+        text,
+        context.shared,
+        context.shared.gateway_guardrails.pii_redaction,
+        context.authorized
+            .and_then(|authorized| authorized.tenant_context())
+            .map(|tenant| tenant.tenant_id),
+    )?;
+    let response_obligations = match runtime_gateway_application_websocket_governance(
+        context.authorized,
+        inspected.text.as_ref(),
+        context.shared,
+        network_zone,
+        &inspected.inspection,
+    ) {
+        Ok(obligations) => obligations,
+        Err(_) => {
+            context.usage.policy_interrupted = true;
+            let _ = context.local_socket.close(Some(CloseFrame {
+                code: CloseCode::Policy,
+                reason: "request denied by policy".into(),
+            }));
+            return Ok(true);
+        }
+    };
+    if !runtime_gemini_live_accept_input(inspected.text.as_ref(), context.accounting, context.usage)
+    {
+        runtime_gateway_guardrail_websocket_block(
+            context.request_id,
+            context.shared,
+            context.authorized,
+            "realtime_session_token_limit_exceeded",
+        );
+        let _ = context.local_socket.close(Some(CloseFrame {
+            code: CloseCode::Policy,
+            reason: "session token limit exceeded".into(),
+        }));
+        return Ok(true);
+    }
+    let translated = context
+        .state
+        .translate_client_message(inspected.text.as_ref())?;
+    for event in translated.local_events {
+        runtime_gemini_live_send_json(context.local_socket, event)?;
+    }
+    for message in translated.upstream_messages {
+        upstream_socket
+            .send(WsMessage::Text(message.to_string().into()))
+            .context("failed to send Gemini Live upstream message")?;
+    }
+    let timeout = if translated.wait_for_setup {
+        Duration::from_secs(15)
+    } else if translated.wait_for_turn {
+        Duration::from_secs(60)
+    } else {
+        Duration::from_millis(10)
+    };
+    runtime_gemini_live_drain_upstream(
+        context.request_id,
+        upstream_socket,
+        context.local_socket,
+        context.state,
+        context.output_inspector,
+        response_obligations,
+        context.accounting,
+        context.usage,
+        context.shared,
+        context.authorized,
+        timeout,
+        translated.wait_for_setup,
+        translated.wait_for_turn,
+    )?;
+    Ok(context.usage.policy_interrupted)
+}
+
 pub(super) fn runtime_gemini_live_duplex_session<S>(
     request_id: u64,
     local_socket: &mut WsSocket<S>,
@@ -207,151 +251,52 @@ where
     );
     let mut output_inspector =
         RuntimeGatewayIncrementalInspector::new(&shared.gateway_guardrails.blocked_output_keywords);
+    let mut context = RuntimeGeminiLiveProcessContext {
+        request_id,
+        local_socket,
+        state: &mut state,
+        output_inspector: &mut output_inspector,
+        accounting,
+        usage,
+        shared,
+        authorized,
+    };
     let mut response_obligations = None;
     let started_at = Instant::now();
     loop {
-        if runtime_gemini_live_session_expired(started_at, usage) {
+        if runtime_gemini_live_session_expired(started_at, context.usage) {
             runtime_gateway_guardrail_websocket_block(
-                request_id,
-                shared,
-                authorized,
+                context.request_id,
+                context.shared,
+                context.authorized,
                 "realtime_session_duration_limit_exceeded",
             );
-            let _ = local_socket.close(Some(CloseFrame {
+            let _ = context.local_socket.close(Some(CloseFrame {
                 code: CloseCode::Policy,
                 reason: "session duration limit exceeded".into(),
             }));
             return Ok(());
         }
         let mut progressed = false;
-        match local_socket.read() {
-            Ok(WsMessage::Text(text)) => {
-                progressed = true;
-                let inspected = super::super::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_websocket_text(
-                    request_id,
-                    text.as_ref(),
-                    shared,
-                    shared.gateway_guardrails.pii_redaction,
-                    authorized
-                        .and_then(|authorized| authorized.tenant_context())
-                        .map(|tenant| tenant.tenant_id),
-                )?;
-                response_obligations = match runtime_gateway_application_websocket_governance(
-                    authorized,
-                    inspected.text.as_ref(),
-                    shared,
-                    network_zone,
-                    &inspected.inspection,
-                ) {
-                    Ok(obligations) => obligations,
-                    Err(_) => {
-                        usage.policy_interrupted = true;
-                        let _ = local_socket.close(Some(CloseFrame {
-                            code: CloseCode::Policy,
-                            reason: "request denied by policy".into(),
-                        }));
-                        return Ok(());
-                    }
-                };
-                if !runtime_gemini_live_accept_input(inspected.text.as_ref(), accounting, usage) {
-                    runtime_gateway_guardrail_websocket_block(
-                        request_id,
-                        shared,
-                        authorized,
-                        "realtime_session_token_limit_exceeded",
-                    );
-                    let _ = local_socket.close(Some(CloseFrame {
-                        code: CloseCode::Policy,
-                        reason: "session token limit exceeded".into(),
-                    }));
-                    return Ok(());
-                }
-                let translated = state.translate_client_message(inspected.text.as_ref())?;
-                for event in translated.local_events {
-                    runtime_gemini_live_send_json(local_socket, event)?;
-                }
-                for message in translated.upstream_messages {
-                    upstream_socket
-                        .send(WsMessage::Text(message.to_string().into()))
-                        .context("failed to send Gemini Live upstream message")?;
-                }
-            }
-            Ok(WsMessage::Ping(payload)) => {
-                progressed = true;
-                local_socket
-                    .send(WsMessage::Pong(payload))
-                    .context("failed to respond to Gemini Live local ping")?;
-            }
-            Ok(WsMessage::Close(frame)) => {
-                let _ = upstream_socket.close(frame.clone());
-                let _ = local_socket.close(frame);
-                return Ok(());
-            }
-            Ok(WsMessage::Binary(_)) => {
-                progressed = true;
-                runtime_gemini_live_send_json(
-                    local_socket,
-                    gemini_provider_core_live_binary_frame_error(),
-                )?;
-            }
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {
-                progressed = true;
-            }
-            Err(err) if crate::runtime_websocket_timeout_error(&err) => {}
-            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
-                return Ok(());
-            }
-            Err(err) => return Err(anyhow::anyhow!("Gemini Live local websocket failed: {err}")),
-        }
-
-        match upstream_socket.read() {
-            Ok(WsMessage::Text(text)) => {
-                progressed = true;
-                let translated = state.translate_server_message(text.as_ref())?;
-                for event in translated.events {
-                    if !runtime_gemini_live_send_guarded_json(
-                        request_id,
-                        local_socket,
-                        event,
-                        &mut output_inspector,
-                        response_obligations,
-                        (accounting, &mut *usage),
-                        (shared, authorized),
-                    )? {
-                        return Ok(());
-                    }
-                }
-            }
-            Ok(WsMessage::Ping(payload)) => {
-                progressed = true;
-                upstream_socket
-                    .send(WsMessage::Pong(payload))
-                    .context("failed to respond to Gemini Live upstream ping")?;
-            }
-            Ok(WsMessage::Close(frame)) => {
-                let _ = local_socket.close(frame);
-                return Ok(());
-            }
-            Ok(WsMessage::Binary(_)) => {
-                return runtime_gemini_live_reject_upstream_binary(
-                    request_id,
-                    local_socket,
-                    usage,
-                    shared,
-                    authorized,
-                );
-            }
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => progressed = true,
-            Err(err) if crate::runtime_websocket_timeout_error(&err) => {}
-            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
-                return Ok(());
-            }
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "Gemini Live upstream websocket failed: {err}"
-                ));
-            }
-        }
+        let Some(local_progressed) = runtime_gemini_live_process_duplex_local_message(
+            &mut context,
+            upstream_socket,
+            network_zone,
+            &mut response_obligations,
+        )?
+        else {
+            return Ok(());
+        };
+        progressed |= local_progressed;
+        let Some(upstream_progressed) = runtime_gemini_live_process_duplex_upstream_message(
+            &mut context,
+            upstream_socket,
+            response_obligations,
+        )?
+        else {
+            return Ok(());
+        };
+        progressed |= upstream_progressed;
 
         if !progressed {
             thread::sleep(GEMINI_LIVE_IDLE_SLEEP);
@@ -364,6 +309,174 @@ where
                 ),
             );
         }
+    }
+}
+
+fn runtime_gemini_live_process_duplex_local_message<S>(
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
+    upstream_socket: &mut RuntimeUpstreamWebSocket,
+    network_zone: prodex_domain::NetworkZone,
+    response_obligations: &mut Option<ApplicationResponseObligationPlan>,
+) -> Result<Option<bool>>
+where
+    S: Read + Write,
+{
+    match context.local_socket.read() {
+        Ok(WsMessage::Text(text)) => {
+            let (stop, obligations) = runtime_gemini_live_process_duplex_text(
+                context,
+                text.as_ref(),
+                upstream_socket,
+                network_zone,
+            )?;
+            *response_obligations = obligations;
+            if stop {
+                return Ok(None);
+            }
+            Ok(Some(true))
+        }
+        Ok(WsMessage::Ping(payload)) => {
+            context
+                .local_socket
+                .send(WsMessage::Pong(payload))
+                .context("failed to respond to Gemini Live local ping")?;
+            Ok(Some(true))
+        }
+        Ok(WsMessage::Close(frame)) => {
+            let _ = upstream_socket.close(frame.clone());
+            let _ = context.local_socket.close(frame);
+            Ok(None)
+        }
+        Ok(WsMessage::Binary(_)) => {
+            runtime_gemini_live_send_json(
+                context.local_socket,
+                gemini_provider_core_live_binary_frame_error(),
+            )?;
+            Ok(Some(true))
+        }
+        Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => Ok(Some(true)),
+        Err(err) if crate::runtime_websocket_timeout_error(&err) => Ok(Some(false)),
+        Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => Ok(None),
+        Err(err) => Err(anyhow::anyhow!("Gemini Live local websocket failed: {err}")),
+    }
+}
+
+fn runtime_gemini_live_process_duplex_text<S>(
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
+    text: &str,
+    upstream_socket: &mut RuntimeUpstreamWebSocket,
+    network_zone: prodex_domain::NetworkZone,
+) -> Result<(bool, Option<ApplicationResponseObligationPlan>)>
+where
+    S: Read + Write,
+{
+    let inspected = super::super::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_websocket_text(
+        context.request_id,
+        text,
+        context.shared,
+        context.shared.gateway_guardrails.pii_redaction,
+        context.authorized
+            .and_then(|authorized| authorized.tenant_context())
+            .map(|tenant| tenant.tenant_id),
+    )?;
+    let obligations = match runtime_gateway_application_websocket_governance(
+        context.authorized,
+        inspected.text.as_ref(),
+        context.shared,
+        network_zone,
+        &inspected.inspection,
+    ) {
+        Ok(obligations) => obligations,
+        Err(_) => {
+            context.usage.policy_interrupted = true;
+            let _ = context.local_socket.close(Some(CloseFrame {
+                code: CloseCode::Policy,
+                reason: "request denied by policy".into(),
+            }));
+            return Ok((true, None));
+        }
+    };
+    if !runtime_gemini_live_accept_input(inspected.text.as_ref(), context.accounting, context.usage)
+    {
+        runtime_gateway_guardrail_websocket_block(
+            context.request_id,
+            context.shared,
+            context.authorized,
+            "realtime_session_token_limit_exceeded",
+        );
+        let _ = context.local_socket.close(Some(CloseFrame {
+            code: CloseCode::Policy,
+            reason: "session token limit exceeded".into(),
+        }));
+        return Ok((true, None));
+    }
+    let translated = context
+        .state
+        .translate_client_message(inspected.text.as_ref())?;
+    for event in translated.local_events {
+        runtime_gemini_live_send_json(context.local_socket, event)?;
+    }
+    for message in translated.upstream_messages {
+        upstream_socket
+            .send(WsMessage::Text(message.to_string().into()))
+            .context("failed to send Gemini Live upstream message")?;
+    }
+    Ok((false, obligations))
+}
+
+fn runtime_gemini_live_process_duplex_upstream_message<S>(
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
+    upstream_socket: &mut RuntimeUpstreamWebSocket,
+    response_obligations: Option<ApplicationResponseObligationPlan>,
+) -> Result<Option<bool>>
+where
+    S: Read + Write,
+{
+    match upstream_socket.read() {
+        Ok(WsMessage::Text(text)) => {
+            let translated = context.state.translate_server_message(text.as_ref())?;
+            for event in translated.events {
+                if !runtime_gemini_live_send_guarded_json(
+                    context.request_id,
+                    context.local_socket,
+                    event,
+                    context.output_inspector,
+                    response_obligations,
+                    (context.accounting, &mut *context.usage),
+                    context.shared,
+                    context.authorized,
+                )? {
+                    return Ok(None);
+                }
+            }
+            Ok(Some(true))
+        }
+        Ok(WsMessage::Ping(payload)) => {
+            upstream_socket
+                .send(WsMessage::Pong(payload))
+                .context("failed to respond to Gemini Live upstream ping")?;
+            Ok(Some(true))
+        }
+        Ok(WsMessage::Close(frame)) => {
+            let _ = context.local_socket.close(frame);
+            Ok(None)
+        }
+        Ok(WsMessage::Binary(_)) => {
+            runtime_gemini_live_reject_upstream_binary(
+                context.request_id,
+                context.local_socket,
+                context.usage,
+                context.shared,
+                context.authorized,
+            )?;
+            Ok(None)
+        }
+        Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => Ok(Some(true)),
+        Err(err) if crate::runtime_websocket_timeout_error(&err) => Ok(Some(false)),
+        Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => Ok(None),
+        Err(err) => Err(anyhow::anyhow!(
+            "Gemini Live upstream websocket failed: {err}"
+        )),
     }
 }
 
@@ -388,26 +501,26 @@ where
 {
     runtime_set_upstream_websocket_read_timeout(upstream_socket, Some(timeout))
         .context("failed to set Gemini Live drain timeout")?;
+    let mut context = RuntimeGeminiLiveProcessContext {
+        request_id,
+        local_socket,
+        state,
+        output_inspector,
+        accounting,
+        usage,
+        shared,
+        authorized,
+    };
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
-                let translated = state.translate_server_message(text.as_ref())?;
-                for event in translated.events {
-                    if !runtime_gemini_live_send_guarded_json(
-                        request_id,
-                        local_socket,
-                        event,
-                        output_inspector,
-                        response_obligations,
-                        (accounting, &mut *usage),
-                        (shared, authorized),
-                    )? {
-                        return Ok(());
-                    }
-                }
-                if (stop_on_setup && translated.setup_complete)
-                    || (stop_on_turn && translated.turn_complete)
-                {
+                if runtime_gemini_live_drain_text(
+                    &mut context,
+                    text.as_ref(),
+                    response_obligations,
+                    stop_on_setup,
+                    stop_on_turn,
+                )? {
                     return Ok(());
                 }
             }
@@ -417,16 +530,16 @@ where
                     .context("failed to respond to Gemini Live upstream ping")?;
             }
             Ok(WsMessage::Close(frame)) => {
-                let _ = local_socket.close(frame);
+                let _ = context.local_socket.close(frame);
                 return Ok(());
             }
             Ok(WsMessage::Binary(_)) => {
                 return runtime_gemini_live_reject_upstream_binary(
-                    request_id,
-                    local_socket,
-                    usage,
-                    shared,
-                    authorized,
+                    context.request_id,
+                    context.local_socket,
+                    context.usage,
+                    context.shared,
+                    context.authorized,
                 );
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
@@ -441,6 +554,34 @@ where
             }
         }
     }
+}
+
+fn runtime_gemini_live_drain_text<S>(
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
+    text: &str,
+    response_obligations: Option<ApplicationResponseObligationPlan>,
+    stop_on_setup: bool,
+    stop_on_turn: bool,
+) -> Result<bool>
+where
+    S: Read + Write,
+{
+    let translated = context.state.translate_server_message(text)?;
+    for event in translated.events {
+        if !runtime_gemini_live_send_guarded_json(
+            context.request_id,
+            context.local_socket,
+            event,
+            context.output_inspector,
+            response_obligations,
+            (context.accounting, &mut *context.usage),
+            context.shared,
+            context.authorized,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok((stop_on_setup && translated.setup_complete) || (stop_on_turn && translated.turn_complete))
 }
 
 fn runtime_gemini_live_send_guarded_json<S>(

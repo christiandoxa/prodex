@@ -217,38 +217,25 @@ impl RuntimeGatewayApplication {
         self.shared.gateway_draining.store(true, Ordering::Release);
         self.request_slots.close();
         let deadline = Instant::now() + timeout;
-        let requests_drained = loop {
-            let drained = self.request_slots.available_permits() == self.request_limit
+        let requests_drained = runtime_gateway_wait_until(deadline, || {
+            self.request_slots.available_permits() == self.request_limit
                 && self
                     .shared
                     .gateway_background_task_count
                     .load(Ordering::Acquire)
-                    == 0;
-            if drained || Instant::now() >= deadline {
-                break drained;
-            }
-            thread::sleep(Duration::from_millis(10));
-        };
+                    == 0
+        });
         self.shutdown.store(true, Ordering::Release);
         self.health_slots.close();
-        let health_drained = loop {
-            let drained = self.health_slots.available_permits() == HEALTH_REQUEST_LIMIT;
-            if drained || Instant::now() >= deadline {
-                break drained;
-            }
-            thread::sleep(Duration::from_millis(10));
-        };
-        let workers_finished = loop {
-            let finished = self
-                .worker_threads
+        let health_drained = runtime_gateway_wait_until(deadline, || {
+            self.health_slots.available_permits() == HEALTH_REQUEST_LIMIT
+        });
+        let workers_finished = runtime_gateway_wait_until(deadline, || {
+            self.worker_threads
                 .lock()
                 .map(|workers| workers.iter().all(thread::JoinHandle::is_finished))
-                .unwrap_or(false);
-            if finished || Instant::now() >= deadline {
-                break finished;
-            }
-            thread::sleep(Duration::from_millis(10));
-        };
+                .unwrap_or(false)
+        });
         if workers_finished && let Ok(mut workers) = self.worker_threads.lock() {
             while let Some(worker) = workers.pop() {
                 let _ = worker.join();
@@ -257,6 +244,16 @@ impl RuntimeGatewayApplication {
         let logs_flushed =
             runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path).is_ok();
         requests_drained && health_drained && workers_finished && logs_flushed
+    }
+}
+
+fn runtime_gateway_wait_until(deadline: Instant, mut condition: impl FnMut() -> bool) -> bool {
+    loop {
+        let satisfied = condition();
+        if satisfied || Instant::now() >= deadline {
+            return satisfied;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

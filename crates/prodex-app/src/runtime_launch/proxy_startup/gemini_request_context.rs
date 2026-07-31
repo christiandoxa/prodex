@@ -224,32 +224,8 @@ fn runtime_gemini_at_paths_from_text(text: &str) -> Vec<PathBuf> {
     let bytes = text.as_bytes();
     let mut paths = Vec::new();
     let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != b'@' {
-            index += 1;
-            continue;
-        }
-        let mut start = index.saturating_add(1);
-        let mut end = start;
-        if let Some(quote @ (b'"' | b'\'' | b'`')) = bytes.get(start).copied() {
-            start = start.saturating_add(1);
-            end = start;
-            while end < bytes.len() && bytes[end] != quote {
-                end += 1;
-            }
-            index = end.saturating_add(1);
-        } else {
-            while end < bytes.len()
-                && !bytes[end].is_ascii_whitespace()
-                && !matches!(
-                    bytes[end],
-                    b',' | b';' | b':' | b')' | b']' | b'}' | b'<' | b'>'
-                )
-            {
-                end += 1;
-            }
-            index = end;
-        }
+    while let Some((start, end, next)) = runtime_gemini_at_path_bounds(bytes, index) {
+        index = next;
         if start < end
             && let Some(token) = text.get(start..end)
             && !token.contains('@')
@@ -261,6 +237,30 @@ fn runtime_gemini_at_paths_from_text(text: &str) -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+fn runtime_gemini_at_path_bounds(bytes: &[u8], index: usize) -> Option<(usize, usize, usize)> {
+    let at = index + bytes.get(index..)?.iter().position(|byte| *byte == b'@')?;
+    let mut start = at.saturating_add(1);
+    let quote = matches!(bytes.get(start), Some(b'"' | b'\'' | b'`')).then(|| bytes[start]);
+    if let Some(quote) = quote {
+        start = start.saturating_add(1);
+        let end = bytes
+            .get(start..)
+            .and_then(|rest| rest.iter().position(|byte| *byte == quote))
+            .map_or(bytes.len(), |offset| start + offset);
+        return Some((start, end, end.saturating_add(1)));
+    }
+    let end = bytes
+        .get(start..)
+        .and_then(|rest| {
+            rest.iter().position(|byte| {
+                byte.is_ascii_whitespace()
+                    || matches!(byte, b',' | b';' | b':' | b')' | b']' | b'}' | b'<' | b'>')
+            })
+        })
+        .map_or(bytes.len(), |offset| start + offset);
+    Some((start, end, end))
 }
 
 #[cfg(test)]

@@ -26,7 +26,8 @@ use crate::runtime_anthropic::{
     translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
 };
 use crate::runtime_kiro_acp::{
-    RuntimeKiroAcpClientInfo, RuntimeKiroAcpEnvelope, RuntimeKiroAcpPromptTurnResult,
+    RuntimeKiroAcpClientInfo, RuntimeKiroAcpEnvelope, RuntimeKiroAcpInitializeResult,
+    RuntimeKiroAcpNewSessionResult, RuntimeKiroAcpPromptTurnResult,
     RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
     runtime_kiro_acp_chat_assistant_messages_from_prompt_turn, runtime_kiro_acp_initialize_request,
     runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
@@ -123,53 +124,23 @@ pub(super) fn send_runtime_kiro_upstream_request(
     let chat_completions_route = endpoint == ProviderEndpoint::ChatCompletions;
     let messages_route = endpoint == ProviderEndpoint::Messages;
     if !(endpoint == ProviderEndpoint::Responses || chat_completions_route || messages_route) {
-        return Ok(RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Buffered(runtime_kiro_json_parts(
-                501,
-                prodex_provider_core::kiro_provider_core_unsupported_path_error_value(path),
-            )),
-            gemini_context: None,
-            copilot_context: None,
-        });
+        return Ok(runtime_kiro_unsupported_route_result(path));
     }
     let conversations = shared.deepseek_conversations_for_request(request);
-    let anthropic_request = if messages_route {
-        match translate_runtime_anthropic_messages_request(request) {
-            Ok(translated) => Some(translated),
-            Err(err) => {
-                return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                        build_runtime_anthropic_error_parts(
-                            400,
-                            "invalid_request_error",
-                            &err.to_string(),
-                        ),
-                    ),
-                    gemini_context: None,
-                    copilot_context: None,
-                });
-            }
-        }
-    } else {
-        None
+    let anthropic_request = match runtime_kiro_anthropic_request(request, messages_route) {
+        Ok(translated) => translated,
+        Err(response) => return Ok(response),
     };
     let body = anthropic_request
         .as_ref()
         .map(|translated| translated.translated_request.body.clone())
         .unwrap_or(body);
-    let body = match runtime_kiro_request_body_for_endpoint(endpoint, body) {
+    let body = match runtime_kiro_request_body(endpoint, body) {
         Ok(body) => body,
-        Err(parts) => {
-            return Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                gemini_context: None,
-                copilot_context: None,
-            });
-        }
+        Err(response) => return Ok(response),
     };
     let value: Value =
         serde_json::from_slice(&body).context("failed to parse Codex Responses request JSON")?;
-    let stream = stream_mode == Streaming;
     let translated = runtime_provider_chat_compatible_request_body(
         &body,
         &conversations,
@@ -178,8 +149,70 @@ pub(super) fn send_runtime_kiro_upstream_request(
         false,
         runtime_kiro_rewrite_options(),
     )?;
-    let prompt_messages = translated.messages.clone();
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
+    let prompt_messages = translated.messages;
+    let (requested_model, requested_effort) = runtime_kiro_requested_options(&value);
+    let context = RuntimeKiroRequestContext {
+        request_id,
+        prompt,
+        prompt_messages,
+        auth,
+        requested_model,
+        requested_effort,
+        chat_completions_route,
+        shared,
+        conversations,
+    };
+    if stream_mode == Streaming {
+        return runtime_kiro_streaming_upstream_result(context, anthropic_request);
+    }
+    runtime_kiro_buffered_upstream_result(context, anthropic_request)
+}
+
+fn runtime_kiro_unsupported_route_result(path: &str) -> RuntimeLocalRewriteUpstreamResult {
+    RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Buffered(runtime_kiro_json_parts(
+            501,
+            prodex_provider_core::kiro_provider_core_unsupported_path_error_value(path),
+        )),
+        gemini_context: None,
+        copilot_context: None,
+    }
+}
+
+fn runtime_kiro_anthropic_request(
+    request: &RuntimeProxyRequest,
+    messages_route: bool,
+) -> std::result::Result<Option<RuntimeAnthropicMessagesRequest>, RuntimeLocalRewriteUpstreamResult>
+{
+    if !messages_route {
+        return Ok(None);
+    }
+    translate_runtime_anthropic_messages_request(request)
+        .map(Some)
+        .map_err(|err| RuntimeLocalRewriteUpstreamResult {
+            response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                build_runtime_anthropic_error_parts(400, "invalid_request_error", &err.to_string()),
+            ),
+            gemini_context: None,
+            copilot_context: None,
+        })
+}
+
+fn runtime_kiro_request_body(
+    endpoint: ProviderEndpoint,
+    body: Vec<u8>,
+) -> std::result::Result<Vec<u8>, RuntimeLocalRewriteUpstreamResult> {
+    runtime_kiro_request_body_for_endpoint(endpoint, body).map_err(|parts| {
+        RuntimeLocalRewriteUpstreamResult {
+            response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+            gemini_context: None,
+            copilot_context: None,
+        }
+    })
+}
+
+fn runtime_kiro_requested_options(value: &Value) -> (Option<String>, Option<String>) {
     let requested_model = value
         .get("model")
         .and_then(Value::as_str)
@@ -193,43 +226,69 @@ pub(super) fn send_runtime_kiro_upstream_request(
         .map(str::trim)
         .filter(|effort| !effort.is_empty())
         .map(str::to_string);
-    if stream {
-        let response =
-            RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
-                status: 200,
-                headers: vec![(
-                    "content-type".to_string(),
-                    "text/event-stream; charset=utf-8".to_string(),
-                )],
-                body: Box::new(runtime_kiro_streaming_reader(
-                    request_id,
-                    prompt,
-                    prompt_messages,
-                    auth,
-                    requested_model,
-                    requested_effort,
-                    chat_completions_route,
-                    shared,
-                    conversations.clone(),
-                )?),
-                profile_name: auth.profile_name.clone(),
-            });
-        let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
-            runtime_kiro_anthropic_streaming_local_response(
-                response,
-                anthropic_request,
-                request_id,
-                &shared.runtime_shared,
-            )?
-        } else {
-            response
-        };
-        return Ok(RuntimeLocalRewriteUpstreamResult {
-            response,
-            gemini_context: None,
-            copilot_context: None,
+    (requested_model, requested_effort)
+}
+
+struct RuntimeKiroRequestContext<'a> {
+    request_id: u64,
+    prompt: String,
+    prompt_messages: Vec<Value>,
+    auth: &'a RuntimeKiroProfileAuth,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
+    chat_completions_route: bool,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    conversations: RuntimeDeepSeekConversationStore,
+}
+
+fn runtime_kiro_streaming_upstream_result(
+    context: RuntimeKiroRequestContext<'_>,
+    anthropic_request: Option<RuntimeAnthropicMessagesRequest>,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let request_id = context.request_id;
+    let profile_name = context.auth.profile_name.clone();
+    let shared = context.shared;
+    let response =
+        RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
+            status: 200,
+            headers: vec![(
+                "content-type".to_string(),
+                "text/event-stream; charset=utf-8".to_string(),
+            )],
+            body: Box::new(runtime_kiro_streaming_reader(context)?),
+            profile_name,
         });
-    }
+    let response = match anthropic_request.as_ref() {
+        Some(anthropic_request) => runtime_kiro_anthropic_streaming_local_response(
+            response,
+            anthropic_request,
+            request_id,
+            &shared.runtime_shared,
+        )?,
+        None => response,
+    };
+    Ok(RuntimeLocalRewriteUpstreamResult {
+        response,
+        gemini_context: None,
+        copilot_context: None,
+    })
+}
+
+fn runtime_kiro_buffered_upstream_result(
+    context: RuntimeKiroRequestContext<'_>,
+    anthropic_request: Option<RuntimeAnthropicMessagesRequest>,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let RuntimeKiroRequestContext {
+        request_id,
+        prompt,
+        prompt_messages,
+        auth,
+        requested_model,
+        requested_effort,
+        chat_completions_route,
+        conversations,
+        ..
+    } = context;
     let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
     (|| {
         let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
@@ -269,7 +328,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             runtime_deepseek_store_conversation(
                 &conversations,
                 response_id,
-                translated.messages,
+                prompt_messages,
                 runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
             );
         }
@@ -476,18 +535,20 @@ fn runtime_kiro_anthropic_streaming_local_response(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_reader(
-    request_id: u64,
-    prompt: String,
-    prompt_messages: Vec<Value>,
-    auth: &RuntimeKiroProfileAuth,
-    requested_model: Option<String>,
-    requested_effort: Option<String>,
-    chat_completions_route: bool,
-    shared: &RuntimeLocalRewriteProxyShared,
-    conversations: RuntimeDeepSeekConversationStore,
+    context: RuntimeKiroRequestContext<'_>,
 ) -> Result<RuntimeKiroStreamingReader> {
+    let RuntimeKiroRequestContext {
+        request_id,
+        prompt,
+        prompt_messages,
+        auth,
+        requested_model,
+        requested_effort,
+        chat_completions_route,
+        shared,
+        conversations,
+    } = context;
     let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
     let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret
@@ -545,7 +606,6 @@ fn runtime_kiro_streaming_reader(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_worker(
     sender: SyncSender<RuntimeKiroStreamingChunk>,
     request_id: u64,
@@ -561,253 +621,434 @@ fn runtime_kiro_streaming_worker(
     conversations: RuntimeDeepSeekConversationStore,
     idle_timeout: Duration,
 ) -> Result<()> {
-    let mut acp_command = Command::new(command);
-    acp_command.arg("acp");
-    if let Some(model) = requested_model
-        .as_deref()
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-    {
-        acp_command.arg("--model").arg(model);
-    }
-    if let Some(effort) = requested_effort
-        .as_deref()
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-    {
-        acp_command.arg("--effort").arg(effort);
-    }
-    let mut child = acp_command
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .envs(extra_env.iter().cloned())
-        .spawn()
-        .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
-    let result = (|| -> Result<()> {
-        let mut stdin = BufWriter::new(
-            child
-                .stdin
-                .take()
-                .context("failed to capture Kiro ACP stdin")?,
-        );
-        writeln!(
-            stdin,
-            "{}",
-            runtime_kiro_acp_initialize_request(
-                0,
-                RuntimeKiroAcpClientInfo {
-                    name: "prodex",
-                    title: "Prodex",
-                    version: env!("CARGO_PKG_VERSION"),
-                },
-            )
-        )
-        .context("failed to write Kiro ACP initialize request")?;
-        writeln!(stdin, "{}", runtime_kiro_acp_session_new_request(1, cwd))
-            .context("failed to write Kiro ACP session/new request")?;
-        stdin
-            .flush()
-            .context("failed to flush initial Kiro ACP streaming requests")?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .context("failed to capture Kiro ACP stdout")?;
-        let lines = runtime_kiro_acp_line_receiver(stdout);
-        let mut initialize = None;
-        let mut session = None;
-        let mut prompt_response = None;
-        let mut notifications = Vec::new();
-        let response_id = format!("resp_kiro_{request_id}");
-        let created_at = runtime_kiro_created_at();
-        let mut sequence_number = 0_u64;
-        let message_item_id = format!("msg_kiro_{request_id}_0");
-        let mut message_item_open = false;
-        let mut assistant_text = String::new();
-        let mut added_tool_calls = BTreeSet::new();
-        let mut delta_tool_calls = BTreeSet::new();
-        let mut done_tool_calls = BTreeSet::new();
-        let mut prompt_sent = false;
-        let mut chat_delta_started = false;
-        let chat_completion_id = format!("chatcmpl_{response_id}");
-        let stream_model = requested_model
-            .clone()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "kiro-cli".to_string());
-
-        loop {
-            let line = match lines.recv_timeout(idle_timeout) {
-                Ok(Ok(line)) => line,
-                Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    anyhow::bail!("Kiro ACP stream timed out waiting for output")
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            };
-            let current = line.trim();
-            if current.is_empty() {
-                continue;
-            }
-            let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
-            if !prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
-                let parsed_session = envelope.parse_session_new_result()?;
-                writeln!(
-                    stdin,
-                    "{}",
-                    runtime_kiro_acp_session_prompt_request(2, &parsed_session.session_id, prompt)
-                )
-                .context("failed to write Kiro ACP session/prompt request")?;
-                stdin
-                    .flush()
-                    .context("failed to flush Kiro ACP session/prompt request")?;
-                prompt_sent = true;
-                session = Some(parsed_session);
-                if chat_completions_route {
-                    sender.send(RuntimeKiroStreamingChunk::Data(
-                        runtime_kiro_chat_completion_chunk(
-                            &chat_completion_id,
-                            Some(&stream_model),
-                            prodex_provider_core::kiro_provider_core_chat_completion_role_delta(),
-                            None,
-                        )?,
-                    ))?;
-                    chat_delta_started = true;
-                } else {
-                    sender.send(RuntimeKiroStreamingChunk::Data(
-                        runtime_provider_sse_event(
-                            "response.created",
-                            prodex_provider_core::kiro_provider_core_response_created_event(
-                                sequence_number,
-                                created_at,
-                                &response_id,
-                            ),
-                        )
-                        .into_bytes(),
-                    ))?;
-                }
-                continue;
-            }
-            match envelope.id {
-                Some(0) if envelope.error.is_none() => {
-                    initialize = Some(envelope.parse_initialize_result()?);
-                }
-                Some(1) if envelope.error.is_none() => {
-                    session = Some(envelope.parse_session_new_result()?);
-                }
-                Some(2) => {
-                    prompt_response = Some(envelope);
-                    break;
-                }
-                _ => {
-                    if let Ok(notification) = envelope.parse_session_notification() {
-                        runtime_kiro_stream_notification(
-                            &sender,
-                            &notification,
-                            &response_id,
-                            &chat_completion_id,
-                            &stream_model,
-                            created_at,
-                            &message_item_id,
-                            &mut sequence_number,
-                            &mut message_item_open,
-                            &mut assistant_text,
-                            &mut added_tool_calls,
-                            &mut delta_tool_calls,
-                            &mut done_tool_calls,
-                            chat_completions_route,
-                            &mut chat_delta_started,
-                        )?;
-                    }
-                    notifications.push(envelope);
-                }
-            }
-        }
-        drop(stdin);
-
-        if message_item_open {
-            sequence_number += 1;
-            sender.send(RuntimeKiroStreamingChunk::Data(
-                runtime_provider_sse_output_text_item_done_event(
-                    sequence_number,
-                    &response_id,
-                    &message_item_id,
-                    &assistant_text,
-                )
-                .into_bytes(),
-            ))?;
-        }
-
-        let initialize =
-            initialize.context("Kiro ACP streaming turn did not return initialize result")?;
-        let session =
-            session.context("Kiro ACP streaming turn did not return session/new result")?;
-        let prompt_response = prompt_response
-            .context("Kiro ACP streaming turn did not return session/prompt response")?;
-        let turn = RuntimeKiroAcpPromptTurnResult {
-            initialize,
-            session,
-            prompt_response,
-            notifications,
-        };
-        let mut response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
-        prodex_provider_core::kiro_provider_core_apply_response_runtime_metadata(
-            &mut response,
+    let mut child = runtime_kiro_streaming_command(
+        command,
+        requested_model.as_deref(),
+        requested_effort.as_deref(),
+    )
+    .current_dir(cwd)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .envs(extra_env.iter().cloned())
+    .spawn()
+    .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
+    let result = runtime_kiro_streaming_child(
+        &mut child,
+        RuntimeKiroStreamingContext {
+            request_id,
+            prompt,
+            prompt_messages,
+            cwd,
             profile_name,
-            requested_model.as_deref(),
-            Some(created_at),
-        );
-        if response.get("status").and_then(Value::as_str) != Some("failed")
-            && let Some(response_id_value) = response.get("id").and_then(Value::as_str)
-        {
-            runtime_deepseek_store_conversation(
-                &conversations,
-                response_id_value,
-                prompt_messages,
-                runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
-            );
-        }
-        if chat_completions_route {
-            let has_tool_calls =
-                prodex_provider_core::kiro_provider_core_response_has_tool_calls(&response);
-            sender.send(RuntimeKiroStreamingChunk::Data(
-                runtime_kiro_chat_completion_chunk(
-                    &chat_completion_id,
-                    None,
-                    prodex_provider_core::kiro_provider_core_chat_completion_empty_delta(),
-                    Some(runtime_kiro_chat_completion_finish_reason(
-                        &response,
-                        has_tool_calls,
-                    )),
-                )?,
-            ))?;
-            sender.send(RuntimeKiroStreamingChunk::Data(
-                b"data: [DONE]\n\n".to_vec(),
-            ))?;
-        } else {
-            sequence_number += 1;
-            sender.send(RuntimeKiroStreamingChunk::Data(
-                runtime_provider_sse_event(
-                    "response.completed",
-                    prodex_provider_core::kiro_provider_core_response_completed_event(
-                        sequence_number,
-                        created_at,
-                        &response,
-                    ),
-                )
-                .into_bytes(),
-            ))?;
-            sender.send(RuntimeKiroStreamingChunk::Data(
-                b"data: [DONE]\r\n\r\n".to_vec(),
-            ))?;
-        }
-        sender.send(RuntimeKiroStreamingChunk::End)?;
-        Ok(())
-    })();
+            requested_model,
+            chat_completions_route,
+            conversations,
+            idle_timeout,
+        },
+        sender,
+    );
     let _ = child.kill();
     let _ = child.wait();
     result
+}
+
+fn runtime_kiro_streaming_command(
+    command: &Path,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Command {
+    let mut acp_command = Command::new(command);
+    acp_command.arg("acp");
+    if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
+        acp_command.arg("--model").arg(model);
+    }
+    if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
+        acp_command.arg("--effort").arg(effort);
+    }
+    acp_command
+}
+
+struct RuntimeKiroStreamingContext<'a> {
+    request_id: u64,
+    prompt: &'a str,
+    prompt_messages: Vec<Value>,
+    cwd: &'a Path,
+    profile_name: &'a str,
+    requested_model: Option<String>,
+    chat_completions_route: bool,
+    conversations: RuntimeDeepSeekConversationStore,
+    idle_timeout: Duration,
+}
+
+fn runtime_kiro_streaming_child(
+    child: &mut std::process::Child,
+    context: RuntimeKiroStreamingContext<'_>,
+    sender: SyncSender<RuntimeKiroStreamingChunk>,
+) -> Result<()> {
+    let RuntimeKiroStreamingContext {
+        request_id,
+        prompt,
+        prompt_messages,
+        cwd,
+        profile_name,
+        requested_model,
+        chat_completions_route,
+        conversations,
+        idle_timeout,
+    } = context;
+    let mut stdin = BufWriter::new(
+        child
+            .stdin
+            .take()
+            .context("failed to capture Kiro ACP stdin")?,
+    );
+    writeln!(
+        stdin,
+        "{}",
+        runtime_kiro_acp_initialize_request(
+            0,
+            RuntimeKiroAcpClientInfo {
+                name: "prodex",
+                title: "Prodex",
+                version: env!("CARGO_PKG_VERSION"),
+            },
+        )
+    )
+    .context("failed to write Kiro ACP initialize request")?;
+    writeln!(stdin, "{}", runtime_kiro_acp_session_new_request(1, cwd))
+        .context("failed to write Kiro ACP session/new request")?;
+    stdin
+        .flush()
+        .context("failed to flush initial Kiro ACP streaming requests")?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("failed to capture Kiro ACP stdout")?;
+    let lines = runtime_kiro_acp_line_receiver(stdout);
+    let mut state = RuntimeKiroStreamingState::new(request_id, requested_model.as_deref());
+    runtime_kiro_receive_stream(
+        &sender,
+        &mut stdin,
+        lines,
+        prompt,
+        &mut state,
+        chat_completions_route,
+        idle_timeout,
+    )?;
+    drop(stdin);
+    runtime_kiro_finish_stream(
+        sender,
+        RuntimeKiroStreamingContext {
+            request_id,
+            prompt,
+            prompt_messages,
+            cwd,
+            profile_name,
+            requested_model,
+            chat_completions_route,
+            conversations,
+            idle_timeout,
+        },
+        state,
+    )
+}
+
+struct RuntimeKiroStreamingState {
+    initialize: Option<RuntimeKiroAcpInitializeResult>,
+    session: Option<RuntimeKiroAcpNewSessionResult>,
+    prompt_response: Option<RuntimeKiroAcpEnvelope>,
+    notifications: Vec<RuntimeKiroAcpEnvelope>,
+    response_id: String,
+    created_at: u64,
+    sequence_number: u64,
+    message_item_id: String,
+    message_item_open: bool,
+    assistant_text: String,
+    added_tool_calls: BTreeSet<String>,
+    delta_tool_calls: BTreeSet<String>,
+    done_tool_calls: BTreeSet<String>,
+    prompt_sent: bool,
+    chat_delta_started: bool,
+    chat_completion_id: String,
+    stream_model: String,
+}
+
+impl RuntimeKiroStreamingState {
+    fn new(request_id: u64, requested_model: Option<&str>) -> Self {
+        let response_id = format!("resp_kiro_{request_id}");
+        Self {
+            initialize: None,
+            session: None,
+            prompt_response: None,
+            notifications: Vec::new(),
+            response_id: response_id.clone(),
+            created_at: runtime_kiro_created_at(),
+            sequence_number: 0,
+            message_item_id: format!("msg_kiro_{request_id}_0"),
+            message_item_open: false,
+            assistant_text: String::new(),
+            added_tool_calls: BTreeSet::new(),
+            delta_tool_calls: BTreeSet::new(),
+            done_tool_calls: BTreeSet::new(),
+            prompt_sent: false,
+            chat_delta_started: false,
+            chat_completion_id: format!("chatcmpl_{response_id}"),
+            stream_model: requested_model
+                .filter(|model| !model.is_empty())
+                .unwrap_or("kiro-cli")
+                .to_string(),
+        }
+    }
+}
+
+fn runtime_kiro_receive_stream(
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
+    stdin: &mut impl Write,
+    lines: Receiver<io::Result<String>>,
+    prompt: &str,
+    state: &mut RuntimeKiroStreamingState,
+    chat_completions_route: bool,
+    idle_timeout: Duration,
+) -> Result<()> {
+    loop {
+        let Some(line) = runtime_kiro_next_stream_line(&lines, idle_timeout)? else {
+            break;
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        runtime_kiro_process_stream_envelope(
+            sender,
+            stdin,
+            RuntimeKiroAcpEnvelope::parse(line.trim())?,
+            prompt,
+            state,
+            chat_completions_route,
+        )?;
+        if state.prompt_response.is_some() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn runtime_kiro_next_stream_line(
+    lines: &Receiver<io::Result<String>>,
+    idle_timeout: Duration,
+) -> Result<Option<String>> {
+    match lines.recv_timeout(idle_timeout) {
+        Ok(Ok(line)) => Ok(Some(line)),
+        Ok(Err(error)) => Err(error).context("failed to read Kiro ACP stdout"),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            anyhow::bail!("Kiro ACP stream timed out waiting for output")
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+    }
+}
+
+fn runtime_kiro_process_stream_envelope(
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
+    stdin: &mut impl Write,
+    envelope: RuntimeKiroAcpEnvelope,
+    prompt: &str,
+    state: &mut RuntimeKiroStreamingState,
+    chat_completions_route: bool,
+) -> Result<()> {
+    if !state.prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
+        return runtime_kiro_send_stream_prompt(
+            sender,
+            stdin,
+            envelope.parse_session_new_result()?,
+            prompt,
+            state,
+            chat_completions_route,
+        );
+    }
+    match envelope.id {
+        Some(0) if envelope.error.is_none() => {
+            state.initialize = Some(envelope.parse_initialize_result()?);
+        }
+        Some(1) if envelope.error.is_none() => {
+            state.session = Some(envelope.parse_session_new_result()?);
+        }
+        Some(2) => state.prompt_response = Some(envelope),
+        _ => {
+            if let Ok(notification) = envelope.parse_session_notification() {
+                runtime_kiro_stream_notification(
+                    sender,
+                    &notification,
+                    &state.response_id,
+                    &state.chat_completion_id,
+                    &state.stream_model,
+                    state.created_at,
+                    &state.message_item_id,
+                    &mut state.sequence_number,
+                    &mut state.message_item_open,
+                    &mut state.assistant_text,
+                    &mut state.added_tool_calls,
+                    &mut state.delta_tool_calls,
+                    &mut state.done_tool_calls,
+                    chat_completions_route,
+                    &mut state.chat_delta_started,
+                )?;
+            }
+            state.notifications.push(envelope);
+        }
+    }
+    Ok(())
+}
+
+fn runtime_kiro_send_stream_prompt(
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
+    stdin: &mut impl Write,
+    session: RuntimeKiroAcpNewSessionResult,
+    prompt: &str,
+    state: &mut RuntimeKiroStreamingState,
+    chat_completions_route: bool,
+) -> Result<()> {
+    writeln!(
+        stdin,
+        "{}",
+        runtime_kiro_acp_session_prompt_request(2, &session.session_id, prompt)
+    )
+    .context("failed to write Kiro ACP session/prompt request")?;
+    stdin
+        .flush()
+        .context("failed to flush Kiro ACP session/prompt request")?;
+    state.prompt_sent = true;
+    state.session = Some(session);
+    if chat_completions_route {
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            runtime_kiro_chat_completion_chunk(
+                &state.chat_completion_id,
+                Some(&state.stream_model),
+                prodex_provider_core::kiro_provider_core_chat_completion_role_delta(),
+                None,
+            )?,
+        ))?;
+        state.chat_delta_started = true;
+    } else {
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            runtime_provider_sse_event(
+                "response.created",
+                prodex_provider_core::kiro_provider_core_response_created_event(
+                    state.sequence_number,
+                    state.created_at,
+                    &state.response_id,
+                ),
+            )
+            .into_bytes(),
+        ))?;
+    }
+    Ok(())
+}
+
+fn runtime_kiro_finish_stream(
+    sender: SyncSender<RuntimeKiroStreamingChunk>,
+    context: RuntimeKiroStreamingContext<'_>,
+    mut state: RuntimeKiroStreamingState,
+) -> Result<()> {
+    let RuntimeKiroStreamingContext {
+        request_id,
+        prompt_messages,
+        profile_name,
+        requested_model,
+        chat_completions_route,
+        conversations,
+        ..
+    } = context;
+    if state.message_item_open {
+        state.sequence_number += 1;
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            runtime_provider_sse_output_text_item_done_event(
+                state.sequence_number,
+                &state.response_id,
+                &state.message_item_id,
+                &state.assistant_text,
+            )
+            .into_bytes(),
+        ))?;
+    }
+    let turn = RuntimeKiroAcpPromptTurnResult {
+        initialize: state
+            .initialize
+            .take()
+            .context("Kiro ACP streaming turn did not return initialize result")?,
+        session: state
+            .session
+            .take()
+            .context("Kiro ACP streaming turn did not return session/new result")?,
+        prompt_response: state
+            .prompt_response
+            .take()
+            .context("Kiro ACP streaming turn did not return session/prompt response")?,
+        notifications: std::mem::take(&mut state.notifications),
+    };
+    let mut response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
+    prodex_provider_core::kiro_provider_core_apply_response_runtime_metadata(
+        &mut response,
+        profile_name,
+        requested_model.as_deref(),
+        Some(state.created_at),
+    );
+    if response.get("status").and_then(Value::as_str) != Some("failed")
+        && let Some(response_id) = response.get("id").and_then(Value::as_str)
+    {
+        runtime_deepseek_store_conversation(
+            &conversations,
+            response_id,
+            prompt_messages,
+            runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
+        );
+    }
+    runtime_kiro_send_final_stream(&sender, &response, &mut state, chat_completions_route)?;
+    sender.send(RuntimeKiroStreamingChunk::End)?;
+    Ok(())
+}
+
+fn runtime_kiro_send_final_stream(
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
+    response: &Value,
+    state: &mut RuntimeKiroStreamingState,
+    chat_completions_route: bool,
+) -> Result<()> {
+    if chat_completions_route {
+        let has_tool_calls =
+            prodex_provider_core::kiro_provider_core_response_has_tool_calls(response);
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            runtime_kiro_chat_completion_chunk(
+                &state.chat_completion_id,
+                None,
+                prodex_provider_core::kiro_provider_core_chat_completion_empty_delta(),
+                Some(runtime_kiro_chat_completion_finish_reason(
+                    response,
+                    has_tool_calls,
+                )),
+            )?,
+        ))?;
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            b"data: [DONE]\n\n".to_vec(),
+        ))?;
+    } else {
+        state.sequence_number += 1;
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            runtime_provider_sse_event(
+                "response.completed",
+                prodex_provider_core::kiro_provider_core_response_completed_event(
+                    state.sequence_number,
+                    state.created_at,
+                    response,
+                ),
+            )
+            .into_bytes(),
+        ))?;
+        sender.send(RuntimeKiroStreamingChunk::Data(
+            b"data: [DONE]\r\n\r\n".to_vec(),
+        ))?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

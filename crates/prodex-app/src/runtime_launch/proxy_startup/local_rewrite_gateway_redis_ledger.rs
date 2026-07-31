@@ -234,34 +234,7 @@ fn runtime_gateway_redis_ensure_ledger_id_index_from_connection(
     }
 
     if !ids.is_empty() {
-        let entry_keys = ids
-            .iter()
-            .map(|id| runtime_gateway_redis_ledger_entry_key(ledger_key, id))
-            .collect::<Vec<_>>();
-        let payloads: Vec<Option<String>> = redis::cmd("MGET").arg(&entry_keys).query(conn)?;
-        let mut call_indexes = Vec::with_capacity(ids.len());
-        for (id, payload) in ids.iter().zip(payloads) {
-            let payload = payload.ok_or_else(|| {
-                anyhow::anyhow!("gateway redis ledger index references a missing entry")
-            })?;
-            let entry = serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(&payload)
-                .context("failed to parse gateway redis ledger entry during ID-index backfill")?;
-            if runtime_gateway_redis_ledger_entry_id(&entry) != id.as_str() {
-                anyhow::bail!("gateway redis ledger entry identity does not match its index");
-            }
-            call_indexes.push(runtime_gateway_redis_ledger_call_index_key(
-                ledger_key,
-                &entry.call_id,
-            ));
-        }
-        let mut membership = redis::pipe();
-        for (call_index, id) in call_indexes.iter().zip(&ids) {
-            membership.cmd("SISMEMBER").arg(call_index).arg(id);
-        }
-        let call_members: Vec<bool> = membership.query(conn)?;
-        if call_members.iter().any(|member| !member) {
-            anyhow::bail!("gateway redis ledger entry is missing from its call index");
-        }
+        runtime_gateway_redis_validate_index_entries(conn, ledger_key, &ids)?;
     }
 
     let _: usize = redis::cmd("EVAL")
@@ -273,6 +246,42 @@ fn runtime_gateway_redis_ensure_ledger_id_index_from_connection(
         .arg(&ids)
         .query(conn)?;
     runtime_gateway_redis_validate_ledger_id_index_counts(conn, ledger_key)
+}
+
+fn runtime_gateway_redis_validate_index_entries(
+    conn: &mut redis::Connection,
+    ledger_key: &str,
+    ids: &[String],
+) -> Result<()> {
+    let entry_keys = ids
+        .iter()
+        .map(|id| runtime_gateway_redis_ledger_entry_key(ledger_key, id))
+        .collect::<Vec<_>>();
+    let payloads: Vec<Option<String>> = redis::cmd("MGET").arg(&entry_keys).query(conn)?;
+    let mut call_indexes = Vec::with_capacity(ids.len());
+    for (id, payload) in ids.iter().zip(payloads) {
+        let payload = payload.ok_or_else(|| {
+            anyhow::anyhow!("gateway redis ledger index references a missing entry")
+        })?;
+        let entry = serde_json::from_str::<RuntimeGatewayBillingLedgerEntry>(&payload)
+            .context("failed to parse gateway redis ledger entry during ID-index backfill")?;
+        if runtime_gateway_redis_ledger_entry_id(&entry) != id.as_str() {
+            anyhow::bail!("gateway redis ledger entry identity does not match its index");
+        }
+        call_indexes.push(runtime_gateway_redis_ledger_call_index_key(
+            ledger_key,
+            &entry.call_id,
+        ));
+    }
+    let mut membership = redis::pipe();
+    for (call_index, id) in call_indexes.iter().zip(ids) {
+        membership.cmd("SISMEMBER").arg(call_index).arg(id);
+    }
+    let call_members: Vec<bool> = membership.query(conn)?;
+    if call_members.iter().any(|member| !member) {
+        anyhow::bail!("gateway redis ledger entry is missing from its call index");
+    }
+    Ok(())
 }
 
 fn runtime_gateway_redis_validate_ledger_id_index_counts(

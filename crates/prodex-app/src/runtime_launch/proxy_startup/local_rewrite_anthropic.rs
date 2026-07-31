@@ -2,7 +2,7 @@ use super::anthropic_rewrite::RuntimeAnthropicProviderAuth;
 use super::chat_compatible_rewrite::{
     RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
 };
-use super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
+use super::deepseek_rewrite::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingRequest};
 use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
@@ -52,6 +52,12 @@ struct AnthropicResponsesPlan {
     model_chain: Vec<String>,
     chat_upstream_url: String,
     messages_upstream_url: String,
+}
+
+struct AnthropicSendContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeLocalRewriteProxyShared,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -220,101 +226,27 @@ fn send_responses_attempts(
     let auth_count = auth_attempts.len();
     let mut cursor = AnthropicAttemptCursor::new(auth_count, model_chain.len());
     let conversations = shared.deepseek_conversations_for_request(request);
+    let context = AnthropicSendContext {
+        request_id,
+        request,
+        shared,
+    };
     while let Some(attempt) = cursor.current() {
         let selected_auth = &auth_attempts[attempt.auth_index];
         let model = &model_chain[attempt.model_index];
-        let model_body = runtime_provider_request_body_with_model(&body, model);
-        let harness_policy = harness_provider_policy(
-            shared.resolved_harness.effective,
-            ProviderId::Anthropic,
-            Some(model),
-        );
-        let native_messages = harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
-        let translated = runtime_provider_chat_compatible_request_body(
-            &model_body,
+        let Some(prepared) = prepare_anthropic_attempt(
+            &context,
+            &body,
             &conversations,
-            RuntimeProviderBridgeKind::Anthropic,
-            prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
-            false,
-            RuntimeDeepSeekRewriteOptions::default(),
-        )?;
-        let provider_core_result = if native_messages {
-            let mut input =
-                ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
-            input.model = Some(model.clone());
-            Some(translate_openai_chat_request_to_anthropic_messages(input))
-        } else {
-            runtime_provider_request_conformance_result(
-                RuntimeProviderBridgeKind::Anthropic,
-                request,
-                &model_body,
-            )
+            model,
+            &chat_upstream_url,
+            &messages_upstream_url,
+        )?
+        else {
+            return Ok(incompatible_native_translation());
         };
-        if let Some(result) = provider_core_result.as_ref() {
-            runtime_provider_log_request_conformance(
-                &shared.runtime_shared,
-                request_id,
-                RuntimeProviderBridgeKind::Anthropic,
-                result,
-            );
-        }
-        runtime_harness_log_provider_policy(
-            &shared.runtime_shared,
-            request_id,
-            RuntimeHarnessProviderPolicyLog {
-                provider: ProviderId::Anthropic,
-                endpoint: ProviderEndpoint::Responses,
-                model,
-                phase: "request-translation",
-                policy: harness_policy,
-                applied: native_messages
-                    && provider_core_lossless_body(provider_core_result.as_ref()).is_some(),
-            },
-        );
-        let upstream_body = match provider_core_lossless_body(provider_core_result.as_ref()) {
-            Some(body) => body,
-            None if !native_messages => translated.body.clone(),
-            None => return Ok(incompatible_native_translation()),
-        };
-        let upstream_url = if native_messages {
-            &messages_upstream_url
-        } else {
-            &chat_upstream_url
-        };
-        let send_result = send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
-            RuntimeLocalRewriteSearchFallbackRequest {
-                request_id,
-                request,
-                shared,
-                upstream_url,
-                body: upstream_body,
-                provider_kind: RuntimeProviderBridgeKind::Anthropic,
-                auth_label: selected_auth.label.as_str(),
-                model,
-                auth_factory: || RuntimeLocalRewritePreparedAuth::Anthropic {
-                    auth: &selected_auth.auth,
-                    native_messages,
-                },
-            },
-        );
-        let outcome = match send_result {
-            Ok(RuntimeLocalRewritePreparedSendResult::Live(response)) => {
-                AnthropicAttemptOutcome::SuccessfulLive {
-                    response,
-                    native_messages,
-                    pending_request: RuntimeDeepSeekPendingRequest {
-                        messages: translated.messages,
-                        response_metadata: translated.response_metadata,
-                    },
-                }
-            }
-            Ok(RuntimeLocalRewritePreparedSendResult::Error {
-                status,
-                parts,
-                class,
-            }) => classify_buffered_outcome(attempt, &cursor, status, parts, class),
-            Err(error) => AnthropicAttemptOutcome::InternalFailure(error),
-        };
+        let outcome =
+            send_anthropic_attempt(&context, selected_auth, model, attempt, &cursor, prepared);
         match outcome {
             AnthropicAttemptOutcome::ModelFallback { status, class } => {
                 log_model_fallback(
@@ -348,6 +280,136 @@ fn send_responses_attempts(
         }
     }
     anyhow::bail!("no Anthropic model attempts were available")
+}
+
+struct AnthropicPreparedAttempt<'a> {
+    upstream_url: &'a str,
+    upstream_body: Vec<u8>,
+    native_messages: bool,
+    pending_request: RuntimeDeepSeekPendingRequest,
+}
+
+fn prepare_anthropic_attempt<'a>(
+    context: &AnthropicSendContext<'_>,
+    body: &[u8],
+    conversations: &RuntimeDeepSeekConversationStore,
+    model: &str,
+    chat_upstream_url: &'a str,
+    messages_upstream_url: &'a str,
+) -> Result<Option<AnthropicPreparedAttempt<'a>>> {
+    let model_body = runtime_provider_request_body_with_model(body, model);
+    let harness_policy = harness_provider_policy(
+        context.shared.resolved_harness.effective,
+        ProviderId::Anthropic,
+        Some(model),
+    );
+    let native_messages = harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
+    let translated = runtime_provider_chat_compatible_request_body(
+        &model_body,
+        conversations,
+        RuntimeProviderBridgeKind::Anthropic,
+        prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
+        false,
+        RuntimeDeepSeekRewriteOptions::default(),
+    )?;
+    let provider_core_result = if native_messages {
+        let mut input =
+            ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
+        input.model = Some(model.to_string());
+        Some(translate_openai_chat_request_to_anthropic_messages(input))
+    } else {
+        runtime_provider_request_conformance_result(
+            RuntimeProviderBridgeKind::Anthropic,
+            context.request,
+            &model_body,
+        )
+    };
+    if let Some(result) = provider_core_result.as_ref() {
+        runtime_provider_log_request_conformance(
+            &context.shared.runtime_shared,
+            context.request_id,
+            RuntimeProviderBridgeKind::Anthropic,
+            result,
+        );
+    }
+    runtime_harness_log_provider_policy(
+        &context.shared.runtime_shared,
+        context.request_id,
+        RuntimeHarnessProviderPolicyLog {
+            provider: ProviderId::Anthropic,
+            endpoint: ProviderEndpoint::Responses,
+            model,
+            phase: "request-translation",
+            policy: harness_policy,
+            applied: native_messages
+                && provider_core_lossless_body(provider_core_result.as_ref()).is_some(),
+        },
+    );
+    let Some(upstream_body) = provider_core_lossless_body(provider_core_result.as_ref())
+        .or_else(|| (!native_messages).then(|| translated.body.clone()))
+    else {
+        return Ok(None);
+    };
+    Ok(Some(AnthropicPreparedAttempt {
+        upstream_url: if native_messages {
+            messages_upstream_url
+        } else {
+            chat_upstream_url
+        },
+        upstream_body,
+        native_messages,
+        pending_request: RuntimeDeepSeekPendingRequest {
+            messages: translated.messages,
+            response_metadata: translated.response_metadata,
+        },
+    }))
+}
+
+fn send_anthropic_attempt(
+    context: &AnthropicSendContext<'_>,
+    selected_auth: &RuntimeLocalRewriteSelectedAnthropicAuth,
+    model: &str,
+    attempt: AnthropicAttempt,
+    cursor: &AnthropicAttemptCursor,
+    prepared: AnthropicPreparedAttempt<'_>,
+) -> AnthropicAttemptOutcome {
+    let AnthropicPreparedAttempt {
+        upstream_url,
+        upstream_body,
+        native_messages,
+        pending_request,
+    } = prepared;
+    let send_result = send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
+        RuntimeLocalRewriteSearchFallbackRequest {
+            request_id: context.request_id,
+            request: context.request,
+            shared: context.shared,
+            upstream_url,
+            body: upstream_body,
+            provider_kind: RuntimeProviderBridgeKind::Anthropic,
+            auth_label: selected_auth.label.as_str(),
+            model,
+            auth_factory: || RuntimeLocalRewritePreparedAuth::Anthropic {
+                auth: &selected_auth.auth,
+                native_messages,
+            },
+        },
+    );
+    match send_result {
+        Ok(RuntimeLocalRewritePreparedSendResult::Live(response)) => {
+            AnthropicAttemptOutcome::SuccessfulLive {
+                response,
+                native_messages,
+                pending_request,
+            }
+        }
+        Ok(RuntimeLocalRewritePreparedSendResult::Error {
+            status,
+            parts,
+            class,
+        }) => classify_buffered_outcome(attempt, cursor, status, parts, class),
+        Err(error) => AnthropicAttemptOutcome::InternalFailure(error),
+    }
 }
 
 fn classify_buffered_outcome(

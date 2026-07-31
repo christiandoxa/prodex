@@ -34,6 +34,13 @@ use prodex_provider_core::{
 };
 use std::collections::BTreeSet;
 
+struct RuntimeProviderChatCompatibleMessages {
+    messages: Vec<serde_json::Value>,
+    response_format: Option<serde_json::Value>,
+    response_metadata: Option<serde_json::Value>,
+    thinking_enabled: bool,
+}
+
 pub(super) fn runtime_provider_chat_compatible_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
@@ -65,51 +72,18 @@ pub(super) fn runtime_provider_chat_compatible_request_body(
         .unwrap_or(false);
     request.insert("model".to_string(), serde_json::Value::String(model));
     request.insert("stream".to_string(), serde_json::Value::Bool(stream));
-    let thinking_enabled = deepseek_provider_core_thinking_enabled(&value);
-    let mut messages = runtime_deepseek_messages_from_responses_request(
+    let RuntimeProviderChatCompatibleMessages {
+        messages,
+        response_format,
+        response_metadata,
+        thinking_enabled,
+    } = runtime_provider_chat_compatible_messages(
         &value,
         conversations,
-        gemini_compat,
         provider_kind,
-    )?
-    .unwrap_or_else(|| {
-        vec![serde_json::json!({
-            "role": "user",
-            "content": "",
-        })]
-    });
-    deepseek_provider_core_repair_tool_call_adjacency(&mut messages);
-    if provider_kind == RuntimeProviderBridgeKind::Gemini {
-        gemini_provider_core_preserve_tool_call_signatures(&mut messages);
-    }
-    if messages.is_empty() {
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": "",
-        }));
-    }
-    if thinking_enabled {
-        deepseek_provider_core_normalize_thinking_tool_call_messages(&mut messages);
-    }
-    let response_format =
-        deepseek_provider_core_response_format_from_responses_request(&value, provider_label)
-            .map_err(anyhow::Error::msg)?;
-    let mut response_metadata = deepseek_provider_core_response_metadata_from_responses_request(
-        &value,
         provider_label,
         provider_key,
-    )
-    .map_err(anyhow::Error::msg)?;
-    deepseek_provider_core_note_thinking_tool_choice_omission(
-        &value,
-        thinking_enabled,
-        provider_label,
-        provider_key,
-        &mut response_metadata,
-    );
-    if response_format.is_some() {
-        deepseek_provider_core_ensure_json_prompt_instruction(&mut messages);
-    }
+    )?;
     request.insert(
         "messages".to_string(),
         serde_json::Value::Array(messages.clone()),
@@ -124,9 +98,116 @@ pub(super) fn runtime_provider_chat_compatible_request_body(
         .map_err(anyhow::Error::msg)?;
     }
     let mut tool_names = BTreeSet::new();
-    deepseek_provider_core_validate_tools_shape(&value, gemini_compat, provider_label)
+    runtime_provider_chat_compatible_tools(
+        &value,
+        &mut request,
+        &mut tool_names,
+        options,
+        provider_kind,
+        gemini_compat,
+        provider_label,
+    )?;
+    runtime_provider_chat_compatible_tool_choice(
+        &value,
+        &mut request,
+        &tool_names,
+        thinking_enabled,
+        provider_label,
+    )?;
+    runtime_provider_chat_compatible_optional_fields(
+        &value,
+        &mut request,
+        stream,
+        response_format,
+        gemini_compat,
+        provider_label,
+    )?;
+    let body = serde_json::to_vec(&serde_json::Value::Object(request)).with_context(|| {
+        format!(
+            "failed to serialize {} chat request JSON",
+            provider_kind.chat_compatible_adapter_label()
+        )
+    })?;
+    Ok(RuntimeDeepSeekTranslatedRequest {
+        body,
+        messages,
+        response_metadata,
+    })
+}
+
+fn runtime_provider_chat_compatible_messages(
+    value: &serde_json::Value,
+    conversations: &RuntimeDeepSeekConversationStore,
+    provider_kind: RuntimeProviderBridgeKind,
+    provider_label: &str,
+    provider_key: &str,
+) -> Result<RuntimeProviderChatCompatibleMessages> {
+    let gemini_compat = provider_kind == RuntimeProviderBridgeKind::Gemini;
+    let thinking_enabled = deepseek_provider_core_thinking_enabled(value);
+    let mut messages = runtime_deepseek_messages_from_responses_request(
+        value,
+        conversations,
+        gemini_compat,
+        provider_kind,
+    )?
+    .unwrap_or_else(|| {
+        vec![serde_json::json!({
+            "role": "user",
+            "content": "",
+        })]
+    });
+    deepseek_provider_core_repair_tool_call_adjacency(&mut messages);
+    if gemini_compat {
+        gemini_provider_core_preserve_tool_call_signatures(&mut messages);
+    }
+    if messages.is_empty() {
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": "",
+        }));
+    }
+    if thinking_enabled {
+        deepseek_provider_core_normalize_thinking_tool_call_messages(&mut messages);
+    }
+    let response_format =
+        deepseek_provider_core_response_format_from_responses_request(value, provider_label)
+            .map_err(anyhow::Error::msg)?;
+    let mut response_metadata = deepseek_provider_core_response_metadata_from_responses_request(
+        value,
+        provider_label,
+        provider_key,
+    )
+    .map_err(anyhow::Error::msg)?;
+    deepseek_provider_core_note_thinking_tool_choice_omission(
+        value,
+        thinking_enabled,
+        provider_label,
+        provider_key,
+        &mut response_metadata,
+    );
+    if response_format.is_some() {
+        deepseek_provider_core_ensure_json_prompt_instruction(&mut messages);
+    }
+    Ok(RuntimeProviderChatCompatibleMessages {
+        messages,
+        response_format,
+        response_metadata,
+        thinking_enabled,
+    })
+}
+
+fn runtime_provider_chat_compatible_tools(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+    tool_names: &mut BTreeSet<String>,
+    options: RuntimeDeepSeekRewriteOptions,
+    provider_kind: RuntimeProviderBridgeKind,
+    gemini_compat: bool,
+    provider_label: &str,
+) -> Result<()> {
+    deepseek_provider_core_validate_tools_shape(value, gemini_compat, provider_label)
         .map_err(anyhow::Error::msg)?;
-    if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
+    if let Some(tools) = runtime_deepseek_tools_from_responses_request(value) {
         let tools =
             runtime_deepseek_dedup_and_validate_function_tools(tools, options, provider_kind)?;
         if tools.len() > 128 {
@@ -144,43 +225,61 @@ pub(super) fn runtime_provider_chat_compatible_request_body(
     }
     if !gemini_compat
         && let Some(web_search_options) =
-            runtime_deepseek_web_search_options_from_responses_request(&value, provider_kind)?
+            runtime_deepseek_web_search_options_from_responses_request(value, provider_kind)?
     {
         runtime_deepseek_apply_web_search_mode(
-            &mut request,
+            request,
             web_search_options,
             options,
             provider_kind,
         )?;
     }
-    deepseek_provider_core_validate_tool_choice_shape(&value, thinking_enabled, provider_label)
+    Ok(())
+}
+
+fn runtime_provider_chat_compatible_tool_choice(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+    tool_names: &BTreeSet<String>,
+    thinking_enabled: bool,
+    provider_label: &str,
+) -> Result<()> {
+    deepseek_provider_core_validate_tool_choice_shape(value, thinking_enabled, provider_label)
         .map_err(anyhow::Error::msg)?;
-    if let Some(tool_choice) =
-        runtime_deepseek_tool_choice_from_responses_request(&value, thinking_enabled)
-    {
-        deepseek_provider_core_validate_tool_choice_name(&tool_choice, provider_label)
-            .map_err(anyhow::Error::msg)?;
-        deepseek_provider_core_validate_tool_choice_target(
-            &tool_choice,
-            &tool_names,
-            provider_label,
-        )
+    let Some(tool_choice) =
+        runtime_deepseek_tool_choice_from_responses_request(value, thinking_enabled)
+    else {
+        return Ok(());
+    };
+    deepseek_provider_core_validate_tool_choice_name(&tool_choice, provider_label)
         .map_err(anyhow::Error::msg)?;
-        request.insert("tool_choice".to_string(), tool_choice);
-    }
-    deepseek_provider_core_insert_primitive_request_fields(&value, &mut request, provider_label)
+    deepseek_provider_core_validate_tool_choice_target(&tool_choice, tool_names, provider_label)
+        .map_err(anyhow::Error::msg)?;
+    request.insert("tool_choice".to_string(), tool_choice);
+    Ok(())
+}
+
+fn runtime_provider_chat_compatible_optional_fields(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+    stream: bool,
+    response_format: Option<serde_json::Value>,
+    gemini_compat: bool,
+    provider_label: &str,
+) -> Result<()> {
+    deepseek_provider_core_insert_primitive_request_fields(value, request, provider_label)
         .map_err(anyhow::Error::msg)?;
     if !gemini_compat {
-        deepseek_provider_core_reject_unsupported_request_fields(&value, provider_label)
+        deepseek_provider_core_reject_unsupported_request_fields(value, provider_label)
             .map_err(anyhow::Error::msg)?;
     }
-    if let Some(stop) = deepseek_provider_core_stop_from_responses_request(&value, provider_label)
+    if let Some(stop) = deepseek_provider_core_stop_from_responses_request(value, provider_label)
         .map_err(anyhow::Error::msg)?
     {
         request.insert("stop".to_string(), stop);
     }
     if let Some(top_logprobs) =
-        deepseek_provider_core_top_logprobs_from_responses_request(&value, provider_label)
+        deepseek_provider_core_top_logprobs_from_responses_request(value, provider_label)
             .map_err(anyhow::Error::msg)?
     {
         request.insert("top_logprobs".to_string(), top_logprobs);
@@ -195,20 +294,10 @@ pub(super) fn runtime_provider_chat_compatible_request_body(
         request.insert("response_format".to_string(), response_format);
     }
     if let Some(user_id) =
-        deepseek_provider_core_user_id_from_responses_request(&value, provider_label)
+        deepseek_provider_core_user_id_from_responses_request(value, provider_label)
             .map_err(anyhow::Error::msg)?
     {
         request.insert("user_id".to_string(), serde_json::Value::String(user_id));
     }
-    let body = serde_json::to_vec(&serde_json::Value::Object(request)).with_context(|| {
-        format!(
-            "failed to serialize {} chat request JSON",
-            provider_kind.chat_compatible_adapter_label()
-        )
-    })?;
-    Ok(RuntimeDeepSeekTranslatedRequest {
-        body,
-        messages,
-        response_metadata,
-    })
+    Ok(())
 }

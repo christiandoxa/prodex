@@ -35,73 +35,87 @@ pub(super) fn spawn_runtime_gateway_reservation_recovery_worker(
 ) -> Result<Option<thread::JoinHandle<()>>> {
     match &shared.gateway_state_store {
         RuntimeGatewayStateStore::Sqlite { path } => {
-            let mut repository =
-                prodex_storage_sqlite_runtime::SqliteAccountingRepository::open(path)
-                    .context("failed to open SQLite reservation recovery repository")?;
-            let shutdown = Arc::clone(shutdown);
-            let log_path = shared.runtime_shared.log_path.clone();
-            Ok(Some(thread::spawn(move || {
-                while !shutdown.load(Ordering::SeqCst) {
-                    match recover_sqlite_once(&mut repository, now_unix_ms()) {
-                        Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
-                            &log_path,
-                            &format!(
-                                "gateway_reservation_recovery status=success backend=sqlite selected={} released={}",
-                                report.selected, report.released
-                            ),
-                        ),
-                        Ok(_) => {}
-                        Err(_) => runtime_proxy_log_to_path(
-                            &log_path,
-                            "gateway_reservation_recovery status=error backend=sqlite",
-                        ),
-                    }
-                    wait_for_next_run(&shutdown);
-                }
-            })))
+            spawn_runtime_gateway_sqlite_recovery_worker(shared, shutdown, path)
         }
         RuntimeGatewayStateStore::Postgres { .. } => {
-            let repository = shared
-                .gateway_postgres_repository
-                .clone()
-                .context("failed to open PostgreSQL reservation recovery repository")?;
-            let runtime = shared.runtime_shared.async_runtime.handle().clone();
-            let governance_authority = shared.governance_authority.clone();
-            let gateway_credentials = shared.gateway_credentials.clone();
-            let shutdown = Arc::clone(shutdown);
-            let log_path = shared.runtime_shared.log_path.clone();
-            Ok(Some(thread::spawn(move || {
-                while !shutdown.load(Ordering::SeqCst) {
-                    match recovery_tenant_ids(governance_authority.as_ref(), &gateway_credentials) {
-                        Ok(tenant_ids) => match runtime.block_on(recover_postgres_once(
-                            &repository,
-                            &tenant_ids,
-                            now_unix_ms(),
-                        )) {
-                            Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
-                                &log_path,
-                                &format!(
-                                    "gateway_reservation_recovery status=success backend=postgres selected={} released={}",
-                                    report.selected, report.released
-                                ),
-                            ),
-                            Ok(_) => {}
-                            Err(_) => runtime_proxy_log_to_path(
-                                &log_path,
-                                "gateway_reservation_recovery status=error backend=postgres phase=recovery",
-                            ),
-                        },
-                        Err(_) => runtime_proxy_log_to_path(
-                            &log_path,
-                            "gateway_reservation_recovery status=error backend=postgres phase=tenant_discovery",
-                        ),
-                    }
-                    wait_for_next_run(&shutdown);
-                }
-            })))
+            spawn_runtime_gateway_postgres_recovery_worker(shared, shutdown)
         }
         RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => Ok(None),
     }
+}
+
+fn spawn_runtime_gateway_sqlite_recovery_worker(
+    shared: &RuntimeLocalRewriteProxyShared,
+    shutdown: &Arc<AtomicBool>,
+    path: &std::path::Path,
+) -> Result<Option<thread::JoinHandle<()>>> {
+    let mut repository = prodex_storage_sqlite_runtime::SqliteAccountingRepository::open(path)
+        .context("failed to open SQLite reservation recovery repository")?;
+    let shutdown = Arc::clone(shutdown);
+    let log_path = shared.runtime_shared.log_path.clone();
+    Ok(Some(thread::spawn(move || {
+        while !shutdown.load(Ordering::SeqCst) {
+            match recover_sqlite_once(&mut repository, now_unix_ms()) {
+                Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
+                    &log_path,
+                    &format!(
+                        "gateway_reservation_recovery status=success backend=sqlite selected={} released={}",
+                        report.selected, report.released
+                    ),
+                ),
+                Ok(_) => {}
+                Err(_) => runtime_proxy_log_to_path(
+                    &log_path,
+                    "gateway_reservation_recovery status=error backend=sqlite",
+                ),
+            }
+            wait_for_next_run(&shutdown);
+        }
+    })))
+}
+
+fn spawn_runtime_gateway_postgres_recovery_worker(
+    shared: &RuntimeLocalRewriteProxyShared,
+    shutdown: &Arc<AtomicBool>,
+) -> Result<Option<thread::JoinHandle<()>>> {
+    let repository = shared
+        .gateway_postgres_repository
+        .clone()
+        .context("failed to open PostgreSQL reservation recovery repository")?;
+    let runtime = shared.runtime_shared.async_runtime.handle().clone();
+    let governance_authority = shared.governance_authority.clone();
+    let gateway_credentials = shared.gateway_credentials.clone();
+    let shutdown = Arc::clone(shutdown);
+    let log_path = shared.runtime_shared.log_path.clone();
+    Ok(Some(thread::spawn(move || {
+        while !shutdown.load(Ordering::SeqCst) {
+            match recovery_tenant_ids(governance_authority.as_ref(), &gateway_credentials) {
+                Ok(tenant_ids) => match runtime.block_on(recover_postgres_once(
+                    &repository,
+                    &tenant_ids,
+                    now_unix_ms(),
+                )) {
+                    Ok(report) if report.released > 0 => runtime_proxy_log_to_path(
+                        &log_path,
+                        &format!(
+                            "gateway_reservation_recovery status=success backend=postgres selected={} released={}",
+                            report.selected, report.released
+                        ),
+                    ),
+                    Ok(_) => {}
+                    Err(_) => runtime_proxy_log_to_path(
+                        &log_path,
+                        "gateway_reservation_recovery status=error backend=postgres phase=recovery",
+                    ),
+                },
+                Err(_) => runtime_proxy_log_to_path(
+                    &log_path,
+                    "gateway_reservation_recovery status=error backend=postgres phase=tenant_discovery",
+                ),
+            }
+            wait_for_next_run(&shutdown);
+        }
+    })))
 }
 
 fn recover_sqlite_once(

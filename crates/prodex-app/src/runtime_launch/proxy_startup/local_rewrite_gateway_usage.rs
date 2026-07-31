@@ -240,52 +240,81 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
     let background_task = RuntimeGatewayBackgroundTaskGuard::new(shared);
     drop(shared.runtime_shared.async_runtime.spawn_blocking(move || {
         let _background_task = background_task;
-        loop {
-            dirty.store(false, Ordering::Release);
-            let pending_batch = pending_deltas
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .drain(..)
-                .collect::<Vec<_>>();
-            if !pending_batch.is_empty() {
-                let deltas = pending_batch
-                    .iter()
-                    .map(|pending| pending.delta.clone())
-                    .collect::<Vec<_>>();
-                if let Err(_err) =
-                    runtime_gateway_virtual_key_usage_apply_deltas(&state_store, &deltas)
-                {
-                    let mut pending = pending_deltas
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    runtime_gateway_restore_pending_usage_batch(&mut pending, pending_batch);
-                    drop(pending);
-                    dirty.store(true, Ordering::Release);
-                    runtime_proxy_log_to_path(
-                        &log_path,
-                        &runtime_proxy_structured_log_message(
-                            "gateway_virtual_key_usage_save_failed",
-                            [
-                                runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field(
-                                    "error_kind",
-                                    "gateway_usage_persistence_failed",
-                                ),
-                            ],
-                        ),
-                    );
-                    std::thread::sleep(RUNTIME_GATEWAY_USAGE_RETRY_BACKOFF);
-                }
-            }
-            if !dirty.load(Ordering::Acquire) {
-                in_flight.store(false, Ordering::Release);
-                if dirty.load(Ordering::Acquire) && !in_flight.swap(true, Ordering::AcqRel) {
-                    continue;
-                }
-                break;
-            }
-        }
+        runtime_gateway_usage_save_loop(
+            &state_store,
+            &pending_deltas,
+            &dirty,
+            &in_flight,
+            &log_path,
+        );
     }));
+}
+
+fn runtime_gateway_usage_save_loop(
+    state_store: &RuntimeGatewayStateStore,
+    pending_deltas: &Arc<Mutex<Vec<RuntimeGatewayPendingUsageDelta>>>,
+    dirty: &Arc<std::sync::atomic::AtomicBool>,
+    in_flight: &Arc<std::sync::atomic::AtomicBool>,
+    log_path: &Path,
+) {
+    loop {
+        dirty.store(false, Ordering::Release);
+        runtime_gateway_save_usage_batch(state_store, pending_deltas, dirty, log_path);
+        if !runtime_gateway_usage_save_should_continue(dirty, in_flight) {
+            return;
+        }
+    }
+}
+
+fn runtime_gateway_save_usage_batch(
+    state_store: &RuntimeGatewayStateStore,
+    pending_deltas: &Arc<Mutex<Vec<RuntimeGatewayPendingUsageDelta>>>,
+    dirty: &Arc<std::sync::atomic::AtomicBool>,
+    log_path: &Path,
+) {
+    let pending_batch = pending_deltas
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .drain(..)
+        .collect::<Vec<_>>();
+    if pending_batch.is_empty() {
+        return;
+    }
+    let deltas = pending_batch
+        .iter()
+        .map(|pending| pending.delta.clone())
+        .collect::<Vec<_>>();
+    if runtime_gateway_virtual_key_usage_apply_deltas(state_store, &deltas).is_ok() {
+        return;
+    }
+    let mut pending = pending_deltas
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    runtime_gateway_restore_pending_usage_batch(&mut pending, pending_batch);
+    drop(pending);
+    dirty.store(true, Ordering::Release);
+    runtime_proxy_log_to_path(
+        log_path,
+        &runtime_proxy_structured_log_message(
+            "gateway_virtual_key_usage_save_failed",
+            [
+                runtime_proxy_log_field("backend", state_store.label()),
+                runtime_proxy_log_field("error_kind", "gateway_usage_persistence_failed"),
+            ],
+        ),
+    );
+    std::thread::sleep(RUNTIME_GATEWAY_USAGE_RETRY_BACKOFF);
+}
+
+fn runtime_gateway_usage_save_should_continue(
+    dirty: &Arc<std::sync::atomic::AtomicBool>,
+    in_flight: &Arc<std::sync::atomic::AtomicBool>,
+) -> bool {
+    if dirty.load(Ordering::Acquire) {
+        return true;
+    }
+    in_flight.store(false, Ordering::Release);
+    dirty.load(Ordering::Acquire) && !in_flight.swap(true, Ordering::AcqRel)
 }
 
 pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(

@@ -1,7 +1,7 @@
 use super::super::*;
 use super::endpoint_policy::RuntimeGatewayOidcEndpoint;
 use prodex_authn::ValidatedOidcEndpoint;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -192,45 +192,50 @@ pub(super) fn runtime_gateway_oidc_peer_is_allowed(
 
 pub(super) fn runtime_gateway_oidc_ip_is_forbidden(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(address) => {
-            let [first, second, third, _] = address.octets();
-            first == 0
-                || first == 10
-                || (first == 100 && (64..=127).contains(&second))
-                || first == 127
-                || (first == 169 && second == 254)
-                || (first == 172 && (16..=31).contains(&second))
-                || (first == 192 && (second == 168 || (second == 0 && matches!(third, 0 | 2))))
-                || (first == 198 && ((18..=19).contains(&second) || (second == 51 && third == 100)))
-                || (first == 203 && second == 0 && third == 113)
-                || first >= 224
-        }
-        IpAddr::V6(address) => {
-            let octets = address.octets();
-            address.is_unspecified()
-                || address.is_loopback()
-                || address.is_multicast()
-                || octets[0] & 0xfe == 0xfc
-                || (octets[0] == 0xfe && octets[1] & 0xc0 == 0x80)
-                || (octets[0] == 0x20
-                    && octets[1] == 0x01
-                    && octets[2] == 0x0d
-                    && octets[3] == 0xb8)
-                || address
-                    .to_ipv4_mapped()
-                    .is_some_and(|address| runtime_gateway_oidc_ip_is_forbidden(address.into()))
-                || ((octets[..12] == [0; 12]
-                    || octets[..12] == [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0])
-                    && runtime_gateway_oidc_ip_is_forbidden(
-                        std::net::Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15])
-                            .into(),
-                    ))
-                || octets[..6] == [0, 0x64, 0xff, 0x9b, 0, 1]
-                || octets[..4] == [0x20, 0x01, 0, 0]
-                || (octets[..2] == [0x20, 0x02]
-                    && runtime_gateway_oidc_ip_is_forbidden(
-                        std::net::Ipv4Addr::new(octets[2], octets[3], octets[4], octets[5]).into(),
-                    ))
-        }
+        IpAddr::V4(address) => runtime_gateway_oidc_ipv4_is_forbidden(address),
+        IpAddr::V6(address) => runtime_gateway_oidc_ipv6_is_forbidden(address),
     }
+}
+
+fn runtime_gateway_oidc_ipv4_is_forbidden(address: Ipv4Addr) -> bool {
+    let [first, second, third, _] = address.octets();
+    first == 0
+        || first == 10
+        || (first == 100 && (64..=127).contains(&second))
+        || first == 127
+        || (first == 169 && second == 254)
+        || (first == 172 && (16..=31).contains(&second))
+        || (first == 192 && (second == 168 || (second == 0 && matches!(third, 0 | 2))))
+        || (first == 198 && ((18..=19).contains(&second) || (second == 51 && third == 100)))
+        || (first == 203 && second == 0 && third == 113)
+        || first >= 224
+}
+
+fn runtime_gateway_oidc_ipv6_is_forbidden(address: std::net::Ipv6Addr) -> bool {
+    let octets = address.octets();
+    address.is_unspecified()
+        || address.is_loopback()
+        || address.is_multicast()
+        || octets[0] & 0xfe == 0xfc
+        || (octets[0] == 0xfe && octets[1] & 0xc0 == 0x80)
+        || (octets[0] == 0x20 && octets[1] == 0x01 && octets[2] == 0x0d && octets[3] == 0xb8)
+        || address
+            .to_ipv4_mapped()
+            .is_some_and(runtime_gateway_oidc_ipv4_is_forbidden)
+        || runtime_gateway_oidc_ipv6_embeds_forbidden_ipv4(&octets)
+        || octets[..6] == [0, 0x64, 0xff, 0x9b, 0, 1]
+        || octets[..4] == [0x20, 0x01, 0, 0]
+        || (octets[..2] == [0x20, 0x02]
+            && runtime_gateway_oidc_ipv4_is_forbidden(Ipv4Addr::new(
+                octets[2], octets[3], octets[4], octets[5],
+            )))
+}
+
+fn runtime_gateway_oidc_ipv6_embeds_forbidden_ipv4(octets: &[u8; 16]) -> bool {
+    let is_compatible = octets[..12] == [0; 12];
+    let is_translated = octets[..12] == [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0];
+    (is_compatible || is_translated)
+        && runtime_gateway_oidc_ipv4_is_forbidden(Ipv4Addr::new(
+            octets[12], octets[13], octets[14], octets[15],
+        ))
 }
