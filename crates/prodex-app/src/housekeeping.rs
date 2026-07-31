@@ -107,10 +107,11 @@ pub(crate) fn newest_runtime_proxy_log_in_dir(dir: &Path) -> Option<PathBuf> {
 pub(crate) use prodex_housekeeping::cleanup_runtime_proxy_latest_pointer;
 
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
-    !matches!(
-        command,
-        Commands::Cleanup(_) | Commands::RuntimeBroker(_) | Commands::Update(_)
-    )
+    !crate::command_dispatch::command_is_native_dry_run(command)
+        && !matches!(
+            command,
+            Commands::Cleanup(_) | Commands::RuntimeBroker(_) | Commands::Update(_)
+        )
 }
 
 pub(crate) fn schedule_prodex_auto_runtime_housekeeping(command: &Commands) {

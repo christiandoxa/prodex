@@ -59,6 +59,8 @@ use prodex_storage::{
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 const MAX_OUTBOX_BATCH: u16 = 256;
+const DEFAULT_OUTBOX_LEASE_MS: u64 = 60_000;
+const MAX_OUTBOX_LEASE_MS: u64 = 300_000;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct SiemOutboxEvent {
@@ -67,6 +69,41 @@ pub struct SiemOutboxEvent {
     pub audit_event_id: AuditEventId,
     pub event_envelope: String,
     pub attempt_count: u8,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct SqliteSiemOutboxClaim {
+    pub tenant_id: TenantId,
+    pub event_id: AuditEventId,
+    pub audit_event_id: AuditEventId,
+    pub event_envelope: String,
+    pub attempt_count: u8,
+    pub claim_token: String,
+}
+
+impl fmt::Debug for SqliteSiemOutboxClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SqliteSiemOutboxClaim")
+            .field("tenant_id", &"<redacted>")
+            .field("event_id", &"<redacted>")
+            .field("audit_event_id", &"<redacted>")
+            .field("event_envelope", &"<redacted>")
+            .field("attempt_count", &self.attempt_count)
+            .field("claim_token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl SqliteSiemOutboxClaim {
+    fn event(&self) -> SiemOutboxEvent {
+        SiemOutboxEvent {
+            tenant_id: self.tenant_id,
+            event_id: self.event_id,
+            audit_event_id: self.audit_event_id,
+            event_envelope: self.event_envelope.clone(),
+            attempt_count: self.attempt_count,
+        }
+    }
 }
 
 impl fmt::Debug for SiemOutboxEvent {

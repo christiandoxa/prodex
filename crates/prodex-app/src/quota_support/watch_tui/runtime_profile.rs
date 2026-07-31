@@ -34,7 +34,8 @@ pub(crate) fn watch_quota(
         let output = render_profile_quota_watch_output(
             profile_name,
             &quota_watch_updated_at(),
-            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
+            fetch_profile_quota(provider, codex_home, base_url)
+                .map_err(|err| quota_error_message(&err)),
         );
         print_quota_watch_plain_snapshot(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
@@ -56,32 +57,77 @@ fn watch_profile_quota_tui(
     base_url: Option<&str>,
 ) -> Result<()> {
     let mut tui = QuotaWatchTui::stdout("quota TUI")?;
-    loop {
-        let updated = quota_watch_updated_at();
-        let frame = build_profile_quota_watch_tui_frame(
-            profile_name,
-            &updated,
-            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
-        );
-        tui.terminal
-            .draw(|area| render_all_quota_watch_tui(area, &frame))
-            .context("failed to draw quota TUI")?;
+    let mut snapshot = ProfileQuotaWatchSnapshot {
+        updated: quota_watch_updated_at(),
+        quota: Err("Loading quota data...".to_string()),
+    };
+    let mut refresh = ProfileQuotaWatchRefresh::new();
+    let _ = start_profile_quota_watch_refresh(&mut refresh, provider, codex_home, base_url);
+    let mut redraw_needed = true;
+    let mut next_refresh_at = None;
 
-        let refresh_at = quota_watch_next_refresh_at();
-        while Instant::now() < refresh_at {
-            if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
-                .context("failed to poll quota TUI input")?
-            {
-                match event::read().context("failed to read quota TUI input")? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        if quota_watch_quit_key(key) {
-                            return Ok(());
-                        }
+    loop {
+        if let Some(next_snapshot) = refresh.take_latest() {
+            snapshot = next_snapshot;
+            redraw_needed = true;
+            next_refresh_at = Some(quota_watch_next_refresh_at());
+        }
+
+        if redraw_needed {
+            let frame = build_profile_quota_watch_tui_frame(
+                profile_name,
+                &snapshot.updated,
+                snapshot.quota.clone(),
+            );
+            tui.terminal
+                .draw(|area| render_all_quota_watch_tui(area, &frame))
+                .context("failed to draw quota TUI")?;
+            redraw_needed = false;
+        }
+
+        if next_refresh_at.is_some_and(|refresh_at| Instant::now() >= refresh_at)
+            && start_profile_quota_watch_refresh(&mut refresh, provider, codex_home, base_url)
+        {
+            next_refresh_at = None;
+            continue;
+        }
+
+        if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
+            .context("failed to poll quota TUI input")?
+        {
+            match event::read().context("failed to read quota TUI input")? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if quota_watch_quit_key(key) {
+                        return Ok(());
                     }
-                    Event::Resize(_, _) => break,
-                    _ => {}
                 }
+                Event::Resize(_, _) => {
+                    redraw_needed = true;
+                }
+                _ => {}
             }
         }
     }
+}
+
+fn start_profile_quota_watch_refresh(
+    refresh: &mut ProfileQuotaWatchRefresh,
+    provider: &ProfileProvider,
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> bool {
+    let provider = provider.clone();
+    let codex_home = codex_home.to_path_buf();
+    let base_url = base_url.map(str::to_string);
+    refresh.try_start_catching_panic(
+        move || ProfileQuotaWatchSnapshot {
+            updated: quota_watch_updated_at(),
+            quota: fetch_profile_quota(&provider, &codex_home, base_url.as_deref())
+                .map_err(|err| quota_error_message(&err)),
+        },
+        ProfileQuotaWatchSnapshot {
+            updated: quota_watch_updated_at(),
+            quota: Err("quota refresh failed unexpectedly".to_string()),
+        },
+    )
 }

@@ -319,6 +319,10 @@ pub enum PostgresStoragePlanError {
         observed: PostgresMigrationVersion,
         required: PostgresMigrationVersion,
     },
+    SchemaVersionTooNew {
+        observed: PostgresMigrationVersion,
+        required: PostgresMigrationVersion,
+    },
     TenantMismatch {
         key_tenant: TenantId,
         request_tenant: TenantId,
@@ -365,6 +369,9 @@ impl fmt::Display for PostgresStoragePlanError {
             ),
             Self::SchemaVersionTooOld { .. } => {
                 write!(f, "PostgreSQL schema version is too old")
+            }
+            Self::SchemaVersionTooNew { .. } => {
+                write!(f, "PostgreSQL schema version is newer than supported")
             }
             Self::TenantMismatch { .. } => write!(f, "PostgreSQL tenant mismatch"),
             Self::VirtualKeyMismatch { .. } => write!(f, "PostgreSQL virtual key mismatch"),

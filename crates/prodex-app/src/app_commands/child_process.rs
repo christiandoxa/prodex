@@ -22,7 +22,7 @@ use crate::{
     codex_cli_profile_v2_name, preview_deepseek_provider_codex_args,
     preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
     preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
-    runtime_launch_cli_gemini_thinking_budget_tokens,
+    resolve_runtime_optional_tool_plan, runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
     trusted_workspace_codex_args, validate_credential_free_http_url,
 };
@@ -415,26 +415,7 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
     let required_tools = args.required_tool_set();
     let presidio_enabled =
         args.presidio || selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
-    let selected = selected_tools
-        .iter()
-        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
-        .collect();
-    let required = required_tools
-        .iter()
-        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
-        .collect();
-    let tool_plan = prodex_optional_tools::resolve_optional_tools(&selected, &required);
-    if let Some(unavailable) = tool_plan
-        .unavailable
-        .iter()
-        .find(|health| required.contains(health.id))
-    {
-        anyhow::bail!(
-            "required optional tool {} is unavailable: {}; run `prodex capability super-doctor`",
-            unavailable.id,
-            redaction::redaction_redact_secret_like_text(&unavailable.detail)
-        );
-    }
+    let tool_plan = resolve_runtime_optional_tool_plan(&selected_tools, &required_tools)?;
     let codex_args = args.codex_args_with_feature_overrides();
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =

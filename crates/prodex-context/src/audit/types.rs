@@ -24,6 +24,13 @@ pub struct ContextAuditEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ContextAuditError {
+    pub relative_path: String,
+    pub operation: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ContextAuditReport {
     pub root: PathBuf,
     pub files: Vec<ContextAuditEntry>,
@@ -31,6 +38,8 @@ pub struct ContextAuditReport {
     pub total_chars: usize,
     pub total_words: usize,
     pub total_estimated_tokens: usize,
+    pub errors: Vec<ContextAuditError>,
+    pub hidden_errors: usize,
     pub static_duplicates: ContextStaticDuplicateReport,
 }
 

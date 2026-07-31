@@ -28,16 +28,38 @@ pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyho
 }
 
 pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
-    !matches!(
+    !command_is_native_dry_run(command)
+        && !matches!(
+            command,
+            Commands::RuntimeBroker(_)
+                | Commands::Update(_)
+                | Commands::GeminiCompatRefresh(_)
+                | Commands::McpJsonlBridge(_)
+        )
+}
+
+pub(crate) fn command_is_native_dry_run(command: &Commands) -> bool {
+    matches!(
         command,
-        Commands::RuntimeBroker(_)
-            | Commands::Update(_)
-            | Commands::GeminiCompatRefresh(_)
-            | Commands::McpJsonlBridge(_)
+        Commands::Super(args)
+            if (args.dry_run || prodex_dry_run_requested(&args.codex_args))
+                && args
+                    .cli
+                    .is_some_and(|agent| agent != SuperCliAgent::Codex)
     )
 }
 
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
+    if !command_is_native_dry_run(&command)
+        && !matches!(
+            &command,
+            Commands::Profile(ProfileCommands::Remove(_))
+                | Commands::Cleanup(_)
+                | Commands::Doctor(_)
+        )
+    {
+        recover_pending_profile_lifecycle()?;
+    }
     match command {
         Commands::Profile(command) => execute_profile_command(command),
         Commands::UseProfile(args) => handle_set_active_profile(args),
@@ -145,4 +167,25 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
         );
     }
     handle_super(args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_dry_run_skips_startup_side_effects() {
+        let native = parse_cli_command_from(["prodex", "super", "--cli", "gemini", "--dry-run"])
+            .expect("native dry-run should parse");
+        let codex = parse_cli_command_from(["prodex", "super", "--dry-run"])
+            .expect("Codex dry-run should parse");
+
+        assert!(command_is_native_dry_run(&native));
+        assert!(!command_should_show_update_notice(&native));
+        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&native));
+        assert!(!command_is_native_dry_run(&codex));
+        assert!(crate::housekeeping::command_runs_auto_runtime_housekeeping(
+            &codex
+        ));
+    }
 }

@@ -123,12 +123,14 @@ impl PostgresRepository {
             .query_opt(
                 "SELECT 1 FROM prodex_siem_outbox
                  WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3
+                   AND claim_expires_at_unix_ms > $4
                    AND delivered_at_unix_ms IS NULL
                  FOR UPDATE",
                 &[
                     &claim.tenant_id.as_uuid(),
                     &claim.event_id.as_uuid(),
                     &claim.claim_token,
+                    &now,
                 ],
             )
             .await
@@ -143,11 +145,14 @@ impl PostgresRepository {
                         "UPDATE prodex_siem_outbox
                          SET attempt_count = attempt_count + 1, delivered_at_unix_ms = $4,
                              claim_token = NULL, claim_expires_at_unix_ms = NULL
-                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3",
+                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3
+                           AND claim_expires_at_unix_ms > $5
+                           AND delivered_at_unix_ms IS NULL",
                         &[
                             &claim.tenant_id.as_uuid(),
                             &claim.event_id.as_uuid(),
                             &claim.claim_token,
+                            &now,
                             &now,
                         ],
                     )
@@ -161,12 +166,15 @@ impl PostgresRepository {
                         "UPDATE prodex_siem_outbox
                          SET attempt_count = attempt_count + 1, next_attempt_at_unix_ms = $4,
                              claim_token = NULL, claim_expires_at_unix_ms = NULL
-                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3",
+                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3
+                           AND claim_expires_at_unix_ms > $5
+                           AND delivered_at_unix_ms IS NULL",
                         &[
                             &claim.tenant_id.as_uuid(),
                             &claim.event_id.as_uuid(),
                             &claim.claim_token,
                             &next_attempt_at,
+                            &now,
                         ],
                     )
                     .await
@@ -197,11 +205,14 @@ impl PostgresRepository {
                 transaction
                     .execute(
                         "DELETE FROM prodex_siem_outbox
-                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3",
+                         WHERE tenant_id = $1 AND event_id = $2 AND claim_token = $3
+                           AND claim_expires_at_unix_ms > $4
+                           AND delivered_at_unix_ms IS NULL",
                         &[
                             &claim.tenant_id.as_uuid(),
                             &claim.event_id.as_uuid(),
                             &claim.claim_token,
+                            &now,
                         ],
                     )
                     .await

@@ -2950,6 +2950,7 @@ version = "0.376.0"
 dependencies = [
  "anyhow",
  "libc",
+ "prodex-redaction",
  "prodex-terminal-ui",
  "serde",
  "serde_json",

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
@@ -18,18 +17,21 @@ pub(crate) use environment::kiro_cli_data_dir_env;
 mod store;
 pub(crate) use store::prepare_kiro_cli_data_dir;
 use store::{KIRO_DATA_DIR, write_kiro_cli_data_dir};
+#[path = "kiro/lifecycle_support.rs"]
+mod lifecycle_support;
+pub(crate) use lifecycle_support::handle_import_kiro_profile;
 
 use super::manage::print_profile_panel;
 use super::write_secret_text_file;
+#[cfg(test)]
+use crate::create_codex_home_if_missing;
 use crate::runtime_kiro_acp::{
     runtime_kiro_acp_bootstrap_with_command, runtime_kiro_acp_model_catalog,
 };
 use crate::secret_store_support::secret_file_read_error;
-use crate::{
-    AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    audit_log_event, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
-    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
-};
+use crate::{AppState, kiro_bin};
+#[cfg(test)]
+use rusqlite::{Connection, params};
 
 pub(crate) const KIRO_CREDENTIALS_FILE: &str = "kiro_auth.json";
 pub(crate) const KIRO_MODEL_CATALOG_FILE: &str = "kiro_model_catalog.json";
@@ -121,103 +123,6 @@ pub(super) fn is_kiro_import_source(path: &Path) -> bool {
         && !path.exists()
 }
 
-pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()> {
-    let context = resolve_kiro_import_context()?;
-    let provider = ProfileProvider::Kiro {
-        auth_key: context.auth_key.clone(),
-        auth_kind: Some(context.auth_kind.clone()),
-        profile_arn: context.profile_arn.clone(),
-        profile_name: context.profile_name.clone(),
-        start_url: context.start_url.clone(),
-        region: context.region.clone(),
-    };
-
-    let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
-    let profile_name = if let Some(existing_name) = find_kiro_profile_by_identity(&state, &context)
-    {
-        let activate = state.active_profile.is_none() || args.activate;
-        let profile = state
-            .profiles
-            .get(&existing_name)
-            .with_context(|| format!("profile '{}' is missing", existing_name))?;
-        prepare_profile_codex_home(&paths, profile)?;
-        write_kiro_auth_secret(
-            &profile.codex_home,
-            &kiro_auth_secret_from_context(&context),
-        )?;
-        let model_catalog_refreshed = refresh_kiro_model_catalog_snapshot(
-            &profile.codex_home,
-            &kiro_auth_secret_from_context(&context),
-        )
-        .is_ok();
-        let profile = state
-            .profiles
-            .get_mut(&existing_name)
-            .with_context(|| format!("profile '{}' is missing", existing_name))?;
-        profile.provider = provider.clone();
-        profile.email = context.email.clone();
-        if activate {
-            state.active_profile = Some(existing_name.clone());
-        }
-        state.save(&paths)?;
-        render_kiro_import_result(
-            &state,
-            &existing_name,
-            &context,
-            true,
-            model_catalog_refreshed,
-        )?;
-        audit_kiro_import(&state, &existing_name, &context, true)?;
-        return Ok(());
-    } else {
-        let requested = args
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        match requested {
-            Some(name) => {
-                prodex_profile_identity::validate_profile_name(name)?;
-                name.to_string()
-            }
-            None => default_kiro_profile_name(&paths, &state, &context),
-        }
-    };
-
-    let activate = state.active_profile.is_none() || args.activate;
-    let codex_home = managed_profile_home_path(&paths, &profile_name)?;
-    ensure_path_is_unique(&state, &codex_home)?;
-    create_codex_home_if_missing(&codex_home)?;
-    prepare_managed_codex_home(&paths, &codex_home)?;
-    write_kiro_auth_secret(&codex_home, &kiro_auth_secret_from_context(&context))?;
-    let model_catalog_refreshed =
-        refresh_kiro_model_catalog_snapshot(&codex_home, &kiro_auth_secret_from_context(&context))
-            .is_ok();
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home,
-            managed: true,
-            email: context.email.clone(),
-            provider: provider.clone(),
-        },
-    );
-    if activate {
-        state.active_profile = Some(profile_name.clone());
-    }
-    state.save(&paths)?;
-    render_kiro_import_result(
-        &state,
-        &profile_name,
-        &context,
-        false,
-        model_catalog_refreshed,
-    )?;
-    audit_kiro_import(&state, &profile_name, &context, false)?;
-    Ok(())
-}
-
 fn render_kiro_import_result(
     state: &AppState,
     profile_name: &str,
@@ -279,216 +184,6 @@ fn render_kiro_import_result(
 
 fn kiro_model_catalog_warning(refreshed: bool) -> Option<&'static str> {
     (!refreshed).then_some("Catalog refresh failed; re-import this Kiro profile to retry.")
-}
-
-fn audit_kiro_import(
-    state: &AppState,
-    profile_name: &str,
-    context: &KiroImportContext,
-    updated_existing: bool,
-) -> Result<()> {
-    audit_log_event(
-        "profile",
-        "import_kiro",
-        "success",
-        serde_json::json!({
-            "profile_name": profile_name,
-            "provider": "kiro",
-            "auth_key": context.auth_key,
-            "auth_kind": context.auth_kind,
-            "email": context.email,
-            "profile_arn": context.profile_arn,
-            "profile_name_upstream": context.profile_name,
-            "start_url": context.start_url,
-            "region": context.region,
-            "activated": state.active_profile.as_deref() == Some(profile_name),
-            "updated_existing": updated_existing,
-        }),
-    )
-}
-
-fn default_kiro_profile_name(
-    paths: &AppPaths,
-    state: &AppState,
-    context: &KiroImportContext,
-) -> String {
-    let base = context
-        .email
-        .as_deref()
-        .map(|email| prodex_profile_identity::profile_name_from_email(&format!("kiro-{email}")))
-        .or_else(|| {
-            context.profile_name.as_deref().map(|name| {
-                prodex_profile_identity::profile_name_from_email(&format!("kiro-{name}"))
-            })
-        })
-        .unwrap_or_else(|| "kiro".to_string());
-    prodex_profile_identity::unique_profile_name_from_base(&base, "kiro", |candidate| {
-        crate::profile_name_is_available(paths, state, candidate)
-    })
-}
-
-fn find_kiro_profile_by_identity(state: &AppState, context: &KiroImportContext) -> Option<String> {
-    state.profiles.iter().find_map(|(name, profile)| {
-        profile
-            .provider
-            .kiro_matches(
-                &context.auth_key,
-                context.profile_arn.as_deref(),
-                context.profile_name.as_deref(),
-            )
-            .then_some(name.clone())
-    })
-}
-
-fn resolve_kiro_import_context() -> Result<KiroImportContext> {
-    let database_path = discover_kiro_database_path()?;
-    let connection = Connection::open_with_flags(
-        &database_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("failed to open {}", database_path.display()))?;
-    let (auth_key, raw_token) = read_kiro_auth_token(&connection)?;
-    let profile = read_kiro_profile_state(&connection)?;
-    let state_start_url = read_kiro_state_value(&connection, KIRO_START_URL_STATE_KEY)?;
-    let state_region = read_kiro_state_value(&connection, KIRO_REGION_STATE_KEY)?;
-    let whoami = read_kiro_whoami_json().ok();
-
-    let token_value: Value = serde_json::from_str(&raw_token)
-        .with_context(|| format!("failed to parse Kiro auth JSON for key '{auth_key}'"))?;
-    let token_start_url = token_value
-        .get("start_url")
-        .or_else(|| token_value.get("startUrl"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let token_region = token_value
-        .get("region")
-        .or_else(|| token_value.get("aws_region"))
-        .or_else(|| token_value.get("awsRegion"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let start_url = state_start_url.or(token_start_url);
-    let region = state_region.or(token_region);
-    let auth_kind = parse_kiro_auth_kind(&auth_key, &token_value, start_url.as_deref());
-    let email = parse_kiro_email(&token_value)
-        .or_else(|| whoami.as_ref().and_then(parse_kiro_email))
-        .or_else(|| profile.as_ref().and_then(|profile| profile.user_id.clone()));
-
-    Ok(KiroImportContext {
-        auth_key,
-        auth_kind,
-        raw_auth_json: raw_token,
-        email,
-        profile_arn: profile.as_ref().map(|profile| profile.arn.clone()),
-        profile_name: profile.as_ref().map(|profile| profile.profile_name.clone()),
-        start_url,
-        region,
-    })
-}
-
-fn read_kiro_auth_token(connection: &Connection) -> Result<(String, String)> {
-    for key in KIRO_AUTH_KEY_PRIORITY {
-        if let Some(value) = connection
-            .query_row(
-                "SELECT value FROM auth_kv WHERE key = ?1",
-                params![key],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-        {
-            return Ok(((*key).to_string(), value));
-        }
-    }
-
-    let fallback = connection
-        .query_row(
-            "SELECT key, value FROM auth_kv WHERE key LIKE '%:token' AND trim(value) != '' ORDER BY key LIMIT 1",
-            [],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?;
-    fallback.context("no logged-in Kiro credential found in auth_kv")
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct KiroProfileState {
-    arn: String,
-    profile_name: String,
-    #[serde(default)]
-    user_id: Option<String>,
-}
-
-fn read_kiro_profile_state(connection: &Connection) -> Result<Option<KiroProfileState>> {
-    read_kiro_state_value(connection, KIRO_PROFILE_STATE_KEY)?
-        .map(|value| {
-            serde_json::from_str(&value).with_context(|| {
-                format!("failed to parse Kiro state key '{KIRO_PROFILE_STATE_KEY}'")
-            })
-        })
-        .transpose()
-}
-
-fn read_kiro_state_value(connection: &Connection, key: &str) -> Result<Option<String>> {
-    connection
-        .query_row(
-            "SELECT value FROM state WHERE key = ?1",
-            params![key],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(Into::into)
-}
-
-fn parse_kiro_auth_kind(auth_key: &str, token_value: &Value, start_url: Option<&str>) -> String {
-    match auth_key {
-        "kirocli:social:token" => "social".to_string(),
-        "kirocli:external-idp:token" => "external-idp".to_string(),
-        _ => {
-            let start_url = token_value
-                .get("start_url")
-                .or_else(|| token_value.get("startUrl"))
-                .and_then(Value::as_str)
-                .or(start_url);
-            if matches!(start_url, Some(url) if !url.trim().is_empty() && url != KIRO_BUILDER_START_URL)
-            {
-                "identity-center".to_string()
-            } else {
-                "builder-id".to_string()
-            }
-        }
-    }
-}
-
-fn parse_kiro_email(value: &Value) -> Option<String> {
-    for key in ["email", "user_email", "userId", "user_id", "username"] {
-        let candidate = value
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|candidate| !candidate.is_empty())?;
-        if candidate.contains('@') || key != "username" {
-            return Some(candidate.to_string());
-        }
-    }
-    None
-}
-
-fn kiro_auth_secret_from_context(context: &KiroImportContext) -> KiroAuthSecret {
-    KiroAuthSecret {
-        auth_key: context.auth_key.clone(),
-        auth_kind: context.auth_kind.clone(),
-        auth_json: context.raw_auth_json.clone(),
-        email: context.email.clone(),
-        profile_arn: context.profile_arn.clone(),
-        profile_name: context.profile_name.clone(),
-        start_url: context.start_url.clone(),
-        region: context.region.clone(),
-    }
 }
 
 pub(crate) fn parse_kiro_auth_secret_text(text: &str) -> Result<KiroAuthSecret> {
@@ -983,7 +678,6 @@ sys.exit(1)
             start_url: Some("https://view.awsapps.com/start".to_string()),
             region: Some("us-east-1".to_string()),
         };
-
         write_kiro_model_catalog_snapshot_with_command(&codex_home, &secret, fake_kiro.as_os_str())
             .expect("model catalog snapshot should be written");
         let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);

@@ -1066,6 +1066,12 @@ pub fn plan_postgres_backend_open(
                     required: REQUIRED_POSTGRES_SCHEMA_VERSION,
                 });
             }
+            if observed > REQUIRED_POSTGRES_SCHEMA_VERSION {
+                return Err(PostgresStoragePlanError::SchemaVersionTooNew {
+                    observed,
+                    required: REQUIRED_POSTGRES_SCHEMA_VERSION,
+                });
+            }
             Ok(PostgresBackendOpenPlan {
                 mode,
                 required_schema_version: REQUIRED_POSTGRES_SCHEMA_VERSION,

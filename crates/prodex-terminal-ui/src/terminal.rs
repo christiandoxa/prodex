@@ -1,5 +1,7 @@
 use std::env;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::process::Command;
 
 use crate::CLI_WIDTH;
@@ -15,6 +17,7 @@ pub fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
         .filter(|value| *value > 0)
 }
 
+#[cfg(unix)]
 pub fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
     let tty = fs::File::open("/dev/tty").ok()?;
     let output = Command::new("stty").arg("size").stdin(tty).output().ok()?;
@@ -29,6 +32,18 @@ pub fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
     Some((rows, cols))
 }
 
+#[cfg(not(unix))]
+pub fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
+    crossterm::terminal::size()
+        .ok()
+        .and_then(terminal_dimensions_from_crossterm_size)
+}
+
+#[cfg(any(test, not(unix)))]
+fn terminal_dimensions_from_crossterm_size((columns, rows): (u16, u16)) -> Option<(usize, usize)> {
+    (columns > 0 && rows > 0).then_some((usize::from(rows), usize::from(columns)))
+}
+
 pub fn terminal_width_chars() -> Option<usize> {
     terminal_size_override_usize("PRODEX_TERM_COLUMNS")
         .or_else(|| terminal_dimensions_from_tty().map(|(_, cols)| cols))
@@ -38,4 +53,18 @@ pub fn terminal_height_lines() -> Option<usize> {
     terminal_size_override_usize("PRODEX_TERM_LINES")
         .or_else(|| terminal_size_override_usize("LINES"))
         .or_else(|| terminal_dimensions_from_tty().map(|(rows, _)| rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terminal_dimensions_from_crossterm_size;
+
+    #[test]
+    fn crossterm_dimensions_preserve_rows_and_columns() {
+        assert_eq!(
+            terminal_dimensions_from_crossterm_size((120, 40)),
+            Some((40, 120))
+        );
+        assert_eq!(terminal_dimensions_from_crossterm_size((0, 40)), None);
+    }
 }

@@ -123,3 +123,60 @@ fn import_auth_update_journal_root_rejects_symlink() {
     assert!(std::fs::read_dir(&outside).unwrap().next().is_none());
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn profile_lifecycle_journal_round_trips_and_cleans_up() {
+    let root = profile_export_private_temp_dir("lifecycle-journal");
+    let path = unique_profile_lifecycle_journal_path(&root, "login", "test-token").unwrap();
+    let journal = ProfileLifecycleJournal::new(
+        "login".to_string(),
+        serde_json::json!({"profile": "main"}),
+        "2026-05-02T00:00:00+00:00".to_string(),
+    );
+
+    write_profile_lifecycle_journal(&path, &journal).unwrap();
+    assert_eq!(read_profile_lifecycle_journal(&path).unwrap(), journal);
+    assert_eq!(
+        profile_lifecycle_journal_paths(&root).unwrap(),
+        vec![path.clone()]
+    );
+
+    cleanup_profile_lifecycle_journal(&path);
+    assert!(!path.exists());
+    assert!(profile_lifecycle_journal_paths(&root).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn profile_lifecycle_journal_boundaries_reject_unknown_values() {
+    let root = profile_export_private_temp_dir("lifecycle-boundaries");
+    assert!(unique_profile_lifecycle_journal_path(&root, "unknown", "token").is_err());
+    assert!(unique_profile_lifecycle_journal_path(&root, "manage", "token").is_ok());
+    assert!(unique_profile_lifecycle_journal_path(&root, "login", "../token").is_err());
+    assert!(unique_profile_import_auth_update_journal_path(&root, "../profile", "token").is_err());
+
+    let path = unique_profile_lifecycle_journal_path(&root, "login", "token").unwrap();
+    let journal = ProfileLifecycleJournal::new(
+        "unknown".to_string(),
+        serde_json::Value::Null,
+        "2026-05-02T00:00:00+00:00".to_string(),
+    );
+    assert!(write_profile_lifecycle_journal(&path, &journal).is_err());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn auth_update_journal_debug_redacts_temporary_home() {
+    let mut journal = ImportedExistingProfileAuthUpdateJournal::new(
+        "main".to_string(),
+        "/home/test-user/main".to_string(),
+        None,
+        None,
+        "2026-05-02T00:00:00+00:00".to_string(),
+    );
+    journal.temporary_home = Some("/home/test-user/.login-secret-sentinel".to_string());
+
+    let debug = format!("{journal:?}");
+    assert!(!debug.contains("secret-sentinel"));
+    assert!(debug.contains("\"<redacted>\""));
+}

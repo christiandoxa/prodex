@@ -505,6 +505,14 @@ fn sqlite_backend_open_requires_known_current_schema_without_ddl() {
             required: REQUIRED_SQLITE_SCHEMA_VERSION,
         })
     );
+    let future = SqliteMigrationVersion(REQUIRED_SQLITE_SCHEMA_VERSION.0 + 1);
+    assert_eq!(
+        plan_sqlite_backend_open(SqliteBackendOpenMode::GatewayRequestPath, Some(future)),
+        Err(SqliteStoragePlanError::SchemaVersionTooNew {
+            observed: future,
+            required: REQUIRED_SQLITE_SCHEMA_VERSION,
+        })
+    );
 }
 
 #[test]

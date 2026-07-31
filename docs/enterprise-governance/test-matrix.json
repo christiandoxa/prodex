@@ -376,6 +376,8 @@
       "evidence": [
         "outbox_retries_with_stable_id_then_dead_letters",
         "outbox_worker_delivers_through_the_bounded_exporter_port",
+        "outbox_worker_claims_once_across_repository_instances",
+        "expired_outbox_claim_is_reclaimed_and_stale_finalize_is_rejected",
         "PostgreSQL claim-token lease and separate finalize transactions passed live",
         "SQLite exporter outage, retry and dead-letter tests"
       ]

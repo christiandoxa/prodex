@@ -12,10 +12,16 @@ use terminal_ui::{
     tui_secondary_style, tui_title_style,
 };
 
+use super::import_export::{
+    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
+    acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
+};
 use crate::{
-    AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
-    ProfileProviderExt, ProfileSelector, absolutize, audit_log_event, collect_profile_summaries,
-    copy_codex_home, create_codex_home_if_missing, default_codex_home, ensure_path_is_unique,
+    AddProfileArgs, AppPaths, AppStateIoExt, ProfileEntry, ProfileProvider, ProfileProviderExt,
+    ProfileSelector, absolutize, audit_log_event, collect_profile_summaries, copy_codex_home,
+    create_codex_home_if_missing, default_codex_home, ensure_path_is_unique,
     fetch_profile_identity, find_profile_by_identity, managed_profile_home_path,
     prepare_managed_codex_home, print_panel, read_auth_json_text,
     repair_missing_active_profile_and_save, resolve_profile_name, update_existing_profile_auth,
@@ -36,7 +42,8 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     )?;
 
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
 
     if state.profiles.contains_key(&args.name) {
         bail!("profile '{}' already exists", args.name);
@@ -73,6 +80,32 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         && let Some(profile_name) = find_profile_by_identity(&mut state, identity)?
         && let Ok(Some(auth_json)) = read_auth_json_text(source)
     {
+        let mut desired_profile = state
+            .profiles
+            .get(&profile_name)
+            .with_context(|| format!("profile '{}' is missing", profile_name))?
+            .clone();
+        desired_profile.email = Some(email.to_string());
+        let next_active_profile = if activate_profile {
+            Some(profile_name.clone())
+        } else {
+            state.active_profile.clone()
+        };
+        let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+            &paths,
+            "manage",
+            &state,
+            &profile_name,
+            &desired_profile,
+            next_active_profile,
+            ProfileAuthUpdate {
+                next_auth_json: Some(auth_json.clone()),
+                next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+                next_secret_files: Vec::new(),
+                previous_secret_file_paths: &[],
+                temporary_home: None,
+            },
+        )?;
         let updated = update_existing_profile_auth(
             &paths,
             &mut state,
@@ -123,41 +156,65 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
             fields.push(("Active".to_string(), updated.profile_name));
         }
         print_profile_panel("Profile Updated", &fields)?;
+        cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
         return Ok(());
     }
 
     let codex_home = match args.codex_home {
-        Some(path) => {
-            let home = absolutize(path)?;
-            create_codex_home_if_missing(&home)?;
-            home
-        }
-        None => {
-            let home = managed_profile_home_path(&paths, &args.name)?;
-            if let Some(source) = source_home.as_deref() {
-                copy_codex_home(source, &home)?;
-            } else {
-                create_codex_home_if_missing(&home)?;
-            }
-            home
-        }
+        Some(path) => absolutize(path)?,
+        None => managed_profile_home_path(&paths, &args.name)?,
     };
 
+    ensure_path_is_unique(&state, &codex_home)?;
+    if managed && codex_home.exists() {
+        bail!(
+            "managed profile home {} already exists",
+            codex_home.display()
+        );
+    }
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed,
+        email: source_email,
+        provider: ProfileProvider::Openai,
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        &paths,
+        "manage",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &args.name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: if activate_profile {
+                Some(args.name.clone())
+            } else {
+                state.active_profile.clone()
+            },
+            home_actions: managed
+                .then(|| ProfileLifecycleHomeAction::Create {
+                    path: codex_home.display().to_string(),
+                })
+                .into_iter()
+                .collect(),
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
+
+    if let Some(source) = source_home.as_deref() {
+        if managed {
+            copy_codex_home(source, &codex_home)?;
+        }
+    } else {
+        create_codex_home_if_missing(&codex_home)?;
+    }
     if managed {
         prepare_managed_codex_home(&paths, &codex_home)?;
     }
 
-    ensure_path_is_unique(&state, &codex_home)?;
-
-    state.profiles.insert(
-        args.name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed,
-            email: source_email,
-            provider: ProfileProvider::Openai,
-        },
-    );
+    state.profiles.insert(args.name.clone(), desired_profile);
 
     if activate_profile {
         state.active_profile = Some(args.name.clone());
@@ -199,13 +256,15 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         fields.push(("Active".to_string(), args.name.clone()));
     }
     print_profile_panel("Profile Added", &fields)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
 
     Ok(())
 }
 
 pub(crate) fn handle_list_profiles() -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
 
     if state.profiles.is_empty() {
@@ -280,7 +339,8 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
 
 pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     let name = resolve_profile_name(&state, selector.profile.as_deref())?;
     state.active_profile = Some(name.clone());
     state.save(&paths)?;
@@ -312,7 +372,8 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
 
 pub(crate) fn handle_current_profile() -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
 
     let Some(active) = state.active_profile.as_deref() else {

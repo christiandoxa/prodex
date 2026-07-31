@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use prodex_profile_export::ImportedExistingProfileAuthUpdateJournal;
+use prodex_profile_export::{
+    ImportedExistingProfileAuthUpdateJournal, ImportedExistingProfileFileUpdate,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -17,10 +19,7 @@ use crate::{
     ProfileProvider, runtime_random_token,
 };
 
-pub(in crate::profile_commands) fn write_secret_text_file(
-    path: &Path,
-    content: &str,
-) -> Result<()> {
+pub(crate) fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .write_text(&secret_store::SecretLocation::file(path), content)
         .map_err(anyhow::Error::new)
@@ -168,7 +167,7 @@ pub(super) fn write_exported_secret_files(
     Ok(())
 }
 
-pub(super) fn read_optional_secret_text_file(path: &Path) -> Result<Option<String>> {
+pub(crate) fn read_optional_secret_text_file(path: &Path) -> Result<Option<String>> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .read_text(&secret_store::SecretLocation::file(path))
         .map_err(anyhow::Error::new)
@@ -189,10 +188,28 @@ pub(super) fn restore_optional_secret_text_file(
     }
 }
 
-pub(super) fn write_imported_auth_update_journal(
+pub(crate) fn write_imported_auth_update_journal(
     paths: &AppPaths,
     rollback: &ImportedExistingProfileAuthUpdate,
+    next_email: Option<String>,
+    next_auth_json: Option<String>,
+    next_provider_json: Option<String>,
+    next_secret_files: Vec<ImportedExistingProfileFileUpdate>,
+    temporary_home: Option<&Path>,
 ) -> Result<PathBuf> {
+    for secret_file in &rollback.previous_secret_files {
+        validate_exported_secret_file_path(&secret_file.path, &rollback.profile_name)?;
+    }
+    for secret_file in &next_secret_files {
+        validate_exported_secret_file_path(&secret_file.path, &rollback.profile_name)?;
+    }
+    if let Some(temporary_home) = temporary_home {
+        super::lifecycle::validate_temporary_home_path(
+            paths,
+            temporary_home,
+            "auth journal temporary home",
+        )?;
+    }
     let journal_path = prodex_profile_export::unique_profile_import_auth_update_journal_path(
         &paths.root,
         &rollback.profile_name,
@@ -208,6 +225,12 @@ pub(super) fn write_imported_auth_update_journal(
     journal.restore_auth_json = rollback.restore_auth_json;
     journal.previous_provider_json = rollback.previous_provider_json.clone();
     journal.previous_secret_files = rollback.previous_secret_files.clone();
+    journal.state_after_known = true;
+    journal.next_email = next_email;
+    journal.next_auth_json = next_auth_json;
+    journal.next_provider_json = next_provider_json;
+    journal.next_secret_files = next_secret_files;
+    journal.temporary_home = temporary_home.map(|path| path.display().to_string());
     prodex_profile_export::write_profile_import_auth_update_journal(&journal_path, &journal)?;
     Ok(journal_path)
 }

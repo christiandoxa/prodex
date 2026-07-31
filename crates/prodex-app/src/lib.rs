@@ -447,12 +447,17 @@ fn main_entry_error_message(err: &anyhow::Error) -> String {
 
 fn run() -> Result<()> {
     let command = parse_cli_command_or_exit();
-    create_codex_home_if_missing(&AppPaths::discover()?.root)?;
-    if command_dispatch::command_should_show_update_notice(&command) {
-        let _ = show_update_notice_if_available(&command);
+    let native_dry_run = command_dispatch::command_is_native_dry_run(&command);
+    if !native_dry_run {
+        create_codex_home_if_missing(&AppPaths::discover()?.root)?;
+        if command_dispatch::command_should_show_update_notice(&command) {
+            let _ = show_update_notice_if_available(&command);
+        }
     }
     validate_command_runtime_policy(&command)?;
-    schedule_prodex_auto_runtime_housekeeping(&command);
+    if !native_dry_run {
+        schedule_prodex_auto_runtime_housekeeping(&command);
+    }
     command_dispatch::execute_command(command)
 }
 

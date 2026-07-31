@@ -187,8 +187,8 @@ fn stale_login_dir_housekeeping_removes_old_temp_login_homes() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
-    fs::create_dir_all(&paths.root).expect("prodex root should exist");
-    let stale_login = paths.root.join(".login-123-1-0");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+    let stale_login = paths.managed_profiles_root.join(".login-123-1-0");
     fs::create_dir_all(&stale_login).expect("stale login dir should exist");
 
     let simulated_now = SystemTime::now()
@@ -227,7 +227,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
     let missing_log = runtime_log_dir.join("missing.log");
     fs::write(&pointer, format!("{}\n", missing_log.display())).expect("pointer should write");
 
-    let stale_login = paths.root.join(".login-123-1-0");
+    let stale_login = paths.managed_profiles_root.join(".login-123-1-0");
     fs::create_dir_all(&stale_login).expect("stale login dir should exist");
 
     let transient_root_files = [

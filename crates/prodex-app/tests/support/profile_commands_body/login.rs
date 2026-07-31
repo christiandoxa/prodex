@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "login/lifecycle.rs"]
+mod lifecycle;
+
 #[test]
 fn persist_login_home_preserves_refresh_token_from_codex_login_home() {
     let target_dir = ProfileCommandsTestDir::new("login-refresh-token-new");

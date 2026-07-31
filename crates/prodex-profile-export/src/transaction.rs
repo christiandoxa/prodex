@@ -49,6 +49,22 @@ impl fmt::Debug for ImportedExistingProfileFileRollback {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedExistingProfileFileUpdate {
+    pub path: String,
+    pub text: Option<String>,
+}
+
+impl fmt::Debug for ImportedExistingProfileFileUpdate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImportedExistingProfileFileUpdate")
+            .field("path", &self.path)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedProfilesCommit {
     pub imported_names: Vec<String>,
@@ -56,6 +72,7 @@ pub struct ImportedProfilesCommit {
     pub committed_homes: Vec<PathBuf>,
     pub auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
     pub previous_active_profile: Option<String>,
+    pub lifecycle_journal_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +82,7 @@ pub struct ImportedProfilesTransaction {
     pub committed_homes: Vec<PathBuf>,
     pub auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
     pub previous_active_profile: Option<String>,
+    pub lifecycle_journal_path: Option<PathBuf>,
 }
 
 impl ImportedProfilesTransaction {
@@ -79,7 +97,12 @@ impl ImportedProfilesTransaction {
             committed_homes: Vec::with_capacity(staged_profile_count),
             auth_updates: Vec::with_capacity(auth_update_count),
             previous_active_profile,
+            lifecycle_journal_path: None,
         }
+    }
+
+    pub fn set_lifecycle_journal_path(&mut self, path: PathBuf) {
+        self.lifecycle_journal_path = Some(path);
     }
 
     pub fn record_existing_auth_update(&mut self, update: ImportedExistingProfileAuthUpdate) {
@@ -100,6 +123,7 @@ impl ImportedProfilesTransaction {
             committed_homes: self.committed_homes,
             auth_updates: self.auth_updates,
             previous_active_profile: self.previous_active_profile,
+            lifecycle_journal_path: self.lifecycle_journal_path,
         }
     }
 }
@@ -117,6 +141,18 @@ pub struct ImportedExistingProfileAuthUpdateJournal {
     pub previous_provider_json: Option<String>,
     #[serde(default)]
     pub previous_secret_files: Vec<ImportedExistingProfileFileRollback>,
+    #[serde(default)]
+    pub state_after_known: bool,
+    #[serde(default)]
+    pub next_email: Option<String>,
+    #[serde(default)]
+    pub next_auth_json: Option<String>,
+    #[serde(default)]
+    pub next_provider_json: Option<String>,
+    #[serde(default)]
+    pub next_secret_files: Vec<ImportedExistingProfileFileUpdate>,
+    #[serde(default)]
+    pub temporary_home: Option<String>,
     pub created_at: String,
 }
 
@@ -132,6 +168,12 @@ impl fmt::Debug for ImportedExistingProfileAuthUpdateJournal {
             .field("restore_auth_json", &self.restore_auth_json)
             .field("previous_provider_json", &"<redacted>")
             .field("previous_secret_files", &"<redacted>")
+            .field("state_after_known", &self.state_after_known)
+            .field("next_email", &self.next_email)
+            .field("next_auth_json", &"<redacted>")
+            .field("next_provider_json", &"<redacted>")
+            .field("next_secret_files", &"<redacted>")
+            .field("temporary_home", &"<redacted>")
             .field("created_at", &self.created_at)
             .finish()
     }
@@ -154,6 +196,43 @@ impl ImportedExistingProfileAuthUpdateJournal {
             restore_auth_json: true,
             previous_provider_json: None,
             previous_secret_files: Vec::new(),
+            state_after_known: false,
+            next_email: None,
+            next_auth_json: None,
+            next_provider_json: None,
+            next_secret_files: Vec::new(),
+            temporary_home: None,
+            created_at,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileLifecycleJournal {
+    pub version: u32,
+    pub operation: String,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
+impl fmt::Debug for ProfileLifecycleJournal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileLifecycleJournal")
+            .field("version", &self.version)
+            .field("operation", &self.operation)
+            .field("payload", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
+impl ProfileLifecycleJournal {
+    pub fn new(operation: String, payload: serde_json::Value, created_at: String) -> Self {
+        Self {
+            version: crate::PROFILE_LIFECYCLE_JOURNAL_VERSION,
+            operation,
+            payload,
             created_at,
         }
     }

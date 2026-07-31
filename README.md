@@ -491,6 +491,7 @@ prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
 prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
+prodex quota --all --provider agy --once
 prodex redeem main
 prodex gui
 prodex s gui
@@ -500,7 +501,7 @@ prodex status
 
 `prodex status` opens a btop-inspired live terminal dashboard combining the active/runtime profile, 5-hour and weekly quota/reset/runway, historical token usage and cache efficiency, and aggregate Prodex process CPU, resident memory, disk I/O, and network socket queues. Press `r` to refresh immediately and `q` or `Esc` to exit. `prodex status --once` emits one snapshot for scripts. Resource counters use Linux `/proc`; non-Linux systems show those fields as unavailable while quota and token panels continue working.
 
-The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider.
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
 

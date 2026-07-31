@@ -22,6 +22,7 @@ mod claude;
 mod copilot_import;
 mod google;
 mod home;
+pub(super) mod lifecycle_support;
 mod login_menu;
 mod profile_names;
 mod request;
@@ -31,23 +32,30 @@ use self::claude::*;
 use self::copilot_import::*;
 use self::google::*;
 use self::home::create_temporary_login_home;
+use self::lifecycle_support::login_into_profile;
 use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
 };
 use self::profile_names::*;
 use self::request::*;
+use super::import_export::{
+    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
+    ProfileLifecyclePromoteRollback, acquire_profile_lifecycle_lock,
+    cleanup_profile_lifecycle_and_auth_journal, lifecycle_profile_state,
+    load_profile_state_with_profile_recovery_locked, prepare_existing_profile_lifecycle,
+    write_profile_lifecycle_plan,
+};
 use super::manage::print_profile_panel;
 use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
-    agy_bin, codex_child_plan, exit_with_status, fetch_profile_email, fetch_profile_identity,
-    find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, read_auth_summary,
-    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
-    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
-    validate_credential_free_http_url, write_gemini_oauth_secret,
-    write_profile_openai_compatible_base_url,
+    agy_bin, claude_oauth_profile_identity, codex_child_plan, exit_with_status,
+    fetch_profile_email, fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
+    login_with_google_oauth, managed_profile_home_path, persist_login_home,
+    prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists,
+    required_auth_json_text, run_child_plan, unique_profile_name_for_email,
+    update_existing_profile_auth, write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 
@@ -86,7 +94,6 @@ enum PromptLoginSelection {
 
 pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
     let login_request = match resolve_login_request(args.profile.as_deref(), args.codex_args)? {
         ResolvedLoginRequest::Login(login_request) => login_request,
         ResolvedLoginRequest::ImportCopilot => return handle_copilot_login_import(),
@@ -98,107 +105,11 @@ pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
         return exit_with_status(run_antigravity_login(&paths)?);
     }
     let status = if let Some(profile_name) = args.profile.as_deref() {
-        login_into_profile(&paths, &mut state, profile_name, &login_request)?
+        login_into_profile(&paths, profile_name, &login_request)?
     } else {
-        login_with_auto_profile(&paths, &mut state, &login_request)?
+        login_with_auto_profile(&paths, &login_request)?
     };
     exit_with_status(status)
-}
-
-fn login_into_profile(
-    paths: &AppPaths,
-    state: &mut AppState,
-    profile_name: &str,
-    login_request: &LoginRequest,
-) -> Result<ExitStatus> {
-    let profile_name = resolve_profile_name(state, Some(profile_name))?;
-
-    // Validate the profile exists and supports codex runtime before creating
-    // a temporary login home (non-destructive check, no home prep needed yet).
-    {
-        let profile = state
-            .profiles
-            .get(&profile_name)
-            .with_context(|| format!("profile '{}' is missing", profile_name))?;
-        if login_request.method == LoginMethod::Google {
-            if matches!(
-                profile.provider,
-                ProfileProvider::Copilot { .. }
-                    | ProfileProvider::Anthropic { .. }
-                    | ProfileProvider::Agy { .. }
-            ) {
-                bail!(
-                    "profile '{}' uses {}. Google sign-in supports OpenAI/Codex placeholders or Google Gemini profiles.",
-                    profile_name,
-                    profile.provider.display_name()
-                );
-            }
-        } else if login_request.method == LoginMethod::Claude {
-            if matches!(
-                profile.provider,
-                ProfileProvider::Gemini { .. }
-                    | ProfileProvider::Copilot { .. }
-                    | ProfileProvider::Agy { .. }
-            ) {
-                bail!(
-                    "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
-                    profile_name,
-                    profile.provider.display_name()
-                );
-            }
-        } else if !profile.provider.supports_codex_runtime() {
-            bail!(
-                "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
-                profile_name,
-                profile.provider.display_name()
-            );
-        }
-    }
-
-    // Run codex login in a temporary home so the existing auth.json is
-    // preserved when login fails or is cancelled.
-    let login_home = create_temporary_login_home(paths)?;
-    let status = run_codex_login(&login_home, login_request)?;
-    if !status.success() {
-        remove_dir_if_exists(&login_home)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Status {
-        remove_dir_if_exists(&login_home)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Google {
-        let secret = read_gemini_oauth_secret(&login_home)?;
-        let codex_home = prepare_gemini_profile_login_home(paths, state, &profile_name)?;
-        write_gemini_oauth_secret(&codex_home, &secret)?;
-        remove_dir_if_exists(&login_home)?;
-        finish_named_gemini_profile_login(paths, state, &profile_name, &codex_home, &secret)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Claude {
-        let codex_home = prepare_anthropic_profile_login_home(paths, state, &profile_name)?;
-        crate::copy_claude_oauth_credentials(&login_home, &codex_home)?;
-        remove_dir_if_exists(&login_home)?;
-        finish_named_anthropic_profile_login(paths, state, &profile_name, &codex_home)?;
-        return Ok(status);
-    }
-
-    // Login succeeded — prepare the real profile home (dirs only, never
-    // deletes auth.json) and copy the new auth across.
-    let codex_home = prepare_profile_login_home(paths, state, &profile_name)?;
-    let auth_json = required_auth_json_text(&login_home)?;
-    write_secret_text_file(&secret_store::auth_json_path(&codex_home), &auth_json)?;
-    remove_dir_if_exists(&login_home)?;
-
-    finish_named_profile_login(
-        paths,
-        state,
-        &profile_name,
-        &codex_home,
-        login_request.openai_base_url.as_deref(),
-        login_request.openai_base_url_specified,
-    )?;
-    Ok(status)
 }
 
 fn prepare_profile_login_home(
@@ -275,11 +186,7 @@ fn profile_email_label(state: &AppState, profile_name: &str) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn login_with_auto_profile(
-    paths: &AppPaths,
-    state: &mut AppState,
-    login_request: &LoginRequest,
-) -> Result<ExitStatus> {
+fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Result<ExitStatus> {
     let login_home = create_temporary_login_home(paths)?;
     let status = run_codex_login(&login_home, login_request)?;
     if !status.success() {
@@ -292,19 +199,26 @@ fn login_with_auto_profile(
     }
     if login_request.method == LoginMethod::Google {
         let secret = read_gemini_oauth_secret(&login_home)?;
-        finish_auto_login_for_gemini_profile(paths, state, &login_home, &secret)?;
+        let _lock = acquire_profile_lifecycle_lock(paths)?;
+        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
+        finish_auto_login_for_gemini_profile(paths, &mut state, &login_home, &secret)?;
         return Ok(status);
     }
     if login_request.method == LoginMethod::Claude {
-        finish_auto_login_for_anthropic_profile(paths, state, &login_home)?;
+        let _lock = acquire_profile_lifecycle_lock(paths)?;
+        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
+        finish_auto_login_for_anthropic_profile(paths, &mut state, &login_home)?;
         return Ok(status);
     }
 
     let auth_json = required_auth_json_text(&login_home)?;
-    if read_auth_summary(&login_home).label == "api-key" {
+    let auth_is_api_key = read_auth_summary(&login_home).label == "api-key";
+    if auth_is_api_key {
+        let _lock = acquire_profile_lifecycle_lock(paths)?;
+        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
         finish_auto_login_for_api_key_profile(
             paths,
-            state,
+            &mut state,
             &login_home,
             login_request.api_key_profile_name.as_deref(),
             login_request.openai_base_url.as_deref(),
@@ -325,10 +239,12 @@ fn login_with_auto_profile(
         .as_deref()
         .context("logged-in account identity did not include an email")?;
 
-    if let Some(profile_name) = find_profile_by_identity(state, &identity)? {
+    let _lock = acquire_profile_lifecycle_lock(paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
+    if let Some(profile_name) = find_profile_by_identity(&mut state, &identity)? {
         finish_auto_login_for_existing_profile(
             paths,
-            state,
+            &mut state,
             &login_home,
             &profile_name,
             email,
@@ -337,7 +253,7 @@ fn login_with_auto_profile(
         return Ok(status);
     }
 
-    finish_auto_login_for_new_profile(paths, state, &login_home, email)?;
+    finish_auto_login_for_new_profile(paths, &mut state, &login_home, email)?;
     Ok(status)
 }
 
@@ -349,10 +265,31 @@ fn finish_auto_login_for_existing_profile(
     email: &str,
     auth_json: &str,
 ) -> Result<()> {
+    let mut desired_profile = state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?
+        .clone();
+    desired_profile.email = Some(email.to_string());
+    let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        paths,
+        "login",
+        state,
+        profile_name,
+        &desired_profile,
+        Some(profile_name.to_string()),
+        ProfileAuthUpdate {
+            next_auth_json: Some(auth_json.to_string()),
+            next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+            next_secret_files: Vec::new(),
+            previous_secret_file_paths: &[],
+            temporary_home: Some(login_home),
+        },
+    )?;
     let updated =
         update_existing_profile_auth(paths, state, profile_name, Some(email), auth_json, true)?;
-    remove_dir_if_exists(login_home)?;
     state.save(paths)?;
+    remove_dir_if_exists(login_home)?;
 
     let fields = vec![
         (
@@ -370,6 +307,7 @@ fn finish_auto_login_for_existing_profile(
         ),
     ];
     print_profile_panel("Login", &fields)?;
+    cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
     Ok(())
 }
 
@@ -381,18 +319,35 @@ fn finish_auto_login_for_new_profile(
 ) -> Result<()> {
     let profile_name = unique_profile_name_for_email(paths, state, email);
     let codex_home = managed_profile_home_path(paths, &profile_name)?;
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: Some(email.to_string()),
+        provider: ProfileProvider::Openai,
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        paths,
+        "login",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &profile_name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: Some(profile_name.clone()),
+            home_actions: vec![ProfileLifecycleHomeAction::Promote {
+                source: login_home.display().to_string(),
+                destination: codex_home.display().to_string(),
+                rollback: ProfileLifecyclePromoteRollback::Remove,
+            }],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
     persist_login_home(login_home, &codex_home)?;
     prepare_managed_codex_home(paths, &codex_home)?;
 
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed: true,
-            email: Some(email.to_string()),
-            provider: ProfileProvider::Openai,
-        },
-    );
+    state.profiles.insert(profile_name.clone(), desired_profile);
     state.active_profile = Some(profile_name.clone());
     state.save(paths)?;
 
@@ -406,6 +361,7 @@ fn finish_auto_login_for_new_profile(
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_profile_panel("Login", &fields)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
     Ok(())
 }
 
@@ -835,42 +791,6 @@ fn extract_login_base_url(
     Ok((base_url, specified, filtered))
 }
 
-fn normalize_optional_base_url(value: &str) -> Result<Option<String>> {
-    if value.is_empty() {
-        return Ok(None);
-    }
-    validate_credential_free_http_url(value, "profile OpenAI-compatible base URL")?;
-    Ok(Some(value.to_string()))
-}
-
-#[cfg(test)]
-mod url_boundary_tests {
-    use super::*;
-
-    #[test]
-    fn login_base_url_rejects_secrets_without_echoing_or_stripping() {
-        for value in [
-            "https://user:login-password-secret-sentinel@example.test/v1",
-            "https://example.test/v1?token=login-query-secret-sentinel",
-            "https://example.test/v1#login-fragment-secret-sentinel",
-            " not-a-url-login-parse-secret-sentinel ",
-        ] {
-            let error = normalize_optional_base_url(value).unwrap_err().to_string();
-
-            assert!(
-                error.contains("no credentials, query, or fragment"),
-                "{error}"
-            );
-            assert!(!error.contains("secret-sentinel"), "{error}");
-        }
-
-        assert_eq!(
-            normalize_optional_base_url("https://example.test/v1/").unwrap(),
-            Some("https://example.test/v1/".to_string())
-        );
-    }
-}
-
 fn success_exit_status() -> ExitStatus {
     ExitStatus::from_raw(0)
 }
@@ -879,27 +799,4 @@ fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {
     let mut plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
     plan.args = vec![OsString::from("auth"), OsString::from("login")];
     run_child_plan(&plan, None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn copilot_login_menu_selection_runs_import_instead_of_guidance() {
-        assert_eq!(
-            classify_login_menu_action(LoginMenuAction::Guidance(LoginGuidanceKind::CopilotImport)),
-            PromptLoginSelection::ImportCopilot
-        );
-    }
-
-    #[test]
-    fn api_key_guidance_still_shows_guidance() {
-        assert_eq!(
-            classify_login_menu_action(LoginMenuAction::Guidance(
-                LoginGuidanceKind::DeepSeekApiKey
-            )),
-            PromptLoginSelection::Guidance(LoginGuidanceKind::DeepSeekApiKey)
-        );
-    }
 }

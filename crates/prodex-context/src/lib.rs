@@ -10,10 +10,10 @@ mod command_output;
 mod compression;
 mod critical_signal;
 pub use audit::{
-    ContextAuditEntry, ContextAuditReport, ContextCompressEntry, ContextCompressReport,
-    ContextStaticDuplicateOccurrence, ContextStaticDuplicateReport, ContextStaticDuplicateSnippet,
-    collect_context_audit_report, collect_context_static_duplicate_report,
-    render_context_audit_report_with_width,
+    ContextAuditEntry, ContextAuditError, ContextAuditReport, ContextCompressEntry,
+    ContextCompressReport, ContextStaticDuplicateOccurrence, ContextStaticDuplicateReport,
+    ContextStaticDuplicateSnippet, collect_context_audit_report,
+    collect_context_static_duplicate_report, render_context_audit_report_with_width,
 };
 pub(crate) use audit::{collect_context_files, format_count};
 pub use blob_noise::{

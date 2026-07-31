@@ -30,7 +30,7 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
     )
     .expect("pointer should write");
 
-    let stale_login = paths.root.join(".login-456-1-0");
+    let stale_login = paths.managed_profiles_root.join(".login-456-1-0");
     fs::create_dir_all(&stale_login).expect("stale login dir should exist");
     let stale_root_temp = paths.root.join("runtime-scores.json.999999999.1.0.tmp");
     fs::write(&stale_root_temp, "tmp").expect("stale root temp should write");

@@ -9,17 +9,18 @@ use zeroize::Zeroizing;
 
 pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let password = match resolve_export_password_mode(&args)? {
+        true => Some(resolve_export_password()?),
+        false => None,
+    };
+    let _lock = super::acquire_profile_lifecycle_lock(&paths)?;
+    let (state, _) = super::load_profile_state_with_profile_recovery_locked(&paths, true)?;
     let available_profile_names = state.profiles.keys().cloned().collect::<BTreeSet<_>>();
     let profile_names = prodex_profile_export::resolve_requested_profile_names(
         &available_profile_names,
         &args.profile,
     )?;
     let payload = build_profile_export_payload(&state, &profile_names)?;
-    let password = match resolve_export_password_mode(&args)? {
-        true => Some(resolve_export_password()?),
-        false => None,
-    };
     let encoded = Zeroizing::new(prodex_profile_export::serialize_profile_export_payload(
         &payload,
         password.as_ref().map(|password| password.as_str()),

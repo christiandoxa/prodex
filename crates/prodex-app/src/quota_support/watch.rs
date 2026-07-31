@@ -66,12 +66,22 @@ enum QuotaWatchCommandOutcome {
     Update,
     Quit,
 }
-struct AllQuotaWatchRefresh {
-    receiver: Receiver<AllQuotaWatchSnapshot>,
-    sender: mpsc::Sender<AllQuotaWatchSnapshot>,
+#[derive(Debug, Clone)]
+struct ProfileQuotaWatchSnapshot {
+    updated: String,
+    quota: std::result::Result<ProviderQuotaSnapshot, String>,
+}
+
+struct QuotaWatchRefresh<T> {
+    receiver: Receiver<T>,
+    sender: mpsc::Sender<T>,
     in_flight: bool,
 }
-impl AllQuotaWatchRefresh {
+
+type AllQuotaWatchRefresh = QuotaWatchRefresh<AllQuotaWatchSnapshot>;
+type ProfileQuotaWatchRefresh = QuotaWatchRefresh<ProfileQuotaWatchSnapshot>;
+
+impl<T: Send + 'static> QuotaWatchRefresh<T> {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
@@ -81,23 +91,57 @@ impl AllQuotaWatchRefresh {
         }
     }
 
+    #[cfg(test)]
     fn try_start<F>(&mut self, load: F) -> bool
     where
-        F: FnOnce() -> AllQuotaWatchSnapshot + Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
     {
         if self.in_flight {
             return false;
         }
 
-        self.in_flight = true;
         let sender = self.sender.clone();
-        thread::spawn(move || {
-            let _ = sender.send(load());
-        });
+        if thread::Builder::new()
+            .name("prodex-quota-refresh".to_string())
+            .spawn(move || {
+                let _ = sender.send(load());
+            })
+            .is_err()
+        {
+            return false;
+        }
+        self.in_flight = true;
         true
     }
 
-    fn take_latest(&mut self) -> Option<AllQuotaWatchSnapshot> {
+    fn try_start_catching_panic<F>(&mut self, load: F, fallback: T) -> bool
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Clone,
+    {
+        if self.in_flight {
+            return false;
+        }
+
+        let sender = self.sender.clone();
+        let panic_fallback = fallback.clone();
+        if thread::Builder::new()
+            .name("prodex-quota-refresh".to_string())
+            .spawn(move || {
+                let snapshot = crate::runtime_panic::catch_runtime_unwind_silently(load)
+                    .unwrap_or(panic_fallback);
+                let _ = sender.send(snapshot);
+            })
+            .is_err()
+        {
+            let _ = self.sender.send(fallback);
+            return false;
+        }
+        self.in_flight = true;
+        true
+    }
+
+    fn take_latest(&mut self) -> Option<T> {
         let mut latest = None;
         loop {
             match self.receiver.try_recv() {
@@ -286,11 +330,14 @@ fn quota_watch_without_interactive_scroll_notice(output: &str) -> String {
 }
 
 fn quota_watch_scroll_range(window: &RenderedQuotaReportWindow) -> Option<String> {
-    if window.total_profiles == 0
-        || window.shown_profiles == 0
-        || (window.hidden_before == 0 && window.hidden_after == 0)
-    {
+    if window.total_profiles == 0 || (window.hidden_before == 0 && window.hidden_after == 0) {
         return None;
+    }
+    if window.shown_profiles == 0 {
+        return Some(format!(
+            "0/{} visible; {} above, {} below",
+            window.total_profiles, window.hidden_before, window.hidden_after
+        ));
     }
     let first_visible = window.start_profile.saturating_add(1);
     let last_visible = window.start_profile.saturating_add(window.shown_profiles);
@@ -334,9 +381,20 @@ fn start_all_quota_watch_refresh(
     let paths = paths.clone();
     let base_url = base_url.map(str::to_string);
     let auth_filter = auth_filter.clone();
-    refresh.try_start(move || {
-        load_all_quota_watch_snapshot(&paths, base_url.as_deref(), &auth_filter, provider_filter)
-    })
+    refresh.try_start_catching_panic(
+        move || {
+            load_all_quota_watch_snapshot(
+                &paths,
+                base_url.as_deref(),
+                &auth_filter,
+                provider_filter,
+            )
+        },
+        AllQuotaWatchSnapshot::Error {
+            updated: quota_watch_updated_at(),
+            message: "quota refresh failed unexpectedly".to_string(),
+        },
+    )
 }
 
 fn quota_watch_updated_at() -> String {
@@ -592,6 +650,7 @@ fn apply_quota_watch_command(
 #[cfg(test)]
 mod tests {
     include!("../../tests/src/quota_support/watch_unit.rs");
+    include!("../../tests/src/quota_support/watch_refresh_unit.rs");
     include!("../../tests/src/quota_support/watch_tui_frame_unit.rs");
     include!("../../tests/src/quota_support/watch_tui_table_unit.rs");
 }

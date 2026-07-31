@@ -1,8 +1,9 @@
 use crate::{
-    PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
-    agy_bin, clear_rtk_auto_wrap_control_env, copilot_bin, execute_runtime_launch, gemini_bin,
-    kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir, prepare_prodex_overlay_home,
-    prepend_child_path, refresh_gemini_oauth_secret_if_needed,
+    PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeOverlayCleanup,
+    RuntimeProxyEndpoint, agy_bin, clear_rtk_auto_wrap_control_env, copilot_bin,
+    execute_runtime_launch, gemini_bin, kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir,
+    prepare_prodex_overlay_home, prepend_child_path, refresh_gemini_oauth_secret_if_needed,
+    resolve_runtime_optional_tool_plan,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -70,6 +71,24 @@ struct SuperNativeCliLaunchStrategy {
     agent: SuperCliAgent,
 }
 
+fn resolve_super_native_tool_plan(
+    args: &SuperArgs,
+) -> Result<prodex_optional_tools::ToolActivationPlan> {
+    let mut selected = prodex_optional_tools::OptionalToolSet::super_defaults();
+    for tool in args.tools.iter().chain(&args.required_tools) {
+        if *tool != prodex_optional_tools::OptionalToolId::Presidio {
+            selected.insert(*tool);
+        }
+    }
+    let required = args
+        .required_tools
+        .iter()
+        .copied()
+        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
+        .collect();
+    resolve_runtime_optional_tool_plan(&selected, &required)
+}
+
 impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
@@ -118,6 +137,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        let tool_plan = resolve_super_native_tool_plan(&self.args)?;
         let presidio_enabled = self.presidio_enabled
             && matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot);
         if presidio_enabled {
@@ -136,8 +156,10 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         }
 
         let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
-        prodex_optional_tools::configure_super_optimizer_codex_home_with_presidio(
+        let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
+        prodex_optional_tools::activate_optional_tools_for_codex(
             &overlay_home,
+            &tool_plan,
             presidio_enabled,
         )?;
         let mut child = match self.agent {
@@ -225,7 +247,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
                 OsString::from("1"),
             ));
         }
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
+        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
     }
 }
 

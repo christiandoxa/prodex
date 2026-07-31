@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+redaction = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 terminal_ui = { workspace = true }

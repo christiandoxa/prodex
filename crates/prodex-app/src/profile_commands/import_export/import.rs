@@ -1,9 +1,11 @@
 use prodex_profile_export::{
-    ImportedExistingProfileFileRollback, ProfileImportAuthUpdatePlan, ProfileImportIdentity,
-    ProfileImportPlan, ProfileImportPlanAction, ProfileImportPlanInput,
+    ImportedExistingProfileFileRollback, ImportedExistingProfileFileUpdate,
+    ProfileImportAuthUpdatePlan, ProfileImportIdentity, ProfileImportPlan, ProfileImportPlanAction,
+    ProfileImportPlanInput,
 };
 
 use super::super::manage::print_profile_panel;
+use super::lifecycle::{update_profile_lifecycle_plan, write_profile_lifecycle_plan};
 use super::passwords::read_profile_export_payload;
 use super::progress::print_profile_import_progress;
 use super::secrets::{
@@ -13,6 +15,21 @@ use super::secrets::{
     write_imported_auth_update_journal, write_secret_text_file,
 };
 use super::*;
+
+pub(super) mod lifecycle_support;
+use self::lifecycle_support::build_import_lifecycle_plan;
+
+struct StagedImportCleanup<'a> {
+    staged_profiles: &'a [StagedImportedProfile],
+}
+
+impl Drop for StagedImportCleanup<'_> {
+    fn drop(&mut self) {
+        for staged in self.staged_profiles {
+            let _ = fs::remove_dir_all(&staged.staging_home);
+        }
+    }
+}
 
 pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
     if super::super::anthropic::is_claude_import_source(&args.path) {
@@ -39,25 +56,21 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
     let source_active_profile = payload.active_profile.clone();
 
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let _lock = super::acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     print_profile_import_progress("Checking existing profiles...")?;
-    let recovered_auth_updates = recover_imported_auth_update_journals(&paths, &mut state)?;
-    if recovered_auth_updates > 0 {
-        print_profile_import_progress("Recovering interrupted profile import...")?;
-        state
-            .save(&paths)
-            .context("failed to save recovered import auth rollback state")?;
-    }
     print_profile_import_progress("Staging imported profiles...")?;
     let commit = import_profile_export_payload(&paths, &mut state, &payload)?;
     print_profile_import_progress("Saving imported profiles...")?;
     if let Err(err) = state.save(&paths) {
         rollback_imported_profiles(&mut state, &commit)
             .with_context(|| format!("failed to roll back profile import after: {err:#}"))?;
+        state
+            .save_with_removed_profiles(&paths, &commit.imported_names)
+            .with_context(|| format!("failed to persist profile import rollback after: {err:#}"))?;
         return Err(err);
     }
     print_profile_import_progress("Profile import complete.")?;
-    prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
     audit_log_event(
         "profile",
         "import",
@@ -85,6 +98,7 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         },
     );
     print_profile_panel("Profile Import", &fields)?;
+    prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
     Ok(())
 }
 
@@ -99,14 +113,8 @@ pub(crate) fn handle_import_current_profile(args: ImportCurrentArgs) -> Result<(
 }
 
 pub(crate) fn count_profile_import_auth_journals(paths: &AppPaths) -> Result<usize> {
+    let _lock = super::acquire_profile_lifecycle_lock(paths)?;
     Ok(prodex_profile_export::profile_import_auth_update_journal_paths(&paths.root)?.len())
-}
-
-pub(crate) fn repair_profile_import_auth_journals(
-    paths: &AppPaths,
-    state: &mut AppState,
-) -> Result<usize> {
-    recover_imported_auth_update_journals(paths, state)
 }
 
 pub(in crate::profile_commands) fn import_profile_export_payload(
@@ -115,16 +123,39 @@ pub(in crate::profile_commands) fn import_profile_export_payload(
     payload: &ProfileExportPayload,
 ) -> Result<ImportedProfilesCommit> {
     let prepared = stage_imported_profiles(paths, state, payload)?;
+    let _staging_cleanup = StagedImportCleanup {
+        staged_profiles: &prepared.staged_profiles,
+    };
+    let mut lifecycle_plan = build_import_lifecycle_plan(state, payload, &prepared)?;
+    let lifecycle_path = write_profile_lifecycle_plan(paths, "import", &lifecycle_plan)?;
     let mut transaction = ImportedProfilesTransaction::new(
         state.active_profile.clone(),
         prepared.staged_profiles.len(),
         prepared.auth_updates.len() + prepared.existing_profile_updates.len(),
     );
+    transaction.set_lifecycle_journal_path(lifecycle_path.clone());
 
     if let Err(err) = apply_imported_profiles(paths, state, payload, &prepared, &mut transaction) {
         rollback_partial_imported_profiles(state, &transaction).with_context(|| {
             format!("failed to roll back partial profile import after: {err:#}")
         })?;
+        cleanup_rolled_back_import_journals(Some(&lifecycle_path), &transaction.auth_updates);
+        return Err(err);
+    }
+
+    lifecycle_plan.auth_journal_paths = transaction
+        .auth_updates
+        .iter()
+        .filter_map(|update| update.journal_path.as_ref())
+        .map(|path| path.display().to_string())
+        .collect();
+    if let Err(err) =
+        update_profile_lifecycle_plan(paths, &lifecycle_path, "import", &lifecycle_plan)
+    {
+        rollback_partial_imported_profiles(state, &transaction).with_context(|| {
+            format!("failed to roll back profile import after lifecycle update failed: {err:#}")
+        })?;
+        cleanup_rolled_back_import_journals(Some(&lifecycle_path), &transaction.auth_updates);
         return Err(err);
     }
 
@@ -179,7 +210,15 @@ fn apply_imported_existing_auth_updates(
             previous_provider_json: None,
             previous_secret_files: Vec::new(),
         };
-        rollback.journal_path = Some(write_imported_auth_update_journal(paths, &rollback)?);
+        rollback.journal_path = Some(write_imported_auth_update_journal(
+            paths,
+            &rollback,
+            update.email.clone(),
+            Some(update.auth_json.clone()),
+            Some(serde_json::to_string(&previous.provider)?),
+            Vec::new(),
+            None,
+        )?);
         let updated = match update_existing_profile_auth(
             paths,
             state,
@@ -197,6 +236,9 @@ fn apply_imported_existing_auth_updates(
                             update.target_profile_name
                         )
                     })?;
+                if let Some(path) = rollback.journal_path.as_deref() {
+                    prodex_profile_export::cleanup_profile_import_auth_update_journal(path);
+                }
                 return Err(err);
             }
         };
@@ -246,7 +288,22 @@ fn apply_imported_existing_profile_updates(
             previous_provider_json: Some(previous_provider_json),
             previous_secret_files,
         };
-        let journal_path = write_imported_auth_update_journal(paths, &rollback)?;
+        let journal_path = write_imported_auth_update_journal(
+            paths,
+            &rollback,
+            update.email.clone(),
+            None,
+            Some(serde_json::to_string(&update.provider)?),
+            update
+                .secret_files
+                .iter()
+                .map(|secret_file| ImportedExistingProfileFileUpdate {
+                    path: secret_file.path.clone(),
+                    text: Some(secret_file.text.clone()),
+                })
+                .collect(),
+            None,
+        )?;
         rollback.journal_path = Some(journal_path.clone());
         let applied = (|| -> Result<()> {
             for secret_file in &update.secret_files {
@@ -272,7 +329,7 @@ fn apply_imported_existing_profile_updates(
                     )
                 },
             )?;
-            let _ = fs::remove_file(journal_path);
+            prodex_profile_export::cleanup_profile_import_auth_update_journal(journal_path);
             return Err(err);
         }
         transaction.record_existing_auth_update(rollback);
@@ -350,6 +407,20 @@ fn rollback_partial_imported_profiles(
     Ok(())
 }
 
+fn cleanup_rolled_back_import_journals(
+    lifecycle_path: Option<&Path>,
+    auth_updates: &[ImportedExistingProfileAuthUpdate],
+) {
+    if let Some(path) = lifecycle_path {
+        super::lifecycle::cleanup_profile_lifecycle_journal(path);
+    }
+    for update in auth_updates {
+        if let Some(path) = update.journal_path.as_deref() {
+            prodex_profile_export::cleanup_profile_import_auth_update_journal(path);
+        }
+    }
+}
+
 pub(super) fn rollback_imported_auth_updates(
     state: &mut AppState,
     auth_updates: &[ImportedExistingProfileAuthUpdate],
@@ -383,69 +454,6 @@ pub(super) fn rollback_imported_auth_updates(
         }
     }
     Ok(())
-}
-
-pub(super) fn recover_imported_auth_update_journals(
-    paths: &AppPaths,
-    state: &mut AppState,
-) -> Result<usize> {
-    let journal_root = prodex_profile_export::profile_import_auth_update_journal_root(&paths.root);
-    let journal_paths =
-        prodex_profile_export::profile_import_auth_update_journal_paths(&paths.root)?;
-
-    let mut journals = Vec::new();
-    for journal_path in journal_paths {
-        let journal =
-            prodex_profile_export::read_profile_import_auth_update_journal(&journal_path)?;
-        let profile = state.profiles.get(&journal.profile_name).with_context(|| {
-            format!(
-                "auth update journal {} references missing profile '{}'",
-                journal_path.display(),
-                journal.profile_name
-            )
-        })?;
-        let journal_codex_home = PathBuf::from(&journal.codex_home);
-        if journal_codex_home != profile.codex_home {
-            bail!(
-                "auth update journal {} targets {} but profile '{}' uses {}",
-                journal_path.display(),
-                journal_codex_home.display(),
-                journal.profile_name,
-                profile.codex_home.display()
-            );
-        }
-        journals.push((journal_path, journal));
-    }
-    journals.sort_by(|left, right| {
-        right
-            .1
-            .created_at
-            .cmp(&left.1.created_at)
-            .then_with(|| right.0.cmp(&left.0))
-    });
-
-    let mut recovered = 0;
-    for (journal_path, journal) in journals {
-        rollback_imported_auth_updates(
-            state,
-            &[ImportedExistingProfileAuthUpdate {
-                profile_name: journal.profile_name,
-                codex_home: PathBuf::from(journal.codex_home),
-                previous_auth_json: journal.previous_auth_json,
-                previous_email: journal.previous_email,
-                journal_path: Some(journal_path.clone()),
-                restore_auth_json: journal.restore_auth_json,
-                previous_provider_json: journal.previous_provider_json,
-                previous_secret_files: journal.previous_secret_files,
-            }],
-        )?;
-        fs::remove_file(&journal_path)
-            .with_context(|| format!("failed to remove {}", journal_path.display()))?;
-        recovered += 1;
-    }
-
-    let _ = fs::remove_dir(&journal_root);
-    Ok(recovered)
 }
 
 pub(super) fn stage_imported_profiles(
@@ -708,19 +716,19 @@ fn stage_new_profile(
         &exported.name,
         &runtime_random_token("profile")?,
     );
+    staged_profiles.push(StagedImportedProfile {
+        name: exported.name.clone(),
+        email: plan_inputs[source_index].identity.email.clone(),
+        staging_home: staging_home.clone(),
+        final_home: final_home.clone(),
+        provider: exported.provider.clone(),
+    });
     create_codex_home_if_missing(&staging_home)?;
     prepare_managed_codex_home(paths, &staging_home)?;
     if plan_inputs[source_index].supports_codex_runtime {
         write_secret_text_file(&staging_home.join("auth.json"), &exported.auth_json)?;
     }
     write_exported_secret_files(&staging_home, exported)?;
-    staged_profiles.push(StagedImportedProfile {
-        name: exported.name.clone(),
-        email: plan_inputs[source_index].identity.email.clone(),
-        staging_home,
-        final_home,
-        provider: exported.provider.clone(),
-    });
     Ok(())
 }
 

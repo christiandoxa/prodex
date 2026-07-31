@@ -263,6 +263,17 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
             .unwrap(),
         prodex_storage::SiemOutboxDeliveryDecision::Delivered
     );
+    assert_eq!(
+        repository
+            .governance_finalize_siem_outbox_claim(
+                &claims[1],
+                true,
+                1_800_060_000_005,
+                prodex_storage::SiemOutboxRetryPolicy::bounded(3, 1_000, 10_000).unwrap(),
+            )
+            .await,
+        Err(prodex_storage::GovernanceRepositoryError::Conflict)
+    );
 
     let registry_revision = "registry-v1";
     let mut client = pool.get().await.unwrap();

@@ -61,12 +61,12 @@ fn configure_ponytail_plugin_config(
         }
     };
 
-    let features = ensure_child_table(&mut table, "features");
+    let features = ensure_child_table(&mut table, "features")?;
     features.insert("plugins".to_string(), toml::Value::Boolean(true));
     features.insert("remote_plugin".to_string(), toml::Value::Boolean(false));
 
-    let marketplaces = ensure_child_table(&mut table, "marketplaces");
-    let ponytail_marketplace = ensure_child_table(marketplaces, MARKETPLACE_NAME);
+    let marketplaces = ensure_child_table(&mut table, "marketplaces")?;
+    let ponytail_marketplace = ensure_child_table(marketplaces, MARKETPLACE_NAME)?;
     ponytail_marketplace.insert(
         "source_type".to_string(),
         toml::Value::String("local".to_string()),
@@ -80,8 +80,8 @@ fn configure_ponytail_plugin_config(
         toml::Value::String(plugin_version.to_string()),
     );
 
-    let plugins = ensure_child_table(&mut table, "plugins");
-    let ponytail_plugin = ensure_child_table(plugins, PLUGIN_ID);
+    let plugins = ensure_child_table(&mut table, "plugins")?;
+    let ponytail_plugin = ensure_child_table(plugins, PLUGIN_ID)?;
     ponytail_plugin.insert("enabled".to_string(), toml::Value::Boolean(true));
 
     let rendered = toml::to_string(&toml::Value::Table(table))

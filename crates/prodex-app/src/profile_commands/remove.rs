@@ -1,3 +1,8 @@
+use super::import_export::{
+    ProfileLifecycleHomeAction, ProfileLifecyclePlan, acquire_profile_lifecycle_lock,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    write_profile_lifecycle_plan,
+};
 use super::manage::print_profile_panel;
 use anyhow::{Context, Result, bail};
 use prodex_core::path_is_strictly_under_root;
@@ -10,7 +15,8 @@ use crate::{
     load_runtime_continuation_journal_with_recovery, load_runtime_continuations_with_recovery,
     runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
     runtime_continuations_file_path, runtime_continuations_last_good_file_path,
-    save_runtime_continuation_journal_for_profiles, save_runtime_continuations_for_profiles,
+    runtime_random_token, save_runtime_continuation_journal_for_profiles,
+    save_runtime_continuations_for_profiles,
 };
 
 #[derive(Debug)]
@@ -20,9 +26,10 @@ struct RemovedProfileRecord {
     deleted_home: bool,
     delete_home: bool,
     codex_home: PathBuf,
+    quarantine_home: Option<PathBuf>,
 }
 
-fn persist_pruned_profile_runtime_sidecars(
+pub(crate) fn persist_pruned_profile_runtime_sidecars(
     paths: &AppPaths,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<()> {
@@ -48,9 +55,41 @@ fn persist_pruned_profile_runtime_sidecars(
     Ok(())
 }
 
+pub(crate) fn finalize_recovered_profile_removals(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    journal_paths: &[PathBuf],
+) -> Result<()> {
+    if journal_paths.is_empty() {
+        return Ok(());
+    }
+    persist_pruned_profile_runtime_sidecars(paths, profiles)?;
+    for journal_path in journal_paths {
+        prodex_profile_export::cleanup_profile_lifecycle_journal(journal_path);
+    }
+    Ok(())
+}
+
 pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, lifecycle_recovery) =
+        load_profile_state_with_profile_recovery_locked(&paths, true)?;
+    finalize_recovered_profile_removals(
+        &paths,
+        &state.profiles,
+        &lifecycle_recovery.pending_removal_journals,
+    )?;
+    if !args.all
+        && args.name.as_deref().is_some_and(|name| {
+            lifecycle_recovery
+                .completed_removal_profiles
+                .iter()
+                .any(|removed| removed == name)
+        })
+    {
+        return Ok(());
+    }
 
     let target_names = prodex_profile_identity::resolve_remove_profile_targets(
         state
@@ -61,15 +100,24 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         args.name.as_deref(),
         args.delete_home,
     )?;
+    let previous_state = state.clone();
     let mut removed_profiles =
         remove_profiles_from_state(&paths, &mut state, &target_names, args.delete_home)?;
     prune_removed_profile_metadata(&mut state, &target_names);
+    assign_quarantine_homes(&paths, &mut removed_profiles)?;
+    let lifecycle_path = write_profile_lifecycle_plan(
+        &paths,
+        "remove",
+        &build_remove_lifecycle_plan(&previous_state, &state, &removed_profiles)?,
+    )?;
+    quarantine_removed_profile_homes(&mut removed_profiles)?;
     state.save_with_removed_profiles(&paths, &target_names)?;
     persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
     delete_removed_profile_homes(&mut removed_profiles)?;
 
     if args.all {
         print_bulk_profile_removal_result(&state, &removed_profiles)?;
+        prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
         return Ok(());
     }
 
@@ -77,6 +125,7 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         bail!("internal error: single-profile removal did not remove a profile");
     };
     print_single_profile_removal_result(&state, removed_profile)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
 
     Ok(())
 }
@@ -100,6 +149,7 @@ fn remove_profiles_from_state(
             deleted_home: false,
             delete_home,
             codex_home: profile.codex_home,
+            quarantine_home: None,
         });
     }
 
@@ -138,16 +188,93 @@ fn delete_removed_profile_homes(removed_profiles: &mut [RemovedProfileRecord]) -
         .iter_mut()
         .filter(|profile| profile.delete_home)
     {
-        if profile.codex_home.exists() {
-            fs::remove_dir_all(&profile.codex_home)
-                .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
+        let home = profile
+            .quarantine_home
+            .as_deref()
+            .unwrap_or(&profile.codex_home);
+        if home.exists() {
+            fs::remove_dir_all(home)
+                .with_context(|| format!("failed to delete {}", home.display()))?;
         }
         profile.deleted_home = true;
     }
     Ok(())
 }
 
-fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String]) {
+fn assign_quarantine_homes(
+    paths: &AppPaths,
+    removed_profiles: &mut [RemovedProfileRecord],
+) -> Result<()> {
+    for profile in removed_profiles
+        .iter_mut()
+        .filter(|profile| profile.delete_home)
+    {
+        let quarantine = paths.managed_profiles_root.join(format!(
+            ".remove-{}-{}",
+            profile.name,
+            runtime_random_token("home")?
+        ));
+        profile.quarantine_home = Some(quarantine);
+    }
+    Ok(())
+}
+
+fn quarantine_removed_profile_homes(removed_profiles: &mut [RemovedProfileRecord]) -> Result<()> {
+    for profile in removed_profiles
+        .iter()
+        .filter(|profile| profile.delete_home)
+    {
+        if !profile.codex_home.exists() {
+            continue;
+        }
+        let quarantine = profile
+            .quarantine_home
+            .as_ref()
+            .context("missing profile home quarantine path")?;
+        fs::rename(&profile.codex_home, quarantine).with_context(|| {
+            format!(
+                "failed to quarantine profile home {}",
+                profile.codex_home.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn build_remove_lifecycle_plan(
+    previous_state: &AppState,
+    state: &AppState,
+    removed_profiles: &[RemovedProfileRecord],
+) -> Result<ProfileLifecyclePlan> {
+    Ok(ProfileLifecyclePlan {
+        profile_states: removed_profiles
+            .iter()
+            .map(|profile| {
+                lifecycle_profile_state(
+                    &profile.name,
+                    previous_state.profiles.get(&profile.name),
+                    state.profiles.get(&profile.name),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?,
+        previous_active_profile: previous_state.active_profile.clone(),
+        next_active_profile: state.active_profile.clone(),
+        home_actions: removed_profiles
+            .iter()
+            .filter_map(|profile| {
+                profile.quarantine_home.as_ref().map(|quarantine| {
+                    ProfileLifecycleHomeAction::Quarantine {
+                        source: profile.codex_home.display().to_string(),
+                        quarantine: quarantine.display().to_string(),
+                    }
+                })
+            })
+            .collect(),
+        auth_journal_paths: Vec::new(),
+    })
+}
+
+pub(crate) fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String]) {
     let plan = prodex_profile_identity::plan_removed_profile_state(
         state.profiles.keys().map(String::as_str),
         state.active_profile.as_deref(),

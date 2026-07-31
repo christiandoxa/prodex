@@ -231,6 +231,10 @@ impl DashboardServer {
 }
 
 #[cfg(test)]
+#[path = "dashboard/lifecycle_tests.rs"]
+mod lifecycle_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ProfileEntry, ProfileProvider};
@@ -241,7 +245,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn dashboard_json_request(
+    pub(super) fn dashboard_json_request(
         dashboard: &DashboardServer,
         method: reqwest::Method,
         path: &str,
@@ -643,7 +647,7 @@ mod tests {
         SECRET_MARKERS.iter().any(|marker| value.contains(marker))
     }
 
-    fn dashboard_test_paths(name: &str) -> AppPaths {
+    pub(super) fn dashboard_test_paths(name: &str) -> AppPaths {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time should be available")

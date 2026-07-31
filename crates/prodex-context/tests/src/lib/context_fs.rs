@@ -47,6 +47,114 @@ fn context_walk_rejects_excessive_depth() {
 
 #[cfg(unix)]
 #[test]
+fn context_audit_fail_fast_errors_escape_terminal_controls() {
+    let root = temp_context_root("fail-fast-controls");
+    let mut path = root.join("skills");
+    for _ in 0..65 {
+        path.push("nested\n\u{1b}[31m");
+    }
+    std::fs::create_dir_all(&path).expect("deep tree created");
+    std::fs::write(path.join("SKILL.md"), "deep context").expect("deep file written");
+
+    let error = collect_context_audit_report(&root, 20).expect_err("depth must be bounded");
+    let message = format!("{error:#}");
+    assert!(!message.contains('\n'));
+    assert!(!message.contains('\u{1b}'));
+    assert!(message.contains("\\n"));
+    assert!(message.contains("\\u{1b}"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn context_audit_surfaces_bounded_read_errors_without_content() {
+    let root = temp_context_root("read-errors");
+    std::fs::create_dir_all(root.join("skills")).expect("skills directory created");
+    for index in 0..65 {
+        std::fs::write(
+            root.join(format!("skills/broken-{index:02}.md")),
+            b"secret-token \xff",
+        )
+        .expect("broken context written");
+    }
+
+    let report = collect_context_audit_report(&root, 20).expect("audit should complete");
+
+    assert!(report.files.is_empty());
+    assert_eq!(report.errors.len(), 64);
+    assert_eq!(report.hidden_errors, 1);
+    assert_eq!(report.errors[0].relative_path, "skills/broken-00.md");
+    assert_eq!(report.errors[0].operation, "read");
+    assert!(report.errors[0].message.contains("UTF-8"));
+
+    let rendered = render_context_audit_report_with_width(&report, 20, 100);
+    assert!(rendered.contains("Context Audit Errors"));
+    assert!(rendered.contains("skills/broken-00.md"));
+    assert!(rendered.contains("1 more audit errors hidden"));
+    assert!(!rendered.contains("secret-token"));
+
+    let json = serde_json::to_string(&report).expect("audit should serialize");
+    assert!(json.contains("\"errors\""));
+    assert!(!json.contains("secret-token"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn context_audit_keeps_readable_files_when_a_subtree_is_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_context_root("traversal-errors");
+    let blocked = root.join("skills/blocked");
+    std::fs::create_dir_all(&blocked).expect("blocked directory created");
+    std::fs::write(root.join("AGENTS.md"), "readable context").expect("context written");
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000))
+        .expect("permissions updated");
+    if std::fs::read_dir(&blocked).is_ok() {
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700))
+            .expect("permissions restored");
+        let _ = std::fs::remove_dir_all(root);
+        return;
+    }
+
+    let report = collect_context_audit_report(&root, 20).expect("audit should continue");
+
+    assert_eq!(report.files.len(), 1);
+    assert_eq!(report.files[0].relative_path, "AGENTS.md");
+    assert!(report.errors.iter().any(|error| {
+        error.operation == "traversal" && error.relative_path == "skills/blocked"
+    }));
+
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700))
+        .expect("permissions restored");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn context_audit_escapes_terminal_controls_in_error_paths() {
+    let root = temp_context_root("control-path");
+    std::fs::create_dir_all(root.join("skills")).expect("skills directory created");
+    std::fs::write(root.join("skills/broken\n\u{1b}[31m.md"), b"\xff")
+        .expect("broken context written");
+
+    let report = collect_context_audit_report(&root, 20).expect("audit should complete");
+
+    assert_eq!(report.errors.len(), 1);
+    assert_eq!(
+        report.errors[0].relative_path,
+        "skills/broken\\n\\u{1b}[31m.md"
+    );
+    let rendered = render_context_audit_report_with_width(&report, 20, 100);
+    assert!(!rendered.contains("skills/broken\n"));
+    assert!(!rendered.contains('\u{1b}'));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
 fn context_compress_preserves_private_mode() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 

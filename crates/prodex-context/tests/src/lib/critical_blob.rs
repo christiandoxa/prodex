@@ -276,6 +276,68 @@ fn context_static_duplicate_report_ignores_short_snippets_fences_and_backups() {
 }
 
 #[test]
+fn context_audit_terminal_rendering_escapes_untrusted_values() {
+    let malicious = "name\n\u{1b}[31mred\u{7}\r\u{9b}2J\t\u{8}\u{202e}\u{2066}\u{200b}\u{feff}";
+    let report = ContextAuditReport {
+        root: malicious.into(),
+        files: vec![ContextAuditEntry {
+            path: malicious.into(),
+            relative_path: malicious.to_string(),
+            bytes: 1,
+            chars: 1,
+            words: 1,
+            estimated_tokens: 1,
+            compressible: false,
+        }],
+        total_bytes: 1,
+        total_chars: 1,
+        total_words: 1,
+        total_estimated_tokens: 1,
+        errors: Vec::new(),
+        hidden_errors: 0,
+        static_duplicates: ContextStaticDuplicateReport {
+            root: malicious.into(),
+            snippets: vec![ContextStaticDuplicateSnippet {
+                preview: malicious.to_string(),
+                occurrence_count: 2,
+                occurrences: vec![ContextStaticDuplicateOccurrence {
+                    path: malicious.into(),
+                    relative_path: malicious.to_string(),
+                    start_line: 1,
+                    end_line: 2,
+                }],
+                words: 1,
+                normalized_chars: 1,
+                estimated_tokens_per_occurrence: 1,
+                estimated_duplicate_tokens: 1,
+                suggestion: format!("Keep {malicious}"),
+            }],
+            total_duplicate_snippets: 1,
+            hidden_duplicate_snippets: 0,
+            total_duplicate_occurrences: 2,
+            estimated_duplicate_tokens: 1,
+            suggestion: malicious.to_string(),
+        },
+    };
+
+    let rendered = render_context_audit_report_with_width(&report, 20, 100);
+
+    assert!(!rendered.contains('\u{1b}'));
+    assert!(!rendered.contains('\u{7}'));
+    assert!(!rendered.contains('\r'));
+    assert!(!rendered.contains('\u{9b}'));
+    assert!(!rendered.contains('\u{8}'));
+    assert!(!rendered.contains('\u{202e}'));
+    assert!(!rendered.contains('\u{2066}'));
+    assert!(!rendered.contains('\u{200b}'));
+    assert!(!rendered.contains('\u{feff}'));
+    assert!(!rendered.contains(malicious));
+    assert!(rendered.contains("\\n"));
+    assert!(rendered.contains("\\u{1b}"));
+    assert!(rendered.contains("\\u{202e}"));
+}
+
+#[test]
 fn context_blob_noise_detects_base64ish_blob() {
     let blob = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".repeat(4);
     let input = format!("header\n{blob}\nfooter\n");

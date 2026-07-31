@@ -532,3 +532,37 @@ BEGIN
 END;
 "#,
 };
+
+pub const LOCAL_SIEM_OUTBOX_LEASING_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(13),
+    phase: SqliteMigrationPhase::Expand,
+    name: "013_siem_outbox_leasing",
+    sql: r#"
+ALTER TABLE prodex_siem_outbox
+    ADD COLUMN claim_token TEXT
+    CHECK (claim_token IS NULL OR length(claim_token) BETWEEN 1 AND 128);
+ALTER TABLE prodex_siem_outbox
+    ADD COLUMN claim_expires_at_unix_ms INTEGER
+    CHECK (claim_expires_at_unix_ms IS NULL OR claim_expires_at_unix_ms >= 0);
+
+CREATE INDEX IF NOT EXISTS prodex_siem_outbox_due_claim_idx
+    ON prodex_siem_outbox (
+        delivered_at_unix_ms, next_attempt_at_unix_ms, event_id,
+        claim_expires_at_unix_ms
+    );
+
+CREATE TRIGGER IF NOT EXISTS prodex_siem_outbox_claim_pair_insert
+BEFORE INSERT ON prodex_siem_outbox
+WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
+BEGIN
+    SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prodex_siem_outbox_claim_pair_update
+BEFORE UPDATE OF claim_token, claim_expires_at_unix_ms ON prodex_siem_outbox
+WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
+BEGIN
+    SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
+END;
+"#,
+};
