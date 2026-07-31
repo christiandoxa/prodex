@@ -86,6 +86,7 @@ test("classifies Rust, workflow, runtime CI, and stress paths as heavy", () => {
     "scripts/ci/runtime-proxy-ci-matrix.mjs",
     "scripts/ci/runtime-stress.mjs",
     "scripts/ci/runtime-proxy-shard.mjs",
+    "scripts/ci/prodex-app-test-shards.mjs",
     "scripts/ci/runtime-test-manifest-guard.mjs",
     "scripts/ci/runtime-test-manifest.mjs",
   ]) {

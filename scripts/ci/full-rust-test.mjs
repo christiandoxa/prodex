@@ -133,7 +133,14 @@ function prebuildSteps(args) {
     {
       label: "prebuild:workspace-all-features",
       command: "cargo",
-      args: ["test", "--locked", "--workspace", "--all-features", "--no-run"],
+      args: [
+        "test",
+        "--locked",
+        "--workspace",
+        ...(!args.prodexAppLib ? ["--exclude", "prodex-app"] : []),
+        "--all-features",
+        "--no-run",
+      ],
     },
     ...(args.prodexAppLib
       ? [
@@ -157,6 +164,7 @@ function workspaceSteps(args) {
         "--locked",
         "-q",
         "--workspace",
+        ...(!args.prodexAppLib ? ["--exclude", "prodex-app"] : []),
         "--all-features",
         "--",
         `--test-threads=${args.testThreads}`,

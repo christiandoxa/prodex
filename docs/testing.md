@@ -11,8 +11,12 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:runtime-manifest` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `npm run ci:runtime-manifest` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
-  The full workflow runs the workspace and four disjoint `prodex-app` library
-  partitions concurrently; each risky partition remains internally serial.
+  The full workflow runs the workspace and eight disjoint `prodex-app` library
+  partitions concurrently; its workspace partition excludes `prodex-app`, and
+  each risky partition remains internally serial.
+- `npm run ci:full-test-shards` validates the shared app-library shard manifest;
+  `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
+  without compiling or running tests.
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
