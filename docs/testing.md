@@ -16,11 +16,12 @@ Prodex test speed should come from process-level sharding first, not from making
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
-Native macOS and Windows jobs run the workspace suite without the large
-`prodex-app` library test binary; Linux owns that full serial suite. The same
-Linux job cheaply reruns the overlay and Smart Context persistence regressions
-through a private symlinked `TMPDIR`, matching the macOS temp-path alias that
-previously exposed non-canonical test fixture paths.
+Native macOS omits the large `prodex-app` library test binary; Linux owns its
+full serial suite. Windows preserves its existing `prodex-app` coverage in a
+separate parallel partition instead of serializing it behind other workspace
+members. The Linux job also cheaply reruns the overlay and Smart Context
+persistence regressions through a private symlinked `TMPDIR`, matching the
+macOS temp-path alias that previously exposed non-canonical test fixture paths.
 
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds

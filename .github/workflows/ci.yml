@@ -390,6 +390,9 @@ jobs:
           - suite: members
             label: workspace members
             save_cache: true
+          - suite: app
+            label: prodex-app
+            save_cache: false
           - suite: root-0
             label: root shard 1 of 2
             auto_rotate_shard: 0
@@ -418,7 +421,7 @@ jobs:
           save-if: ${{ matrix.save_cache }}
 
       - name: Install Node.js
-        if: matrix.suite != 'members'
+        if: startsWith(matrix.suite, 'root-')
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -433,6 +436,12 @@ jobs:
           cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
           cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
           cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
+
+      - name: Run Windows prodex-app tests
+        if: matrix.suite == 'app'
+        env:
+          RUST_BACKTRACE: "1"
+        run: cargo test --locked -q -p prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
 
       - name: Prebuild Windows auto-rotate tests
         if: startsWith(matrix.suite, 'root-')

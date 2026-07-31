@@ -66,6 +66,7 @@ export function validateWindowsSecurityJob(contents) {
   }
   for (const marker of [
     "--workspace --exclude prodex --exclude prodex-app --all-features",
+    "cargo test --locked -q -p prodex-app --all-features -- --test-threads=4",
     "- name: Build Windows installer fixture binary",
     "- name: Test Windows installer",
   ]) {
@@ -407,6 +408,7 @@ function selfTest() {
   windows-workspace:
     steps:
       - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features
+      - run: cargo test --locked -q -p prodex-app --all-features -- --test-threads=4
       - name: Build Windows installer fixture binary
       - name: Test Windows installer
 `;
