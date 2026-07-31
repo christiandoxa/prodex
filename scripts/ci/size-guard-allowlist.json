@@ -5,11 +5,6 @@
     "reason": "Core runtime preparation still owns provider selection, harness resolution, proxy startup, and session entry planning; direct runtime dispatch removed the redundant forwarding layer and ratcheted this cap to the remaining core."
   },
   {
-    "file": "crates/prodex-app/src/dashboard.rs",
-    "maxLines": 1134,
-    "reason": "The local control-plane JSON endpoints now surface mutation-audit persistence failures while provider/model catalog assembly and dashboard tests remain capped after HTTP transport moved to dashboard/server.rs."
-  },
-  {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
     "maxLines": 909,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
