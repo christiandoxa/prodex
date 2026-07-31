@@ -796,8 +796,9 @@ jobs:
             sleep 5
           done
           local_admin="admin"
+          local_auth="$(printf '%s:%s' "${local_admin}" "${local_admin}" | base64 --wrap=0)"
           token_name="prodex-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          response="$(curl --fail --silent --show-error --user "${local_admin}:${local_admin}" --request POST \
+          response="$(curl --fail --silent --show-error --header "Authorization: Basic ${local_auth}" --request POST \
             --data-urlencode "name=${token_name}" \
             "${SONAR_HOST_URL}/api/user_tokens/generate")"
           token="$(jq -er '.token' <<<"${response}")"
@@ -843,7 +844,8 @@ jobs:
         shell: bash
         run: |
           local_admin="admin"
-          curl --fail --silent --show-error --user "${local_admin}:${local_admin}" --request POST \
+          local_auth="$(printf '%s:%s' "${local_admin}" "${local_admin}" | base64 --wrap=0)"
+          curl --fail --silent --show-error --header "Authorization: Basic ${local_auth}" --request POST \
             --data-urlencode "name=${SONAR_TOKEN_NAME}" \
             "${SONAR_HOST_URL}/api/user_tokens/revoke" >/dev/null
 
