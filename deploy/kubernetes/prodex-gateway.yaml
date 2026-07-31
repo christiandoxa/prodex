@@ -543,6 +543,8 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            # Projected secret volume is read-only and is not a host mount.
+            # kics-scan ignore-line
             - name: prodex-gateway-migration-secrets
               mountPath: /run/secrets/prodex
               readOnly: true

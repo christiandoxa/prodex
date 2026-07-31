@@ -49,10 +49,12 @@ refs:
 
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
-and Redis indexes include both Linux amd64 and arm64 manifests. Syft and
-Gitleaks CI images are also tag-and-digest pinned. The Rust quality job uses
+and Redis indexes include both Linux amd64 and arm64 manifests. Syft, Gitleaks,
+and KICS CI images are also tag-and-digest pinned. The Rust quality job uses
 SonarQube Community Build `26.7.0.124771-community` at manifest digest
 `sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3`.
+The KICS gate uses `v2.1.20` at manifest digest
+`sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602`.
 Dependabot owns Dockerfile and Compose refreshes. The release workflow scans
 the locally built image with digest-pinned Trivy 0.72.0, failing on fixable
 high/critical vulnerabilities, then publishes an attested GHCR image and
@@ -71,10 +73,12 @@ Primary pin sources:
 - [Docker Official Images](https://github.com/docker-library/official-images)
 - [Syft](https://github.com/anchore/syft)
 - [Gitleaks](https://github.com/gitleaks/gitleaks)
+- [KICS](https://github.com/Checkmarx/kics)
 
 ## Required gates
 
-The `rust-quality` and `supply-chain` jobs run in parallel. `rust-quality`
+The `rust-quality`, `kics`, and `supply-chain` jobs run in parallel. The first
+two run for every commit. `rust-quality`
 generates the production-only Clippy JSON report, enforces zero Clippy warnings
 across all targets, and imports that report into a job-local SonarQube Community
 Build instance. Its token is generated inside the ephemeral runner, masked,
@@ -91,6 +95,15 @@ remains indexed. CI requires both an `OK` quality gate and zero unresolved
 issues. SonarQube for VS Code is not used as this gate: its official language
 list does not include Rust, and its analysis is editor-triggered rather than a
 deterministic headless CI interface.
+
+The `kics` job scans the checked-in Dockerfile, Compose file, Kubernetes
+manifests, and GitHub workflows through a read-only repository mount. Any high
+or critical infrastructure finding fails CI. KICS secret heuristics are disabled
+because the separate pinned Gitleaks job owns secret detection; other KICS
+queries remain enabled. The scanner container has no network, capabilities, or
+writable root filesystem. The only inline suppression covers a read-only
+projected Kubernetes Secret volume that KICS otherwise mistakes for a writable
+host mount.
 
 The parallel `supply-chain` job runs `cargo audit`, all configured `cargo deny`
 checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
@@ -114,6 +127,16 @@ Run the local policy checks with:
 ```bash
 npm run ci:supply-chain-guard
 npm run ci:secret-boundary-guard
+mkdir -p target/kics
+docker run --rm \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --volume "${PWD}:/path:ro" \
+  --volume "${PWD}/target/kics:/results" \
+  docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602 \
+  scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif \
+  --disable-secrets --disable-full-descriptions --fail-on critical,high \
+  --minimal-ui --no-progress
 cargo deny check advisories bans licenses sources
 cargo machete --with-metadata
 cargo +nightly-2026-07-11 fuzz build --fuzz-dir fuzz

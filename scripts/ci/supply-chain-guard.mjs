@@ -17,6 +17,8 @@ const SONAR_ACTION =
   "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0";
 const SONAR_IMAGE =
   "docker.io/library/sonarqube:26.7.0.124771-community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
+const KICS_IMAGE =
+  "docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602";
 const PRODUCTION_CLIPPY_COMMAND =
   "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
@@ -109,6 +111,7 @@ export function validateSonarConfiguration(workflowContents, properties) {
   if (!job) return [".github/workflows/ci.yml: missing rust-quality job"];
   const violations = [];
   for (const marker of [
+    "name: SonarQube Rust quality gate",
     `image: ${SONAR_IMAGE}`,
     'SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"',
     "SONAR_HOST_URL: http://127.0.0.1:9000",
@@ -139,6 +142,9 @@ export function validateSonarConfiguration(workflowContents, properties) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: rust-quality job missing ${marker}`);
     }
+  }
+  if (/^    (?:if|needs):/mu.test(job)) {
+    violations.push(".github/workflows/ci.yml: rust-quality must run on every commit");
   }
   if (supplyChainJob?.includes(PRODUCTION_CLIPPY_COMMAND)) {
     violations.push(".github/workflows/ci.yml: production Clippy must run in parallel rust-quality job");
@@ -181,6 +187,50 @@ export function validateSonarConfiguration(workflowContents, properties) {
     if (properties.includes(marker)) {
       violations.push(`sonar-project.properties: must not contain ${marker}`);
     }
+  }
+  return violations;
+}
+
+export function validateKicsConfiguration(workflowContents) {
+  const job = workflowJob(workflowContents, "kics");
+  const telemetry = workflowJob(workflowContents, "ci-duration-telemetry");
+  if (!job) return [".github/workflows/ci.yml: missing kics job"];
+  const violations = [];
+  for (const marker of [
+    "name: KICS IaC security gate",
+    "timeout-minutes: 10",
+    `kics_image="${KICS_IMAGE}"`,
+    'docker pull "${kics_image}"',
+    "docker run --rm",
+    "--read-only",
+    "--cap-drop ALL",
+    "--security-opt no-new-privileges:true",
+    "--network none",
+    "--tmpfs /tmp:rw,noexec,nosuid,size=64m",
+    '--volume "${PWD}:/path:ro"',
+    '--volume "${PWD}/target/kics:/results"',
+    "scan -p /path -o /results",
+    "--output-name prodex-kics",
+    "--report-formats json,sarif",
+    "--disable-secrets",
+    "--disable-full-descriptions",
+    "--fail-on critical,high",
+    "if: always()",
+    "name: kics-iac-results",
+    "if-no-files-found: error",
+  ]) {
+    if (!job.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: kics job missing ${marker}`);
+    }
+  }
+  if (/^    (?:if|needs):/mu.test(job)) {
+    violations.push(".github/workflows/ci.yml: kics must run on every commit");
+  }
+  if (job.includes("continue-on-error") || job.includes("--ignore-on-exit")) {
+    violations.push(".github/workflows/ci.yml: kics must fail closed");
+  }
+  if (!telemetry?.includes("- kics")) {
+    violations.push(".github/workflows/ci.yml: CI telemetry must wait for kics");
   }
   return violations;
 }
@@ -502,6 +552,7 @@ function selfTest() {
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
   const sonarWorkflow = `jobs:
   rust-quality:
+    name: SonarQube Rust quality gate
     env:
       SONAR_HOST_URL: http://127.0.0.1:9000
     services:
@@ -540,6 +591,23 @@ function selfTest() {
       - run: cargo audit
   other:
     steps: []
+  kics:
+    name: KICS IaC security gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: |
+          kics_image="${KICS_IMAGE}"
+          docker pull "\${kics_image}"
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --fail-on critical,high
+      - name: Upload KICS reports
+        if: always()
+        with:
+          name: kics-iac-results
+          if-no-files-found: error
+  ci-duration-telemetry:
+    needs:
+      - kics
 `;
   const sonarProperties = `sonar.sources=src,crates
 sonar.inclusions=src/**/*.rs,crates/**/*.rs
@@ -549,6 +617,28 @@ sonar.rust.clippyReport.reportPaths=target/sonar/clippy-report.json
 sonar.qualitygate.wait=true
 `;
   assert.deepEqual(validateSonarConfiguration(sonarWorkflow, sonarProperties), []);
+  assert.deepEqual(validateKicsConfiguration(sonarWorkflow), []);
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow.replace(
+        "    name: SonarQube Rust quality gate",
+        "    name: SonarQube Rust quality gate\n    needs: changes",
+      ),
+      sonarProperties,
+    ).length,
+    1,
+  );
+  assert.equal(
+    validateKicsConfiguration(
+      sonarWorkflow.replace(
+        "    name: KICS IaC security gate",
+        "    name: KICS IaC security gate\n    needs: changes",
+      ),
+    ).length,
+    1,
+  );
+  assert.equal(validateKicsConfiguration(sonarWorkflow.replace(KICS_IMAGE, "checkmarx/kics:latest")).length, 1);
+  assert.equal(validateKicsConfiguration(sonarWorkflow.replace("--fail-on critical,high", "--fail-on critical")).length, 1);
   assert.equal(
     validateSonarConfiguration(sonarWorkflow.replace(SONAR_ACTION, "SonarSource/sonarqube-scan-action@v8.1.0"), sonarProperties).length,
     1,
@@ -620,7 +710,11 @@ async function main() {
     const contents = await fs.readFile(path.join(workflowDir, fileName), "utf8");
     violations.push(...validateWorkflow(filePath, contents));
     if (fileName === "ci.yml") {
-      violations.push(...validateWindowsSecurityJob(contents), ...validateProcessGuard(contents));
+      violations.push(
+        ...validateWindowsSecurityJob(contents),
+        ...validateProcessGuard(contents),
+        ...validateKicsConfiguration(contents),
+      );
     }
     if (fileName === "standalone-release.yml") {
       violations.push(
