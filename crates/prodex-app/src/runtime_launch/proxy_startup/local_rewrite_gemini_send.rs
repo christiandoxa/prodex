@@ -79,6 +79,31 @@ use std::time::Duration;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
 
+struct RuntimeGeminiAttemptContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    body: &'a [u8],
+    base_body: &'a [u8],
+    conversations: &'a RuntimeDeepSeekConversationStore,
+    model_scope: Option<&'a str>,
+    requested_model: &'a str,
+    responses_route: bool,
+    application_streaming: bool,
+    thinking_budget_tokens: Option<u64>,
+    attempt_index: usize,
+    attempt_count: usize,
+}
+
+struct RuntimeGeminiModelAttemptContext<'a, 'context> {
+    attempt: &'a RuntimeGeminiAttemptContext<'context>,
+    selected: &'a mut RuntimeGeminiSelectedAuth,
+    translated: &'a mut RuntimeGeminiTranslatedRequest,
+    model_cache_endpoint: &'a str,
+    model_index: usize,
+    model_chain: &'a [String],
+}
+
 fn runtime_gemini_responses_route_result(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -174,22 +199,22 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     };
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
-        if let Some(result) = runtime_gemini_attempt_selected_auth(
+        let context = RuntimeGeminiAttemptContext {
             request_id,
             request,
             shared,
-            &body,
-            &base_body,
-            &conversations,
-            selected,
-            model_scope.as_deref(),
-            &requested_model,
+            body: &body,
+            base_body: &base_body,
+            conversations: &conversations,
+            model_scope: model_scope.as_deref(),
+            requested_model: &requested_model,
             responses_route,
             application_streaming,
             thinking_budget_tokens,
             attempt_index,
             attempt_count,
-        )? {
+        };
+        if let Some(result) = runtime_gemini_attempt_selected_auth(&context, selected)? {
             return Ok(result);
         }
     }
@@ -198,73 +223,48 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
 }
 
 fn runtime_gemini_attempt_selected_auth(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    body: &[u8],
-    base_body: &[u8],
-    conversations: &RuntimeDeepSeekConversationStore,
+    context: &RuntimeGeminiAttemptContext<'_>,
     mut selected: RuntimeGeminiSelectedAuth,
-    model_scope: Option<&str>,
-    requested_model: &str,
-    responses_route: bool,
-    application_streaming: bool,
-    thinking_budget_tokens: Option<u64>,
-    attempt_index: usize,
-    attempt_count: usize,
 ) -> Result<Option<RuntimeLocalRewriteUpstreamResult>> {
     let (model_chain, model_cache_endpoint) = runtime_gemini_model_chain_for_selected_auth(
-        request_id,
-        shared,
+        context.request_id,
+        context.shared,
         &selected,
-        model_scope,
-        requested_model,
-        responses_route,
+        context.model_scope,
+        context.requested_model,
+        context.responses_route,
     );
     for (model_index, model) in model_chain.iter().enumerate() {
-        let model_body = if responses_route {
-            runtime_provider_request_body_with_model(base_body, model)
+        let model_body = if context.responses_route {
+            runtime_provider_request_body_with_model(context.base_body, model)
         } else {
-            base_body.to_vec()
+            context.base_body.to_vec()
         };
-        let mut translated = runtime_gemini_translate_attempt(
-            request_id,
-            request,
-            shared,
-            body,
-            &model_body,
-            conversations,
-            &selected,
-            model,
-            responses_route,
-            application_streaming,
-            thinking_budget_tokens,
-        )?;
+        let mut translated =
+            runtime_gemini_translate_attempt(context, &model_body, &selected, model)?;
         if let Some(result) = runtime_gemini_exact_output_short_circuit(
-            request_id,
-            shared,
-            conversations,
+            context.request_id,
+            context.shared,
+            context.conversations,
             &selected,
             &translated,
         )? {
             return Ok(Some(result));
         }
-        match runtime_gemini_send_model_attempt(
-            request_id,
-            request,
-            shared,
-            &mut selected,
-            &mut translated,
-            model_cache_endpoint.as_str(),
-            model_index,
-            &model_chain,
-            responses_route,
-            attempt_index,
-            attempt_count,
-        )? {
-            RuntimeGeminiModelAttempt::RetryAuth | RuntimeGeminiModelAttempt::RetryModel => {
-                return Ok(None);
-            }
+        let model_attempt = {
+            let mut model_context = RuntimeGeminiModelAttemptContext {
+                attempt: context,
+                selected: &mut selected,
+                translated: &mut translated,
+                model_cache_endpoint: model_cache_endpoint.as_str(),
+                model_index,
+                model_chain: &model_chain,
+            };
+            runtime_gemini_send_model_attempt(&mut model_context)?
+        };
+        match model_attempt {
+            RuntimeGeminiModelAttempt::RetryAuth => return Ok(None),
+            RuntimeGeminiModelAttempt::RetryModel => continue,
             RuntimeGeminiModelAttempt::Buffered(parts) => {
                 return Ok(Some(RuntimeLocalRewriteUpstreamResult {
                     response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
@@ -276,34 +276,36 @@ fn runtime_gemini_attempt_selected_auth(
                 response,
                 stream_prefix,
             } => {
-                let binding_recorder = shared.gemini_oauth_pool.as_ref().map(|pool| {
+                let binding_recorder = context.shared.gemini_oauth_pool.as_ref().map(|pool| {
                     runtime_gemini_binding_recorder(
                         pool,
                         selected.profile_name.clone(),
-                        model_scope.map(str::to_string),
+                        context.model_scope.map(str::to_string),
                     )
                 });
                 runtime_gemini_remember_sticky_model_preference(
-                    request_id,
-                    shared,
+                    context.request_id,
+                    context.shared,
                     &selected,
-                    model_scope,
-                    requested_model,
+                    context.model_scope,
+                    context.requested_model,
                     &translated.model,
                     model_index,
                 );
                 runtime_local_rewrite_remember_accepted_model(
-                    shared,
+                    context.shared,
                     RuntimeProviderBridgeKind::Gemini,
-                    request,
+                    context.request,
                     &translated.model,
                 );
-                let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
-                    profile_name: selected.profile_name.clone(),
-                    model: translated.model.clone(),
-                    conversation_messages: translated.messages,
-                    binding_recorder,
-                });
+                let gemini_context = context
+                    .responses_route
+                    .then(|| RuntimeGeminiRequestContext {
+                        profile_name: selected.profile_name.clone(),
+                        model: translated.model.clone(),
+                        conversation_messages: translated.messages,
+                        binding_recorder,
+                    });
                 return Ok(Some(RuntimeLocalRewriteUpstreamResult {
                     response: RuntimeLocalRewriteUpstreamResponse::Live(
                         RuntimeLocalRewriteLiveResponse::with_prefix(response, stream_prefix),
@@ -322,55 +324,48 @@ fn runtime_gemini_error_log_value(error: &str) -> String {
 }
 
 fn runtime_gemini_translate_attempt(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    body: &[u8],
+    context: &RuntimeGeminiAttemptContext<'_>,
     model_body: &[u8],
-    conversations: &RuntimeDeepSeekConversationStore,
     selected: &RuntimeGeminiSelectedAuth,
     model: &str,
-    responses_route: bool,
-    application_streaming: bool,
-    thinking_budget_tokens: Option<u64>,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
-    let conformance = responses_route.then(|| {
+    let conformance = context.responses_route.then(|| {
         runtime_provider_request_conformance_result(
             RuntimeProviderBridgeKind::Gemini,
-            request,
+            context.request,
             model_body,
         )
     });
     if let Some(Some(result)) = conformance.as_ref() {
         runtime_provider_log_request_conformance(
-            &shared.runtime_shared,
-            request_id,
+            &context.shared.runtime_shared,
+            context.request_id,
             RuntimeProviderBridgeKind::Gemini,
             result,
         );
     }
-    let mut translated = if responses_route {
+    let mut translated = if context.responses_route {
         runtime_gemini_generate_request_body_with_config(
             model_body,
-            conversations,
+            context.conversations,
             matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
             runtime_gemini_project_id(&selected.auth),
-            thinking_budget_tokens,
-            shared.allow_local_file_access,
-            &shared.runtime_shared.runtime_config.gemini,
+            context.thinking_budget_tokens,
+            context.shared.allow_local_file_access,
+            &context.shared.runtime_shared.runtime_config.gemini,
         )?
     } else {
         RuntimeGeminiTranslatedRequest {
-            body: runtime_gemini_native_request_body(body, &selected.auth)?,
+            body: runtime_gemini_native_request_body(context.body, &selected.auth)?,
             messages: Vec::new(),
             model: model.to_string(),
             stream: false,
         }
     };
-    if responses_route {
-        translated.stream = application_streaming;
+    if context.responses_route {
+        translated.stream = context.application_streaming;
     }
-    if responses_route
+    if context.responses_route
         && gemini_provider_core_simple_request(model_body)
         && let Some(body) = conformance
             .as_ref()
@@ -380,8 +375,8 @@ fn runtime_gemini_translate_attempt(
         translated.body = body;
     }
     harden_thoughts(
-        shared,
-        request_id,
+        context.shared,
+        context.request_id,
         selected.profile_name.as_str(),
         &mut translated,
     )?;
@@ -415,54 +410,36 @@ enum RuntimeGeminiStreamAction {
 }
 
 fn runtime_gemini_send_model_attempt(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    selected: &mut RuntimeGeminiSelectedAuth,
-    translated: &mut RuntimeGeminiTranslatedRequest,
-    model_cache_endpoint: &str,
-    model_index: usize,
-    model_chain: &[String],
-    responses_route: bool,
-    attempt_index: usize,
-    attempt_count: usize,
+    context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
 ) -> Result<RuntimeGeminiModelAttempt> {
     let upstream_url = runtime_gemini_request_upstream_url(
-        &shared.upstream_base_url,
-        &selected.auth,
-        &request.path_and_query,
-        &translated.model,
-        translated.stream,
-        responses_route,
+        &context.attempt.shared.upstream_base_url,
+        &context.selected.auth,
+        &context.attempt.request.path_and_query,
+        &context.translated.model,
+        context.translated.stream,
+        context.attempt.responses_route,
     );
     let mut rate_limit_retry_index = 0;
     let mut invalid_stream_retry_index = 0;
     let mut auth_refresh_attempted = false;
     loop {
         let response = send_runtime_local_rewrite_prepared_request(
-            request_id,
-            request,
-            shared,
+            context.attempt.request_id,
+            context.attempt.request,
+            context.attempt.shared,
             &upstream_url,
-            translated.body.clone(),
+            context.translated.body.clone(),
             RuntimeLocalRewritePreparedAuth::Gemini {
-                auth: &selected.auth,
+                auth: &context.selected.auth,
             },
         )?;
         let status = response.status().as_u16();
         if status >= 400 {
             match runtime_gemini_handle_error(
-                request_id,
+                context,
                 response,
                 status,
-                shared,
-                selected,
-                translated,
-                model_cache_endpoint,
-                attempt_index,
-                attempt_count,
-                model_index,
-                model_chain,
                 &mut rate_limit_retry_index,
                 &mut auth_refresh_attempted,
             )? {
@@ -478,27 +455,24 @@ fn runtime_gemini_send_model_attempt(
                 }
             }
         }
-        let (response, stream_prefix) =
-            if responses_route && translated.stream && runtime_gemini_response_is_sse(&response) {
-                match runtime_gemini_peek_stream_attempt(
-                    response,
-                    &translated.messages,
-                    shared,
-                    request_id,
-                    selected,
-                    model_index,
-                    model_chain,
-                    &mut invalid_stream_retry_index,
-                )? {
-                    RuntimeGeminiStreamAction::Retry => continue,
-                    RuntimeGeminiStreamAction::RetryModel => {
-                        return Ok(RuntimeGeminiModelAttempt::RetryModel);
-                    }
-                    RuntimeGeminiStreamAction::Committed { response, prefix } => (response, prefix),
+        let (response, stream_prefix) = if context.attempt.responses_route
+            && context.translated.stream
+            && runtime_gemini_response_is_sse(&response)
+        {
+            match runtime_gemini_peek_stream_attempt(
+                context,
+                response,
+                &mut invalid_stream_retry_index,
+            )? {
+                RuntimeGeminiStreamAction::Retry => continue,
+                RuntimeGeminiStreamAction::RetryModel => {
+                    return Ok(RuntimeGeminiModelAttempt::RetryModel);
                 }
-            } else {
-                (response, Vec::new())
-            };
+                RuntimeGeminiStreamAction::Committed { response, prefix } => (response, prefix),
+            }
+        } else {
+            (response, Vec::new())
+        };
         return Ok(RuntimeGeminiModelAttempt::Live {
             response,
             stream_prefix,
@@ -507,17 +481,9 @@ fn runtime_gemini_send_model_attempt(
 }
 
 fn runtime_gemini_handle_error(
-    request_id: u64,
+    context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
     response: reqwest::blocking::Response,
     status: u16,
-    shared: &RuntimeLocalRewriteProxyShared,
-    selected: &mut RuntimeGeminiSelectedAuth,
-    translated: &mut RuntimeGeminiTranslatedRequest,
-    model_cache_endpoint: &str,
-    attempt_index: usize,
-    attempt_count: usize,
-    model_index: usize,
-    model_chain: &[String],
     rate_limit_retry_index: &mut usize,
     auth_refresh_attempted: &mut bool,
 ) -> Result<RuntimeGeminiErrorAction> {
@@ -539,60 +505,22 @@ fn runtime_gemini_handle_error(
                     &parts.body,
                 )
             });
-    runtime_gemini_record_error_state(
-        request_id,
-        shared,
-        selected,
-        model_cache_endpoint,
-        &translated.model,
-        status,
-        class,
-        delay_ms,
-    );
-    if runtime_gemini_apply_tool_fallback(shared, request_id, selected, translated, status, &parts)
-    {
+    runtime_gemini_record_error_state(context, status, class, delay_ms);
+    if runtime_gemini_apply_tool_fallback(context, status, &parts) {
         return Ok(RuntimeGeminiErrorAction::RetryRequest);
     }
-    if let Some(action) = runtime_gemini_quota_retry(
-        shared,
-        request_id,
-        selected,
-        status,
-        class,
-        quota_blocked,
-        attempt_index,
-        attempt_count,
-    ) {
+    if let Some(action) = runtime_gemini_quota_retry(context, status, class, quota_blocked) {
         return Ok(action);
     }
-    if let Some(action) = runtime_gemini_model_retry(
-        shared,
-        request_id,
-        selected,
-        translated,
-        status,
-        class,
-        model_index,
-        model_chain,
-    ) {
+    if let Some(action) = runtime_gemini_model_retry(context, status, class) {
         return Ok(action);
     }
-    if let Some(action) = runtime_gemini_auth_retry(
-        shared,
-        request_id,
-        selected,
-        status,
-        class,
-        attempt_index,
-        attempt_count,
-        auth_refresh_attempted,
-    ) {
+    if let Some(action) = runtime_gemini_auth_retry(context, status, class, auth_refresh_attempted)
+    {
         return Ok(action);
     }
     if runtime_gemini_rate_limit_retry(
-        shared,
-        request_id,
-        selected,
+        context,
         status,
         &parts.body,
         delay_ms,
@@ -606,31 +534,27 @@ fn runtime_gemini_handle_error(
 }
 
 fn runtime_gemini_quota_retry(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &RuntimeGeminiSelectedAuth,
+    context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     class: RuntimeProviderErrorClass,
     quota_blocked: bool,
-    attempt_index: usize,
-    attempt_count: usize,
 ) -> Option<RuntimeGeminiErrorAction> {
     if !quota_blocked
         || !runtime_gemini_response_retryable_quota(status)
-        || (selected.hard_affinity && !selected.quota_fallback_allowed)
+        || (context.selected.hard_affinity && !context.selected.quota_fallback_allowed)
         || !runtime_gateway_application_provider_retry_precommit(
             ProviderRetryCause::RotateCredential,
             class,
-            attempt_index,
-            attempt_count,
+            context.attempt.attempt_index,
+            context.attempt.attempt_count,
         )
     {
         return None;
     }
     runtime_gemini_log_quota_rotate(
-        shared,
-        request_id,
-        selected.profile_name.as_str(),
+        context.attempt.shared,
+        context.attempt.request_id,
+        context.selected.profile_name.as_str(),
         status,
         if status == 429 {
             "rate_limit"
@@ -642,31 +566,26 @@ fn runtime_gemini_quota_retry(
 }
 
 fn runtime_gemini_model_retry(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &RuntimeGeminiSelectedAuth,
-    translated: &RuntimeGeminiTranslatedRequest,
+    context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     class: RuntimeProviderErrorClass,
-    model_index: usize,
-    model_chain: &[String],
 ) -> Option<RuntimeGeminiErrorAction> {
-    if model_index + 1 >= model_chain.len()
+    if context.model_index + 1 >= context.model_chain.len()
         || !runtime_gateway_application_provider_retry_precommit(
             ProviderRetryCause::NextModel,
             class,
-            model_index,
-            model_chain.len(),
+            context.model_index,
+            context.model_chain.len(),
         )
     {
         return None;
     }
     runtime_gemini_log_provider_model_fallback(
-        shared,
-        request_id,
-        selected.profile_name.as_str(),
-        translated.model.as_str(),
-        model_chain[model_index + 1].as_str(),
+        context.attempt.shared,
+        context.attempt.request_id,
+        context.selected.profile_name.as_str(),
+        context.translated.model.as_str(),
+        context.model_chain[context.model_index + 1].as_str(),
         status,
         class,
     );
@@ -674,33 +593,29 @@ fn runtime_gemini_model_retry(
 }
 
 fn runtime_gemini_auth_retry(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &mut RuntimeGeminiSelectedAuth,
+    context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     class: RuntimeProviderErrorClass,
-    attempt_index: usize,
-    attempt_count: usize,
     auth_refresh_attempted: &mut bool,
 ) -> Option<RuntimeGeminiErrorAction> {
     if class != RuntimeProviderErrorClass::Auth {
         return None;
     }
     runtime_gemini_log_provider_auth_failure(
-        shared,
-        request_id,
-        selected.profile_name.as_str(),
+        context.attempt.shared,
+        context.attempt.request_id,
+        context.selected.profile_name.as_str(),
         status,
     );
-    if runtime_gemini_refresh_auth(shared, request_id, selected, status, auth_refresh_attempted) {
+    if runtime_gemini_refresh_auth(context, status, auth_refresh_attempted) {
         return Some(RuntimeGeminiErrorAction::RetryRequest);
     }
-    if !selected.hard_affinity
+    if !context.selected.hard_affinity
         && runtime_gateway_application_provider_retry_precommit(
             ProviderRetryCause::RotateCredential,
             class,
-            attempt_index,
-            attempt_count,
+            context.attempt.attempt_index,
+            context.attempt.attempt_count,
         )
     {
         return Some(RuntimeGeminiErrorAction::RetryAuth);
@@ -709,11 +624,7 @@ fn runtime_gemini_auth_retry(
 }
 
 fn runtime_gemini_record_error_state(
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    selected: &RuntimeGeminiSelectedAuth,
-    model_cache_endpoint: &str,
-    model: &str,
+    context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     class: RuntimeProviderErrorClass,
     delay_ms: u64,
@@ -723,76 +634,84 @@ fn runtime_gemini_record_error_state(
         RuntimeProviderErrorClass::Quota
             | RuntimeProviderErrorClass::RateLimit
             | RuntimeProviderErrorClass::Transient
-    ) && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+    ) && let Some(pool) = context.attempt.shared.gemini_oauth_pool.as_ref()
     {
-        pool.remember_model_cooldown(&selected.profile_name, model, delay_ms);
+        pool.remember_model_cooldown(
+            &context.selected.profile_name,
+            &context.translated.model,
+            delay_ms,
+        );
     }
     if class == RuntimeProviderErrorClass::NotFound
-        && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+        && let Some(pool) = context.attempt.shared.gemini_oauth_pool.as_ref()
     {
-        pool.remember_model_unavailable(&selected.profile_name, model_cache_endpoint, model);
+        pool.remember_model_unavailable(
+            &context.selected.profile_name,
+            context.model_cache_endpoint,
+            &context.translated.model,
+        );
         runtime_gemini_log_model_unavailable(
-            shared,
-            request_id,
-            selected.profile_name.as_str(),
-            model_cache_endpoint,
-            model,
+            context.attempt.shared,
+            context.attempt.request_id,
+            context.selected.profile_name.as_str(),
+            context.model_cache_endpoint,
+            context.translated.model.as_str(),
             status,
         );
     }
 }
 
 fn runtime_gemini_apply_tool_fallback(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &RuntimeGeminiSelectedAuth,
-    translated: &mut RuntimeGeminiTranslatedRequest,
+    context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     parts: &RuntimeHeapTrimmedBufferedResponseParts,
 ) -> bool {
     let Some((tool_name, fallback_body)) = (status == 400)
-        .then(|| gemini_provider_core_unsupported_tool_fallback_body(&translated.body, &parts.body))
+        .then(|| {
+            gemini_provider_core_unsupported_tool_fallback_body(
+                &context.translated.body,
+                &parts.body,
+            )
+        })
         .flatten()
     else {
         return false;
     };
     runtime_gemini_log_builtin_tool_fallback(
-        shared,
-        request_id,
-        selected.profile_name.as_str(),
-        translated.model.as_str(),
+        context.attempt.shared,
+        context.attempt.request_id,
+        context.selected.profile_name.as_str(),
+        context.translated.model.as_str(),
         status,
         tool_name,
     );
-    translated.body = fallback_body;
+    context.translated.body = fallback_body;
     true
 }
 
 fn runtime_gemini_refresh_auth(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &mut RuntimeGeminiSelectedAuth,
+    context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     attempted: &mut bool,
 ) -> bool {
     if *attempted {
         return false;
     }
-    let Some(pool) = shared.gemini_oauth_pool.as_ref() else {
+    let Some(pool) = context.attempt.shared.gemini_oauth_pool.as_ref() else {
         return false;
     };
     *attempted = true;
     match pool.refresh_profile_auth(
-        &selected.profile_name,
-        selected.hard_affinity,
-        selected.quota_fallback_allowed,
+        &context.selected.profile_name,
+        context.selected.hard_affinity,
+        context.selected.quota_fallback_allowed,
     ) {
         Ok(Some(refreshed)) => {
-            *selected = refreshed;
+            *context.selected = refreshed;
             runtime_gemini_log_provider_auth_refresh(
-                shared,
-                request_id,
-                selected.profile_name.as_str(),
+                context.attempt.shared,
+                context.attempt.request_id,
+                context.selected.profile_name.as_str(),
                 status,
             );
             true
@@ -800,9 +719,9 @@ fn runtime_gemini_refresh_auth(
         Ok(None) => false,
         Err(err) => {
             runtime_gemini_log_provider_auth_refresh_failed(
-                shared,
-                request_id,
-                selected.profile_name.as_str(),
+                context.attempt.shared,
+                context.attempt.request_id,
+                context.selected.profile_name.as_str(),
                 runtime_gemini_error_log_value(&err.to_string()),
             );
             false
@@ -811,9 +730,7 @@ fn runtime_gemini_refresh_auth(
 }
 
 fn runtime_gemini_rate_limit_retry(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &RuntimeGeminiSelectedAuth,
+    context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     body: &[u8],
     delay_ms: u64,
@@ -828,9 +745,9 @@ fn runtime_gemini_rate_limit_retry(
     }
     if runtime_gemini_should_inline_rate_limit_retry(delay_ms) {
         runtime_gemini_log_rate_limit_retry(
-            shared,
-            request_id,
-            selected.profile_name.as_str(),
+            context.attempt.shared,
+            context.attempt.request_id,
+            context.selected.profile_name.as_str(),
             status,
             *retry_index,
             delay_ms,
@@ -840,9 +757,9 @@ fn runtime_gemini_rate_limit_retry(
         return true;
     }
     runtime_gemini_log_rate_limit_retry_fail_fast(
-        shared,
-        request_id,
-        selected.profile_name.as_str(),
+        context.attempt.shared,
+        context.attempt.request_id,
+        context.selected.profile_name.as_str(),
         status,
         *retry_index,
         delay_ms,
@@ -852,16 +769,11 @@ fn runtime_gemini_rate_limit_retry(
 }
 
 fn runtime_gemini_peek_stream_attempt(
+    context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     response: reqwest::blocking::Response,
-    messages: &[serde_json::Value],
-    shared: &RuntimeLocalRewriteProxyShared,
-    request_id: u64,
-    selected: &RuntimeGeminiSelectedAuth,
-    model_index: usize,
-    model_chain: &[String],
     retry_index: &mut usize,
 ) -> Result<RuntimeGeminiStreamAction> {
-    match runtime_gemini_peek_stream_for_retry(response, messages)? {
+    match runtime_gemini_peek_stream_for_retry(response, &context.translated.messages)? {
         RuntimeGeminiPrecommitPeek::Committed { response, prefix } => {
             Ok(RuntimeGeminiStreamAction::Committed { response, prefix })
         }
@@ -873,10 +785,10 @@ fn runtime_gemini_peek_stream_attempt(
             if *retry_index < RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT {
                 let delay_ms = runtime_gemini_invalid_stream_retry_delay_ms(*retry_index);
                 runtime_gemini_log_invalid_stream_retry(
-                    shared,
-                    request_id,
-                    selected.profile_name.as_str(),
-                    model_chain[model_index].as_str(),
+                    context.attempt.shared,
+                    context.attempt.request_id,
+                    context.selected.profile_name.as_str(),
+                    context.model_chain[context.model_index].as_str(),
                     *retry_index,
                     reason.as_str(),
                     delay_ms,
@@ -885,20 +797,20 @@ fn runtime_gemini_peek_stream_attempt(
                 thread::sleep(Duration::from_millis(delay_ms));
                 return Ok(RuntimeGeminiStreamAction::Retry);
             }
-            if model_index + 1 < model_chain.len()
+            if context.model_index + 1 < context.model_chain.len()
                 && runtime_gateway_application_provider_retry_precommit(
                     ProviderRetryCause::NextModel,
                     RuntimeProviderErrorClass::Transient,
-                    model_index,
-                    model_chain.len(),
+                    context.model_index,
+                    context.model_chain.len(),
                 )
             {
                 runtime_gemini_log_invalid_stream_model_fallback(
-                    shared,
-                    request_id,
-                    selected.profile_name.as_str(),
-                    model_chain[model_index].as_str(),
-                    model_chain[model_index + 1].as_str(),
+                    context.attempt.shared,
+                    context.attempt.request_id,
+                    context.selected.profile_name.as_str(),
+                    context.model_chain[context.model_index].as_str(),
+                    context.model_chain[context.model_index + 1].as_str(),
                     reason.as_str(),
                 );
                 drop(response);
