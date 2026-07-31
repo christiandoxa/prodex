@@ -61,55 +61,22 @@ impl GovernanceSqliteRepository {
             return Err(GovernanceRepositoryError::ApprovalRequired);
         }
         let pointer = load_pointer(&transaction, request.tenant_id, request.kind)?;
-        let revocation_fallback_candidate = if request.action == GovernanceActivationAction::Revoke
-        {
+        let revocation_fallback_candidate = governance_revocation_fallback_candidate(
+            request.action,
+            &request.revision_id,
             pointer
                 .as_ref()
-                .and_then(|pointer| {
-                    if pointer.active_revision_id.as_deref() == Some(request.revision_id.as_str()) {
-                        pointer.last_known_good_revision_id.as_deref()
-                    } else if pointer.last_known_good_revision_id.as_deref()
-                        == Some(request.revision_id.as_str())
-                    {
-                        pointer.active_revision_id.as_deref()
-                    } else {
-                        None
-                    }
-                })
-                .filter(|revision_id| *revision_id != request.revision_id)
-                .map(str::to_owned)
-        } else {
-            None
-        };
-        let revocation_fallback_revision_id = if let Some(revision_id) =
-            revocation_fallback_candidate.as_deref()
-        {
-            let state = load_revision_lifecycle_state(
-                &transaction,
-                request.tenant_id,
-                request.kind,
-                revision_id,
-            )?;
-            let fallback =
-                load_revision_row(&transaction, request.tenant_id, request.kind, revision_id)?;
-            let valid = fallback.is_some_and(|fallback| {
-                let validation = GovernanceArtifactValidationInput {
-                    tenant_id: request.tenant_id,
-                    kind: request.kind,
-                    revision_id,
-                    compiled_artifact: &fallback.compiled_artifact,
-                    authenticity: fallback.authenticity.as_ref(),
-                };
-                matches!(state.as_deref(), Some("active" | "superseded"))
-                    && fallback.checksum == artifact_checksum(&fallback.compiled_artifact)
-                    && validate_artifact
-                        .take()
-                        .expect("validator must be available")(&validation)
-            });
-            valid.then_some(revision_id)
-        } else {
-            None
-        };
+                .and_then(|pointer| pointer.active_revision_id.as_deref()),
+            pointer
+                .as_ref()
+                .and_then(|pointer| pointer.last_known_good_revision_id.as_deref()),
+        );
+        let revocation_fallback_revision_id = validate_revocation_fallback(
+            &transaction,
+            &request,
+            revocation_fallback_candidate.as_deref(),
+            &mut validate_artifact,
+        )?;
         let plan = plan_governance_activation(
             &request,
             GovernanceActivationCurrent {
@@ -121,7 +88,7 @@ impl GovernanceSqliteRepository {
                 last_known_good_revision_id: pointer
                     .as_ref()
                     .and_then(|value| value.last_known_good_revision_id.as_deref()),
-                revocation_fallback_revision_id,
+                revocation_fallback_revision_id: revocation_fallback_revision_id.as_deref(),
                 etag: pointer.as_ref().map(|value| value.etag.as_str()),
             },
         )?;
@@ -495,4 +462,41 @@ impl GovernanceSqliteRepository {
         transaction.commit().map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
     }
+}
+
+fn validate_revocation_fallback<F>(
+    transaction: &Transaction<'_>,
+    request: &GovernanceActivationRequest,
+    revision_id: Option<&str>,
+    validate_artifact: &mut Option<F>,
+) -> Result<Option<String>, GovernanceRepositoryError>
+where
+    F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
+{
+    let Some(revision_id) = revision_id else {
+        return Ok(None);
+    };
+    let state =
+        load_revision_lifecycle_state(transaction, request.tenant_id, request.kind, revision_id)?;
+    let Some(fallback) =
+        load_revision_row(transaction, request.tenant_id, request.kind, revision_id)?
+    else {
+        return Ok(None);
+    };
+    if !matches!(state.as_deref(), Some("active" | "superseded"))
+        || fallback.checksum != artifact_checksum(&fallback.compiled_artifact)
+    {
+        return Ok(None);
+    }
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id: request.tenant_id,
+        kind: request.kind,
+        revision_id,
+        compiled_artifact: &fallback.compiled_artifact,
+        authenticity: fallback.authenticity.as_ref(),
+    };
+    Ok(validate_artifact
+        .take()
+        .expect("validator must be available")(&validation)
+    .then(|| revision_id.to_owned()))
 }

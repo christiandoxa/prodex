@@ -109,25 +109,20 @@ impl GovernanceSqliteRepository {
             command.kind,
             &command.revision_id,
         )? {
-            if existing.checksum == checksum
-                && existing.compiled_artifact == command.compiled_artifact
-                && existing.authenticity == command.authenticity
-                && existing.created_by == command.created_by
-                && existing.created_at_unix_ms == command.created_at_unix_ms
-            {
-                if let Some(idempotency) = idempotency.as_ref() {
-                    complete_governance_idempotency_sqlite(
-                        &transaction,
-                        command.tenant_id,
-                        idempotency,
-                        GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE,
-                        completed_at_unix_ms,
-                    )?;
-                }
-                transaction.commit().map_err(database_error)?;
-                return Ok(GovernanceWriteOutcome::Replayed);
+            if !revision_matches_command(&existing, &command, &checksum) {
+                return Err(GovernanceRepositoryError::Conflict);
             }
-            return Err(GovernanceRepositoryError::Conflict);
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_governance_idempotency_sqlite(
+                    &transaction,
+                    command.tenant_id,
+                    idempotency,
+                    GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE,
+                    completed_at_unix_ms,
+                )?;
+            }
+            transaction.commit().map_err(database_error)?;
+            return Ok(GovernanceWriteOutcome::Replayed);
         }
 
         insert_revision_metadata(&transaction, &command, &checksum, created_at)?;
@@ -198,10 +193,7 @@ impl GovernanceSqliteRepository {
         audit_outbox: AuditOutboxWriteCommand,
         idempotency: Option<GovernanceMutationIdempotency>,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
-        if approval.state != ApprovalState::PendingApproval
-            || approval.version != 1
-            || !approval.votes.is_empty()
-        {
+        if !approval_is_new(&approval) {
             return Err(GovernanceRepositoryError::InvalidInput);
         }
         let kind = approval_artifact_kind(approval.kind)?;
@@ -249,20 +241,20 @@ impl GovernanceSqliteRepository {
             .transpose()?;
 
         if let Some(existing) = load_approval_tx(&transaction, approval.tenant_id, &approval.id)? {
-            if existing == approval {
-                if let Some(idempotency) = idempotency.as_ref() {
-                    complete_governance_idempotency_sqlite(
-                        &transaction,
-                        approval.tenant_id,
-                        idempotency,
-                        GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
-                        completed_at_unix_ms,
-                    )?;
-                }
-                transaction.commit().map_err(database_error)?;
-                return Ok(GovernanceWriteOutcome::Replayed);
+            if existing != approval {
+                return Err(GovernanceRepositoryError::Conflict);
             }
-            return Err(GovernanceRepositoryError::Conflict);
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_governance_idempotency_sqlite(
+                    &transaction,
+                    approval.tenant_id,
+                    idempotency,
+                    GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
+                    completed_at_unix_ms,
+                )?;
+            }
+            transaction.commit().map_err(database_error)?;
+            return Ok(GovernanceWriteOutcome::Replayed);
         }
         transaction
             .execute(
@@ -721,6 +713,24 @@ impl GovernanceSqliteRepository {
             .map(|row| row.map_err(database_error))
             .collect()
     }
+}
+
+fn revision_matches_command(
+    existing: &RevisionRow,
+    command: &GovernanceRevisionWriteCommand,
+    checksum: &str,
+) -> bool {
+    existing.checksum == checksum
+        && existing.compiled_artifact == command.compiled_artifact
+        && existing.authenticity == command.authenticity
+        && existing.created_by == command.created_by
+        && existing.created_at_unix_ms == command.created_at_unix_ms
+}
+
+fn approval_is_new(approval: &ApprovalRecord) -> bool {
+    approval.state == ApprovalState::PendingApproval
+        && approval.version == 1
+        && approval.votes.is_empty()
 }
 
 fn governance_audit_export_record(

@@ -66,22 +66,7 @@ impl PostgresRepository {
         {
             return Err(GovernanceRepositoryError::Conflict);
         }
-        if request.action != GovernanceActivationAction::Revoke {
-            let validation = GovernanceArtifactValidationInput {
-                tenant_id: request.tenant_id,
-                kind: request.kind,
-                revision_id: &request.revision_id,
-                compiled_artifact: &revision.compiled_artifact,
-                authenticity: revision.authenticity.as_ref(),
-            };
-            if revision.checksum != artifact_checksum(&revision.compiled_artifact)
-                || !validate_artifact
-                    .take()
-                    .expect("validator must be available")(&validation)
-            {
-                return Err(GovernanceRepositoryError::SnapshotUnavailable);
-            }
-        }
+        validate_activation_revision(&request, &revision, &mut validate_artifact)?;
         let approval = match request.approval_id.as_ref() {
             Some(approval_id) => {
                 load_approval_tx(&transaction, request.tenant_id, approval_id).await?
@@ -92,57 +77,23 @@ impl PostgresRepository {
             return Err(GovernanceRepositoryError::ApprovalRequired);
         }
         let pointer = load_pointer_for_kind(&transaction, request.tenant_id, request.kind).await?;
-        let revocation_fallback_candidate = if request.action == GovernanceActivationAction::Revoke
-        {
+        let revocation_fallback_candidate = governance_revocation_fallback_candidate(
+            request.action,
+            &request.revision_id,
             pointer
                 .as_ref()
-                .and_then(|pointer| {
-                    if pointer.active_revision_id.as_deref() == Some(request.revision_id.as_str()) {
-                        pointer.last_known_good_revision_id.as_deref()
-                    } else if pointer.last_known_good_revision_id.as_deref()
-                        == Some(request.revision_id.as_str())
-                    {
-                        pointer.active_revision_id.as_deref()
-                    } else {
-                        None
-                    }
-                })
-                .filter(|revision_id| *revision_id != request.revision_id)
-                .map(str::to_owned)
-        } else {
-            None
-        };
-        let revocation_fallback_revision_id = if let Some(revision_id) =
-            revocation_fallback_candidate.as_deref()
-        {
-            let state = load_revision_lifecycle_state(
-                &transaction,
-                request.tenant_id,
-                request.kind,
-                revision_id,
-            )
-            .await?;
-            let fallback =
-                load_revision_row(&transaction, request.tenant_id, request.kind, revision_id)
-                    .await?;
-            let valid = fallback.is_some_and(|fallback| {
-                let validation = GovernanceArtifactValidationInput {
-                    tenant_id: request.tenant_id,
-                    kind: request.kind,
-                    revision_id,
-                    compiled_artifact: &fallback.compiled_artifact,
-                    authenticity: fallback.authenticity.as_ref(),
-                };
-                matches!(state.as_deref(), Some("active" | "superseded"))
-                    && fallback.checksum == artifact_checksum(&fallback.compiled_artifact)
-                    && validate_artifact
-                        .take()
-                        .expect("validator must be available")(&validation)
-            });
-            valid.then_some(revision_id)
-        } else {
-            None
-        };
+                .and_then(|pointer| pointer.active_revision_id.as_deref()),
+            pointer
+                .as_ref()
+                .and_then(|pointer| pointer.last_known_good_revision_id.as_deref()),
+        );
+        let revocation_fallback_revision_id = validate_revocation_fallback(
+            &transaction,
+            &request,
+            revocation_fallback_candidate.as_deref(),
+            &mut validate_artifact,
+        )
+        .await?;
         let plan = plan_governance_activation(
             &request,
             GovernanceActivationCurrent {
@@ -154,7 +105,7 @@ impl PostgresRepository {
                 last_known_good_revision_id: pointer
                     .as_ref()
                     .and_then(|value| value.last_known_good_revision_id.as_deref()),
-                revocation_fallback_revision_id,
+                revocation_fallback_revision_id: revocation_fallback_revision_id.as_deref(),
                 etag: pointer.as_ref().map(|value| value.etag.as_str()),
             },
         )?;
@@ -613,4 +564,70 @@ impl PostgresRepository {
         transaction.commit().await.map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
     }
+}
+
+async fn validate_revocation_fallback<F>(
+    transaction: &Transaction<'_>,
+    request: &GovernanceActivationRequest,
+    revision_id: Option<&str>,
+    validate_artifact: &mut Option<F>,
+) -> Result<Option<String>, GovernanceRepositoryError>
+where
+    F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
+{
+    let Some(revision_id) = revision_id else {
+        return Ok(None);
+    };
+    let state =
+        load_revision_lifecycle_state(transaction, request.tenant_id, request.kind, revision_id)
+            .await?;
+    let Some(fallback) =
+        load_revision_row(transaction, request.tenant_id, request.kind, revision_id).await?
+    else {
+        return Ok(None);
+    };
+    if !matches!(state.as_deref(), Some("active" | "superseded"))
+        || fallback.checksum != artifact_checksum(&fallback.compiled_artifact)
+    {
+        return Ok(None);
+    }
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id: request.tenant_id,
+        kind: request.kind,
+        revision_id,
+        compiled_artifact: &fallback.compiled_artifact,
+        authenticity: fallback.authenticity.as_ref(),
+    };
+    Ok(validate_artifact
+        .take()
+        .expect("validator must be available")(&validation)
+    .then(|| revision_id.to_owned()))
+}
+
+fn validate_activation_revision<F>(
+    request: &GovernanceActivationRequest,
+    revision: &RevisionRow,
+    validate_artifact: &mut Option<F>,
+) -> Result<(), GovernanceRepositoryError>
+where
+    F: FnOnce(&GovernanceArtifactValidationInput<'_>) -> bool,
+{
+    if request.action == GovernanceActivationAction::Revoke {
+        return Ok(());
+    }
+    let validation = GovernanceArtifactValidationInput {
+        tenant_id: request.tenant_id,
+        kind: request.kind,
+        revision_id: &request.revision_id,
+        compiled_artifact: &revision.compiled_artifact,
+        authenticity: revision.authenticity.as_ref(),
+    };
+    if revision.checksum != artifact_checksum(&revision.compiled_artifact)
+        || !validate_artifact
+            .take()
+            .expect("validator must be available")(&validation)
+    {
+        return Err(GovernanceRepositoryError::SnapshotUnavailable);
+    }
+    Ok(())
 }

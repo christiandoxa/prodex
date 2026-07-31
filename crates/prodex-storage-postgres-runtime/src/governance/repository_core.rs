@@ -113,26 +113,21 @@ impl PostgresRepository {
         )
         .await?
         {
-            if existing.checksum == checksum
-                && existing.compiled_artifact == command.compiled_artifact
-                && existing.authenticity == command.authenticity
-                && existing.created_by == command.created_by
-                && existing.created_at_unix_ms == command.created_at_unix_ms
-            {
-                if let Some(idempotency) = idempotency.as_ref() {
-                    complete_governance_idempotency_postgres(
-                        &transaction,
-                        command.tenant_id,
-                        idempotency,
-                        GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE,
-                        completed_at_unix_ms,
-                    )
-                    .await?;
-                }
-                transaction.commit().await.map_err(database_error)?;
-                return Ok(GovernanceWriteOutcome::Replayed);
+            if !revision_matches_command(&existing, &command, &checksum) {
+                return Err(GovernanceRepositoryError::Conflict);
             }
-            return Err(GovernanceRepositoryError::Conflict);
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_governance_idempotency_postgres(
+                    &transaction,
+                    command.tenant_id,
+                    idempotency,
+                    GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE,
+                    completed_at_unix_ms,
+                )
+                .await?;
+            }
+            transaction.commit().await.map_err(database_error)?;
+            return Ok(GovernanceWriteOutcome::Replayed);
         }
 
         insert_revision_metadata(&transaction, &command, &checksum, created_at).await?;
@@ -214,10 +209,7 @@ impl PostgresRepository {
         audit_outbox: AuditOutboxWriteCommand,
         idempotency: Option<GovernanceMutationIdempotency>,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
-        if approval.state != ApprovalState::PendingApproval
-            || approval.version != 1
-            || !approval.votes.is_empty()
-        {
+        if !approval_is_new(&approval) {
             return Err(GovernanceRepositoryError::InvalidInput);
         }
         let expires_at = to_i64(approval.expires_at_unix_ms)?;
@@ -276,21 +268,18 @@ impl PostgresRepository {
         if let Some(existing) =
             load_approval_tx(&transaction, approval.tenant_id, &approval.id).await?
         {
-            if existing == approval {
-                if let Some(idempotency) = idempotency.as_ref() {
-                    complete_governance_idempotency_postgres(
-                        &transaction,
-                        approval.tenant_id,
-                        idempotency,
-                        GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
-                        completed_at_unix_ms,
-                    )
-                    .await?;
-                }
-                transaction.commit().await.map_err(database_error)?;
-                return Ok(GovernanceWriteOutcome::Replayed);
+            if existing != approval {
+                return Err(GovernanceRepositoryError::Conflict);
             }
-            return Err(GovernanceRepositoryError::Conflict);
+            complete_approval_idempotency_if_present(
+                &transaction,
+                approval.tenant_id,
+                idempotency.as_ref(),
+                completed_at_unix_ms,
+            )
+            .await?;
+            transaction.commit().await.map_err(database_error)?;
+            return Ok(GovernanceWriteOutcome::Replayed);
         }
         transaction
             .execute(
@@ -325,16 +314,13 @@ impl PostgresRepository {
             .await?;
         }
         append_audit_outbox_tx(&transaction, audit_outbox).await?;
-        if let Some(idempotency) = idempotency.as_ref() {
-            complete_governance_idempotency_postgres(
-                &transaction,
-                approval.tenant_id,
-                idempotency,
-                GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
-                completed_at_unix_ms,
-            )
-            .await?;
-        }
+        complete_approval_idempotency_if_present(
+            &transaction,
+            approval.tenant_id,
+            idempotency.as_ref(),
+            completed_at_unix_ms,
+        )
+        .await?;
         transaction.commit().await.map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
     }
@@ -945,6 +931,43 @@ impl PostgresRepository {
         transaction.commit().await.map_err(database_error)?;
         Ok(records)
     }
+}
+
+fn revision_matches_command(
+    existing: &RevisionRow,
+    command: &GovernanceRevisionWriteCommand,
+    checksum: &str,
+) -> bool {
+    existing.checksum == checksum
+        && existing.compiled_artifact == command.compiled_artifact
+        && existing.authenticity == command.authenticity
+        && existing.created_by == command.created_by
+        && existing.created_at_unix_ms == command.created_at_unix_ms
+}
+
+fn approval_is_new(approval: &ApprovalRecord) -> bool {
+    approval.state == ApprovalState::PendingApproval
+        && approval.version == 1
+        && approval.votes.is_empty()
+}
+
+async fn complete_approval_idempotency_if_present(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: Option<&GovernanceMutationIdempotency>,
+    completed_at_unix_ms: u64,
+) -> Result<(), GovernanceRepositoryError> {
+    let Some(idempotency) = idempotency else {
+        return Ok(());
+    };
+    complete_governance_idempotency_postgres(
+        transaction,
+        tenant_id,
+        idempotency,
+        GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE,
+        completed_at_unix_ms,
+    )
+    .await
 }
 
 fn governance_audit_export_record(

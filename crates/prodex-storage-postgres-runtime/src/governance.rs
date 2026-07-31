@@ -43,6 +43,7 @@ use prodex_storage::{
     IdempotencyRecordLookupRowStatus, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy,
     decode_governance_audit_retention_purge_idempotency_response, denied_approval_audit_outbox,
     encode_governance_audit_retention_purge_idempotency_response,
+    governance_revocation_fallback_candidate,
     governance_support::{
         approval_artifact_kind, approval_kind_from_label, approval_kind_label,
         approval_state_from_label, approval_state_label, artifact_checksum, artifact_kind_label,
