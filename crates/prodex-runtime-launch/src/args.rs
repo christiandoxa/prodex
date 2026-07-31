@@ -316,74 +316,16 @@ pub fn runtime_proxy_local_model_provider_codex_args(
 ) -> Vec<OsString> {
     let proxy_base = format!("http://{listen_addr}{}", normalize_mount_path(mount_path));
     let provider_base_key = format!("model_providers.{local_provider_id}.base_url");
-    let provider_base_override =
-        format!("{}={}", provider_base_key, toml_string_literal(&proxy_base));
-    let mut args = Vec::with_capacity(user_args.len() + 2);
-    let mut replaced = false;
-    let mut index = 0;
-    while index < user_args.len() {
-        let Some(arg) = user_args[index].to_str() else {
-            args.push(user_args[index].clone());
-            index += 1;
-            continue;
-        };
-
-        if arg == "--" {
-            args.extend(user_args[index..].iter().cloned());
-            break;
-        }
-
-        if matches!(arg, "-c" | "--config") {
-            args.push(user_args[index].clone());
-            index += 1;
-            if index < user_args.len() {
-                if config_assignment_key(user_args[index].to_str())
-                    == Some(provider_base_key.as_str())
-                {
-                    args.push(OsString::from(provider_base_override.clone()));
-                    replaced = true;
-                } else {
-                    args.push(user_args[index].clone());
-                }
-            }
-            index += 1;
-            continue;
-        }
-
-        if let Some(value) = arg.strip_prefix("--config=") {
-            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
-                args.push(OsString::from(format!("--config={provider_base_override}")));
-                replaced = true;
-            } else {
-                args.push(user_args[index].clone());
-            }
-            index += 1;
-            continue;
-        }
-
-        if let Some(value) = arg.strip_prefix("-c")
-            && !value.is_empty()
-            && value.contains('=')
-        {
-            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
-                args.push(OsString::from(format!("-c{provider_base_override}")));
-                replaced = true;
-            } else {
-                args.push(user_args[index].clone());
-            }
-            index += 1;
-            continue;
-        }
-
-        args.push(user_args[index].clone());
-        index += 1;
-    }
-
-    if !replaced {
+    let overrides = [(provider_base_key, toml_string_literal(&proxy_base))];
+    let (mut args, replaced) = rewrite_codex_config_overrides(user_args, &overrides);
+    if !replaced[0] {
         let insert_at = codex_config_override_insertion_index(&args);
         args.splice(
             insert_at..insert_at,
-            [OsString::from("-c"), OsString::from(provider_base_override)],
+            [
+                OsString::from("-c"),
+                OsString::from(format!("{}={}", overrides[0].0, overrides[0].1)),
+            ],
         );
     }
     args
@@ -411,70 +353,7 @@ fn runtime_proxy_realtime_codex_args(
         return user_args.to_vec();
     }
 
-    let mut args = Vec::with_capacity(user_args.len() + (overrides.len() * 2));
-    let mut replaced = vec![false; overrides.len()];
-    let mut index = 0;
-    while index < user_args.len() {
-        let Some(arg) = user_args[index].to_str() else {
-            args.push(user_args[index].clone());
-            index += 1;
-            continue;
-        };
-
-        if arg == "--" {
-            args.extend(user_args[index..].iter().cloned());
-            break;
-        }
-
-        if (arg == "-c" || arg == "--config")
-            && let Some(next) = user_args.get(index + 1)
-        {
-            if let Some((override_index, override_value)) =
-                runtime_proxy_matching_realtime_override(next.to_str(), &overrides)
-            {
-                args.push(user_args[index].clone());
-                args.push(OsString::from(override_value));
-                replaced[override_index] = true;
-            } else {
-                args.push(user_args[index].clone());
-                args.push(next.clone());
-            }
-            index += 2;
-            continue;
-        }
-
-        if let Some(value) = arg.strip_prefix("--config=") {
-            if let Some((override_index, override_value)) =
-                runtime_proxy_matching_realtime_override(Some(value), &overrides)
-            {
-                args.push(OsString::from(format!("--config={override_value}")));
-                replaced[override_index] = true;
-            } else {
-                args.push(user_args[index].clone());
-            }
-            index += 1;
-            continue;
-        }
-
-        if let Some(value) = arg.strip_prefix("-c")
-            && !value.is_empty()
-            && value.contains('=')
-        {
-            if let Some((override_index, override_value)) =
-                runtime_proxy_matching_realtime_override(Some(value), &overrides)
-            {
-                args.push(OsString::from(format!("-c{override_value}")));
-                replaced[override_index] = true;
-            } else {
-                args.push(user_args[index].clone());
-            }
-            index += 1;
-            continue;
-        }
-
-        args.push(user_args[index].clone());
-        index += 1;
-    }
+    let (mut args, replaced) = rewrite_codex_config_overrides(user_args, &overrides);
 
     for (index, (key, value)) in overrides.iter().enumerate() {
         if !replaced[index] {
@@ -491,13 +370,112 @@ fn runtime_proxy_realtime_codex_args(
     args
 }
 
+enum CodexConfigArg<'a> {
+    Stop,
+    Separate(&'a OsString),
+    LongInline(&'a str),
+    ShortInline(&'a str),
+    Other,
+}
+
+fn codex_config_arg(args: &[OsString], index: usize) -> CodexConfigArg<'_> {
+    let Some(arg) = args[index].to_str() else {
+        return CodexConfigArg::Other;
+    };
+    if arg == "--" {
+        return CodexConfigArg::Stop;
+    }
+    if matches!(arg, "-c" | "--config")
+        && let Some(value) = args.get(index + 1)
+    {
+        return CodexConfigArg::Separate(value);
+    }
+    if let Some(value) = arg.strip_prefix("--config=") {
+        return CodexConfigArg::LongInline(value);
+    }
+    if let Some(value) = arg.strip_prefix("-c")
+        && !value.is_empty()
+        && value.contains('=')
+    {
+        return CodexConfigArg::ShortInline(value);
+    }
+    CodexConfigArg::Other
+}
+
+fn rewrite_codex_config_overrides(
+    user_args: &[OsString],
+    overrides: &[(String, String)],
+) -> (Vec<OsString>, Vec<bool>) {
+    let mut args = Vec::with_capacity(user_args.len() + (overrides.len() * 2));
+    let mut replaced = vec![false; overrides.len()];
+    let mut index = 0;
+    while index < user_args.len() {
+        match codex_config_arg(user_args, index) {
+            CodexConfigArg::Stop => {
+                args.extend(user_args[index..].iter().cloned());
+                break;
+            }
+            CodexConfigArg::Separate(value) => {
+                args.push(user_args[index].clone());
+                args.push(rewrite_codex_config_assignment(
+                    value.to_str(),
+                    overrides,
+                    &mut replaced,
+                    "",
+                    value,
+                ));
+                index += 2;
+            }
+            CodexConfigArg::LongInline(value) => {
+                args.push(rewrite_codex_config_assignment(
+                    Some(value),
+                    overrides,
+                    &mut replaced,
+                    "--config=",
+                    &user_args[index],
+                ));
+                index += 1;
+            }
+            CodexConfigArg::ShortInline(value) => {
+                args.push(rewrite_codex_config_assignment(
+                    Some(value),
+                    overrides,
+                    &mut replaced,
+                    "-c",
+                    &user_args[index],
+                ));
+                index += 1;
+            }
+            CodexConfigArg::Other => {
+                args.push(user_args[index].clone());
+                index += 1;
+            }
+        }
+    }
+    (args, replaced)
+}
+
+fn rewrite_codex_config_assignment(
+    assignment: Option<&str>,
+    overrides: &[(String, String)],
+    replaced: &mut [bool],
+    prefix: &str,
+    fallback: &OsString,
+) -> OsString {
+    let Some((index, value)) = runtime_proxy_matching_config_override(assignment, overrides) else {
+        return fallback.clone();
+    };
+    replaced[index] = true;
+    OsString::from(format!("{prefix}{value}"))
+}
+
 fn codex_config_override_insertion_index(args: &[OsString]) -> usize {
     first_codex_positional_arg_index(args)
         .or_else(|| args.iter().position(|arg| arg == "--"))
         .unwrap_or(args.len())
 }
 
-fn runtime_proxy_matching_realtime_override(
+fn runtime_proxy_matching_config_override(
     assignment: Option<&str>,
     overrides: &[(String, String)],
 ) -> Option<(usize, String)> {
