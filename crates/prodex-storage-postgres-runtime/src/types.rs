@@ -126,3 +126,11 @@ impl fmt::Display for PostgresRuntimeError {
 }
 
 impl Error for PostgresRuntimeError {}
+
+pub(super) fn to_i64(value: u64) -> Result<i64, PostgresRuntimeError> {
+    i64::try_from(value).map_err(|_| PostgresRuntimeError::NumericOverflow)
+}
+
+pub(super) fn from_i64(value: i64) -> Result<u64, PostgresRuntimeError> {
+    u64::try_from(value).map_err(|_| PostgresRuntimeError::InvalidDatabaseState)
+}
