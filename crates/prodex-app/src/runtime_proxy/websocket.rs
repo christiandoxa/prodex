@@ -340,68 +340,14 @@ fn handle_runtime_proxy_websocket_connect_attempt(
             );
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
-            if status == 401
-                && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                    request_id,
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    recovery_steps,
-                )
-            {
-                return Ok(None);
-            }
-            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
-                status,
-                &body,
-                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-            );
-            if (matches!(status, 401 | 403)
-                && (status == 401
-                    || error_policy.action
-                        != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
-                || runtime_proxy_body_indicates_token_invalidated(&body)
-            {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    status,
-                );
-            }
-            runtime_proxy_log(
+            handle_runtime_proxy_websocket_http_response(
+                request_id,
                 shared,
-                runtime_proxy_structured_log_message(
-                    "upstream_connect_http",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "websocket"),
-                        runtime_proxy_log_field("profile", profile_name),
-                        runtime_proxy_log_field("status", status.to_string()),
-                        runtime_proxy_log_field("body_bytes", body.len().to_string()),
-                    ],
-                ),
-            );
-            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
-                return Ok(Some(RuntimeWebsocketConnectResult::QuotaBlocked(
-                    runtime_websocket_error_payload_from_http_body(&body),
-                )));
-            }
-            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
-                return Ok(Some(RuntimeWebsocketConnectResult::Overloaded(
-                    runtime_websocket_error_payload_from_http_body(&body),
-                )));
-            }
-            let payload = if body.is_empty() {
-                RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
-                    status,
-                    "upstream_rejected",
-                    &format!("Upstream rejected the WebSocket handshake with HTTP {status}."),
-                ))
-            } else {
-                runtime_websocket_error_payload_from_http_body(&body)
-            };
-            Ok(Some(RuntimeWebsocketConnectResult::Rejected(payload)))
+                profile_name,
+                status,
+                body,
+                recovery_steps,
+            )
         }
         Err(err) => Err(runtime_websocket_connect_transport_error(
             shared,
@@ -410,6 +356,77 @@ fn handle_runtime_proxy_websocket_connect_attempt(
             &err,
         )),
     }
+}
+
+fn handle_runtime_proxy_websocket_http_response(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    status: u16,
+    body: Vec<u8>,
+    recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
+) -> Result<Option<RuntimeWebsocketConnectResult>> {
+    if status == 401
+        && runtime_try_recover_profile_auth_from_unauthorized_steps(
+            request_id,
+            shared,
+            profile_name,
+            RuntimeRouteKind::Websocket,
+            recovery_steps,
+        )
+    {
+        return Ok(None);
+    }
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        &body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    if (matches!(status, 401 | 403)
+        && (status == 401
+            || error_policy.action != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
+        || runtime_proxy_body_indicates_token_invalidated(&body)
+    {
+        note_runtime_profile_auth_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Websocket,
+            status,
+        );
+    }
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "upstream_connect_http",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("status", status.to_string()),
+                runtime_proxy_log_field("body_bytes", body.len().to_string()),
+            ],
+        ),
+    );
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
+        return Ok(Some(RuntimeWebsocketConnectResult::QuotaBlocked(
+            runtime_websocket_error_payload_from_http_body(&body),
+        )));
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+        return Ok(Some(RuntimeWebsocketConnectResult::Overloaded(
+            runtime_websocket_error_payload_from_http_body(&body),
+        )));
+    }
+    let payload = if body.is_empty() {
+        RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+            status,
+            "upstream_rejected",
+            &format!("Upstream rejected the WebSocket handshake with HTTP {status}."),
+        ))
+    } else {
+        runtime_websocket_error_payload_from_http_body(&body)
+    };
+    Ok(Some(RuntimeWebsocketConnectResult::Rejected(payload)))
 }
 
 fn runtime_websocket_connect_transport_error(

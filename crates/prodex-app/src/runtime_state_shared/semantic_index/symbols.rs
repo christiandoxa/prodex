@@ -30,6 +30,31 @@ fn runtime_smart_context_parse_symbol_declaration(
     line: &str,
     rust_test: bool,
 ) -> Option<RuntimeSmartContextParsedSymbolLine> {
+    if let Some(symbol) = runtime_smart_context_parse_callable_symbol(line, rust_test) {
+        return Some(symbol);
+    }
+
+    for keyword in ["struct", "enum", "trait", "impl", "mod", "class"] {
+        if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, keyword) {
+            return Some(RuntimeSmartContextParsedSymbolLine {
+                label: "symbol",
+                symbol: if keyword == "impl" {
+                    format!("impl {symbol}")
+                } else {
+                    symbol
+                },
+                style: RuntimeSmartContextSymbolRangeStyle::Brace,
+            });
+        }
+    }
+
+    None
+}
+
+fn runtime_smart_context_parse_callable_symbol(
+    line: &str,
+    rust_test: bool,
+) -> Option<RuntimeSmartContextParsedSymbolLine> {
     if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, "fn") {
         return Some(RuntimeSmartContextParsedSymbolLine {
             label: if rust_test { "test_symbol" } else { "function" },
@@ -58,29 +83,13 @@ fn runtime_smart_context_parse_symbol_declaration(
         });
     }
 
-    if let Some(symbol) = runtime_smart_context_parse_js_function_symbol(line) {
-        return Some(RuntimeSmartContextParsedSymbolLine {
+    runtime_smart_context_parse_js_function_symbol(line).map(|symbol| {
+        RuntimeSmartContextParsedSymbolLine {
             label: "function",
             symbol,
             style: RuntimeSmartContextSymbolRangeStyle::Brace,
-        });
-    }
-
-    for keyword in ["struct", "enum", "trait", "impl", "mod", "class"] {
-        if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, keyword) {
-            return Some(RuntimeSmartContextParsedSymbolLine {
-                label: "symbol",
-                symbol: if keyword == "impl" {
-                    format!("impl {symbol}")
-                } else {
-                    symbol
-                },
-                style: RuntimeSmartContextSymbolRangeStyle::Brace,
-            });
         }
-    }
-
-    None
+    })
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_symbol_range_bounds(
