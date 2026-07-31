@@ -16,11 +16,12 @@ Submission freezes and validates the candidate. Independent approval binds
 tenant, revision/checksum, policy kind, approver role, quorum and expiry; the
 maker cannot count as checker. Activation atomically updates active/LKG history
 with audit and SIEM-outbox records under optimistic concurrency. PostgreSQL
-pointer changes also queue a transactional, non-durable cache notification;
-authoritative pointer polling recovers missed notifications. Rollback activates
-a previous immutable approved revision; invalidated/revoked revisions remain
-ineligible. Gateways acknowledge revision changes and reject unknown mandatory
-schema semantics.
+pointer changes also append a transactional invalidation-outbox event and queue
+a bounded cache wake-up. Gateways replay unacknowledged events, refresh from the
+authoritative pointers before acknowledgement, and retain a current head for
+restarted replicas. Rollback activates a previous immutable approved revision;
+invalidated/revoked revisions remain ineligible. Gateways reject unknown
+mandatory schema semantics.
 
 ## Consequences
 
@@ -32,9 +33,10 @@ Every race, rejection, activation, rollback and failed attempt is audited.
 
 Prodex implements immutable signed governance revisions, approval transitions,
 maker-checker/quorum enforcement, optimistic activation, active/LKG pointers,
-rollback, audit and SIEM-outbox contracts, PostgreSQL notification fanout, and
-authoritative polling recovery. A durable cache-invalidation outbox with
-per-replica acknowledgement remains a target rather than a current claim.
+rollback, audit and SIEM-outbox contracts, PostgreSQL outbox replay, and
+notification wake-ups. PostgreSQL cache fanout now uses a durable
+tenant-scoped invalidation outbox with per-replica acknowledgement; `NOTIFY`
+remains a non-authoritative wake-up only.
 Evidence includes
 `maker_checker_quorum_and_activation_are_enforced`,
 `gateway_policy_http_revocation_invalidates_cache_and_lkg`, the

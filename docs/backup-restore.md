@@ -13,6 +13,8 @@ provider credential rotation, or disaster-recovery drills:
 - `policy.toml` and non-secret gateway configuration.
 - config-publication event, replica, and acknowledgement state in PostgreSQL,
   or its outbox/ack state when the shared filesystem transport is active.
+- governance invalidation event, live-replica, and acknowledgement state in
+  PostgreSQL.
 - virtual-key store.
 - usage counters.
 - append-only billing ledger.
@@ -111,8 +113,8 @@ PostgreSQL is the durable source of truth for multi-replica deployments. Use a
 consistent dump or your managed database backup facility. Store WAL/PITR backups
 outside the cluster. A full database dump includes
 `prodex_config_publication_events`, `prodex_config_publication_replicas`, and
-`prodex_config_publication_acks`; do not exclude those tables when PostgreSQL
-publication is enabled.
+`prodex_config_publication_acks`, plus the governance invalidation outbox,
+replica, and acknowledgement tables; do not exclude those tables.
 
 Backup:
 
@@ -149,6 +151,8 @@ Drill acceptance:
 - cross-tenant admin reads still fail safely.
 - every restored configuration-publication acknowledgement references an
   existing event and registered replica.
+- every restored governance-invalidation acknowledgement references an
+  existing event and registered replica.
 
 ### Automated PostgreSQL drill
 
@@ -163,8 +167,11 @@ npm run ci:backup-restore-drill
 The command requires Docker plus `psql`, starts disposable PostgreSQL source
 and restore databases, invokes
 the external migrator, seeds synthetic tenant/accounting records, dumps and
-restores them, and verifies every tenant-scoped table covered by the drill. It also proves that
-a write made after the backup is absent from the restored recovery point.
+restores them, and verifies every tenant-scoped table covered by the drill. It
+also proves that a write made after the backup is absent from the restored
+recovery point.
+The fingerprint and RLS gate include durable governance invalidation events,
+replica leases, and acknowledgement links.
 Its recovery-point-age threshold bounds stale logical backups; it is not a WAL
 PITR or production RPO measurement. Validate production RPO separately against
 the deployment's acknowledged-write cutoff and restored PITR coordinate.
