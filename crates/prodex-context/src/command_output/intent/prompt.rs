@@ -87,24 +87,7 @@ fn push_prompt_intent_candidate(
         return;
     }
 
-    let Some(candidate) = normalize_prompt_intent_candidate(candidate) else {
-        return;
-    };
-
-    let term = if let Some(code) = prompt_intent_error_code(&candidate) {
-        Some(code)
-    } else if let Some(path) = prompt_intent_path(&candidate) {
-        Some(path)
-    } else if looks_like_prompt_intent_file_name(&candidate)
-        || looks_like_prompt_intent_symbol(&candidate)
-        || quoted && looks_like_quoted_prompt_intent_identifier(&candidate)
-    {
-        Some(candidate)
-    } else {
-        None
-    };
-
-    let Some(term) = term else {
+    let Some(term) = prompt_intent_candidate_term(candidate, quoted) else {
         return;
     };
     if term.chars().count() > 160 {
@@ -117,6 +100,23 @@ fn push_prompt_intent_candidate(
     }
     seen.insert(key, ());
     terms.push(term);
+}
+
+fn prompt_intent_candidate_term(candidate: &str, quoted: bool) -> Option<String> {
+    let candidate = normalize_prompt_intent_candidate(candidate)?;
+    if let Some(code) = prompt_intent_error_code(&candidate) {
+        return Some(code);
+    }
+    if let Some(path) = prompt_intent_path(&candidate) {
+        return Some(path);
+    }
+    if looks_like_prompt_intent_file_name(&candidate)
+        || looks_like_prompt_intent_symbol(&candidate)
+        || quoted && looks_like_quoted_prompt_intent_identifier(&candidate)
+    {
+        return Some(candidate);
+    }
+    None
 }
 
 fn normalize_prompt_intent_candidate(candidate: &str) -> Option<String> {

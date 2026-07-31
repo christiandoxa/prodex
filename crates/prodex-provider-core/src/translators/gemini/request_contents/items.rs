@@ -99,79 +99,15 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
         match role {
             "system" => {}
             "assistant" => {
-                let mut parts = Vec::new();
-                if let Some(text) = gemini_message_text(item).filter(|text| !text.is_empty()) {
-                    parts.push(json!({ "text": text }));
-                }
-                if let Some(tool_calls) = item.get("tool_calls").and_then(Value::as_array) {
-                    for tool_call in tool_calls {
-                        let call_id = tool_call
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        let Some(function) = tool_call.get("function") else {
-                            continue;
-                        };
-                        let name = function
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or("tool_call");
-                        if !call_id.is_empty() {
-                            tool_names_by_call_id.insert(call_id.to_string(), name.to_string());
-                        }
-                        let args = function
-                            .get("arguments")
-                            .and_then(Value::as_str)
-                            .and_then(|args| serde_json::from_str::<Value>(args).ok())
-                            .unwrap_or_else(|| json!({}));
-                        let mut function_call = json!({
-                            "name": name,
-                            "args": args,
-                        });
-                        if !call_id.trim().is_empty() {
-                            function_call["id"] = Value::String(call_id.to_string());
-                        }
-                        parts.push(json!({ "functionCall": function_call }));
-                    }
-                }
-                if !parts.is_empty() {
-                    contents.push(json!({
-                        "role": "model",
-                        "parts": parts,
-                    }));
-                }
+                gemini_append_assistant_content(item, &mut contents, &mut tool_names_by_call_id)
             }
             "tool" => {
-                let mut parts = Vec::new();
-                while index < items.len()
-                    && items[index].get("role").and_then(Value::as_str) == Some("tool")
-                {
-                    let tool_item = &items[index];
-                    let call_id = tool_item
-                        .get("tool_call_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let name = tool_item
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or_else(|| tool_names_by_call_id.get(call_id).cloned())
-                        .unwrap_or_else(|| "tool_call".to_string());
-                    let response = gemini_tool_response_from_message(tool_item);
-                    let mut function_response = json!({
-                        "name": name,
-                        "response": response,
-                    });
-                    if !call_id.trim().is_empty() {
-                        function_response["id"] = Value::String(call_id.to_string());
-                    }
-                    parts.push(json!({ "functionResponse": function_response }));
-                    index += 1;
-                }
-                contents.push(json!({
-                    "role": "user",
-                    "parts": parts,
-                }));
+                gemini_append_tool_content(
+                    items,
+                    &mut index,
+                    &mut contents,
+                    &tool_names_by_call_id,
+                );
                 continue;
             }
             _ => {
@@ -179,14 +115,7 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
                     index += 1;
                     continue;
                 }
-                let parts =
-                    gemini_content_parts_from_message_content(item.get("content").unwrap_or(item));
-                if !parts.is_empty() {
-                    contents.push(json!({
-                        "role":"user",
-                        "parts": parts,
-                    }));
-                }
+                gemini_append_user_content(item, &mut contents);
             }
         }
         index += 1;
@@ -195,6 +124,117 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
         contents.push(json!({"role":"user","parts":[{"text":""}]}));
     }
     contents
+}
+
+fn gemini_append_assistant_content(
+    item: &Value,
+    contents: &mut Vec<Value>,
+    tool_names_by_call_id: &mut std::collections::BTreeMap<String, String>,
+) {
+    let mut parts = Vec::new();
+    if let Some(text) = gemini_message_text(item).filter(|text| !text.is_empty()) {
+        parts.push(json!({ "text": text }));
+    }
+    if let Some(tool_calls) = item.get("tool_calls").and_then(Value::as_array) {
+        for tool_call in tool_calls {
+            if let Some(part) = gemini_function_call_part(tool_call, tool_names_by_call_id) {
+                parts.push(part);
+            }
+        }
+    }
+    if !parts.is_empty() {
+        contents.push(json!({
+            "role": "model",
+            "parts": parts,
+        }));
+    }
+}
+
+fn gemini_function_call_part(
+    tool_call: &Value,
+    tool_names_by_call_id: &mut std::collections::BTreeMap<String, String>,
+) -> Option<Value> {
+    let call_id = tool_call
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let function = tool_call.get("function")?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool_call");
+    if !call_id.is_empty() {
+        tool_names_by_call_id.insert(call_id.to_string(), name.to_string());
+    }
+    let args = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .and_then(|args| serde_json::from_str::<Value>(args).ok())
+        .unwrap_or_else(|| json!({}));
+    let mut function_call = json!({
+        "name": name,
+        "args": args,
+    });
+    if !call_id.trim().is_empty() {
+        function_call["id"] = Value::String(call_id.to_string());
+    }
+    Some(json!({ "functionCall": function_call }))
+}
+
+fn gemini_append_tool_content(
+    items: &[Value],
+    index: &mut usize,
+    contents: &mut Vec<Value>,
+    tool_names_by_call_id: &std::collections::BTreeMap<String, String>,
+) {
+    let mut parts = Vec::new();
+    while *index < items.len() && items[*index].get("role").and_then(Value::as_str) == Some("tool")
+    {
+        parts.push(gemini_function_response_part(
+            &items[*index],
+            tool_names_by_call_id,
+        ));
+        *index += 1;
+    }
+    contents.push(json!({
+        "role": "user",
+        "parts": parts,
+    }));
+}
+
+fn gemini_function_response_part(
+    tool_item: &Value,
+    tool_names_by_call_id: &std::collections::BTreeMap<String, String>,
+) -> Value {
+    let call_id = tool_item
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = tool_item
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| tool_names_by_call_id.get(call_id).cloned())
+        .unwrap_or_else(|| "tool_call".to_string());
+    let response = gemini_tool_response_from_message(tool_item);
+    let mut function_response = json!({
+        "name": name,
+        "response": response,
+    });
+    if !call_id.trim().is_empty() {
+        function_response["id"] = Value::String(call_id.to_string());
+    }
+    json!({ "functionResponse": function_response })
+}
+
+fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) {
+    let parts = gemini_content_parts_from_message_content(item.get("content").unwrap_or(item));
+    if !parts.is_empty() {
+        contents.push(json!({
+            "role":"user",
+            "parts": parts,
+        }));
+    }
 }
 
 fn gemini_tool_response_from_message(message: &Value) -> Value {

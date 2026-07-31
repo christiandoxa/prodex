@@ -81,29 +81,7 @@ pub fn wrap_text(input: &str, width: usize) -> Vec<String> {
 
     let mut lines = Vec::new();
     for paragraph in input.lines() {
-        if paragraph.trim().is_empty() {
-            lines.push(String::new());
-            continue;
-        }
-
-        let mut current = String::new();
-        for word in paragraph.split_whitespace() {
-            for piece in chunk_token(word, width) {
-                if current.is_empty() {
-                    current.push_str(&piece);
-                } else if text_width(&current) + 1 + text_width(&piece) <= width {
-                    current.push(' ');
-                    current.push_str(&piece);
-                } else {
-                    lines.push(std::mem::take(&mut current));
-                    current.push_str(&piece);
-                }
-            }
-        }
-
-        if !current.is_empty() {
-            lines.push(current);
-        }
+        wrap_paragraph(paragraph, width, &mut lines);
     }
 
     if lines.is_empty() {
@@ -111,4 +89,33 @@ pub fn wrap_text(input: &str, width: usize) -> Vec<String> {
     }
 
     lines
+}
+
+fn wrap_paragraph(paragraph: &str, width: usize, lines: &mut Vec<String>) {
+    if paragraph.trim().is_empty() {
+        lines.push(String::new());
+        return;
+    }
+
+    let mut current = String::new();
+    for word in paragraph.split_whitespace() {
+        for piece in chunk_token(word, width) {
+            append_wrapped_piece(&mut current, lines, &piece, width);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+}
+
+fn append_wrapped_piece(current: &mut String, lines: &mut Vec<String>, piece: &str, width: usize) {
+    if current.is_empty() {
+        current.push_str(piece);
+    } else if text_width(current) + 1 + text_width(piece) <= width {
+        current.push(' ');
+        current.push_str(piece);
+    } else {
+        lines.push(std::mem::take(current));
+        current.push_str(piece);
+    }
 }

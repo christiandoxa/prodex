@@ -607,56 +607,90 @@ fn quota_error_summary(error: &str) -> String {
         return "unknown".to_string();
     }
     let lower = first_line.to_ascii_lowercase();
+    if let Some(summary) = [
+        quota_error_summary_basic(&lower),
+        quota_error_summary_transport(&lower),
+        quota_error_summary_auth(&lower),
+        quota_error_summary_response(&lower),
+    ]
+    .into_iter()
+    .flatten()
+    .next()
+    {
+        return summary.to_string();
+    }
+    first_line
+}
+
+fn quota_error_summary_basic(lower: &str) -> Option<&'static str> {
     if lower.contains("unavailable") {
-        "unavailable".to_string()
+        Some("unavailable")
     } else if lower.contains("missing")
         || lower.contains("not configured")
         || lower.contains("config")
     {
-        "config".to_string()
-    } else if lower.contains("500")
+        Some("config")
+    } else {
+        None
+    }
+}
+
+fn quota_error_summary_transport(lower: &str) -> Option<&'static str> {
+    if lower.contains("500")
         || lower.contains("502")
         || lower.contains("503")
         || lower.contains("504")
         || lower.contains("server")
     {
-        "server".to_string()
+        Some("server")
     } else if lower.contains("timeout") || lower.contains("timed out") {
-        "timeout".to_string()
+        Some("timeout")
     } else if lower.contains("dns")
         || lower.contains("tls")
         || lower.contains("certificate")
         || lower.contains("network")
     {
-        "network".to_string()
+        Some("network")
     } else if lower.contains("proxy") {
-        "proxy".to_string()
+        Some("proxy")
     } else if lower.contains("refused") || lower.contains("connect") {
-        "connection".to_string()
-    } else if lower.contains("invalid auth")
+        Some("connection")
+    } else {
+        None
+    }
+}
+
+fn quota_error_summary_auth(lower: &str) -> Option<&'static str> {
+    if lower.contains("invalid auth")
         || lower.contains("invalid token")
         || lower.contains("bad credentials")
         || lower.contains("credential")
     {
-        "invalid auth".to_string()
+        Some("invalid auth")
     } else if lower.contains("429") || lower.contains("rate limit") {
-        "rate limit".to_string()
-    } else if lower.contains("parse")
+        Some("rate limit")
+    } else {
+        None
+    }
+}
+
+fn quota_error_summary_response(lower: &str) -> Option<&'static str> {
+    if lower.contains("parse")
         || lower.contains("deserialize")
         || lower.contains("decode")
         || lower.contains("invalid json")
     {
-        "parse".to_string()
+        Some("parse")
     } else if lower.contains("empty") {
-        "empty".to_string()
+        Some("empty")
     } else if lower.contains("cancel") {
-        "cancelled".to_string()
+        Some("cancelled")
     } else if lower.contains("403") || lower.contains("forbidden") {
-        "forbidden".to_string()
+        Some("forbidden")
     } else if lower.contains("404") || lower.contains("not found") {
-        "not found".to_string()
+        Some("not found")
     } else {
-        first_line
+        None
     }
 }
 

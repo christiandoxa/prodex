@@ -14,19 +14,13 @@ pub(super) fn detect_binaryish_text_noise_supplement(
     let mut first_line = None;
     for (line_index, line) in input.lines().enumerate() {
         for ch in line.chars() {
-            let suspicious = ch == '\0'
-                || ch == '\u{fffd}'
-                || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'));
-            if !suspicious {
+            let Some((nul, replacement)) = binaryish_char_counts(ch) else {
                 continue;
-            }
+            };
             first_line.get_or_insert(line_index + 1);
             suspicious_chars += 1;
-            if ch == '\0' {
-                nul_chars += 1;
-            } else if ch == '\u{fffd}' {
-                replacement_chars += 1;
-            }
+            nul_chars += nul;
+            replacement_chars += replacement;
         }
     }
 
@@ -44,4 +38,14 @@ pub(super) fn detect_binaryish_text_noise_supplement(
             "binaryish_controls={suspicious_chars}, nul_chars={nul_chars}, replacement_chars={replacement_chars}"
         ),
     })
+}
+
+fn binaryish_char_counts(ch: char) -> Option<(usize, usize)> {
+    if ch == '\0' {
+        return Some((1, 0));
+    }
+    if ch == '\u{fffd}' {
+        return Some((0, 1));
+    }
+    (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')).then_some((0, 0))
 }

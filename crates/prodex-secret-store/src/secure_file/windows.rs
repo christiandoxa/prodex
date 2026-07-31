@@ -41,39 +41,12 @@ pub(super) struct Directory {
 
 impl Directory {
     pub(super) fn open_path(path: &Path, create: bool) -> io::Result<Self> {
-        let absolute = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()?.join(path)
-        };
+        let absolute = absolute_path(path)?;
         let mut current = PathBuf::new();
         let mut opened = None;
         for component in absolute.components() {
-            match component {
-                Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-                Component::RootDir => current.push(component.as_os_str()),
-                Component::CurDir => {}
-                Component::Normal(name) => {
-                    current.push(name);
-                    let created = if create && !current.exists() {
-                        match fs::create_dir(&current) {
-                            Ok(()) => true,
-                            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-                            Err(error) => return Err(error),
-                        }
-                    } else {
-                        false
-                    };
-                    let file = open_directory(&current, created)?;
-                    if created {
-                        set_private_acl(&file, true)?;
-                    }
-                    validate_directory(&file)?;
-                    opened = Some(Self::from_file(current.clone(), file)?);
-                }
-                Component::ParentDir => {
-                    return Err(invalid_input("parent traversal is not allowed"));
-                }
+            if let Some(directory) = open_path_component(&mut current, component, create)? {
+                opened = Some(directory);
             }
         }
         let directory = match opened {
@@ -270,6 +243,48 @@ impl Directory {
     }
 }
 
+fn absolute_path(path: &Path) -> io::Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn open_path_component(
+    current: &mut PathBuf,
+    component: Component<'_>,
+    create: bool,
+) -> io::Result<Option<Directory>> {
+    match component {
+        Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+        Component::RootDir => current.push(component.as_os_str()),
+        Component::CurDir => {}
+        Component::Normal(name) => return open_path_entry(current, name, create).map(Some),
+        Component::ParentDir => return Err(invalid_input("parent traversal is not allowed")),
+    }
+    Ok(None)
+}
+
+fn open_path_entry(current: &mut PathBuf, name: &OsStr, create: bool) -> io::Result<Directory> {
+    current.push(name);
+    let created = if create && !current.exists() {
+        match fs::create_dir(&*current) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
+            Err(error) => return Err(error),
+        }
+    } else {
+        false
+    };
+    let file = open_directory(current, created)?;
+    if created {
+        set_private_acl(&file, true)?;
+    }
+    validate_directory(&file)?;
+    Directory::from_file(current.clone(), file)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FileIdentity {
     volume: u32,
@@ -452,6 +467,18 @@ fn set_private_acl(file: &File, directory: bool) -> io::Result<()> {
 
 fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
     let user = CurrentUserSid::load()?;
+    let (owner, dacl, descriptor) = security_info(file)?;
+    if owner.is_null() || dacl.is_null() {
+        return Err(permission_denied(
+            "secret object has no private owner or DACL",
+        ));
+    }
+    validate_acl_owner(owner, user.sid(), usage)?;
+    validate_acl_control(descriptor.0, usage)?;
+    validate_acl_entries(dacl, user.sid(), usage)
+}
+
+fn security_info(file: &File) -> io::Result<(PSID, *mut ACL, LocalSecurityDescriptor)> {
     let mut owner = std::ptr::null_mut();
     let mut dacl = std::ptr::null_mut();
     let mut descriptor = std::ptr::null_mut();
@@ -471,23 +498,27 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
     if status != ERROR_SUCCESS {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
-    let descriptor = LocalSecurityDescriptor(descriptor);
-    if owner.is_null() || dacl.is_null() {
-        return Err(permission_denied(
-            "secret object has no private owner or DACL",
-        ));
-    }
+    Ok((owner, dacl, LocalSecurityDescriptor(descriptor)))
+}
+
+fn validate_acl_owner(owner: PSID, user: PSID, usage: AclUse) -> io::Result<()> {
     if matches!(usage, AclUse::PrivateFile) {
         // SAFETY: both SID pointers are live for this descriptor/user buffer.
-        if unsafe { EqualSid(owner, user.sid()) } == 0 {
+        if unsafe { EqualSid(owner, user) } == 0 {
             return Err(permission_denied(
                 "private secret is not owned by this user",
             ));
         }
-    } else if !principal_is_trusted(owner, user.sid(), usage)? {
+    } else if !principal_is_trusted(owner, user, usage)? {
         return Err(permission_denied("secret object owner is not trusted"));
     }
+    Ok(())
+}
 
+fn validate_acl_control(
+    descriptor: windows_sys::Win32::Security::PSECURITY_DESCRIPTOR,
+    usage: AclUse,
+) -> io::Result<()> {
     let mut control = 0u16;
     let mut revision = 0u32;
     // SAFETY: the descriptor returned by GetSecurityInfo remains live in guard.
@@ -499,40 +530,48 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
     {
         return Err(permission_denied("secret object DACL is not private"));
     }
+    Ok(())
+}
 
+fn validate_acl_entries(dacl: *mut ACL, user: PSID, usage: AclUse) -> io::Result<()> {
     // SAFETY: `dacl` points into the live descriptor and AceCount bounds GetAce.
     let ace_count = unsafe { (*dacl).AceCount };
     for index in 0..u32::from(ace_count) {
-        let mut ace = std::ptr::null_mut();
-        // SAFETY: index is below AceCount and `ace` is a valid output pointer.
-        if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: GetAce returned a live ACE_HEADER inside the DACL.
-        let header = unsafe { &*ace.cast::<windows_sys::Win32::Security::ACE_HEADER>() };
-        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0
-            || u32::from(header.AceType) == ACCESS_DENIED_ACE_TYPE
+        if let Some(sid) = validate_acl_entry(dacl, index, usage)?
+            && !principal_is_trusted(sid, user, usage)?
         {
-            continue;
-        }
-        if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE {
-            return Err(permission_denied(
-                "secret object has an unsupported allow ACE",
-            ));
-        }
-        // SAFETY: the ACE type was checked before interpreting its fixed prefix.
-        let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
-        if allowed.Mask & sensitive_access(usage) == 0 {
-            continue;
-        }
-        let sid = std::ptr::addr_of!(allowed.SidStart).cast_mut().cast();
-        if !principal_is_trusted(sid, user.sid(), usage)? {
             return Err(permission_denied(
                 "secret object grants sensitive access to an untrusted principal",
             ));
         }
     }
     Ok(())
+}
+
+fn validate_acl_entry(dacl: *mut ACL, index: u32, usage: AclUse) -> io::Result<Option<PSID>> {
+    let mut ace = std::ptr::null_mut();
+    // SAFETY: index is below AceCount and `ace` is a valid output pointer.
+    if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: GetAce returned a live ACE_HEADER inside the DACL.
+    let header = unsafe { &*ace.cast::<windows_sys::Win32::Security::ACE_HEADER>() };
+    if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0
+        || u32::from(header.AceType) == ACCESS_DENIED_ACE_TYPE
+    {
+        return Ok(None);
+    }
+    if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE {
+        return Err(permission_denied(
+            "secret object has an unsupported allow ACE",
+        ));
+    }
+    // SAFETY: the ACE type was checked before interpreting its fixed prefix.
+    let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+    if allowed.Mask & sensitive_access(usage) == 0 {
+        return Ok(None);
+    }
+    Ok(Some(std::ptr::addr_of!(allowed.SidStart).cast_mut().cast()))
 }
 
 fn sensitive_access(usage: AclUse) -> u32 {

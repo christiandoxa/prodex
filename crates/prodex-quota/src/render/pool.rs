@@ -48,108 +48,128 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         }
         match snapshot {
             ProviderQuotaSnapshot::OpenAi(usage) => {
-                let five_hour = required_main_window_snapshot(usage, "5h");
-                let weekly = required_main_window_snapshot(usage, "weekly");
-                if five_hour.is_none() && weekly.is_none() {
-                    continue;
-                }
-
-                aggregate.profiles_with_data += 1;
-                if let Some(five_hour) = five_hour {
-                    aggregate.five_hour_profiles_with_data += 1;
-                    aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
-                    if five_hour.reset_at != i64::MAX {
-                        aggregate.earliest_five_hour_reset_at = Some(
-                            aggregate
-                                .earliest_five_hour_reset_at
-                                .map_or(five_hour.reset_at, |current| {
-                                    current.min(five_hour.reset_at)
-                                }),
-                        );
-                    }
-                }
-                if let Some(weekly) = weekly {
-                    aggregate.weekly_profiles_with_data += 1;
-                    aggregate.weekly_pool_remaining += weekly.remaining_percent;
-                    if weekly.reset_at != i64::MAX {
-                        aggregate.earliest_weekly_reset_at = Some(
-                            aggregate
-                                .earliest_weekly_reset_at
-                                .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
-                        );
-                    }
-                }
-                if openai_quota_has_ready_limit(usage) {
-                    aggregate.ready_profiles_with_data += 1;
-                    if let Some(five_hour) = five_hour {
-                        aggregate.ready_five_hour_profiles_with_data += 1;
-                        aggregate.ready_five_hour_pool_remaining += five_hour.remaining_percent;
-                    }
-                    if let Some(weekly) = weekly {
-                        aggregate.ready_weekly_profiles_with_data += 1;
-                        aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
-                    }
-                }
-                let spark_five_hour = spark_window_snapshot(usage, "5h");
-                let spark_weekly = spark_window_snapshot(usage, "weekly");
-                if spark_five_hour.is_some() || spark_weekly.is_some() {
-                    aggregate.spark_profiles_with_data += 1;
-                    if let Some(window) = spark_five_hour {
-                        aggregate.spark_five_hour_profiles_with_data += 1;
-                        aggregate.spark_five_hour_pool_remaining += window.remaining_percent;
-                    }
-                    if let Some(window) = spark_weekly {
-                        aggregate.spark_weekly_profiles_with_data += 1;
-                        aggregate.spark_weekly_pool_remaining += window.remaining_percent;
-                    }
-                    for reset_at in [spark_five_hour, spark_weekly]
-                        .into_iter()
-                        .flatten()
-                        .map(|window| window.reset_at)
-                    {
-                        if reset_at != i64::MAX {
-                            aggregate.earliest_spark_reset_at = Some(
-                                aggregate
-                                    .earliest_spark_reset_at
-                                    .map_or(reset_at, |current| current.min(reset_at)),
-                            );
-                        }
-                    }
-                }
+                aggregate_openai_quota(usage, &mut aggregate);
             }
-            ProviderQuotaSnapshot::Gemini(info) => {
-                let Some(remaining_percent) = gemini_main_remaining_percent(info) else {
-                    continue;
-                };
-                aggregate.main_profiles_with_data += 1;
-                aggregate.main_pool_remaining += remaining_percent;
-                if let Some(reset_at) = gemini_reset_epoch(info) {
-                    aggregate.earliest_main_reset_at = Some(
-                        aggregate
-                            .earliest_main_reset_at
-                            .map_or(reset_at, |current| current.min(reset_at)),
-                    );
-                }
-            }
-            ProviderQuotaSnapshot::Copilot(info) => {
-                let Some(remaining_percent) = copilot_main_remaining_percent(info) else {
-                    continue;
-                };
-                aggregate.main_profiles_with_data += 1;
-                aggregate.main_pool_remaining += remaining_percent;
-                if let Some(reset_at) = copilot_reset_epoch(info) {
-                    aggregate.earliest_main_reset_at = Some(
-                        aggregate
-                            .earliest_main_reset_at
-                            .map_or(reset_at, |current| current.min(reset_at)),
-                    );
-                }
-            }
+            ProviderQuotaSnapshot::Gemini(info) => aggregate_main_quota(
+                gemini_main_remaining_percent(info),
+                gemini_reset_epoch(info),
+                &mut aggregate,
+            ),
+            ProviderQuotaSnapshot::Copilot(info) => aggregate_main_quota(
+                copilot_main_remaining_percent(info),
+                copilot_reset_epoch(info),
+                &mut aggregate,
+            ),
             ProviderQuotaSnapshot::External(_) => {}
         }
     }
 
     aggregate
+}
+
+fn aggregate_openai_quota(usage: &UsageResponse, aggregate: &mut QuotaPoolAggregate) {
+    let five_hour = required_main_window_snapshot(usage, "5h");
+    let weekly = required_main_window_snapshot(usage, "weekly");
+    if five_hour.is_none() && weekly.is_none() {
+        return;
+    }
+
+    aggregate.profiles_with_data += 1;
+    add_pool_window(
+        five_hour,
+        &mut aggregate.five_hour_profiles_with_data,
+        &mut aggregate.five_hour_pool_remaining,
+        &mut aggregate.earliest_five_hour_reset_at,
+    );
+    add_pool_window(
+        weekly,
+        &mut aggregate.weekly_profiles_with_data,
+        &mut aggregate.weekly_pool_remaining,
+        &mut aggregate.earliest_weekly_reset_at,
+    );
+    if openai_quota_has_ready_limit(usage) {
+        aggregate.ready_profiles_with_data += 1;
+        add_ready_pool_window(
+            five_hour,
+            &mut aggregate.ready_five_hour_profiles_with_data,
+            &mut aggregate.ready_five_hour_pool_remaining,
+        );
+        add_ready_pool_window(
+            weekly,
+            &mut aggregate.ready_weekly_profiles_with_data,
+            &mut aggregate.ready_weekly_pool_remaining,
+        );
+    }
+    aggregate_openai_spark(usage, aggregate);
+}
+
+fn aggregate_openai_spark(usage: &UsageResponse, aggregate: &mut QuotaPoolAggregate) {
+    let five_hour = spark_window_snapshot(usage, "5h");
+    let weekly = spark_window_snapshot(usage, "weekly");
+    if five_hour.is_none() && weekly.is_none() {
+        return;
+    }
+    aggregate.spark_profiles_with_data += 1;
+    add_pool_window(
+        five_hour,
+        &mut aggregate.spark_five_hour_profiles_with_data,
+        &mut aggregate.spark_five_hour_pool_remaining,
+        &mut aggregate.earliest_spark_reset_at,
+    );
+    add_pool_window(
+        weekly,
+        &mut aggregate.spark_weekly_profiles_with_data,
+        &mut aggregate.spark_weekly_pool_remaining,
+        &mut aggregate.earliest_spark_reset_at,
+    );
+}
+
+fn aggregate_main_quota(
+    remaining_percent: Option<i64>,
+    reset_at: Option<i64>,
+    aggregate: &mut QuotaPoolAggregate,
+) {
+    let Some(remaining_percent) = remaining_percent else {
+        return;
+    };
+    aggregate.main_profiles_with_data += 1;
+    aggregate.main_pool_remaining += remaining_percent;
+    if let Some(reset_at) = reset_at {
+        aggregate.earliest_main_reset_at = Some(
+            aggregate
+                .earliest_main_reset_at
+                .map_or(reset_at, |current| current.min(reset_at)),
+        );
+    }
+}
+
+fn add_pool_window(
+    window: Option<MainWindowSnapshot>,
+    profiles: &mut usize,
+    remaining: &mut i64,
+    earliest_reset_at: &mut Option<i64>,
+) {
+    let Some(window) = window else {
+        return;
+    };
+    *profiles += 1;
+    *remaining += window.remaining_percent;
+    if window.reset_at != i64::MAX {
+        *earliest_reset_at =
+            Some(earliest_reset_at.map_or(window.reset_at, |current| current.min(window.reset_at)));
+    }
+}
+
+fn add_ready_pool_window(
+    window: Option<MainWindowSnapshot>,
+    profiles: &mut usize,
+    remaining: &mut i64,
+) {
+    let Some(window) = window else {
+        return;
+    };
+    *profiles += 1;
+    *remaining += window.remaining_percent;
 }
 
 fn gemini_main_remaining_percent(info: &GeminiQuotaInfo) -> Option<i64> {

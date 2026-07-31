@@ -26,6 +26,48 @@ pub(super) fn gemini_build_response_value(
         .cloned()
         .unwrap_or_default();
     let mut output = Vec::new();
+    let (text, content_items) = gemini_collect_response_parts(
+        parts,
+        response_id,
+        suppress_visible_text_when_tool_calls,
+        &mut visible_text_from_part,
+        &mut function_call_item,
+        &mut output,
+    );
+    gemini_insert_response_message(&mut output, text, content_items);
+    gemini_append_grounding_and_citations(&mut output, value, response_id);
+    let has_visible_output = !output.is_empty();
+    let mut response = json!({
+        "id": response_id,
+        "object": "response",
+        "model": model,
+        "output": output,
+    });
+    if let Some(created_at) = created_at {
+        response["created_at"] = json!(created_at);
+    }
+    if let Some(usage) = value.get("usageMetadata").and_then(gemini_responses_usage) {
+        response["usage"] = usage;
+    } else if include_empty_usage {
+        response["usage"] = json!({});
+    }
+    if let Some(metadata) = gemini_response_metadata(value) {
+        response["metadata"] = metadata;
+    } else if include_empty_metadata {
+        response["metadata"] = json!({});
+    }
+    gemini_apply_response_status(&mut response, value, has_visible_output);
+    response
+}
+
+fn gemini_collect_response_parts(
+    parts: Vec<Value>,
+    response_id: &str,
+    suppress_visible_text_when_tool_calls: bool,
+    visible_text_from_part: &mut impl FnMut(&Value) -> Option<String>,
+    function_call_item: &mut impl FnMut(&Value, &Value, usize) -> Value,
+    output: &mut Vec<Value>,
+) -> (String, Vec<Value>) {
     let mut text = String::new();
     let mut content_items = Vec::new();
     let suppress_visible_text = suppress_visible_text_when_tool_calls
@@ -52,30 +94,42 @@ pub(super) fn gemini_build_response_value(
             output.push(function_call_item(&part, function_call, index));
         }
     }
-    if !text.is_empty() {
+    (text, content_items)
+}
+
+fn gemini_insert_response_message(
+    output: &mut Vec<Value>,
+    text: String,
+    content_items: Vec<Value>,
+) {
+    if text.is_empty() && content_items.is_empty() {
+        return;
+    }
+    let content = if text.is_empty() {
+        content_items
+    } else {
         let mut content = vec![json!({
             "type":"output_text",
             "text": text,
         })];
         content.extend(content_items);
-        output.insert(
-            0,
-            json!({
-                "type":"message",
-                "role":"assistant",
-                "content": content,
-            }),
-        );
-    } else if !content_items.is_empty() {
-        output.insert(
-            0,
-            json!({
-                "type":"message",
-                "role":"assistant",
-                "content": content_items,
-            }),
-        );
-    }
+        content
+    };
+    output.insert(
+        0,
+        json!({
+            "type":"message",
+            "role":"assistant",
+            "content": content,
+        }),
+    );
+}
+
+fn gemini_append_grounding_and_citations(
+    output: &mut Vec<Value>,
+    value: &Value,
+    response_id: &str,
+) {
     if let Some(grounding_call) = gemini_web_search_call_from_grounding(value, response_id) {
         output.push(grounding_call);
     }
@@ -89,45 +143,28 @@ pub(super) fn gemini_build_response_value(
             }],
         }));
     }
-    let has_visible_output = !output.is_empty();
-    let mut response = json!({
-        "id": response_id,
-        "object": "response",
-        "model": model,
-        "output": output,
-    });
-    if let Some(created_at) = created_at {
-        response["created_at"] = json!(created_at);
-    }
-    if let Some(usage) = value.get("usageMetadata").and_then(gemini_responses_usage) {
-        response["usage"] = usage;
-    } else if include_empty_usage {
-        response["usage"] = json!({});
-    }
-    if let Some(metadata) = gemini_response_metadata(value) {
-        response["metadata"] = metadata;
-    } else if include_empty_metadata {
-        response["metadata"] = json!({});
-    }
-    if let Some(status) = gemini_response_status(value, has_visible_output) {
-        match status {
-            GeminiResponseStatus::Failed { code, message } => {
-                response["status"] = Value::String("failed".to_string());
-                response["error"] = json!({
-                    "code": code,
-                    "message": message,
-                });
-            }
-            GeminiResponseStatus::Incomplete { reason, message } => {
-                response["status"] = Value::String("incomplete".to_string());
-                response["incomplete_details"] = json!({
-                    "reason": reason,
-                    "message": message,
-                });
-            }
+}
+
+fn gemini_apply_response_status(response: &mut Value, value: &Value, has_visible_output: bool) {
+    let Some(status) = gemini_response_status(value, has_visible_output) else {
+        return;
+    };
+    match status {
+        GeminiResponseStatus::Failed { code, message } => {
+            response["status"] = Value::String("failed".to_string());
+            response["error"] = json!({
+                "code": code,
+                "message": message,
+            });
+        }
+        GeminiResponseStatus::Incomplete { reason, message } => {
+            response["status"] = Value::String("incomplete".to_string());
+            response["incomplete_details"] = json!({
+                "reason": reason,
+                "message": message,
+            });
         }
     }
-    response
 }
 
 pub(super) fn gemini_function_call_id(

@@ -87,50 +87,65 @@ pub(super) fn parse_long_git_status_lines(lines: &[&str], summary: &mut GitStatu
     let mut section = GitStatusSection::Other;
     for line in lines {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("(use ") {
-            continue;
+        if !trimmed.is_empty() {
+            parse_long_git_status_line(trimmed, &mut section, summary);
         }
-        if let Some(branch) = trimmed.strip_prefix("On branch ") {
-            summary.branch = Some(branch.trim().to_string());
-            continue;
-        }
-        if trimmed.starts_with("HEAD detached ") {
-            summary.branch = Some(trimmed.to_string());
-            continue;
-        }
-        if trimmed.contains("nothing to commit") || trimmed.contains("working tree clean") {
-            summary.clean = true;
-            continue;
-        }
-        section = match trimmed {
-            "Changes to be committed:" => GitStatusSection::Staged,
-            "Changes not staged for commit:" => GitStatusSection::Modified,
-            "Untracked files:" => GitStatusSection::Untracked,
-            "Unmerged paths:" => GitStatusSection::Conflicted,
-            _ => section,
-        };
-        if trimmed.ends_with(':') {
-            continue;
-        }
+    }
+}
 
-        match section {
-            GitStatusSection::Staged => summary.staged.push(parse_long_status_path(trimmed)),
-            GitStatusSection::Modified => {
-                let parsed = parse_long_status_path(trimmed);
-                if parsed.starts_with("deleted:") {
-                    summary.deleted.push(parsed);
-                } else {
-                    summary.modified.push(parsed);
-                }
+fn parse_long_git_status_line(
+    trimmed: &str,
+    section: &mut GitStatusSection,
+    summary: &mut GitStatusSummary,
+) {
+    if trimmed.starts_with("(use ") {
+        return;
+    }
+    if let Some(branch) = trimmed.strip_prefix("On branch ") {
+        summary.branch = Some(branch.trim().to_string());
+        return;
+    }
+    if trimmed.starts_with("HEAD detached ") {
+        summary.branch = Some(trimmed.to_string());
+        return;
+    }
+    if trimmed.contains("nothing to commit") || trimmed.contains("working tree clean") {
+        summary.clean = true;
+        return;
+    }
+    *section = match trimmed {
+        "Changes to be committed:" => GitStatusSection::Staged,
+        "Changes not staged for commit:" => GitStatusSection::Modified,
+        "Untracked files:" => GitStatusSection::Untracked,
+        "Unmerged paths:" => GitStatusSection::Conflicted,
+        _ => *section,
+    };
+    if trimmed.ends_with(':') {
+        return;
+    }
+    push_long_status_entry(trimmed, *section, summary);
+}
+
+fn push_long_status_entry(
+    trimmed: &str,
+    section: GitStatusSection,
+    summary: &mut GitStatusSummary,
+) {
+    match section {
+        GitStatusSection::Staged => summary.staged.push(parse_long_status_path(trimmed)),
+        GitStatusSection::Modified => {
+            let parsed = parse_long_status_path(trimmed);
+            if parsed.starts_with("deleted:") {
+                summary.deleted.push(parsed);
+            } else {
+                summary.modified.push(parsed);
             }
-            GitStatusSection::Untracked => summary.untracked.push(trimmed.to_string()),
-            GitStatusSection::Conflicted => {
-                summary.conflicted.push(parse_long_status_path(trimmed))
-            }
-            GitStatusSection::Other => {
-                if !trimmed.starts_with("Your branch ") {
-                    summary.other.push(trimmed.to_string());
-                }
+        }
+        GitStatusSection::Untracked => summary.untracked.push(trimmed.to_string()),
+        GitStatusSection::Conflicted => summary.conflicted.push(parse_long_status_path(trimmed)),
+        GitStatusSection::Other => {
+            if !trimmed.starts_with("Your branch ") {
+                summary.other.push(trimmed.to_string());
             }
         }
     }
@@ -367,26 +382,30 @@ pub(super) fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
         semantic_contexts: Vec::new(),
     };
     for line in section {
-        if line.starts_with("@@ ") {
-            summary.hunks += 1;
-            if let Some(context) = git_diff_semantic_context_line(line) {
-                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
-            }
-        } else if line.starts_with('+') && !line.starts_with("+++") {
-            summary.added += 1;
-            if let Some(context) = git_diff_semantic_context_line(line) {
-                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
-            }
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            summary.removed += 1;
-            if let Some(context) = git_diff_semantic_context_line(line) {
-                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
-            }
-        } else if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
-            summary.binary = true;
-        }
+        record_git_diff_summary_line(&mut summary, line);
     }
     summary
+}
+
+fn record_git_diff_summary_line(summary: &mut GitDiffSummary, line: &str) {
+    if line.starts_with("@@ ") {
+        summary.hunks += 1;
+        record_git_diff_semantic_context(summary, line);
+    } else if line.starts_with('+') && !line.starts_with("+++") {
+        summary.added += 1;
+        record_git_diff_semantic_context(summary, line);
+    } else if line.starts_with('-') && !line.starts_with("---") {
+        summary.removed += 1;
+        record_git_diff_semantic_context(summary, line);
+    } else if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
+        summary.binary = true;
+    }
+}
+
+fn record_git_diff_semantic_context(summary: &mut GitDiffSummary, line: &str) {
+    if let Some(context) = git_diff_semantic_context_line(line) {
+        push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
+    }
 }
 
 pub(super) fn git_diff_section_path(section: &[&str]) -> String {
@@ -565,11 +584,7 @@ pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSumm
 
     for line in lines {
         if let Some(header) = parse_git_log_commit_header(line) {
-            if let Some(commit) = current.take()
-                && (!commit.stat_lines.is_empty() || !commit.stat_summaries.is_empty())
-            {
-                commits.push(commit);
-            }
+            finish_git_log_stat_commit(&mut commits, &mut current);
             current = Some(GitLogCommitSummary {
                 header,
                 ..GitLogCommitSummary::default()
@@ -581,26 +596,37 @@ pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSumm
             continue;
         };
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("Author:") || trimmed.starts_with("Date:") {
-            push_unique_line(&mut commit.metadata, trimmed);
-        } else if looks_like_git_diff_stat_line(line) {
-            push_unique_line(&mut commit.stat_lines, trimmed);
-        } else if looks_like_git_diff_stat_summary(line) {
-            push_unique_line(&mut commit.stat_summaries, trimmed);
-        } else if line.starts_with("    ") && commit.subject.len() < 2 {
-            push_unique_line(&mut commit.subject, trimmed);
-        }
+        record_git_log_stat_line(commit, line, trimmed);
     }
 
+    finish_git_log_stat_commit(&mut commits, &mut current);
+    commits
+}
+
+fn record_git_log_stat_line(commit: &mut GitLogCommitSummary, line: &str, trimmed: &str) {
+    if trimmed.is_empty() {
+        return;
+    }
+    if trimmed.starts_with("Author:") || trimmed.starts_with("Date:") {
+        push_unique_line(&mut commit.metadata, trimmed);
+    } else if looks_like_git_diff_stat_line(line) {
+        push_unique_line(&mut commit.stat_lines, trimmed);
+    } else if looks_like_git_diff_stat_summary(line) {
+        push_unique_line(&mut commit.stat_summaries, trimmed);
+    } else if line.starts_with("    ") && commit.subject.len() < 2 {
+        push_unique_line(&mut commit.subject, trimmed);
+    }
+}
+
+fn finish_git_log_stat_commit(
+    commits: &mut Vec<GitLogCommitSummary>,
+    current: &mut Option<GitLogCommitSummary>,
+) {
     if let Some(commit) = current.take()
         && (!commit.stat_lines.is_empty() || !commit.stat_summaries.is_empty())
     {
         commits.push(commit);
     }
-    commits
 }
 
 pub(super) fn parse_git_log_commit_header(line: &str) -> Option<String> {

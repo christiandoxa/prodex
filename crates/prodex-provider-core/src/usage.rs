@@ -92,33 +92,9 @@ fn extract_usage_from_sse(body: &[u8]) -> ProviderTokenUsage {
     };
     let mut data_lines = Vec::new();
     let mut merged = ProviderTokenUsage::default();
-    let flush = |data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUsage| {
-        if data_lines.is_empty() {
-            return;
-        }
-        let data = data_lines.join("\n");
-        data_lines.clear();
-        if data.trim() == "[DONE]" {
-            return;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else {
-            return;
-        };
-        let usage = extract_usage_from_value(&value);
-        if usage.input_tokens.is_some() {
-            merged.input_tokens = usage.input_tokens;
-        }
-        if usage.output_tokens.is_some() {
-            merged.output_tokens = usage.output_tokens;
-        }
-        if usage.total_tokens.is_some() {
-            merged.total_tokens = usage.total_tokens;
-        }
-    };
-
     for line in text.lines() {
         if line.is_empty() || line == "\r" {
-            flush(&mut data_lines, &mut merged);
+            merge_sse_usage_data(&mut data_lines, &mut merged);
             continue;
         }
         if let Some(data) = line.strip_prefix("data:") {
@@ -129,8 +105,32 @@ fn extract_usage_from_sse(body: &[u8]) -> ProviderTokenUsage {
             );
         }
     }
-    flush(&mut data_lines, &mut merged);
+    merge_sse_usage_data(&mut data_lines, &mut merged);
     merged
+}
+
+fn merge_sse_usage_data(data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUsage) {
+    if data_lines.is_empty() {
+        return;
+    }
+    let data = data_lines.join("\n");
+    data_lines.clear();
+    if data.trim() == "[DONE]" {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
+    let usage = extract_usage_from_value(&value);
+    if usage.input_tokens.is_some() {
+        merged.input_tokens = usage.input_tokens;
+    }
+    if usage.output_tokens.is_some() {
+        merged.output_tokens = usage.output_tokens;
+    }
+    if usage.total_tokens.is_some() {
+        merged.total_tokens = usage.total_tokens;
+    }
 }
 
 fn first_u64(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {

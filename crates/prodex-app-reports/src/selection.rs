@@ -422,54 +422,18 @@ fn explain_profile_selection_entry<S: ProfileSelectionRead>(
     });
 
     if candidate.is_none() {
-        match report {
-            None => reasons.push(selection_reason(
-                ProfileSelectionReasonKind::MissingReport,
-                "no selection report exists for this profile",
-            )),
-            Some(report) if !report.auth.quota_compatible => reasons.push(selection_reason(
-                ProfileSelectionReasonKind::AuthIncompatible,
-                format!("auth label '{}' is not quota compatible", report.auth.label),
-            )),
-            Some(report) => match report.result.as_ref() {
-                Ok(usage) => {
-                    blocked_limits = collect_blocked_limits(usage, include_code_review)
-                        .into_iter()
-                        .map(|limit| limit.message)
-                        .collect();
-                    reasons.push(if blocked_limits.is_empty() {
-                        selection_reason(
-                            ProfileSelectionReasonKind::NotReady,
-                            "profile was not scheduled as a ready candidate",
-                        )
-                    } else {
-                        selection_reason(
-                            ProfileSelectionReasonKind::Blocked,
-                            format!("blocked quota: {}", blocked_limits.join(", ")),
-                        )
-                    });
-                }
-                Err(error) => {
-                    probe_error = Some(error.clone());
-                    let snapshot_usable = persisted_usage_snapshots
-                        .and_then(|snapshots| snapshots.get(name))
-                        .is_some_and(|snapshot| {
-                            runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
-                        });
-                    reasons.push(if snapshot_usable {
-                        selection_reason(
-                            ProfileSelectionReasonKind::NotReady,
-                            "profile probe failed and persisted snapshot did not produce a candidate",
-                        )
-                    } else {
-                        selection_reason(
-                            ProfileSelectionReasonKind::MissingPersistedSnapshot,
-                            "profile probe failed and no usable persisted snapshot was available",
-                        )
-                    });
-                }
-            },
-        }
+        let (entry_blocked_limits, entry_probe_error, entry_reasons) =
+            explain_profile_selection_failure(
+                name,
+                report,
+                include_code_review,
+                persisted_usage_snapshots,
+                stale_grace_seconds,
+                now,
+            );
+        blocked_limits = entry_blocked_limits;
+        probe_error = entry_probe_error;
+        reasons.extend(entry_reasons);
     }
 
     let rank = ranked_candidate.map(|(rank, _)| rank);
@@ -493,6 +457,73 @@ fn explain_profile_selection_entry<S: ProfileSelectionRead>(
         blocked_limits,
         probe_error,
         reasons,
+    }
+}
+
+fn explain_profile_selection_failure(
+    name: &str,
+    report: Option<&RunProfileProbeReport>,
+    include_code_review: bool,
+    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    stale_grace_seconds: i64,
+    now: i64,
+) -> (Vec<String>, Option<String>, Vec<ProfileSelectionReason>) {
+    match report {
+        None => (
+            Vec::new(),
+            None,
+            vec![selection_reason(
+                ProfileSelectionReasonKind::MissingReport,
+                "no selection report exists for this profile",
+            )],
+        ),
+        Some(report) if !report.auth.quota_compatible => (
+            Vec::new(),
+            None,
+            vec![selection_reason(
+                ProfileSelectionReasonKind::AuthIncompatible,
+                format!("auth label '{}' is not quota compatible", report.auth.label),
+            )],
+        ),
+        Some(report) => match report.result.as_ref() {
+            Ok(usage) => {
+                let blocked_limits = collect_blocked_limits(usage, include_code_review)
+                    .into_iter()
+                    .map(|limit| limit.message)
+                    .collect::<Vec<_>>();
+                let reason = if blocked_limits.is_empty() {
+                    selection_reason(
+                        ProfileSelectionReasonKind::NotReady,
+                        "profile was not scheduled as a ready candidate",
+                    )
+                } else {
+                    selection_reason(
+                        ProfileSelectionReasonKind::Blocked,
+                        format!("blocked quota: {}", blocked_limits.join(", ")),
+                    )
+                };
+                (blocked_limits, None, vec![reason])
+            }
+            Err(error) => {
+                let snapshot_usable = persisted_usage_snapshots
+                    .and_then(|snapshots| snapshots.get(name))
+                    .is_some_and(|snapshot| {
+                        runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+                    });
+                let reason = if snapshot_usable {
+                    selection_reason(
+                        ProfileSelectionReasonKind::NotReady,
+                        "profile probe failed and persisted snapshot did not produce a candidate",
+                    )
+                } else {
+                    selection_reason(
+                        ProfileSelectionReasonKind::MissingPersistedSnapshot,
+                        "profile probe failed and no usable persisted snapshot was available",
+                    )
+                };
+                (Vec::new(), Some(error.clone()), vec![reason])
+            }
+        },
     }
 }
 

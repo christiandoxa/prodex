@@ -104,13 +104,8 @@ impl VerifiedContextDirectory {
 }
 
 pub(crate) fn collect_context_files(path: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
-    let named = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to inspect context path {}", path.display()));
-        }
+    let Some(named) = context_path_metadata(path)? else {
+        return Ok(());
     };
     if named.file_type().is_symlink() {
         return Ok(());
@@ -124,72 +119,108 @@ pub(crate) fn collect_context_files(path: &Path, paths: &mut Vec<PathBuf>) -> Re
     let Some(root) = VerifiedContextDirectory::open(path)? else {
         return Ok(());
     };
+    collect_context_directory_files(&root, paths)
+}
 
+fn collect_context_directory_files(
+    root: &VerifiedContextDirectory,
+    paths: &mut Vec<PathBuf>,
+) -> Result<()> {
     let mut pending = vec![(root.canonical.clone(), 0_usize)];
     let mut visited_directories = HashSet::new();
     let mut collected_files = 0_usize;
     let mut collected_bytes = 0_u64;
     while let Some((current, depth)) = pending.pop() {
         root.validate()?;
-        let named = match fs::symlink_metadata(&current) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("failed to inspect context path {}", current.display())
-                });
-            }
+        let Some(named) = context_path_metadata(&current)? else {
+            continue;
         };
         if named.file_type().is_symlink() {
             continue;
         }
         if named.is_file() {
-            let (_, metadata, canonical) = open_context_file_no_follow(&current)?;
-            if !canonical.starts_with(&root.canonical) {
-                bail!("context file escaped traversal root {}", current.display());
-            }
-            collected_files = collected_files.saturating_add(1);
-            collected_bytes = collected_bytes.saturating_add(metadata.len());
-            enforce_context_walk_limits(collected_files, collected_bytes, &current)?;
-            paths.push(current);
+            collect_context_file_from_root(
+                root,
+                current,
+                paths,
+                &mut collected_files,
+                &mut collected_bytes,
+            )?;
             continue;
         }
         if !named.is_dir() {
             continue;
         }
-        if depth >= CONTEXT_WALK_MAX_DEPTH {
-            bail!("context traversal depth exceeded at {}", current.display());
+        enqueue_context_directory(root, current, depth, &mut visited_directories, &mut pending)?;
+    }
+    Ok(())
+}
+
+fn context_path_metadata(path: &Path) -> Result<Option<Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to inspect context path {}", path.display()))
         }
-        let Some(directory) = VerifiedContextDirectory::open(&current)? else {
-            continue;
-        };
-        if !directory.canonical.starts_with(&root.canonical) {
-            bail!(
-                "context directory escaped traversal root {}",
-                current.display()
-            );
-        }
-        if !visited_directories.insert(directory.canonical.clone()) {
-            continue;
-        }
-        directory.validate()?;
-        let mut entries = fs::read_dir(&directory.canonical)
-            .with_context(|| {
-                format!(
-                    "failed to read context directory {}",
-                    directory.canonical.display()
-                )
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .with_context(|| {
-                format!("failed to read entry in {}", directory.canonical.display())
-            })?;
-        directory.validate()?;
-        root.validate()?;
-        entries.sort_by_key(|entry| entry.path());
-        for entry in entries.into_iter().rev() {
-            pending.push((entry.path(), depth + 1));
-        }
+    }
+}
+
+fn collect_context_file_from_root(
+    root: &VerifiedContextDirectory,
+    current: PathBuf,
+    paths: &mut Vec<PathBuf>,
+    collected_files: &mut usize,
+    collected_bytes: &mut u64,
+) -> Result<()> {
+    let (_, metadata, canonical) = open_context_file_no_follow(&current)?;
+    if !canonical.starts_with(&root.canonical) {
+        bail!("context file escaped traversal root {}", current.display());
+    }
+    *collected_files = collected_files.saturating_add(1);
+    *collected_bytes = collected_bytes.saturating_add(metadata.len());
+    enforce_context_walk_limits(*collected_files, *collected_bytes, &current)?;
+    paths.push(current);
+    Ok(())
+}
+
+fn enqueue_context_directory(
+    root: &VerifiedContextDirectory,
+    current: PathBuf,
+    depth: usize,
+    visited_directories: &mut HashSet<PathBuf>,
+    pending: &mut Vec<(PathBuf, usize)>,
+) -> Result<()> {
+    if depth >= CONTEXT_WALK_MAX_DEPTH {
+        bail!("context traversal depth exceeded at {}", current.display());
+    }
+    let Some(directory) = VerifiedContextDirectory::open(&current)? else {
+        return Ok(());
+    };
+    if !directory.canonical.starts_with(&root.canonical) {
+        bail!(
+            "context directory escaped traversal root {}",
+            current.display()
+        );
+    }
+    if !visited_directories.insert(directory.canonical.clone()) {
+        return Ok(());
+    }
+    directory.validate()?;
+    let mut entries = fs::read_dir(&directory.canonical)
+        .with_context(|| {
+            format!(
+                "failed to read context directory {}",
+                directory.canonical.display()
+            )
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read entry in {}", directory.canonical.display()))?;
+    directory.validate()?;
+    root.validate()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries.into_iter().rev() {
+        pending.push((entry.path(), depth + 1));
     }
     Ok(())
 }

@@ -184,32 +184,11 @@ impl GatewayAdminRoute<'_> {
     pub fn operation(&self, method: GatewayHttpMethod) -> Option<GatewayControlPlaneOperation> {
         Some(match self {
             Self::RouteExplain => GatewayControlPlaneOperation::RouteExplain,
-            Self::Keys => {
-                if method == GatewayHttpMethod::Get {
-                    GatewayControlPlaneOperation::VirtualKeyRead
-                } else {
-                    GatewayControlPlaneOperation::VirtualKeyCreate
-                }
-            }
-            Self::Key { .. } | Self::KeyUnknown(_) => match method {
-                GatewayHttpMethod::Get => GatewayControlPlaneOperation::VirtualKeyRead,
-                GatewayHttpMethod::Patch => GatewayControlPlaneOperation::VirtualKeyUpdate,
-                GatewayHttpMethod::Delete => GatewayControlPlaneOperation::VirtualKeyDelete,
-                _ => return None,
-            },
+            Self::Keys => key_collection_operation(method),
+            Self::Key { .. } | Self::KeyUnknown(_) => key_operation(method)?,
             Self::KeySecret { .. } => GatewayControlPlaneOperation::VirtualKeyRotateSecret,
-            Self::ScimUsers => {
-                if method == GatewayHttpMethod::Get {
-                    GatewayControlPlaneOperation::ScimUserRead
-                } else {
-                    GatewayControlPlaneOperation::ScimUserCreate
-                }
-            }
-            Self::ScimUser { .. } | Self::ScimUnknown(_) => match method {
-                GatewayHttpMethod::Get => GatewayControlPlaneOperation::ScimUserRead,
-                GatewayHttpMethod::Delete => GatewayControlPlaneOperation::ScimUserDelete,
-                _ => GatewayControlPlaneOperation::ScimUserUpdate,
-            },
+            Self::ScimUsers => scim_collection_operation(method),
+            Self::ScimUser { .. } | Self::ScimUnknown(_) => scim_user_operation(method),
             Self::Ledger | Self::LedgerCsv | Self::LedgerSummary | Self::LedgerSummaryCsv => {
                 GatewayControlPlaneOperation::BillingRead
             }
@@ -217,39 +196,7 @@ impl GatewayAdminRoute<'_> {
             Self::AuditRetentionHolds => GatewayControlPlaneOperation::PolicyPublish,
             Self::AuditRetentionHold { .. } => GatewayControlPlaneOperation::AuditRetentionPurge,
             Self::AuditRetentionPurge => GatewayControlPlaneOperation::AuditRetentionPurge,
-            Self::Governance { resource, .. } => match resource {
-                GatewayGovernanceResourceRoute::Collection => match method {
-                    GatewayHttpMethod::Get => GatewayControlPlaneOperation::PolicyRead,
-                    GatewayHttpMethod::Post => GatewayControlPlaneOperation::PolicyCreate,
-                    _ => return None,
-                },
-                GatewayGovernanceResourceRoute::Validate => {
-                    GatewayControlPlaneOperation::PolicyValidate
-                }
-                GatewayGovernanceResourceRoute::Status
-                | GatewayGovernanceResourceRoute::Resource { .. } => {
-                    if method != GatewayHttpMethod::Get {
-                        return None;
-                    }
-                    GatewayControlPlaneOperation::PolicyRead
-                }
-                GatewayGovernanceResourceRoute::Submit { .. } => {
-                    GatewayControlPlaneOperation::PolicySubmit
-                }
-                GatewayGovernanceResourceRoute::Vote { .. } => {
-                    GatewayControlPlaneOperation::PolicyVote
-                }
-                GatewayGovernanceResourceRoute::Activate { .. } => {
-                    GatewayControlPlaneOperation::PolicyActivate
-                }
-                GatewayGovernanceResourceRoute::Rollback { .. } => {
-                    GatewayControlPlaneOperation::PolicyRollback
-                }
-                GatewayGovernanceResourceRoute::Revoke { .. } => {
-                    GatewayControlPlaneOperation::PolicyRevoke
-                }
-                GatewayGovernanceResourceRoute::Unknown(_) => return None,
-            },
+            Self::Governance { resource, .. } => governance_operation(resource, method)?,
             Self::SessionRevoke { .. } => GatewayControlPlaneOperation::PolicyRevoke,
             Self::GovernanceOutbox | Self::GovernanceAuditIntegrity => {
                 GatewayControlPlaneOperation::PolicyRead
@@ -265,6 +212,70 @@ impl GatewayAdminRoute<'_> {
             Self::SessionUnknown(_) => return None,
         })
     }
+}
+
+fn key_collection_operation(method: GatewayHttpMethod) -> GatewayControlPlaneOperation {
+    if method == GatewayHttpMethod::Get {
+        GatewayControlPlaneOperation::VirtualKeyRead
+    } else {
+        GatewayControlPlaneOperation::VirtualKeyCreate
+    }
+}
+
+fn key_operation(method: GatewayHttpMethod) -> Option<GatewayControlPlaneOperation> {
+    Some(match method {
+        GatewayHttpMethod::Get => GatewayControlPlaneOperation::VirtualKeyRead,
+        GatewayHttpMethod::Patch => GatewayControlPlaneOperation::VirtualKeyUpdate,
+        GatewayHttpMethod::Delete => GatewayControlPlaneOperation::VirtualKeyDelete,
+        _ => return None,
+    })
+}
+
+fn scim_collection_operation(method: GatewayHttpMethod) -> GatewayControlPlaneOperation {
+    if method == GatewayHttpMethod::Get {
+        GatewayControlPlaneOperation::ScimUserRead
+    } else {
+        GatewayControlPlaneOperation::ScimUserCreate
+    }
+}
+
+fn scim_user_operation(method: GatewayHttpMethod) -> GatewayControlPlaneOperation {
+    match method {
+        GatewayHttpMethod::Get => GatewayControlPlaneOperation::ScimUserRead,
+        GatewayHttpMethod::Delete => GatewayControlPlaneOperation::ScimUserDelete,
+        _ => GatewayControlPlaneOperation::ScimUserUpdate,
+    }
+}
+
+fn governance_operation(
+    resource: &GatewayGovernanceResourceRoute<'_>,
+    method: GatewayHttpMethod,
+) -> Option<GatewayControlPlaneOperation> {
+    Some(match resource {
+        GatewayGovernanceResourceRoute::Collection => match method {
+            GatewayHttpMethod::Get => GatewayControlPlaneOperation::PolicyRead,
+            GatewayHttpMethod::Post => GatewayControlPlaneOperation::PolicyCreate,
+            _ => return None,
+        },
+        GatewayGovernanceResourceRoute::Validate => GatewayControlPlaneOperation::PolicyValidate,
+        GatewayGovernanceResourceRoute::Status
+        | GatewayGovernanceResourceRoute::Resource { .. } => {
+            if method != GatewayHttpMethod::Get {
+                return None;
+            }
+            GatewayControlPlaneOperation::PolicyRead
+        }
+        GatewayGovernanceResourceRoute::Submit { .. } => GatewayControlPlaneOperation::PolicySubmit,
+        GatewayGovernanceResourceRoute::Vote { .. } => GatewayControlPlaneOperation::PolicyVote,
+        GatewayGovernanceResourceRoute::Activate { .. } => {
+            GatewayControlPlaneOperation::PolicyActivate
+        }
+        GatewayGovernanceResourceRoute::Rollback { .. } => {
+            GatewayControlPlaneOperation::PolicyRollback
+        }
+        GatewayGovernanceResourceRoute::Revoke { .. } => GatewayControlPlaneOperation::PolicyRevoke,
+        GatewayGovernanceResourceRoute::Unknown(_) => return None,
+    })
 }
 
 const fn metadata(

@@ -7,51 +7,51 @@ use self::text::kiro_provider_core_chat_message_text;
 use serde_json::{Value, json};
 
 pub fn kiro_provider_core_prompt_from_chat_messages(messages: &[Value]) -> String {
-    let mut sections = Vec::new();
-    for message in messages {
-        let role = message
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or("message");
-        let mut block = String::new();
-        if let Some(content) = message
-            .get("content")
-            .and_then(kiro_provider_core_prompt_message_text)
-        {
-            block.push_str(&content);
-        }
-        if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
-            for tool_call in tool_calls {
-                let name = tool_call
-                    .get("function")
-                    .and_then(|v| v.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool_call");
-                let arguments = tool_call
-                    .get("function")
-                    .and_then(|v| v.get("arguments"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}");
-                if !block.is_empty() {
-                    block.push('\n');
-                }
-                block.push_str(&format!("Tool call {name}: {arguments}"));
-            }
-        }
-        if block.trim().is_empty() {
-            continue;
-        }
-        sections.push(format!(
-            "{}:\n{}",
-            kiro_provider_core_prompt_role_label(role),
-            block.trim()
-        ));
-    }
+    let sections = messages
+        .iter()
+        .filter_map(kiro_provider_core_prompt_section)
+        .collect::<Vec<_>>();
     if sections.is_empty() {
         "User:\n".to_string()
     } else {
         sections.join("\n\n")
     }
+}
+
+fn kiro_provider_core_prompt_section(message: &Value) -> Option<String> {
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("message");
+    let mut block = message
+        .get("content")
+        .and_then(kiro_provider_core_prompt_message_text)
+        .unwrap_or_default();
+    if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+        for tool_call in tool_calls {
+            let name = tool_call
+                .get("function")
+                .and_then(|v| v.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("tool_call");
+            let arguments = tool_call
+                .get("function")
+                .and_then(|v| v.get("arguments"))
+                .and_then(Value::as_str)
+                .unwrap_or("{}");
+            if !block.is_empty() {
+                block.push('\n');
+            }
+            block.push_str(&format!("Tool call {name}: {arguments}"));
+        }
+    }
+    (!block.trim().is_empty()).then(|| {
+        format!(
+            "{}:\n{}",
+            kiro_provider_core_prompt_role_label(role),
+            block.trim()
+        )
+    })
 }
 
 pub fn kiro_provider_core_responses_items_from_chat_message(message: &Value) -> Vec<Value> {
@@ -196,38 +196,40 @@ pub fn kiro_provider_core_tool_choice_from_legacy_chat_function_call(
 fn kiro_provider_core_prompt_message_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => (!text.trim().is_empty()).then(|| text.to_string()),
-        Value::Array(items) => {
-            let mut text = String::new();
-            for item in items {
-                if let Some(chunk) = kiro_provider_core_prompt_message_text(item) {
-                    if !text.is_empty() {
-                        text.push('\n');
-                    }
-                    text.push_str(&chunk);
-                }
-            }
-            (!text.trim().is_empty()).then_some(text)
-        }
-        Value::Object(object) => {
-            if let Some(text) = object.get("text").and_then(Value::as_str) {
-                return (!text.trim().is_empty()).then(|| text.to_string());
-            }
-            if let Some(text) = object
-                .get("content")
-                .and_then(kiro_provider_core_prompt_message_text)
-            {
-                return Some(text);
-            }
-            if let Some(tool_output) = object
-                .get("output")
-                .and_then(kiro_provider_core_prompt_message_text)
-            {
-                return Some(tool_output);
-            }
-            None
-        }
+        Value::Array(items) => kiro_provider_core_prompt_array_text(items),
+        Value::Object(object) => kiro_provider_core_prompt_object_text(object),
         _ => None,
     }
+}
+
+fn kiro_provider_core_prompt_array_text(items: &[Value]) -> Option<String> {
+    let mut text = String::new();
+    for item in items {
+        if let Some(chunk) = kiro_provider_core_prompt_message_text(item) {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&chunk);
+        }
+    }
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn kiro_provider_core_prompt_object_text(
+    object: &serde_json::Map<String, Value>,
+) -> Option<String> {
+    if let Some(text) = object.get("text").and_then(Value::as_str) {
+        return (!text.trim().is_empty()).then(|| text.to_string());
+    }
+    if let Some(text) = object
+        .get("content")
+        .and_then(kiro_provider_core_prompt_message_text)
+    {
+        return Some(text);
+    }
+    object
+        .get("output")
+        .and_then(kiro_provider_core_prompt_message_text)
 }
 
 fn kiro_provider_core_prompt_role_label(role: &str) -> &'static str {

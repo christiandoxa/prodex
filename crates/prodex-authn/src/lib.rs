@@ -320,6 +320,13 @@ impl OidcEndpointPolicy {
 }
 
 fn parse_oidc_https_url(value: &str) -> Result<Url, OidcEndpointValidationError> {
+    validate_oidc_url_input(value)?;
+    let url = Url::parse(value).map_err(|_| OidcEndpointValidationError::InvalidUrl)?;
+    validate_oidc_url_parts(&url)?;
+    Ok(url)
+}
+
+fn validate_oidc_url_input(value: &str) -> Result<(), OidcEndpointValidationError> {
     if value.is_empty() {
         return Err(OidcEndpointValidationError::Empty);
     }
@@ -338,7 +345,10 @@ fn parse_oidc_https_url(value: &str) -> Result<Url, OidcEndpointValidationError>
     {
         return Err(OidcEndpointValidationError::InvalidUrl);
     }
-    let url = Url::parse(value).map_err(|_| OidcEndpointValidationError::InvalidUrl)?;
+    Ok(())
+}
+
+fn validate_oidc_url_parts(url: &Url) -> Result<(), OidcEndpointValidationError> {
     if url.scheme() != "https" {
         return Err(OidcEndpointValidationError::HttpsRequired);
     }
@@ -369,7 +379,7 @@ fn parse_oidc_https_url(value: &str) -> Result<Url, OidcEndpointValidationError>
         }
         _ => {}
     }
-    Ok(url)
+    Ok(())
 }
 
 fn ipv4_address_is_forbidden(octets: [u8; 4]) -> bool {

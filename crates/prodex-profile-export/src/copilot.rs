@@ -192,14 +192,7 @@ fn strip_json_line_comments(raw: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if in_string {
-            output.push(ch);
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
+            append_json_string_char(&mut output, ch, &mut escaped, &mut in_string);
             continue;
         }
 
@@ -210,13 +203,7 @@ fn strip_json_line_comments(raw: &str) -> String {
         }
 
         if ch == '/' && chars.peek() == Some(&'/') {
-            let _ = chars.next();
-            for comment_ch in chars.by_ref() {
-                if comment_ch == '\n' {
-                    output.push('\n');
-                    break;
-                }
-            }
+            skip_json_line_comment(&mut chars, &mut output);
             continue;
         }
 
@@ -224,6 +211,35 @@ fn strip_json_line_comments(raw: &str) -> String {
     }
 
     output
+}
+
+fn append_json_string_char(
+    output: &mut String,
+    ch: char,
+    escaped: &mut bool,
+    in_string: &mut bool,
+) {
+    output.push(ch);
+    if *escaped {
+        *escaped = false;
+    } else if ch == '\\' {
+        *escaped = true;
+    } else if ch == '"' {
+        *in_string = false;
+    }
+}
+
+fn skip_json_line_comment(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    output: &mut String,
+) {
+    let _ = chars.next();
+    for comment_ch in chars.by_ref() {
+        if comment_ch == '\n' {
+            output.push('\n');
+            break;
+        }
+    }
 }
 
 pub fn select_copilot_logged_in_user(config: &CopilotConfigFile) -> Option<CopilotConfigUser> {

@@ -378,29 +378,7 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     policy: ProviderRequestConstraintPolicy,
     entry: Option<&ProviderCatalogEntry>,
 ) -> ProviderRequestConstraintEvaluation {
-    let mut resolved = requirements.clone();
-    resolved.resolved_upstream_model = Some(
-        entry
-            .map(|entry| entry.id.clone())
-            .unwrap_or_else(|| resolved_model.trim().to_string()),
-    );
-    if let Some(entry) = entry {
-        if resolved.explicit_output_tokens.is_none() {
-            resolved.default_output_reserve_tokens = entry.default_output_reserve_tokens;
-        }
-        let effort = resolved.reasoning_effort.or(entry.default_reasoning_effort);
-        resolved.reasoning_effort = effort;
-        if resolved.reasoning_reserve_tokens.is_none() {
-            resolved.reasoning_reserve_tokens = effort
-                .filter(|effort| effort.reserves_tokens())
-                .and_then(|effort| {
-                    entry
-                        .reasoning_reserve_tokens
-                        .as_ref()
-                        .and_then(|reserves| reserves.get(&effort).copied())
-                });
-        }
-    }
+    let mut resolved = resolve_provider_request_requirements(requirements, resolved_model, entry);
     recalculate_total(&mut resolved);
 
     if !policy.enabled {
@@ -433,6 +411,48 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     let Some(entry) = entry else {
         return unknown_catalog_evaluation(resolved, policy);
     };
+    evaluate_known_provider_constraints(provider, requirements, policy, resolved, entry)
+}
+
+fn resolve_provider_request_requirements(
+    requirements: &ProviderRequestRequirements,
+    resolved_model: &str,
+    entry: Option<&ProviderCatalogEntry>,
+) -> ProviderRequestRequirements {
+    let mut resolved = requirements.clone();
+    resolved.resolved_upstream_model = Some(
+        entry
+            .map(|entry| entry.id.clone())
+            .unwrap_or_else(|| resolved_model.trim().to_string()),
+    );
+    let Some(entry) = entry else {
+        return resolved;
+    };
+    if resolved.explicit_output_tokens.is_none() {
+        resolved.default_output_reserve_tokens = entry.default_output_reserve_tokens;
+    }
+    let effort = resolved.reasoning_effort.or(entry.default_reasoning_effort);
+    resolved.reasoning_effort = effort;
+    if resolved.reasoning_reserve_tokens.is_none() {
+        resolved.reasoning_reserve_tokens = effort
+            .filter(|effort| effort.reserves_tokens())
+            .and_then(|effort| {
+                entry
+                    .reasoning_reserve_tokens
+                    .as_ref()
+                    .and_then(|reserves| reserves.get(&effort).copied())
+            });
+    }
+    resolved
+}
+
+fn evaluate_known_provider_constraints(
+    provider: ProviderId,
+    requirements: &ProviderRequestRequirements,
+    policy: ProviderRequestConstraintPolicy,
+    resolved: ProviderRequestRequirements,
+    entry: &ProviderCatalogEntry,
+) -> ProviderRequestConstraintEvaluation {
     if !entry_supports_endpoint(entry, requirements.endpoint) {
         return evaluation(
             ProviderRequestConstraintDecision::EndpointUnsupported,
@@ -456,15 +476,7 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
         result.missing_feature = Some(feature);
         return result;
     }
-    if resolved.reasoning_effort == Some(ProviderReasoningEffort::Unknown)
-        || resolved.reasoning_effort.is_some_and(|effort| {
-            effort.reserves_tokens()
-                && entry
-                    .supported_reasoning_efforts
-                    .as_ref()
-                    .is_some_and(|efforts| !efforts.contains(&effort))
-        })
-    {
+    if unsupported_reasoning_effort(&resolved, entry) {
         return evaluation(
             ProviderRequestConstraintDecision::ReasoningReserveUnsupported,
             false,
@@ -479,48 +491,86 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
         resolved,
         Some(entry),
     );
-    if let Some(requested) = result.requirements.explicit_output_tokens {
-        match entry.max_output_tokens {
-            Some(limit) if requested > limit => match policy.oversized_output {
-                ProviderOversizedOutputPolicy::Passthrough => {
-                    result.decision =
-                        ProviderRequestConstraintDecision::RequestedOutputExceedsModelLimit;
-                    result.warnings.push(result.decision);
-                }
-                ProviderOversizedOutputPolicy::Reject => {
-                    result.decision =
-                        ProviderRequestConstraintDecision::RequestedOutputExceedsModelLimit;
-                    result.eligible = false;
-                    return result;
-                }
-                ProviderOversizedOutputPolicy::ClampWithNotice => {
-                    result.decision = ProviderRequestConstraintDecision::OutputLimitClamped;
-                    result.adjustment = Some(ProviderOutputAdjustment {
-                        field: result
-                            .requirements
-                            .output_limit_field
-                            .unwrap_or(ProviderOutputLimitField::MaxOutputTokens),
-                        requested_tokens: requested,
-                        applied_tokens: limit,
-                        reason: ProviderRequestConstraintDecision::OutputLimitClamped,
-                    });
-                    result.requirements.explicit_output_tokens = Some(limit);
-                    recalculate_total(&mut result.requirements);
-                }
-            },
-            None => {
-                result.decision = ProviderRequestConstraintDecision::OutputLimitUnknown;
+    if apply_output_limit_policy(
+        &mut result,
+        entry.max_output_tokens,
+        policy.oversized_output,
+    ) {
+        return result;
+    }
+    apply_context_window_policy(&mut result, entry.context_window_tokens, policy);
+    result
+}
+
+fn unsupported_reasoning_effort(
+    requirements: &ProviderRequestRequirements,
+    entry: &ProviderCatalogEntry,
+) -> bool {
+    requirements.reasoning_effort == Some(ProviderReasoningEffort::Unknown)
+        || requirements.reasoning_effort.is_some_and(|effort| {
+            effort.reserves_tokens()
+                && entry
+                    .supported_reasoning_efforts
+                    .as_ref()
+                    .is_some_and(|efforts| !efforts.contains(&effort))
+        })
+}
+
+fn apply_output_limit_policy(
+    result: &mut ProviderRequestConstraintEvaluation,
+    max_output_tokens: Option<u64>,
+    policy: ProviderOversizedOutputPolicy,
+) -> bool {
+    let Some(requested) = result.requirements.explicit_output_tokens else {
+        return false;
+    };
+    match max_output_tokens {
+        Some(limit) if requested > limit => match policy {
+            ProviderOversizedOutputPolicy::Passthrough => {
+                result.decision =
+                    ProviderRequestConstraintDecision::RequestedOutputExceedsModelLimit;
                 result.warnings.push(result.decision);
             }
-            Some(_) => {}
+            ProviderOversizedOutputPolicy::Reject => {
+                result.decision =
+                    ProviderRequestConstraintDecision::RequestedOutputExceedsModelLimit;
+                result.eligible = false;
+                return true;
+            }
+            ProviderOversizedOutputPolicy::ClampWithNotice => {
+                result.decision = ProviderRequestConstraintDecision::OutputLimitClamped;
+                result.adjustment = Some(ProviderOutputAdjustment {
+                    field: result
+                        .requirements
+                        .output_limit_field
+                        .unwrap_or(ProviderOutputLimitField::MaxOutputTokens),
+                    requested_tokens: requested,
+                    applied_tokens: limit,
+                    reason: ProviderRequestConstraintDecision::OutputLimitClamped,
+                });
+                result.requirements.explicit_output_tokens = Some(limit);
+                recalculate_total(&mut result.requirements);
+            }
+        },
+        None => {
+            result.decision = ProviderRequestConstraintDecision::OutputLimitUnknown;
+            result.warnings.push(result.decision);
         }
+        Some(_) => {}
     }
+    false
+}
 
+fn apply_context_window_policy(
+    result: &mut ProviderRequestConstraintEvaluation,
+    context_window_tokens: Option<u64>,
+    policy: ProviderRequestConstraintPolicy,
+) {
     let reasoning = result
         .requirements
         .reasoning_reserve_tokens
         .unwrap_or_default();
-    match entry.context_window_tokens {
+    match context_window_tokens {
         Some(context) if result.requirements.total_required_tokens > context => {
             result.decision = if reasoning > 0
                 && result
@@ -557,7 +607,6 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
             }
         },
     }
-    result
 }
 
 fn recalculate_total(requirements: &mut ProviderRequestRequirements) {

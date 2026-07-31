@@ -496,6 +496,13 @@ pub fn plan_governed_provider_route(
 }
 
 fn validate_request(request: &GovernedRoutingRequest<'_>) -> Result<(), GovernedRoutingError> {
+    validate_request_policy_and_limits(request)?;
+    validate_provider_descriptors(request)
+}
+
+fn validate_request_policy_and_limits(
+    request: &GovernedRoutingRequest<'_>,
+) -> Result<(), GovernedRoutingError> {
     match request.policy.effect {
         PolicyEffect::Deny => return Err(GovernedRoutingError::PolicyDenied),
         PolicyEffect::RequireApproval => return Err(GovernedRoutingError::ApprovalRequired),
@@ -527,7 +534,12 @@ fn validate_request(request: &GovernedRoutingRequest<'_>) -> Result<(), Governed
     if request.weights.total().is_none() {
         return Err(GovernedRoutingError::InvalidWeights);
     }
+    Ok(())
+}
 
+fn validate_provider_descriptors(
+    request: &GovernedRoutingRequest<'_>,
+) -> Result<(), GovernedRoutingError> {
     for (index, provider) in request.registry.providers.iter().enumerate() {
         if provider.revision == 0 || provider.pricing_revision == 0 {
             return Err(GovernedRoutingError::InvalidDescriptorRevision {
@@ -568,6 +580,17 @@ fn provider_rejection_reasons(
 ) -> Vec<GovernedHardFilterReason> {
     let obligations = &request.policy.obligations;
     let mut reasons = Vec::with_capacity(MAX_GOVERNED_HARD_FILTER_REASONS);
+    append_provider_static_rejection_reasons(provider, request, &mut reasons);
+    append_provider_obligation_rejection_reasons(provider, obligations, &mut reasons);
+    assert!(reasons.len() <= MAX_GOVERNED_HARD_FILTER_REASONS);
+    reasons
+}
+
+fn append_provider_static_rejection_reasons(
+    provider: &GovernedProviderDescriptor,
+    request: &GovernedRoutingRequest<'_>,
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
     if provider.tenant != request.tenant {
         reasons.push(GovernedHardFilterReason::TenantMismatch);
     }
@@ -602,7 +625,13 @@ fn provider_rejection_reasons(
     {
         reasons.push(GovernedHardFilterReason::CapabilityMissing);
     }
+}
 
+fn append_provider_obligation_rejection_reasons(
+    provider: &GovernedProviderDescriptor,
+    obligations: &[GovernanceObligation],
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
     let has_allow_list = obligations
         .iter()
         .any(|item| matches!(item, GovernanceObligation::AllowProvider(_)));
@@ -662,8 +691,6 @@ fn provider_rejection_reasons(
     if obligations.contains(&GovernanceObligation::ProhibitTrainingUse) && provider.training_use {
         reasons.push(GovernedHardFilterReason::TrainingUseProhibited);
     }
-    assert!(reasons.len() <= MAX_GOVERNED_HARD_FILTER_REASONS);
-    reasons
 }
 
 fn selector_matches_provider(selector: &PolicySelector, provider: ProviderId) -> bool {

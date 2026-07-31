@@ -9,59 +9,14 @@ pub(super) fn compact_diagnostic_output(
         return String::new();
     }
 
-    let mut summary = CommandDiagnosticSummary::default();
-    let mut noise_counts = BTreeMap::<String, usize>::new();
-    let mut key_lines = Vec::<String>::new();
-    let mut blocks = Vec::<CommandCriticalBlock>::new();
-    let block_limit = diagnostic_block_line_limit(options);
-    let block_budget = options.max_lines.max(24).saturating_div(3).max(6);
-    let mut used_block_lines = 0usize;
-    let mut omitted_blocks = 0usize;
-    let mut index = 0usize;
-
-    while index < lines.len() {
-        let line = lines[index];
-        if let Some(label) = diagnostic_noise_label(line) {
-            *noise_counts.entry(label.to_string()).or_default() += 1;
-            if is_diagnostic_key_line(line) {
-                push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
-            }
-            index += 1;
-            continue;
-        }
-
-        if is_diagnostic_block_start(line) {
-            summary.record_line(line);
-            let (block, next_index) = collect_diagnostic_block(&lines, index, block_limit);
-            summary.record_block_signals(&block);
-            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
-                || blocks.is_empty()
-            {
-                used_block_lines = used_block_lines.saturating_add(block.lines.len());
-                blocks.push(block);
-            } else {
-                omitted_blocks += 1;
-            }
-            index = next_index;
-            continue;
-        }
-
-        if is_critical_preserve_line(line) || count_file_location_signals(line) > 0 {
-            summary.record_line(line);
-            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
-            index += 1;
-            continue;
-        }
-
-        if is_success_output_failure_signal_line(line)
-            || is_success_output_warning_signal_line(line)
-        {
-            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
-            index += 1;
-            continue;
-        }
-        index += 1;
-    }
+    let DiagnosticOutputDetails {
+        summary,
+        noise_counts,
+        key_lines,
+        blocks,
+        omitted_blocks,
+        ..
+    } = DiagnosticOutputDetails::collect(&lines, options);
 
     if summary.is_empty() && noise_counts.is_empty() && key_lines.is_empty() && blocks.is_empty() {
         return smart_truncate_command_output(input, options);
@@ -133,4 +88,83 @@ pub(super) fn compact_diagnostic_output(
     }
 
     finalize_compacted_command_output(CommandOutputKind::Diagnostics, input, output, options)
+}
+
+#[derive(Default)]
+struct DiagnosticOutputDetails {
+    summary: CommandDiagnosticSummary,
+    noise_counts: BTreeMap<String, usize>,
+    key_lines: Vec<String>,
+    blocks: Vec<CommandCriticalBlock>,
+    used_block_lines: usize,
+    omitted_blocks: usize,
+}
+
+impl DiagnosticOutputDetails {
+    fn collect(lines: &[&str], options: &CommandOutputCompactOptions) -> Self {
+        let mut details = Self::default();
+        let block_limit = diagnostic_block_line_limit(options);
+        let block_budget = options.max_lines.max(24).saturating_div(3).max(6);
+        let mut index = 0usize;
+        while index < lines.len() {
+            index = details.record_line(
+                lines,
+                index,
+                block_limit,
+                block_budget,
+                options.max_line_chars,
+            );
+        }
+        details
+    }
+
+    fn record_line(
+        &mut self,
+        lines: &[&str],
+        index: usize,
+        block_limit: usize,
+        block_budget: usize,
+        max_line_chars: usize,
+    ) -> usize {
+        let line = lines[index];
+        if let Some(label) = diagnostic_noise_label(line) {
+            *self.noise_counts.entry(label.to_string()).or_default() += 1;
+            if is_diagnostic_key_line(line) {
+                push_unique_truncated_line(&mut self.key_lines, line, max_line_chars);
+            }
+            return index + 1;
+        }
+
+        if is_diagnostic_block_start(line) {
+            self.summary.record_line(line);
+            let (block, next_index) = collect_diagnostic_block(lines, index, block_limit);
+            self.summary.record_block_signals(&block);
+            self.record_block(block, block_budget);
+            return next_index;
+        }
+
+        if is_critical_preserve_line(line) || count_file_location_signals(line) > 0 {
+            self.summary.record_line(line);
+            push_unique_truncated_line(&mut self.key_lines, line, max_line_chars);
+            return index + 1;
+        }
+
+        if is_success_output_failure_signal_line(line)
+            || is_success_output_warning_signal_line(line)
+        {
+            push_unique_truncated_line(&mut self.key_lines, line, max_line_chars);
+        }
+        index + 1
+    }
+
+    fn record_block(&mut self, block: CommandCriticalBlock, block_budget: usize) {
+        if self.used_block_lines.saturating_add(block.lines.len()) <= block_budget
+            || self.blocks.is_empty()
+        {
+            self.used_block_lines = self.used_block_lines.saturating_add(block.lines.len());
+            self.blocks.push(block);
+        } else {
+            self.omitted_blocks += 1;
+        }
+    }
 }

@@ -42,51 +42,9 @@ pub(crate) fn gemini_web_search_call_from_grounding(
     let candidate = value.get("candidates")?.as_array()?.first()?;
     let mut sources = Vec::new();
     let grounding_metadata = candidate.get("groundingMetadata");
-    if let Some(chunks) = grounding_metadata
-        .and_then(|metadata| metadata.get("groundingChunks"))
-        .and_then(Value::as_array)
-    {
-        for chunk in chunks {
-            for source_kind in ["web", "retrievedContext"] {
-                if let Some(source) = chunk
-                    .get(source_kind)
-                    .and_then(gemini_url_source_from_metadata)
-                {
-                    gemini_push_unique_url_source(&mut sources, source);
-                }
-            }
-        }
-    }
-    if let Some(citations) = candidate
-        .get("citationMetadata")
-        .and_then(|metadata| {
-            metadata
-                .get("citations")
-                .or_else(|| metadata.get("citationSources"))
-        })
-        .and_then(Value::as_array)
-    {
-        for citation in citations {
-            if let Some(source) = gemini_url_source_from_metadata(citation) {
-                gemini_push_unique_url_source(&mut sources, source);
-            }
-        }
-    }
-    if let Some(url_metadata) = candidate
-        .get("urlContextMetadata")
-        .and_then(|metadata| {
-            metadata
-                .get("urlMetadata")
-                .or_else(|| metadata.get("url_metadata"))
-        })
-        .and_then(Value::as_array)
-    {
-        for entry in url_metadata {
-            if let Some(source) = gemini_url_source_from_metadata(entry) {
-                gemini_push_unique_url_source(&mut sources, source);
-            }
-        }
-    }
+    gemini_collect_grounding_chunk_sources(grounding_metadata, &mut sources);
+    gemini_collect_citation_sources(candidate, &mut sources);
+    gemini_collect_url_metadata_sources(candidate, &mut sources);
     let queries = grounding_metadata
         .and_then(|metadata| metadata.get("webSearchQueries"))
         .and_then(Value::as_array)
@@ -118,6 +76,66 @@ pub(crate) fn gemini_web_search_call_from_grounding(
         "status": "completed",
         "action": action,
     }))
+}
+
+fn gemini_collect_grounding_chunk_sources(
+    grounding_metadata: Option<&Value>,
+    sources: &mut Vec<Value>,
+) {
+    let Some(chunks) = grounding_metadata
+        .and_then(|metadata| metadata.get("groundingChunks"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for chunk in chunks {
+        for source_kind in ["web", "retrievedContext"] {
+            if let Some(source) = chunk
+                .get(source_kind)
+                .and_then(gemini_url_source_from_metadata)
+            {
+                gemini_push_unique_url_source(sources, source);
+            }
+        }
+    }
+}
+
+fn gemini_collect_citation_sources(candidate: &Value, sources: &mut Vec<Value>) {
+    let Some(citations) = candidate
+        .get("citationMetadata")
+        .and_then(|metadata| {
+            metadata
+                .get("citations")
+                .or_else(|| metadata.get("citationSources"))
+        })
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for citation in citations {
+        if let Some(source) = gemini_url_source_from_metadata(citation) {
+            gemini_push_unique_url_source(sources, source);
+        }
+    }
+}
+
+fn gemini_collect_url_metadata_sources(candidate: &Value, sources: &mut Vec<Value>) {
+    let Some(url_metadata) = candidate
+        .get("urlContextMetadata")
+        .and_then(|metadata| {
+            metadata
+                .get("urlMetadata")
+                .or_else(|| metadata.get("url_metadata"))
+        })
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for entry in url_metadata {
+        if let Some(source) = gemini_url_source_from_metadata(entry) {
+            gemini_push_unique_url_source(sources, source);
+        }
+    }
 }
 
 fn gemini_url_source_from_metadata(value: &Value) -> Option<Value> {

@@ -177,34 +177,13 @@ pub fn compress_context_text(input: &str) -> String {
     let mut previous_blank = false;
 
     for line in input.lines() {
-        let trimmed = line.trim();
-        let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
-        if fence {
-            flush_context_paragraph(&mut paragraph, &mut output);
-            output.push(line.to_string());
-            in_fence = !in_fence;
-            previous_blank = false;
-            continue;
-        }
-
-        if in_fence || protected_context_line(line) {
-            flush_context_paragraph(&mut paragraph, &mut output);
-            output.push(line.to_string());
-            previous_blank = false;
-            continue;
-        }
-
-        if trimmed.is_empty() {
-            flush_context_paragraph(&mut paragraph, &mut output);
-            if !previous_blank && !output.is_empty() {
-                output.push(String::new());
-            }
-            previous_blank = true;
-            continue;
-        }
-
-        paragraph.push(trimmed.to_string());
-        previous_blank = false;
+        append_context_compressed_line(
+            line,
+            &mut output,
+            &mut paragraph,
+            &mut in_fence,
+            &mut previous_blank,
+        );
     }
 
     flush_context_paragraph(&mut paragraph, &mut output);
@@ -216,6 +195,43 @@ pub fn compress_context_text(input: &str) -> String {
     } else {
         format!("{}\n", output.join("\n"))
     }
+}
+
+fn append_context_compressed_line(
+    line: &str,
+    output: &mut Vec<String>,
+    paragraph: &mut Vec<String>,
+    in_fence: &mut bool,
+    previous_blank: &mut bool,
+) {
+    let trimmed = line.trim();
+    let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+    if fence {
+        flush_context_paragraph(paragraph, output);
+        output.push(line.to_string());
+        *in_fence = !*in_fence;
+        *previous_blank = false;
+        return;
+    }
+
+    if *in_fence || protected_context_line(line) {
+        flush_context_paragraph(paragraph, output);
+        output.push(line.to_string());
+        *previous_blank = false;
+        return;
+    }
+
+    if trimmed.is_empty() {
+        flush_context_paragraph(paragraph, output);
+        if !*previous_blank && !output.is_empty() {
+            output.push(String::new());
+        }
+        *previous_blank = true;
+        return;
+    }
+
+    paragraph.push(trimmed.to_string());
+    *previous_blank = false;
 }
 
 fn flush_context_paragraph(paragraph: &mut Vec<String>, output: &mut Vec<String>) {

@@ -108,19 +108,7 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
             Value::Object(generation_config),
         );
     }
-    if let Some(tools) = obj.get("tools").and_then(Value::as_array) {
-        let mut translated_tools = gemini_builtin_tools_from_request(tools);
-        let declarations: Vec<Value> = tools
-            .iter()
-            .filter_map(gemini_tool_from_openai_tool)
-            .collect();
-        if !declarations.is_empty() {
-            translated_tools.push(json!({"functionDeclarations": declarations}));
-        }
-        if !translated_tools.is_empty() {
-            request.insert("tools".to_string(), Value::Array(translated_tools));
-        }
-    }
+    gemini_apply_tools(obj, &mut request);
     if let Some(tool_config) = gemini_tool_config_from_request(&value) {
         request.insert("toolConfig".to_string(), tool_config);
     }
@@ -138,5 +126,25 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         result.with_metadata("continuation", metadata)
     } else {
         result
+    }
+}
+
+fn gemini_apply_tools(
+    obj: &serde_json::Map<String, Value>,
+    request: &mut serde_json::Map<String, Value>,
+) {
+    let Some(tools) = obj.get("tools").and_then(Value::as_array) else {
+        return;
+    };
+    let mut translated_tools = gemini_builtin_tools_from_request(tools);
+    let declarations: Vec<Value> = tools
+        .iter()
+        .filter_map(gemini_tool_from_openai_tool)
+        .collect();
+    if !declarations.is_empty() {
+        translated_tools.push(json!({"functionDeclarations": declarations}));
+    }
+    if !translated_tools.is_empty() {
+        request.insert("tools".to_string(), Value::Array(translated_tools));
     }
 }

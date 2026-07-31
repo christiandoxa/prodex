@@ -3,31 +3,54 @@ use super::*;
 
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let lines = command_lines(input);
-    if looks_like_git_log_stat_output(&lines) {
-        return CommandOutputKind::GitLog;
+    detect_command_output_kind_from_lines(&lines)
+}
+
+fn detect_command_output_kind_from_lines(lines: &[&str]) -> CommandOutputKind {
+    if let Some(kind) = detect_primary_command_output_kind(lines) {
+        return kind;
+    }
+    if looks_like_git_status_lines(lines) {
+        return CommandOutputKind::GitStatus;
+    }
+    if let Some(kind) = detect_search_command_output_kind(lines) {
+        return kind;
+    }
+    if looks_like_file_list_output(lines) {
+        return CommandOutputKind::FileList;
+    }
+    CommandOutputKind::Plain
+}
+
+fn detect_primary_command_output_kind(lines: &[&str]) -> Option<CommandOutputKind> {
+    if looks_like_git_log_stat_output(lines) {
+        return Some(CommandOutputKind::GitLog);
     }
 
-    if looks_like_git_diff_output(&lines) {
-        return CommandOutputKind::GitDiff;
+    if looks_like_git_diff_output(lines) {
+        return Some(CommandOutputKind::GitDiff);
     }
 
-    if looks_like_rust_diagnostic_output(&lines) {
-        return CommandOutputKind::RustDiagnostics;
+    if looks_like_rust_diagnostic_output(lines) {
+        return Some(CommandOutputKind::RustDiagnostics);
     }
 
-    if looks_like_noisy_success_output(&lines) {
-        return CommandOutputKind::NoisySuccess;
+    if looks_like_noisy_success_output(lines) {
+        return Some(CommandOutputKind::NoisySuccess);
     }
 
-    if looks_like_log_stream_output(&lines) {
-        return CommandOutputKind::LogStream;
+    if looks_like_log_stream_output(lines) {
+        return Some(CommandOutputKind::LogStream);
     }
 
-    if looks_like_diagnostic_output(&lines) {
-        return CommandOutputKind::Diagnostics;
+    if looks_like_diagnostic_output(lines) {
+        return Some(CommandOutputKind::Diagnostics);
     }
+    None
+}
 
-    if lines.iter().any(|line| {
+fn looks_like_git_status_lines(lines: &[&str]) -> bool {
+    lines.iter().any(|line| {
         line.starts_with("On branch ")
             || line.starts_with("HEAD detached ")
             || line.starts_with("Changes to be committed:")
@@ -39,10 +62,9 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
         .take(3)
         .count()
         >= 2
-    {
-        return CommandOutputKind::GitStatus;
-    }
+}
 
+fn detect_search_command_output_kind(lines: &[&str]) -> Option<CommandOutputKind> {
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let search_matches = lines
         .iter()
@@ -50,28 +72,28 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
             parse_search_match_line(line).is_some() || parse_rg_json_match_line(line).is_some()
         })
         .count();
-    let heading_search_matches = count_heading_search_matches(&lines);
+    let heading_search_matches = count_heading_search_matches(lines);
     let rg_json_lines = lines
         .iter()
         .filter(|line| looks_like_rg_json_line(line))
         .count();
     let total_search_matches = search_matches.saturating_add(heading_search_matches);
     if total_search_matches >= 2 && total_search_matches.saturating_mul(2) >= non_empty {
-        return CommandOutputKind::Search;
+        return Some(CommandOutputKind::Search);
     }
     if search_matches > 0 && rg_json_lines.saturating_mul(2) >= non_empty {
-        return CommandOutputKind::Search;
+        return Some(CommandOutputKind::Search);
     }
+    None
+}
 
+fn looks_like_file_list_output(lines: &[&str]) -> bool {
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let file_list_lines = lines
         .iter()
         .filter(|line| parse_file_list_entry_line(line).is_some())
         .count();
-    if file_list_lines >= 4 && file_list_lines.saturating_mul(2) >= non_empty {
-        return CommandOutputKind::FileList;
-    }
-
-    CommandOutputKind::Plain
+    file_list_lines >= 4 && file_list_lines.saturating_mul(2) >= non_empty
 }
 
 pub(super) fn detect_command_output_kind_with_hint(
@@ -96,124 +118,190 @@ pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<Command
 fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<CommandOutputKind> {
     for index in 0..tokens.len() {
         let command = command_metadata_token_command_name(&tokens[index]);
-        if matches!(command, "rg" | "ripgrep" | "grep" | "egrep" | "fgrep") {
-            return Some(CommandOutputKind::Search);
+        if let Some(kind) = infer_metadata_direct_command(command) {
+            return Some(kind);
         }
-        if matches!(command, "ls" | "find" | "tree") {
-            return Some(CommandOutputKind::FileList);
+        if let Some(kind) = infer_metadata_build_command(tokens, index, command) {
+            return Some(kind);
         }
-        if matches!(
-            command,
-            "pytest"
-                | "py.test"
-                | "tsc"
-                | "ruff"
-                | "mypy"
-                | "biome"
-                | "oxlint"
-                | "eslint"
-                | "playwright"
-                | "cypress"
-        ) || command.ends_with("-tsc")
-            || command.ends_with("_tsc")
-        {
-            return Some(CommandOutputKind::Diagnostics);
+        if let Some(kind) = infer_metadata_stream_command(tokens, index, command) {
+            return Some(kind);
         }
-        if matches!(
-            command,
-            "bazel"
-                | "bazelisk"
-                | "nx"
-                | "turbo"
-                | "pip"
-                | "pip3"
-                | "uv"
-                | "nyc"
-                | "c8"
-                | "vite"
-                | "next"
-        ) {
-            return Some(CommandOutputKind::NoisySuccess);
+        if let Some(kind) = infer_metadata_language_command(tokens, index, command) {
+            return Some(kind);
         }
-        if matches!(command, "gradle" | "gradlew")
-            && command_metadata_subcommand_after(tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "test" | "check" | "build"))
-        {
-            return Some(CommandOutputKind::NoisySuccess);
+        if let Some(kind) = infer_metadata_cargo_command(tokens, index, command) {
+            return Some(kind);
         }
-        if matches!(command, "mvn" | "mvnw")
-            && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
-                matches!(subcommand, "test" | "verify" | "package" | "install")
-            })
-        {
-            return Some(CommandOutputKind::NoisySuccess);
+        if let Some(kind) = infer_metadata_git_command(tokens, index, command) {
+            return Some(kind);
         }
-        if matches!(command, "journalctl" | "tail")
-            || command == "kubectl"
-                && command_metadata_subcommand_after(tokens, index) == Some("logs")
-        {
-            return Some(CommandOutputKind::LogStream);
+        if let Some(kind) = infer_metadata_docker_command(tokens, index, command) {
+            return Some(kind);
         }
-        if command == "go"
-            && command_metadata_subcommand_after(tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "vet" | "test" | "build"))
-        {
-            return Some(CommandOutputKind::Diagnostics);
+        if let Some(kind) = infer_metadata_package_command(tokens, index, command) {
+            return Some(kind);
         }
-        if command == "cargo"
-            && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
-                matches!(
-                    subcommand,
-                    "test" | "check" | "clippy" | "build" | "doc" | "nextest" | "fmt" | "fix"
-                )
-            })
-        {
-            return Some(CommandOutputKind::RustDiagnostics);
-        }
-        if command == "cargo"
-            && command_metadata_subcommand_after(tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "update" | "install" | "fetch"))
-        {
-            return Some(CommandOutputKind::NoisySuccess);
-        }
-        if command == "git"
-            && let Some(subcommand) = command_metadata_subcommand_after(tokens, index)
-        {
-            match subcommand {
-                "status" => return Some(CommandOutputKind::GitStatus),
-                "diff" | "show" => return Some(CommandOutputKind::GitDiff),
-                "log" => return Some(CommandOutputKind::GitLog),
-                "grep" => return Some(CommandOutputKind::Search),
-                "ls-files" => return Some(CommandOutputKind::FileList),
-                _ => {}
-            }
-        }
-        if command == "docker"
-            && command_metadata_subcommand_after(tokens, index) == Some("compose")
-        {
-            return Some(CommandOutputKind::NoisySuccess);
-        }
-        if command == "docker"
-            && command_metadata_subcommand_after(tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "build" | "buildx" | "pull"))
-        {
-            return Some(CommandOutputKind::NoisySuccess);
-        }
-        if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
-            && command_metadata_package_script_after(tokens, index).is_some()
-        {
-            return Some(CommandOutputKind::Diagnostics);
-        }
-        if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
-            && command_metadata_package_install_after(tokens, index).is_some()
-        {
-            return Some(CommandOutputKind::NoisySuccess);
-        }
-        if matches!(command, "docker-compose") {
+        if command == "docker-compose" {
             return Some(CommandOutputKind::NoisySuccess);
         }
     }
     None
+}
+
+fn infer_metadata_direct_command(command: &str) -> Option<CommandOutputKind> {
+    if matches!(command, "rg" | "ripgrep" | "grep" | "egrep" | "fgrep") {
+        Some(CommandOutputKind::Search)
+    } else if matches!(command, "ls" | "find" | "tree") {
+        Some(CommandOutputKind::FileList)
+    } else if matches!(
+        command,
+        "pytest"
+            | "py.test"
+            | "tsc"
+            | "ruff"
+            | "mypy"
+            | "biome"
+            | "oxlint"
+            | "eslint"
+            | "playwright"
+            | "cypress"
+    ) || command.ends_with("-tsc")
+        || command.ends_with("_tsc")
+    {
+        Some(CommandOutputKind::Diagnostics)
+    } else if matches!(
+        command,
+        "bazel"
+            | "bazelisk"
+            | "nx"
+            | "turbo"
+            | "pip"
+            | "pip3"
+            | "uv"
+            | "nyc"
+            | "c8"
+            | "vite"
+            | "next"
+    ) {
+        Some(CommandOutputKind::NoisySuccess)
+    } else {
+        None
+    }
+}
+
+fn infer_metadata_build_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    let build_command = matches!(command, "gradle" | "gradlew")
+        && command_metadata_subcommand_after(tokens, index)
+            .is_some_and(|subcommand| matches!(subcommand, "test" | "check" | "build"))
+        || matches!(command, "mvn" | "mvnw")
+            && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
+                matches!(subcommand, "test" | "verify" | "package" | "install")
+            });
+    build_command.then_some(CommandOutputKind::NoisySuccess)
+}
+
+fn infer_metadata_stream_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    (matches!(command, "journalctl" | "tail")
+        || command == "kubectl" && command_metadata_subcommand_after(tokens, index) == Some("logs"))
+    .then_some(CommandOutputKind::LogStream)
+}
+
+fn infer_metadata_language_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    (command == "go"
+        && command_metadata_subcommand_after(tokens, index)
+            .is_some_and(|subcommand| matches!(subcommand, "vet" | "test" | "build")))
+    .then_some(CommandOutputKind::Diagnostics)
+}
+
+fn infer_metadata_cargo_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    if command != "cargo" {
+        return None;
+    }
+    let subcommand = command_metadata_subcommand_after(tokens, index);
+    if subcommand.is_some_and(|subcommand| {
+        matches!(
+            subcommand,
+            "test" | "check" | "clippy" | "build" | "doc" | "nextest" | "fmt" | "fix"
+        )
+    }) {
+        Some(CommandOutputKind::RustDiagnostics)
+    } else if subcommand
+        .is_some_and(|subcommand| matches!(subcommand, "update" | "install" | "fetch"))
+    {
+        Some(CommandOutputKind::NoisySuccess)
+    } else {
+        None
+    }
+}
+
+fn infer_metadata_git_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    if command != "git" {
+        return None;
+    }
+    match command_metadata_subcommand_after(tokens, index) {
+        Some("status") => Some(CommandOutputKind::GitStatus),
+        Some("diff" | "show") => Some(CommandOutputKind::GitDiff),
+        Some("log") => Some(CommandOutputKind::GitLog),
+        Some("grep") => Some(CommandOutputKind::Search),
+        Some("ls-files") => Some(CommandOutputKind::FileList),
+        _ => None,
+    }
+}
+
+fn infer_metadata_docker_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    if command != "docker" {
+        return None;
+    }
+    let subcommand = command_metadata_subcommand_after(tokens, index);
+    if subcommand == Some("compose")
+        || subcommand.is_some_and(|subcommand| matches!(subcommand, "build" | "buildx" | "pull"))
+    {
+        Some(CommandOutputKind::NoisySuccess)
+    } else {
+        None
+    }
+}
+
+fn infer_metadata_package_command(
+    tokens: &[String],
+    index: usize,
+    command: &str,
+) -> Option<CommandOutputKind> {
+    if !matches!(command, "npm" | "pnpm" | "yarn" | "bun") {
+        return None;
+    }
+    if command_metadata_package_script_after(tokens, index).is_some() {
+        Some(CommandOutputKind::Diagnostics)
+    } else if command_metadata_package_install_after(tokens, index).is_some() {
+        Some(CommandOutputKind::NoisySuccess)
+    } else {
+        None
+    }
 }
 
 pub(super) fn command_metadata_subcommand_after(

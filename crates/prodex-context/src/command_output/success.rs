@@ -8,50 +8,155 @@ pub fn compact_successful_command_output_with_options(
     let lines = command_lines(&normalized);
     let original_lines = count_text_lines(&normalized);
     let critical_signals = count_critical_signals(&normalized);
+    let touched_files = collect_success_output_touched_files(&lines).len();
     let failure_suspected =
         command_success_output_failure_suspected(&lines, critical_signals, options);
 
     if normalized.is_empty() || failure_suspected {
-        return CommandSuccessOutputCompactReport {
-            compacted: false,
+        return uncompact_success_output_report(
+            normalized,
             failure_suspected,
             original_lines,
-            compacted_lines: original_lines,
-            touched_files: collect_success_output_touched_files(&lines).len(),
             critical_signals,
-            output: normalized,
-        };
+            touched_files,
+        );
     }
 
     let success_like = command_success_output_success_like(&lines, options);
     if !success_like || original_lines < options.min_lines_to_compact.max(1) {
-        return CommandSuccessOutputCompactReport {
-            compacted: false,
-            failure_suspected: false,
+        return uncompact_success_output_report(
+            normalized,
+            false,
             original_lines,
-            compacted_lines: original_lines,
-            touched_files: collect_success_output_touched_files(&lines).len(),
             critical_signals,
-            output: normalized,
-        };
+            touched_files,
+        );
     }
 
-    let touched_files = collect_success_output_touched_files(&lines);
+    compact_success_output(
+        &normalized,
+        &lines,
+        original_lines,
+        critical_signals,
+        options,
+    )
+}
+
+fn uncompact_success_output_report(
+    normalized: String,
+    failure_suspected: bool,
+    original_lines: usize,
+    critical_signals: CriticalSignalCounts,
+    touched_files: usize,
+) -> CommandSuccessOutputCompactReport {
+    CommandSuccessOutputCompactReport {
+        compacted: false,
+        failure_suspected,
+        original_lines,
+        compacted_lines: original_lines,
+        touched_files,
+        critical_signals,
+        output: normalized,
+    }
+}
+
+fn compact_success_output(
+    normalized: &str,
+    lines: &[&str],
+    original_lines: usize,
+    critical_signals: CriticalSignalCounts,
+    options: &CommandSuccessOutputCompactOptions,
+) -> CommandSuccessOutputCompactReport {
+    let touched_files = collect_success_output_touched_files(lines);
+    let (noise_counts, key_lines) = collect_success_output_details(lines, options.max_line_chars);
+
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    let noisy_success_lines = noise_counts.values().sum::<usize>();
+    let mut output = success_output_header(
+        original_lines,
+        non_empty,
+        noisy_success_lines,
+        critical_signals,
+        touched_files.len(),
+        options,
+    );
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
+    }
+
+    let include_path_summary =
+        command_success_output_path_summary_useful(lines, &touched_files, options);
+    if include_path_summary {
+        append_success_output_path_summary(&mut output, &touched_files);
+    }
+
+    if command_success_output_can_use_short_success_summary(
+        critical_signals,
+        include_path_summary,
+        touched_files.len(),
+        &key_lines,
+        options,
+    ) {
+        return short_success_output_report(
+            original_lines,
+            noisy_success_lines,
+            touched_files.len(),
+            &noise_counts,
+            options,
+            critical_signals,
+        );
+    }
+
+    push_labeled_lines(
+        &mut output,
+        "key lines",
+        &key_lines,
+        options.max_key_lines.max(1),
+    );
+    if include_path_summary {
+        push_success_output_touched_files(&mut output, &touched_files, options);
+    }
+
+    let output = lines_to_text(output);
+    let output =
+        canonicalize_compacted_command_paths(normalized, &output, CommandOutputKind::NoisySuccess);
+    CommandSuccessOutputCompactReport {
+        compacted: true,
+        failure_suspected: false,
+        original_lines,
+        compacted_lines: count_text_lines(&output),
+        touched_files: touched_files.len(),
+        critical_signals,
+        output,
+    }
+}
+
+fn collect_success_output_details(
+    lines: &[&str],
+    max_line_chars: usize,
+) -> (BTreeMap<String, usize>, Vec<String>) {
     let mut noise_counts = BTreeMap::<String, usize>::new();
     let mut key_lines = Vec::<String>::new();
-    for line in &lines {
+    for line in lines {
         if let Some(label) = noisy_success_label(line) {
             *noise_counts.entry(label.to_string()).or_default() += 1;
         }
         if is_noisy_success_key_line(line) || is_rust_success_summary_line(line) {
-            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            push_unique_truncated_line(&mut key_lines, line, max_line_chars);
         }
     }
+    (noise_counts, key_lines)
+}
 
-    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
-    let noisy_success_lines = noise_counts.values().sum::<usize>();
-    let mut output = Vec::<String>::new();
-    output.push(format!("pcs: success cmd ({}->sum)", original_lines));
+fn success_output_header(
+    original_lines: usize,
+    non_empty: usize,
+    noisy_success_lines: usize,
+    critical_signals: CriticalSignalCounts,
+    touched_files: usize,
+    options: &CommandSuccessOutputCompactOptions,
+) -> Vec<String> {
+    let mut output = vec![format!("pcs: success cmd ({}->sum)", original_lines)];
     output.push(format!(
         "command: {}",
         options.command.as_deref().unwrap_or("(unknown)")
@@ -69,84 +174,56 @@ pub fn compact_successful_command_output_with_options(
         non_empty,
         noisy_success_lines,
         critical_signals.total(),
-        touched_files.len()
+        touched_files
     ));
-    if !noise_counts.is_empty() {
-        output.push(format_count_map("noise", &noise_counts, 10));
-    }
+    output
+}
 
-    let include_path_summary =
-        command_success_output_path_summary_useful(&lines, &touched_files, options);
-    if include_path_summary {
-        let roots = count_success_output_path_roots(&touched_files);
-        if !roots.is_empty() {
-            output.push(format_count_map("top roots", &roots, 8));
-        }
-        let extensions = count_success_output_path_extensions(&touched_files);
-        if !extensions.is_empty() {
-            output.push(format_count_map("extensions", &extensions, 8));
-        }
+fn append_success_output_path_summary(output: &mut Vec<String>, touched_files: &[String]) {
+    let roots = count_success_output_path_roots(touched_files);
+    if !roots.is_empty() {
+        output.push(format_count_map("top roots", &roots, 8));
     }
-
-    if command_success_output_can_use_short_success_summary(
-        critical_signals,
-        include_path_summary,
-        touched_files.len(),
-        &key_lines,
-        options,
-    ) {
-        let mut short = format!(
-            "pcs: ok lines={} noisy={} touched={}",
-            original_lines,
-            noisy_success_lines,
-            touched_files.len()
-        );
-        if !noise_counts.is_empty() {
-            short.push_str(" | ");
-            short.push_str(&format_count_map("noise", &noise_counts, 6));
-        }
-        if let Some(command) = options
-            .command
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            short.push_str(" | ");
-            short.push_str(&format!(
-                "cmd: {}",
-                truncate_command_line(command, options.max_line_chars)
-            ));
-        }
-        let output = lines_to_text(vec![short]);
-        return CommandSuccessOutputCompactReport {
-            compacted: true,
-            failure_suspected: false,
-            original_lines,
-            compacted_lines: count_text_lines(&output),
-            touched_files: touched_files.len(),
-            critical_signals,
-            output,
-        };
+    let extensions = count_success_output_path_extensions(touched_files);
+    if !extensions.is_empty() {
+        output.push(format_count_map("extensions", &extensions, 8));
     }
+}
 
-    push_labeled_lines(
-        &mut output,
-        "key lines",
-        &key_lines,
-        options.max_key_lines.max(1),
+fn short_success_output_report(
+    original_lines: usize,
+    noisy_success_lines: usize,
+    touched_files: usize,
+    noise_counts: &BTreeMap<String, usize>,
+    options: &CommandSuccessOutputCompactOptions,
+    critical_signals: CriticalSignalCounts,
+) -> CommandSuccessOutputCompactReport {
+    let mut short = format!(
+        "pcs: ok lines={} noisy={} touched={}",
+        original_lines, noisy_success_lines, touched_files
     );
-    if include_path_summary {
-        push_success_output_touched_files(&mut output, &touched_files, options);
+    if !noise_counts.is_empty() {
+        short.push_str(" | ");
+        short.push_str(&format_count_map("noise", noise_counts, 6));
     }
-
-    let output = lines_to_text(output);
-    let output =
-        canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::NoisySuccess);
+    if let Some(command) = options
+        .command
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        short.push_str(" | ");
+        short.push_str(&format!(
+            "cmd: {}",
+            truncate_command_line(command, options.max_line_chars)
+        ));
+    }
+    let output = lines_to_text(vec![short]);
     CommandSuccessOutputCompactReport {
         compacted: true,
         failure_suspected: false,
         original_lines,
         compacted_lines: count_text_lines(&output),
-        touched_files: touched_files.len(),
+        touched_files,
         critical_signals,
         output,
     }

@@ -58,6 +58,12 @@ pub type GatewayRequestBody = Limited<Incoming>;
 pub type GatewayResponseBody = UnsyncBoxBody<Bytes, GatewayBoxError>;
 
 type ProxyClient = Client<HttpConnector, GatewayRequestBody>;
+type ParsedIngressRequest = (
+    CanonicalRequestTarget,
+    GatewayHttpRouteKind,
+    GatewayHttpRoutePlane,
+    Vec<GatewayHttpHeader>,
+);
 
 const ROUTE_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"route_not_available","message":"route is not available"}}"#;
@@ -756,96 +762,28 @@ where
     H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
 {
-    if request.uri().scheme().is_some() || request.uri().authority().is_some() {
-        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
-    }
-    let raw_target = request
-        .uri()
-        .path_and_query()
-        .map_or_else(|| request.uri().path(), |target| target.as_str());
-    let Ok(target) = CanonicalRequestTarget::parse(raw_target) else {
-        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
-    };
-    let Some(route) = classify_request_target(&target) else {
-        return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
-    };
-    if !route_allowed(state.mode, route.plane) {
-        return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
-    }
-    let headers = match gateway_http_headers(&request) {
-        Some(headers) => headers,
-        None => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
+    let (target, route, plane, headers) = match parse_ingress_request(&request, state.mode) {
+        Ok(parsed) => parsed,
+        Err(response) => return Ok(*response),
     };
     let Ok(reload_transition) = state.reload.transition.try_read() else {
         return Ok(json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD));
     };
     let edge_security = Arc::clone(&state.reload.load().edge_security);
-    let peer_is_trusted_proxy = edge_security.trusted_proxies.contains(&peer_addr.ip());
-    let client_ip =
-        match derive_gateway_client_ip(peer_addr, &edge_security.trusted_proxies, &headers) {
-            Ok(client_ip) => client_ip,
-            Err(_) => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
+    let (client_ip, peer_is_trusted_proxy) =
+        match validate_ingress_security(&request, plane, peer_addr, &edge_security, &headers) {
+            Ok(metadata) => metadata,
+            Err(response) => return Ok(*response),
         };
-    if route.plane == GatewayHttpRoutePlane::ControlPlane {
-        let browser_capable = browser_capable_request(&request);
-        let browser = if browser_capable {
-            match edge_security.browser.as_ref() {
-                Some(browser) => Some(browser),
-                None => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
-            }
-        } else {
-            None
-        };
-        let state_changing = state_changing_method(request.method());
-        let expected_origin = browser
-            .filter(|_| state_changing || request.headers().contains_key(hyper::header::ORIGIN))
-            .map(|browser| browser.expected_origin.as_str());
-        let expected_csrf_token = browser
-            .filter(|_| state_changing)
-            .and_then(|browser| browser.expected_csrf_token.as_deref());
-        if validate_gateway_edge_security(
-            GatewayEdgeSecurityPolicy {
-                peer_is_trusted_proxy,
-                expected_host: loopback_compatible_expected_host(
-                    &edge_security.expected_host,
-                    &headers,
-                ),
-                expected_origin,
-                expected_csrf_token,
-            },
-            &headers,
-        )
-        .is_err()
-        {
-            return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED));
-        }
-    }
-    let route = route.kind;
-    match content_length(&request) {
-        Err(()) => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
-        Ok(Some(length)) if length > state.max_request_body_bytes as u64 => {
-            return Ok(json_error(StatusCode::PAYLOAD_TOO_LARGE, BODY_TOO_LARGE));
-        }
-        Ok(_) => {}
+    if let Err(response) = validate_request_size(&request, state.max_request_body_bytes) {
+        return Ok(*response);
     }
 
     let frontend_upgrade = request
         .headers()
         .contains_key(hyper::header::UPGRADE)
         .then(|| upgrade::on(&mut request));
-    let forwarding_headers = request
-        .headers()
-        .keys()
-        .filter(|name| {
-            name.as_str() == "forwarded"
-                || name.as_str().starts_with("x-forwarded-")
-                || name.as_str() == "x-real-ip"
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    for name in forwarding_headers {
-        request.headers_mut().remove(name);
-    }
+    strip_forwarding_headers(&mut request);
     let (parts, body) = request.into_parts();
     let request = GatewayHandlerRequest {
         peer_addr,
@@ -893,6 +831,138 @@ where
         }
     }
     Ok(response)
+}
+
+fn parse_ingress_request(
+    request: &Request<Incoming>,
+    mode: GatewayServerMode,
+) -> Result<ParsedIngressRequest, Box<Response<GatewayResponseBody>>> {
+    if request.uri().scheme().is_some() || request.uri().authority().is_some() {
+        return Err(Box::new(json_error(
+            StatusCode::BAD_REQUEST,
+            INVALID_REQUEST_TARGET,
+        )));
+    }
+    let raw_target = request
+        .uri()
+        .path_and_query()
+        .map_or_else(|| request.uri().path(), |target| target.as_str());
+    let target = CanonicalRequestTarget::parse(raw_target)
+        .map_err(|_| Box::new(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET)))?;
+    let route = classify_request_target(&target)
+        .ok_or_else(|| Box::new(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE)))?;
+    if !route_allowed(mode, route.plane) {
+        return Err(Box::new(json_error(
+            StatusCode::NOT_FOUND,
+            ROUTE_UNAVAILABLE,
+        )));
+    }
+    let (kind, plane) = (route.kind, route.plane);
+    let headers = gateway_http_headers(request)
+        .ok_or_else(|| Box::new(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)))?;
+    Ok((target, kind, plane, headers))
+}
+
+fn validate_ingress_security(
+    request: &Request<Incoming>,
+    plane: GatewayHttpRoutePlane,
+    peer_addr: SocketAddr,
+    edge_security: &GatewayServerEdgeSecurity,
+    headers: &[GatewayHttpHeader],
+) -> Result<(IpAddr, bool), Box<Response<GatewayResponseBody>>> {
+    let peer_is_trusted_proxy = edge_security.trusted_proxies.contains(&peer_addr.ip());
+    let client_ip = derive_gateway_client_ip(peer_addr, &edge_security.trusted_proxies, headers)
+        .map_err(|_| Box::new(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)))?;
+    if plane == GatewayHttpRoutePlane::ControlPlane {
+        validate_control_plane_security(request, peer_is_trusted_proxy, edge_security, headers)?;
+    }
+    if plane == GatewayHttpRoutePlane::DataPlane
+        && (request.headers().contains_key(hyper::header::ORIGIN)
+            || request.headers().contains_key(hyper::header::COOKIE))
+    {
+        return Err(Box::new(json_error(
+            StatusCode::FORBIDDEN,
+            EDGE_REQUEST_DENIED,
+        )));
+    }
+    Ok((client_ip, peer_is_trusted_proxy))
+}
+
+fn validate_control_plane_security(
+    request: &Request<Incoming>,
+    peer_is_trusted_proxy: bool,
+    edge_security: &GatewayServerEdgeSecurity,
+    headers: &[GatewayHttpHeader],
+) -> Result<(), Box<Response<GatewayResponseBody>>> {
+    let browser = if browser_capable_request(request) {
+        edge_security
+            .browser
+            .as_ref()
+            .ok_or_else(|| Box::new(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)))?
+    } else {
+        return validate_gateway_edge_security(
+            GatewayEdgeSecurityPolicy {
+                peer_is_trusted_proxy,
+                expected_host: loopback_compatible_expected_host(
+                    &edge_security.expected_host,
+                    headers,
+                ),
+                expected_origin: None,
+                expected_csrf_token: None,
+            },
+            headers,
+        )
+        .map_err(|_| Box::new(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)));
+    };
+    let state_changing = state_changing_method(request.method());
+    let expected_origin = (state_changing || request.headers().contains_key(hyper::header::ORIGIN))
+        .then_some(browser.expected_origin.as_str());
+    let expected_csrf_token = state_changing
+        .then_some(browser.expected_csrf_token.as_deref())
+        .flatten();
+    validate_gateway_edge_security(
+        GatewayEdgeSecurityPolicy {
+            peer_is_trusted_proxy,
+            expected_host: loopback_compatible_expected_host(&edge_security.expected_host, headers),
+            expected_origin,
+            expected_csrf_token,
+        },
+        headers,
+    )
+    .map_err(|_| Box::new(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)))
+}
+
+fn validate_request_size(
+    request: &Request<Incoming>,
+    max_request_body_bytes: usize,
+) -> Result<(), Box<Response<GatewayResponseBody>>> {
+    match content_length(request) {
+        Err(()) => Err(Box::new(json_error(
+            StatusCode::BAD_REQUEST,
+            INVALID_REQUEST,
+        ))),
+        Ok(Some(length)) if length > max_request_body_bytes as u64 => Err(Box::new(json_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            BODY_TOO_LARGE,
+        ))),
+        Ok(_) => Ok(()),
+    }
+}
+
+fn strip_forwarding_headers(request: &mut Request<Incoming>) {
+    let forwarding_headers = request
+        .headers()
+        .keys()
+        .filter(|name| {
+            name.as_str() == "forwarded"
+                || name.as_str().starts_with("x-forwarded-")
+                || name.as_str() == "x-real-ip"
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in forwarding_headers {
+        request.headers_mut().remove(name);
+    }
 }
 
 fn gateway_http_headers(request: &Request<Incoming>) -> Option<Vec<GatewayHttpHeader>> {
