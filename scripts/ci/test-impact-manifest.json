@@ -145,7 +145,7 @@
     "ci:storage-sqlite-boundary-guard": "node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs",
     "ci:gateway-core-boundary-guard": "node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs",
     "ci:gateway-http-boundary-guard": "node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs",
-    "ci:gateway-security-smoke": "cargo test --locked -q -p prodex-app gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app gateway_usage -- --test-threads=1",
+    "ci:gateway-security-smoke": "cargo test --locked -q -p prodex-app --lib gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app --lib gateway_usage -- --test-threads=1",
     "ci:deployment-security-guard": "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs",
     "ci:size-guard": "node scripts/ci/size-guard.mjs",
     "ci:size-guard-fixtures": "node --test scripts/ci/size-guard.test.mjs",
@@ -207,6 +207,7 @@
         "scripts/ci/runtime-proxy-bench-thresholds.json",
         "scripts/ci/runtime-proxy-ci-matrix.mjs",
         "scripts/ci/runtime-proxy-shard.mjs",
+        "scripts/ci/prodex-app-test-shards.mjs",
         "scripts/ci/runtime-stress.mjs",
         "scripts/ci/runtime-test-manifest-guard.mjs",
         "scripts/ci/runtime-test-manifest.mjs"

@@ -3,22 +3,6 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const PRODEX_APP_PARTITION_FILTERS = Object.freeze(
-  ["selection", "pressure", "incidents", "admission", "state", "rotation", "health"].map(
-    (filter) => `main_internal_tests::runtime_proxy_selection_and_pressure::${filter}::`,
-  ),
-);
-
-function assertProdexAppPartitionCoverage(workflow) {
-  assert.equal(new Set(PRODEX_APP_PARTITION_FILTERS).size, PRODEX_APP_PARTITION_FILTERS.length);
-  for (const [index, path] of PRODEX_APP_PARTITION_FILTERS.entries()) {
-    for (const sibling of PRODEX_APP_PARTITION_FILTERS.slice(index + 1)) {
-      assert.ok(!path.includes(sibling) && !sibling.includes(path), `${path} overlaps ${sibling}`);
-    }
-    assert.equal(workflow.match(new RegExp(`'${path}'`, "g"))?.length, 2, `${path} must run once and be skipped once`);
-  }
-}
-
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
   const result = spawnSync(
     process.execPath,
@@ -53,20 +37,32 @@ test("full Rust runner locks every direct cargo test command", () => {
   assert.ok(cargoTestLines.every((line) => line.includes("cargo test --locked ")));
 });
 
+test("no-prodex-app mode excludes prodex-app from workspace execution", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--no-prodex-app-lib"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const workspaceCommand = result.stdout
+    .split("\n")
+    .find((line) => line.includes("workspace:parallel-safe: cargo test "));
+  assert.ok(workspaceCommand, "workspace test command missing");
+  assert.match(workspaceCommand, /--workspace --exclude prodex-app --all-features/);
+  assert.doesNotMatch(workspaceCommand, /--workspace --all-features/);
+});
+
 test("scheduled full suite runs disjoint workspace and prodex-app partitions in parallel", () => {
   const workflow = readFileSync(".github/workflows/full-test.yml", "utf8");
 
   assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
-  assert.match(workflow, /- suite: workspace/);
-  assert.match(workflow, /- suite: prodex-app-selection/);
-  assert.match(workflow, /- suite: prodex-app-admission/);
-  assert.match(workflow, /- suite: prodex-app-rotation/);
-  assert.match(workflow, /- suite: prodex-app-remainder/);
-  assert.equal(workflow.match(/save_cache: true/g)?.length, 1);
-  assert.equal(workflow.match(/save_cache: false/g)?.length, 4);
+  assert.match(workflow, /full_test_shards:/);
+  assert.match(workflow, /--full-test-matrix/);
+  assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.full_test_shards\.outputs\.matrix\) \}\}/);
   assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
-  assertProdexAppPartitionCoverage(workflow);
-  assert.match(workflow, /prodex-app-remainder\)[\s\S]*?cargo test --locked -q -p prodex-app --lib --all-features --/);
+  assert.match(workflow, /matrix\.skip_filters/);
+  assert.match(workflow, /--test-threads=1/);
 });
 
 test("push CI reuses the disjoint prodex-app library partitions", () => {
@@ -76,16 +72,12 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
 
   assert.ok(job, "prodex-app-lib job missing");
   assert.ok(telemetry, "ci-duration-telemetry job missing");
-  for (const suite of ["selection", "admission", "rotation", "remainder"]) {
-    assert.match(job, new RegExp(`- suite: ${suite}`));
-  }
-  assert.equal(job.match(/save_cache: true/g)?.length, 1);
-  assert.equal(job.match(/save_cache: false/g)?.length, 3);
+  assert.match(job, /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\) \}\}/);
+  assert.doesNotMatch(job, /include:/);
   assert.match(job, /CARGO_INCREMENTAL: "0"/);
   assert.match(job, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
-
-  assertProdexAppPartitionCoverage(job);
+  assert.match(job, /PRODEX_APP_FILTER/);
   assert.match(job, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
   for (const dependency of ["prodex-app-lib", "redis-integration", "backup-restore-drill"]) {
     assert.match(telemetry, new RegExp(`- ${dependency}`));

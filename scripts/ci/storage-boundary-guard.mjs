@@ -7,6 +7,7 @@ import { parseDependencySections } from "./boundary-guard-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
+const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/u;
 
 const STORAGE_MANIFEST = "crates/prodex-storage/Cargo.toml";
 const STORAGE_SRC_DIR = "crates/prodex-storage/src";
@@ -76,6 +77,8 @@ const OPTIONAL_POSTGRES_RUNTIME_TESTS = Object.freeze({
     "--test-threads=1",
   ],
 });
+const POSTGRES_SIEM_SCHEMA_TEST =
+  "runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::enterprise_migration_tests::postgres_ledgerless_siem_shape_uses_catalog_semantics";
 const OPTIONAL_POSTGRES_APP_TESTS = Object.freeze({
   command: "cargo",
   args: [
@@ -87,6 +90,24 @@ const OPTIONAL_POSTGRES_APP_TESTS = Object.freeze({
     "--lib",
     "--",
     "--ignored",
+    "--skip",
+    POSTGRES_SIEM_SCHEMA_TEST,
+    "--test-threads=1",
+  ],
+});
+const OPTIONAL_POSTGRES_SIEM_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "--locked",
+    "-q",
+    "-p",
+    "prodex-app",
+    "--lib",
+    POSTGRES_SIEM_SCHEMA_TEST,
+    "--",
+    "--ignored",
+    "--exact",
     "--test-threads=1",
   ],
 });
@@ -185,15 +206,33 @@ function assertSelfTest(condition, message) {
   if (!condition) throw new Error(`self-test failed: ${message}`);
 }
 
+function hasZeroTests(output) {
+  return ZERO_TESTS_PATTERN.test(output);
+}
+
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const capture = options.capture === true;
     const child = spawn(command, args, {
       cwd: repoRoot,
-      stdio: "inherit",
+      stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
       env: { ...process.env, ...(options.env ?? {}) },
     });
+    let output = "";
+    if (capture) {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+        process.stdout.write(chunk);
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk;
+        process.stderr.write(chunk);
+      });
+    }
     child.on("error", reject);
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       if (signal) {
         reject(new Error(`${command} ${args.join(" ")} exited from signal ${signal}`));
         return;
@@ -202,12 +241,16 @@ function runCommand(command, args, options = {}) {
         reject(new Error(`${command} ${args.join(" ")} exited with code ${code}`));
         return;
       }
-      resolve();
+      if (options.failOnZeroTests && hasZeroTests(output)) {
+        reject(new Error(`${command} ${args.join(" ")} matched no tests (cargo reported "running 0 tests")`));
+        return;
+      }
+      resolve(output);
     });
   });
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const valid = `
 [package]
 name = "prodex-storage"
@@ -272,11 +315,43 @@ topology: evidence.topology
     ),
     "missing topology mismatch contract accepted",
   );
+  assertSelfTest(
+    OPTIONAL_POSTGRES_SIEM_TEST.args.includes(POSTGRES_SIEM_SCHEMA_TEST) &&
+      OPTIONAL_POSTGRES_SIEM_TEST.args.includes("--ignored") &&
+      OPTIONAL_POSTGRES_SIEM_TEST.args.includes("--exact"),
+    "Postgres guard must run the exact ignored SIEM schema test",
+  );
+  assertSelfTest(
+    OPTIONAL_POSTGRES_APP_TESTS.args.includes("--skip") &&
+      OPTIONAL_POSTGRES_APP_TESTS.args.includes(POSTGRES_SIEM_SCHEMA_TEST),
+    "broad Postgres app proof must retain every non-SIEM ignored test",
+  );
+  assertSelfTest(hasZeroTests("running 0 tests"), "zero-test output not detected");
+  assertSelfTest(!hasZeroTests("running 1 test"), "matched test output misclassified as zero tests");
+
+  const delayedWriter = "setTimeout(() => process.stdout.write('running 0 tests'), 25);";
+  const exitBeforeStream = `const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", ${JSON.stringify(
+    delayedWriter,
+  )}], { stdio: ["ignore", "inherit", "inherit"] }); process.exit(0);`;
+  let zeroTestValidationWorked = false;
+  try {
+    await runCommand(process.execPath, ["-e", exitBeforeStream], {
+      capture: true,
+      failOnZeroTests: true,
+    });
+  } catch (error) {
+    zeroTestValidationWorked =
+      error instanceof Error && error.message.includes("matched no tests");
+  }
+  assertSelfTest(
+    zeroTestValidationWorked,
+    "zero-test validation must wait for child output streams",
+  );
 }
 
 async function main() {
   if (process.argv.includes("--self-test")) {
-    runSelfTest();
+    await runSelfTest();
     return;
   }
 
@@ -313,6 +388,11 @@ async function main() {
     OPTIONAL_POSTGRES_APP_TESTS.command,
     OPTIONAL_POSTGRES_APP_TESTS.args,
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_SIEM_TEST.command,
+    OPTIONAL_POSTGRES_SIEM_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl }, capture: true, failOnZeroTests: true },
   );
 }
 

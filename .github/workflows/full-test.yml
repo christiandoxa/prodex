@@ -18,31 +18,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  full_test_shards:
+    name: Generate full-test shard plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Generate full-test shard matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/prodex-app-test-shards.mjs --full-test-matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
   full-test:
     name: Full tests (${{ matrix.label }})
+    needs: full_test_shards
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - suite: workspace
-            label: workspace and auto-rotate
-            save_cache: true
-          - suite: prodex-app-selection
-            label: prodex-app selection and pressure
-            save_cache: false
-          - suite: prodex-app-admission
-            label: prodex-app admission and state
-            save_cache: false
-          - suite: prodex-app-rotation
-            label: prodex-app rotation and health
-            save_cache: false
-          - suite: prodex-app-remainder
-            label: prodex-app remaining library tests
-            save_cache: false
+      matrix: ${{ fromJSON(needs.full_test_shards.outputs.matrix) }}
 
     steps:
       - name: Check out repository
@@ -57,6 +67,7 @@ jobs:
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Install Node.js
+        if: matrix.suite == 'workspace'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -81,23 +92,13 @@ jobs:
 
           case "${suite}" in
             workspace)
-              command_description="node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib"
+              command_description="node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib (workspace passes --exclude prodex-app)"
               ;;
-            prodex-app-selection)
-              command_description="prodex-app filters: runtime proxy selection, pressure, and incidents"
-              ;;
-            prodex-app-admission)
-              command_description="prodex-app filters: runtime proxy admission and state"
-              ;;
-            prodex-app-rotation)
-              command_description="prodex-app filters: runtime proxy rotation and health"
-              ;;
-            prodex-app-remainder)
+            remainder)
               command_description="prodex-app library excluding the seven disjoint runtime proxy filters"
               ;;
             *)
-              echo "unknown full-test suite: ${suite}" >&2
-              exit 2
+              command_description="prodex-app filter: ${{ matrix.filter }}"
               ;;
           esac
 
@@ -130,47 +131,31 @@ jobs:
                 --no-prodex-app-lib \
                 > "${cargo_log}" 2>&1
               ;;
-            prodex-app-selection)
-              {
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' -- --test-threads=1 &&
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' -- --test-threads=1 &&
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' -- --test-threads=1
-              } > "${cargo_log}" 2>&1
-              ;;
-            prodex-app-admission)
-              {
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' -- --test-threads=1 &&
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::state::' -- --test-threads=1
-              } > "${cargo_log}" 2>&1
-              ;;
-            prodex-app-rotation)
-              {
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' -- --test-threads=1 &&
-                cargo test --locked -q -p prodex-app --lib --all-features \
-                  'main_internal_tests::runtime_proxy_selection_and_pressure::health::' -- --test-threads=1
-              } > "${cargo_log}" 2>&1
-              ;;
-            prodex-app-remainder)
+            remainder)
+              skip_args=()
+              while IFS= read -r filter; do
+                [ -z "${filter}" ] && continue
+                skip_args+=(--skip "${filter}")
+              done <<< "${{ matrix.skip_filters }}"
               cargo test --locked -q -p prodex-app --lib --all-features -- \
                 --test-threads=1 \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::state::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::health::' \
+                "${skip_args[@]}" \
+                > "${cargo_log}" 2>&1
+              ;;
+            *)
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                "${{ matrix.filter }}" -- --test-threads=1 \
                 > "${cargo_log}" 2>&1
               ;;
           esac
           status=$?
           set -e
+
+          if [ "${status}" -eq 0 ] && [ "${suite}" != "workspace" ] && \
+             grep -Fq 'running 0 tests' "${cargo_log}"; then
+            echo "prodex-app shard matched no tests" >> "${cargo_log}"
+            status=1
+          fi
 
           printf 'exit_code=%s\nfinished_at=%s\n' \
             "${status}" \

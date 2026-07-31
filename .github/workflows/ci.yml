@@ -28,6 +28,7 @@ jobs:
     outputs:
       heavy: ${{ steps.impact.outputs.heavy }}
       reason: ${{ steps.impact.outputs.reason }}
+      prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.matrix }}
       runtime_proxy_matrix: ${{ steps.runtime-matrix.outputs.matrix }}
 
     steps:
@@ -88,6 +89,14 @@ jobs:
           matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
 
+      - name: Generate prodex-app test shard matrix
+        id: prodex-app-matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/prodex-app-test-shards.mjs --github-matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
   fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -118,20 +127,7 @@ jobs:
       RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - suite: selection
-            label: selection and pressure
-            save_cache: true
-          - suite: admission
-            label: admission and state
-            save_cache: false
-          - suite: rotation
-            label: rotation and health
-            save_cache: false
-          - suite: remainder
-            label: remaining tests
-            save_cache: false
+      matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
 
     steps:
       - name: Check out repository
@@ -151,47 +147,31 @@ jobs:
           cache-bin: false
           save-if: ${{ matrix.save_cache }}
 
-      - name: Run prodex-app library partition
+      - name: Run prodex-app library partition ${{ matrix.label }}
         shell: bash
+        env:
+          PRODEX_APP_FILTER: ${{ matrix.filter }}
+          PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
         run: |
           set -euo pipefail
-          case "${{ matrix.suite }}" in
-            selection)
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' -- --test-threads=1
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' -- --test-threads=1
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' -- --test-threads=1
-              ;;
-            admission)
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' -- --test-threads=1
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::state::' -- --test-threads=1
-              ;;
-            rotation)
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' -- --test-threads=1
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                'main_internal_tests::runtime_proxy_selection_and_pressure::health::' -- --test-threads=1
-              ;;
-            remainder)
-              cargo test --locked -q -p prodex-app --lib --all-features -- \
-                --test-threads=1 \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::selection::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::pressure::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::incidents::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::admission::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::state::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::rotation::' \
-                --skip 'main_internal_tests::runtime_proxy_selection_and_pressure::health::'
-              ;;
-            *)
-              echo "unknown prodex-app library suite: ${{ matrix.suite }}" >&2
-              exit 2
-              ;;
-          esac
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          if [[ -n "${PRODEX_APP_FILTER}" ]]; then
+            cargo test --locked -q -p prodex-app --lib --all-features \
+              "${PRODEX_APP_FILTER}" -- --test-threads=1 2>&1 | tee "${test_log}"
+          else
+            skip_args=()
+            while IFS= read -r filter; do
+              [[ -z "${filter}" ]] && continue
+              skip_args+=(--skip "${filter}")
+            done <<< "${PRODEX_APP_SKIP_FILTERS}"
+            cargo test --locked -q -p prodex-app --lib --all-features \
+              -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
+          fi
+          if grep -Fq 'running 0 tests' "${test_log}"; then
+            echo "prodex-app shard matched no tests"
+            exit 1
+          fi
 
       - name: Test temp-backed state with a symlinked TMPDIR
         if: matrix.suite == 'remainder'
@@ -387,9 +367,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: members
-            label: workspace members
+          - suite: members-foundation
+            label: workspace foundation members
             save_cache: true
+          - suite: members-runtime
+            label: workspace runtime members
+            save_cache: false
+          - suite: members-storage
+            label: workspace storage members
+            save_cache: false
           - suite: app
             label: prodex-app
             save_cache: false
@@ -400,6 +386,12 @@ jobs:
           - suite: root-1
             label: root shard 2 of 2
             auto_rotate_shard: 1
+            save_cache: false
+          - suite: root-tests
+            label: root non-sharded tests
+            save_cache: false
+          - suite: installer
+            label: Windows installer
             save_cache: false
 
     steps:
@@ -421,35 +413,50 @@ jobs:
           save-if: ${{ matrix.save_cache }}
 
       - name: Install Node.js
-        if: startsWith(matrix.suite, 'root-')
+        if: matrix.suite == 'root-0' || matrix.suite == 'root-1' || matrix.suite == 'installer'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           package-manager-cache: false
 
-      - name: Run Windows workspace member tests
-        if: matrix.suite == 'members'
+      - name: Run Windows foundation member tests
+        if: matrix.suite == 'members-foundation'
         shell: bash
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
-          cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
+          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
           cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
+
+      - name: Run Windows runtime member tests
+        if: matrix.suite == 'members-runtime'
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo test --locked -q -p 'prodex-runtime-*' --all-features -- --test-threads=4 --skip continuity_failure_reason_metrics_
+          cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
+
+      - name: Run Windows storage member tests
+        if: matrix.suite == 'members-storage'
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: cargo test --locked -q -p 'prodex-storage*' --all-features -- --test-threads=4
 
       - name: Run Windows prodex-app tests
         if: matrix.suite == 'app'
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q -p prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
+          cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
 
       - name: Prebuild Windows auto-rotate tests
-        if: startsWith(matrix.suite, 'root-')
+        if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         run: cargo test --locked --test auto_rotate --all-features --no-run
 
       - name: Run Windows non-sharded root tests
-        if: matrix.suite == 'root-1'
+        if: matrix.suite == 'root-tests'
         shell: bash
         env:
           RUST_BACKTRACE: "1"
@@ -458,17 +465,17 @@ jobs:
           cargo test --locked -q -p prodex --doc --all-features
 
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
-        if: startsWith(matrix.suite, 'root-')
+        if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         env:
           RUST_BACKTRACE: "1"
         run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
       - name: Build Windows installer fixture binary
-        if: matrix.suite == 'root-1'
+        if: matrix.suite == 'installer'
         run: cargo build --locked --bin prodex
 
       - name: Test Windows installer
-        if: matrix.suite == 'root-1'
+        if: matrix.suite == 'installer'
         run: npm run installer:test
 
   macos-workspace:
@@ -585,6 +592,9 @@ jobs:
 
       - name: Check generated Smart Context evidence
         run: npm run docs:smart-context-evidence:check
+
+      - name: Validate full-test shard manifest
+        run: npm run ci:full-test-shards
 
       - name: Enforce Rust super wildcard guard
         run: npm run ci:super-wildcard-guard

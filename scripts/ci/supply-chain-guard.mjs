@@ -77,8 +77,10 @@ export function validateWindowsSecurityJob(contents) {
     violations.push(".github/workflows/ci.yml: windows-security job must fail closed");
   }
   for (const marker of [
-    "--workspace --exclude prodex --exclude prodex-app --all-features",
-    "cargo test --locked -q -p prodex-app --all-features -- --test-threads=4",
+    "cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features",
+    "cargo test --locked -q -p 'prodex-runtime-*' --all-features",
+    "cargo test --locked -q -p 'prodex-storage*' --all-features",
+    "cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1",
     "- name: Build Windows installer fixture binary",
     "- name: Test Windows installer",
   ]) {
@@ -529,8 +531,10 @@ function selfTest() {
       - run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
   windows-workspace:
     steps:
-      - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features
-      - run: cargo test --locked -q -p prodex-app --all-features -- --test-threads=4
+      - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features
+      - run: cargo test --locked -q -p 'prodex-runtime-*' --all-features
+      - run: cargo test --locked -q -p 'prodex-storage*' --all-features
+      - run: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1
       - name: Build Windows installer fixture binary
       - name: Test Windows installer
 `;
