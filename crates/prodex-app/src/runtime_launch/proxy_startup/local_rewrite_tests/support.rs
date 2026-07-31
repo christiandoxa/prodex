@@ -137,8 +137,18 @@ impl TestUpstream {
         let (headers_tx, headers_rx) = mpsc::channel();
         let (path_tx, path_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
-            for _ in 0..request_count {
-                let mut request = server.recv().expect("test upstream should receive request");
+            for request_index in 0..request_count {
+                let mut request = if request_index == 0 {
+                    server.recv().expect("test upstream should receive request")
+                } else {
+                    let Some(request) = server
+                        .recv_timeout(Duration::from_secs(1))
+                        .expect("test upstream should probe for retries")
+                    else {
+                        break;
+                    };
+                    request
+                };
                 let _ = path_tx.send(request.url().to_string());
                 let _ = headers_tx.send(
                     request

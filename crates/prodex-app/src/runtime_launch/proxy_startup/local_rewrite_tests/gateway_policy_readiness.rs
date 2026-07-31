@@ -64,12 +64,14 @@ fn enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers()
     install_postcommit_audit_failure(&fixture.database_path);
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(2))
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(10))
         .build()
         .unwrap();
     let mut response = client
         .post(format!("http://{}/v1/responses", fixture.proxy.listen_addr))
         .bearer_auth(fixture.data_token)
+        .header(reqwest::header::CONNECTION, "close")
         .json(&serde_json::json!({"model": "gpt-5", "input": "hello", "stream": true}))
         .send()
         .unwrap();
