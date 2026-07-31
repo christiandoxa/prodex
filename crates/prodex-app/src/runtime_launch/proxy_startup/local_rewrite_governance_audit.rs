@@ -69,6 +69,13 @@ struct RuntimeGovernanceAuditWrite {
     acknowledge: SyncSender<Result<(), GovernanceRepositoryError>>,
 }
 
+struct RuntimeGovernanceAuditPersistContext<'a> {
+    writer: &'a RuntimeGovernanceAuditWriter,
+    mandatory: bool,
+    audit_context: &'a RuntimeGovernanceAuditContext,
+    reconcile_on_failure: bool,
+}
+
 impl RuntimeGovernanceAuditWriter {
     pub(super) fn spawn(
         &self,
@@ -389,16 +396,20 @@ pub(super) fn persist_runtime_material_governance_audit(
     reason_code: &str,
 ) -> Result<(), GovernanceRepositoryError> {
     persist_runtime_material_governance_audit_with_writer(
-        &shared.governance_audit_writer,
-        shared
-            .runtime_shared
-            .runtime_config
-            .governance
-            .mandatory_audit,
-        context,
+        RuntimeGovernanceAuditPersistContext {
+            writer: &shared.governance_audit_writer,
+            mandatory: shared
+                .runtime_shared
+                .runtime_config
+                .governance
+                .mandatory_audit,
+            audit_context: context,
+            reconcile_on_failure: false,
+        },
         request_id,
-        (action, outcome, reason_code),
-        false,
+        action,
+        outcome,
+        reason_code,
     )
 }
 
@@ -411,16 +422,20 @@ pub(super) fn persist_runtime_material_governance_audit_reconciling(
     reason_code: &str,
 ) -> Result<(), GovernanceRepositoryError> {
     persist_runtime_material_governance_audit_with_writer(
-        &shared.governance_audit_writer,
-        shared
-            .runtime_shared
-            .runtime_config
-            .governance
-            .mandatory_audit,
-        context,
+        RuntimeGovernanceAuditPersistContext {
+            writer: &shared.governance_audit_writer,
+            mandatory: shared
+                .runtime_shared
+                .runtime_config
+                .governance
+                .mandatory_audit,
+            audit_context: context,
+            reconcile_on_failure: true,
+        },
         request_id,
-        (action, outcome, reason_code),
-        true,
+        action,
+        outcome,
+        reason_code,
     )
 }
 
@@ -441,14 +456,18 @@ pub(super) fn runtime_governance_audit_is_available(
 }
 
 fn persist_runtime_material_governance_audit_with_writer(
-    writer: &RuntimeGovernanceAuditWriter,
-    mandatory: bool,
-    context: &RuntimeGovernanceAuditContext,
+    context: RuntimeGovernanceAuditPersistContext<'_>,
     request_id: u64,
-    audit: (&str, AuditOutcome, &str),
-    reconcile_on_failure: bool,
+    action: &str,
+    outcome: AuditOutcome,
+    reason_code: &str,
 ) -> Result<(), GovernanceRepositoryError> {
-    let (action, outcome, reason_code) = audit;
+    let RuntimeGovernanceAuditPersistContext {
+        writer,
+        mandatory,
+        audit_context,
+        reconcile_on_failure,
+    } = context;
     let action = AuditAction::try_new(format!("gateway.governance.{action}"))
         .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
     if reason_code.is_empty()
@@ -469,13 +488,13 @@ fn persist_runtime_material_governance_audit_with_writer(
         .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
     let event = AuditEvent::new(
         occurred_at_unix_ms,
-        context.tenant,
-        &context.principal,
+        audit_context.tenant,
+        &audit_context.principal,
         action,
         AuditResource::new_with_resource_id(
             "gateway_material_event",
             Some(resource_id),
-            Some(context.tenant.tenant_id),
+            Some(audit_context.tenant.tenant_id),
         )
         .map_err(|_| GovernanceRepositoryError::InvalidInput)?,
         outcome,
@@ -666,16 +685,16 @@ mod tests {
     #[test]
     fn mandatory_transform_audit_writer_failure_is_fail_closed_and_content_free() {
         let error = persist_runtime_material_governance_audit_with_writer(
-            &RuntimeGovernanceAuditWriter::default(),
-            true,
-            &audit_context(),
+            RuntimeGovernanceAuditPersistContext {
+                writer: &RuntimeGovernanceAuditWriter::default(),
+                mandatory: true,
+                audit_context: &audit_context(),
+                reconcile_on_failure: false,
+            },
             7,
-            (
-                "request_transform",
-                AuditOutcome::Success,
-                "sensitive_fields_masked",
-            ),
-            false,
+            "request_transform",
+            AuditOutcome::Success,
+            "sensitive_fields_masked",
         )
         .unwrap_err();
 
@@ -685,16 +704,16 @@ mod tests {
     #[test]
     fn mandatory_response_precommit_audit_writer_failure_is_fail_closed() {
         let error = persist_runtime_material_governance_audit_with_writer(
-            &RuntimeGovernanceAuditWriter::default(),
-            true,
-            &audit_context(),
+            RuntimeGovernanceAuditPersistContext {
+                writer: &RuntimeGovernanceAuditWriter::default(),
+                mandatory: true,
+                audit_context: &audit_context(),
+                reconcile_on_failure: false,
+            },
             8,
-            (
-                "response_precommit_block",
-                AuditOutcome::Denied,
-                "blocked_output_keyword",
-            ),
-            false,
+            "response_precommit_block",
+            AuditOutcome::Denied,
+            "blocked_output_keyword",
         )
         .unwrap_err();
 
@@ -704,16 +723,16 @@ mod tests {
     #[test]
     fn observe_mode_attempts_but_does_not_fail_closed_on_writer_failure() {
         persist_runtime_material_governance_audit_with_writer(
-            &RuntimeGovernanceAuditWriter::default(),
-            false,
-            &audit_context(),
+            RuntimeGovernanceAuditPersistContext {
+                writer: &RuntimeGovernanceAuditWriter::default(),
+                mandatory: false,
+                audit_context: &audit_context(),
+                reconcile_on_failure: false,
+            },
             9,
-            (
-                "request_transform",
-                AuditOutcome::Success,
-                "sensitive_fields_masked",
-            ),
-            false,
+            "request_transform",
+            AuditOutcome::Success,
+            "sensitive_fields_masked",
         )
         .unwrap();
     }

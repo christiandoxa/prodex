@@ -129,7 +129,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
     let conversations = shared.deepseek_conversations_for_request(request);
     let anthropic_request = match runtime_kiro_anthropic_request(request, messages_route) {
         Ok(translated) => translated,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     let body = anthropic_request
         .as_ref()
@@ -137,7 +137,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
         .unwrap_or(body);
     let body = match runtime_kiro_request_body(endpoint, body) {
         Ok(body) => body,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     let value: Value =
         serde_json::from_slice(&body).context("failed to parse Codex Responses request JSON")?;
@@ -183,32 +183,40 @@ fn runtime_kiro_unsupported_route_result(path: &str) -> RuntimeLocalRewriteUpstr
 fn runtime_kiro_anthropic_request(
     request: &RuntimeProxyRequest,
     messages_route: bool,
-) -> std::result::Result<Option<RuntimeAnthropicMessagesRequest>, RuntimeLocalRewriteUpstreamResult>
-{
+) -> std::result::Result<
+    Option<RuntimeAnthropicMessagesRequest>,
+    Box<RuntimeLocalRewriteUpstreamResult>,
+> {
     if !messages_route {
         return Ok(None);
     }
     translate_runtime_anthropic_messages_request(request)
         .map(Some)
-        .map_err(|err| RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                build_runtime_anthropic_error_parts(400, "invalid_request_error", &err.to_string()),
-            ),
-            gemini_context: None,
-            copilot_context: None,
+        .map_err(|err| {
+            Box::new(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                    build_runtime_anthropic_error_parts(
+                        400,
+                        "invalid_request_error",
+                        &err.to_string(),
+                    ),
+                ),
+                gemini_context: None,
+                copilot_context: None,
+            })
         })
 }
 
 fn runtime_kiro_request_body(
     endpoint: ProviderEndpoint,
     body: Vec<u8>,
-) -> std::result::Result<Vec<u8>, RuntimeLocalRewriteUpstreamResult> {
+) -> std::result::Result<Vec<u8>, Box<RuntimeLocalRewriteUpstreamResult>> {
     runtime_kiro_request_body_for_endpoint(endpoint, body).map_err(|parts| {
-        RuntimeLocalRewriteUpstreamResult {
+        Box::new(RuntimeLocalRewriteUpstreamResult {
             response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
             gemini_context: None,
             copilot_context: None,
-        }
+        })
     })
 }
 
@@ -579,18 +587,20 @@ fn runtime_kiro_streaming_reader(
     schedule_runtime_kiro_blocking_work(&async_runtime, move || {
         let result = runtime_kiro_streaming_worker(
             sender,
-            request_id,
-            &prompt,
-            prompt_messages,
-            &cwd,
-            &extra_env,
-            &command,
-            &profile_name,
-            requested_model,
-            requested_effort,
-            chat_completions_route,
-            conversations,
-            idle_timeout,
+            RuntimeKiroStreamingWorkerContext {
+                request_id,
+                prompt,
+                prompt_messages,
+                cwd,
+                extra_env,
+                command,
+                profile_name,
+                requested_model,
+                requested_effort,
+                chat_completions_route,
+                conversations,
+                idle_timeout,
+            },
         );
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
@@ -606,27 +616,45 @@ fn runtime_kiro_streaming_reader(
     })
 }
 
-fn runtime_kiro_streaming_worker(
-    sender: SyncSender<RuntimeKiroStreamingChunk>,
+struct RuntimeKiroStreamingWorkerContext {
     request_id: u64,
-    prompt: &str,
+    prompt: String,
     prompt_messages: Vec<Value>,
-    cwd: &Path,
-    extra_env: &[(OsString, OsString)],
-    command: &Path,
-    profile_name: &str,
+    cwd: PathBuf,
+    extra_env: Vec<(OsString, OsString)>,
+    command: PathBuf,
+    profile_name: String,
     requested_model: Option<String>,
     requested_effort: Option<String>,
     chat_completions_route: bool,
     conversations: RuntimeDeepSeekConversationStore,
     idle_timeout: Duration,
+}
+
+fn runtime_kiro_streaming_worker(
+    sender: SyncSender<RuntimeKiroStreamingChunk>,
+    context: RuntimeKiroStreamingWorkerContext,
 ) -> Result<()> {
-    let mut child = runtime_kiro_streaming_command(
+    let RuntimeKiroStreamingWorkerContext {
+        request_id,
+        prompt,
+        prompt_messages,
+        cwd,
+        extra_env,
         command,
+        profile_name,
+        requested_model,
+        requested_effort,
+        chat_completions_route,
+        conversations,
+        idle_timeout,
+    } = context;
+    let mut child = runtime_kiro_streaming_command(
+        &command,
         requested_model.as_deref(),
         requested_effort.as_deref(),
     )
-    .current_dir(cwd)
+    .current_dir(&cwd)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::null())
@@ -637,10 +665,10 @@ fn runtime_kiro_streaming_worker(
         &mut child,
         RuntimeKiroStreamingContext {
             request_id,
-            prompt,
+            prompt: &prompt,
             prompt_messages,
-            cwd,
-            profile_name,
+            cwd: &cwd,
+            profile_name: &profile_name,
             requested_model,
             chat_completions_route,
             conversations,
