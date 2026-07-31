@@ -119,7 +119,8 @@ export function validateSonarConfiguration(workflowContents, properties) {
     "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
     "Create ephemeral local Sonar token",
     'local_admin="admin"',
-    '--user "${local_admin}:${local_admin}"',
+    "base64 --wrap=0",
+    '--header "Authorization: Basic ${local_auth}"',
     "/api/user_tokens/generate",
     'echo "::add-mask::${token}"',
     'sonar_token_key="SONAR_TOKEN"',
@@ -518,7 +519,8 @@ function selfTest() {
       - name: Create ephemeral local Sonar token
         run: |
           local_admin="admin"
-          curl --user "\${local_admin}:\${local_admin}" /api/user_tokens/generate
+          local_auth="$(printf '%s:%s' "\${local_admin}" "\${local_admin}" | base64 --wrap=0)"
+          curl --header "Authorization: Basic \${local_auth}" /api/user_tokens/generate
           echo "::add-mask::\${token}"
           sonar_token_key="SONAR_TOKEN"
           printf '%s=%s\\n' "\${sonar_token_key}" "\${token}"
