@@ -259,48 +259,51 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
             response_turn_state_changed = turn_state_changed || response_turn_state_changed;
         }
     }
-    if changed {
-        prune_profile_bindings(
-            &mut runtime.state.response_profile_bindings,
-            RESPONSE_PROFILE_BINDING_LIMIT,
-        );
-        schedule_runtime_state_save_from_runtime(
-            shared,
-            &runtime,
-            RuntimeStateMutation::ResponseIds(profile_name.to_string()),
-        );
+    if !changed {
         drop(runtime);
+        return Ok(());
+    }
+
+    prune_profile_bindings(
+        &mut runtime.state.response_profile_bindings,
+        RESPONSE_PROFILE_BINDING_LIMIT,
+    );
+    schedule_runtime_state_save_from_runtime(
+        shared,
+        &runtime,
+        RuntimeStateMutation::ResponseIds(profile_name.to_string()),
+    );
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "binding response_ids profile={profile_name} count={} first={:?}",
+            response_ids.len(),
+            response_ids.first()
+        ),
+    );
+    if response_turn_state_changed {
         runtime_proxy_log(
             shared,
             format!(
-                "binding response_ids profile={profile_name} count={} first={:?}",
+                "binding response_turn_state profile={profile_name} count={} first={:?} turn_state={}",
                 response_ids.len(),
-                response_ids.first()
+                response_ids.first(),
+                turn_state.unwrap_or("-"),
             ),
         );
-        if response_turn_state_changed {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "binding response_turn_state profile={profile_name} count={} first={:?} turn_state={}",
-                    response_ids.len(),
-                    response_ids.first(),
-                    turn_state.unwrap_or("-"),
-                ),
-            );
-        } else if turn_state.is_none() {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "turn_state_coverage route={} profile={profile_name} status=missing response_ids={} first={:?}",
-                    runtime_route_kind_label(verified_route),
-                    response_ids.len(),
-                    response_ids.first(),
-                ),
-            );
-        }
-    } else {
-        drop(runtime);
+        return Ok(());
+    }
+    if turn_state.is_none() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "turn_state_coverage route={} profile={profile_name} status=missing response_ids={} first={:?}",
+                runtime_route_kind_label(verified_route),
+                response_ids.len(),
+                response_ids.first(),
+            ),
+        );
     }
     Ok(())
 }

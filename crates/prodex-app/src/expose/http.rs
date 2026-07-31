@@ -122,6 +122,30 @@ fn expose_parse_http_request_head(
         return Err(expose_parse_error(400, "invalid request"));
     }
 
+    let headers = expose_parse_http_headers(lines)?;
+    let content_length = match headers.get("content-length").map(Vec::as_slice) {
+        None => 0,
+        Some([value]) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
+            value
+                .parse::<usize>()
+                .map_err(|_| expose_parse_error(400, "invalid content length"))?
+        }
+        Some(_) => return Err(expose_parse_error(400, "invalid content length")),
+    };
+    if content_length > EXPOSE_MAX_INPUT_BYTES {
+        return Err(expose_parse_error(413, "request body too large"));
+    }
+    Ok((
+        method.to_string(),
+        target.to_string(),
+        headers,
+        content_length,
+    ))
+}
+
+fn expose_parse_http_headers<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> std::result::Result<BTreeMap<String, Vec<String>>, ExposeHttpParseError> {
     let mut headers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (index, line) in lines.enumerate() {
         if index >= EXPOSE_MAX_HEADERS
@@ -153,24 +177,7 @@ fn expose_parse_http_request_head(
     if headers.contains_key("expect") {
         return Err(expose_parse_error(417, "expectation failed"));
     }
-    let content_length = match headers.get("content-length").map(Vec::as_slice) {
-        None => 0,
-        Some([value]) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
-            value
-                .parse::<usize>()
-                .map_err(|_| expose_parse_error(400, "invalid content length"))?
-        }
-        Some(_) => return Err(expose_parse_error(400, "invalid content length")),
-    };
-    if content_length > EXPOSE_MAX_INPUT_BYTES {
-        return Err(expose_parse_error(413, "request body too large"));
-    }
-    Ok((
-        method.to_string(),
-        target.to_string(),
-        headers,
-        content_length,
-    ))
+    Ok(headers)
 }
 
 fn expose_read_http_body(

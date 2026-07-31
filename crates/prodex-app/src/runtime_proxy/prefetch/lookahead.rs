@@ -18,10 +18,7 @@ async fn inspect_runtime_sse_lookahead(
         Instant::now() + Duration::from_millis(prefetch.shared.config.lookahead_timeout_ms);
     let mut buffered = Vec::new();
 
-    loop {
-        if buffered.len() >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
-            break;
-        }
+    while buffered.len() < RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
         let now = Instant::now();
         if now >= deadline {
             break;
@@ -74,6 +71,14 @@ async fn inspect_runtime_sse_lookahead(
         }
     }
 
+    runtime_sse_lookahead_finish(buffered, log_path, request_id)
+}
+
+fn runtime_sse_lookahead_finish(
+    buffered: Vec<u8>,
+    log_path: &Path,
+    request_id: u64,
+) -> Result<RuntimeSseInspection> {
     match inspect_runtime_sse_buffer(&buffered) {
         RuntimeSseInspectionProgress::Commit {
             response_ids,

@@ -339,68 +339,92 @@ fn dispatch_runtime_http_captured(
     }
 
     if is_runtime_anthropic_messages_path(&captured.path_and_query) {
-        let response = match proxy_runtime_anthropic_messages_request(request_id, &captured, shared)
-        {
-            Ok(response) => response,
-            Err(err) => {
-                if is_runtime_proxy_transport_failure(&err) {
-                    runtime_proxy_log_dispatch_error(
-                        shared,
-                        request_id,
-                        "anthropic_transport_failure",
-                        format!("{err:#}"),
-                    );
-                    return;
-                } else {
-                    runtime_proxy_log_dispatch_error(
-                        shared,
-                        request_id,
-                        "anthropic_error",
-                        format!("{err:#}"),
-                    );
-                    RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
-                        502,
-                        "api_error",
-                        RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
-                    ))
-                }
-            }
-        };
-        respond_runtime_responses_reply(request, response);
+        dispatch_runtime_http_anthropic_request(request_id, request, &captured, shared);
         return;
     }
 
     if is_runtime_responses_path(&captured.path_and_query) {
-        let response = match proxy_runtime_responses_request(request_id, &captured, shared) {
-            Ok(response) => response,
-            Err(err) => {
-                if is_runtime_proxy_transport_failure(&err) {
-                    runtime_proxy_log_dispatch_error(
-                        shared,
-                        request_id,
-                        "responses_transport_failure",
-                        format!("{err:#}"),
-                    );
-                    return;
-                } else {
-                    runtime_proxy_log_dispatch_error(
-                        shared,
-                        request_id,
-                        "responses_error",
-                        format!("{err:#}"),
-                    );
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
-                        502,
-                        RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
-                    ))
-                }
-            }
-        };
-        respond_runtime_responses_reply(request, response);
+        dispatch_runtime_http_responses_request(request_id, request, &captured, shared);
         return;
     }
 
-    let response = match proxy_runtime_standard_request(request_id, &captured, shared) {
+    dispatch_runtime_http_standard_request(request_id, request, &captured, shared);
+}
+
+fn dispatch_runtime_http_anthropic_request(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let response = match proxy_runtime_anthropic_messages_request(request_id, captured, shared) {
+        Ok(response) => response,
+        Err(err) => {
+            if is_runtime_proxy_transport_failure(&err) {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "anthropic_transport_failure",
+                    format!("{err:#}"),
+                );
+                return;
+            }
+            runtime_proxy_log_dispatch_error(
+                shared,
+                request_id,
+                "anthropic_error",
+                format!("{err:#}"),
+            );
+            RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
+                502,
+                "api_error",
+                RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
+            ))
+        }
+    };
+    respond_runtime_responses_reply(request, response);
+}
+
+fn dispatch_runtime_http_responses_request(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let response = match proxy_runtime_responses_request(request_id, captured, shared) {
+        Ok(response) => response,
+        Err(err) => {
+            if is_runtime_proxy_transport_failure(&err) {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "responses_transport_failure",
+                    format!("{err:#}"),
+                );
+                return;
+            }
+            runtime_proxy_log_dispatch_error(
+                shared,
+                request_id,
+                "responses_error",
+                format!("{err:#}"),
+            );
+            RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
+                502,
+                RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
+            ))
+        }
+    };
+    respond_runtime_responses_reply(request, response);
+}
+
+fn dispatch_runtime_http_standard_request(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let response = match proxy_runtime_standard_request(request_id, captured, shared) {
         Ok(response) => response,
         Err(err) => {
             if is_runtime_proxy_transport_failure(&err) {
@@ -411,15 +435,14 @@ fn dispatch_runtime_http_captured(
                     format!("{err:#}"),
                 );
                 return;
-            } else {
-                runtime_proxy_log_dispatch_error(
-                    shared,
-                    request_id,
-                    "standard_error",
-                    format!("{err:#}"),
-                );
-                build_runtime_proxy_text_response(502, RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE)
             }
+            runtime_proxy_log_dispatch_error(
+                shared,
+                request_id,
+                "standard_error",
+                format!("{err:#}"),
+            );
+            build_runtime_proxy_text_response(502, RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE)
         }
     };
     let _ = request.respond(response);

@@ -70,9 +70,7 @@ fn merge_presidio_analyzer_result(
         && last.end == result.end
         && last.entity_type == result.entity_type
     {
-        if result.score > last.score {
-            *last = result;
-        }
+        replace_presidio_analyzer_result_if_stronger(last, result);
         return None;
     }
     let overlaps = result.start < last.end && result.end > last.start;
@@ -84,9 +82,7 @@ fn merge_presidio_analyzer_result(
     let contained = (result.start >= last.start && result.end <= last.end)
         || (last.start >= result.start && last.end <= result.end);
     if contained {
-        if result.score > last.score {
-            *last = result;
-        }
+        replace_presidio_analyzer_result_if_stronger(last, result);
         return None;
     }
     if result.score > last.score {
@@ -98,4 +94,13 @@ fn merge_presidio_analyzer_result(
         return None;
     }
     Some(result)
+}
+
+fn replace_presidio_analyzer_result_if_stronger(
+    current: &mut PresidioAnalyzerResult,
+    candidate: PresidioAnalyzerResult,
+) {
+    if candidate.score > current.score {
+        *current = candidate;
+    }
 }
