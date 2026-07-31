@@ -1,5 +1,8 @@
 use super::{validate_gateway_exact_identifier, validate_gateway_optional_scope};
-use crate::types::{RuntimePolicyFile, RuntimePolicyServiceMode};
+use crate::types::{
+    RuntimePolicyFile, RuntimePolicyGatewaySsoSettings,
+    RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyServiceMode,
+};
 use crate::validate_helpers::{validate_gateway_admin_role, validate_optional_u64};
 use crate::validate_secrets::validate_gateway_secret_source;
 use anyhow::{Context, Result, bail};
@@ -98,6 +101,31 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
         sso.proxy_token_ref.as_ref(),
         false,
     )?;
+    validate_gateway_sso_identifiers(sso, path)?;
+    if validate_gateway_sso_shape(sso, path)? {
+        validate_gateway_sso_oidc(sso, path)?;
+    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.sso.oidc_client_secret",
+        None,
+        sso.oidc_client_secret_ref.as_ref(),
+        false,
+    )?;
+    if let Some(role) = sso.default_role.as_deref() {
+        validate_gateway_admin_role(role).with_context(|| {
+            format!("gateway.sso.default_role in {} is invalid", path.display())
+        })?;
+    }
+    validate_gateway_workload_identity(policy, path)?;
+    Ok(())
+}
+
+fn validate_gateway_sso_identifiers(
+    sso: &RuntimePolicyGatewaySsoSettings,
+    path: &Path,
+) -> Result<()> {
     for (field, value) in [
         ("gateway.sso.token_header", sso.token_header.as_deref()),
         ("gateway.sso.user_header", sso.user_header.as_deref()),
@@ -152,6 +180,10 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
             bail!("{field} in {} cannot be empty", path.display());
         }
     }
+    Ok(())
+}
+
+fn validate_gateway_sso_shape(sso: &RuntimePolicyGatewaySsoSettings, path: &Path) -> Result<bool> {
     let oidc_enabled = sso.oidc_issuer.is_some()
         || sso.oidc_audience.is_some()
         || sso.oidc_jwks_url.is_some()
@@ -212,166 +244,151 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
             path.display()
         );
     }
-    if oidc_enabled {
-        if sso
-            .required_scope
-            .as_deref()
-            .is_some_and(|scope| scope != "control_plane")
-        {
-            bail!(
-                "gateway.sso.required_scope in {} must be control_plane for human OIDC",
-                path.display()
-            );
-        }
-        if sso.oidc_issuer.is_none() || sso.oidc_audience.is_none() {
-            bail!(
-                "gateway.sso OIDC in {} requires oidc_issuer and oidc_audience",
-                path.display()
-            );
-        }
-        let issuer = sso
-            .oidc_issuer
-            .as_deref()
-            .expect("OIDC issuer presence checked above");
-        ValidatedOidcIssuer::parse(issuer).with_context(|| {
-            format!(
-                "gateway.sso.oidc_issuer in {} must be an https URL with host and permitted OIDC policy",
-                path.display()
-            )
-        })?;
-        if sso.oidc_jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
-            bail!(
-                "gateway.sso.oidc_jwks_origin_allowlist in {} must contain at most {} entries",
-                path.display(),
-                OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES
-            );
-        }
+    Ok(oidc_enabled)
+}
+
+fn validate_gateway_sso_oidc(sso: &RuntimePolicyGatewaySsoSettings, path: &Path) -> Result<()> {
+    if sso
+        .required_scope
+        .as_deref()
+        .is_some_and(|scope| scope != "control_plane")
+    {
+        bail!(
+            "gateway.sso.required_scope in {} must be control_plane for human OIDC",
+            path.display()
+        );
+    }
+    if sso.oidc_issuer.is_none() || sso.oidc_audience.is_none() {
+        bail!(
+            "gateway.sso OIDC in {} requires oidc_issuer and oidc_audience",
+            path.display()
+        );
+    }
+    let issuer = sso
+        .oidc_issuer
+        .as_deref()
+        .expect("OIDC issuer presence checked above");
+    ValidatedOidcIssuer::parse(issuer).with_context(|| {
+        format!(
+            "gateway.sso.oidc_issuer in {} must be an https URL with host and permitted OIDC policy",
+            path.display()
+        )
+    })?;
+    if sso.oidc_jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
+        bail!(
+            "gateway.sso.oidc_jwks_origin_allowlist in {} must contain at most {} entries",
+            path.display(),
+            OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES
+        );
+    }
+    OidcEndpointPolicy::with_jwks_origin_allowlist(
+        issuer,
+        None,
+        sso.oidc_jwks_origin_allowlist.iter().map(String::as_str),
+    )
+    .with_context(|| {
+        format!(
+            "gateway.sso.oidc_jwks_origin_allowlist in {} is not permitted",
+            path.display()
+        )
+    })?;
+    if let Some(jwks_url) = sso.oidc_jwks_url.as_deref() {
         OidcEndpointPolicy::with_jwks_origin_allowlist(
             issuer,
-            None,
+            Some(jwks_url),
             sso.oidc_jwks_origin_allowlist.iter().map(String::as_str),
         )
         .with_context(|| {
             format!(
-                "gateway.sso.oidc_jwks_origin_allowlist in {} is not permitted",
+                "gateway.sso.oidc_jwks_url in {} must be an https URL with host and permitted OIDC policy",
                 path.display()
             )
         })?;
-        if let Some(jwks_url) = sso.oidc_jwks_url.as_deref() {
-            OidcEndpointPolicy::with_jwks_origin_allowlist(
-                issuer,
-                Some(jwks_url),
-                sso.oidc_jwks_origin_allowlist.iter().map(String::as_str),
-            )
-            .with_context(|| {
-                format!(
-                    "gateway.sso.oidc_jwks_url in {} must be an https URL with host and permitted OIDC policy",
-                    path.display()
-                )
-            })?;
-        }
-        if sso.browser_flow == Some(true) {
-            if sso.remote_human != Some(true) {
-                bail!(
-                    "gateway.sso.browser_flow in {} requires remote_human=true",
-                    path.display()
-                );
-            }
-            if sso.pkce_method.as_deref() != Some("S256") {
-                bail!(
-                    "gateway.sso.browser_flow in {} requires pkce_method=S256",
-                    path.display()
-                );
-            }
-            let endpoints = OidcEndpointPolicy::new(issuer, None).with_context(|| {
-                format!(
-                    "gateway.sso browser issuer in {} is invalid",
-                    path.display()
-                )
-            })?;
-            for (field, value) in [
-                (
-                    "gateway.sso.oidc_authorization_url",
-                    sso.oidc_authorization_url.as_deref(),
-                ),
-                ("gateway.sso.oidc_token_url", sso.oidc_token_url.as_deref()),
-            ] {
-                let value = value.with_context(|| {
-                    format!("{field} in {} is required for browser OIDC", path.display())
-                })?;
-                endpoints
-                    .validate_issuer_endpoint(value)
-                    .with_context(|| format!("{field} in {} is not permitted", path.display()))?;
-            }
-            let redirect = sso.oidc_redirect_uri.as_deref().with_context(|| {
-                format!(
-                    "gateway.sso.oidc_redirect_uri in {} is required for browser OIDC",
-                    path.display()
-                )
-            })?;
-            ValidatedOidcEndpoint::parse(redirect).with_context(|| {
-                format!(
-                    "gateway.sso.oidc_redirect_uri in {} is not permitted",
-                    path.display()
-                )
-            })?;
-            let redirect_path = url::Url::parse(redirect)
-                .map(|redirect| redirect.path().to_string())
-                .with_context(|| {
-                    format!(
-                        "gateway.sso.oidc_redirect_uri in {} is invalid",
-                        path.display()
-                    )
-                })?;
-            if !matches!(
-                redirect_path.as_str(),
-                "/prodex/gateway/auth/callback" | "/v1/prodex/gateway/auth/callback"
-            ) {
-                bail!(
-                    "gateway.sso.oidc_redirect_uri in {} must target the gateway OIDC callback",
-                    path.display()
-                );
-            }
-            if sso.oidc_client_id.is_none() {
-                bail!(
-                    "gateway.sso.oidc_client_id in {} is required for browser OIDC",
-                    path.display()
-                );
-            }
-        }
     }
-    validate_gateway_secret_source(
-        policy,
-        path,
-        "gateway.sso.oidc_client_secret",
-        None,
-        sso.oidc_client_secret_ref.as_ref(),
-        false,
-    )?;
-    if let Some(role) = sso.default_role.as_deref() {
-        validate_gateway_admin_role(role).with_context(|| {
-            format!("gateway.sso.default_role in {} is invalid", path.display())
+    if sso.browser_flow == Some(true) {
+        validate_gateway_sso_browser(sso, issuer, path)?;
+    }
+    Ok(())
+}
+
+fn validate_gateway_sso_browser(
+    sso: &RuntimePolicyGatewaySsoSettings,
+    issuer: &str,
+    path: &Path,
+) -> Result<()> {
+    if sso.remote_human != Some(true) {
+        bail!(
+            "gateway.sso.browser_flow in {} requires remote_human=true",
+            path.display()
+        );
+    }
+    if sso.pkce_method.as_deref() != Some("S256") {
+        bail!(
+            "gateway.sso.browser_flow in {} requires pkce_method=S256",
+            path.display()
+        );
+    }
+    let endpoints = OidcEndpointPolicy::new(issuer, None).with_context(|| {
+        format!(
+            "gateway.sso browser issuer in {} is invalid",
+            path.display()
+        )
+    })?;
+    for (field, value) in [
+        (
+            "gateway.sso.oidc_authorization_url",
+            sso.oidc_authorization_url.as_deref(),
+        ),
+        ("gateway.sso.oidc_token_url", sso.oidc_token_url.as_deref()),
+    ] {
+        let value = value.with_context(|| {
+            format!("{field} in {} is required for browser OIDC", path.display())
         })?;
+        endpoints
+            .validate_issuer_endpoint(value)
+            .with_context(|| format!("{field} in {} is not permitted", path.display()))?;
     }
-    validate_gateway_workload_identity(policy, path)?;
+    let redirect = sso.oidc_redirect_uri.as_deref().with_context(|| {
+        format!(
+            "gateway.sso.oidc_redirect_uri in {} is required for browser OIDC",
+            path.display()
+        )
+    })?;
+    ValidatedOidcEndpoint::parse(redirect).with_context(|| {
+        format!(
+            "gateway.sso.oidc_redirect_uri in {} is not permitted",
+            path.display()
+        )
+    })?;
+    let redirect_path = url::Url::parse(redirect)
+        .map(|redirect| redirect.path().to_string())
+        .with_context(|| {
+            format!(
+                "gateway.sso.oidc_redirect_uri in {} is invalid",
+                path.display()
+            )
+        })?;
+    if !matches!(
+        redirect_path.as_str(),
+        "/prodex/gateway/auth/callback" | "/v1/prodex/gateway/auth/callback"
+    ) {
+        bail!(
+            "gateway.sso.oidc_redirect_uri in {} must target the gateway OIDC callback",
+            path.display()
+        );
+    }
+    if sso.oidc_client_id.is_none() {
+        bail!(
+            "gateway.sso.oidc_client_id in {} is required for browser OIDC",
+            path.display()
+        );
+    }
     Ok(())
 }
 
 fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let workload = &policy.gateway.workload_identity;
-    let configured = workload.enabled.is_some()
-        || workload.issuer.is_some()
-        || workload.audience.is_some()
-        || workload.jwks_url.is_some()
-        || !workload.jwks_origin_allowlist.is_empty()
-        || workload.subject_claim.is_some()
-        || workload.tenant_claim.is_some()
-        || workload.scope_claim.is_some()
-        || workload.required_scope.is_some()
-        || workload.mtls_required.is_some()
-        || workload.mtls_ca_ref.is_some()
-        || workload.tls_identity_ref.is_some();
-    if !configured {
+    if !gateway_workload_identity_is_configured(workload) {
         return Ok(());
     }
     if workload.enabled != Some(true) {
@@ -397,6 +414,32 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
             policy.service_mode.as_str(),
         );
     }
+    validate_gateway_workload_mtls(policy, path)?;
+    if policy.service_mode == RuntimePolicyServiceMode::ControlPlane {
+        return validate_gateway_control_plane_workload(workload, path);
+    }
+    validate_gateway_data_plane_workload(workload, path)
+}
+
+fn gateway_workload_identity_is_configured(
+    workload: &RuntimePolicyGatewayWorkloadIdentitySettings,
+) -> bool {
+    workload.enabled.is_some()
+        || workload.issuer.is_some()
+        || workload.audience.is_some()
+        || workload.jwks_url.is_some()
+        || !workload.jwks_origin_allowlist.is_empty()
+        || workload.subject_claim.is_some()
+        || workload.tenant_claim.is_some()
+        || workload.scope_claim.is_some()
+        || workload.required_scope.is_some()
+        || workload.mtls_required.is_some()
+        || workload.mtls_ca_ref.is_some()
+        || workload.tls_identity_ref.is_some()
+}
+
+fn validate_gateway_workload_mtls(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let workload = &policy.gateway.workload_identity;
     let mtls_required = workload.mtls_required.unwrap_or(false);
     if policy.service_mode == RuntimePolicyServiceMode::ControlPlane && !mtls_required {
         bail!(
@@ -438,22 +481,33 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
             path.display()
         );
     }
-    if policy.service_mode == RuntimePolicyServiceMode::ControlPlane {
-        if workload.issuer.is_some()
-            || workload.audience.is_some()
-            || workload.jwks_url.is_some()
-            || !workload.jwks_origin_allowlist.is_empty()
-            || workload.subject_claim.is_some()
-            || workload.tenant_claim.is_some()
-            || workload.scope_claim.is_some()
-        {
-            bail!(
-                "gateway.workload_identity in {} must not configure OIDC/JWKS claims when used as a control-plane transport identity",
-                path.display()
-            );
-        }
-        return Ok(());
+    Ok(())
+}
+
+fn validate_gateway_control_plane_workload(
+    workload: &RuntimePolicyGatewayWorkloadIdentitySettings,
+    path: &Path,
+) -> Result<()> {
+    if workload.issuer.is_some()
+        || workload.audience.is_some()
+        || workload.jwks_url.is_some()
+        || !workload.jwks_origin_allowlist.is_empty()
+        || workload.subject_claim.is_some()
+        || workload.tenant_claim.is_some()
+        || workload.scope_claim.is_some()
+    {
+        bail!(
+            "gateway.workload_identity in {} must not configure OIDC/JWKS claims when used as a control-plane transport identity",
+            path.display()
+        );
     }
+    Ok(())
+}
+
+fn validate_gateway_data_plane_workload(
+    workload: &RuntimePolicyGatewayWorkloadIdentitySettings,
+    path: &Path,
+) -> Result<()> {
     let issuer = workload.issuer.as_deref().with_context(|| {
         format!(
             "gateway.workload_identity.issuer in {} is required",

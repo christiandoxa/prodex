@@ -45,6 +45,12 @@ pub(super) fn validate_gateway_observability(
         observability.http_bearer_token_ref.as_ref(),
         false,
     )?;
+    validate_gateway_siem_observability(policy, path)?;
+    Ok(())
+}
+
+fn validate_gateway_siem_observability(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let observability = &policy.gateway.observability;
     crate::validate_secrets::validate_gateway_secret_ref(
         policy,
         path,
@@ -132,6 +138,36 @@ pub(super) fn validate_gateway_observability(
 
 pub(super) fn validate_gateway_guardrails(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let guardrails = &policy.gateway.guardrails;
+    validate_gateway_guardrail_keywords(policy, path)?;
+    for (index, model) in guardrails.allowed_models.iter().enumerate() {
+        validate_gateway_exact_identifier(
+            model,
+            path,
+            &format!("gateway.guardrails.allowed_models[{index}]"),
+        )?;
+    }
+    validate_gateway_guardrail_webhook(policy, path)?;
+    for (index, phase) in guardrails.webhook_phases.iter().enumerate() {
+        validate_gateway_guardrail_webhook_phase(phase).with_context(|| {
+            format!(
+                "gateway.guardrails.webhook_phases[{index}] in {} is invalid",
+                path.display()
+            )
+        })?;
+    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.guardrails.webhook_bearer_token",
+        guardrails.webhook_bearer_token_env.as_deref(),
+        guardrails.webhook_bearer_token_ref.as_ref(),
+        false,
+    )?;
+    Ok(())
+}
+
+fn validate_gateway_guardrail_keywords(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let guardrails = &policy.gateway.guardrails;
     for (field, keywords) in [
         ("blocked_keywords", guardrails.blocked_keywords.as_slice()),
         (
@@ -162,13 +198,11 @@ pub(super) fn validate_gateway_guardrails(policy: &RuntimePolicyFile, path: &Pat
             }
         }
     }
-    for (index, model) in guardrails.allowed_models.iter().enumerate() {
-        validate_gateway_exact_identifier(
-            model,
-            path,
-            &format!("gateway.guardrails.allowed_models[{index}]"),
-        )?;
-    }
+    Ok(())
+}
+
+fn validate_gateway_guardrail_webhook(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let guardrails = &policy.gateway.guardrails;
     if let Some(url) = guardrails.webhook_url.as_deref() {
         validate_http_endpoint(url, path, "gateway.guardrails.webhook_url")?;
         if matches!(policy.governance.mode, RuntimeGovernanceMode::BankEnforce)
@@ -201,22 +235,6 @@ pub(super) fn validate_gateway_guardrails(policy: &RuntimePolicyFile, path: &Pat
             );
         }
     }
-    for (index, phase) in guardrails.webhook_phases.iter().enumerate() {
-        validate_gateway_guardrail_webhook_phase(phase).with_context(|| {
-            format!(
-                "gateway.guardrails.webhook_phases[{index}] in {} is invalid",
-                path.display()
-            )
-        })?;
-    }
-    validate_gateway_secret_source(
-        policy,
-        path,
-        "gateway.guardrails.webhook_bearer_token",
-        guardrails.webhook_bearer_token_env.as_deref(),
-        guardrails.webhook_bearer_token_ref.as_ref(),
-        false,
-    )?;
     Ok(())
 }
 
