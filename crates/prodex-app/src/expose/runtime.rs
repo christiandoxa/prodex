@@ -1,4 +1,5 @@
 use super::*;
+use std::net::SocketAddr;
 
 pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
     if args.no_tunnel {
@@ -35,34 +36,8 @@ pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
     let local_url = expose_access_url(&format!("http://{listen_addr}"), &bootstrap);
 
     let tunnel_requested = args.tunnel && !args.no_tunnel;
-    let mut tunnel_status = if tunnel_requested {
-        "starting cloudflared".to_string()
-    } else {
-        "disabled by default; pass --tunnel to publish this remote shell".to_string()
-    };
-    let mut tunnel_url = None;
-    let mut tunnel = if tunnel_requested {
-        match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
-            Ok(tunnel) => {
-                if let Some(url) = &tunnel.url {
-                    if let Some(host) = expose_public_host(url) {
-                        shared.allow_host(host);
-                    }
-                    tunnel_status = "ready".to_string();
-                    tunnel_url = Some(expose_access_url(url, &bootstrap));
-                } else {
-                    tunnel_status = "cloudflared started; public URL not reported".to_string();
-                }
-                Some(tunnel)
-            }
-            Err(err) => {
-                tunnel_status = expose_tunnel_unavailable_status(&err);
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let (tunnel_status, tunnel_url, mut tunnel) =
+        expose_start_tunnel(&shared, listen_addr, &bootstrap, tunnel_requested);
     print_expose_status(
         &local_url,
         max_clients,
@@ -82,6 +57,41 @@ pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
     shared.pty.shutdown();
     http.shutdown();
     Ok(())
+}
+
+fn expose_start_tunnel(
+    shared: &ExposeShared,
+    listen_addr: SocketAddr,
+    bootstrap: &str,
+    requested: bool,
+) -> (String, Option<String>, Option<CloudflaredTunnel>) {
+    if !requested {
+        return (
+            "disabled by default; pass --tunnel to publish this remote shell".to_string(),
+            None,
+            None,
+        );
+    }
+    match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
+        Ok(tunnel) => {
+            let Some(url) = tunnel.url.as_deref() else {
+                return (
+                    "cloudflared started; public URL not reported".to_string(),
+                    None,
+                    Some(tunnel),
+                );
+            };
+            if let Some(host) = expose_public_host(url) {
+                shared.allow_host(host);
+            }
+            (
+                "ready".to_string(),
+                Some(expose_access_url(url, bootstrap)),
+                Some(tunnel),
+            )
+        }
+        Err(err) => (expose_tunnel_unavailable_status(&err), None, None),
+    }
 }
 
 pub(super) fn print_expose_status(

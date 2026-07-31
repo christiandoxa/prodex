@@ -87,140 +87,34 @@ pub(crate) fn attempt_runtime_responses_request(
         let response_turn_state =
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
         if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let parts = await_runtime_proxy_async_task(
+            let Some(attempt) = handle_runtime_responses_non_success(
+                request_id,
                 shared,
-                "responses_buffer_response",
-                buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-            )
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    "responses_buffer_response",
-                    err,
-                );
-            })?;
-            if status == 401
-                && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                    request_id,
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    &mut recovery_steps,
-                )
-            {
-                continue;
-            }
-            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
-                status,
-                &parts.body,
-                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-            );
-            let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
-            let retryable_previous = status == 400
-                && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
-            let response = RuntimeResponsesReply::Buffered(parts);
-
-            if status == 401 {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    status,
-                );
-                return Ok(RuntimeResponsesAttempt::AuthFailed {
-                    profile_name: profile_name.to_string(),
-                    response,
-                });
-            }
-            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
-                return Ok(RuntimeResponsesAttempt::QuotaBlocked {
-                    profile_name: profile_name.to_string(),
-                    response,
-                });
-            }
-            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
-                return Ok(RuntimeResponsesAttempt::Overloaded {
-                    profile_name: profile_name.to_string(),
-                    response,
-                });
-            }
-            if retryable_previous {
-                return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
-                    profile_name: profile_name.to_string(),
-                    response,
-                    turn_state: response_turn_state,
-                });
-            }
-            if matches!(status, 401 | 403) || token_invalidated {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    status,
-                );
-            }
-
-            return Ok(RuntimeResponsesAttempt::Success {
-                profile_name: profile_name.to_string(),
+                profile_name,
                 response,
-            });
+                response_turn_state,
+                &mut recovery_steps,
+            )?
+            else {
+                continue;
+            };
+            return Ok(attempt);
         }
-        let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
-        let Some(inflight_guard) = inflight_guard.take() else {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "responses_inflight_guard_missing",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("profile", profile_name),
-                    ],
-                ),
-            );
-            return Err(anyhow::anyhow!(
-                "responses inflight guard missing before success forwarding"
-            ));
-        };
-        let success_shared = shared.clone();
-        let success_profile_name = profile_name.to_string();
-        let success_request_model_name = request_model_name;
-        let success_previous_response_id = request_previous_response_id.clone();
-        let success_prompt_cache_key = request_prompt_cache_key.clone();
-        let success_session_id = request_session_id.clone();
-        let success_turn_state = request_turn_state.clone();
-        let success_turn_state_override = turn_state_override.map(str::to_string);
-        let prepared =
-            await_runtime_proxy_async_task(shared, "responses_prepare_success", async move {
-                prepare_runtime_proxy_responses_success(
-                    RuntimeResponsesSuccessContext {
-                        request_id,
-                        request_model_name: success_request_model_name.as_deref(),
-                        request_previous_response_id: success_previous_response_id.as_deref(),
-                        request_prompt_cache_key: success_prompt_cache_key.as_deref(),
-                        request_session_id: success_session_id.as_deref(),
-                        request_turn_state: success_turn_state.as_deref(),
-                        turn_state_override: success_turn_state_override.as_deref(),
-                        shared: &success_shared,
-                        profile_name: &success_profile_name,
-                        inflight_guard,
-                    },
-                    response,
-                )
-                .await
-            })
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    "responses_prepare_success",
-                    err,
-                );
-            });
+        let prepared = prepare_runtime_responses_success_attempt(
+            RuntimeResponsesSuccessAttemptContext {
+                request_id,
+                shared: shared.clone(),
+                profile_name: profile_name.to_string(),
+                turn_state_override: turn_state_override.map(str::to_string),
+                request_previous_response_id: request_previous_response_id.clone(),
+                request_prompt_cache_key: request_prompt_cache_key.clone(),
+                request_session_id: request_session_id.clone(),
+                request_turn_state: request_turn_state.clone(),
+                request_model_name: runtime_smart_context_model_name_from_body(&request.body),
+                inflight_guard: inflight_guard.take(),
+            },
+            response,
+        );
         if let Ok(RuntimeResponsesAttempt::Success { profile_name, .. }) = &prepared {
             remember_runtime_prompt_cache_profile(
                 shared,
@@ -231,4 +125,168 @@ pub(crate) fn attempt_runtime_responses_request(
         }
         return prepared;
     }
+}
+
+fn handle_runtime_responses_non_success(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    response: reqwest::Response,
+    response_turn_state: Option<String>,
+    recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
+) -> Result<Option<RuntimeResponsesAttempt>> {
+    let status = response.status().as_u16();
+    let parts = await_runtime_proxy_async_task(
+        shared,
+        "responses_buffer_response",
+        buffer_runtime_proxy_async_response_parts(response, Vec::new()),
+    )
+    .inspect_err(|err| {
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Responses,
+            "responses_buffer_response",
+            err,
+        );
+    })?;
+    if status == 401
+        && runtime_try_recover_profile_auth_from_unauthorized_steps(
+            request_id,
+            shared,
+            profile_name,
+            RuntimeRouteKind::Responses,
+            recovery_steps,
+        )
+    {
+        return Ok(None);
+    }
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        &parts.body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
+    let retryable_previous =
+        status == 400 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+    let response = RuntimeResponsesReply::Buffered(parts);
+    if status == 401 {
+        note_runtime_profile_auth_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Responses,
+            status,
+        );
+        return Ok(Some(RuntimeResponsesAttempt::AuthFailed {
+            profile_name: profile_name.to_string(),
+            response,
+        }));
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
+        return Ok(Some(RuntimeResponsesAttempt::QuotaBlocked {
+            profile_name: profile_name.to_string(),
+            response,
+        }));
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+        return Ok(Some(RuntimeResponsesAttempt::Overloaded {
+            profile_name: profile_name.to_string(),
+            response,
+        }));
+    }
+    if retryable_previous {
+        return Ok(Some(RuntimeResponsesAttempt::PreviousResponseNotFound {
+            profile_name: profile_name.to_string(),
+            response,
+            turn_state: response_turn_state,
+        }));
+    }
+    if matches!(status, 401 | 403) || token_invalidated {
+        note_runtime_profile_auth_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Responses,
+            status,
+        );
+    }
+    Ok(Some(RuntimeResponsesAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response,
+    }))
+}
+
+struct RuntimeResponsesSuccessAttemptContext {
+    request_id: u64,
+    shared: RuntimeRotationProxyShared,
+    profile_name: String,
+    turn_state_override: Option<String>,
+    request_previous_response_id: Option<String>,
+    request_prompt_cache_key: Option<String>,
+    request_session_id: Option<String>,
+    request_turn_state: Option<String>,
+    request_model_name: Option<String>,
+    inflight_guard: Option<RuntimeProfileInFlightGuard>,
+}
+
+fn prepare_runtime_responses_success_attempt(
+    context: RuntimeResponsesSuccessAttemptContext,
+    response: reqwest::Response,
+) -> Result<RuntimeResponsesAttempt> {
+    let RuntimeResponsesSuccessAttemptContext {
+        request_id,
+        shared,
+        profile_name,
+        turn_state_override,
+        request_previous_response_id,
+        request_prompt_cache_key,
+        request_session_id,
+        request_turn_state,
+        request_model_name,
+        inflight_guard,
+    } = context;
+    let Some(inflight_guard) = inflight_guard else {
+        runtime_proxy_log(
+            &shared,
+            runtime_proxy_structured_log_message(
+                "responses_inflight_guard_missing",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("profile", profile_name),
+                ],
+            ),
+        );
+        return Err(anyhow::anyhow!(
+            "responses inflight guard missing before success forwarding"
+        ));
+    };
+    let success_shared = shared.clone();
+    let success_profile_name = profile_name.clone();
+    await_runtime_proxy_async_task(&shared, "responses_prepare_success", async move {
+        prepare_runtime_proxy_responses_success(
+            RuntimeResponsesSuccessContext {
+                request_id,
+                request_model_name: request_model_name.as_deref(),
+                request_previous_response_id: request_previous_response_id.as_deref(),
+                request_prompt_cache_key: request_prompt_cache_key.as_deref(),
+                request_session_id: request_session_id.as_deref(),
+                request_turn_state: request_turn_state.as_deref(),
+                turn_state_override: turn_state_override.as_deref(),
+                shared: &success_shared,
+                profile_name: &success_profile_name,
+                inflight_guard,
+            },
+            response,
+        )
+        .await
+    })
+    .inspect_err(|err| {
+        note_runtime_profile_transport_failure(
+            &shared,
+            &profile_name,
+            RuntimeRouteKind::Responses,
+            "responses_prepare_success",
+            err,
+        );
+    })
 }

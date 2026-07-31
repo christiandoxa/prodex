@@ -18,20 +18,62 @@ pub(crate) fn gateway_observability_config_with_resolver(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewayObservabilityConfig> {
-    let mut sinks = Vec::new();
-    for sink in &policy.observability.sinks {
-        if !gateway_exact_policy_identifier(sink) {
-            bail!("gateway.observability.sinks must be non-empty strings without whitespace");
-        }
-        sinks.push(sink.clone());
-    }
+    let mut sinks = gateway_observability_sinks(policy)?;
+    let jsonl_path = gateway_observability_jsonl_path(paths, policy)?;
+    let http_endpoint = policy
+        .observability
+        .http_endpoint
+        .as_deref()
+        .map(|value| {
+            gateway_observability_http_endpoint("gateway.observability.http_endpoint", value)
+        })
+        .transpose()?;
     if !sinks
         .iter()
         .any(|sink| sink.eq_ignore_ascii_case("runtime-log") || sink.eq_ignore_ascii_case("log"))
     {
         sinks.push("runtime-log".to_string());
     }
-    let jsonl_path = policy
+    if jsonl_path.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("jsonl")) {
+        sinks.push("jsonl".to_string());
+    }
+    if http_endpoint.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("http")) {
+        sinks.push("http".to_string());
+    }
+    let http_schema = gateway_observability_http_schema(policy)?;
+    let http_bearer_token = gateway_observability_secret_with_resolver(policy, resolver)?;
+    let siem_worker = RuntimeSiemWorkerConfig::from_policy(&policy.observability, resolver)?;
+    Ok(RuntimeGatewayObservabilityConfig {
+        sinks,
+        jsonl_path,
+        http_endpoint,
+        http_schema,
+        http_bearer_token,
+        siem_worker: siem_worker.map(std::sync::Arc::new),
+    })
+}
+
+fn gateway_observability_sinks(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Vec<String>> {
+    policy
+        .observability
+        .sinks
+        .iter()
+        .map(|sink| {
+            if !gateway_exact_policy_identifier(sink) {
+                bail!("gateway.observability.sinks must be non-empty strings without whitespace");
+            }
+            Ok(sink.clone())
+        })
+        .collect()
+}
+
+fn gateway_observability_jsonl_path(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Option<PathBuf>> {
+    policy
         .observability
         .jsonl_path
         .as_deref()
@@ -46,52 +88,26 @@ pub(crate) fn gateway_observability_config_with_resolver(
                 paths.root.join(path)
             })
         })
-        .transpose()?;
-    if jsonl_path.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("jsonl")) {
-        sinks.push("jsonl".to_string());
+        .transpose()
+}
+
+fn gateway_observability_http_schema(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<String> {
+    let Some(value) = policy.observability.http_schema.as_deref() else {
+        return Ok("generic".to_string());
+    };
+    if !gateway_exact_policy_identifier(value) {
+        bail!("gateway.observability.http_schema must be non-empty without whitespace");
     }
-    let http_endpoint = policy
-        .observability
-        .http_endpoint
-        .as_deref()
-        .map(|value| {
-            gateway_observability_http_endpoint("gateway.observability.http_endpoint", value)
-        })
-        .transpose()?;
-    if http_endpoint.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("http")) {
-        sinks.push("http".to_string());
+    match value.to_ascii_lowercase().as_str() {
+        "generic" | "otel" | "otlp" | "opentelemetry" | "datadog" | "langfuse" => {
+            Ok(value.to_ascii_lowercase())
+        }
+        _ => bail!(
+            "gateway.observability.http_schema must be one of generic, otel, otlp, datadog, langfuse"
+        ),
     }
-    let http_schema = policy
-        .observability
-        .http_schema
-        .as_deref()
-        .map(|value| {
-            if !gateway_exact_policy_identifier(value) {
-                bail!(
-                    "gateway.observability.http_schema must be non-empty without whitespace"
-                );
-            }
-            match value.to_ascii_lowercase().as_str() {
-                "generic" | "otel" | "otlp" | "opentelemetry" | "datadog" | "langfuse" => {
-                    Ok(value.to_ascii_lowercase())
-                }
-                _ => bail!(
-                    "gateway.observability.http_schema must be one of generic, otel, otlp, datadog, langfuse"
-                ),
-            }
-        })
-        .transpose()?
-        .unwrap_or_else(|| "generic".to_string());
-    let http_bearer_token = gateway_observability_secret_with_resolver(policy, resolver)?;
-    let siem_worker = RuntimeSiemWorkerConfig::from_policy(&policy.observability, resolver)?;
-    Ok(RuntimeGatewayObservabilityConfig {
-        sinks,
-        jsonl_path,
-        http_endpoint,
-        http_schema,
-        http_bearer_token,
-        siem_worker: siem_worker.map(std::sync::Arc::new),
-    })
 }
 
 pub(crate) fn gateway_observability_secret_with_resolver(

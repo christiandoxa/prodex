@@ -119,44 +119,7 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_v
     }
     match value {
         serde_json::Value::String(text) => {
-            let mut next = text.clone();
-            for reference in runtime_smart_context_artifact_ref_occurrences_from_text(text, aliases)
-            {
-                if rehydrate_ids.contains(&reference.id)
-                    && let Some(artifact_text) = store.get_text(&reference.id)
-                    && let Some(rehydrated_text) =
-                        runtime_smart_context_rehydrated_artifact_reference_text(
-                            &artifact_text,
-                            &reference,
-                        )
-                {
-                    let legacy_marker = format!("prodex-artifact:{}", reference.id);
-                    let short_marker = runtime_smart_context_artifact_ref(&reference.id);
-                    if reference.line_range.is_none()
-                        && runtime_smart_context_text_is_artifact_marker_summary(
-                            &next,
-                            &reference.id,
-                        )
-                    {
-                        next = rehydrated_text;
-                        stats.rehydrated_refs += 1;
-                        break;
-                    } else if next.contains(&reference.marker) {
-                        next = next.replace(&reference.marker, &rehydrated_text);
-                        stats.rehydrated_refs += 1;
-                    } else if next.contains(&legacy_marker) {
-                        next = next.replace(&legacy_marker, &rehydrated_text);
-                        stats.rehydrated_refs += 1;
-                    } else if next.contains(&short_marker) {
-                        next = next.replace(&short_marker, &rehydrated_text);
-                        stats.rehydrated_refs += 1;
-                    } else if next.trim() == reference.id {
-                        next = rehydrated_text;
-                        stats.rehydrated_refs += 1;
-                    }
-                }
-            }
-            *text = next;
+            runtime_smart_context_rehydrate_text(text, store, rehydrate_ids, aliases, stats);
         }
         serde_json::Value::Array(items) => {
             for item in items {
@@ -185,6 +148,67 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_v
         }
         _ => {}
     }
+}
+
+fn runtime_smart_context_rehydrate_text(
+    text: &mut String,
+    store: &RuntimeSmartContextArtifactStore,
+    rehydrate_ids: &BTreeSet<String>,
+    aliases: &BTreeMap<String, String>,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    let mut next = text.clone();
+    for reference in runtime_smart_context_artifact_ref_occurrences_from_text(text, aliases) {
+        if !rehydrate_ids.contains(&reference.id) {
+            continue;
+        }
+        let Some(artifact_text) = store.get_text(&reference.id) else {
+            continue;
+        };
+        let Some(rehydrated_text) =
+            runtime_smart_context_rehydrated_artifact_reference_text(&artifact_text, &reference)
+        else {
+            continue;
+        };
+        let Some((replacement, stop)) =
+            runtime_smart_context_reference_replacement(&next, &reference, rehydrated_text)
+        else {
+            continue;
+        };
+        next = replacement;
+        stats.rehydrated_refs += 1;
+        if stop {
+            break;
+        }
+    }
+    *text = next;
+}
+
+fn runtime_smart_context_reference_replacement(
+    current: &str,
+    reference: &RuntimeSmartContextArtifactReference,
+    rehydrated_text: String,
+) -> Option<(String, bool)> {
+    let legacy_marker = format!("prodex-artifact:{}", reference.id);
+    let short_marker = runtime_smart_context_artifact_ref(&reference.id);
+    if reference.line_range.is_none()
+        && runtime_smart_context_text_is_artifact_marker_summary(current, &reference.id)
+    {
+        return Some((rehydrated_text, true));
+    }
+    if current.contains(&reference.marker) {
+        return Some((current.replace(&reference.marker, &rehydrated_text), false));
+    }
+    if current.contains(&legacy_marker) {
+        return Some((current.replace(&legacy_marker, &rehydrated_text), false));
+    }
+    if current.contains(&short_marker) {
+        return Some((current.replace(&short_marker, &rehydrated_text), false));
+    }
+    current
+        .trim()
+        .eq(reference.id.as_str())
+        .then_some((rehydrated_text, false))
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_text_is_artifact_marker_summary(

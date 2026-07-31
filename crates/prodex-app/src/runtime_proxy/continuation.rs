@@ -193,47 +193,14 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     } else {
         RuntimeContinuationBindingKind::TurnState
     };
-    if runtime_age_stale_verified_continuation_status(
-        &mut runtime.continuation_statuses,
-        status_kind,
+    if runtime_compact_lineage_status_is_unusable(
+        shared,
+        runtime,
         key,
+        status_kind,
+        session_binding,
         now,
     ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_stale key={key}",
-                if session_binding {
-                    "compact_session"
-                } else {
-                    "compact_turn_state"
-                }
-            ),
-        );
-        schedule_runtime_binding_touch_save(
-            shared,
-            runtime,
-            RuntimeStateMutation::ContinuationStale(key.to_string()),
-        );
-        return None;
-    }
-    if runtime_continuation_status_recently_suspect(
-        &runtime.continuation_statuses,
-        status_kind,
-        key,
-        now,
-    ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_recent_suspect key={key}",
-                if session_binding {
-                    "compact_session"
-                } else {
-                    "compact_turn_state"
-                }
-            ),
-        );
         return None;
     }
     let (profile_name, dead_shadowed_by_binding) = {
@@ -254,22 +221,14 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
             ),
         )
     };
-    if runtime_continuation_status_map(&runtime.continuation_statuses, status_kind)
-        .get(key)
-        .is_some_and(runtime_continuation_status_is_terminal)
-        && !dead_shadowed_by_binding
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_dead key={key}",
-                if session_binding {
-                    "compact_session"
-                } else {
-                    "compact_turn_state"
-                }
-            ),
-        );
+    if runtime_compact_lineage_status_is_dead(
+        shared,
+        &runtime.continuation_statuses,
+        key,
+        status_kind,
+        session_binding,
+        dead_shadowed_by_binding,
+    ) {
         return None;
     }
     let bindings = if session_binding {
@@ -305,6 +264,84 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
         schedule_runtime_binding_touch_save(shared, runtime, mutation);
     }
     profile_name
+}
+
+fn runtime_compact_lineage_status_is_unusable(
+    shared: &RuntimeRotationProxyShared,
+    runtime: &mut RuntimeRotationState,
+    key: &str,
+    status_kind: RuntimeContinuationBindingKind,
+    session_binding: bool,
+    now: i64,
+) -> bool {
+    let affinity = if session_binding {
+        "compact_session"
+    } else {
+        "compact_turn_state"
+    };
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        status_kind,
+        key,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_stale key={key}"
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            runtime,
+            RuntimeStateMutation::ContinuationStale(key.to_string()),
+        );
+        return true;
+    }
+    if runtime_continuation_status_recently_suspect(
+        &runtime.continuation_statuses,
+        status_kind,
+        key,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_recent_suspect key={key}"
+            ),
+        );
+        return true;
+    }
+    false
+}
+
+fn runtime_compact_lineage_status_is_dead(
+    shared: &RuntimeRotationProxyShared,
+    statuses: &RuntimeContinuationStatuses,
+    key: &str,
+    status_kind: RuntimeContinuationBindingKind,
+    session_binding: bool,
+    dead_shadowed_by_binding: bool,
+) -> bool {
+    if !runtime_continuation_status_map(statuses, status_kind)
+        .get(key)
+        .is_some_and(runtime_continuation_status_is_terminal)
+        || dead_shadowed_by_binding
+    {
+        return false;
+    }
+    let affinity = if session_binding {
+        "compact_session"
+    } else {
+        "compact_turn_state"
+    };
+    runtime_proxy_log(
+        shared,
+        format!(
+            "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_dead key={key}"
+        ),
+    );
+    true
 }
 
 fn runtime_compact_followup_bound_profile_raw(

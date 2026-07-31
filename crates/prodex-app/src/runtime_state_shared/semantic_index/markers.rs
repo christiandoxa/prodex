@@ -228,21 +228,13 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_infer_command_kind(
     let mut saw_cargo_error = false;
     let mut saw_npm_test = false;
     for line in lines {
-        if line.starts_with("diff --git ") || line.starts_with("@@ ") {
-            saw_diff = true;
-        }
-        if line.contains("test result:") || line.starts_with("running ") && line.ends_with(" tests")
-        {
-            saw_cargo_test = true;
-        }
-        if line.contains("error: could not compile") {
-            saw_cargo_error = true;
-        }
-        if line.starts_with("npm ERR!") || line.starts_with("FAIL ") {
-            saw_npm_test = true;
-        }
-        if *line == "Traceback (most recent call last):" {
-            return Some("python".to_string());
+        match runtime_smart_context_command_line_kind(line) {
+            Some("python") => return Some("python".to_string()),
+            Some("diff") => saw_diff = true,
+            Some("cargo-test") => saw_cargo_test = true,
+            Some("cargo-build") => saw_cargo_error = true,
+            Some("npm-test") => saw_npm_test = true,
+            _ => {}
         }
     }
     if saw_cargo_test {
@@ -254,4 +246,20 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_infer_command_kind(
     } else {
         saw_diff.then(|| "diff".to_string())
     }
+}
+
+fn runtime_smart_context_command_line_kind(line: &str) -> Option<&'static str> {
+    if line.starts_with("diff --git ") || line.starts_with("@@ ") {
+        return Some("diff");
+    }
+    if line.contains("test result:") || line.starts_with("running ") && line.ends_with(" tests") {
+        return Some("cargo-test");
+    }
+    if line.contains("error: could not compile") {
+        return Some("cargo-build");
+    }
+    if line.starts_with("npm ERR!") || line.starts_with("FAIL ") {
+        return Some("npm-test");
+    }
+    (line == "Traceback (most recent call last):").then_some("python")
 }

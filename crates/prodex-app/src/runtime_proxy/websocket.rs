@@ -13,7 +13,7 @@ pub(in crate::runtime_proxy) use self::session_state::RuntimeWebsocketSessionSta
 pub(crate) use self::session_state::acquire_runtime_profile_inflight_guard;
 use self::tcp_connect_executor::*;
 pub(super) use self::unauthorized_recovery::{
-    RuntimeProfileUnauthorizedRecoveryStep,
+    RuntimeProfileUnauthorizedRecoveryStep, RuntimeProfileUnauthorizedRecoverySteps,
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
 use runtime_proxy_crate::{
@@ -157,62 +157,15 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let auth = runtime_profile_usage_auth(shared, profile_name)?;
-        let mut request = upstream_url
-            .as_str()
-            .into_client_request()
-            .with_context(|| format!("failed to build runtime websocket request for {log_url}"))?;
-
-        for (name, value) in runtime_forward_request_headers(
-            handshake_request
-                .headers
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.as_str())),
-        ) {
-            if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
-                continue;
-            }
-            if name.eq_ignore_ascii_case("cookie") {
-                continue;
-            }
-            let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
-                continue;
-            };
-            let Ok(header_value) = WsHeaderValue::from_str(value) else {
-                continue;
-            };
-            request.headers_mut().insert(header_name, header_value);
-        }
-        if let Some(turn_state) = turn_state_override {
-            request.headers_mut().insert(
-                WsHeaderName::from_static("x-codex-turn-state"),
-                WsHeaderValue::from_str(turn_state)
-                    .context("failed to encode websocket turn-state header")?,
-            );
-        }
-        if let Some(cookie_header) = runtime_proxy_cookie_header_for_websocket(
+        let request = build_runtime_proxy_websocket_request(
+            handshake_request,
             shared,
             profile_name,
+            turn_state_override,
+            auth,
             &upstream_url,
-            &handshake_request.headers,
-        ) && let Ok(cookie_header) = WsHeaderValue::from_str(&cookie_header)
-        {
-            request
-                .headers_mut()
-                .insert(WsHeaderName::from_static("cookie"), cookie_header);
-        }
-
-        request.headers_mut().insert(
-            WsHeaderName::from_static("authorization"),
-            WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
-                .context("failed to encode websocket authorization header")?,
-        );
-        if let Some(account_id) = auth.account_id.as_deref() {
-            request.headers_mut().insert(
-                WsHeaderName::from_static("chatgpt-account-id"),
-                WsHeaderValue::from_str(account_id)
-                    .context("failed to encode websocket account header")?,
-            );
-        }
+            &log_url,
+        )?;
 
         runtime_proxy_log(
             shared,
@@ -245,147 +198,217 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
             return Err(transport_error);
         }
         let started_at = Instant::now();
-        match connect_runtime_proxy_upstream_websocket_with_timeout(request_id, shared, request) {
-            Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
-                runtime_proxy_capture_websocket_cookies(
-                    shared,
-                    profile_name,
-                    &upstream_url,
-                    response.headers(),
-                );
-                return Ok(RuntimeWebsocketConnectResult::Connected {
-                    socket,
-                    turn_state: {
-                        let turn_state = runtime_proxy_tungstenite_header_value(
-                            response.headers(),
-                            "x-codex-turn-state",
-                        );
-                        runtime_proxy_log(
-                            shared,
-                            runtime_proxy_structured_log_message(
-                                "upstream_connect_ok",
-                                [
-                                    runtime_proxy_log_field("request", request_id.to_string()),
-                                    runtime_proxy_log_field("transport", "websocket"),
-                                    runtime_proxy_log_field("profile", profile_name),
-                                    runtime_proxy_log_field(
-                                        "status",
-                                        response.status().as_u16().to_string(),
-                                    ),
-                                    runtime_proxy_log_field("addr", selected_addr.to_string()),
-                                    runtime_proxy_log_field(
-                                        "resolved_addrs",
-                                        resolved_addrs.to_string(),
-                                    ),
-                                    runtime_proxy_log_field(
-                                        "attempted_addrs",
-                                        attempted_addrs.to_string(),
-                                    ),
-                                    runtime_proxy_log_field(
-                                        "turn_state",
-                                        if turn_state.is_some() {
-                                            "present"
-                                        } else {
-                                            "none"
-                                        },
-                                    ),
-                                ],
-                            ),
-                        );
-                        note_runtime_profile_latency_observation(
-                            shared,
-                            profile_name,
-                            RuntimeRouteKind::Websocket,
-                            "connect",
-                            started_at.elapsed().as_millis() as u64,
-                        );
-                        turn_state
-                    },
-                });
-            }
-            Err(WsError::Http(response)) => {
-                runtime_proxy_capture_websocket_cookies(
-                    shared,
-                    profile_name,
-                    &upstream_url,
-                    response.headers(),
-                );
-                let status = response.status().as_u16();
-                let body = response.body().clone().unwrap_or_default();
-                if status == 401
-                    && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                        request_id,
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        &mut recovery_steps,
-                    )
-                {
-                    continue;
-                }
-                let error_policy = runtime_proxy_crate::runtime_http_error_policy(
-                    status,
-                    &body,
-                    runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-                );
-                if (matches!(status, 401 | 403)
-                    && (status == 401
-                        || error_policy.action
-                            != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
-                    || runtime_proxy_body_indicates_token_invalidated(&body)
-                {
-                    note_runtime_profile_auth_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        status,
-                    );
-                }
-                runtime_proxy_log(
-                    shared,
-                    runtime_proxy_structured_log_message(
-                        "upstream_connect_http",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "websocket"),
-                            runtime_proxy_log_field("profile", profile_name),
-                            runtime_proxy_log_field("status", status.to_string()),
-                            runtime_proxy_log_field("body_bytes", body.len().to_string()),
-                        ],
-                    ),
-                );
-                if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-                {
-                    return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
-                        runtime_websocket_error_payload_from_http_body(&body),
-                    ));
-                }
-                if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
-                {
-                    return Ok(RuntimeWebsocketConnectResult::Overloaded(
-                        runtime_websocket_error_payload_from_http_body(&body),
-                    ));
-                }
-                let payload = if body.is_empty() {
-                    RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
-                        status,
-                        "upstream_rejected",
-                        &format!("Upstream rejected the WebSocket handshake with HTTP {status}."),
-                    ))
-                } else {
-                    runtime_websocket_error_payload_from_http_body(&body)
-                };
-                return Ok(RuntimeWebsocketConnectResult::Rejected(payload));
-            }
-            Err(err) => {
-                return Err(runtime_websocket_connect_transport_error(
-                    shared,
-                    request_id,
-                    profile_name,
-                    &err,
-                ));
-            }
+        if let Some(result) = handle_runtime_proxy_websocket_connect_attempt(
+            request_id,
+            shared,
+            profile_name,
+            &upstream_url,
+            request,
+            started_at,
+            &mut recovery_steps,
+        )? {
+            return Ok(result);
         }
+    }
+}
+
+fn build_runtime_proxy_websocket_request(
+    handshake_request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    turn_state_override: Option<&str>,
+    auth: UsageAuth,
+    upstream_url: &str,
+    log_url: &str,
+) -> Result<tungstenite::http::Request<()>> {
+    let mut request = upstream_url
+        .into_client_request()
+        .with_context(|| format!("failed to build runtime websocket request for {log_url}"))?;
+    for (name, value) in runtime_forward_request_headers(
+        handshake_request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ) {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
+        let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = WsHeaderValue::from_str(value) else {
+            continue;
+        };
+        request.headers_mut().insert(header_name, header_value);
+    }
+    if let Some(turn_state) = turn_state_override {
+        request.headers_mut().insert(
+            WsHeaderName::from_static("x-codex-turn-state"),
+            WsHeaderValue::from_str(turn_state)
+                .context("failed to encode websocket turn-state header")?,
+        );
+    }
+    if let Some(cookie_header) = runtime_proxy_cookie_header_for_websocket(
+        shared,
+        profile_name,
+        upstream_url,
+        &handshake_request.headers,
+    ) && let Ok(cookie_header) = WsHeaderValue::from_str(&cookie_header)
+    {
+        request
+            .headers_mut()
+            .insert(WsHeaderName::from_static("cookie"), cookie_header);
+    }
+    request.headers_mut().insert(
+        WsHeaderName::from_static("authorization"),
+        WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
+            .context("failed to encode websocket authorization header")?,
+    );
+    if let Some(account_id) = auth.account_id.as_deref() {
+        request.headers_mut().insert(
+            WsHeaderName::from_static("chatgpt-account-id"),
+            WsHeaderValue::from_str(account_id)
+                .context("failed to encode websocket account header")?,
+        );
+    }
+    Ok(request)
+}
+
+fn handle_runtime_proxy_websocket_connect_attempt(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    upstream_url: &str,
+    request: tungstenite::http::Request<()>,
+    started_at: Instant,
+    recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
+) -> Result<Option<RuntimeWebsocketConnectResult>> {
+    match connect_runtime_proxy_upstream_websocket_with_timeout(request_id, shared, request) {
+        Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
+            runtime_proxy_capture_websocket_cookies(
+                shared,
+                profile_name,
+                upstream_url,
+                response.headers(),
+            );
+            let turn_state =
+                runtime_proxy_tungstenite_header_value(response.headers(), "x-codex-turn-state");
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "upstream_connect_ok",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field("status", response.status().as_u16().to_string()),
+                        runtime_proxy_log_field("addr", selected_addr.to_string()),
+                        runtime_proxy_log_field("resolved_addrs", resolved_addrs.to_string()),
+                        runtime_proxy_log_field("attempted_addrs", attempted_addrs.to_string()),
+                        runtime_proxy_log_field(
+                            "turn_state",
+                            if turn_state.is_some() {
+                                "present"
+                            } else {
+                                "none"
+                            },
+                        ),
+                    ],
+                ),
+            );
+            note_runtime_profile_latency_observation(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Websocket,
+                "connect",
+                started_at.elapsed().as_millis() as u64,
+            );
+            Ok(Some(RuntimeWebsocketConnectResult::Connected {
+                socket,
+                turn_state,
+            }))
+        }
+        Err(WsError::Http(response)) => {
+            runtime_proxy_capture_websocket_cookies(
+                shared,
+                profile_name,
+                upstream_url,
+                response.headers(),
+            );
+            let status = response.status().as_u16();
+            let body = response.body().clone().unwrap_or_default();
+            if status == 401
+                && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                    request_id,
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Websocket,
+                    recovery_steps,
+                )
+            {
+                return Ok(None);
+            }
+            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+                status,
+                &body,
+                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+            );
+            if (matches!(status, 401 | 403)
+                && (status == 401
+                    || error_policy.action
+                        != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
+                || runtime_proxy_body_indicates_token_invalidated(&body)
+            {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Websocket,
+                    status,
+                );
+            }
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "upstream_connect_http",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field("status", status.to_string()),
+                        runtime_proxy_log_field("body_bytes", body.len().to_string()),
+                    ],
+                ),
+            );
+            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
+                return Ok(Some(RuntimeWebsocketConnectResult::QuotaBlocked(
+                    runtime_websocket_error_payload_from_http_body(&body),
+                )));
+            }
+            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+                return Ok(Some(RuntimeWebsocketConnectResult::Overloaded(
+                    runtime_websocket_error_payload_from_http_body(&body),
+                )));
+            }
+            let payload = if body.is_empty() {
+                RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                    status,
+                    "upstream_rejected",
+                    &format!("Upstream rejected the WebSocket handshake with HTTP {status}."),
+                ))
+            } else {
+                runtime_websocket_error_payload_from_http_body(&body)
+            };
+            Ok(Some(RuntimeWebsocketConnectResult::Rejected(payload)))
+        }
+        Err(err) => Err(runtime_websocket_connect_transport_error(
+            shared,
+            request_id,
+            profile_name,
+            &err,
+        )),
     }
 }
 

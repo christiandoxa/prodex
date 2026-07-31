@@ -279,39 +279,16 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
             }
             Err(rejection) => {
                 let elapsed = started_at.elapsed();
-                if elapsed >= budget {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "runtime_proxy_admission_wait_exhausted transport={transport} path={path} waited_ms={} reason={} pressure_mode={pressure_mode}",
-                            elapsed.as_millis(),
-                            match rejection {
-                                RuntimeProxyAdmissionRejection::GlobalLimit =>
-                                    "active_request_limit",
-                                RuntimeProxyAdmissionRejection::LaneLimit(lane) =>
-                                    runtime_route_kind_label(lane),
-                            }
-                        ),
-                    );
-                    record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
+                if runtime_proxy_admission_wait_is_exhausted_or_started(
+                    shared,
+                    RuntimeProxyAdmissionWaitContext { transport, path },
+                    pressure_mode,
+                    budget,
+                    elapsed,
+                    rejection,
+                    &mut wait_metric,
+                ) {
                     return Err(rejection);
-                }
-                if !wait_metric.started() {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason={} pressure_mode={pressure_mode}",
-                            budget.as_millis(),
-                            budget.saturating_sub(elapsed).as_millis(),
-                            match rejection {
-                                RuntimeProxyAdmissionRejection::GlobalLimit =>
-                                    "active_request_limit",
-                                RuntimeProxyAdmissionRejection::LaneLimit(lane) =>
-                                    runtime_route_kind_label(lane),
-                            }
-                        ),
-                    );
-                    wait_metric.start();
                 }
                 let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
@@ -373,57 +350,34 @@ where
             Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
                 item = returned_item;
                 let elapsed = started_at.elapsed();
-                if elapsed >= budget {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
-                            elapsed.as_millis()
-                        ),
-                    );
+                if runtime_proxy_queue_wait_is_exhausted_or_started(
+                    shared,
+                    transport,
+                    path,
+                    pressure_mode,
+                    budget,
+                    elapsed,
+                    &mut wait_metric,
+                ) {
                     return Err((RuntimeProxyQueueRejection::Full, item));
-                }
-                if !wait_metric.started() {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
-                            budget.as_millis(),
-                            budget.saturating_sub(elapsed).as_millis()
-                        ),
-                    );
-                    wait_metric.start();
                 }
                 let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                match try_enqueue(item) {
+                match runtime_proxy_queue_enqueue_after_wait(
+                    item,
+                    &mut try_enqueue,
+                    shared,
+                    transport,
+                    path,
+                    started_at,
+                ) {
                     Ok(()) => return Ok(()),
                     Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
                         item = returned_item;
                     }
-                    Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
-                        runtime_proxy_log(
-                            shared,
-                            runtime_proxy_structured_log_message(
-                                "runtime_proxy_queue_wait_exhausted",
-                                [
-                                    runtime_proxy_log_field("transport", transport),
-                                    runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
-                                    runtime_proxy_log_field(
-                                        "waited_ms",
-                                        started_at.elapsed().as_millis().to_string(),
-                                    ),
-                                    runtime_proxy_log_field(
-                                        "reason",
-                                        "long_lived_queue_disconnected",
-                                    ),
-                                ],
-                            ),
-                        );
-                        return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
-                    }
+                    Err(err) => return Err(err),
                 }
                 let wait_for = budget.saturating_sub(elapsed);
                 if !wait_for.is_zero() {
@@ -434,25 +388,146 @@ where
                 continue;
             }
             Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
-                runtime_proxy_log(
-                    shared,
-                    runtime_proxy_structured_log_message(
-                        "runtime_proxy_queue_wait_exhausted",
-                        [
-                            runtime_proxy_log_field("transport", transport),
-                            runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
-                            runtime_proxy_log_field(
-                                "waited_ms",
-                                started_at.elapsed().as_millis().to_string(),
-                            ),
-                            runtime_proxy_log_field("reason", "long_lived_queue_disconnected"),
-                        ],
-                    ),
-                );
+                log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
                 return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
             }
         }
     }
+}
+
+struct RuntimeProxyAdmissionWaitContext<'a> {
+    transport: &'a str,
+    path: &'a str,
+}
+
+fn runtime_proxy_admission_wait_is_exhausted_or_started(
+    shared: &RuntimeRotationProxyShared,
+    context: RuntimeProxyAdmissionWaitContext<'_>,
+    pressure_mode: bool,
+    budget: Duration,
+    elapsed: Duration,
+    rejection: RuntimeProxyAdmissionRejection,
+    wait_metric: &mut RuntimeProxyWaitMetricGuard<'_>,
+) -> bool {
+    if elapsed >= budget {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_admission_wait_exhausted transport={} path={} waited_ms={} reason={} pressure_mode={pressure_mode}",
+                context.transport,
+                context.path,
+                elapsed.as_millis(),
+                runtime_proxy_admission_rejection_reason(rejection),
+            ),
+        );
+        record_runtime_proxy_admission_rejection(
+            shared,
+            context.transport,
+            context.path,
+            rejection,
+        );
+        return true;
+    }
+    if !wait_metric.started() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_admission_wait_started transport={} path={} budget_ms={} wait_timeout_ms={} reason={} pressure_mode={pressure_mode}",
+                context.transport,
+                context.path,
+                budget.as_millis(),
+                budget.saturating_sub(elapsed).as_millis(),
+                runtime_proxy_admission_rejection_reason(rejection),
+            ),
+        );
+        wait_metric.start();
+    }
+    false
+}
+
+fn runtime_proxy_admission_rejection_reason(
+    rejection: RuntimeProxyAdmissionRejection,
+) -> &'static str {
+    match rejection {
+        RuntimeProxyAdmissionRejection::GlobalLimit => "active_request_limit",
+        RuntimeProxyAdmissionRejection::LaneLimit(lane) => runtime_route_kind_label(lane),
+    }
+}
+
+fn runtime_proxy_queue_wait_is_exhausted_or_started(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    pressure_mode: bool,
+    budget: Duration,
+    elapsed: Duration,
+    wait_metric: &mut RuntimeProxyWaitMetricGuard<'_>,
+) -> bool {
+    if elapsed >= budget {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
+                elapsed.as_millis()
+            ),
+        );
+        return true;
+    }
+    if !wait_metric.started() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
+                budget.as_millis(),
+                budget.saturating_sub(elapsed).as_millis()
+            ),
+        );
+        wait_metric.start();
+    }
+    false
+}
+
+fn runtime_proxy_queue_enqueue_after_wait<T, F>(
+    item: T,
+    try_enqueue: &mut F,
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    started_at: Instant,
+) -> Result<(), (RuntimeProxyQueueRejection, T)>
+where
+    F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
+{
+    match try_enqueue(item) {
+        Ok(()) => Ok(()),
+        Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
+            Err((RuntimeProxyQueueRejection::Full, returned_item))
+        }
+        Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
+            log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
+            Err((RuntimeProxyQueueRejection::Disconnected, returned_item))
+        }
+    }
+}
+
+fn log_runtime_proxy_queue_disconnected(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    started_at: Instant,
+) {
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "runtime_proxy_queue_wait_exhausted",
+            [
+                runtime_proxy_log_field("transport", transport),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
+                runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
+                runtime_proxy_log_field("reason", "long_lived_queue_disconnected"),
+            ],
+        ),
+    );
 }
 
 #[allow(clippy::result_large_err)]

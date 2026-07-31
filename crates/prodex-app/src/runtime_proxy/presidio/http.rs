@@ -10,7 +10,7 @@ use super::findings::{
     runtime_presidio_unavailable_source,
 };
 use super::local::{RuntimeTenantDetectorPatterns, runtime_local_inspect_and_mask_for_tenant};
-use super::registry::runtime_presidio_redaction_for_log_path;
+use super::registry::{RuntimePresidioRedactionState, runtime_presidio_redaction_for_log_path};
 use super::telemetry::{
     runtime_emit_inspection_denied_metric, runtime_emit_inspection_metric,
     runtime_inspection_duration_micros, runtime_inspection_error_outcome,
@@ -20,7 +20,7 @@ use super::telemetry::{
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
 use anyhow::{Context, Result, anyhow};
-use prodex_application::ApplicationInspectionPlan;
+use prodex_application::{ApplicationInspectionPlan, ApplicationInspectionSource};
 use prodex_domain::{DetectorRevisionId, InspectionCoverage, TenantId};
 use prodex_observability::{InspectionMaskingAction, InspectionOutcome, InspectionStage};
 use std::time::Instant;
@@ -72,15 +72,59 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
         );
     }
 
-    let original_bytes = request.body.len();
-    let local_started = Instant::now();
     let local_fail_closed = runtime_local_inspection_fail_closed(
         governance.inspection,
         legacy_local_enabled,
         tenant_detector_patterns.has_for_tenant(tenant_id),
         state.as_ref().map(|state| state.config.fail_closed),
     );
-    let mut sources = match runtime_local_inspect_and_mask_for_tenant(
+    let mut sources = runtime_apply_local_http_inspection(
+        request_id,
+        request,
+        shared,
+        tenant_detector_patterns,
+        tenant_id,
+        local_fail_closed,
+        state.is_some(),
+    )?;
+    let Some(state) = state else {
+        return runtime_presidio_inspection_plan(
+            sources,
+            governance.classification_default,
+            detector_revision,
+        );
+    };
+    if request.body.is_empty() {
+        return runtime_presidio_inspection_plan(
+            sources,
+            governance.classification_default,
+            detector_revision,
+        );
+    }
+
+    runtime_apply_external_http_redaction(
+        request_id,
+        request,
+        shared,
+        governance,
+        detector_revision,
+        &mut sources,
+        state,
+    )
+}
+
+fn runtime_apply_local_http_inspection(
+    request_id: u64,
+    request: &mut RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    tenant_detector_patterns: &RuntimeTenantDetectorPatterns,
+    tenant_id: Option<TenantId>,
+    local_fail_closed: bool,
+    redaction_state_present: bool,
+) -> Result<Vec<ApplicationInspectionSource>> {
+    let original_bytes = request.body.len();
+    let local_started = Instant::now();
+    match runtime_local_inspect_and_mask_for_tenant(
         std::mem::take(&mut request.body),
         tenant_detector_patterns,
         tenant_id,
@@ -109,11 +153,11 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
                     shared,
                 );
             }
-            vec![runtime_local_inspection_source(
+            Ok(vec![runtime_local_inspection_source(
                 local.coverage,
                 local.findings,
                 local.changed,
-            )?]
+            )?])
         }
         Err(failure) => {
             request.body = failure.body;
@@ -130,31 +174,29 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
                 runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            if state.is_some() {
+            if redaction_state_present {
                 runtime_log_presidio_redaction_error(request_id, "http", local_fail_closed, shared);
             }
             if local_fail_closed {
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 return Err(failure.error);
             }
-            vec![runtime_presidio_unavailable_source("local.unavailable")?]
+            Ok(vec![runtime_presidio_unavailable_source(
+                "local.unavailable",
+            )?])
         }
-    };
-    let Some(state) = state else {
-        return runtime_presidio_inspection_plan(
-            sources,
-            governance.classification_default,
-            detector_revision,
-        );
-    };
-    if request.body.is_empty() {
-        return runtime_presidio_inspection_plan(
-            sources,
-            governance.classification_default,
-            detector_revision,
-        );
     }
+}
 
+fn runtime_apply_external_http_redaction(
+    request_id: u64,
+    request: &mut RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    governance: &prodex_config::GovernanceConfig,
+    detector_revision: &DetectorRevisionId,
+    sources: &mut Vec<ApplicationInspectionSource>,
+    state: std::sync::Arc<RuntimePresidioRedactionState>,
+) -> Result<ApplicationInspectionPlan> {
     let presidio_input_bytes = request.body.len();
     let external_started = Instant::now();
     let redaction = await_runtime_proxy_async_task(
@@ -190,7 +232,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
             }
             sources.push(redaction.source);
             runtime_presidio_inspection_plan(
-                sources,
+                std::mem::take(sources),
                 governance.classification_default,
                 detector_revision,
             )
@@ -219,7 +261,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
             } else {
                 sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
                 runtime_presidio_inspection_plan(
-                    sources,
+                    std::mem::take(sources),
                     governance.classification_default,
                     detector_revision,
                 )

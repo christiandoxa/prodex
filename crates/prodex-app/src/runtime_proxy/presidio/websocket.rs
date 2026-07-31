@@ -10,7 +10,7 @@ use super::findings::{
     runtime_presidio_unavailable_source,
 };
 use super::local::{RuntimeTenantDetectorPatterns, runtime_local_inspect_and_mask_for_tenant};
-use super::registry::runtime_presidio_redaction_for_log_path;
+use super::registry::{RuntimePresidioRedactionState, runtime_presidio_redaction_for_log_path};
 use super::telemetry::{
     runtime_emit_inspection_denied_metric, runtime_emit_inspection_metric,
     runtime_inspection_duration_micros, runtime_inspection_error_outcome,
@@ -82,14 +82,57 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
         return Ok(result);
     }
 
-    let local_started = Instant::now();
     let local_fail_closed = runtime_local_inspection_fail_closed(
         governance.inspection,
         legacy_local_enabled,
         tenant_detector_patterns.has_for_tenant(tenant_id),
         state.as_ref().map(|state| state.config.fail_closed),
     );
-    let (mut body, mut sources) = match runtime_local_inspect_and_mask_for_tenant(
+    let (body, sources) = runtime_apply_local_websocket_inspection(
+        request_id,
+        text,
+        shared,
+        tenant_detector_patterns,
+        tenant_id,
+        local_fail_closed,
+        state.is_some(),
+    )?;
+    let Some(state) = state else {
+        return runtime_local_websocket_inspection(
+            request_id,
+            text,
+            body,
+            sources,
+            shared,
+            governance.classification_default,
+            detector_revision,
+        );
+    };
+    runtime_apply_external_websocket_redaction(
+        request_id,
+        text,
+        body,
+        sources,
+        shared,
+        RuntimeExternalWebSocketRedactionContext {
+            governance,
+            detector_revision,
+            state,
+        },
+    )
+}
+
+fn runtime_apply_local_websocket_inspection(
+    request_id: u64,
+    text: &str,
+    shared: &RuntimeRotationProxyShared,
+    tenant_detector_patterns: &RuntimeTenantDetectorPatterns,
+    tenant_id: Option<TenantId>,
+    local_fail_closed: bool,
+    redaction_state_present: bool,
+) -> Result<(Vec<u8>, Vec<ApplicationInspectionSource>)> {
+    let local_started = Instant::now();
+    match runtime_local_inspect_and_mask_for_tenant(
         text.as_bytes().to_vec(),
         tenant_detector_patterns,
         tenant_id,
@@ -110,7 +153,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
             );
             let source =
                 runtime_local_inspection_source(local.coverage, local.findings, local.changed)?;
-            (local.body, vec![source])
+            Ok((local.body, vec![source]))
         }
         Err(failure) => {
             runtime_emit_inspection_metric(
@@ -126,7 +169,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
                 runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            if state.is_some() {
+            if redaction_state_present {
                 runtime_log_presidio_redaction_error(
                     request_id,
                     "websocket",
@@ -138,23 +181,33 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 return Err(failure.error);
             }
-            (
+            Ok((
                 failure.body,
                 vec![runtime_presidio_unavailable_source("local.unavailable")?],
-            )
+            ))
         }
-    };
-    let Some(state) = state else {
-        return runtime_local_websocket_inspection(
-            request_id,
-            text,
-            body,
-            sources,
-            shared,
-            governance.classification_default,
-            detector_revision,
-        );
-    };
+    }
+}
+
+struct RuntimeExternalWebSocketRedactionContext<'a> {
+    governance: &'a prodex_config::GovernanceConfig,
+    detector_revision: &'a DetectorRevisionId,
+    state: std::sync::Arc<RuntimePresidioRedactionState>,
+}
+
+fn runtime_apply_external_websocket_redaction<'a>(
+    request_id: u64,
+    text: &'a str,
+    mut body: Vec<u8>,
+    mut sources: Vec<ApplicationInspectionSource>,
+    shared: &RuntimeRotationProxyShared,
+    context: RuntimeExternalWebSocketRedactionContext<'_>,
+) -> Result<RuntimePresidioWebSocketInspection<'a>> {
+    let RuntimeExternalWebSocketRedactionContext {
+        governance,
+        detector_revision,
+        state,
+    } = context;
     let external_started = Instant::now();
     let redaction = await_runtime_proxy_async_task(
         shared,

@@ -107,59 +107,23 @@ pub(crate) fn clear_runtime_dead_response_bindings(
     let mut changed = false;
     let mut dead_turn_states = BTreeSet::new();
     for response_id in &response_ids {
-        if runtime
-            .state
-            .response_profile_bindings
-            .get(*response_id)
-            .is_some_and(|binding| binding.profile_name != profile_name)
-        {
-            continue;
-        }
-        changed = runtime
-            .state
-            .response_profile_bindings
-            .remove(*response_id)
-            .is_some()
-            || changed;
-        let removed_turn_states = drain_runtime_response_turn_state_lineage(
-            &mut runtime.state.response_profile_bindings,
-            response_id,
-            Some(profile_name),
-        );
-        changed = !removed_turn_states.is_empty() || changed;
+        let (response_changed, removed_turn_states) =
+            clear_runtime_dead_response_binding(&mut runtime, response_id, profile_name, now);
+        changed = response_changed || changed;
         dead_turn_states.extend(removed_turn_states);
-        changed = runtime_mark_continuation_status_dead(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::Response,
-            response_id,
-            now,
-        ) || changed;
     }
     let surviving_turn_states = runtime_live_response_turn_states_for_profile(
         &runtime.state.response_profile_bindings,
         profile_name,
         &dead_turn_states,
     );
-    for turn_state in dead_turn_states {
-        if runtime
-            .turn_state_bindings
-            .get(turn_state.as_str())
-            .is_some_and(|binding| binding.profile_name == profile_name)
-            && !surviving_turn_states.contains(turn_state.as_str())
-        {
-            changed = runtime
-                .turn_state_bindings
-                .remove(turn_state.as_str())
-                .is_some()
-                || changed;
-            changed = runtime_mark_continuation_status_dead(
-                &mut runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::TurnState,
-                turn_state.as_str(),
-                now,
-            ) || changed;
-        }
-    }
+    changed = clear_runtime_dead_turn_state_bindings(
+        &mut runtime,
+        profile_name,
+        dead_turn_states,
+        &surviving_turn_states,
+        now,
+    ) || changed;
 
     if changed {
         schedule_runtime_state_save_from_runtime(
@@ -181,6 +145,71 @@ pub(crate) fn clear_runtime_dead_response_bindings(
     }
 
     Ok(changed)
+}
+
+fn clear_runtime_dead_response_binding(
+    runtime: &mut RuntimeRotationState,
+    response_id: &str,
+    profile_name: &str,
+    now: i64,
+) -> (bool, BTreeSet<String>) {
+    if runtime
+        .state
+        .response_profile_bindings
+        .get(response_id)
+        .is_some_and(|binding| binding.profile_name != profile_name)
+    {
+        return (false, BTreeSet::new());
+    }
+    let mut changed = runtime
+        .state
+        .response_profile_bindings
+        .remove(response_id)
+        .is_some();
+    let removed_turn_states = drain_runtime_response_turn_state_lineage(
+        &mut runtime.state.response_profile_bindings,
+        response_id,
+        Some(profile_name),
+    );
+    changed = !removed_turn_states.is_empty() || changed;
+    changed = runtime_mark_continuation_status_dead(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+        response_id,
+        now,
+    ) || changed;
+    (changed, removed_turn_states)
+}
+
+fn clear_runtime_dead_turn_state_bindings(
+    runtime: &mut RuntimeRotationState,
+    profile_name: &str,
+    dead_turn_states: BTreeSet<String>,
+    surviving_turn_states: &BTreeSet<String>,
+    now: i64,
+) -> bool {
+    let mut changed = false;
+    for turn_state in dead_turn_states {
+        if runtime
+            .turn_state_bindings
+            .get(turn_state.as_str())
+            .is_some_and(|binding| binding.profile_name == profile_name)
+            && !surviving_turn_states.contains(turn_state.as_str())
+        {
+            changed = runtime
+                .turn_state_bindings
+                .remove(turn_state.as_str())
+                .is_some()
+                || changed;
+            changed = runtime_mark_continuation_status_dead(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::TurnState,
+                turn_state.as_str(),
+                now,
+            ) || changed;
+        }
+    }
+    changed
 }
 pub(super) fn release_runtime_affinity_bindings(
     runtime: &mut RuntimeRotationState,

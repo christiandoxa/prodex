@@ -67,22 +67,7 @@ pub(crate) fn gateway_route_alias_model_metrics(
     models: &[String],
     configured: &[prodex_runtime_policy::RuntimePolicyGatewayRouteModelMetrics],
 ) -> Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelMetrics>> {
-    let mut metrics = BTreeMap::new();
-    for model in models {
-        if let Some(provider) = provider {
-            let cost = prodex_provider_core::provider_model_cost(provider, model);
-            if cost.any() {
-                metrics.insert(
-                    model.clone(),
-                    runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
-                        input_cost_per_million_microusd: cost.input_cost_per_million_microusd,
-                        output_cost_per_million_microusd: cost.output_cost_per_million_microusd,
-                        ..runtime_proxy_crate::RuntimeGatewayRouteModelMetrics::default()
-                    },
-                );
-            }
-        }
-    }
+    let mut metrics = gateway_route_alias_provider_metrics(provider, models);
     for metric in configured {
         if !gateway_exact_policy_identifier(&metric.model) {
             bail!(
@@ -97,23 +82,55 @@ pub(crate) fn gateway_route_alias_model_metrics(
             );
         }
         let entry = metrics.entry(metric.model.clone()).or_default();
-        if metric.input_cost_per_million_microusd.is_some() {
-            entry.input_cost_per_million_microusd = metric.input_cost_per_million_microusd;
-        }
-        if metric.output_cost_per_million_microusd.is_some() {
-            entry.output_cost_per_million_microusd = metric.output_cost_per_million_microusd;
-        }
-        if metric.latency_ms.is_some() {
-            entry.latency_ms = metric.latency_ms;
-        }
-        if metric.rpm_limit.is_some() {
-            entry.rpm_limit = metric.rpm_limit;
-        }
-        if metric.tpm_limit.is_some() {
-            entry.tpm_limit = metric.tpm_limit;
-        }
+        gateway_route_alias_apply_model_metrics(entry, metric);
     }
     Ok(metrics)
+}
+
+fn gateway_route_alias_provider_metrics(
+    provider: Option<prodex_provider_core::ProviderId>,
+    models: &[String],
+) -> BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelMetrics> {
+    let Some(provider) = provider else {
+        return BTreeMap::new();
+    };
+    models
+        .iter()
+        .filter_map(|model| {
+            let cost = prodex_provider_core::provider_model_cost(provider, model);
+            cost.any().then(|| {
+                (
+                    model.clone(),
+                    runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                        input_cost_per_million_microusd: cost.input_cost_per_million_microusd,
+                        output_cost_per_million_microusd: cost.output_cost_per_million_microusd,
+                        ..runtime_proxy_crate::RuntimeGatewayRouteModelMetrics::default()
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn gateway_route_alias_apply_model_metrics(
+    entry: &mut runtime_proxy_crate::RuntimeGatewayRouteModelMetrics,
+    metric: &prodex_runtime_policy::RuntimePolicyGatewayRouteModelMetrics,
+) {
+    if let Some(value) = metric.input_cost_per_million_microusd {
+        entry.input_cost_per_million_microusd = Some(value);
+    }
+    if let Some(value) = metric.output_cost_per_million_microusd {
+        entry.output_cost_per_million_microusd = Some(value);
+    }
+    if let Some(value) = metric.latency_ms {
+        entry.latency_ms = Some(value);
+    }
+    if let Some(value) = metric.rpm_limit {
+        entry.rpm_limit = Some(value);
+    }
+    if let Some(value) = metric.tpm_limit {
+        entry.tpm_limit = Some(value);
+    }
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

@@ -124,88 +124,23 @@ pub(super) fn runtime_local_rewrite_provider_options(
             if provider.eq_ignore_ascii_case("anthropic")
                 || provider.eq_ignore_ascii_case("claude") =>
         {
-            if let Some(api_keys) =
-                runtime_anthropic_api_keys_from_request_or_env(request.external_provider_api_key)?
-            {
-                return Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
-                    auth: RuntimeAnthropicProviderAuth::ApiKeys { api_keys },
-                });
-            }
-            if selection.profileless_local_home {
-                bail!(
-                    "Anthropic provider requires Claude sign-in from `prodex login --with-claude`, or --api-key / ANTHROPIC_API_KEY(S)"
-                );
-            }
-            let profiles =
-                runtime_anthropic_oauth_profiles_for_provider(state, selection, request)?;
-            Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
-                auth: RuntimeAnthropicProviderAuth::OAuthProfiles { profiles },
-            })
+            runtime_local_rewrite_anthropic_options(state, selection, request)
         }
         Some(provider)
             if provider.eq_ignore_ascii_case("copilot")
                 || provider.eq_ignore_ascii_case("github-copilot")
                 || provider.eq_ignore_ascii_case("github_copilot") =>
         {
-            if let Some(api_keys) =
-                runtime_copilot_api_keys_from_request_or_env(request.external_provider_api_key)?
-            {
-                return Ok(RuntimeLocalRewriteProviderOptions::Copilot {
-                    auth: RuntimeCopilotProviderAuth::ApiKeys { api_keys },
-                });
-            }
-            if selection.profileless_local_home {
-                bail!(
-                    "Copilot provider requires `prodex profile import copilot`, or --api-key / GITHUB_COPILOT_API_KEY(S)"
-                );
-            }
-            let profiles = runtime_copilot_profiles_for_provider(state, selection, request)?;
-            Ok(RuntimeLocalRewriteProviderOptions::Copilot {
-                auth: RuntimeCopilotProviderAuth::Profiles { profiles },
-            })
+            runtime_local_rewrite_copilot_options(state, selection, request)
         }
         Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
-            let api_keys = runtime_deepseek_api_keys_from_request_or_env(
-                request.external_provider_api_key,
-            )?
-            .context(
-                "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY(S) in the environment",
-            )?;
-            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek {
-                api_keys,
-                strict_tools: runtime_deepseek_strict_tools_enabled(&selection.codex_home)?,
-                beta_base_url: runtime_deepseek_beta_base_url(&selection.codex_home)?,
-                web_search_mode: runtime_deepseek_web_search_mode(&selection.codex_home)?,
-            })
+            runtime_local_rewrite_deepseek_options(selection, request)
         }
         Some(provider)
             if provider.eq_ignore_ascii_case("gemini")
                 || provider.eq_ignore_ascii_case("gemini-oauth") =>
         {
-            let thinking_budget_tokens =
-                runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
-            let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
-            if !provider.eq_ignore_ascii_case("gemini-oauth")
-                && let Some(api_keys) =
-                    runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)?
-            {
-                return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
-                    auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },
-                    thinking_budget_tokens,
-                    model_resolution,
-                });
-            }
-            if selection.profileless_local_home {
-                bail!(
-                    "Gemini provider requires Google sign-in from `prodex login`, or --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S)"
-                );
-            }
-            let profiles = runtime_gemini_oauth_profiles_for_provider(state, selection, request)?;
-            Ok(RuntimeLocalRewriteProviderOptions::Gemini {
-                auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
-                thinking_budget_tokens,
-                model_resolution,
-            })
+            runtime_local_rewrite_gemini_options(state, selection, request, provider)
         }
         Some(provider) if provider.eq_ignore_ascii_case("kiro") => {
             let auth = runtime_kiro_profile_for_provider(state, selection)?;
@@ -216,4 +151,98 @@ pub(super) fn runtime_local_rewrite_provider_options(
             api_keys: Vec::new(),
         }),
     }
+}
+
+fn runtime_local_rewrite_anthropic_options(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    if let Some(api_keys) =
+        runtime_anthropic_api_keys_from_request_or_env(request.external_provider_api_key)?
+    {
+        return Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
+            auth: RuntimeAnthropicProviderAuth::ApiKeys { api_keys },
+        });
+    }
+    if selection.profileless_local_home {
+        bail!(
+            "Anthropic provider requires Claude sign-in from `prodex login --with-claude`, or --api-key / ANTHROPIC_API_KEY(S)"
+        );
+    }
+    let profiles = runtime_anthropic_oauth_profiles_for_provider(state, selection, request)?;
+    Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
+        auth: RuntimeAnthropicProviderAuth::OAuthProfiles { profiles },
+    })
+}
+
+fn runtime_local_rewrite_copilot_options(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    if let Some(api_keys) =
+        runtime_copilot_api_keys_from_request_or_env(request.external_provider_api_key)?
+    {
+        return Ok(RuntimeLocalRewriteProviderOptions::Copilot {
+            auth: RuntimeCopilotProviderAuth::ApiKeys { api_keys },
+        });
+    }
+    if selection.profileless_local_home {
+        bail!(
+            "Copilot provider requires `prodex profile import copilot`, or --api-key / GITHUB_COPILOT_API_KEY(S)"
+        );
+    }
+    let profiles = runtime_copilot_profiles_for_provider(state, selection, request)?;
+    Ok(RuntimeLocalRewriteProviderOptions::Copilot {
+        auth: RuntimeCopilotProviderAuth::Profiles { profiles },
+    })
+}
+
+fn runtime_local_rewrite_deepseek_options(
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    let api_keys = runtime_deepseek_api_keys_from_request_or_env(
+        request.external_provider_api_key,
+    )?
+    .context("DeepSeek provider requires --api-key or DEEPSEEK_API_KEY(S) in the environment")?;
+    Ok(RuntimeLocalRewriteProviderOptions::DeepSeek {
+        api_keys,
+        strict_tools: runtime_deepseek_strict_tools_enabled(&selection.codex_home)?,
+        beta_base_url: runtime_deepseek_beta_base_url(&selection.codex_home)?,
+        web_search_mode: runtime_deepseek_web_search_mode(&selection.codex_home)?,
+    })
+}
+
+fn runtime_local_rewrite_gemini_options(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+    provider: &str,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    let thinking_budget_tokens =
+        runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
+    let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
+    if !provider.eq_ignore_ascii_case("gemini-oauth")
+        && let Some(api_keys) =
+            runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)?
+    {
+        return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
+            auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },
+            thinking_budget_tokens,
+            model_resolution,
+        });
+    }
+    if selection.profileless_local_home {
+        bail!(
+            "Gemini provider requires Google sign-in from `prodex login`, or --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S)"
+        );
+    }
+    let profiles = runtime_gemini_oauth_profiles_for_provider(state, selection, request)?;
+    Ok(RuntimeLocalRewriteProviderOptions::Gemini {
+        auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
+        thinking_budget_tokens,
+        model_resolution,
+    })
 }

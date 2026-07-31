@@ -52,41 +52,50 @@ pub(super) fn merge_presidio_analyzer_results(
 
     let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
     for result in results {
-        if let Some(last) = merged.last_mut() {
-            if last.start == result.start
-                && last.end == result.end
-                && last.entity_type == result.entity_type
-            {
-                if result.score > last.score {
-                    *last = result;
-                }
-                continue;
-            }
-
-            let overlaps = result.start < last.end && result.end > last.start;
-            if overlaps
-                && (result.score > last.score
-                    || (result.score == last.score
-                        && (result.end - result.start) > (last.end - last.start)))
-            {
-                if (result.start >= last.start && result.end <= last.end)
-                    || (last.start >= result.start && last.end <= result.end)
-                {
-                    if result.score > last.score {
-                        *last = result;
-                    }
-                    continue;
-                } else if result.score > last.score {
-                    last.start = last.start.min(result.start);
-                    last.end = last.end.max(result.end);
-                    last.score = result.score;
-                    last.entity_type = result.entity_type;
-                    last.language = result.language;
-                    continue;
-                }
-            }
+        if let Some(result) = merge_presidio_analyzer_result(&mut merged, result) {
+            merged.push(result);
         }
-        merged.push(result);
     }
     merged
+}
+
+fn merge_presidio_analyzer_result(
+    merged: &mut [PresidioAnalyzerResult],
+    result: PresidioAnalyzerResult,
+) -> Option<PresidioAnalyzerResult> {
+    let Some(last) = merged.last_mut() else {
+        return Some(result);
+    };
+    if last.start == result.start
+        && last.end == result.end
+        && last.entity_type == result.entity_type
+    {
+        if result.score > last.score {
+            *last = result;
+        }
+        return None;
+    }
+    let overlaps = result.start < last.end && result.end > last.start;
+    let stronger_or_longer = result.score > last.score
+        || (result.score == last.score && (result.end - result.start) > (last.end - last.start));
+    if !overlaps || !stronger_or_longer {
+        return Some(result);
+    }
+    let contained = (result.start >= last.start && result.end <= last.end)
+        || (last.start >= result.start && last.end <= result.end);
+    if contained {
+        if result.score > last.score {
+            *last = result;
+        }
+        return None;
+    }
+    if result.score > last.score {
+        last.start = last.start.min(result.start);
+        last.end = last.end.max(result.end);
+        last.score = result.score;
+        last.entity_type = result.entity_type;
+        last.language = result.language;
+        return None;
+    }
+    Some(result)
 }

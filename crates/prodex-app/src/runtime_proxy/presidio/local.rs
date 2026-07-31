@@ -289,41 +289,53 @@ fn detect_tenant_patterns(
     matches: &mut Vec<LocalMatch>,
 ) -> Result<()> {
     for pattern in patterns {
-        let mut search_from = 0;
-        while search_from < text.len() {
-            let Some(relative_start) = text[search_from..].find(&pattern.segments[0]) else {
-                break;
-            };
-            let start = search_from + relative_start;
-            let mut end = start + pattern.segments[0].len();
-            let mut matched = true;
-            for segment in &pattern.segments[1..] {
-                let Some(relative_end) = text[end..].find(segment) else {
-                    matched = false;
-                    break;
-                };
-                end += relative_end + segment.len();
-                if end - start > MAX_TENANT_PATTERN_MATCH_BYTES {
-                    matched = false;
-                    break;
-                }
-            }
-            if matched {
-                matches.push(LocalMatch {
-                    start,
-                    end,
-                    kind: FindingKind::TenantSensitive,
-                });
-                if matches.len() > MAX_INSPECTION_FINDINGS {
-                    anyhow::bail!("local inspection finding count exceeded safe limit");
-                }
-                search_from = end;
-            } else {
-                search_from = start + text[start..].chars().next().map_or(1, char::len_utf8);
-            }
-        }
+        detect_tenant_pattern_matches(text, pattern, matches)?;
     }
     Ok(())
+}
+
+fn detect_tenant_pattern_matches(
+    text: &str,
+    pattern: &RuntimeTenantDetectorPattern,
+    matches: &mut Vec<LocalMatch>,
+) -> Result<()> {
+    let mut search_from = 0;
+    while search_from < text.len() {
+        let Some(relative_start) = text[search_from..].find(&pattern.segments[0]) else {
+            break;
+        };
+        let start = search_from + relative_start;
+        let Some(end) = tenant_pattern_match_end(text, pattern, start) else {
+            search_from = start + text[start..].chars().next().map_or(1, char::len_utf8);
+            continue;
+        };
+        matches.push(LocalMatch {
+            start,
+            end,
+            kind: FindingKind::TenantSensitive,
+        });
+        if matches.len() > MAX_INSPECTION_FINDINGS {
+            anyhow::bail!("local inspection finding count exceeded safe limit");
+        }
+        search_from = end;
+    }
+    Ok(())
+}
+
+fn tenant_pattern_match_end(
+    text: &str,
+    pattern: &RuntimeTenantDetectorPattern,
+    start: usize,
+) -> Option<usize> {
+    let mut end = start + pattern.segments[0].len();
+    for segment in &pattern.segments[1..] {
+        let relative_end = text[end..].find(segment)?;
+        end += relative_end + segment.len();
+        if end - start > MAX_TENANT_PATTERN_MATCH_BYTES {
+            return None;
+        }
+    }
+    Some(end)
 }
 
 fn detect_labeled_credentials(text: &str, matches: &mut Vec<LocalMatch>) {
