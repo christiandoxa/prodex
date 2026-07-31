@@ -4,7 +4,9 @@ use crate::runtime_launch::proxy_startup::local_rewrite::{
 use crate::{AppPaths, RuntimeRotationProxy};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::{IntoUrl, blocking::RequestBuilder};
+use std::collections::VecDeque;
 use std::fs;
+use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -121,6 +123,60 @@ impl TestUpstream {
         Self::start_with_responses(statuses.to_vec(), content_type, response_body)
     }
 
+    pub(super) fn start_with_delayed_chunks(
+        request_count: usize,
+        content_type: &'static str,
+        chunks: Vec<Vec<u8>>,
+    ) -> Self {
+        let server = TinyServer::http("127.0.0.1:0").expect("test upstream should bind");
+        let addr = server
+            .server_addr()
+            .to_ip()
+            .expect("test upstream should expose TCP addr");
+        let (body_tx, body_rx) = mpsc::channel();
+        let (headers_tx, headers_rx) = mpsc::channel();
+        let (path_tx, path_rx) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            for _ in 0..request_count {
+                let mut request = server.recv().expect("test upstream should receive request");
+                let _ = path_tx.send(request.url().to_string());
+                let _ = headers_tx.send(
+                    request
+                        .headers()
+                        .iter()
+                        .map(|header| {
+                            (
+                                header.field.to_string().to_ascii_lowercase(),
+                                header.value.as_str().to_string(),
+                            )
+                        })
+                        .collect(),
+                );
+                let mut body = Vec::new();
+                request
+                    .as_reader()
+                    .read_to_end(&mut body)
+                    .expect("test upstream should read request body");
+                let _ = body_tx.send(body);
+                let response = TinyResponse::new(
+                    tiny_http::StatusCode(200),
+                    vec![TinyHeader::from_bytes("content-type", content_type).unwrap()],
+                    Box::new(DelayedChunkReader::new(chunks.clone())),
+                    None,
+                    None,
+                );
+                let _ = request.respond(response);
+            }
+        });
+        Self {
+            addr,
+            body_rx,
+            headers_rx,
+            path_rx,
+            _thread: thread,
+        }
+    }
+
     fn start_n_with_response(
         request_count: usize,
         content_type: &'static str,
@@ -176,6 +232,42 @@ impl TestUpstream {
             headers_rx,
             path_rx,
             _thread: thread,
+        }
+    }
+}
+
+struct DelayedChunkReader {
+    chunks: VecDeque<Cursor<Vec<u8>>>,
+    first: bool,
+}
+
+impl DelayedChunkReader {
+    fn new(chunks: Vec<Vec<u8>>) -> Self {
+        Self {
+            chunks: chunks.into_iter().map(Cursor::new).collect(),
+            first: true,
+        }
+    }
+}
+
+impl Read for DelayedChunkReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let Some(chunk) = self.chunks.front_mut() else {
+                return Ok(0);
+            };
+            if chunk.position() == 0 {
+                if self.first {
+                    self.first = false;
+                } else {
+                    thread::sleep(Duration::from_millis(200));
+                }
+            }
+            let read = chunk.read(buffer)?;
+            if read != 0 {
+                return Ok(read);
+            }
+            self.chunks.pop_front();
         }
     }
 }
