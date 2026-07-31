@@ -1,5 +1,36 @@
 [
   {
+    "id": "audited-sonar-and-ci-release-0.375.0",
+    "requiredSubjects": [
+      "ci: require zero production Sonar issues",
+      "refactor(runtime): simplify launch branches",
+      "chore(ci): record reviewed 0.375.0 churn",
+      "chore(release): release 0.375.0"
+    ],
+    "caps": {
+      "maxFiles": 315,
+      "maxBehaviorFiles": 300,
+      "maxLines": 54500,
+      "maxFileLines": 1100
+    },
+    "reason": "Reviewed the complete 0.375.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata; source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
+  },
+  {
+    "id": "audited-sonar-and-ci-feature-0.375.0",
+    "requiredSubjects": [
+      "ci: require zero production Sonar issues",
+      "refactor(runtime): simplify launch branches",
+      "chore(ci): record reviewed 0.375.0 churn"
+    ],
+    "caps": {
+      "maxFiles": 300,
+      "maxBehaviorFiles": 290,
+      "maxLines": 53500,
+      "maxFileLines": 1020
+    },
+    "reason": "Reviewed the whole-repository production audit covering runtime affinity, governance durability, provider compatibility, zero unresolved official SonarQube issues across production Rust, strict all-target Clippy, focused and full locked test suites, size and hot-path ratchets, security and dependency guards, and parallel Linux, Windows, scheduled, and runtime-proxy CI execution."
+  },
+  {
     "id": "bank-control-plane-and-ci-hardening-0.373.0",
     "requiredSubjects": [
       "fix(enterprise): harden bank and control-plane boundaries",
