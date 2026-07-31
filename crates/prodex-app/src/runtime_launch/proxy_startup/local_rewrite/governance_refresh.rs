@@ -708,9 +708,9 @@ fn runtime_gateway_refresh_tenant(
         .authority
         .commit_for_tenant(context.tenant_id, || {
             if context.inputs.deployment_mode.is_enforcing() {
-                return runtime_gateway_refresh_enforcing_tenant(&context, governance_snapshots);
+                return runtime_gateway_refresh_enforcing_tenant(context, governance_snapshots);
             }
-            runtime_gateway_refresh_non_enforcing_tenant(&context, governance_snapshots)
+            runtime_gateway_refresh_non_enforcing_tenant(context, governance_snapshots)
         })
 }
 

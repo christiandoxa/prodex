@@ -436,16 +436,7 @@ where
         Ok(WsMessage::Text(text)) => {
             let translated = context.state.translate_server_message(text.as_ref())?;
             for event in translated.events {
-                if !runtime_gemini_live_send_guarded_json(
-                    context.request_id,
-                    context.local_socket,
-                    event,
-                    context.output_inspector,
-                    response_obligations,
-                    (context.accounting, &mut *context.usage),
-                    context.shared,
-                    context.authorized,
-                )? {
+                if !runtime_gemini_live_send_guarded_json(context, event, response_obligations)? {
                     return Ok(None);
                 }
             }
@@ -568,16 +559,7 @@ where
 {
     let translated = context.state.translate_server_message(text)?;
     for event in translated.events {
-        if !runtime_gemini_live_send_guarded_json(
-            context.request_id,
-            context.local_socket,
-            event,
-            context.output_inspector,
-            response_obligations,
-            (context.accounting, &mut *context.usage),
-            context.shared,
-            context.authorized,
-        )? {
+        if !runtime_gemini_live_send_guarded_json(context, event, response_obligations)? {
             return Ok(true);
         }
     }
@@ -585,51 +567,46 @@ where
 }
 
 fn runtime_gemini_live_send_guarded_json<S>(
-    request_id: u64,
-    socket: &mut WsSocket<S>,
+    context: &mut RuntimeGeminiLiveProcessContext<'_, '_, S>,
     value: serde_json::Value,
-    inspector: &mut RuntimeGatewayIncrementalInspector,
     response_obligations: Option<ApplicationResponseObligationPlan>,
-    accounting_and_usage: (
-        &RuntimeGatewayRealtimeAccountingPlan,
-        &mut RuntimeGatewayRealtimeUsage,
-    ),
-    shared_and_authorized: (
-        &RuntimeLocalRewriteProxyShared,
-        Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
-    ),
 ) -> Result<bool>
 where
     S: Read + Write,
 {
-    let (accounting, usage) = accounting_and_usage;
-    let (shared, authorized) = shared_and_authorized;
     let text = value.to_string();
-    let within_session_limit = runtime_gemini_live_observe_output(&text, accounting, usage);
+    let within_session_limit =
+        runtime_gemini_live_observe_output(&text, context.accounting, context.usage);
     let reason = if !within_session_limit {
         Some("realtime_session_token_limit_exceeded")
-    } else if inspector.inspect(text.as_bytes()) {
+    } else if context.output_inspector.inspect(text.as_bytes()) {
         Some("blocked_output_keyword")
     } else if response_obligations.is_some_and(|plan| {
         plan.enforce
             && plan
                 .maximum_output_tokens
-                .is_some_and(|limit| usage.output_tokens > u64::from(limit))
+                .is_some_and(|limit| context.usage.output_tokens > u64::from(limit))
     }) {
         Some("output_token_limit_exceeded")
     } else {
         None
     };
     if let Some(reason) = reason {
-        usage.policy_interrupted = true;
-        runtime_gateway_guardrail_websocket_block(request_id, shared, authorized, reason);
-        let _ = socket.close(Some(CloseFrame {
+        context.usage.policy_interrupted = true;
+        runtime_gateway_guardrail_websocket_block(
+            context.request_id,
+            context.shared,
+            context.authorized,
+            reason,
+        );
+        let _ = context.local_socket.close(Some(CloseFrame {
             code: CloseCode::Policy,
             reason: "response blocked by policy".into(),
         }));
         return Ok(false);
     }
-    socket
+    context
+        .local_socket
         .send(WsMessage::Text(text.into()))
         .context("failed to send translated Gemini Live event")?;
     Ok(true)
