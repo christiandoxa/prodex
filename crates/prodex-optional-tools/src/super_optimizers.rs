@@ -91,25 +91,7 @@ fn validate_optimizer_config_shapes(
     };
 
     if validate_ponytail {
-        for key in ["features", "marketplaces", "plugins"] {
-            if let Some(value) = table.get(key)
-                && !matches!(value, toml::Value::Table(_))
-            {
-                bail!("configuration entry `{key}` must be a TOML table");
-            }
-        }
-        if let Some(marketplaces) = table.get("marketplaces").and_then(toml::Value::as_table)
-            && let Some(value) = marketplaces.get("ponytail")
-            && !matches!(value, toml::Value::Table(_))
-        {
-            bail!("configuration entry `ponytail` must be a TOML table");
-        }
-        if let Some(plugins) = table.get("plugins").and_then(toml::Value::as_table)
-            && let Some(value) = plugins.get("ponytail@ponytail")
-            && !matches!(value, toml::Value::Table(_))
-        {
-            bail!("configuration entry `ponytail@ponytail` must be a TOML table");
-        }
+        validate_ponytail_config_shapes(&table)?;
     }
     if !validate_codebase_memory && !validate_playwright {
         return Ok(());
@@ -121,6 +103,37 @@ fn validate_optimizer_config_shapes(
         toml::Value::Table(table) => table,
         _ => bail!("mcp_servers must be a TOML table"),
     };
+    validate_selected_mcp_server_shapes(mcp_servers, validate_codebase_memory, validate_playwright)
+}
+
+fn validate_ponytail_config_shapes(table: &toml::Table) -> Result<()> {
+    for key in ["features", "marketplaces", "plugins"] {
+        if let Some(value) = table.get(key)
+            && !matches!(value, toml::Value::Table(_))
+        {
+            bail!("configuration entry `{key}` must be a TOML table");
+        }
+    }
+    if let Some(marketplaces) = table.get("marketplaces").and_then(toml::Value::as_table)
+        && let Some(value) = marketplaces.get("ponytail")
+        && !matches!(value, toml::Value::Table(_))
+    {
+        bail!("configuration entry `ponytail` must be a TOML table");
+    }
+    if let Some(plugins) = table.get("plugins").and_then(toml::Value::as_table)
+        && let Some(value) = plugins.get("ponytail@ponytail")
+        && !matches!(value, toml::Value::Table(_))
+    {
+        bail!("configuration entry `ponytail@ponytail` must be a TOML table");
+    }
+    Ok(())
+}
+
+fn validate_selected_mcp_server_shapes(
+    mcp_servers: &toml::Table,
+    validate_codebase_memory: bool,
+    validate_playwright: bool,
+) -> Result<()> {
     for (name, selected) in [
         ("codebase-memory-mcp", validate_codebase_memory),
         ("playwright", validate_playwright),

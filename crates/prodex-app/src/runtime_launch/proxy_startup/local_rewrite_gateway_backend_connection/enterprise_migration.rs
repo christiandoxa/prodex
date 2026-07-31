@@ -151,6 +151,13 @@ fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
         tx.commit()?;
     }
 
+    apply_sqlite_migration_plan(conn, &plan)
+}
+
+fn apply_sqlite_migration_plan(
+    conn: &mut Connection,
+    plan: &prodex_storage_sqlite::SqliteMigrationPlan,
+) -> Result<usize> {
     let mut applied = 0;
     for migration in &plan.migrations {
         let version = i64::from(migration.version.0);
@@ -237,6 +244,13 @@ fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
         tx.commit()?;
     }
 
+    apply_postgres_migration_plan(client, &plan)
+}
+
+fn apply_postgres_migration_plan(
+    client: &mut PostgresClient,
+    plan: &prodex_storage_postgres::PostgresMigrationPlan,
+) -> Result<usize> {
     let mut applied = 0;
     for migration in &plan.migrations {
         let version = i64::from(migration.version.0);

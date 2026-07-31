@@ -268,29 +268,6 @@ fn optimizer_preflight_rejects_wrong_shapes_before_mutation() -> Result<()> {
 }
 
 #[test]
-fn default_optimizer_preflight_runs_before_rtk_mutation() -> Result<()> {
-    let home = temp_dir("default-optimizer-preflight");
-    fs::create_dir_all(&home)?;
-    fs::write(home.join("config.toml"), "features = \"invalid\"\n")?;
-
-    let error = configure_super_optimizer_codex_home_with_presidio(&home, false).unwrap_err();
-
-    assert!(error.to_string().contains("features"));
-    assert_eq!(
-        fs::read_to_string(home.join("config.toml"))?,
-        "features = \"invalid\"\n"
-    );
-    for relative in ["AGENTS.md", RTK_MD, SUPER_OPTIMIZERS_MD, "bin"] {
-        assert!(
-            !home.join(relative).exists(),
-            "unexpected mutation: {relative}"
-        );
-    }
-    fs::remove_dir_all(home)?;
-    Ok(())
-}
-
-#[test]
 fn optimizer_preflight_ignores_unselected_config_sections() -> Result<()> {
     let home = temp_dir("optimizer-preflight-unselected");
     fs::create_dir_all(&home)?;

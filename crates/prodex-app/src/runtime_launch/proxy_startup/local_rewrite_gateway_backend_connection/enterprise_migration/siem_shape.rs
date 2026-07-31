@@ -3,6 +3,11 @@ use anyhow::{Result, anyhow, bail};
 use postgres::Client as PostgresClient;
 use rusqlite::{Connection, OptionalExtension};
 
+mod sqlite_helpers;
+use sqlite_helpers::{
+    sqlite_check_expressions, sqlite_normalize_sql, validate_sqlite_index_columns,
+};
+
 pub(super) fn sqlite_siem_outbox_has_v13_marker(conn: &Connection) -> Result<bool> {
     conn.query_row(
         "SELECT EXISTS(
@@ -28,6 +33,15 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
     conn: &Connection,
     require_v13: bool,
 ) -> Result<()> {
+    let table_sql = validate_sqlite_siem_outbox_columns(conn, require_v13)?;
+    validate_sqlite_siem_outbox_checks(&table_sql, require_v13)?;
+    validate_sqlite_siem_outbox_foreign_keys(conn)?;
+    validate_sqlite_siem_outbox_indexes(conn, require_v13)?;
+    validate_sqlite_siem_outbox_markers(conn, require_v13)?;
+    Ok(())
+}
+
+fn validate_sqlite_siem_outbox_columns(conn: &Connection, require_v13: bool) -> Result<String> {
     let table_sql = conn
         .query_row(
             "SELECT sql FROM sqlite_master
@@ -88,8 +102,11 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
             "cannot infer gateway sqlite enterprise schema: SIEM outbox columns are not the known shape"
         );
     }
+    Ok(table_sql)
+}
 
-    let mut checks = sqlite_check_expressions(&table_sql);
+fn validate_sqlite_siem_outbox_checks(table_sql: &str, require_v13: bool) -> Result<()> {
+    let mut checks = sqlite_check_expressions(table_sql);
     checks.sort();
     let mut expected_checks = vec![sqlite_normalize_sql("attempt_count >= 0")];
     if require_v13 {
@@ -106,7 +123,10 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
             "cannot infer gateway sqlite enterprise schema: SIEM outbox checks are not the known shape"
         );
     }
+    Ok(())
+}
 
+fn validate_sqlite_siem_outbox_foreign_keys(conn: &Connection) -> Result<()> {
     let foreign_keys = conn
         .prepare(
             "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\"
@@ -137,7 +157,10 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
             "cannot infer gateway sqlite enterprise schema: SIEM outbox foreign keys are not the known shape"
         );
     }
+    Ok(())
+}
 
+fn validate_sqlite_siem_outbox_indexes(conn: &Connection, require_v13: bool) -> Result<()> {
     let indexes = conn
         .prepare(
             "SELECT name, \"unique\", origin, partial
@@ -152,53 +175,80 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut primary_index = false;
-    let mut unique_index = false;
-    let mut due_claim_index = false;
-    let primary_columns = ["tenant_id", "event_id"];
-    let unique_columns = ["tenant_id", "audit_event_id"];
-    let due_claim_columns = [
-        "delivered_at_unix_ms",
-        "next_attempt_at_unix_ms",
-        "event_id",
-        "claim_expires_at_unix_ms",
-    ];
+    let mut shape = SqliteSiemOutboxIndexes::default();
     for (name, unique, origin, partial) in indexes {
-        let expected = if origin == "pk" {
-            if primary_index || unique != 1 || partial != 0 {
-                bail!(
-                    "cannot infer gateway sqlite enterprise schema: SIEM outbox primary index is not the known shape"
-                );
-            }
-            primary_index = true;
-            primary_columns.as_slice()
-        } else if origin == "u" {
-            if unique_index || unique != 1 || partial != 0 {
-                bail!(
-                    "cannot infer gateway sqlite enterprise schema: SIEM outbox unique index is not the known shape"
-                );
-            }
-            unique_index = true;
-            unique_columns.as_slice()
-        } else if name == "prodex_siem_outbox_due_claim_idx" {
-            if !require_v13 || due_claim_index || origin != "c" || unique != 0 || partial != 0 {
-                bail!(
-                    "cannot infer gateway sqlite enterprise schema: SIEM outbox lease index is not the known shape"
-                );
-            }
-            due_claim_index = true;
-            due_claim_columns.as_slice()
-        } else {
-            bail!(
-                "cannot infer gateway sqlite enterprise schema: SIEM outbox has an unknown index"
-            );
-        };
-        validate_sqlite_index_columns(conn, &name, expected)?;
+        validate_sqlite_siem_index(
+            conn,
+            &name,
+            unique,
+            &origin,
+            partial,
+            require_v13,
+            &mut shape,
+        )?;
     }
-    if !primary_index || !unique_index || due_claim_index != require_v13 {
+    if !shape.primary_index || !shape.unique_index || shape.due_claim_index != require_v13 {
         bail!("cannot infer gateway sqlite enterprise schema: SIEM outbox indexes are incomplete");
     }
+    Ok(())
+}
 
+#[derive(Default)]
+struct SqliteSiemOutboxIndexes {
+    primary_index: bool,
+    unique_index: bool,
+    due_claim_index: bool,
+}
+
+fn validate_sqlite_siem_index(
+    conn: &Connection,
+    name: &str,
+    unique: i64,
+    origin: &str,
+    partial: i64,
+    require_v13: bool,
+    shape: &mut SqliteSiemOutboxIndexes,
+) -> Result<()> {
+    if origin == "pk" {
+        if shape.primary_index || unique != 1 || partial != 0 {
+            bail!(
+                "cannot infer gateway sqlite enterprise schema: SIEM outbox primary index is not the known shape"
+            );
+        }
+        shape.primary_index = true;
+        return validate_sqlite_index_columns(conn, name, &["tenant_id", "event_id"]);
+    }
+    if origin == "u" {
+        if shape.unique_index || unique != 1 || partial != 0 {
+            bail!(
+                "cannot infer gateway sqlite enterprise schema: SIEM outbox unique index is not the known shape"
+            );
+        }
+        shape.unique_index = true;
+        return validate_sqlite_index_columns(conn, name, &["tenant_id", "audit_event_id"]);
+    }
+    if name == "prodex_siem_outbox_due_claim_idx" {
+        if !require_v13 || shape.due_claim_index || origin != "c" || unique != 0 || partial != 0 {
+            bail!(
+                "cannot infer gateway sqlite enterprise schema: SIEM outbox lease index is not the known shape"
+            );
+        }
+        shape.due_claim_index = true;
+        return validate_sqlite_index_columns(
+            conn,
+            name,
+            &[
+                "delivered_at_unix_ms",
+                "next_attempt_at_unix_ms",
+                "event_id",
+                "claim_expires_at_unix_ms",
+            ],
+        );
+    }
+    bail!("cannot infer gateway sqlite enterprise schema: SIEM outbox has an unknown index");
+}
+
+fn validate_sqlite_siem_outbox_markers(conn: &Connection, require_v13: bool) -> Result<()> {
     let marker_objects = conn
         .prepare(
             "SELECT name, type, tbl_name, sql FROM sqlite_master
@@ -218,41 +268,53 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (name, object_type, owner, sql) in marker_objects {
-        let expected_type = if name == "prodex_siem_outbox_due_claim_idx" {
-            "index"
+        validate_sqlite_siem_marker(&name, &object_type, &owner, sql.as_deref())?;
+    }
+    validate_sqlite_siem_outbox_triggers(conn, require_v13)
+}
+
+fn validate_sqlite_siem_marker(
+    name: &str,
+    object_type: &str,
+    owner: &str,
+    sql: Option<&str>,
+) -> Result<()> {
+    let expected_type = if name == "prodex_siem_outbox_due_claim_idx" {
+        "index"
+    } else {
+        "trigger"
+    };
+    if object_type != expected_type || owner != "prodex_siem_outbox" {
+        bail!(
+            "cannot infer gateway sqlite enterprise schema: SIEM outbox marker has the wrong owner or object type"
+        );
+    }
+    if expected_type == "trigger" {
+        let expected_sql = if name == "prodex_siem_outbox_claim_pair_insert" {
+            "CREATE TRIGGER prodex_siem_outbox_claim_pair_insert
+             BEFORE INSERT ON prodex_siem_outbox
+             WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
+             BEGIN
+                 SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
+             END"
         } else {
-            "trigger"
+            "CREATE TRIGGER prodex_siem_outbox_claim_pair_update
+             BEFORE UPDATE OF claim_token, claim_expires_at_unix_ms ON prodex_siem_outbox
+             WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
+             BEGIN
+                 SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
+             END"
         };
-        if object_type != expected_type || owner != "prodex_siem_outbox" {
+        if sqlite_normalize_sql(sql.unwrap_or_default()) != sqlite_normalize_sql(expected_sql) {
             bail!(
-                "cannot infer gateway sqlite enterprise schema: SIEM outbox marker has the wrong owner or object type"
+                "cannot infer gateway sqlite enterprise schema: SIEM outbox trigger behavior is not the known shape"
             );
         }
-        if expected_type == "trigger" {
-            let expected_sql = if name == "prodex_siem_outbox_claim_pair_insert" {
-                "CREATE TRIGGER prodex_siem_outbox_claim_pair_insert
-                 BEFORE INSERT ON prodex_siem_outbox
-                 WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
-                 BEGIN
-                     SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
-                 END"
-            } else {
-                "CREATE TRIGGER prodex_siem_outbox_claim_pair_update
-                 BEFORE UPDATE OF claim_token, claim_expires_at_unix_ms ON prodex_siem_outbox
-                 WHEN (NEW.claim_token IS NULL) <> (NEW.claim_expires_at_unix_ms IS NULL)
-                 BEGIN
-                     SELECT RAISE(ABORT, 'SIEM outbox claim fields must be paired');
-                 END"
-            };
-            if sqlite_normalize_sql(sql.as_deref().unwrap_or_default())
-                != sqlite_normalize_sql(expected_sql)
-            {
-                bail!(
-                    "cannot infer gateway sqlite enterprise schema: SIEM outbox trigger behavior is not the known shape"
-                );
-            }
-        }
     }
+    Ok(())
+}
+
+fn validate_sqlite_siem_outbox_triggers(conn: &Connection, require_v13: bool) -> Result<()> {
     let trigger_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master
          WHERE type = 'trigger' AND tbl_name = 'prodex_siem_outbox'",
@@ -284,110 +346,6 @@ pub(super) fn validate_sqlite_siem_outbox_shape(
     Ok(())
 }
 
-fn validate_sqlite_index_columns(
-    conn: &Connection,
-    index_name: &str,
-    expected: &[&str],
-) -> Result<()> {
-    let index_name = index_name.replace('\'', "''");
-    let query = format!(
-        "SELECT seqno, name, \"desc\", coll, key
-         FROM pragma_index_xinfo('{index_name}') ORDER BY seqno"
-    );
-    let rows = conn
-        .prepare(&query)?
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut key_columns = Vec::new();
-    for (seqno, name, descending, collation, key) in rows {
-        if key == 0 {
-            continue;
-        }
-        if seqno < 0 || descending != 0 || !collation.eq_ignore_ascii_case("BINARY") {
-            bail!(
-                "cannot infer gateway sqlite enterprise schema: SIEM outbox index metadata is not the known shape"
-            );
-        }
-        key_columns.push(name.ok_or_else(|| {
-            anyhow!("cannot infer gateway sqlite enterprise schema: SIEM outbox index has an expression key")
-        })?);
-    }
-    if key_columns != expected {
-        bail!(
-            "cannot infer gateway sqlite enterprise schema: SIEM outbox index columns are not the known order"
-        );
-    }
-    Ok(())
-}
-
-fn sqlite_check_expressions(sql: &str) -> Vec<String> {
-    let bytes = sql.as_bytes();
-    let mut checks = Vec::new();
-    let mut index = 0;
-    while index + 5 <= bytes.len() {
-        if bytes[index..index + 5].eq_ignore_ascii_case(b"check")
-            && (index == 0 || !is_sql_identifier_byte(bytes[index - 1]))
-            && (index + 5 == bytes.len() || !is_sql_identifier_byte(bytes[index + 5]))
-        {
-            let mut open = index + 5;
-            while open < bytes.len() && bytes[open].is_ascii_whitespace() {
-                open += 1;
-            }
-            if open < bytes.len() && bytes[open] == b'(' {
-                let mut depth = 1;
-                let start = open + 1;
-                let mut cursor = start;
-                let mut quote = None;
-                while cursor < bytes.len() {
-                    let byte = bytes[cursor];
-                    if let Some(delimiter) = quote {
-                        if byte == delimiter {
-                            if cursor + 1 < bytes.len() && bytes[cursor + 1] == delimiter {
-                                cursor += 2;
-                                continue;
-                            }
-                            quote = None;
-                        }
-                    } else if matches!(byte, b'\'' | b'"' | b'`') {
-                        quote = Some(byte);
-                    } else if byte == b'(' {
-                        depth += 1;
-                    } else if byte == b')' {
-                        depth -= 1;
-                        if depth == 0 {
-                            checks.push(sqlite_normalize_sql(&sql[start..cursor]));
-                            index = cursor;
-                            break;
-                        }
-                    }
-                    cursor += 1;
-                }
-            }
-        }
-        index += 1;
-    }
-    checks
-}
-
-fn is_sql_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
-}
-
-fn sqlite_normalize_sql(sql: &str) -> String {
-    sql.chars()
-        .filter(|character| !character.is_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
 #[derive(Debug, Default)]
 pub(super) struct PostgresSiemOutboxShape {
     pub(super) complete_v6: bool,
@@ -399,6 +357,31 @@ pub(super) fn validate_postgres_siem_outbox_shape(
     if !runtime_gateway_postgres_table_exists(client, "prodex_siem_outbox")? {
         return Ok(PostgresSiemOutboxShape::default());
     }
+    validate_postgres_siem_outbox_due_index_owner(client)?;
+
+    let columns = validate_postgres_siem_outbox_columns(client)?;
+
+    let indexes = validate_postgres_siem_outbox_indexes(client)?;
+
+    let constraints = validate_postgres_siem_outbox_constraints(client)?;
+    let complete_v6 = columns.has_claim_token
+        || columns.has_claim_expires_at
+        || indexes.due_claim_index
+        || constraints.claim_pair_check;
+    if complete_v6
+        && (!columns.has_claim_token
+            || !columns.has_claim_expires_at
+            || !indexes.due_claim_index
+            || !constraints.claim_pair_check)
+    {
+        bail!(
+            "cannot infer gateway postgres enterprise schema: SIEM outbox leasing shape is incomplete or unrecognized"
+        );
+    }
+    Ok(PostgresSiemOutboxShape { complete_v6 })
+}
+
+fn validate_postgres_siem_outbox_due_index_owner(client: &mut PostgresClient) -> Result<()> {
     let due_index_has_wrong_owner: bool = client
         .query_one(
             "SELECT EXISTS(
@@ -428,7 +411,18 @@ pub(super) fn validate_postgres_siem_outbox_shape(
             "cannot infer gateway postgres enterprise schema: SIEM outbox lease index has the wrong owner"
         );
     }
+    Ok(())
+}
 
+#[derive(Default)]
+struct PostgresSiemOutboxColumns {
+    has_claim_token: bool,
+    has_claim_expires_at: bool,
+}
+
+fn validate_postgres_siem_outbox_columns(
+    client: &mut PostgresClient,
+) -> Result<PostgresSiemOutboxColumns> {
     let columns = client.query(
         "SELECT attribute.attname,
                 pg_catalog.format_type(attribute.atttypid, attribute.atttypmod),
@@ -461,8 +455,6 @@ pub(super) fn validate_postgres_siem_outbox_shape(
         ("claim_token", "uuid", false, ""),
         ("claim_expires_at_unix_ms", "bigint", false, ""),
     ];
-    let mut has_claim_token = false;
-    let mut has_claim_expires_at = false;
     if columns.len() < 8
         || columns.len() > expected_columns.len()
         || columns.iter().any(|row| {
@@ -472,6 +464,7 @@ pub(super) fn validate_postgres_siem_outbox_shape(
     {
         bail!("cannot infer gateway postgres enterprise schema: SIEM outbox has unknown columns");
     }
+    let mut shape = PostgresSiemOutboxColumns::default();
     for (row, expected) in columns.iter().zip(expected_columns) {
         let name: &str = row.get(0);
         let sql_type: &str = row.get(1);
@@ -490,10 +483,22 @@ pub(super) fn validate_postgres_siem_outbox_shape(
                 "cannot infer gateway postgres enterprise schema: SIEM outbox columns are not the known shape"
             );
         }
-        has_claim_token |= name == "claim_token";
-        has_claim_expires_at |= name == "claim_expires_at_unix_ms";
+        shape.has_claim_token |= name == "claim_token";
+        shape.has_claim_expires_at |= name == "claim_expires_at_unix_ms";
     }
+    Ok(shape)
+}
 
+#[derive(Default)]
+struct PostgresSiemOutboxIndexes {
+    primary_index: bool,
+    unique_index: bool,
+    due_claim_index: bool,
+}
+
+fn validate_postgres_siem_outbox_indexes(
+    client: &mut PostgresClient,
+) -> Result<PostgresSiemOutboxIndexes> {
     let indexes = client.query(
         "SELECT index_class.relname,
                 index_row.indisprimary,
@@ -529,77 +534,100 @@ pub(super) fn validate_postgres_siem_outbox_shape(
          ORDER BY index_class.relname",
         &[],
     )?;
-    let mut primary_index = false;
-    let mut unique_index = false;
-    let mut due_claim_index = false;
+    let mut shape = PostgresSiemOutboxIndexes::default();
     for row in indexes {
-        let name: &str = row.get(0);
-        let primary: bool = row.get(1);
-        let unique: bool = row.get(2);
-        let no_predicate: bool = row.get(3);
-        let key_count: i32 = row.get(4);
-        let column_count: i32 = row.get(5);
-        let constraint_index: bool = row.get(6);
-        let columns: &str = row.get(7);
-        let ascending: bool = row.get(8);
-        if name == "prodex_siem_outbox_due_claim_idx" {
-            if due_claim_index
-                || primary
-                || unique
-                || !no_predicate
-                || key_count != 5
-                || column_count != 5
-                || constraint_index
-                || columns
-                    != "tenant_id,delivered_at_unix_ms,next_attempt_at_unix_ms,claim_expires_at_unix_ms,event_id"
-                || !ascending
-            {
-                bail!(
-                    "cannot infer gateway postgres enterprise schema: SIEM outbox lease index is not the known shape"
-                );
-            }
-            due_claim_index = true;
-        } else if primary {
-            if primary_index
-                || !unique
-                || !no_predicate
-                || key_count != 2
-                || column_count != 2
-                || !constraint_index
-                || columns != "tenant_id,event_id"
-                || !ascending
-            {
-                bail!(
-                    "cannot infer gateway postgres enterprise schema: SIEM outbox primary index is not the known shape"
-                );
-            }
-            primary_index = true;
-        } else if unique {
-            if unique_index
-                || !no_predicate
-                || key_count != 2
-                || column_count != 2
-                || !constraint_index
-                || columns != "tenant_id,audit_event_id"
-                || !ascending
-            {
-                bail!(
-                    "cannot infer gateway postgres enterprise schema: SIEM outbox unique index is not the known shape"
-                );
-            }
-            unique_index = true;
-        } else {
-            bail!(
-                "cannot infer gateway postgres enterprise schema: SIEM outbox has an unknown index"
-            );
-        }
+        validate_postgres_siem_index(&row, &mut shape)?;
     }
-    if !primary_index || !unique_index {
+    if !shape.primary_index || !shape.unique_index {
         bail!(
             "cannot infer gateway postgres enterprise schema: SIEM outbox indexes are incomplete"
         );
     }
+    Ok(shape)
+}
 
+fn validate_postgres_siem_index(
+    row: &postgres::Row,
+    shape: &mut PostgresSiemOutboxIndexes,
+) -> Result<()> {
+    let name: &str = row.get(0);
+    let primary: bool = row.get(1);
+    let unique: bool = row.get(2);
+    let no_predicate: bool = row.get(3);
+    let key_count: i32 = row.get(4);
+    let column_count: i32 = row.get(5);
+    let constraint_index: bool = row.get(6);
+    let columns: &str = row.get(7);
+    let ascending: bool = row.get(8);
+    if name == "prodex_siem_outbox_due_claim_idx" {
+        if shape.due_claim_index
+            || primary
+            || unique
+            || !no_predicate
+            || key_count != 5
+            || column_count != 5
+            || constraint_index
+            || columns
+                != "tenant_id,delivered_at_unix_ms,next_attempt_at_unix_ms,claim_expires_at_unix_ms,event_id"
+            || !ascending
+        {
+            bail!(
+                "cannot infer gateway postgres enterprise schema: SIEM outbox lease index is not the known shape"
+            );
+        }
+        shape.due_claim_index = true;
+        return Ok(());
+    }
+    if primary {
+        if shape.primary_index
+            || !unique
+            || !no_predicate
+            || key_count != 2
+            || column_count != 2
+            || !constraint_index
+            || columns != "tenant_id,event_id"
+            || !ascending
+        {
+            bail!(
+                "cannot infer gateway postgres enterprise schema: SIEM outbox primary index is not the known shape"
+            );
+        }
+        shape.primary_index = true;
+        return Ok(());
+    }
+    if unique {
+        if shape.unique_index
+            || !no_predicate
+            || key_count != 2
+            || column_count != 2
+            || !constraint_index
+            || columns != "tenant_id,audit_event_id"
+            || !ascending
+        {
+            bail!(
+                "cannot infer gateway postgres enterprise schema: SIEM outbox unique index is not the known shape"
+            );
+        }
+        shape.unique_index = true;
+        return Ok(());
+    }
+    bail!("cannot infer gateway postgres enterprise schema: SIEM outbox has an unknown index");
+}
+
+#[derive(Default)]
+struct PostgresSiemOutboxConstraints {
+    primary_constraint: bool,
+    unique_constraint: bool,
+    tenant_foreign_key: bool,
+    audit_foreign_key: bool,
+    attempt_check: bool,
+    bounded_check: bool,
+    claim_pair_check: bool,
+}
+
+fn validate_postgres_siem_outbox_constraints(
+    client: &mut PostgresClient,
+) -> Result<PostgresSiemOutboxConstraints> {
     let constraints = client.query(
         "SELECT constraint_row.contype::TEXT,
                 constraint_row.condeferrable,
@@ -612,13 +640,7 @@ pub(super) fn validate_postgres_siem_outbox_shape(
          ORDER BY constraint_row.oid",
         &[],
     )?;
-    let mut primary_constraint = false;
-    let mut unique_constraint = false;
-    let mut tenant_foreign_key = false;
-    let mut audit_foreign_key = false;
-    let mut attempt_check = false;
-    let mut bounded_check = false;
-    let mut claim_pair_check = false;
+    let mut shape = PostgresSiemOutboxConstraints::default();
     for row in constraints {
         let constraint_type: &str = row.get(0);
         let deferrable: bool = row.get(1);
@@ -629,94 +651,79 @@ pub(super) fn validate_postgres_siem_outbox_shape(
             );
         }
         let definition = postgres_normalize_sql(definition);
-        match constraint_type {
-            "p" if definition == "primarykeytenant_id,event_id" => {
-                if primary_constraint {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate primary constraints"
-                    );
-                }
-                primary_constraint = true;
-            }
-            "u" if definition == "uniquetenant_id,audit_event_id" => {
-                if unique_constraint {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate unique constraints"
-                    );
-                }
-                unique_constraint = true;
-            }
-            "f" if definition == "foreignkeytenant_idreferencesprodex_tenantstenant_id" => {
-                if tenant_foreign_key {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate tenant constraints"
-                    );
-                }
-                tenant_foreign_key = true;
-            }
-            "f" if definition
-                == "foreignkeytenant_id,audit_event_idreferencesprodex_audit_logtenant_id,audit_event_id" =>
-            {
-                if audit_foreign_key {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate audit constraints"
-                    );
-                }
-                audit_foreign_key = true;
-            }
-            "c" if definition == "checkattempt_count>=0" => {
-                if attempt_check {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate attempt constraints"
-                    );
-                }
-                attempt_check = true;
-            }
-            "c" if definition
-                == "checkoctet_lengthevent_envelope::text<=1048576andnext_attempt_at_unix_ms>=0andcreated_at_unix_ms>=0anddelivered_at_unix_msisnullordelivered_at_unix_ms>=created_at_unix_ms" =>
-            {
-                if bounded_check {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate bound constraints"
-                    );
-                }
-                bounded_check = true;
-            }
-            "c" if definition
-                == "checkclaim_tokenisnullandclaim_expires_at_unix_msisnullorclaim_tokenisnotnullandclaim_expires_at_unix_msisnotnull" =>
-            {
-                if claim_pair_check {
-                    bail!(
-                        "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate claim constraints"
-                    );
-                }
-                claim_pair_check = true;
-            }
-            _ => bail!(
-                "cannot infer gateway postgres enterprise schema: SIEM outbox has an unknown constraint"
-            ),
-        }
+        mark_postgres_siem_constraint(&mut shape, constraint_type, &definition)?;
     }
-    if !primary_constraint || !unique_constraint || !tenant_foreign_key || !attempt_check {
+    if !shape.primary_constraint
+        || !shape.unique_constraint
+        || !shape.tenant_foreign_key
+        || !shape.attempt_check
+    {
         bail!(
             "cannot infer gateway postgres enterprise schema: SIEM outbox constraints are incomplete"
         );
     }
-    if audit_foreign_key != bounded_check {
+    if shape.audit_foreign_key != shape.bounded_check {
         bail!(
             "cannot infer gateway postgres enterprise schema: SIEM outbox hardening constraints are incomplete"
         );
     }
-    let complete_v6 =
-        has_claim_token || has_claim_expires_at || due_claim_index || claim_pair_check;
-    if complete_v6
-        && (!has_claim_token || !has_claim_expires_at || !due_claim_index || !claim_pair_check)
-    {
-        bail!(
-            "cannot infer gateway postgres enterprise schema: SIEM outbox leasing shape is incomplete or unrecognized"
-        );
+    Ok(shape)
+}
+
+fn mark_postgres_siem_constraint(
+    shape: &mut PostgresSiemOutboxConstraints,
+    constraint_type: &str,
+    definition: &str,
+) -> Result<()> {
+    let (seen, duplicate_message) = match (constraint_type, definition) {
+        ("p", "primarykeytenant_id,event_id") => (
+            &mut shape.primary_constraint,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate primary constraints",
+        ),
+        ("u", "uniquetenant_id,audit_event_id") => (
+            &mut shape.unique_constraint,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate unique constraints",
+        ),
+        ("f", "foreignkeytenant_idreferencesprodex_tenantstenant_id") => (
+            &mut shape.tenant_foreign_key,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate tenant constraints",
+        ),
+        (
+            "f",
+            "foreignkeytenant_id,audit_event_idreferencesprodex_audit_logtenant_id,audit_event_id",
+        ) => (
+            &mut shape.audit_foreign_key,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate audit constraints",
+        ),
+        ("c", "checkattempt_count>=0") => (
+            &mut shape.attempt_check,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate attempt constraints",
+        ),
+        (
+            "c",
+            "checkoctet_lengthevent_envelope::text<=1048576andnext_attempt_at_unix_ms>=0andcreated_at_unix_ms>=0anddelivered_at_unix_msisnullordelivered_at_unix_ms>=created_at_unix_ms",
+        ) => (
+            &mut shape.bounded_check,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate bound constraints",
+        ),
+        (
+            "c",
+            "checkclaim_tokenisnullandclaim_expires_at_unix_msisnullorclaim_tokenisnotnullandclaim_expires_at_unix_msisnotnull",
+        ) => (
+            &mut shape.claim_pair_check,
+            "cannot infer gateway postgres enterprise schema: SIEM outbox has duplicate claim constraints",
+        ),
+        _ => {
+            bail!(
+                "cannot infer gateway postgres enterprise schema: SIEM outbox has an unknown constraint"
+            );
+        }
+    };
+    if *seen {
+        bail!("{duplicate_message}");
     }
-    Ok(PostgresSiemOutboxShape { complete_v6 })
+    *seen = true;
+    Ok(())
 }
 
 fn postgres_normalize_sql(sql: &str) -> String {

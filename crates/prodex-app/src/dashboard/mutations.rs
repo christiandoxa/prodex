@@ -9,13 +9,14 @@ use super::server::{
     respond_json_result, respond_status,
 };
 use crate::{
-    AppStateIoExt, ProfileEntry, ProfileLifecycleHomeAction, ProfileLifecyclePlan, ProfileProvider,
-    acquire_profile_lifecycle_lock, audit_log_event, create_codex_home_if_missing,
-    ensure_path_is_unique, finalize_recovered_profile_removals, lifecycle_profile_state,
-    load_profile_state_with_profile_recovery_locked, managed_profile_home_path,
-    persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileLifecycleHomeAction,
+    ProfileLifecyclePlan, ProfileProvider, acquire_profile_lifecycle_lock, audit_log_event,
+    create_codex_home_if_missing, ensure_path_is_unique, finalize_recovered_profile_removals,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    managed_profile_home_path, persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
     prune_removed_profile_metadata, write_profile_lifecycle_plan,
 };
+use std::path::PathBuf;
 
 impl DashboardServer {
     pub(super) fn handle_set_active(&self, mut request: Request) -> Result<()> {
@@ -94,65 +95,11 @@ impl DashboardServer {
                 anyhow!("profile '{}' already exists", name),
             );
         }
-        let codex_home = match managed_profile_home_path(&self.paths, &name) {
-            Ok(path) => path,
-            Err(err) => return respond_error(request, StatusCode(500), err),
-        };
-        if let Err(err) = ensure_path_is_unique(&state, &codex_home) {
-            return respond_error(request, StatusCode(500), err);
-        }
-        let lifecycle_path = match write_profile_lifecycle_plan(
-            &self.paths,
-            "manage",
-            &ProfileLifecyclePlan {
-                profile_states: match lifecycle_profile_state(
-                    &name,
-                    None,
-                    Some(&ProfileEntry {
-                        codex_home: codex_home.clone(),
-                        managed: true,
-                        email: None,
-                        provider: ProfileProvider::Openai,
-                    }),
-                ) {
-                    Ok(profile_state) => vec![profile_state],
-                    Err(err) => return respond_error(request, StatusCode(500), err),
-                },
-                previous_active_profile: state.active_profile.clone(),
-                next_active_profile: if payload.activate || state.active_profile.is_none() {
-                    Some(name.clone())
-                } else {
-                    state.active_profile.clone()
-                },
-                home_actions: vec![ProfileLifecycleHomeAction::Create {
-                    path: codex_home.display().to_string(),
-                }],
-                auth_journal_paths: Vec::new(),
-            },
-        ) {
-            Ok(path) => path,
-            Err(err) => return respond_error(request, StatusCode(500), err),
-        };
-        for result in [
-            create_codex_home_if_missing(&codex_home),
-            prepare_managed_codex_home(&self.paths, &codex_home),
-        ] {
-            if let Err(err) = result {
-                return respond_error(request, StatusCode(500), err);
-            }
-        }
-        state.profiles.insert(
-            name.clone(),
-            ProfileEntry {
-                codex_home: codex_home.clone(),
-                managed: true,
-                email: None,
-                provider: ProfileProvider::Openai,
-            },
-        );
-        if payload.activate || state.active_profile.is_none() {
-            state.active_profile = Some(name.clone());
-        }
+        let (codex_home, lifecycle_path) =
+            match prepare_added_profile(&self.paths, &mut state, &name, payload.activate) {
+                Ok(path) => path,
+                Err(err) => return respond_error(request, StatusCode(500), err),
+            };
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
@@ -251,4 +198,48 @@ impl DashboardServer {
             .map(|()| json!({ "status": "ok", "activeProfile": state.active_profile })),
         )
     }
+}
+
+fn prepare_added_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    name: &str,
+    activate: bool,
+) -> Result<(PathBuf, PathBuf)> {
+    let codex_home = managed_profile_home_path(paths, name)?;
+    ensure_path_is_unique(state, &codex_home)?;
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: None,
+        provider: ProfileProvider::Openai,
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        paths,
+        "manage",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(name, None, Some(&desired_profile))?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: if activate || state.active_profile.is_none() {
+                Some(name.to_string())
+            } else {
+                state.active_profile.clone()
+            },
+            home_actions: vec![ProfileLifecycleHomeAction::Create {
+                path: codex_home.display().to_string(),
+            }],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
+    for result in [
+        create_codex_home_if_missing(&codex_home),
+        prepare_managed_codex_home(paths, &codex_home),
+    ] {
+        result?;
+    }
+    state.profiles.insert(name.to_string(), desired_profile);
+    if activate || state.active_profile.is_none() {
+        state.active_profile = Some(name.to_string());
+    }
+    Ok((codex_home, lifecycle_path))
 }
