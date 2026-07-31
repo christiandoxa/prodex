@@ -13,6 +13,23 @@ import {
 
 const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
+const SONAR_ACTION =
+  "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0";
+const PRODUCTION_CLIPPY_COMMAND =
+  "cargo clippy --locked --workspace --lib --bins --all-features --message-format=json -- -D warnings";
+const SONAR_EXCLUSIONS = [
+  "**/test/**",
+  "**/tests/**",
+  "**/benches/**",
+  "**/examples/**",
+  "**/fuzz/**",
+  "**/generated/**",
+  "**/vendor/**",
+  "**/target/**",
+  "**/*_test.rs",
+  "**/*_tests.rs",
+  "**/test_*.rs",
+];
 
 function workflowJob(contents, name) {
   const lines = contents.split(/\r?\n/u);
@@ -71,6 +88,54 @@ export function validateProcessGuard(contents) {
   }
   if (job.includes("for commit in") || job.includes("git rev-list --reverse")) {
     violations.push(".github/workflows/ci.yml: process-guard must not split push allowances per commit");
+  }
+  return violations;
+}
+
+export function validateSonarConfiguration(workflowContents, properties) {
+  const job = workflowJob(workflowContents, "supply-chain");
+  if (!job) return [".github/workflows/ci.yml: missing supply-chain job"];
+  const violations = [];
+  for (const marker of [
+    PRODUCTION_CLIPPY_COMMAND,
+    "> sonar-clippy.json",
+    "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
+    "id: sonar-config",
+    "SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}",
+    "SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}",
+    "SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}",
+    "SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}",
+    "Sonar scan activation boundary",
+    "if: ${{ steps.sonar-config.outputs.enabled == 'true' }}",
+    SONAR_ACTION,
+  ]) {
+    if (!job.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: supply-chain job missing ${marker}`);
+    }
+  }
+  if (workflowContents.includes("sonarlint-vscode") || properties.includes("sonarlint-vscode")) {
+    violations.push("Sonar scan must not clone sonarlint-vscode");
+  }
+  for (const marker of [
+    "sonar.sources=src,crates",
+    "sonar.inclusions=src/**/*.rs,crates/**/*.rs",
+    "sonar.rust.clippy.enable=false",
+    "sonar.rust.clippyReport.reportPaths=sonar-clippy.json",
+    "sonar.qualitygate.wait=true",
+  ]) {
+    if (!properties.includes(marker)) {
+      violations.push(`sonar-project.properties: missing ${marker}`);
+    }
+  }
+  for (const exclusion of SONAR_EXCLUSIONS) {
+    if (!properties.includes(exclusion)) {
+      violations.push(`sonar-project.properties: missing exclusion ${exclusion}`);
+    }
+  }
+  for (const marker of ["sonar.projectKey=", "sonar.organization=", "sonar.host.url=", "SONAR_TOKEN="]) {
+    if (properties.includes(marker)) {
+      violations.push(`sonar-project.properties: must not contain ${marker}`);
+    }
   }
   return violations;
 }
@@ -362,6 +427,64 @@ function selfTest() {
 `;
   assert.deepEqual(validateProcessGuard(processJob), []);
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
+  const sonarWorkflow = `jobs:
+  supply-chain:
+    steps:
+      - run: ${PRODUCTION_CLIPPY_COMMAND} > sonar-clippy.json
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - id: sonar-config
+        env:
+          SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: \${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_HOST_URL: \${{ vars.SONAR_HOST_URL }}
+          SONAR_ORGANIZATION: \${{ vars.SONAR_ORGANIZATION }}
+        run: echo "Sonar scan activation boundary"
+      - if: \${{ steps.sonar-config.outputs.enabled == 'true' }}
+        uses: ${SONAR_ACTION}
+  other:
+    steps: []
+`;
+  const sonarProperties = `sonar.sources=src,crates
+sonar.inclusions=src/**/*.rs,crates/**/*.rs
+sonar.exclusions=${SONAR_EXCLUSIONS.join(",")}
+sonar.rust.clippy.enable=false
+sonar.rust.clippyReport.reportPaths=sonar-clippy.json
+sonar.qualitygate.wait=true
+`;
+  assert.deepEqual(validateSonarConfiguration(sonarWorkflow, sonarProperties), []);
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow.replace(SONAR_ACTION, "SonarSource/sonarqube-scan-action@v8.1.0"), sonarProperties).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow.replace(PRODUCTION_CLIPPY_COMMAND, "cargo clippy --locked --workspace --all-targets --all-features --message-format=json -- -D warnings"), sonarProperties).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow, sonarProperties.replace("**/vendor/**,", "")).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow,
+      sonarProperties.replace("sonar.rust.clippyReport.reportPaths=sonar-clippy.json", ""),
+    ).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow, sonarProperties.replace("sonar.qualitygate.wait=true", "sonar.qualitygate.wait=false")).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow.replace(
+        '        run: echo "Sonar scan activation boundary"',
+        '        run: echo "Sonar scan activation boundary"\n      - run: git clone https://github.com/SonarSource/sonarlint-vscode',
+      ),
+      sonarProperties,
+    ).length,
+    1,
+  );
   assert.equal(validateReleaseMalwareGate("jobs:\n  other:\n").length, 1);
   assert.equal(validateReleaseContainerPublication("jobs:\n  other:\n").length, 1);
 }
@@ -384,6 +507,9 @@ async function main() {
       );
     }
   }
+  const sonarProperties = await fs.readFile(path.join(repoRoot, "sonar-project.properties"), "utf8");
+  const ciContents = await fs.readFile(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  violations.push(...validateSonarConfiguration(ciContents, sonarProperties));
   const toolchain = await fs.readFile(path.join(repoRoot, "rust-toolchain.toml"), "utf8");
   const rustToolchain = toolchain.match(/^channel\s*=\s*"([^"]+)"/mu)?.[1];
   if (!rustToolchain) {

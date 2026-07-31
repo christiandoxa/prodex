@@ -767,8 +767,51 @@ jobs:
             ~/.cargo/bin/cargo-machete
           key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0-machete-0.9.2
 
+      - name: Generate production Clippy JSON report
+        shell: bash
+        run: cargo clippy --locked --workspace --lib --bins --all-features --message-format=json -- -D warnings > sonar-clippy.json
+
       - name: Run clippy warning gate
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Check Sonar scan configuration
+        id: sonar-config
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+        run: |
+          set -euo pipefail
+          configured=0
+          if [ -n "${SONAR_TOKEN}" ] || [ -n "${SONAR_PROJECT_KEY}" ] ||
+             [ -n "${SONAR_HOST_URL}" ] || [ -n "${SONAR_ORGANIZATION}" ]; then
+            configured=1
+          fi
+
+          if [ -n "${SONAR_TOKEN}" ] && [ -n "${SONAR_PROJECT_KEY}" ] &&
+             { [ -n "${SONAR_HOST_URL}" ] || [ -n "${SONAR_ORGANIZATION}" ]; }; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "Sonar scan activation boundary: enabled (complete repository configuration)." | tee -a "${GITHUB_STEP_SUMMARY}"
+          elif [ "${configured}" -eq 1 ]; then
+            echo "Sonar scan activation boundary: incomplete repository configuration; refusing live scan." >&2
+            exit 1
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Sonar scan activation boundary: disabled (repository configuration absent); production Clippy gate still runs." | tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Run SonarQube scan
+        if: ${{ steps.sonar-config.outputs.enabled == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        with:
+          args: >-
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            ${{ vars.SONAR_ORGANIZATION != '' && format('-Dsonar.organization={0}', vars.SONAR_ORGANIZATION) || '' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
       - name: Install cargo-audit
         shell: bash

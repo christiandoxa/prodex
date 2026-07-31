@@ -45,6 +45,7 @@ refs:
 | `dtolnay/rust-toolchain` | `stable` | `4be7066ada62dd38de10e7b70166bc74ed198c30` |
 | `Swatinem/rust-cache` | `v2` | `e18b497796c12c097a38f9edb9d0641fb99eee32` |
 | `mozilla-actions/sccache-action` | `v0.0.10` | `9e7fa8a12102821edf02ca5dbea1acd0f89a2696` |
+| `SonarSource/sonarqube-scan-action` | `v8.1.0` | `7006c4492b2e0ee0f816d36501671557c97f5995` |
 
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
@@ -68,8 +69,14 @@ Primary pin sources:
 
 ## Required gates
 
-The `supply-chain` CI job runs locked clippy, `cargo audit`, all configured
-`cargo deny` checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
+The `supply-chain` CI job runs production-only JSON Clippy plus all-target
+Clippy gates, `cargo audit`, all configured `cargo deny` checks, pinned
+`cargo-machete 0.9.2`, and source SBOM generation. It runs the live Sonar scan
+only when repository configuration provides `SONAR_TOKEN`,
+`SONAR_PROJECT_KEY`, and either `SONAR_HOST_URL` or `SONAR_ORGANIZATION`;
+partial configuration fails closed, while absent configuration reports the
+activation boundary and leaves the production Clippy gate active. Keep these
+values in GitHub Actions secrets/variables, not tracked files.
 `deny.toml` allows only the licenses present in the reviewed lockfile, denies
 wildcard dependencies and OpenSSL/native-tls, and treats duplicate versions as
 errors. Every duplicate exception names one exact older version, its current
