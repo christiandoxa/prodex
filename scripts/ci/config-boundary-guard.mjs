@@ -389,13 +389,13 @@ async function validateConfigSources() {
   const srcRoot = path.join(repoRoot, CONFIG_SRC_DIR);
   const files = await rustFilesUnder(srcRoot);
   const errors = [];
+  const sources = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
+    sources.push(source);
     errors.push(...validateConfigSource(source, path.relative(repoRoot, file)));
-    if (path.relative(repoRoot, file) === CONFIG_LIB) {
-      errors.push(...validateConfigRequiredContracts(source, CONFIG_LIB));
-    }
   }
+  errors.push(...validateConfigRequiredContracts(sources.join("\n"), CONFIG_SRC_DIR));
   return errors;
 }
 
