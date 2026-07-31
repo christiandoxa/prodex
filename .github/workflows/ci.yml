@@ -441,7 +441,8 @@ jobs:
         if: matrix.suite == 'app'
         env:
           RUST_BACKTRACE: "1"
-        run: cargo test --locked -q -p prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
+        run: |
+          cargo test --locked -q -p prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
 
       - name: Prebuild Windows auto-rotate tests
         if: startsWith(matrix.suite, 'root-')
