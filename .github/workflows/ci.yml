@@ -865,6 +865,7 @@ jobs:
           kics_image="docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602"
           docker pull "${kics_image}"
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
             --read-only \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \

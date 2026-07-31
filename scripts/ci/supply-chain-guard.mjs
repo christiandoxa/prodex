@@ -202,6 +202,7 @@ export function validateKicsConfiguration(workflowContents) {
     `kics_image="${KICS_IMAGE}"`,
     'docker pull "${kics_image}"',
     "docker run --rm",
+    '--user "$(id -u):$(id -g)"',
     "--read-only",
     "--cap-drop ALL",
     "--security-opt no-new-privileges:true",
@@ -599,7 +600,7 @@ function selfTest() {
       - run: |
           kics_image="${KICS_IMAGE}"
           docker pull "\${kics_image}"
-          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --fail-on critical,high
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --fail-on critical,high
       - name: Upload KICS reports
         if: always()
         with:

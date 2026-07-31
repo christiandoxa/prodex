@@ -129,6 +129,7 @@ npm run ci:supply-chain-guard
 npm run ci:secret-boundary-guard
 mkdir -p target/kics
 docker run --rm \
+  --user "$(id -u):$(id -g)" \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
   --volume "${PWD}:/path:ro" \
