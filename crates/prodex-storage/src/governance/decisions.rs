@@ -257,3 +257,24 @@ fn governance_activation_revisions(
         }
     }
 }
+
+pub fn governance_revocation_fallback_candidate(
+    action: GovernanceActivationAction,
+    revision_id: &str,
+    active_revision_id: Option<&str>,
+    last_known_good_revision_id: Option<&str>,
+) -> Option<String> {
+    if action != GovernanceActivationAction::Revoke {
+        return None;
+    }
+    let candidate = if active_revision_id == Some(revision_id) {
+        last_known_good_revision_id
+    } else if last_known_good_revision_id == Some(revision_id) {
+        active_revision_id
+    } else {
+        None
+    };
+    candidate
+        .filter(|candidate| *candidate != revision_id)
+        .map(str::to_owned)
+}
