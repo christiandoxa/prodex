@@ -2,6 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.375.0 - 2026-07-31
+
+### Runtime
+
+- Finish gateway module splits (`5fa71c0`)
+- Preserve Gemini blocked response metadata (`0711553`)
+- Satisfy Gemini Clippy checks (`f98d478`)
+- Satisfy core clippy lints (`41d62be`)
+
+### CLI
+
+- Pass Windows descriptor pointer (`cded4b1`)
+
+### Misc
+
+- Latch poisoned audit writer (`7274d89`)
+- Recover postcommit audits (`e1e6758`)
+- Durable governance invalidation (`871a208`)
+- Preserve committed mutation success (`e536986`)
+- Close audited CLI and CI gaps (`cb3151f`)
+
 ## 0.374.0 - 2026-07-31
 
 ### Misc
@@ -81,7 +102,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Correct provider contracts and durable state writes (`c67df85`)
-
-## 0.363.0 - 2026-07-28
-
-- No grouped changes.
