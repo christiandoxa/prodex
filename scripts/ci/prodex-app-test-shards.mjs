@@ -1,26 +1,93 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 
-const FILTER_PREFIX = "main_internal_tests::runtime_proxy_selection_and_pressure::";
+const SELECTION_PREFIX = "main_internal_tests::runtime_proxy_selection_and_pressure::";
+const LAUNCH_PREFIX = "runtime_launch::proxy_startup::";
 
-export const PRODEX_APP_LIB_FILTERS = Object.freeze([
-  `${FILTER_PREFIX}selection::`,
-  `${FILTER_PREFIX}pressure::`,
-  `${FILTER_PREFIX}incidents::`,
-  `${FILTER_PREFIX}admission::`,
-  `${FILTER_PREFIX}state::`,
-  `${FILTER_PREFIX}rotation::`,
-  `${FILTER_PREFIX}health::`,
+const TARGETED_SHARDS = Object.freeze([
+  {
+    suite: "selection",
+    label: "prodex-app selection",
+    filters: [`${SELECTION_PREFIX}selection::`, `${SELECTION_PREFIX}pressure::`, `${SELECTION_PREFIX}incidents::`],
+  },
+  {
+    suite: "admission",
+    label: "prodex-app admission and recovery",
+    filters: [
+      `${SELECTION_PREFIX}admission::`,
+      `${SELECTION_PREFIX}state::`,
+      `${SELECTION_PREFIX}rotation::`,
+      `${SELECTION_PREFIX}health::`,
+    ],
+  },
+  {
+    suite: "launch-local",
+    label: "prodex-app local rewrite",
+    filters: [`${LAUNCH_PREFIX}local_rewrite_tests::`],
+  },
+  {
+    suite: "launch-gemini",
+    label: "prodex-app Gemini runtime",
+    filters: [`${LAUNCH_PREFIX}gemini`, `${LAUNCH_PREFIX}local_rewrite_gemini`],
+  },
+  {
+    suite: "launch-gateway",
+    label: "prodex-app gateway runtime",
+    filters: [`${LAUNCH_PREFIX}local_rewrite_gateway`],
+  },
+  {
+    suite: "launch-providers",
+    label: "prodex-app provider runtimes",
+    filters: [
+      `${LAUNCH_PREFIX}provider`,
+      `${LAUNCH_PREFIX}deepseek`,
+      `${LAUNCH_PREFIX}local_rewrite_deepseek`,
+      `${LAUNCH_PREFIX}local_rewrite_transport`,
+      `${LAUNCH_PREFIX}local_rewrite_copilot`,
+      `${LAUNCH_PREFIX}local_rewrite_anthropic`,
+      `${LAUNCH_PREFIX}anthropic`,
+      `${LAUNCH_PREFIX}local_rewrite_kiro`,
+    ],
+  },
+  {
+    suite: "commands",
+    label: "prodex-app commands",
+    filters: ["app_commands::"],
+  },
+  {
+    suite: "runtime",
+    label: "prodex-app runtime and profiles",
+    filters: ["runtime_proxy::", "profile_commands::"],
+  },
+  {
+    suite: "brokers",
+    label: "prodex-app brokers",
+    filters: [
+      "main_internal_tests::app_server_broker::",
+      "main_internal_tests::runtime_proxy_claude_and_anthropic::",
+    ],
+  },
+  {
+    suite: "support",
+    label: "prodex-app support modules",
+    filters: [
+      "quota_support::",
+      "runtime_state_shared::",
+      "runtime_broker::",
+      "runtime_tools::",
+      "runtime_gemini_cli::",
+      "runtime_kiro_acp::",
+      "runtime_config::",
+      "expose::",
+      "runtime_gemini_auth::",
+    ],
+  },
 ]);
 
+export const PRODEX_APP_LIB_FILTERS = Object.freeze(TARGETED_SHARDS.flatMap((shard) => shard.filters));
+
 export const PRODEX_APP_LIB_SHARDS = Object.freeze([
-  { suite: "selection", label: "prodex-app selection", filter: PRODEX_APP_LIB_FILTERS[0] },
-  { suite: "pressure", label: "prodex-app pressure", filter: PRODEX_APP_LIB_FILTERS[1] },
-  { suite: "incidents", label: "prodex-app incidents", filter: PRODEX_APP_LIB_FILTERS[2] },
-  { suite: "admission", label: "prodex-app admission", filter: PRODEX_APP_LIB_FILTERS[3] },
-  { suite: "state", label: "prodex-app state", filter: PRODEX_APP_LIB_FILTERS[4] },
-  { suite: "rotation", label: "prodex-app rotation", filter: PRODEX_APP_LIB_FILTERS[5] },
-  { suite: "health", label: "prodex-app health", filter: PRODEX_APP_LIB_FILTERS[6] },
+  ...TARGETED_SHARDS,
   {
     suite: "remainder",
     label: "prodex-app remaining library tests",
@@ -67,17 +134,23 @@ export function validateShards(shards = PRODEX_APP_LIB_SHARDS) {
     if (typeof shard.label !== "string" || shard.label.trim() === "") {
       issues.push(`shard[${index}] label must be a non-empty string`);
     }
-    const hasFilter = Object.hasOwn(shard, "filter");
+    const hasFilters = Object.hasOwn(shard, "filters");
     const hasSkipFilters = Object.hasOwn(shard, "skipFilters");
-    if (hasFilter === hasSkipFilters) {
-      issues.push(`shard[${index}] must define exactly one of filter or skipFilters`);
+    if (hasFilters === hasSkipFilters) {
+      issues.push(`shard[${index}] must define exactly one of filters or skipFilters`);
       continue;
     }
-    if (hasFilter) {
-      if (typeof shard.filter !== "string" || shard.filter.trim() === "") {
-        issues.push(`shard[${index}] filter must be a non-empty string`);
+    if (hasFilters) {
+      if (!Array.isArray(shard.filters) || shard.filters.length === 0) {
+        issues.push(`shard[${index}] filters must be a non-empty array`);
       } else {
-        filters.push(shard.filter);
+        for (const filter of shard.filters) {
+          if (typeof filter !== "string" || filter.trim() === "") {
+            issues.push(`shard[${index}] filters must contain only non-empty strings`);
+          } else {
+            filters.push(filter);
+          }
+        }
       }
     } else if (!Array.isArray(shard.skipFilters) || shard.skipFilters.length === 0) {
       issues.push(`shard[${index}] skipFilters must be a non-empty array`);
@@ -117,7 +190,7 @@ function matrixEntry(shard, index) {
     suite: shard.suite,
     label: shard.label,
     save_cache: index === 0,
-    filter: shard.filter ?? "",
+    filters: shard.filters?.join("\n") ?? "",
     skip_filters: shard.skipFilters?.join("\n") ?? "",
   };
 }
@@ -131,7 +204,7 @@ export function githubMatrix({ includeWorkspace = false } = {}) {
       suite: WORKSPACE_SHARD.suite,
       label: WORKSPACE_SHARD.label,
       save_cache: true,
-      filter: "",
+      filters: "",
       skip_filters: "",
     });
   }
@@ -142,8 +215,13 @@ function stepCommand(shard) {
   if (shard.suite === "workspace") {
     return "node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib";
   }
-  if (shard.filter) {
-    return `cargo test --locked -q -p prodex-app --lib --all-features '${shard.filter}' -- --test-threads=1`;
+  if (shard.filters) {
+    return shard.filters
+      .map(
+        (filter) =>
+          `cargo test --locked -q -p prodex-app --lib --all-features '${filter}' -- --test-threads=1`,
+      )
+      .join(" && ");
   }
   return [
     "cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1",

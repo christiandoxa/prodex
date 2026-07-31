@@ -150,15 +150,22 @@ jobs:
       - name: Run prodex-app library partition ${{ matrix.label }}
         shell: bash
         env:
-          PRODEX_APP_FILTER: ${{ matrix.filter }}
+          PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
         run: |
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
-          if [[ -n "${PRODEX_APP_FILTER}" ]]; then
-            cargo test --locked -q -p prodex-app --lib --all-features \
-              "${PRODEX_APP_FILTER}" -- --test-threads=1 2>&1 | tee "${test_log}"
+          if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
+            while IFS= read -r filter; do
+              [[ -z "${filter}" ]] && continue
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                "${filter}" -- --test-threads=1 2>&1 | tee "${test_log}"
+              if grep -Fq 'running 0 tests' "${test_log}"; then
+                echo "prodex-app filter matched no tests: ${filter}"
+                exit 1
+              fi
+            done <<< "${PRODEX_APP_FILTERS}"
           else
             skip_args=()
             while IFS= read -r filter; do
@@ -167,10 +174,10 @@ jobs:
             done <<< "${PRODEX_APP_SKIP_FILTERS}"
             cargo test --locked -q -p prodex-app --lib --all-features \
               -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
-          fi
-          if grep -Fq 'running 0 tests' "${test_log}"; then
-            echo "prodex-app shard matched no tests"
-            exit 1
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "prodex-app shard matched no tests"
+              exit 1
+            fi
           fi
 
       - name: Test temp-backed state with a symlinked TMPDIR
@@ -376,9 +383,6 @@ jobs:
           - suite: members-storage
             label: workspace storage members
             save_cache: false
-          - suite: app
-            label: prodex-app
-            save_cache: false
           - suite: root-0
             label: root shard 1 of 2
             auto_rotate_shard: 0
@@ -444,13 +448,6 @@ jobs:
           RUST_BACKTRACE: "1"
         run: cargo test --locked -q -p 'prodex-storage*' --all-features -- --test-threads=4
 
-      - name: Run Windows prodex-app tests
-        if: matrix.suite == 'app'
-        env:
-          RUST_BACKTRACE: "1"
-        run: |
-          cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
-
       - name: Prebuild Windows auto-rotate tests
         if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         run: cargo test --locked --test auto_rotate --all-features --no-run
@@ -477,6 +474,82 @@ jobs:
       - name: Test Windows installer
         if: matrix.suite == 'installer'
         run: npm run installer:test
+
+  windows-prodex-app:
+    name: Windows prodex-app tests (${{ matrix.label }})
+    needs: changes
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+          save-if: false
+
+      - name: Run Windows prodex-app partition ${{ matrix.label }}
+        shell: bash
+        env:
+          PRODEX_APP_FILTERS: ${{ matrix.filters }}
+          PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          windows_skips=(
+            --skip login::
+            --skip quota_doctor::
+            --skip run::
+            --skip shared_state::
+            --skip super_mode::
+            --skip continuity_failure_reason_metrics_
+            --skip rtk::tests::
+          )
+          if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
+            while IFS= read -r filter; do
+              [[ -z "${filter}" ]] && continue
+              cargo test --locked -q -p prodex-app --lib --all-features \
+                "${filter}" -- --test-threads=1 "${windows_skips[@]}" 2>&1 | tee "${test_log}"
+              if grep -Fq 'running 0 tests' "${test_log}"; then
+                echo "prodex-app filter matched no Windows tests: ${filter}"
+                exit 1
+              fi
+            done <<< "${PRODEX_APP_FILTERS}"
+          else
+            shard_skips=()
+            while IFS= read -r filter; do
+              [[ -z "${filter}" ]] && continue
+              shard_skips+=(--skip "${filter}")
+            done <<< "${PRODEX_APP_SKIP_FILTERS}"
+            cargo test --locked -q -p prodex-app --lib --all-features -- \
+              --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "prodex-app Windows shard matched no tests"
+              exit 1
+            fi
+          fi
 
   macos-workspace:
     name: macOS full workspace tests
@@ -839,10 +912,13 @@ jobs:
             --header "Authorization: Bearer ${SONAR_TOKEN}" \
             --data-urlencode "componentKeys=prodex-ci" \
             --data-urlencode "resolved=false" \
-            --data-urlencode "ps=1" \
+            --data-urlencode "ps=100" \
             "${SONAR_HOST_URL}/api/issues/search")"
           total="$(jq -er '(.paging.total // .total) | select(type == "number")' <<<"${response}")"
           if [ "${total}" -ne 0 ]; then
+            echo "Sonar unresolved issues:" >&2
+            jq -r '.issues[] | "\(.component | sub("^prodex-ci:"; "")):\(.line // 0) \(.rule) \(.message)"' \
+              <<<"${response}" >&2
             echo "Sonar reported ${total} unresolved issue(s); refusing to continue." >&2
             exit 1
           fi
@@ -1504,6 +1580,7 @@ jobs:
       - secret-scan
       - windows-security
       - windows-workspace
+      - windows-prodex-app
       - macos-workspace
       - process-guard
       - redis-integration

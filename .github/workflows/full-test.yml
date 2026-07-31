@@ -82,6 +82,8 @@ jobs:
       - name: Run full test partition
         shell: bash
         env:
+          PRODEX_APP_FILTERS: ${{ matrix.filters }}
+          PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
           RUST_BACKTRACE: "1"
         run: |
           set -euo pipefail
@@ -95,10 +97,10 @@ jobs:
               command_description="node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib (workspace passes --exclude prodex-app)"
               ;;
             remainder)
-              command_description="prodex-app library excluding the seven disjoint runtime proxy filters"
+              command_description="prodex-app library remainder after the shared disjoint filters"
               ;;
             *)
-              command_description="prodex-app filter: ${{ matrix.filter }}"
+              command_description="prodex-app filters: ${PRODEX_APP_FILTERS//$'\n'/, }"
               ;;
           esac
 
@@ -121,6 +123,7 @@ jobs:
           cargo -Vv > "${artifact_dir}/cargo-version.txt"
 
           set +e
+          status=0
           case "${suite}" in
             workspace)
               node scripts/ci/full-rust-test.mjs \
@@ -130,28 +133,44 @@ jobs:
                 --timings-json \
                 --no-prodex-app-lib \
                 > "${cargo_log}" 2>&1
+              status=$?
               ;;
             remainder)
               skip_args=()
               while IFS= read -r filter; do
                 [ -z "${filter}" ] && continue
                 skip_args+=(--skip "${filter}")
-              done <<< "${{ matrix.skip_filters }}"
+              done <<< "${PRODEX_APP_SKIP_FILTERS}"
               cargo test --locked -q -p prodex-app --lib --all-features -- \
                 --test-threads=1 \
                 "${skip_args[@]}" \
                 > "${cargo_log}" 2>&1
+              status=$?
               ;;
             *)
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                "${{ matrix.filter }}" -- --test-threads=1 \
-                > "${cargo_log}" 2>&1
+              : > "${cargo_log}"
+              filter_log="${artifact_dir}/filter.log"
+              while IFS= read -r filter; do
+                [ -z "${filter}" ] && continue
+                cargo test --locked -q -p prodex-app --lib --all-features \
+                  "${filter}" -- --test-threads=1 \
+                  > "${filter_log}" 2>&1
+                status=$?
+                cat "${filter_log}" >> "${cargo_log}"
+                if [ "${status}" -ne 0 ]; then
+                  break
+                fi
+                if grep -Fq 'running 0 tests' "${filter_log}"; then
+                  echo "prodex-app filter matched no tests: ${filter}" >> "${cargo_log}"
+                  status=1
+                  break
+                fi
+              done <<< "${PRODEX_APP_FILTERS}"
               ;;
           esac
-          status=$?
           set -e
 
-          if [ "${status}" -eq 0 ] && [ "${suite}" != "workspace" ] && \
+          if [ "${status}" -eq 0 ] && [ "${suite}" = "remainder" ] && \
              grep -Fq 'running 0 tests' "${cargo_log}"; then
             echo "prodex-app shard matched no tests" >> "${cargo_log}"
             status=1

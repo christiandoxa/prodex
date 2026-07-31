@@ -54,7 +54,8 @@ function workflowJob(contents, name) {
 export function validateWindowsSecurityJob(contents) {
   const job = workflowJob(contents, "windows-security");
   const workspace = workflowJob(contents, "windows-workspace");
-  if (!job || !workspace) return [".github/workflows/ci.yml: missing Windows test job"];
+  const app = workflowJob(contents, "windows-prodex-app");
+  if (!job || !workspace || !app) return [".github/workflows/ci.yml: missing Windows test job"];
   const violations = [];
   for (const marker of [
     "runs-on: windows-latest",
@@ -80,12 +81,25 @@ export function validateWindowsSecurityJob(contents) {
     "cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features",
     "cargo test --locked -q -p 'prodex-runtime-*' --all-features",
     "cargo test --locked -q -p 'prodex-storage*' --all-features",
-    "cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1",
     "- name: Build Windows installer fixture binary",
     "- name: Test Windows installer",
   ]) {
     if (!workspace.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: windows-workspace job missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    "runs-on: windows-latest",
+    "matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}",
+    "PRODEX_APP_FILTERS:",
+    "PRODEX_APP_SKIP_FILTERS:",
+    "cargo test --locked -q -p prodex-app --lib --all-features",
+    "--test-threads=1",
+    "save-if: false",
+    "prodex-app filter matched no Windows tests",
+  ]) {
+    if (!app.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: windows-prodex-app job missing ${marker}`);
     }
   }
   if (job.includes("prodex-secret-store") || job.includes("installer:test")) {
@@ -137,6 +151,7 @@ export function validateSonarConfiguration(workflowContents, properties) {
     '.projectStatus.status == "OK"',
     "/api/issues/search",
     '--data-urlencode "resolved=false"',
+    "Sonar unresolved issues:",
     'if [ "${total}" -ne 0 ]',
     "Revoke ephemeral local Sonar token",
     "/api/user_tokens/revoke",
@@ -534,9 +549,21 @@ function selfTest() {
       - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features
       - run: cargo test --locked -q -p 'prodex-runtime-*' --all-features
       - run: cargo test --locked -q -p 'prodex-storage*' --all-features
-      - run: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1
       - name: Build Windows installer fixture binary
       - name: Test Windows installer
+  windows-prodex-app:
+    runs-on: windows-latest
+    strategy:
+      matrix: \${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
+    steps:
+      - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
+        with:
+          save-if: false
+      - env:
+          PRODEX_APP_FILTERS: filters
+          PRODEX_APP_SKIP_FILTERS: skips
+        run: cargo test --locked -q -p prodex-app --lib --all-features filter -- --test-threads=1
+      - run: echo "prodex-app filter matched no Windows tests"
 `;
   assert.deepEqual(validateWindowsSecurityJob(windowsJob), []);
   assert.equal(
@@ -588,7 +615,7 @@ function selfTest() {
           curl /api/qualitygates/project_status
           jq '.projectStatus.status == "OK"'
           curl --data-urlencode "resolved=false" /api/issues/search
-          if [ "\${total}" -ne 0 ]; then exit 1; fi
+          if [ "\${total}" -ne 0 ]; then echo "Sonar unresolved issues:"; exit 1; fi
       - name: Revoke ephemeral local Sonar token
         run: curl /api/user_tokens/revoke
   supply-chain:
