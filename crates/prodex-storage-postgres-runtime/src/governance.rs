@@ -3,11 +3,15 @@
 mod approvals;
 mod audit_outbox;
 mod audit_retention;
+mod invalidation_outbox;
 mod revisions;
 mod sessions;
 
 use approvals::*;
 use audit_outbox::*;
+pub use invalidation_outbox::{
+    GovernanceInvalidationOutboxCleanup, PostgresGovernanceInvalidation,
+};
 use revisions::*;
 use sessions::*;
 

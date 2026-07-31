@@ -1,5 +1,7 @@
 #[path = "postgres_runtime/audit_retention.rs"]
 mod audit_retention;
+#[path = "postgres_runtime/invalidation_outbox.rs"]
+mod invalidation_outbox;
 #[path = "postgres_runtime/policy_governance.rs"]
 mod policy_governance;
 
@@ -24,8 +26,8 @@ use prodex_storage::{
 };
 use prodex_storage_postgres::{SET_TENANT_STATEMENT, UPSERT_TENANT_LIFECYCLE_STATEMENT};
 use prodex_storage_postgres_runtime::{
-    IdempotentWriteOutcome, PostgresRepository, PostgresRuntimeConfig, ReserveOutcome,
-    ReserveRejection, StoredReservationState,
+    IdempotentWriteOutcome, PostgresGovernanceInvalidation, PostgresRepository,
+    PostgresRuntimeConfig, ReserveOutcome, ReserveRejection, StoredReservationState,
 };
 use sha2::{Digest, Sha256};
 use std::str::FromStr;

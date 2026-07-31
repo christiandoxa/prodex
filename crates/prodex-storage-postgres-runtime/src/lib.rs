@@ -10,7 +10,9 @@ use std::{fmt, future::Future, time::Duration};
 mod governance;
 mod tls;
 mod types;
-pub use governance::PostgresSiemOutboxClaim;
+pub use governance::{
+    GovernanceInvalidationOutboxCleanup, PostgresGovernanceInvalidation, PostgresSiemOutboxClaim,
+};
 pub use tls::{PostgresTlsConfig, PostgresTlsMode, connect_blocking};
 pub use types::{
     ExpiredReservationCandidate, IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome,
