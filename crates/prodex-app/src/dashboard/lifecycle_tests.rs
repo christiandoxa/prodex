@@ -1,10 +1,11 @@
 use super::tests::{dashboard_json_request, dashboard_test_paths};
-use super::*;
+use super::{AppState, DashboardServer};
 use crate::{
     AppStateIoExt, ProfileEntry, ProfileLifecyclePlan, ProfileProvider, ResponseProfileBinding,
     RuntimeContinuationStore, lifecycle_profile_state, runtime_continuations_file_path,
     save_runtime_continuations_for_profiles, write_profile_lifecycle_plan,
 };
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 
