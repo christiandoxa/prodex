@@ -191,12 +191,7 @@ fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
             .map_or(available.len(), |index| index + 1);
         let line_complete = available.get(take.saturating_sub(1)) == Some(&b'\n');
         if !line_oversized {
-            if line.len().saturating_add(take) <= RUNTIME_BROKER_LOG_LINE_MAX_BYTES {
-                line.extend_from_slice(&available[..take]);
-            } else {
-                line.clear();
-                line_oversized = true;
-            }
+            line_oversized = append_runtime_broker_log_chunk(&mut line, &available[..take]);
         }
         reader.consume(take);
         consumed = consumed.checked_add(u64::try_from(take).ok()?)?;
@@ -214,6 +209,15 @@ fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
     }
 
     Some((metrics, parsed_len))
+}
+
+fn append_runtime_broker_log_chunk(line: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    if line.len().saturating_add(chunk.len()) > RUNTIME_BROKER_LOG_LINE_MAX_BYTES {
+        line.clear();
+        return true;
+    }
+    line.extend_from_slice(chunk);
+    false
 }
 
 pub fn runtime_broker_continuity_failure_reason_metrics_from_log_file(
