@@ -239,8 +239,10 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
 
 enum RuntimeLocalRewriteProviderAttempt {
     Success(
-        RuntimeLocalRewriteUpstreamResult,
-        RuntimeLocalRewriteProxyShared,
+        Box<(
+            RuntimeLocalRewriteUpstreamResult,
+            RuntimeLocalRewriteProxyShared,
+        )>,
     ),
     Retry(anyhow::Error),
     Stop(anyhow::Error),
@@ -277,7 +279,8 @@ fn runtime_local_rewrite_try_provider_candidates(
             candidate_count,
             &mut primary_dispatch,
         ) {
-            RuntimeLocalRewriteProviderAttempt::Success(response, selected_shared) => {
+            RuntimeLocalRewriteProviderAttempt::Success(result) => {
+                let (response, selected_shared) = *result;
                 if let Some(guard) = request.state.guards.route_load.as_mut() {
                     guard.mark_status(response.status());
                 }
@@ -365,7 +368,9 @@ fn runtime_local_rewrite_provider_attempt(
                 "provider precommit fallback"
             ))
         }
-        Ok(response) => RuntimeLocalRewriteProviderAttempt::Success(response, selected_shared),
+        Ok(response) => {
+            RuntimeLocalRewriteProviderAttempt::Success(Box::new((response, selected_shared)))
+        }
         Err(error)
             if runtime_gateway_application_provider_retry_precommit(
                 ProviderRetryCause::NextProvider,
