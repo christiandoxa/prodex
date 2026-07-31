@@ -204,12 +204,22 @@ export function validateReleaseMalwareGate(contents) {
 }
 
 export function validateReleaseContainerPublication(contents) {
+  const verify = workflowJob(contents, "verify-ci");
   const container = workflowJob(contents, "publish-container");
   const release = workflowJob(contents, "publish-github-release");
-  if (!container || !release) {
-    return [".github/workflows/standalone-release.yml: missing container or release publish job"];
+  if (!verify || !container || !release) {
+    return [".github/workflows/standalone-release.yml: missing verify, container, or release publish job"];
   }
   const violations = [];
+  for (const marker of [
+    "git fetch origin --tags --force",
+    'release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"',
+    "release tag ${version} targets ${release_tag_sha}, not ${target_sha}",
+  ]) {
+    if (!verify.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release target safety missing ${marker}`);
+    }
+  }
   for (const marker of [
     "- build",
     "packages: write",
@@ -228,6 +238,7 @@ export function validateReleaseContainerPublication(contents) {
   }
   for (const marker of [
     "- publish-container",
+    "- sync-release-docs",
     "name: kubernetes-manifest",
     "cp artifacts/kubernetes-manifest/prodex-* release-assets/",
   ]) {

@@ -45,6 +45,19 @@ jobs:
           elif [ "${ref_name}" != "main" ]; then
             echo "workflow_dispatch release runs must target main or a matching version tag" >&2
             exit 1
+          else
+            version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+            )"
+            git fetch origin --tags --force
+            if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
+              && [ "${release_tag_sha}" != "${target_sha}" ]; then
+              echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
+              exit 1
+            fi
           fi
           echo "target_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
 
@@ -596,6 +609,7 @@ jobs:
     needs:
       - prepare-release
       - publish-container
+      - sync-release-docs
     permissions:
       attestations: write
       contents: write
