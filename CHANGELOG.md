@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.376.0 - 2026-07-31
+
+- No grouped changes.
+
 ## 0.375.0 - 2026-07-31
 
 ### Runtime
@@ -96,9 +100,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete atomic mutation lifecycle (`5a957e6`)
-
-## 0.364.0 - 2026-07-28
-
-### Runtime
-
-- Correct provider contracts and durable state writes (`c67df85`)
