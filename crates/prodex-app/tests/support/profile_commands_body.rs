@@ -8,6 +8,8 @@ use std::thread::JoinHandle;
 mod export;
 #[path = "profile_commands_body/import.rs"]
 mod import;
+#[path = "profile_commands_body/lifecycle.rs"]
+mod lifecycle;
 #[path = "profile_commands_body/login.rs"]
 mod login;
 
@@ -50,6 +52,162 @@ fn profile_add_and_remove_succeed_when_local_audit_persistence_fails() {
             .profiles
             .contains_key("main")
     );
+}
+
+#[test]
+fn profile_remove_recovers_quarantined_home_after_state_save_failure() {
+    let root = ProfileCommandsTestDir::new("remove-lifecycle-recovery");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let profile_home = paths.managed_profiles_root.join("main");
+    profile_commands_write_profile_auth(&profile_home, "main");
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("initial state should save");
+
+    {
+        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "1");
+        handle_remove_profile(RemoveProfileArgs {
+            name: Some("main".to_string()),
+            all: false,
+            delete_home: true,
+        })
+        .expect_err("remove should fail when its state commit fails");
+    }
+
+    assert!(
+        AppState::load(&paths)
+            .expect("state should remain readable")
+            .profiles
+            .contains_key("main"),
+        "failed remove must leave the durable profile state unchanged"
+    );
+    assert!(
+        !profile_home.exists(),
+        "failed remove should leave the home quarantined"
+    );
+    assert!(
+        prodex_profile_export::profile_lifecycle_journal_paths(&paths.root)
+            .expect("lifecycle journal should be readable")
+            .len()
+            == 1
+    );
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: true,
+    })
+    .expect("retry should recover and complete remove");
+
+    assert!(
+        !profile_home.exists(),
+        "completed remove should delete the home"
+    );
+    assert!(
+        !AppState::load(&paths)
+            .expect("state should load")
+            .profiles
+            .contains_key("main")
+    );
+    assert!(
+        prodex_profile_export::profile_lifecycle_journal_paths(&paths.root)
+            .expect("lifecycle journals should be readable")
+            .is_empty()
+    );
+}
+
+#[test]
+fn profile_remove_recovers_after_continuation_sidecar_failure() {
+    let root = ProfileCommandsTestDir::new("remove-sidecar-recovery");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let profile_home = paths.managed_profiles_root.join("main");
+    profile_commands_write_profile_auth(&profile_home, "main");
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    state.save(&paths).expect("initial state should save");
+    save_runtime_continuations_for_profiles(
+        &paths,
+        &RuntimeContinuationStore::default(),
+        &state.profiles,
+    )
+    .expect("continuation sidecar should save");
+
+    {
+        let _fault =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_CONTINUATIONS_SAVE_ERROR_ONCE", "1");
+        handle_remove_profile(RemoveProfileArgs {
+            name: Some("main".to_string()),
+            all: false,
+            delete_home: true,
+        })
+        .expect_err("remove should fail when sidecar persistence fails");
+    }
+
+    assert!(
+        !AppState::load(&paths)
+            .expect("state should load")
+            .profiles
+            .contains_key("main"),
+        "state commit should remain durable before sidecar retry"
+    );
+    assert!(
+        !profile_home.exists(),
+        "home should remain quarantined for retry"
+    );
+
+    let runtime_log_dir = root.path.join("runtime-logs");
+    fs::create_dir_all(&runtime_log_dir).expect("isolated runtime log directory should exist");
+    let _runtime_log_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_LOG_DIR",
+        &runtime_log_dir.display().to_string(),
+    );
+    crate::command_dispatch::execute_command(crate::Commands::Cleanup(CleanupArgs::default()))
+        .expect("cleanup should finalize committed remove recovery");
+
+    assert!(!profile_home.exists());
+    assert!(
+        prodex_profile_export::profile_lifecycle_journal_paths(&paths.root)
+            .expect("lifecycle journals should be readable")
+            .is_empty()
+    );
+    assert!(
+        !fs::read_to_string(runtime_continuations_file_path(&paths))
+            .expect("continuation sidecar should remain readable")
+            .contains("main")
+    );
+    let journal_path = runtime_continuation_journal_file_path(&paths);
+    if journal_path.exists() {
+        assert!(
+            !fs::read_to_string(journal_path)
+                .expect("continuation journal should remain readable")
+                .contains("main")
+        );
+    }
 }
 
 #[test]
@@ -255,8 +413,7 @@ fn profile_commands_auth_json_with_email_and_refresh(
         }
     });
     if let Some(refresh_token) = refresh_token {
-        auth_json["tokens"]["refresh_token"] =
-            serde_json::Value::String(refresh_token.to_string());
+        auth_json["tokens"]["refresh_token"] = serde_json::Value::String(refresh_token.to_string());
     }
     auth_json.to_string()
 }

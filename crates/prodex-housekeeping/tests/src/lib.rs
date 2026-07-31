@@ -2,6 +2,7 @@ use super::*;
 use prodex_state::{ProfileEntry, ProfileProvider};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 fn test_paths(name: &str) -> AppPaths {
     let root =
@@ -43,6 +44,25 @@ fn cleanup_summary_total_and_merge_count_all_fields() {
     assert_eq!(merged.total_removed(), 12);
     assert_eq!(merged.runtime_logs_removed, 2);
     assert_eq!(merged.stale_login_dirs_removed, 4);
+}
+
+#[test]
+fn stale_login_cleanup_can_retry_after_delete_failure() {
+    let paths = test_paths("stale-login-retry");
+    fs::create_dir_all(&paths.managed_profiles_root).unwrap();
+    let stale_login = paths.managed_profiles_root.join(".login-crashed");
+    fs::create_dir_all(&stale_login).unwrap();
+    let now = SystemTime::now()
+        .checked_add(Duration::from_secs(2))
+        .unwrap();
+
+    assert_eq!(cleanup_stale_login_dirs_at(&paths, now, 1, |_| false), 0);
+    assert!(stale_login.exists());
+    assert_eq!(
+        cleanup_stale_login_dirs_at(&paths, now, 1, |path| fs::remove_dir_all(path).is_ok()),
+        1
+    );
+    assert!(!stale_login.exists());
 }
 
 #[test]

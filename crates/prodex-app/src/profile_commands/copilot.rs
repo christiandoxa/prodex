@@ -8,6 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+use super::import_export::{
+    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
+    acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
+};
 use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
@@ -70,7 +76,8 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
     };
 
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     let existing_profile_name =
         find_copilot_profile_by_identity(&state, &context.host, &context.login);
     let import_state_plan = plan_copilot_profile_import_state(
@@ -88,6 +95,33 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             profile_name: existing_name,
             activate,
         } => {
+            let mut desired_profile = state
+                .profiles
+                .get(&existing_name)
+                .with_context(|| format!("profile '{}' is missing", existing_name))?
+                .clone();
+            desired_profile.provider = provider.clone();
+            desired_profile.email = Some(context.login.clone());
+            let next_active_profile = if activate {
+                Some(existing_name.clone())
+            } else {
+                state.active_profile.clone()
+            };
+            let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+                &paths,
+                "import",
+                &state,
+                &existing_name,
+                &desired_profile,
+                next_active_profile,
+                ProfileAuthUpdate {
+                    next_auth_json: None,
+                    next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+                    next_secret_files: Vec::new(),
+                    previous_secret_file_paths: &[],
+                    temporary_home: None,
+                },
+            )?;
             let profile = state
                 .profiles
                 .get_mut(&existing_name)
@@ -98,6 +132,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
                 state.active_profile = Some(existing_name.clone());
             }
             state.save(&paths)?;
+            cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
 
             audit_log_event(
                 "profile",
@@ -144,18 +179,38 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             codex_home.display()
         );
     }
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: Some(context.login.clone()),
+        provider: provider.clone(),
+    };
+    let next_active_profile = if activate {
+        Some(profile_name.clone())
+    } else {
+        state.active_profile.clone()
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        &paths,
+        "import",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &profile_name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile,
+            home_actions: vec![ProfileLifecycleHomeAction::Create {
+                path: codex_home.display().to_string(),
+            }],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
     create_codex_home_if_missing(&codex_home)?;
     prepare_managed_codex_home(&paths, &codex_home)?;
 
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed: true,
-            email: Some(context.login.clone()),
-            provider: provider.clone(),
-        },
-    );
+    state.profiles.insert(profile_name.clone(), desired_profile);
     if activate {
         state.active_profile = Some(profile_name.clone());
     }
@@ -188,6 +243,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
         updated_existing: false,
     });
     print_profile_panel("Profile Added", &fields)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
     Ok(())
 }
 

@@ -1,13 +1,15 @@
 #![cfg(test)]
 
 use super::{
-    PRODEX_COPILOT_PROXY_API_KEY, RuntimeProxyEndpoint, SUPER_COPILOT_PROVIDER_ID, SuperArgs,
-    SuperCliAgent, SuperExternalProvider, SuperNativeCliLaunchStrategy,
-    runtime_super_copilot_cli_env, runtime_super_gemini_cli_oauth_env,
-    runtime_super_gemini_cli_system_settings_from, runtime_super_native_cli_launch_args,
-    super_native_cli_dry_run_report,
+    PRODEX_COPILOT_PROXY_API_KEY, PreparedRuntimeLaunch, RuntimeProxyEndpoint,
+    SUPER_COPILOT_PROVIDER_ID, SuperArgs, SuperCliAgent, SuperExternalProvider,
+    SuperNativeCliLaunchStrategy, runtime_super_copilot_cli_env,
+    runtime_super_gemini_cli_oauth_env, runtime_super_gemini_cli_system_settings_from,
+    runtime_super_native_cli_launch_args, super_native_cli_dry_run_report,
 };
-use crate::{GeminiOAuthSecret, RuntimeLaunchStrategy, write_gemini_oauth_secret};
+use crate::{
+    AppPaths, GeminiOAuthSecret, RuntimeLaunchStrategy, TestEnvVarGuard, write_gemini_oauth_secret,
+};
 use prodex_cli::CodexRuntimeFeatureArgs;
 use std::ffi::OsString;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -132,6 +134,60 @@ fn native_cli_dry_run_is_redacted_and_does_not_resolve_credentials() {
     assert!(report.contains("would use local provider bridge"));
     assert!(report.contains("--prompt"));
     assert!(!report.contains("secret-provider-key"));
+}
+
+#[test]
+#[cfg(unix)]
+fn native_gemini_cli_dry_run_does_not_probe_optional_tools() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "prodex-native-cli-dry-run-passive-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let bin = root.join("bin");
+    let marker = root.join("optional-tool-probe.marker");
+    std::fs::create_dir_all(&bin).unwrap();
+    for command in ["rtk", "codebase-memory-mcp", "node", "npx"] {
+        let path = bin.join(command);
+        std::fs::write(
+            &path,
+            "#!/bin/sh\nprintf x >> \"$PRODEX_OPTIONAL_TOOL_PROBE_MARKER\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let root_text = root.to_str().unwrap();
+    let _optimizers_home =
+        TestEnvVarGuard::set(prodex_optional_tools::PRODEX_OPTIMIZERS_HOME_ENV, root_text);
+    let _xdg_data_home = TestEnvVarGuard::set("XDG_DATA_HOME", root_text);
+    let _home = TestEnvVarGuard::set("HOME", root_text);
+    let _path = TestEnvVarGuard::set("PATH", bin.to_str().unwrap());
+    let _marker = TestEnvVarGuard::set(
+        "PRODEX_OPTIONAL_TOOL_PROBE_MARKER",
+        marker.to_str().unwrap(),
+    );
+
+    let mut args = native_cli_super_args();
+    args.dry_run = true;
+    args.cli = Some(SuperCliAgent::Gemini);
+    args.provider = Some(SuperExternalProvider::Gemini);
+    for codex_args in [
+        vec![OsString::from("--version")],
+        vec![OsString::from("--help")],
+        vec![OsString::from("review")],
+    ] {
+        args.codex_args = codex_args;
+        super_native_cli_dry_run_report(&args).unwrap();
+    }
+
+    assert!(!marker.exists(), "dry-run must not execute optional tools");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -400,4 +456,59 @@ fn native_copilot_cli_runtime_request_enables_provider_proxy() {
     );
     assert!(request.smart_context_enabled);
     assert!(request.presidio_redaction_enabled);
+}
+
+#[test]
+fn native_cli_build_plan_cleans_overlay_when_optimizer_preflight_fails() {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory should resolve")
+        .join(format!(
+            "prodex-native-cli-overlay-cleanup-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+    let base_home = root.join("base");
+    let shared_home = root.join("shared");
+    std::fs::create_dir_all(&base_home).expect("base home should exist");
+    std::fs::create_dir_all(&shared_home).expect("shared home should exist");
+    std::fs::write(base_home.join("config.toml"), "features = \"invalid\"\n")
+        .expect("config should be written");
+
+    let mut args = native_cli_super_args();
+    args.cli = Some(SuperCliAgent::Gemini);
+    args.provider = Some(SuperExternalProvider::Gemini);
+    let strategy = SuperNativeCliLaunchStrategy {
+        args,
+        presidio_enabled: false,
+        agent: SuperCliAgent::Gemini,
+    };
+    let paths = AppPaths {
+        root: root.clone(),
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: shared_home,
+        legacy_shared_codex_root: root.join("legacy-shared"),
+    };
+    let prepared = PreparedRuntimeLaunch {
+        paths,
+        codex_home: base_home,
+        managed: false,
+        runtime_proxy: None,
+    };
+
+    let error = strategy.build_plan(&prepared, None).unwrap_err();
+
+    assert!(error.to_string().contains("features"));
+    assert!(
+        std::fs::read_dir(&prepared.paths.managed_profiles_root)
+            .expect("managed profile root should exist")
+            .next()
+            .is_none(),
+        "failed build must remove temporary overlay"
+    );
+    std::fs::remove_dir_all(root).expect("test root should be removed");
 }

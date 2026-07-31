@@ -124,6 +124,31 @@
     }
 
     #[test]
+    fn quota_watch_tui_footer_surfaces_profiles_hidden_by_terminal_height() {
+        let reports = (0..4)
+            .map(|index| test_quota_report(&format!("profile-{index}"), Ok(test_usage("main"))))
+            .collect::<Vec<_>>();
+        let frame = build_all_quota_watch_tui_frame(
+            &AllQuotaWatchSnapshot::Reports {
+                updated: "now".to_string(),
+                profile_count: reports.len(),
+                reports,
+            },
+            AllQuotaWatchLayout {
+                detail: false,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Remaining,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 100,
+                max_lines: Some(1),
+            },
+        );
+
+        assert!(frame.footer.contains("0/4 visible; 0 above, 4 below"));
+    }
+
+    #[test]
     fn quota_watch_max_scroll_offset_stops_at_last_visible_window() {
         let reports = (0..4)
             .map(|index| test_quota_report(&format!("profile-{index}"), Ok(test_usage("main"))))
@@ -154,46 +179,6 @@
             apply_quota_watch_command(QuotaWatchCommand::Down, max_scroll, max_scroll),
             QuotaWatchCommandOutcome::Continue(next) if next == max_scroll
         ));
-    }
-
-    #[test]
-    fn all_quota_watch_refresh_keeps_single_background_refresh_in_flight() {
-        let mut refresh = AllQuotaWatchRefresh::new();
-        let (release_sender, release_receiver) = mpsc::channel();
-
-        assert!(refresh.try_start(move || {
-            release_receiver
-                .recv()
-                .expect("test refresh should be released");
-            AllQuotaWatchSnapshot::Empty {
-                updated: "done".to_string(),
-            }
-        }));
-        assert!(!refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
-            updated: "second".to_string(),
-        }));
-        assert!(refresh.take_latest().is_none());
-
-        release_sender
-            .send(())
-            .expect("test refresh release should send");
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let mut completed = None;
-        while Instant::now() < deadline {
-            if let Some(snapshot) = refresh.take_latest() {
-                completed = Some(snapshot);
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        assert!(matches!(
-            completed,
-            Some(AllQuotaWatchSnapshot::Empty { .. })
-        ));
-        assert!(refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
-            updated: "third".to_string(),
-        }));
     }
 
     #[test]

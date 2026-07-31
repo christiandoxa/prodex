@@ -71,8 +71,8 @@ pub fn copilot_provider_core_request_has_vision_input(body: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
         return false;
     };
-    copilot_provider_core_value_contains_text(&value, "input_image")
-        || copilot_provider_core_value_contains_key(&value, "image_url")
+    copilot_provider_core_responses_input_has_image(&value)
+        || copilot_provider_core_chat_messages_have_image(&value)
 }
 
 fn copilot_provider_core_strip_encrypted_content(value: &mut Value) -> bool {
@@ -95,30 +95,86 @@ fn copilot_provider_core_strip_encrypted_content(value: &mut Value) -> bool {
     }
 }
 
-fn copilot_provider_core_value_contains_text(value: &Value, needle: &str) -> bool {
-    match value {
-        Value::String(text) => text.contains(needle),
-        Value::Array(values) => values
-            .iter()
-            .any(|value| copilot_provider_core_value_contains_text(value, needle)),
-        Value::Object(object) => object
-            .values()
-            .any(|value| copilot_provider_core_value_contains_text(value, needle)),
+fn copilot_provider_core_responses_input_has_image(value: &Value) -> bool {
+    value
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(copilot_provider_core_responses_input_item_has_image)
+        })
+}
+
+fn copilot_provider_core_responses_input_item_has_image(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    match object.get("type").and_then(Value::as_str) {
+        Some("input_image") => copilot_provider_core_responses_image_payload_is_present(object),
+        Some("message") => copilot_provider_core_responses_content_has_image(object.get("content")),
         _ => false,
     }
 }
 
-fn copilot_provider_core_value_contains_key(value: &Value, needle: &str) -> bool {
-    match value {
-        Value::Array(values) => values
+fn copilot_provider_core_responses_content_has_image(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_array).is_some_and(|items| {
+        items
             .iter()
-            .any(|value| copilot_provider_core_value_contains_key(value, needle)),
-        Value::Object(object) => {
-            object.contains_key(needle)
-                || object
-                    .values()
-                    .any(|value| copilot_provider_core_value_contains_key(value, needle))
-        }
-        _ => false,
-    }
+            .any(copilot_provider_core_responses_image_item_has_payload)
+    })
+}
+
+fn copilot_provider_core_responses_image_item_has_payload(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.get("type").and_then(Value::as_str) == Some("input_image")
+            && copilot_provider_core_responses_image_payload_is_present(object)
+    })
+}
+
+fn copilot_provider_core_responses_image_payload_is_present(
+    object: &serde_json::Map<String, Value>,
+) -> bool {
+    ["image_url", "file_id"].into_iter().any(|key| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
+fn copilot_provider_core_chat_messages_have_image(value: &Value) -> bool {
+    value
+        .get("messages")
+        .and_then(Value::as_array)
+        .is_some_and(|messages| {
+            messages.iter().any(|message| {
+                let Some(object) = message.as_object() else {
+                    return false;
+                };
+                object.get("role").and_then(Value::as_str) == Some("user")
+                    && copilot_provider_core_chat_content_has_image(object.get("content"))
+            })
+        })
+}
+
+fn copilot_provider_core_chat_content_has_image(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_array).is_some_and(|items| {
+        items
+            .iter()
+            .any(copilot_provider_core_chat_image_item_has_payload)
+    })
+}
+
+fn copilot_provider_core_chat_image_item_has_payload(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.get("type").and_then(Value::as_str) == Some("image_url")
+        && object
+            .get("image_url")
+            .and_then(Value::as_object)
+            .and_then(|image| image.get("url"))
+            .and_then(Value::as_str)
+            .is_some_and(|url| !url.trim().is_empty())
 }

@@ -634,7 +634,7 @@ pub fn cleanup_stale_login_dirs_at(
     retention_seconds: i64,
     remove_dir: impl Fn(&Path) -> bool,
 ) -> usize {
-    let Ok(entries) = fs::read_dir(&paths.root) else {
+    let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
         return 0;
     };
     let oldest_allowed = system_time_to_unix_seconds(now).unwrap_or_default() - retention_seconds;

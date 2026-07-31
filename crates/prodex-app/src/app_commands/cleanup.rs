@@ -6,9 +6,10 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
-    AppPaths, AppState, AppStateIoExt, CleanupArgs, CleanupOlderThan,
-    ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS, ProdexCleanupOptions,
-    perform_prodex_cleanup_with_options, print_panel, runtime_proxy_log_dir,
+    AppPaths, CleanupArgs, CleanupOlderThan, ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS,
+    ProdexCleanupOptions, acquire_profile_lifecycle_lock, finalize_recovered_profile_removals,
+    load_profile_state_with_profile_recovery_locked, perform_prodex_cleanup_with_options,
+    print_panel, runtime_proxy_log_dir,
 };
 use terminal_ui::{
     text_width, tui_border_style, tui_connected_header_block, tui_secondary_style, tui_title_style,
@@ -16,7 +17,14 @@ use terminal_ui::{
 
 pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let _profile_lifecycle_lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, lifecycle_recovery) =
+        load_profile_state_with_profile_recovery_locked(&paths, true)?;
+    finalize_recovered_profile_removals(
+        &paths,
+        &state.profiles,
+        &lifecycle_recovery.pending_removal_journals,
+    )?;
     let runtime_log_dir = runtime_proxy_log_dir();
     let cleanup_options = cleanup_options_from_args(&args);
     let summary = perform_prodex_cleanup_with_options(&paths, &mut state, cleanup_options)?;

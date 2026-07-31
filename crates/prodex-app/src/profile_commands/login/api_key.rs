@@ -1,3 +1,9 @@
+use super::super::import_export::{
+    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
+    ProfileLifecyclePromoteRollback, cleanup_profile_lifecycle_and_auth_journal,
+    lifecycle_profile_state, prepare_existing_profile_lifecycle, read_optional_secret_text_file,
+    write_profile_lifecycle_plan,
+};
 use super::super::manage::print_profile_panel;
 use super::super::write_secret_text_file;
 use super::{default_api_key_profile_name, unique_profile_name_for_slug};
@@ -71,6 +77,38 @@ fn finish_api_key_login_for_existing_profile(
         );
     }
 
+    let mut desired_profile = state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?
+        .clone();
+    desired_profile.email = None;
+    let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        paths,
+        "login",
+        state,
+        profile_name,
+        &desired_profile,
+        Some(profile_name.to_string()),
+        ProfileAuthUpdate {
+            next_auth_json: Some(auth_json.to_string()),
+            next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+            next_secret_files: if openai_base_url_specified {
+                vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
+                    path: ".prodex-profile.toml".to_string(),
+                    text: read_optional_secret_text_file(&login_home.join(".prodex-profile.toml"))?,
+                }]
+            } else {
+                Vec::new()
+            },
+            previous_secret_file_paths: if openai_base_url_specified {
+                &[".prodex-profile.toml"][..]
+            } else {
+                &[][..]
+            },
+            temporary_home: Some(login_home),
+        },
+    )?;
     let updated = update_existing_profile_auth(paths, state, profile_name, None, auth_json, true)?;
     if let Some(profile) = state.profiles.get_mut(profile_name) {
         profile.email = None;
@@ -78,8 +116,8 @@ fn finish_api_key_login_for_existing_profile(
     if openai_base_url_specified {
         write_profile_openai_compatible_base_url(&updated.codex_home, openai_base_url)?;
     }
-    remove_dir_if_exists(login_home)?;
     state.save(paths)?;
+    remove_dir_if_exists(login_home)?;
 
     let fields = vec![
         (
@@ -97,6 +135,7 @@ fn finish_api_key_login_for_existing_profile(
         ),
     ];
     print_profile_panel("Login", &fields)?;
+    cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
     Ok(())
 }
 
@@ -110,21 +149,38 @@ fn finish_api_key_login_for_new_profile(
 ) -> Result<()> {
     let profile_name = unique_profile_name_for_slug(paths, state, requested_profile_name);
     let codex_home = managed_profile_home_path(paths, &profile_name)?;
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: None,
+        provider: ProfileProvider::Openai,
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        paths,
+        "login",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &profile_name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: Some(profile_name.clone()),
+            home_actions: vec![ProfileLifecycleHomeAction::Promote {
+                source: login_home.display().to_string(),
+                destination: codex_home.display().to_string(),
+                rollback: ProfileLifecyclePromoteRollback::Remove,
+            }],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
     if openai_base_url_specified {
         write_profile_openai_compatible_base_url(login_home, openai_base_url)?;
     }
     persist_login_home(login_home, &codex_home)?;
     prepare_managed_codex_home(paths, &codex_home)?;
 
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed: true,
-            email: None,
-            provider: ProfileProvider::Openai,
-        },
-    );
+    state.profiles.insert(profile_name.clone(), desired_profile);
     state.active_profile = Some(profile_name.clone());
     state.save(paths)?;
 
@@ -138,6 +194,7 @@ fn finish_api_key_login_for_new_profile(
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_profile_panel("Login", &fields)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
     Ok(())
 }
 

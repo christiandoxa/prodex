@@ -1,5 +1,8 @@
+use super::import_export::{
+    acquire_profile_lifecycle_lock, load_profile_state_with_profile_recovery_locked,
+};
 use crate::{
-    AppPaths, AppState, AppStateIoExt, LogoutArgs, codex_child_plan, exit_with_status,
+    AppPaths, LogoutArgs, codex_child_plan, exit_with_status,
     repair_missing_active_profile_and_save, resolve_profile_name, run_child_plan,
 };
 use anyhow::{Context, Result, bail};
@@ -7,7 +10,8 @@ use std::ffi::OsString;
 
 pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
+    let _lock = acquire_profile_lifecycle_lock(&paths)?;
+    let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
     let profile_name = resolve_profile_name(&state, args.selected_profile())?;
     let codex_home = state

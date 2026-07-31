@@ -38,7 +38,7 @@ pub(crate) fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
     layout: AllQuotaWatchLayout,
 ) -> AllQuotaWatchTuiFrame {
-    let (body, overview_fields, table) = match snapshot {
+    let (body, overview_fields, table, scroll_range) = match snapshot {
         AllQuotaWatchSnapshot::Reports { reports, .. } => {
             let filtered_reports =
                 filter_quota_reports_by_provider(reports, layout.provider_filter);
@@ -51,6 +51,17 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                 layout.max_lines,
                 layout.scroll_offset,
             );
+            let start_profile = layout.scroll_offset.min(filtered_reports.len());
+            let scroll_range = quota_watch_scroll_range(&RenderedQuotaReportWindow {
+                output: String::new(),
+                shown_profiles,
+                total_profiles: filtered_reports.len(),
+                start_profile,
+                hidden_before: start_profile,
+                hidden_after: filtered_reports
+                    .len()
+                    .saturating_sub(start_profile.saturating_add(shown_profiles)),
+            });
             (
                 String::new(),
                 quota_watch_tui_overview_fields(&filtered_reports),
@@ -60,21 +71,25 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                     &sorted_indexes,
                     shown_profiles,
                 )),
+                scroll_range,
             )
         }
         AllQuotaWatchSnapshot::Loading { updated } => (
             "Quota".to_string(),
             quota_watch_status_fields("Loading quota data...", updated),
             None,
+            None,
         ),
         AllQuotaWatchSnapshot::Empty { updated } => (
             "Quota".to_string(),
             quota_watch_status_fields("No profiles configured", updated),
             None,
+            None,
         ),
         AllQuotaWatchSnapshot::Error { updated, message } => (
             "Quota".to_string(),
             quota_watch_status_fields(message, updated),
+            None,
             None,
         ),
     };
@@ -89,7 +104,10 @@ pub(crate) fn build_all_quota_watch_tui_frame(
         overview_fields,
         table,
         footer: format!(
-            "u update | s sort {} | filter {} | {} | j/k scroll | q quit",
+            "{}u update | s sort {} | filter {} | {} | j/k scroll | q quit",
+            scroll_range
+                .map(|range| format!("{range} | "))
+                .unwrap_or_default(),
             layout.sort.label(),
             layout.provider_filter.label(),
             provider_hint

@@ -7,6 +7,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::{is_compressible_context_file, is_context_backup};
 
+use super::safe_path;
+
 pub(super) const CONTEXT_AUDIT_ROOTS: &[&str] = &[
     "AGENTS.md",
     "AGENTS.override.md",
@@ -53,7 +55,7 @@ impl VerifiedContextDirectory {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
                 return Err(error).with_context(|| {
-                    format!("failed to inspect context directory {}", path.display())
+                    format!("failed to inspect context directory {}", safe_path(path))
                 });
             }
         };
@@ -62,19 +64,22 @@ impl VerifiedContextDirectory {
         }
 
         let metadata = open_context_directory_metadata_no_follow(path)
-            .with_context(|| format!("failed to open context directory {}", path.display()))?;
+            .with_context(|| format!("failed to open context directory {}", safe_path(path)))?;
         let canonical = fs::canonicalize(path)
-            .with_context(|| format!("failed to resolve context directory {}", path.display()))?;
+            .with_context(|| format!("failed to resolve context directory {}", safe_path(path)))?;
         let canonical_metadata = fs::metadata(&canonical).with_context(|| {
             format!(
                 "failed to inspect context directory {}",
-                canonical.display()
+                safe_path(&canonical)
             )
         })?;
         if !same_context_file_identity(&named, &metadata)
             || !same_context_file_identity(&metadata, &canonical_metadata)
         {
-            bail!("context directory changed while opening {}", path.display());
+            bail!(
+                "context directory changed while opening {}",
+                safe_path(path)
+            );
         }
         Ok(Some(Self {
             source: path.to_path_buf(),
@@ -87,7 +92,7 @@ impl VerifiedContextDirectory {
         let named = fs::symlink_metadata(&self.source).with_context(|| {
             format!(
                 "failed to recheck context directory {}",
-                self.source.display()
+                safe_path(&self.source)
             )
         })?;
         if named.file_type().is_symlink()
@@ -96,7 +101,7 @@ impl VerifiedContextDirectory {
         {
             bail!(
                 "context directory changed during traversal {}",
-                self.source.display()
+                safe_path(&self.source)
             );
         }
         Ok(())
@@ -104,27 +109,66 @@ impl VerifiedContextDirectory {
 }
 
 pub(crate) fn collect_context_files(path: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
-    let Some(named) = context_path_metadata(path)? else {
+    collect_context_files_inner(path, paths, false, &mut |_| {})
+}
+
+pub(super) fn collect_context_files_for_audit(
+    path: &Path,
+    paths: &mut Vec<PathBuf>,
+    on_error: &mut dyn FnMut(&Path),
+) -> Result<()> {
+    collect_context_files_inner(path, paths, true, on_error)
+}
+
+fn collect_context_files_inner(
+    path: &Path,
+    paths: &mut Vec<PathBuf>,
+    recover_errors: bool,
+    on_error: &mut dyn FnMut(&Path),
+) -> Result<()> {
+    let Some(named) = recover_context_walk_operation(
+        context_path_metadata(path),
+        path,
+        recover_errors,
+        on_error,
+    )?
+    .flatten() else {
         return Ok(());
     };
     if named.file_type().is_symlink() {
         return Ok(());
     }
     if named.is_file() {
-        let (_, metadata, _) = open_context_file_no_follow(path)?;
+        let Some((_, metadata, _)) = recover_context_walk_operation(
+            open_context_file_no_follow(path),
+            path,
+            recover_errors,
+            on_error,
+        )?
+        else {
+            return Ok(());
+        };
         enforce_context_walk_limits(1, metadata.len(), path)?;
         paths.push(path.to_path_buf());
         return Ok(());
     }
-    let Some(root) = VerifiedContextDirectory::open(path)? else {
+    let Some(root) = recover_context_walk_operation(
+        VerifiedContextDirectory::open(path),
+        path,
+        recover_errors,
+        on_error,
+    )?
+    .flatten() else {
         return Ok(());
     };
-    collect_context_directory_files(&root, paths)
+    collect_context_directory_files(&root, paths, recover_errors, on_error)
 }
 
 fn collect_context_directory_files(
     root: &VerifiedContextDirectory,
     paths: &mut Vec<PathBuf>,
+    recover_errors: bool,
+    on_error: &mut dyn FnMut(&Path),
 ) -> Result<()> {
     let mut pending = vec![(root.canonical.clone(), 0_usize)];
     let mut visited_directories = HashSet::new();
@@ -132,7 +176,13 @@ fn collect_context_directory_files(
     let mut collected_bytes = 0_u64;
     while let Some((current, depth)) = pending.pop() {
         root.validate()?;
-        let Some(named) = context_path_metadata(&current)? else {
+        let Some(named) = recover_context_walk_operation(
+            context_path_metadata(&current),
+            &current,
+            recover_errors,
+            on_error,
+        )?
+        .flatten() else {
             continue;
         };
         if named.file_type().is_symlink() {
@@ -145,24 +195,49 @@ fn collect_context_directory_files(
                 paths,
                 &mut collected_files,
                 &mut collected_bytes,
+                recover_errors,
+                on_error,
             )?;
             continue;
         }
         if !named.is_dir() {
             continue;
         }
-        enqueue_context_directory(root, current, depth, &mut visited_directories, &mut pending)?;
+        enqueue_context_directory(
+            root,
+            current,
+            depth,
+            &mut visited_directories,
+            &mut pending,
+            recover_errors,
+            on_error,
+        )?;
     }
     Ok(())
+}
+
+fn recover_context_walk_operation<T>(
+    result: Result<T>,
+    path: &Path,
+    recover_errors: bool,
+    on_error: &mut dyn FnMut(&Path),
+) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(_) if recover_errors => {
+            on_error(path);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn context_path_metadata(path: &Path) -> Result<Option<Metadata>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to inspect context path {}", path.display()))
-        }
+        Err(error) => Err(error)
+            .with_context(|| format!("failed to inspect context path {}", safe_path(path))),
     }
 }
 
@@ -172,10 +247,23 @@ fn collect_context_file_from_root(
     paths: &mut Vec<PathBuf>,
     collected_files: &mut usize,
     collected_bytes: &mut u64,
+    recover_errors: bool,
+    on_error: &mut dyn FnMut(&Path),
 ) -> Result<()> {
-    let (_, metadata, canonical) = open_context_file_no_follow(&current)?;
+    let Some((_, metadata, canonical)) = recover_context_walk_operation(
+        open_context_file_no_follow(&current),
+        &current,
+        recover_errors,
+        on_error,
+    )?
+    else {
+        return Ok(());
+    };
     if !canonical.starts_with(&root.canonical) {
-        bail!("context file escaped traversal root {}", current.display());
+        bail!(
+            "context file escaped traversal root {}",
+            safe_path(&current)
+        );
     }
     *collected_files = collected_files.saturating_add(1);
     *collected_bytes = collected_bytes.saturating_add(metadata.len());
@@ -190,33 +278,73 @@ fn enqueue_context_directory(
     depth: usize,
     visited_directories: &mut HashSet<PathBuf>,
     pending: &mut Vec<(PathBuf, usize)>,
+    recover_errors: bool,
+    on_error: &mut dyn FnMut(&Path),
 ) -> Result<()> {
     if depth >= CONTEXT_WALK_MAX_DEPTH {
-        bail!("context traversal depth exceeded at {}", current.display());
+        bail!(
+            "context traversal depth exceeded at {}",
+            safe_path(&current)
+        );
     }
-    let Some(directory) = VerifiedContextDirectory::open(&current)? else {
+    let Some(directory) = recover_context_walk_operation(
+        VerifiedContextDirectory::open(&current),
+        &current,
+        recover_errors,
+        on_error,
+    )?
+    .flatten() else {
         return Ok(());
     };
     if !directory.canonical.starts_with(&root.canonical) {
         bail!(
             "context directory escaped traversal root {}",
-            current.display()
+            safe_path(&current)
         );
     }
     if !visited_directories.insert(directory.canonical.clone()) {
         return Ok(());
     }
-    directory.validate()?;
-    let mut entries = fs::read_dir(&directory.canonical)
-        .with_context(|| {
+    if recover_context_walk_operation(directory.validate(), &current, recover_errors, on_error)?
+        .is_none()
+    {
+        return Ok(());
+    }
+    let Some(read_dir) = recover_context_walk_operation(
+        fs::read_dir(&directory.canonical).with_context(|| {
             format!(
                 "failed to read context directory {}",
-                directory.canonical.display()
+                safe_path(&directory.canonical)
             )
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read entry in {}", directory.canonical.display()))?;
-    directory.validate()?;
+        }),
+        &current,
+        recover_errors,
+        on_error,
+    )?
+    else {
+        return Ok(());
+    };
+    let mut entries = Vec::new();
+    for entry in read_dir {
+        if let Some(entry) = recover_context_walk_operation(
+            entry.with_context(|| {
+                format!(
+                    "failed to read entry in {}",
+                    safe_path(&directory.canonical)
+                )
+            }),
+            &current,
+            recover_errors,
+            on_error,
+        )? {
+            entries.push(entry);
+        }
+    }
+    if recover_context_walk_operation(directory.validate(), &current, recover_errors, on_error)?
+        .is_none()
+    {
+        return Ok(());
+    }
     root.validate()?;
     entries.sort_by_key(|entry| entry.path());
     for entry in entries.into_iter().rev() {
@@ -232,27 +360,27 @@ pub(super) fn read_context_file_bounded(
     root.validate()?;
     let (mut file, metadata, canonical) = open_context_file_no_follow(path)?;
     if !canonical.starts_with(&root.directory.canonical) {
-        bail!("context file escaped audit root {}", path.display());
+        bail!("context file escaped audit root {}", safe_path(path));
     }
     let (text, metadata) =
         read_opened_context_file_bounded(&mut file, &metadata, CONTEXT_AUDIT_MAX_FILE_BYTES)
-            .with_context(|| format!("failed to read context file {}", path.display()))?;
+            .with_context(|| format!("failed to read context file {}", safe_path(path)))?;
     root.validate()?;
     Ok(ContextFileText { text, metadata })
 }
 
 fn enforce_context_walk_limits(files: usize, bytes: u64, path: &Path) -> Result<()> {
     if files > CONTEXT_WALK_MAX_FILES || bytes > CONTEXT_WALK_MAX_BYTES {
-        bail!("context traversal limit exceeded at {}", path.display());
+        bail!("context traversal limit exceeded at {}", safe_path(path));
     }
     Ok(())
 }
 
 fn open_context_file_no_follow(path: &Path) -> Result<(File, Metadata, PathBuf)> {
     let named = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect context file {}", path.display()))?;
+        .with_context(|| format!("failed to inspect context file {}", safe_path(path)))?;
     if named.file_type().is_symlink() || !named.is_file() {
-        bail!("context path is not a regular file {}", path.display());
+        bail!("context path is not a regular file {}", safe_path(path));
     }
     let mut options = OpenOptions::new();
     options.read(true);
@@ -263,18 +391,18 @@ fn open_context_file_no_follow(path: &Path) -> Result<(File, Metadata, PathBuf)>
     }
     let file = options
         .open(path)
-        .with_context(|| format!("failed to open context file {}", path.display()))?;
+        .with_context(|| format!("failed to open context file {}", safe_path(path)))?;
     let metadata = file
         .metadata()
-        .with_context(|| format!("failed to inspect context file {}", path.display()))?;
+        .with_context(|| format!("failed to inspect context file {}", safe_path(path)))?;
     let canonical = fs::canonicalize(path)
-        .with_context(|| format!("failed to resolve context file {}", path.display()))?;
+        .with_context(|| format!("failed to resolve context file {}", safe_path(path)))?;
     let canonical_metadata = fs::metadata(&canonical)
-        .with_context(|| format!("failed to inspect context file {}", canonical.display()))?;
+        .with_context(|| format!("failed to inspect context file {}", safe_path(&canonical)))?;
     if !same_context_file_identity(&named, &metadata)
         || !same_context_file_identity(&metadata, &canonical_metadata)
     {
-        bail!("context file changed while opening {}", path.display());
+        bail!("context file changed while opening {}", safe_path(path));
     }
     Ok((file, metadata, canonical))
 }
@@ -334,14 +462,18 @@ fn same_context_file_identity(left: &Metadata, right: &Metadata) -> bool {
         && left.modified().ok() == right.modified().ok()
 }
 
-pub(super) fn is_auditable_context_file(path: &Path) -> bool {
-    !is_context_backup(path)
-        && fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+pub(super) fn is_auditable_context_file(path: &Path) -> Result<bool> {
+    if is_context_backup(path) {
+        return Ok(false);
+    }
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect context file {}", safe_path(path)))?;
+    Ok(metadata.file_type().is_file()
         && (is_compressible_context_file(path)
             || matches!(
                 path.extension().and_then(|ext| ext.to_str()),
                 Some("toml" | "json" | "yaml" | "yml")
-            ))
+            )))
 }
 
 pub(super) fn is_static_duplicate_context_file(path: &Path) -> bool {

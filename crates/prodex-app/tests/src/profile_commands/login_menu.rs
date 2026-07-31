@@ -287,6 +287,26 @@ fn login_menu_maps_crossterm_keys() {
 }
 
 #[test]
+fn copilot_login_menu_selection_runs_import_instead_of_guidance() {
+    assert_eq!(
+        super::super::classify_login_menu_action(LoginMenuAction::Guidance(
+            LoginGuidanceKind::CopilotImport,
+        )),
+        super::super::PromptLoginSelection::ImportCopilot
+    );
+}
+
+#[test]
+fn api_key_guidance_still_shows_guidance() {
+    assert_eq!(
+        super::super::classify_login_menu_action(LoginMenuAction::Guidance(
+            LoginGuidanceKind::DeepSeekApiKey,
+        )),
+        super::super::PromptLoginSelection::Guidance(LoginGuidanceKind::DeepSeekApiKey)
+    );
+}
+
+#[test]
 fn login_menu_detail_title_is_generic() {
     let entries = login_menu_entries();
     let detail = format!(

@@ -10,6 +10,7 @@ use super::files::{
     CONTEXT_AUDIT_ROOTS, CONTEXT_WALK_MAX_BYTES, ContextReadRoot, collect_context_files,
     is_static_duplicate_context_file, read_context_file_bounded,
 };
+use super::safe_path;
 use super::types::{
     ContextStaticDuplicateCandidate, ContextStaticDuplicateOccurrence,
     ContextStaticDuplicateReport, ContextStaticDuplicateSnippet,
@@ -66,7 +67,7 @@ fn collect_context_static_duplicate_candidates(
         if read_bytes > CONTEXT_WALK_MAX_BYTES {
             anyhow::bail!(
                 "context duplicate read limit exceeded at {}",
-                path.display()
+                safe_path(path)
             );
         }
         let relative_path = super::context_relative_path(root, path);

@@ -3,8 +3,12 @@ use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
     prepare_desktop_overlay_home, prepare_runtime_overlay_home, repair_desktop_thread_index,
 };
+#[path = "runtime_tools/overlay.rs"]
+mod overlay;
 #[path = "runtime_tools/super_trust.rs"]
 mod super_trust;
+pub(super) use overlay::prepare_prodex_overlay_home;
+pub(crate) use overlay::{RuntimeOverlayCleanup, resolve_runtime_optional_tool_plan};
 pub(crate) use super_trust::trusted_workspace_codex_args;
 const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
 
@@ -99,79 +103,11 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        let tool_plan = self.resolve_optional_tool_plan(prepared)?;
-        let overlay_home = self.prepare_overlay_home(prepared)?;
-        let runtime_args = self.prepare_runtime_codex_args(&overlay_home, runtime_proxy)?;
-        prodex_optional_tools::activate_optional_tools_for_codex(
-            &overlay_home,
-            &tool_plan,
-            self.presidio_enabled,
-        )?;
-        let mut child = self.build_child_plan(prepared, &overlay_home, &runtime_args)?;
-        self.finalize_child_plan(&mut child, &overlay_home, runtime_proxy);
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
+        overlay::build_plan(self, prepared, runtime_proxy)
     }
 }
 
 impl RuntimeToolLaunchStrategy {
-    fn resolve_optional_tool_plan(
-        &self,
-        prepared: &PreparedRuntimeLaunch,
-    ) -> Result<prodex_optional_tools::ToolActivationPlan> {
-        let selected = self
-            .args
-            .selected_tool_set()
-            .iter()
-            .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
-            .collect();
-        let required = self
-            .args
-            .required_tool_set()
-            .iter()
-            .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
-            .collect();
-        let tool_plan = prodex_optional_tools::resolve_optional_tools(&selected, &required);
-        if let Some(unavailable) = tool_plan
-            .unavailable
-            .iter()
-            .find(|health| required.contains(health.id))
-        {
-            bail!(
-                "required optional tool {} is unavailable: {}; run `prodex capability super-doctor`",
-                unavailable.id,
-                redaction::redaction_redact_secret_like_text(&unavailable.detail)
-            );
-        }
-        if !self.args.dry_run {
-            crate::app_commands::runtime_launch::resume_repair::repair_resume_session_in_shared_home(
-                &prepared.paths.shared_codex_root,
-                &self.codex_args,
-            )?;
-        }
-        if self.presidio_enabled {
-            ensure_presidio_services_for_super_launch(&prepared.paths)?;
-        }
-        Ok(tool_plan)
-    }
-
-    fn prepare_overlay_home(&self, prepared: &PreparedRuntimeLaunch) -> Result<std::path::PathBuf> {
-        let overlay_home = if self.desktop_command.is_some() {
-            prepare_desktop_overlay_home(
-                &prepared.paths,
-                &prepared.codex_home,
-                self.configure_prodex_overlay,
-            )?
-        } else if self.configure_prodex_overlay {
-            prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?
-        } else {
-            prepare_runtime_overlay_home(&prepared.paths, &prepared.codex_home)?
-        };
-        if self.provider_runtime_uses_local_proxy_auth() {
-            write_provider_runtime_codex_auth(&overlay_home)?;
-        }
-        Ok(overlay_home)
-    }
-
     fn prepare_runtime_codex_args(
         &self,
         overlay_home: &std::path::Path,
@@ -327,29 +263,6 @@ pub(super) fn handle_desktop_gui(
         args,
         configure_prodex_overlay,
     )?)
-}
-
-pub(super) fn prepare_prodex_overlay_home(
-    paths: &AppPaths,
-    base_codex_home: &Path,
-) -> Result<PathBuf> {
-    let sessions_are_managed = prodex_core::same_path(
-        &base_codex_home.join("sessions"),
-        &paths.shared_codex_root.join("sessions"),
-    );
-    if sessions_are_managed {
-        // Recheck fingerprints immediately before linking history so concurrent session updates
-        // retain the same attachment-persistence behavior without rescanning every JSONL payload.
-        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
-        return prodex_optional_tools::prepare_prodex_overlay_home_from_prepared_base(
-            &paths.managed_profiles_root,
-            base_codex_home,
-        );
-    }
-    prodex_optional_tools::prepare_prodex_overlay_home(
-        &paths.managed_profiles_root,
-        base_codex_home,
-    )
 }
 
 #[cfg(test)]

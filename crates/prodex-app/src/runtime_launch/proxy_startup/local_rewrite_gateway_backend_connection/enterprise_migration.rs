@@ -20,6 +20,12 @@ use rusqlite::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+mod siem_shape;
+use siem_shape::{
+    sqlite_siem_outbox_has_v13_marker, validate_postgres_siem_outbox_shape,
+    validate_sqlite_siem_outbox_shape,
+};
+
 const MIGRATIONS_TABLE: &str = "prodex_enterprise_schema_migrations";
 const SQLITE_MIGRATIONS_TABLE_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS prodex_enterprise_schema_migrations (
@@ -112,6 +118,12 @@ fn migration_checksum(name: &str, sql: &str) -> String {
 
 fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
     let ledger_exists = runtime_gateway_sqlite_table_exists(conn, MIGRATIONS_TABLE)?;
+    if ledger_exists
+        && sqlite_observed_version(conn)?
+            .is_some_and(|version| version > i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0))
+    {
+        bail!("gateway sqlite enterprise schema is newer than supported");
+    }
     let legacy_version = if ledger_exists {
         0
     } else {
@@ -191,6 +203,12 @@ fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
 
 fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
     let ledger_exists = runtime_gateway_postgres_table_exists(client, MIGRATIONS_TABLE)?;
+    if ledger_exists
+        && postgres_observed_version(client)?
+            .is_some_and(|version| version > i64::from(REQUIRED_POSTGRES_SCHEMA_VERSION.0))
+    {
+        bail!("gateway postgres enterprise schema is newer than supported");
+    }
     let legacy_version = if ledger_exists {
         0
     } else {
@@ -269,6 +287,14 @@ fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
 }
 
 fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
+    let outbox_exists = runtime_gateway_sqlite_table_exists(conn, "prodex_siem_outbox")?;
+    let has_v13_marker = sqlite_siem_outbox_has_v13_marker(conn)?;
+    if outbox_exists || has_v13_marker {
+        validate_sqlite_siem_outbox_shape(conn, has_v13_marker)?;
+        if has_v13_marker {
+            return Ok(13);
+        }
+    }
     if runtime_gateway_sqlite_table_has_column(
         conn,
         "prodex_governance_mutation_idempotency",
@@ -321,7 +347,8 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
     )?))
 }
 
-fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
+pub(super) fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
+    let outbox_shape = validate_postgres_siem_outbox_shape(client)?;
     if runtime_gateway_postgres_table_has_column(
         client,
         "prodex_governance_mutation_idempotency",
@@ -365,7 +392,17 @@ fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
     }
     let immutable_trigger_exists: bool = client
         .query_one(
-            "SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname = 'prodex_audit_log_immutable')",
+            "SELECT EXISTS(
+                SELECT 1
+                FROM pg_catalog.pg_trigger trigger_row
+                JOIN pg_catalog.pg_class table_row ON table_row.oid = trigger_row.tgrelid
+                JOIN pg_catalog.pg_namespace namespace_row
+                  ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = current_schema()
+                  AND table_row.relname = 'prodex_audit_log'
+                  AND trigger_row.tgname = 'prodex_audit_log_immutable'
+                  AND NOT trigger_row.tgisinternal
+            )",
             &[],
         )?
         .get(0);
@@ -375,7 +412,7 @@ fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {
     if runtime_gateway_postgres_index_exists(client, "prodex_governance_sessions_refresh_idx")? {
         return Ok(7);
     }
-    if runtime_gateway_postgres_table_has_column(client, "prodex_siem_outbox", "claim_token")? {
+    if outbox_shape.complete_v6 {
         return Ok(6);
     }
     if runtime_gateway_postgres_table_exists(client, "prodex_governance_mutation_idempotency")? {

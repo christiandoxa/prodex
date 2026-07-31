@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -33,13 +33,7 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     .into_iter()
     .collect::<OptionalToolSet>();
     let plan = resolve_optional_tools(&selected, &OptionalToolSet::default());
-    let rtk = plan
-        .activations
-        .iter()
-        .find(|activation| activation.tool.descriptor.id == OptionalToolId::Rtk)
-        .and_then(|activation| activation.tool.path.as_deref());
-    crate::rtk::configure_rtk_codex_home_with_command(codex_home, rtk)?;
-    configure_selected_optimizer_codex_home(codex_home, &plan.activations, presidio_enabled)
+    activate_optional_tools_for_codex(codex_home, &plan, presidio_enabled)
 }
 
 pub fn activate_optional_tools_for_codex(
@@ -47,6 +41,17 @@ pub fn activate_optional_tools_for_codex(
     plan: &ToolActivationPlan,
     presidio_enabled: bool,
 ) -> Result<()> {
+    let selected = |id| {
+        plan.activations
+            .iter()
+            .any(|activation| activation.tool.descriptor.id == id)
+    };
+    validate_optimizer_config_shapes(
+        codex_home,
+        selected(OptionalToolId::CodebaseMemoryMcp),
+        selected(OptionalToolId::PlaywrightMcp),
+        selected(OptionalToolId::Ponytail),
+    )?;
     for activation in &plan.activations {
         match activation.tool.descriptor.id {
             OptionalToolId::Caveman => {
@@ -60,6 +65,74 @@ pub fn activate_optional_tools_for_codex(
         }
     }
     configure_selected_optimizer_codex_home(codex_home, &plan.activations, presidio_enabled)
+}
+
+fn validate_optimizer_config_shapes(
+    codex_home: &Path,
+    validate_codebase_memory: bool,
+    validate_playwright: bool,
+    validate_ponytail: bool,
+) -> Result<()> {
+    if !validate_codebase_memory && !validate_playwright && !validate_ponytail {
+        return Ok(());
+    }
+    let config_path = codex_home.join("config.toml");
+    let Some(contents) = read_text_file_limited(&config_path)? else {
+        return Ok(());
+    };
+    if contents.trim().is_empty() {
+        return Ok(());
+    }
+    let table = match toml::from_str::<toml::Value>(&contents)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?
+    {
+        toml::Value::Table(table) => table,
+        _ => bail!("{} did not parse as a TOML table", config_path.display()),
+    };
+
+    if validate_ponytail {
+        for key in ["features", "marketplaces", "plugins"] {
+            if let Some(value) = table.get(key)
+                && !matches!(value, toml::Value::Table(_))
+            {
+                bail!("configuration entry `{key}` must be a TOML table");
+            }
+        }
+        if let Some(marketplaces) = table.get("marketplaces").and_then(toml::Value::as_table)
+            && let Some(value) = marketplaces.get("ponytail")
+            && !matches!(value, toml::Value::Table(_))
+        {
+            bail!("configuration entry `ponytail` must be a TOML table");
+        }
+        if let Some(plugins) = table.get("plugins").and_then(toml::Value::as_table)
+            && let Some(value) = plugins.get("ponytail@ponytail")
+            && !matches!(value, toml::Value::Table(_))
+        {
+            bail!("configuration entry `ponytail@ponytail` must be a TOML table");
+        }
+    }
+    if !validate_codebase_memory && !validate_playwright {
+        return Ok(());
+    }
+    let Some(mcp_servers) = table.get("mcp_servers") else {
+        return Ok(());
+    };
+    let mcp_servers = match mcp_servers {
+        toml::Value::Table(table) => table,
+        _ => bail!("mcp_servers must be a TOML table"),
+    };
+    for (name, selected) in [
+        ("codebase-memory-mcp", validate_codebase_memory),
+        ("playwright", validate_playwright),
+    ] {
+        if selected
+            && let Some(value) = mcp_servers.get(name)
+            && !matches!(value, toml::Value::Table(_))
+        {
+            bail!("mcp_servers.{name} must be a TOML table");
+        }
+    }
+    Ok(())
 }
 
 fn configure_selected_optimizer_codex_home(
@@ -175,24 +248,25 @@ fn configure_super_mcp_servers(
             bridge,
             &bridge_args,
             &env_vars,
-        );
+        )?;
     }
     if let Some(command) = npx_command {
-        configure_default_playwright_mcp_server(&mut table, command);
+        configure_default_playwright_mcp_server(&mut table, command)?;
     }
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Super optimizer config overlay")?;
     write_text_file(&config_path, &rendered)
 }
 
-fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Path) {
-    let Some(mcp_servers) = mcp_servers_table(table) else {
-        return;
-    };
-    if mcp_servers.contains_key("playwright") {
-        return;
+fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Path) -> Result<()> {
+    let mcp_servers = mcp_servers_table(table)?;
+    match mcp_servers.get("playwright") {
+        Some(toml::Value::Table(_)) => return Ok(()),
+        Some(_) => bail!("mcp_servers.playwright must be a TOML table"),
+        None => {}
     }
-    let server = ensure_child_table(mcp_servers, "playwright");
+    let server = ensure_child_table(mcp_servers, "playwright")
+        .with_context(|| "mcp_servers.playwright must be a TOML table")?;
     configure_stdio_mcp_server_fields(
         server,
         command.to_path_buf(),
@@ -210,6 +284,7 @@ fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Pa
         "default_tools_approval_mode".to_string(),
         toml::Value::String("writes".to_string()),
     );
+    Ok(())
 }
 
 fn configure_stdio_mcp_server(
@@ -218,12 +293,12 @@ fn configure_stdio_mcp_server(
     command: PathBuf,
     args: &[String],
     env_vars: &[(&str, String)],
-) {
-    let Some(mcp_servers) = mcp_servers_table(table) else {
-        return;
-    };
-    let server = ensure_child_table(mcp_servers, name);
+) -> Result<()> {
+    let mcp_servers = mcp_servers_table(table)?;
+    let server = ensure_child_table(mcp_servers, name)
+        .with_context(|| format!("mcp_servers.{name} must be a TOML table"))?;
     configure_stdio_mcp_server_fields(server, command, args, env_vars);
+    Ok(())
 }
 
 fn configure_stdio_mcp_server_fields(
@@ -255,7 +330,7 @@ fn configure_stdio_mcp_server_fields(
     }
 }
 
-fn mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
+fn mcp_servers_table(table: &mut toml::Table) -> Result<&mut toml::Table> {
     if !table.contains_key("mcp_servers") {
         table.insert(
             "mcp_servers".to_string(),
@@ -263,8 +338,8 @@ fn mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
         );
     }
     match table.get_mut("mcp_servers") {
-        Some(toml::Value::Table(table)) => Some(table),
-        _ => None,
+        Some(toml::Value::Table(table)) => Ok(table),
+        _ => bail!("mcp_servers must be a TOML table"),
     }
 }
 

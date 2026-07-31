@@ -38,6 +38,8 @@ pub const PROFILE_EXPORT_MAX_SECRET_FILES: usize =
     PROFILE_EXPORT_MAX_PROFILES * PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE;
 pub const IMPORT_AUTH_UPDATE_JOURNAL_DIR: &str = "profile-import-auth-journal";
 pub const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
+pub const PROFILE_LIFECYCLE_JOURNAL_DIR: &str = "profile-lifecycle-journal";
+pub const PROFILE_LIFECYCLE_JOURNAL_VERSION: u32 = 1;
 
 pub type SummaryFields = Vec<(String, String)>;
 

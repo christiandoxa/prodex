@@ -1,3 +1,8 @@
+use super::super::import_export::{
+    ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
+    cleanup_profile_lifecycle_and_auth_journal, lifecycle_profile_state,
+    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
+};
 use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
@@ -85,8 +90,36 @@ fn finish_gemini_login_for_existing_profile(
     secret: &GeminiOAuthSecret,
 ) -> Result<()> {
     let codex_home = prepare_gemini_profile_login_home(paths, state, profile_name)?;
+    let mut desired_profile = state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?
+        .clone();
+    desired_profile.email = Some(secret.email.clone());
+    desired_profile.provider = ProfileProvider::Gemini {
+        email: secret.email.clone(),
+        project_id: secret.project_id.clone(),
+    };
+    let secret_text = serde_json::to_string_pretty(secret)?;
+    let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+        paths,
+        "login",
+        state,
+        profile_name,
+        &desired_profile,
+        Some(profile_name.to_string()),
+        ProfileAuthUpdate {
+            next_auth_json: None,
+            next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+            next_secret_files: vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
+                path: crate::GEMINI_OAUTH_SECRET_FILE.to_string(),
+                text: Some(secret_text),
+            }],
+            previous_secret_file_paths: &[crate::GEMINI_OAUTH_SECRET_FILE],
+            temporary_home: Some(login_home),
+        },
+    )?;
     write_gemini_oauth_secret(&codex_home, secret)?;
-    remove_dir_if_exists(login_home)?;
     if let Some(profile) = state.profiles.get_mut(profile_name) {
         profile.email = Some(secret.email.clone());
         profile.provider = ProfileProvider::Gemini {
@@ -96,6 +129,7 @@ fn finish_gemini_login_for_existing_profile(
     }
     state.active_profile = Some(profile_name.to_string());
     state.save(paths)?;
+    remove_dir_if_exists(login_home)?;
 
     let fields = vec![
         (
@@ -110,6 +144,7 @@ fn finish_gemini_login_for_existing_profile(
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_profile_panel("Login", &fields)?;
+    cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
     Ok(())
 }
 
@@ -122,24 +157,44 @@ fn finish_gemini_login_for_new_profile(
     let profile_name =
         unique_profile_name_for_slug(paths, state, &format!("gemini_{}", secret.email));
     let codex_home = managed_profile_home_path(paths, &profile_name)?;
+    let desired_profile = ProfileEntry {
+        codex_home: codex_home.clone(),
+        managed: true,
+        email: Some(secret.email.clone()),
+        provider: ProfileProvider::Gemini {
+            email: secret.email.clone(),
+            project_id: secret.project_id.clone(),
+        },
+    };
+    let lifecycle_path = write_profile_lifecycle_plan(
+        paths,
+        "login",
+        &ProfileLifecyclePlan {
+            profile_states: vec![lifecycle_profile_state(
+                &profile_name,
+                None,
+                Some(&desired_profile),
+            )?],
+            previous_active_profile: state.active_profile.clone(),
+            next_active_profile: Some(profile_name.clone()),
+            home_actions: vec![
+                ProfileLifecycleHomeAction::Create {
+                    path: codex_home.display().to_string(),
+                },
+                ProfileLifecycleHomeAction::Cleanup {
+                    path: login_home.display().to_string(),
+                },
+            ],
+            auth_journal_paths: Vec::new(),
+        },
+    )?;
     prepare_managed_codex_home(paths, &codex_home)?;
     write_gemini_oauth_secret(&codex_home, secret)?;
-    remove_dir_if_exists(login_home)?;
 
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed: true,
-            email: Some(secret.email.clone()),
-            provider: ProfileProvider::Gemini {
-                email: secret.email.clone(),
-                project_id: secret.project_id.clone(),
-            },
-        },
-    );
+    state.profiles.insert(profile_name.clone(), desired_profile);
     state.active_profile = Some(profile_name.clone());
     state.save(paths)?;
+    remove_dir_if_exists(login_home)?;
 
     let fields = vec![
         (
@@ -154,5 +209,6 @@ fn finish_gemini_login_for_new_profile(
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_profile_panel("Login", &fields)?;
+    prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
     Ok(())
 }

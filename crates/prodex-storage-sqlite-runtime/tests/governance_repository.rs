@@ -1,5 +1,7 @@
 #[path = "governance_repository/audit_retention.rs"]
 mod audit_retention;
+#[path = "governance_repository/outbox_claims.rs"]
+mod outbox_claims;
 #[path = "governance_repository/revision_recovery.rs"]
 mod revision_recovery;
 
@@ -1126,14 +1128,14 @@ fn outbox_retries_with_stable_id_then_dead_letters() {
         .unwrap();
     assert_eq!(first.retried, 1);
     let second = repository
-        .run_siem_outbox_batch(1_100, 1, retry, |event| {
+        .run_siem_outbox_batch(2_000, 1, retry, |event| {
             observed.push(event.event_id);
             Err::<(), ()>(())
         })
         .unwrap();
     assert_eq!(second.retried, 1);
     let third = repository
-        .run_siem_outbox_batch(1_300, 1, retry, |event| {
+        .run_siem_outbox_batch(3_000, 1, retry, |event| {
             observed.push(event.event_id);
             Err::<(), ()>(())
         })

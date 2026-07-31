@@ -43,11 +43,6 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let mut state = AppState::load(&paths)?;
     let repaired_import_auth_journals = if args.repair_import_auth_journals {
         let repaired = repair_profile_import_auth_journals(&paths, &mut state)?;
-        if repaired > 0 {
-            state
-                .save(&paths)
-                .context("failed to save repaired import auth rollback state")?;
-        }
         audit_log_event(
             "profile",
             "repair_import_auth_journals",

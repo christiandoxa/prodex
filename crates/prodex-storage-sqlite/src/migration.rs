@@ -233,8 +233,9 @@ pub const SQLITE_MIGRATIONS: &[SqliteMigration] = &[
     LOCAL_AUDIT_LEGAL_HOLD_MIGRATION,
     LOCAL_GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION,
     LOCAL_GOVERNANCE_REVOCATION_MIGRATION,
+    LOCAL_SIEM_OUTBOX_LEASING_MIGRATION,
 ];
-pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(12);
+pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(13);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqliteRuntimeMode {
@@ -254,6 +255,10 @@ pub enum SqliteStoragePlanError {
     DdlForbiddenOnRequestPath,
     MissingSchemaVersion,
     SchemaVersionTooOld {
+        observed: SqliteMigrationVersion,
+        required: SqliteMigrationVersion,
+    },
+    SchemaVersionTooNew {
         observed: SqliteMigrationVersion,
         required: SqliteMigrationVersion,
     },
@@ -303,6 +308,9 @@ impl fmt::Display for SqliteStoragePlanError {
             ),
             Self::SchemaVersionTooOld { .. } => {
                 write!(f, "SQLite schema version is too old")
+            }
+            Self::SchemaVersionTooNew { .. } => {
+                write!(f, "SQLite schema version is newer than supported")
             }
             Self::TenantMismatch { .. } => write!(f, "SQLite tenant mismatch"),
             Self::VirtualKeyMismatch { .. } => write!(f, "SQLite virtual key mismatch"),
@@ -392,6 +400,12 @@ pub fn plan_sqlite_backend_open(
                 observed_schema_version.ok_or(SqliteStoragePlanError::MissingSchemaVersion)?;
             if observed < REQUIRED_SQLITE_SCHEMA_VERSION {
                 return Err(SqliteStoragePlanError::SchemaVersionTooOld {
+                    observed,
+                    required: REQUIRED_SQLITE_SCHEMA_VERSION,
+                });
+            }
+            if observed > REQUIRED_SQLITE_SCHEMA_VERSION {
+                return Err(SqliteStoragePlanError::SchemaVersionTooNew {
                     observed,
                     required: REQUIRED_SQLITE_SCHEMA_VERSION,
                 });

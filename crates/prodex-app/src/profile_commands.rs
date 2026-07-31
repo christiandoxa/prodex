@@ -18,12 +18,15 @@ pub(crate) use self::copilot::{
     handle_import_copilot_profile, resolve_copilot_runtime_api_auth,
 };
 use self::import_export::write_secret_text_file;
+pub(crate) use self::import_export::{
+    ProfileLifecycleHomeAction, ProfileLifecyclePlan, acquire_profile_lifecycle_lock,
+    count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
+    handle_import_profiles, lifecycle_profile_state,
+    load_profile_state_with_profile_recovery_locked, recover_pending_profile_lifecycle,
+    repair_profile_import_auth_journals, write_profile_lifecycle_plan,
+};
 #[cfg(test)]
 use self::import_export::{build_profile_export_payload, import_profile_export_payload};
-pub(crate) use self::import_export::{
-    count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
-    handle_import_profiles, repair_profile_import_auth_journals,
-};
 pub(crate) use self::kiro::{
     KIRO_MODEL_CATALOG_FILE, handle_import_kiro_profile, kiro_cli_data_dir_env,
     parse_kiro_model_catalog_text, prepare_kiro_cli_data_dir, read_kiro_auth_secret,
@@ -33,7 +36,10 @@ pub(crate) use self::logout::handle_codex_logout;
 pub(crate) use self::manage::{
     handle_add_profile, handle_current_profile, handle_list_profiles, handle_set_active_profile,
 };
-pub(crate) use self::remove::handle_remove_profile;
+pub(crate) use self::remove::{
+    finalize_recovered_profile_removals, handle_remove_profile,
+    persist_pruned_profile_runtime_sidecars, prune_removed_profile_metadata,
+};
 #[cfg(test)]
 use prodex_profile_export::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_VERSION_V2, ProfileExportKdfParameters,

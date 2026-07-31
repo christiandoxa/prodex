@@ -1,4 +1,5 @@
 use super::*;
+use crate::{RTK_MD, ResolvedTool, ToolDiscoverySource, optional_tool_descriptor};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn configures_only_codebase_memory_server() {
+fn configures_only_codebase_memory_server() -> Result<()> {
     let mut table = toml::Table::new();
     configure_stdio_mcp_server(
         &mut table,
@@ -25,7 +26,7 @@ fn configures_only_codebase_memory_server() {
             "/bin/codebase-memory-mcp".into(),
         ],
         &[("CBM_CACHE_DIR", "/tmp/cbm".into())],
-    );
+    )?;
 
     let rendered = toml::to_string(&table).unwrap();
     assert!(rendered.contains("[mcp_servers.codebase-memory-mcp]"));
@@ -39,6 +40,7 @@ fn configures_only_codebase_memory_server() {
     ] {
         assert!(!rendered.contains(removed));
     }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -67,7 +69,7 @@ fn codebase_memory_cache_ancestors_are_private() -> Result<()> {
 #[test]
 fn configures_playwright_default() {
     let mut table = toml::Table::new();
-    configure_default_playwright_mcp_server(&mut table, Path::new("/bin/npx"));
+    configure_default_playwright_mcp_server(&mut table, Path::new("/bin/npx")).unwrap();
 
     let servers = table
         .get("mcp_servers")
@@ -150,12 +152,229 @@ args = ["--headed"]
     )
     .unwrap();
 
-    configure_default_playwright_mcp_server(&mut table, Path::new("/bin/npx"));
+    configure_default_playwright_mcp_server(&mut table, Path::new("/bin/npx")).unwrap();
 
     let rendered = toml::to_string(&table).unwrap();
     assert!(rendered.contains("command = \"custom-playwright\""));
     assert!(rendered.contains("args = [\"--headed\"]"));
     assert!(!rendered.contains(PLAYWRIGHT_MCP_PACKAGE));
+}
+
+#[test]
+fn rejects_non_table_mcp_servers_and_nested_entries() {
+    let mut table = toml::Table::from_iter([(
+        "mcp_servers".to_string(),
+        toml::Value::String("invalid".to_string()),
+    )]);
+    let error = configure_stdio_mcp_server(
+        &mut table,
+        "codebase-memory-mcp",
+        PathBuf::from("/bin/prodex"),
+        &[],
+        &[],
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("mcp_servers must be a TOML table")
+    );
+
+    let mut table = toml::Table::new();
+    table.insert(
+        "mcp_servers".to_string(),
+        toml::Value::Table(toml::Table::from_iter([(
+            "playwright".to_string(),
+            toml::Value::String("invalid".to_string()),
+        )])),
+    );
+    let error =
+        configure_default_playwright_mcp_server(&mut table, Path::new("/bin/npx")).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("mcp_servers.playwright must be a TOML table")
+    );
+}
+
+#[test]
+fn optimizer_preflight_rejects_wrong_shapes_before_mutation() -> Result<()> {
+    let cases = [
+        ("features = \"invalid\"\n", "features"),
+        ("marketplaces = []\n", "marketplaces"),
+        ("plugins = false\n", "plugins"),
+        ("mcp_servers = \"invalid\"\n", "mcp_servers"),
+        ("[marketplaces]\nponytail = \"invalid\"\n", "ponytail"),
+        (
+            "[plugins]\n\"ponytail@ponytail\" = \"invalid\"\n",
+            "ponytail@ponytail",
+        ),
+        (
+            "[mcp_servers]\nplaywright = \"invalid\"\n",
+            "mcp_servers.playwright",
+        ),
+    ];
+    let activations: Vec<ToolActivation> = [
+        OptionalToolId::Rtk,
+        OptionalToolId::CodebaseMemoryMcp,
+        OptionalToolId::PlaywrightMcp,
+        OptionalToolId::Ponytail,
+    ]
+    .into_iter()
+    .map(|id| ToolActivation {
+        tool: ResolvedTool {
+            descriptor: optional_tool_descriptor(id),
+            source: ToolDiscoverySource::ManagedRoot,
+            path: None,
+            version: None,
+            digest: None,
+        },
+        required: false,
+    })
+    .collect();
+
+    for (index, (contents, expected)) in cases.into_iter().enumerate() {
+        let home = temp_dir(&format!("optimizer-preflight-{index}"));
+        fs::create_dir_all(&home)?;
+        fs::write(home.join("config.toml"), contents)?;
+        let error = activate_optional_tools_for_codex(
+            &home,
+            &ToolActivationPlan {
+                activations: activations.clone(),
+                unavailable: Vec::new(),
+            },
+            false,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(expected));
+        assert_eq!(fs::read_to_string(home.join("config.toml"))?, contents);
+        for relative in [
+            "AGENTS.md",
+            RTK_MD,
+            SUPER_OPTIMIZERS_MD,
+            "bin",
+            ".tmp/marketplaces/ponytail",
+            "plugins/cache/ponytail",
+        ] {
+            assert!(
+                !home.join(relative).exists(),
+                "unexpected mutation: {relative}"
+            );
+        }
+        fs::remove_dir_all(home)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn default_optimizer_preflight_runs_before_rtk_mutation() -> Result<()> {
+    let home = temp_dir("default-optimizer-preflight");
+    fs::create_dir_all(&home)?;
+    fs::write(home.join("config.toml"), "features = \"invalid\"\n")?;
+
+    let error = configure_super_optimizer_codex_home_with_presidio(&home, false).unwrap_err();
+
+    assert!(error.to_string().contains("features"));
+    assert_eq!(
+        fs::read_to_string(home.join("config.toml"))?,
+        "features = \"invalid\"\n"
+    );
+    for relative in ["AGENTS.md", RTK_MD, SUPER_OPTIMIZERS_MD, "bin"] {
+        assert!(
+            !home.join(relative).exists(),
+            "unexpected mutation: {relative}"
+        );
+    }
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
+#[test]
+fn optimizer_preflight_ignores_unselected_config_sections() -> Result<()> {
+    let home = temp_dir("optimizer-preflight-unselected");
+    fs::create_dir_all(&home)?;
+    fs::write(
+        home.join("config.toml"),
+        "features = \"unused\"\nmcp_servers = \"unused\"\n",
+    )?;
+
+    validate_optimizer_config_shapes(&home, false, false, false)?;
+
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
+#[test]
+fn optimizer_preflight_scopes_mcp_children_independently() -> Result<()> {
+    let home = temp_dir("optimizer-preflight-mcp-scope");
+    fs::create_dir_all(&home)?;
+    fs::write(
+        home.join("config.toml"),
+        "[mcp_servers]\ncodebase-memory-mcp = \"invalid\"\nplaywright = {}\n",
+    )?;
+    validate_optimizer_config_shapes(&home, false, true, false)?;
+    assert!(validate_optimizer_config_shapes(&home, true, false, false).is_err());
+
+    fs::write(
+        home.join("config.toml"),
+        "[mcp_servers]\ncodebase-memory-mcp = {}\nplaywright = \"invalid\"\n",
+    )?;
+    validate_optimizer_config_shapes(&home, true, false, false)?;
+    assert!(validate_optimizer_config_shapes(&home, false, true, false).is_err());
+
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
+#[test]
+fn optimizer_preflight_validates_only_activated_tools() -> Result<()> {
+    let home = temp_dir("optimizer-preflight-activation-only");
+    fs::create_dir_all(&home)?;
+    let config = "mcp_servers = \"invalid\"\n";
+    fs::write(home.join("config.toml"), config)?;
+
+    activate_optional_tools_for_codex(
+        &home,
+        &ToolActivationPlan {
+            activations: Vec::new(),
+            unavailable: vec![crate::ToolHealth {
+                id: OptionalToolId::CodebaseMemoryMcp,
+                status: crate::ToolHealthStatus::Missing,
+                source: None,
+                path: None,
+                version: None,
+                digest: None,
+                can_activate: false,
+                detail: "optional fixture unavailable".to_string(),
+            }],
+        },
+        false,
+    )?;
+    assert_eq!(fs::read_to_string(home.join("config.toml"))?, config);
+
+    let error = activate_optional_tools_for_codex(
+        &home,
+        &ToolActivationPlan {
+            activations: vec![ToolActivation {
+                tool: ResolvedTool {
+                    descriptor: optional_tool_descriptor(OptionalToolId::CodebaseMemoryMcp),
+                    source: ToolDiscoverySource::ManagedRoot,
+                    path: None,
+                    version: None,
+                    digest: None,
+                },
+                required: false,
+            }],
+            unavailable: Vec::new(),
+        },
+        false,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("mcp_servers"));
+
+    fs::remove_dir_all(home)?;
+    Ok(())
 }
 
 #[test]
