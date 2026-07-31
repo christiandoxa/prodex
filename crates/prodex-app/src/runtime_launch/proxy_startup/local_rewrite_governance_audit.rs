@@ -133,6 +133,8 @@ impl RuntimeGovernanceAuditWriter {
         let queue = match self.queue.lock() {
             Ok(queue) => queue.clone(),
             Err(_) => {
+                self.reconciliation_overflowed
+                    .store(true, Ordering::Release);
                 self.available.store(false, Ordering::Release);
                 if reconcile_on_failure {
                     enqueue_audit_reconciliation(
@@ -736,5 +738,31 @@ mod tests {
         reconciliation.lock().unwrap().clear();
         refresh_audit_reconciliation_availability(&reconciliation, &overflowed, &available);
         assert!(!available.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn poisoned_writer_queue_never_reports_recovery() {
+        let writer = RuntimeGovernanceAuditWriter::default();
+        writer.available.store(true, Ordering::Release);
+        let _ = std::panic::catch_unwind(|| {
+            let _queue = writer.queue.lock().unwrap();
+            panic!("poison audit writer queue");
+        });
+
+        assert_eq!(
+            writer.append_reconciling(audit_event(1)).unwrap_err(),
+            GovernanceRepositoryError::Database
+        );
+        assert_eq!(writer.reconciliation.lock().unwrap().len(), 1);
+        assert!(writer.reconciliation_overflowed.load(Ordering::Acquire));
+        assert!(!writer.is_available());
+
+        writer.reconciliation.lock().unwrap().clear();
+        refresh_audit_reconciliation_availability(
+            &writer.reconciliation,
+            &writer.reconciliation_overflowed,
+            &writer.available,
+        );
+        assert!(!writer.is_available());
     }
 }
