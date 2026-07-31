@@ -60,20 +60,12 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
             }) {
                 Ok(response) => response,
                 Err(err) => {
-                    note_runtime_profile_transport_failure(
+                    return handle_runtime_compact_upstream_error(
                         shared,
                         profile_name,
-                        RuntimeRouteKind::Compact,
                         "compact_upstream_request",
-                        &err,
+                        err,
                     );
-                    if is_runtime_proxy_transport_failure(&err) {
-                        return Ok(RuntimeStandardAttempt::TransportFailed {
-                            profile_name: profile_name.to_string(),
-                            stage: "compact_upstream_request",
-                        });
-                    }
-                    return Err(err);
                 }
             };
         let compact_request = is_runtime_compact_path(&request.path_and_query);
@@ -96,20 +88,12 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         ) {
             Ok(parts) => parts,
             Err(err) => {
-                note_runtime_profile_transport_failure(
+                return handle_runtime_compact_upstream_error(
                     shared,
                     profile_name,
-                    RuntimeRouteKind::Compact,
                     "compact_buffer_response",
-                    &err,
+                    err,
                 );
-                if is_runtime_proxy_transport_failure(&err) {
-                    return Ok(RuntimeStandardAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "compact_buffer_response",
-                    });
-                }
-                return Err(err);
             }
         };
         if status == 401
@@ -123,84 +107,109 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         {
             continue;
         }
-        let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        return handle_runtime_compact_error_parts(
+            request_id,
+            shared,
+            profile_name,
+            compact_request,
             status,
-            &parts.body,
-            runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+            parts,
         );
-        let retryable_quota =
-            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
-        let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
-        let retryable_overload =
-            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
-        if matches!(status, 402 | 403 | 429) && !retryable_quota {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http compact_quota_unclassified profile={profile_name} status={status} body_snippet={}",
-                    runtime_proxy_body_snippet(&parts.body, 240),
-                ),
-            );
-        }
-        let previous_response_not_found =
-            extract_runtime_proxy_previous_response_message(&parts.body).is_some();
-        let response = build_runtime_proxy_response_from_parts(
-            runtime_proxy_translate_previous_response_http_parts(parts),
+    }
+}
+
+fn handle_runtime_compact_upstream_error(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    stage: &'static str,
+    err: anyhow::Error,
+) -> Result<RuntimeStandardAttempt> {
+    note_runtime_profile_transport_failure(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Compact,
+        stage,
+        &err,
+    );
+    if is_runtime_proxy_transport_failure(&err) {
+        return Ok(RuntimeStandardAttempt::TransportFailed {
+            profile_name: profile_name.to_string(),
+            stage,
+        });
+    }
+    Err(err)
+}
+
+fn handle_runtime_compact_error_parts(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    compact_request: bool,
+    status: u16,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> Result<RuntimeStandardAttempt> {
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        &parts.body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    let retryable_quota =
+        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
+    let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
+    let retryable_overload =
+        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
+    if matches!(status, 402 | 403 | 429) && !retryable_quota {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                runtime_proxy_body_snippet(&parts.body, 240),
+            ),
         );
-
-        if previous_response_not_found {
-            runtime_proxy_record_continuity_failure_reason(
-                shared,
-                "stale_continuation",
-                "previous_response_not_found",
-            );
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http stale_continuation reason=previous_response_not_found route={} profile={profile_name}",
-                    if compact_request {
-                        "compact"
-                    } else {
-                        "standard"
-                    }
-                ),
-            );
-            return Ok(RuntimeStandardAttempt::StaleContinuation { response });
-        }
-
-        if status == 401 {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                status,
-            );
-            return Ok(RuntimeStandardAttempt::AuthFailed {
-                profile_name: profile_name.to_string(),
-                response,
-            });
-        }
-
-        if retryable_quota || retryable_overload {
-            return Ok(RuntimeStandardAttempt::RetryableFailure {
-                profile_name: profile_name.to_string(),
-                response,
-                overload: retryable_overload,
-            });
-        }
-
-        if matches!(status, 401 | 403) || token_invalidated {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                status,
-            );
-        }
-
-        return Ok(RuntimeStandardAttempt::Success {
+    }
+    let previous_response_not_found =
+        extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+    let response = build_runtime_proxy_response_from_parts(
+        runtime_proxy_translate_previous_response_http_parts(parts),
+    );
+    if previous_response_not_found {
+        runtime_proxy_record_continuity_failure_reason(
+            shared,
+            "stale_continuation",
+            "previous_response_not_found",
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http stale_continuation reason=previous_response_not_found route={} profile={profile_name}",
+                if compact_request {
+                    "compact"
+                } else {
+                    "standard"
+                }
+            ),
+        );
+        return Ok(RuntimeStandardAttempt::StaleContinuation { response });
+    }
+    if status == 401 {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Compact, status);
+        return Ok(RuntimeStandardAttempt::AuthFailed {
             profile_name: profile_name.to_string(),
             response,
         });
     }
+    if retryable_quota || retryable_overload {
+        return Ok(RuntimeStandardAttempt::RetryableFailure {
+            profile_name: profile_name.to_string(),
+            response,
+            overload: retryable_overload,
+        });
+    }
+    if matches!(status, 401 | 403) || token_invalidated {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Compact, status);
+    }
+    Ok(RuntimeStandardAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response,
+    })
 }

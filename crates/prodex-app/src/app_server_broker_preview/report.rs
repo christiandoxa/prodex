@@ -1,6 +1,9 @@
 //! Preview report aggregation for app-server broker diagnostics.
 
 use serde_json::Value;
+use std::collections::BTreeMap;
+
+type PreviewCounts = BTreeMap<String, usize>;
 
 pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value>) -> Value {
     let is_first_wire_frame =
@@ -11,221 +14,199 @@ pub(super) fn app_server_broker_preview_report_from_previews(previews: Vec<Value
         .filter(is_first_wire_frame)
         .filter(|entry| entry["preview"]["parse_ok"] == serde_json::Value::Bool(true))
         .count();
-    let failed = line_count.saturating_sub(parsed);
-    let mut request_count = 0usize;
-    let mut batch_count = 0usize;
-    let mut notification_count = 0usize;
-    let mut response_count = 0usize;
-    let mut invalid_count = 0usize;
-    let mut lifecycle_count = 0usize;
-    let mut other_count = 0usize;
-    let mut absent_count = 0usize;
-    let mut fresh_count = 0usize;
-    let mut continue_session_count = 0usize;
-    let mut continue_thread_count = 0usize;
-    let mut continue_turn_count = 0usize;
-    let mut fresh_selection_ok_count = 0usize;
-    let mut preserve_session_affinity_count = 0usize;
-    let mut preserve_thread_affinity_count = 0usize;
-    let mut preserve_turn_affinity_count = 0usize;
-    let mut precommit_count = 0usize;
-    let mut turn_committed_count = 0usize;
-    let mut rotation_open_count = 0usize;
-    let mut rotation_closed_count = 0usize;
-    let mut fresh_select_ok_count = 0usize;
-    let mut preserve_session_owner_count = 0usize;
-    let mut preserve_thread_owner_count = 0usize;
-    let mut preserve_turn_owner_count = 0usize;
-    let mut affinity_required_count = 0usize;
-    let mut rotation_allowed_count = 0usize;
-    let mut preserves_owner_count = 0usize;
-    let mut owner_none_count = 0usize;
-    let mut owner_session_count = 0usize;
-    let mut owner_thread_count = 0usize;
-    let mut owner_turn_count = 0usize;
-    let mut non_jsonrpc_version_count = 0usize;
-    let mut empty_batch_count = 0usize;
-    let mut batch_too_large_count = 0usize;
-    let mut nested_batch_count = 0usize;
-    let mut invalid_batch_member_count = 0usize;
-    let mut non_object_frame_count = 0usize;
-    let mut non_scalar_id_count = 0usize;
-    let mut non_container_params_count = 0usize;
-    let mut non_object_error_count = 0usize;
-    let mut non_integer_error_code_count = 0usize;
-    let mut non_string_error_message_count = 0usize;
-    let mut non_string_method_count = 0usize;
-    let mut invalid_method_name_count = 0usize;
-    let mut result_with_error_count = 0usize;
-    let mut missing_response_id_count = 0usize;
-    let mut method_with_result_or_error_count = 0usize;
-    let mut missing_method_and_response_payload_count = 0usize;
-    for entry in &previews {
-        if entry["batch_index"].as_u64() == Some(0) {
-            batch_count += 1;
-        }
-        match entry["preview"]["summary"]["frame_kind"].as_str() {
-            Some("batch") => batch_count += 1,
-            Some("request") => request_count += 1,
-            Some("notification") => notification_count += 1,
-            Some("response") => response_count += 1,
-            Some("invalid") => invalid_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["method_kind"].as_str() {
-            Some("lifecycle") => lifecycle_count += 1,
-            Some("other") => other_count += 1,
-            Some("absent") => absent_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["continuation_decision"].as_str() {
-            Some("fresh") => fresh_count += 1,
-            Some("continue-session") => continue_session_count += 1,
-            Some("continue-thread") => continue_thread_count += 1,
-            Some("continue-turn") => continue_turn_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["policy_hint"]["mode"].as_str() {
-            Some("fresh-selection-ok") => fresh_selection_ok_count += 1,
-            Some("preserve-session-affinity") => preserve_session_affinity_count += 1,
-            Some("preserve-thread-affinity") => preserve_thread_affinity_count += 1,
-            Some("preserve-turn-affinity") => preserve_turn_affinity_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["policy_hint"]["commit_boundary"].as_str() {
-            Some("precommit") => precommit_count += 1,
-            Some("turn-committed") => turn_committed_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["policy_hint"]["rotation_window"].as_str() {
-            Some("open") => rotation_open_count += 1,
-            Some("closed") => rotation_closed_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["policy_hint"]["routing_hint"].as_str() {
-            Some("fresh-select-ok") => fresh_select_ok_count += 1,
-            Some("preserve-session-owner") => preserve_session_owner_count += 1,
-            Some("preserve-thread-owner") => preserve_thread_owner_count += 1,
-            Some("preserve-turn-owner") => preserve_turn_owner_count += 1,
-            _ => {}
-        }
-        if entry["preview"]["summary"]["policy_hint"]["affinity_required"]
-            == serde_json::Value::Bool(true)
-        {
-            affinity_required_count += 1;
-        }
-        if entry["preview"]["summary"]["policy_hint"]["rotation_allowed"]
-            == serde_json::Value::Bool(true)
-        {
-            rotation_allowed_count += 1;
-        }
-        if entry["preview"]["summary"]["policy_hint"]["preserves_owner"]
-            == serde_json::Value::Bool(true)
-        {
-            preserves_owner_count += 1;
-        }
-        match entry["preview"]["summary"]["continuation_affinity"]["owner_kind"].as_str() {
-            Some("none") => owner_none_count += 1,
-            Some("session") => owner_session_count += 1,
-            Some("thread") => owner_thread_count += 1,
-            Some("turn") => owner_turn_count += 1,
-            _ => {}
-        }
-        match entry["preview"]["summary"]["invalid_reason"].as_str() {
-            Some("non_jsonrpc_version") => non_jsonrpc_version_count += 1,
-            Some("empty_batch") => empty_batch_count += 1,
-            Some("batch_too_large") => batch_too_large_count += 1,
-            Some("nested_batch") => nested_batch_count += 1,
-            Some("invalid_batch_member") => invalid_batch_member_count += 1,
-            Some("non_object_frame") => non_object_frame_count += 1,
-            Some("non_scalar_id") => non_scalar_id_count += 1,
-            Some("non_container_params") => non_container_params_count += 1,
-            Some("non_object_error") => non_object_error_count += 1,
-            Some("non_integer_error_code") => non_integer_error_code_count += 1,
-            Some("non_string_error_message") => non_string_error_message_count += 1,
-            Some("non_string_method") => non_string_method_count += 1,
-            Some("invalid_method_name") => invalid_method_name_count += 1,
-            Some("result_with_error") => result_with_error_count += 1,
-            Some("missing_response_id") => missing_response_id_count += 1,
-            Some("method_with_result_or_error") => method_with_result_or_error_count += 1,
-            Some("missing_method_and_response_payload") => {
-                missing_method_and_response_payload_count += 1
-            }
-            _ => {}
-        }
-    }
+    let counts = preview_counts(&previews);
+
     serde_json::json!({
         "line_count": line_count,
         "parsed_count": parsed,
-        "error_count": failed,
+        "error_count": line_count.saturating_sub(parsed),
         "frame_kind_counts": {
-            "batch": batch_count,
-            "request": request_count,
-            "notification": notification_count,
-            "response": response_count,
-            "invalid": invalid_count,
+            "batch": count(&counts, "batch"),
+            "request": count(&counts, "request"),
+            "notification": count(&counts, "notification"),
+            "response": count(&counts, "response"),
+            "invalid": count(&counts, "invalid"),
         },
         "method_kind_counts": {
-            "lifecycle": lifecycle_count,
-            "other": other_count,
-            "absent": absent_count,
+            "lifecycle": count(&counts, "lifecycle"),
+            "other": count(&counts, "other"),
+            "absent": count(&counts, "absent"),
         },
         "continuation_decision_counts": {
-            "fresh": fresh_count,
-            "continue-session": continue_session_count,
-            "continue-thread": continue_thread_count,
-            "continue-turn": continue_turn_count,
+            "fresh": count(&counts, "fresh"),
+            "continue-session": count(&counts, "continue-session"),
+            "continue-thread": count(&counts, "continue-thread"),
+            "continue-turn": count(&counts, "continue-turn"),
         },
         "policy_mode_counts": {
-            "fresh-selection-ok": fresh_selection_ok_count,
-            "preserve-session-affinity": preserve_session_affinity_count,
-            "preserve-thread-affinity": preserve_thread_affinity_count,
-            "preserve-turn-affinity": preserve_turn_affinity_count,
+            "fresh-selection-ok": count(&counts, "fresh-selection-ok"),
+            "preserve-session-affinity": count(&counts, "preserve-session-affinity"),
+            "preserve-thread-affinity": count(&counts, "preserve-thread-affinity"),
+            "preserve-turn-affinity": count(&counts, "preserve-turn-affinity"),
         },
         "commit_boundary_counts": {
-            "precommit": precommit_count,
-            "turn-committed": turn_committed_count,
+            "precommit": count(&counts, "precommit"),
+            "turn-committed": count(&counts, "turn-committed"),
         },
         "rotation_window_counts": {
-            "open": rotation_open_count,
-            "closed": rotation_closed_count,
+            "open": count(&counts, "open"),
+            "closed": count(&counts, "closed"),
         },
         "routing_hint_counts": {
-            "fresh-select-ok": fresh_select_ok_count,
-            "preserve-session-owner": preserve_session_owner_count,
-            "preserve-thread-owner": preserve_thread_owner_count,
-            "preserve-turn-owner": preserve_turn_owner_count,
+            "fresh-select-ok": count(&counts, "fresh-select-ok"),
+            "preserve-session-owner": count(&counts, "preserve-session-owner"),
+            "preserve-thread-owner": count(&counts, "preserve-thread-owner"),
+            "preserve-turn-owner": count(&counts, "preserve-turn-owner"),
         },
         "policy_flag_counts": {
-            "affinity_required": affinity_required_count,
-            "rotation_allowed": rotation_allowed_count,
-            "preserves_owner": preserves_owner_count,
+            "affinity_required": count(&counts, "affinity_required"),
+            "rotation_allowed": count(&counts, "rotation_allowed"),
+            "preserves_owner": count(&counts, "preserves_owner"),
         },
         "owner_kind_counts": {
-            "none": owner_none_count,
-            "session": owner_session_count,
-            "thread": owner_thread_count,
-            "turn": owner_turn_count,
+            "none": count(&counts, "none"),
+            "session": count(&counts, "session"),
+            "thread": count(&counts, "thread"),
+            "turn": count(&counts, "turn"),
         },
         "invalid_reason_counts": {
-            "non_jsonrpc_version": non_jsonrpc_version_count,
-            "empty_batch": empty_batch_count,
-            "batch_too_large": batch_too_large_count,
-            "nested_batch": nested_batch_count,
-            "invalid_batch_member": invalid_batch_member_count,
-            "non_object_frame": non_object_frame_count,
-            "non_scalar_id": non_scalar_id_count,
-            "non_container_params": non_container_params_count,
-            "non_object_error": non_object_error_count,
-            "non_integer_error_code": non_integer_error_code_count,
-            "non_string_error_message": non_string_error_message_count,
-            "non_string_method": non_string_method_count,
-            "invalid_method_name": invalid_method_name_count,
-            "result_with_error": result_with_error_count,
-            "missing_response_id": missing_response_id_count,
-            "method_with_result_or_error": method_with_result_or_error_count,
-            "missing_method_and_response_payload": missing_method_and_response_payload_count,
+            "non_jsonrpc_version": count(&counts, "non_jsonrpc_version"),
+            "empty_batch": count(&counts, "empty_batch"),
+            "batch_too_large": count(&counts, "batch_too_large"),
+            "nested_batch": count(&counts, "nested_batch"),
+            "invalid_batch_member": count(&counts, "invalid_batch_member"),
+            "non_object_frame": count(&counts, "non_object_frame"),
+            "non_scalar_id": count(&counts, "non_scalar_id"),
+            "non_container_params": count(&counts, "non_container_params"),
+            "non_object_error": count(&counts, "non_object_error"),
+            "non_integer_error_code": count(&counts, "non_integer_error_code"),
+            "non_string_error_message": count(&counts, "non_string_error_message"),
+            "non_string_method": count(&counts, "non_string_method"),
+            "invalid_method_name": count(&counts, "invalid_method_name"),
+            "result_with_error": count(&counts, "result_with_error"),
+            "missing_response_id": count(&counts, "missing_response_id"),
+            "method_with_result_or_error": count(&counts, "method_with_result_or_error"),
+            "missing_method_and_response_payload": count(
+                &counts,
+                "missing_method_and_response_payload",
+            ),
         },
         "previews": previews,
     })
+}
+
+fn preview_counts(previews: &[Value]) -> PreviewCounts {
+    let mut counts = PreviewCounts::new();
+    for entry in previews {
+        count_frame_summary(&mut counts, entry);
+        count_policy_summary(&mut counts, entry);
+        count_invalid_reason(&mut counts, entry);
+    }
+    counts
+}
+
+fn count_frame_summary(counts: &mut PreviewCounts, entry: &Value) {
+    if entry["batch_index"].as_u64() == Some(0) {
+        increment(counts, "batch");
+    }
+    if let Some(kind @ ("batch" | "request" | "notification" | "response" | "invalid")) =
+        entry["preview"]["summary"]["frame_kind"].as_str()
+    {
+        increment(counts, kind);
+    }
+    if let Some(kind @ ("lifecycle" | "other" | "absent")) =
+        entry["preview"]["summary"]["method_kind"].as_str()
+    {
+        increment(counts, kind);
+    }
+    if let Some(kind @ ("fresh" | "continue-session" | "continue-thread" | "continue-turn")) =
+        entry["preview"]["summary"]["continuation_decision"].as_str()
+    {
+        increment(counts, kind);
+    }
+}
+
+fn count_policy_summary(counts: &mut PreviewCounts, entry: &Value) {
+    let policy = &entry["preview"]["summary"]["policy_hint"];
+    if let Some(
+        kind @ ("fresh-selection-ok"
+        | "preserve-session-affinity"
+        | "preserve-thread-affinity"
+        | "preserve-turn-affinity"),
+    ) = policy["mode"].as_str()
+    {
+        increment(counts, kind);
+    }
+    if let Some(kind @ ("precommit" | "turn-committed")) = policy["commit_boundary"].as_str() {
+        increment(counts, kind);
+    }
+    if let Some(kind @ ("open" | "closed")) = policy["rotation_window"].as_str() {
+        increment(counts, kind);
+    }
+    if let Some(
+        kind @ ("fresh-select-ok"
+        | "preserve-session-owner"
+        | "preserve-thread-owner"
+        | "preserve-turn-owner"),
+    ) = policy["routing_hint"].as_str()
+    {
+        increment(counts, kind);
+    }
+    for (field, key) in [
+        ("affinity_required", "affinity_required"),
+        ("rotation_allowed", "rotation_allowed"),
+        ("preserves_owner", "preserves_owner"),
+    ] {
+        if policy[field] == Value::Bool(true) {
+            increment(counts, key);
+        }
+    }
+    if let Some(kind @ ("none" | "session" | "thread" | "turn")) =
+        entry["preview"]["summary"]["continuation_affinity"]["owner_kind"].as_str()
+    {
+        increment(counts, kind);
+    }
+}
+
+fn count_invalid_reason(counts: &mut PreviewCounts, entry: &Value) {
+    if let Some(
+        kind @ ("non_jsonrpc_version"
+        | "empty_batch"
+        | "batch_too_large"
+        | "nested_batch"
+        | "invalid_batch_member"
+        | "non_object_frame"
+        | "non_scalar_id"
+        | "non_container_params"
+        | "non_object_error"),
+    ) = entry["preview"]["summary"]["invalid_reason"].as_str()
+    {
+        increment(counts, kind);
+    } else {
+        count_invalid_payload_reason(counts, entry);
+    }
+}
+
+fn count_invalid_payload_reason(counts: &mut PreviewCounts, entry: &Value) {
+    if let Some(
+        kind @ ("non_integer_error_code"
+        | "non_string_error_message"
+        | "non_string_method"
+        | "invalid_method_name"
+        | "result_with_error"
+        | "missing_response_id"
+        | "method_with_result_or_error"
+        | "missing_method_and_response_payload"),
+    ) = entry["preview"]["summary"]["invalid_reason"].as_str()
+    {
+        increment(counts, kind);
+    }
+}
+
+fn increment(counts: &mut PreviewCounts, key: &str) {
+    *counts.entry(key.to_owned()).or_default() += 1;
+}
+
+fn count(counts: &PreviewCounts, key: &str) -> usize {
+    counts.get(key).copied().unwrap_or_default()
 }

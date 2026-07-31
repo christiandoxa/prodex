@@ -58,37 +58,11 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
         return;
     }
 
-    if let Some((rollout, fallback_status)) = runtime_proxy_websocket_response_inspection_policy(
-        shared.runtime_config.governance.inspection,
-    ) {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "native_websocket_response_inspection",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("coverage", "unsupported"),
-                    runtime_proxy_log_field("rollout", rollout),
-                    runtime_proxy_log_field(
-                        "action",
-                        if fallback_status.is_some() {
-                            "https_fallback"
-                        } else {
-                            "observe"
-                        },
-                    ),
-                ],
-            ),
-        );
-        if let Some(status) = fallback_status {
-            let _ = request.respond(build_runtime_proxy_text_response(
-                status,
-                "governance enforcement requires HTTPS Responses transport fallback",
-            ));
-            return;
-        }
-    }
+    let Some(request) =
+        handle_runtime_proxy_websocket_inspection_policy(request_id, request, shared)
+    else {
+        return;
+    };
 
     let handshake_request = capture_runtime_proxy_websocket_request(&request);
     let Some(websocket_key) = runtime_proxy_websocket_key(&handshake_request) else {
@@ -199,6 +173,46 @@ fn runtime_proxy_websocket_key(request: &RuntimeProxyRequest) -> Option<String> 
             .then(|| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
+}
+
+fn handle_runtime_proxy_websocket_inspection_policy(
+    request_id: u64,
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Option<tiny_http::Request> {
+    let Some((rollout, fallback_status)) = runtime_proxy_websocket_response_inspection_policy(
+        shared.runtime_config.governance.inspection,
+    ) else {
+        return Some(request);
+    };
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "native_websocket_response_inspection",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("coverage", "unsupported"),
+                runtime_proxy_log_field("rollout", rollout),
+                runtime_proxy_log_field(
+                    "action",
+                    if fallback_status.is_some() {
+                        "https_fallback"
+                    } else {
+                        "observe"
+                    },
+                ),
+            ],
+        ),
+    );
+    let Some(status) = fallback_status else {
+        return Some(request);
+    };
+    let _ = request.respond(build_runtime_proxy_text_response(
+        status,
+        "governance enforcement requires HTTPS Responses transport fallback",
+    ));
+    None
 }
 
 fn build_runtime_proxy_websocket_upgrade_response(

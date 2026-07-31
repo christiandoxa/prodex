@@ -132,76 +132,11 @@ impl RequestResponseValidation {
         }
         match lifecycle_stage {
             Some("thread_start_request" | "thread_resume_request" | "thread_fork_request") => {
-                if frame_string(frame, &["result", "thread", "id"]).is_none() {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_missing_thread_id",
-                    ));
-                }
-                if let Some(reason) =
-                    thread_status_failure_reason(frame, &["result", "thread", "status"])
-                {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        match reason {
-                            "lifecycle_invalid_thread_status" => {
-                                "lifecycle_response_invalid_thread_status"
-                            }
-                            _ => "lifecycle_response_missing_thread_status",
-                        },
-                    ));
-                }
-                if !thread_response_has_context(frame) {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_missing_thread_context",
-                    ));
-                }
-                if !thread_response_has_valid_context(frame) {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_invalid_thread_context",
-                    ));
-                }
-                if !thread_object_has_context(frame, &["result", "thread"]) {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_missing_thread_object_context",
-                    ));
-                }
+                validate_thread_response(preview, frame)
             }
-            Some("turn_start_request") => {
-                if frame_string(frame, &["result", "turn", "id"]).is_none() {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_missing_turn_id",
-                    ));
-                }
-                match frame_string(frame, &["result", "turn", "status"]).as_deref() {
-                    Some(status) if is_valid_turn_status(status) => {}
-                    Some(_) => {
-                        return Some(ValidationFailure::from_preview(
-                            preview,
-                            "lifecycle_response_invalid_turn_status",
-                        ));
-                    }
-                    None => {
-                        return Some(ValidationFailure::from_preview(
-                            preview,
-                            "lifecycle_response_missing_turn_status",
-                        ));
-                    }
-                }
-                if !frame_value(frame, &["result", "turn", "items"]).is_some_and(Value::is_array) {
-                    return Some(ValidationFailure::from_preview(
-                        preview,
-                        "lifecycle_response_missing_turn_items",
-                    ));
-                }
-            }
-            _ => {}
+            Some("turn_start_request") => validate_turn_response(preview, frame),
+            _ => None,
         }
-        None
     }
 
     pub(super) fn finish(&self, line_index: usize) -> Option<ValidationFailure> {
@@ -211,4 +146,67 @@ impl RequestResponseValidation {
                 .request_id(id),
         )
     }
+}
+
+fn validate_thread_response(preview: &Value, frame: &Value) -> Option<ValidationFailure> {
+    if frame_string(frame, &["result", "thread", "id"]).is_none() {
+        return Some(ValidationFailure::from_preview(
+            preview,
+            "lifecycle_response_missing_thread_id",
+        ));
+    }
+    if let Some(reason) = thread_status_failure_reason(frame, &["result", "thread", "status"]) {
+        return Some(ValidationFailure::from_preview(
+            preview,
+            match reason {
+                "lifecycle_invalid_thread_status" => "lifecycle_response_invalid_thread_status",
+                _ => "lifecycle_response_missing_thread_status",
+            },
+        ));
+    }
+    for (valid, reason) in [
+        (
+            thread_response_has_context(frame),
+            "lifecycle_response_missing_thread_context",
+        ),
+        (
+            thread_response_has_valid_context(frame),
+            "lifecycle_response_invalid_thread_context",
+        ),
+        (
+            thread_object_has_context(frame, &["result", "thread"]),
+            "lifecycle_response_missing_thread_object_context",
+        ),
+    ] {
+        if !valid {
+            return Some(ValidationFailure::from_preview(preview, reason));
+        }
+    }
+    None
+}
+
+fn validate_turn_response(preview: &Value, frame: &Value) -> Option<ValidationFailure> {
+    if frame_string(frame, &["result", "turn", "id"]).is_none() {
+        return Some(ValidationFailure::from_preview(
+            preview,
+            "lifecycle_response_missing_turn_id",
+        ));
+    }
+    match frame_string(frame, &["result", "turn", "status"]).as_deref() {
+        Some(status) if is_valid_turn_status(status) => {}
+        Some(_) => {
+            return Some(ValidationFailure::from_preview(
+                preview,
+                "lifecycle_response_invalid_turn_status",
+            ));
+        }
+        None => {
+            return Some(ValidationFailure::from_preview(
+                preview,
+                "lifecycle_response_missing_turn_status",
+            ));
+        }
+    }
+    (!frame_value(frame, &["result", "turn", "items"]).is_some_and(Value::is_array))
+        .then(|| ValidationFailure::from_preview(preview, "lifecycle_response_missing_turn_items"))
 }

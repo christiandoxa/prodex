@@ -90,73 +90,7 @@ pub(crate) fn spawn_runtime_realtime_websocket_sidecar(
             format!("prodex-runtime-realtime-{worker_index}"),
             shared.log_path.clone(),
             Arc::clone(shutdown),
-            move || {
-                while !worker_shutdown.load(Ordering::SeqCst) {
-                    match listener.accept() {
-                        Ok((mut stream, _)) => {
-                            let request_id = runtime_proxy_next_request_id(&shared);
-                            let guard = match acquire_runtime_proxy_active_request_slot_with_wait(
-                                &shared,
-                                "websocket",
-                                "/realtime",
-                            ) {
-                                Ok(guard) => guard,
-                                Err(_) => {
-                                    mark_runtime_proxy_local_overload(
-                                        &shared,
-                                        "realtime_sidecar_admission",
-                                    );
-                                    let _ = stream.write_all(
-                                        b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-                                    );
-                                    continue;
-                                }
-                            };
-                            if let Err(error) = handle_runtime_realtime_websocket_stream(
-                                request_id,
-                                stream,
-                                &shared,
-                            ) {
-                                runtime_proxy_log(
-                                    &shared,
-                                    runtime_proxy_structured_log_message(
-                                        "realtime_sidecar_error",
-                                        [
-                                            runtime_proxy_log_field(
-                                                "request",
-                                                request_id.to_string(),
-                                            ),
-                                            runtime_proxy_log_field(
-                                                "error",
-                                                runtime_websocket_error_log_value(
-                                                    &error.to_string(),
-                                                ),
-                                            ),
-                                        ],
-                                    ),
-                                );
-                            }
-                            drop(guard);
-                        }
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(RUNTIME_REALTIME_IDLE_SLEEP);
-                        }
-                        Err(error) => {
-                            runtime_proxy_log(
-                                &shared,
-                                runtime_proxy_structured_log_message(
-                                    "realtime_sidecar_accept_error",
-                                    [runtime_proxy_log_field(
-                                        "error",
-                                        runtime_websocket_error_log_value(&error.to_string()),
-                                    )],
-                                ),
-                            );
-                            thread::sleep(Duration::from_millis(50));
-                        }
-                    }
-                }
-            },
+            move || run_runtime_realtime_websocket_worker(&listener, &shared, &worker_shutdown),
         )?);
     }
 
@@ -171,6 +105,71 @@ pub(crate) fn spawn_runtime_realtime_websocket_sidecar(
         ),
     );
     Ok(listen_addr)
+}
+
+fn run_runtime_realtime_websocket_worker(
+    listener: &std::net::TcpListener,
+    shared: &RuntimeRotationProxyShared,
+    shutdown: &Arc<AtomicBool>,
+) {
+    while !shutdown.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => handle_runtime_realtime_websocket_connection(stream, shared),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(RUNTIME_REALTIME_IDLE_SLEEP);
+            }
+            Err(error) => {
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "realtime_sidecar_accept_error",
+                        [runtime_proxy_log_field(
+                            "error",
+                            runtime_websocket_error_log_value(&error.to_string()),
+                        )],
+                    ),
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+fn handle_runtime_realtime_websocket_connection(
+    mut stream: std::net::TcpStream,
+    shared: &RuntimeRotationProxyShared,
+) {
+    let request_id = runtime_proxy_next_request_id(shared);
+    let guard = match acquire_runtime_proxy_active_request_slot_with_wait(
+        shared,
+        "websocket",
+        "/realtime",
+    ) {
+        Ok(guard) => guard,
+        Err(_) => {
+            mark_runtime_proxy_local_overload(shared, "realtime_sidecar_admission");
+            let _ = stream.write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+            );
+            return;
+        }
+    };
+    if let Err(error) = handle_runtime_realtime_websocket_stream(request_id, stream, shared) {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "realtime_sidecar_error",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field(
+                        "error",
+                        runtime_websocket_error_log_value(&error.to_string()),
+                    ),
+                ],
+            ),
+        );
+    }
+    drop(guard);
 }
 
 fn handle_runtime_realtime_websocket_stream(

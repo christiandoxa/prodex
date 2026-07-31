@@ -1,9 +1,9 @@
 use super::{
     RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind,
     RuntimeSmartContextBudgetInput, RuntimeSmartContextLogInput, RuntimeSmartContextPrepareError,
-    RuntimeSmartContextRewriteSafetyObservation, RuntimeSmartContextTransformStats,
-    RuntimeSmartContextTransport, SMART_CONTEXT_REWRITE_DEADLINE_MS,
-    commit_runtime_smart_context_proxy_state_for_scope,
+    RuntimeSmartContextRewriteSafetyObservation, RuntimeSmartContextTransformOutcome,
+    RuntimeSmartContextTransformStats, RuntimeSmartContextTransport,
+    SMART_CONTEXT_REWRITE_DEADLINE_MS, commit_runtime_smart_context_proxy_state_for_scope,
     observe_runtime_smart_context_rewrite_safety_with_state, runtime_request_previous_response_id,
     runtime_request_session_id, runtime_request_turn_state,
     runtime_smart_context_affinity_pressure_rewrite_allowed,
@@ -41,7 +41,108 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     rollout: &runtime_proxy_crate::SmartContextRolloutDecision,
 ) -> Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
     let started_at = Instant::now();
-    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
+    let Some(mut prepared) = prepare_runtime_smart_context_body_input(
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        profile_name,
+    )?
+    else {
+        return Ok(Cow::Borrowed(&request.body));
+    };
+
+    if prepared.exactness.decision
+        == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact
+        && !prepared.affinity_pressure_rewrite
+    {
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
+            request_id,
+            shared,
+            scope: &prepared.scope,
+            rollout,
+            route_kind,
+            transport,
+            tier: runtime_smart_context_tier_label(prepared.budget.tier),
+            decision: "require_exact",
+            reasons: &runtime_smart_context_reason_labels(&prepared.exactness.reasons),
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &prepared.budget,
+            token_count_after: &prepared.request_token_count,
+            self_check: "pass_through_exact",
+        });
+        return Ok(Cow::Borrowed(&request.body));
+    }
+
+    let outcome = runtime_smart_context_transform_body(
+        RuntimeSmartContextBodyTransformInput {
+            budget: &prepared.budget,
+        },
+        &mut prepared.planned_state,
+        &mut prepared.value,
+    );
+    if prepared.value == prepared.original_value {
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
+            request_id,
+            shared,
+            scope: &prepared.scope,
+            rollout,
+            route_kind,
+            transport,
+            tier: runtime_smart_context_tier_label(prepared.budget.tier),
+            decision: "pass_through",
+            reasons: prepared.rewrite_reason_label,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: outcome.stats,
+            budget: &prepared.budget,
+            token_count_after: &prepared.request_token_count,
+            self_check: "noop",
+        });
+        return Ok(Cow::Borrowed(&request.body));
+    }
+
+    finish_runtime_smart_context_body(RuntimeSmartContextBodyFinishContext {
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        rollout,
+        started_at,
+        prepared,
+        outcome,
+    })
+}
+
+struct RuntimeSmartContextBodyInput {
+    value: serde_json::Value,
+    original_value: serde_json::Value,
+    model_name: Option<String>,
+    request_token_count: runtime_proxy_crate::SmartContextTokenCount,
+    scope: runtime_proxy_crate::ContextScopeId,
+    state_generation: u64,
+    planned_state: super::RuntimeSmartContextProxyState,
+    missing_rehydrate_refs: Vec<String>,
+    exactness: runtime_proxy_crate::SmartContextExactnessGuard,
+    transform_exactness: runtime_proxy_crate::SmartContextExactnessGuard,
+    budget: super::RuntimeSmartContextBudget,
+    affinity_pressure_rewrite: bool,
+    rewrite_reason_label: &'static str,
+}
+
+fn prepare_runtime_smart_context_body_input(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+) -> Result<Option<RuntimeSmartContextBodyInput>, RuntimeSmartContextPrepareError> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -51,7 +152,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             "invalid_json",
         );
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     };
     if let Some(reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
         runtime_smart_context_log_prepare_fallback(
@@ -63,7 +164,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             reason,
         );
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     }
     if !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
         && !runtime_smart_context_has_duplicate_input_text(&value)
@@ -77,7 +178,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             "no_duplicate_candidate",
         );
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     }
     let model_name = runtime_smart_context_normalized_model_name(
         value.get("model").and_then(serde_json::Value::as_str),
@@ -96,17 +197,16 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             "unsupported_tokenizer",
         );
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     }
     let Some(scope) = runtime_smart_context_scope_id(shared, profile_name) else {
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     };
     let original_value = value.clone();
-
-    let Some((state_generation, mut planned_state)) =
+    let Some((state_generation, planned_state)) =
         runtime_smart_context_proxy_state_snapshot_for_scope(shared, &scope)
     else {
-        return Ok(Cow::Borrowed(&request.body));
+        return Ok(None);
     };
     let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs_in_store(
         runtime_smart_context_collect_rehydratable_artifact_ref_ids(&value),
@@ -164,76 +264,73 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             &request_token_count,
         );
     }
-    let tier = budget.tier;
-    let rewrite_reason_label = if affinity_pressure_rewrite {
-        "affinity_pressure"
-    } else {
-        "-"
-    };
+    Ok(Some(RuntimeSmartContextBodyInput {
+        value,
+        original_value,
+        model_name,
+        request_token_count,
+        scope,
+        state_generation,
+        planned_state,
+        missing_rehydrate_refs,
+        exactness,
+        transform_exactness,
+        budget,
+        affinity_pressure_rewrite,
+        rewrite_reason_label: if affinity_pressure_rewrite {
+            "affinity_pressure"
+        } else {
+            "-"
+        },
+    }))
+}
 
-    if exactness.decision == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact
-        && !affinity_pressure_rewrite
-    {
-        runtime_smart_context_log(RuntimeSmartContextLogInput {
-            request_id,
-            shared,
-            scope: &scope,
-            rollout,
-            route_kind,
-            transport,
-            tier: runtime_smart_context_tier_label(tier),
-            decision: "require_exact",
-            reasons: &runtime_smart_context_reason_labels(&exactness.reasons),
-            body_bytes_before: request.body.len(),
-            body_bytes_after: request.body.len(),
-            stats: RuntimeSmartContextTransformStats::default(),
-            budget: &budget,
-            token_count_after: &request_token_count,
-            self_check: "pass_through_exact",
-        });
+struct RuntimeSmartContextBodyFinishContext<'request, 'shared, 'rollout> {
+    request_id: u64,
+    request: &'request RuntimeProxyRequest,
+    shared: &'shared RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    rollout: &'rollout runtime_proxy_crate::SmartContextRolloutDecision,
+    started_at: Instant,
+    prepared: RuntimeSmartContextBodyInput,
+    outcome: RuntimeSmartContextTransformOutcome,
+}
+
+fn finish_runtime_smart_context_body<'a>(
+    context: RuntimeSmartContextBodyFinishContext<'a, '_, '_>,
+) -> Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
+    let RuntimeSmartContextBodyFinishContext {
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        rollout,
+        started_at,
+        mut prepared,
+        outcome,
+    } = context;
+    let mut stats = outcome.stats;
+    let Ok(body) = serde_json::to_vec(&prepared.value) else {
         return Ok(Cow::Borrowed(&request.body));
-    }
-
-    let outcome = runtime_smart_context_transform_body(
-        RuntimeSmartContextBodyTransformInput { budget: &budget },
-        &mut planned_state,
-        &mut value,
+    };
+    let body_token_count = runtime_proxy_crate::smart_context_count_serialized_request(
+        &body,
+        prepared.model_name.as_deref(),
     );
-    let mut stats = outcome.stats.clone();
-    if value == original_value {
-        runtime_smart_context_log(RuntimeSmartContextLogInput {
-            request_id,
-            shared,
-            scope: &scope,
-            rollout,
-            route_kind,
-            transport,
-            tier: runtime_smart_context_tier_label(tier),
-            decision: "pass_through",
-            reasons: rewrite_reason_label,
-            body_bytes_before: request.body.len(),
-            body_bytes_after: request.body.len(),
-            stats,
-            budget: &budget,
-            token_count_after: &request_token_count,
-            self_check: "noop",
-        });
-        return Ok(Cow::Borrowed(&request.body));
-    }
-
-    let Ok(body) = serde_json::to_vec(&value) else {
-        return Ok(Cow::Borrowed(&request.body));
-    };
-    let body_token_count =
-        runtime_proxy_crate::smart_context_count_serialized_request(&body, model_name.as_deref());
     let self_check =
         runtime_smart_context_rewrite_self_check(request.body.len(), body.len(), &stats);
-    let mut unresolved_rehydrate_refs = missing_rehydrate_refs;
-    let mut expanded = runtime_smart_context_expand_inline_references(&original_value, &value);
+    let mut unresolved_rehydrate_refs = prepared.missing_rehydrate_refs;
+    let mut expanded =
+        runtime_smart_context_expand_inline_references(&prepared.original_value, &prepared.value);
     let exact_inline_round_trip = stats.duplicate_texts > 0
         && stats.rehydrated_refs == 0
         && expanded.as_mut().is_some_and(|expanded| {
-            runtime_smart_context_inline_reference_round_trip_is_exact(&original_value, expanded)
+            runtime_smart_context_inline_reference_round_trip_is_exact(
+                &prepared.original_value,
+                expanded,
+            )
         });
     if expanded.is_none() && stats.duplicate_texts > 0 {
         unresolved_rehydrate_refs.push("invalid_inline_reference".to_string());
@@ -263,10 +360,10 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     let regression_check = runtime_smart_context_regression_self_check(
         &request.body,
         &body,
-        &request_token_count,
+        &prepared.request_token_count,
         &body_token_count,
         critical_signal_check,
-        transform_exactness.clone(),
+        prepared.transform_exactness.clone(),
         unresolved_rehydrate_refs.clone(),
     );
     if let Some(fallback_reason) = runtime_smart_context_fallback_exact_reason(
@@ -278,18 +375,18 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
-            scope: &scope,
+            scope: &prepared.scope,
             rollout,
             route_kind,
             transport,
-            tier: runtime_smart_context_tier_label(tier),
+            tier: runtime_smart_context_tier_label(prepared.budget.tier),
             decision: "self_check_passthrough",
-            reasons: rewrite_reason_label,
+            reasons: prepared.rewrite_reason_label,
             body_bytes_before: request.body.len(),
             body_bytes_after: request.body.len(),
             stats,
-            budget: &budget,
-            token_count_after: &request_token_count,
+            budget: &prepared.budget,
+            token_count_after: &prepared.request_token_count,
             self_check: fallback_reason,
         });
         return Ok(Cow::Borrowed(&request.body));
@@ -298,18 +395,18 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
-            scope: &scope,
+            scope: &prepared.scope,
             rollout,
             route_kind,
             transport,
-            tier: runtime_smart_context_tier_label(tier),
+            tier: runtime_smart_context_tier_label(prepared.budget.tier),
             decision: "deadline_passthrough",
             reasons: "deadline_exceeded",
             body_bytes_before: request.body.len(),
             body_bytes_after: request.body.len(),
             stats,
-            budget: &budget,
-            token_count_after: &request_token_count,
+            budget: &prepared.budget,
+            token_count_after: &prepared.request_token_count,
             self_check: "pass_through_exact",
         });
         return Ok(Cow::Borrowed(&request.body));
@@ -318,24 +415,24 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
-            scope: &scope,
+            scope: &prepared.scope,
             rollout,
             route_kind,
             transport,
-            tier: runtime_smart_context_tier_label(tier),
+            tier: runtime_smart_context_tier_label(prepared.budget.tier),
             decision: "shadow_rewrite",
-            reasons: rewrite_reason_label,
+            reasons: prepared.rewrite_reason_label,
             body_bytes_before: request.body.len(),
             body_bytes_after: body.len(),
             stats,
-            budget: &budget,
+            budget: &prepared.budget,
             token_count_after: &body_token_count,
             self_check,
         });
         return Ok(Cow::Borrowed(&request.body));
     }
     observe_runtime_smart_context_rewrite_safety_with_state(
-        &mut planned_state,
+        &mut prepared.planned_state,
         RuntimeSmartContextRewriteSafetyObservation {
             safe: true,
             saved_tokens: regression_check.saved_tokens,
@@ -343,26 +440,26 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     );
     if !commit_runtime_smart_context_proxy_state_for_scope(
         shared,
-        &scope,
-        state_generation,
-        planned_state,
+        &prepared.scope,
+        prepared.state_generation,
+        prepared.planned_state,
     ) {
         return Ok(Cow::Borrowed(&request.body));
     }
     runtime_smart_context_log(RuntimeSmartContextLogInput {
         request_id,
         shared,
-        scope: &scope,
+        scope: &prepared.scope,
         rollout,
         route_kind,
         transport,
-        tier: runtime_smart_context_tier_label(tier),
+        tier: runtime_smart_context_tier_label(prepared.budget.tier),
         decision: "rewritten",
-        reasons: rewrite_reason_label,
+        reasons: prepared.rewrite_reason_label,
         body_bytes_before: request.body.len(),
         body_bytes_after: body.len(),
         stats,
-        budget: &budget,
+        budget: &prepared.budget,
         token_count_after: &body_token_count,
         self_check,
     });

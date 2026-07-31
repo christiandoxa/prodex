@@ -56,46 +56,14 @@ pub(crate) fn handle_runtime_broker(_args: RuntimeBrokerArgs) -> Result<()> {
     let lease_scan_interval = Duration::from_millis(
         RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS.max(RUNTIME_BROKER_POLL_INTERVAL_MS),
     );
-    let mut idle_started_at = None::<i64>;
-    let mut cached_live_leases = 0usize;
-    let mut last_lease_scan_at = Instant::now() - lease_scan_interval;
-    let mut last_owner_promotion_attempt_at = Instant::now() - lease_scan_interval;
-    loop {
-        let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
-        if proxy.owner_lock.is_none()
-            && last_owner_promotion_attempt_at.elapsed() >= lease_scan_interval
-        {
-            runtime_broker_try_promote_persistence_owner(&paths, &mut proxy);
-            last_owner_promotion_attempt_at = Instant::now();
-        }
-        if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
-            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &bootstrap.broker_key);
-            last_lease_scan_at = Instant::now();
-        }
-        if cached_live_leases > 0 || active_requests > 0 {
-            idle_started_at = None;
-        } else {
-            let now = Local::now().timestamp();
-            if now < startup_grace_until {
-                idle_started_at = None;
-                thread::sleep(poll_interval);
-                continue;
-            }
-            let idle_since = idle_started_at.get_or_insert(now);
-            if now.saturating_sub(*idle_since) >= RUNTIME_BROKER_IDLE_GRACE_SECONDS {
-                runtime_proxy_log_to_path(
-                    &proxy.log_path,
-                    &format!(
-                        "runtime_broker_idle_shutdown broker_key={} idle_seconds={}",
-                        bootstrap.broker_key,
-                        now.saturating_sub(*idle_since)
-                    ),
-                );
-                break;
-            }
-        }
-        thread::sleep(poll_interval);
-    }
+    wait_for_runtime_broker_idle(
+        &paths,
+        &bootstrap.broker_key,
+        &mut proxy,
+        startup_grace_until,
+        poll_interval,
+        lease_scan_interval,
+    );
 
     drop(proxy);
     remove_runtime_broker_registry_if_instance_matches(
@@ -110,6 +78,75 @@ pub(crate) fn handle_runtime_broker(_args: RuntimeBrokerArgs) -> Result<()> {
         &bootstrap.admin_token,
     );
     Ok(())
+}
+
+fn wait_for_runtime_broker_idle(
+    paths: &AppPaths,
+    broker_key: &str,
+    proxy: &mut RuntimeRotationProxy,
+    startup_grace_until: i64,
+    poll_interval: Duration,
+    lease_scan_interval: Duration,
+) {
+    let mut idle_started_at = None;
+    let mut cached_live_leases = 0usize;
+    let mut last_lease_scan_at = Instant::now() - lease_scan_interval;
+    let mut last_owner_promotion_attempt_at = Instant::now() - lease_scan_interval;
+    loop {
+        let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
+        if proxy.owner_lock.is_none()
+            && last_owner_promotion_attempt_at.elapsed() >= lease_scan_interval
+        {
+            runtime_broker_try_promote_persistence_owner(paths, proxy);
+            last_owner_promotion_attempt_at = Instant::now();
+        }
+        if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
+            cached_live_leases = cleanup_runtime_broker_stale_leases(paths, broker_key);
+            last_lease_scan_at = Instant::now();
+        }
+        if runtime_broker_idle_tick(
+            proxy,
+            broker_key,
+            startup_grace_until,
+            active_requests,
+            cached_live_leases,
+            &mut idle_started_at,
+        ) {
+            break;
+        }
+        thread::sleep(poll_interval);
+    }
+}
+
+fn runtime_broker_idle_tick(
+    proxy: &RuntimeRotationProxy,
+    broker_key: &str,
+    startup_grace_until: i64,
+    active_requests: usize,
+    cached_live_leases: usize,
+    idle_started_at: &mut Option<i64>,
+) -> bool {
+    if cached_live_leases > 0 || active_requests > 0 {
+        *idle_started_at = None;
+        return false;
+    }
+    let now = Local::now().timestamp();
+    if now < startup_grace_until {
+        *idle_started_at = None;
+        return false;
+    }
+    let idle_since = idle_started_at.get_or_insert(now);
+    if now.saturating_sub(*idle_since) < RUNTIME_BROKER_IDLE_GRACE_SECONDS {
+        return false;
+    }
+    runtime_proxy_log_to_path(
+        &proxy.log_path,
+        &format!(
+            "runtime_broker_idle_shutdown broker_key={broker_key} idle_seconds={}",
+            now.saturating_sub(*idle_since)
+        ),
+    );
+    true
 }
 
 pub(crate) fn runtime_broker_publish_start(

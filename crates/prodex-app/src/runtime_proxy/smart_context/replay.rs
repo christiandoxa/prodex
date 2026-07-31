@@ -84,6 +84,16 @@ pub(crate) fn run_runtime_smart_context_replay_json(
 ) -> Result<runtime_proxy_crate::SmartContextReplayReport> {
     let corpus = runtime_proxy_crate::smart_context_parse_replay_corpus_json(text)
         .map_err(|error| anyhow!(error))?;
+    let scenario_results = run_runtime_smart_context_replay_scenarios(&corpus)?;
+    Ok(build_runtime_smart_context_replay_report(
+        corpus,
+        scenario_results,
+    ))
+}
+
+fn run_runtime_smart_context_replay_scenarios(
+    corpus: &runtime_proxy_crate::SmartContextReplayCorpus,
+) -> Result<Vec<runtime_proxy_crate::SmartContextReplayScenarioResult>> {
     let mut scenario_results = vec![None; corpus.scenarios.len()];
     let mut concurrent_groups = BTreeMap::<&str, Vec<usize>>::new();
     for (index, scenario) in corpus.scenarios.iter().enumerate() {
@@ -147,6 +157,13 @@ pub(crate) fn run_runtime_smart_context_replay_json(
             turn.allocation_bytes = measured_turn.allocation_bytes;
         }
     }
+    Ok(scenario_results)
+}
+
+fn build_runtime_smart_context_replay_report(
+    corpus: runtime_proxy_crate::SmartContextReplayCorpus,
+    scenario_results: Vec<runtime_proxy_crate::SmartContextReplayScenarioResult>,
+) -> runtime_proxy_crate::SmartContextReplayReport {
     let mut failures = Vec::new();
     for result in &scenario_results {
         if !result.passed {
@@ -164,7 +181,7 @@ pub(crate) fn run_runtime_smart_context_replay_json(
         .sum();
     let net_saved_tokens = replay_token_difference(exact_input_tokens, optimized_input_tokens);
 
-    Ok(runtime_proxy_crate::SmartContextReplayReport {
+    runtime_proxy_crate::SmartContextReplayReport {
         schema_version: runtime_proxy_crate::SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION,
         corpus_schema_version: corpus.schema_version,
         evidence_level: SMART_CONTEXT_REPLAY_EVIDENCE_LEVEL,
@@ -186,7 +203,7 @@ pub(crate) fn run_runtime_smart_context_replay_json(
         net_saved_tokens,
         passed: failures.is_empty(),
         failures,
-    })
+    }
 }
 
 pub(crate) fn render_runtime_smart_context_replay_markdown(
@@ -391,75 +408,30 @@ fn run_runtime_smart_context_replay_turn(
     let rewrite_applied = optimized_body != body;
     let exact_byte_identity = exact_body == body;
     let selected_transforms = replay_selected_transforms(&optimized_body);
-    let mut failures = Vec::new();
-    if !exact_byte_identity {
-        failures.push("exact_body_changed".to_string());
-    }
-    if exact_state_mutations != 0 {
-        failures.push("exact_state_mutated".to_string());
-    }
-    if matches!(
-        scenario.mode,
-        runtime_proxy_crate::SmartContextReplayMode::Exact
-            | runtime_proxy_crate::SmartContextReplayMode::Shadow
-            | runtime_proxy_crate::SmartContextReplayMode::CanaryOut
-    ) && optimized_state_mutations != 0
-    {
-        failures.push("pass_through_mode_state_mutated".to_string());
-    }
-    if !valid_json {
-        failures.push("optimized_body_invalid_json".to_string());
-    }
-    if !required_text_preserved {
-        failures.push("required_text_missing".to_string());
-    }
-    if !protocol_fields_preserved {
-        failures.push("protocol_field_changed".to_string());
-    }
-    if !unresolved_artifact_references.is_empty() {
-        failures.push("unresolved_artifact_reference".to_string());
-    }
-    match turn.expected_outcome {
-        runtime_proxy_crate::SmartContextReplayExpectedOutcome::Rewrite if !rewrite_applied => {
-            failures.push("expected_rewrite_not_applied".to_string());
-        }
-        runtime_proxy_crate::SmartContextReplayExpectedOutcome::PassThrough
-            if rewrite_applied || blocked_before_upstream =>
-        {
-            failures.push("expected_pass_through_not_observed".to_string());
-        }
-        runtime_proxy_crate::SmartContextReplayExpectedOutcome::MissingArtifactFailure
-            if !blocked_before_upstream =>
-        {
-            failures.push("expected_missing_artifact_failure_not_observed".to_string());
-        }
-        _ => {}
-    }
-    if rewrite_applied && net_saved_tokens <= 0 {
-        failures.push("rewrite_not_token_positive".to_string());
-    }
-    if optimized_input_tokens > exact_input_tokens {
-        failures.push("aggregate_input_tokens_increased".to_string());
-    }
+    let failures =
+        runtime_smart_context_replay_turn_failures(RuntimeSmartContextReplayTurnChecks {
+            scenario,
+            turn,
+            exact_byte_identity,
+            exact_state_mutations,
+            optimized_state_mutations,
+            valid_json,
+            required_text_preserved,
+            protocol_fields_preserved,
+            unresolved_artifact_references: &unresolved_artifact_references,
+            rewrite_applied,
+            blocked_before_upstream,
+            net_saved_tokens,
+            exact_input_tokens,
+            optimized_input_tokens,
+        });
 
     let validation_passed = failures.is_empty();
-    let fallback_reason = if blocked_before_upstream {
-        Some("missing_artifact")
-    } else if rewrite_applied {
-        None
-    } else {
-        Some(match scenario.mode {
-            runtime_proxy_crate::SmartContextReplayMode::Exact => "explicit_exact",
-            runtime_proxy_crate::SmartContextReplayMode::Shadow => "shadow",
-            runtime_proxy_crate::SmartContextReplayMode::CanaryOut => "canary_out",
-            runtime_proxy_crate::SmartContextReplayMode::Active => match scenario.route {
-                runtime_proxy_crate::SmartContextReplayRoute::Responses
-                | runtime_proxy_crate::SmartContextReplayRoute::Websocket => "no_op",
-                runtime_proxy_crate::SmartContextReplayRoute::Compact
-                | runtime_proxy_crate::SmartContextReplayRoute::Standard => "unsupported_route",
-            },
-        })
-    };
+    let fallback_reason = runtime_smart_context_replay_fallback_reason(
+        scenario,
+        blocked_before_upstream,
+        rewrite_applied,
+    );
 
     Ok(runtime_proxy_crate::SmartContextReplayTurnResult {
         turn: turn_index,
@@ -490,6 +462,171 @@ fn run_runtime_smart_context_replay_turn(
         exact_body_sha256: replay_body_sha256(&exact_body),
         optimized_body_sha256: replay_body_sha256(&optimized_body),
         failures,
+    })
+}
+
+struct RuntimeSmartContextReplayTurnChecks<'a> {
+    scenario: &'a runtime_proxy_crate::SmartContextReplayScenarioInput,
+    turn: &'a runtime_proxy_crate::SmartContextReplayTurnInput,
+    exact_byte_identity: bool,
+    exact_state_mutations: u64,
+    optimized_state_mutations: u64,
+    valid_json: bool,
+    required_text_preserved: bool,
+    protocol_fields_preserved: bool,
+    unresolved_artifact_references: &'a [String],
+    rewrite_applied: bool,
+    blocked_before_upstream: bool,
+    net_saved_tokens: i64,
+    exact_input_tokens: u64,
+    optimized_input_tokens: u64,
+}
+
+fn runtime_smart_context_replay_turn_failures(
+    checks: RuntimeSmartContextReplayTurnChecks<'_>,
+) -> Vec<String> {
+    let RuntimeSmartContextReplayTurnChecks {
+        scenario,
+        turn,
+        exact_byte_identity,
+        exact_state_mutations,
+        optimized_state_mutations,
+        valid_json,
+        required_text_preserved,
+        protocol_fields_preserved,
+        unresolved_artifact_references,
+        rewrite_applied,
+        blocked_before_upstream,
+        net_saved_tokens,
+        exact_input_tokens,
+        optimized_input_tokens,
+    } = checks;
+    let mut failures =
+        runtime_smart_context_replay_invariant_failures(RuntimeSmartContextReplayInvariantChecks {
+            scenario,
+            exact_byte_identity,
+            exact_state_mutations,
+            optimized_state_mutations,
+            valid_json,
+            required_text_preserved,
+            protocol_fields_preserved,
+            unresolved_artifact_references,
+        });
+    if let Some(failure) = runtime_smart_context_replay_expected_failure(
+        turn.expected_outcome,
+        rewrite_applied,
+        blocked_before_upstream,
+    ) {
+        failures.push(failure.to_string());
+    }
+    if rewrite_applied && net_saved_tokens <= 0 {
+        failures.push("rewrite_not_token_positive".to_string());
+    }
+    if optimized_input_tokens > exact_input_tokens {
+        failures.push("aggregate_input_tokens_increased".to_string());
+    }
+    failures
+}
+
+struct RuntimeSmartContextReplayInvariantChecks<'a> {
+    scenario: &'a runtime_proxy_crate::SmartContextReplayScenarioInput,
+    exact_byte_identity: bool,
+    exact_state_mutations: u64,
+    optimized_state_mutations: u64,
+    valid_json: bool,
+    required_text_preserved: bool,
+    protocol_fields_preserved: bool,
+    unresolved_artifact_references: &'a [String],
+}
+
+fn runtime_smart_context_replay_invariant_failures(
+    checks: RuntimeSmartContextReplayInvariantChecks<'_>,
+) -> Vec<String> {
+    let RuntimeSmartContextReplayInvariantChecks {
+        scenario,
+        exact_byte_identity,
+        exact_state_mutations,
+        optimized_state_mutations,
+        valid_json,
+        required_text_preserved,
+        protocol_fields_preserved,
+        unresolved_artifact_references,
+    } = checks;
+    let mut failures = Vec::new();
+    if !exact_byte_identity {
+        failures.push("exact_body_changed".to_string());
+    }
+    if exact_state_mutations != 0 {
+        failures.push("exact_state_mutated".to_string());
+    }
+    if matches!(
+        scenario.mode,
+        runtime_proxy_crate::SmartContextReplayMode::Exact
+            | runtime_proxy_crate::SmartContextReplayMode::Shadow
+            | runtime_proxy_crate::SmartContextReplayMode::CanaryOut
+    ) && optimized_state_mutations != 0
+    {
+        failures.push("pass_through_mode_state_mutated".to_string());
+    }
+    if !valid_json {
+        failures.push("optimized_body_invalid_json".to_string());
+    }
+    if !required_text_preserved {
+        failures.push("required_text_missing".to_string());
+    }
+    if !protocol_fields_preserved {
+        failures.push("protocol_field_changed".to_string());
+    }
+    if !unresolved_artifact_references.is_empty() {
+        failures.push("unresolved_artifact_reference".to_string());
+    }
+    failures
+}
+
+fn runtime_smart_context_replay_expected_failure(
+    expected_outcome: runtime_proxy_crate::SmartContextReplayExpectedOutcome,
+    rewrite_applied: bool,
+    blocked_before_upstream: bool,
+) -> Option<&'static str> {
+    match expected_outcome {
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::Rewrite if !rewrite_applied => {
+            Some("expected_rewrite_not_applied")
+        }
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::PassThrough
+            if rewrite_applied || blocked_before_upstream =>
+        {
+            Some("expected_pass_through_not_observed")
+        }
+        runtime_proxy_crate::SmartContextReplayExpectedOutcome::MissingArtifactFailure
+            if !blocked_before_upstream =>
+        {
+            Some("expected_missing_artifact_failure_not_observed")
+        }
+        _ => None,
+    }
+}
+
+fn runtime_smart_context_replay_fallback_reason(
+    scenario: &runtime_proxy_crate::SmartContextReplayScenarioInput,
+    blocked_before_upstream: bool,
+    rewrite_applied: bool,
+) -> Option<&'static str> {
+    if blocked_before_upstream {
+        return Some("missing_artifact");
+    }
+    if rewrite_applied {
+        return None;
+    }
+    Some(match scenario.mode {
+        runtime_proxy_crate::SmartContextReplayMode::Exact => "explicit_exact",
+        runtime_proxy_crate::SmartContextReplayMode::Shadow => "shadow",
+        runtime_proxy_crate::SmartContextReplayMode::CanaryOut => "canary_out",
+        runtime_proxy_crate::SmartContextReplayMode::Active => match scenario.route {
+            runtime_proxy_crate::SmartContextReplayRoute::Responses
+            | runtime_proxy_crate::SmartContextReplayRoute::Websocket => "no_op",
+            runtime_proxy_crate::SmartContextReplayRoute::Compact
+            | runtime_proxy_crate::SmartContextReplayRoute::Standard => "unsupported_route",
+        },
     })
 }
 

@@ -18,8 +18,7 @@ use self::fallback::{
     try_runtime_responses_direct_current_profile_fallback,
 };
 use self::local_selection::{
-    RuntimeResponsesLocalSelectionAction, RuntimeResponsesLocalSelectionBlocked,
-    handle_runtime_responses_local_selection_blocked, runtime_responses_local_selection_action,
+    RuntimeResponsesLocalSelectionBlocked, handle_runtime_responses_local_selection_blocked,
     runtime_responses_local_selection_failure_reply,
 };
 use self::overloaded::{RuntimeResponsesOverloaded, handle_runtime_responses_overloaded};
@@ -36,6 +35,24 @@ fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
     RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
         runtime_proxy_crate::runtime_proxy_stale_continuation_http_parts(),
     ))
+}
+
+struct RuntimeResponsesRequestContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    request_requires_previous_response_affinity: bool,
+    previous_response_fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    previous_response_id: Option<&'a str>,
+    prompt_cache_key: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_model_name: Option<&'a str>,
+}
+
+enum RuntimeResponsesLoopControl {
+    Continue,
+    Return(Box<RuntimeResponsesReply>),
 }
 
 pub(crate) fn proxy_runtime_responses_request(
@@ -111,179 +128,82 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut auto_redeemed_profiles = BTreeSet::new();
     let mut quota_last_chance_profile = None;
     let mut loop_state = RuntimePrecommitLoopState::<RuntimeUpstreamFailureResponse>::new();
+    let context = RuntimeResponsesRequestContext {
+        request_id,
+        request: &request,
+        shared,
+        request_requires_previous_response_affinity,
+        previous_response_fresh_fallback_shape,
+        previous_response_id: previous_response_id.as_deref(),
+        prompt_cache_key: prompt_cache_key.as_deref(),
+        request_turn_state: request_turn_state.as_deref(),
+        request_session_id: request_session_id.as_deref(),
+        request_model_name: request_model_name.as_deref(),
+    };
 
+    run_runtime_responses_loop(
+        &context,
+        &mut affinity_state,
+        &mut auto_redeemed_profiles,
+        &mut quota_last_chance_profile,
+        &mut loop_state,
+    )
+}
+
+fn run_runtime_responses_loop(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    auto_redeemed_profiles: &mut BTreeSet<String>,
+    quota_last_chance_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+) -> Result<RuntimeResponsesReply> {
     loop {
-        let pressure_mode =
-            runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Responses);
-        if loop_state.budget_exhausted(
-            shared,
-            affinity_state.has_continuation_priority(
-                previous_response_id.as_deref(),
-                request_turn_state.as_deref(),
-            ),
-            pressure_mode,
+        if let Some(control) = handle_runtime_responses_budget_exhausted(
+            context,
+            affinity_state,
+            loop_state,
+            quota_last_chance_profile,
         )? {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
-                    loop_state.selection_attempts,
-                    loop_state.selection_started_at.elapsed().as_millis()
-                ),
-            );
-            if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted"
-                    ),
-                );
-                return Ok(runtime_proxy_final_responses_failure_reply(
-                    loop_state.last_failure,
-                    loop_state.saw_inflight_saturation,
-                ));
+            match control {
+                RuntimeResponsesLoopControl::Continue => continue,
+                RuntimeResponsesLoopControl::Return(response) => return Ok(*response),
             }
-            if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
-                RuntimeResponsesDirectCurrentFallback {
-                    request_id,
-                    request: &request,
-                    shared,
-                    reason: RuntimeResponsesDirectCurrentFallbackReason::PrecommitBudgetExhausted,
-                    previous_response_id: previous_response_id.as_deref(),
-                    prompt_cache_key: prompt_cache_key.as_deref(),
-                    request_turn_state: request_turn_state.as_deref(),
-                    request_session_id: request_session_id.as_deref(),
-                    request_requires_previous_response_affinity,
-                    previous_response_fresh_fallback_shape,
-                    saw_inflight_saturation: loop_state.saw_inflight_saturation,
-                },
-                &mut affinity_state,
-                &mut loop_state.excluded_profiles,
-                &mut loop_state.last_failure,
-                &mut quota_last_chance_profile,
-            )? {
-                match action {
-                    RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
-                    RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
-                        return Ok(*response);
-                    }
-                }
-            }
-            return Ok(runtime_proxy_final_responses_failure_reply(
-                loop_state.last_failure,
-                loop_state.saw_inflight_saturation,
-            ));
         }
 
-        let candidate_name = if let Some(profile_name) = quota_last_chance_profile.take() {
-            Some(profile_name)
-        } else {
-            select_runtime_response_candidate_for_route_with_request(
-                shared,
-                affinity_state.candidate_selection(
-                    &loop_state.excluded_profiles,
-                    previous_response_id.as_deref(),
-                    prompt_cache_key.as_deref(),
-                ),
-                Some(request_id),
-                request_model_name.as_deref(),
-            )?
-        };
-        let Some(candidate_name) = candidate_name else {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http candidate_exhausted last_failure={}",
-                    match &loop_state.last_failure {
-                        Some((RuntimeUpstreamFailureResponse::Http(_), _)) => "http",
-                        Some((RuntimeUpstreamFailureResponse::Websocket(_), _)) => "websocket",
-                        None => "none",
-                    }
-                ),
-            );
-            if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait {
-                    request_id,
-                    request: &request,
-                    shared,
-                    excluded_profiles: &loop_state.excluded_profiles,
-                    route_kind: RuntimeRouteKind::Responses,
-                    selection_started_at: loop_state.selection_started_at,
-                    continuation: affinity_state.has_continuation_priority(
-                        previous_response_id.as_deref(),
-                        request_turn_state.as_deref(),
-                    ),
-                    wait_affinity_owner: affinity_state.wait_affinity_owner(),
-                },
+        let Some(candidate_name) = runtime_responses_next_candidate(
+            context,
+            affinity_state,
+            loop_state,
+            quota_last_chance_profile,
+        )?
+        else {
+            match handle_runtime_responses_candidate_exhausted(
+                context,
+                affinity_state,
+                loop_state,
+                quota_last_chance_profile,
             )? {
-                continue;
+                RuntimeResponsesLoopControl::Continue => continue,
+                RuntimeResponsesLoopControl::Return(response) => return Ok(*response),
             }
-            if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted"
-                    ),
-                );
-                return Ok(runtime_proxy_final_responses_failure_reply(
-                    loop_state.last_failure,
-                    loop_state.saw_inflight_saturation,
-                ));
-            }
-            let remaining_cold_start_profiles =
-                runtime_remaining_sync_probe_cold_start_profiles_for_route(
-                    shared,
-                    &loop_state.excluded_profiles,
-                    RuntimeRouteKind::Responses,
-                )?;
-            if remaining_cold_start_profiles > 0 {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}"
-                    ),
-                );
-                runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Responses);
-                continue;
-            }
-            if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
-                RuntimeResponsesDirectCurrentFallback {
-                    request_id,
-                    request: &request,
-                    shared,
-                    reason: RuntimeResponsesDirectCurrentFallbackReason::CandidateExhausted,
-                    previous_response_id: previous_response_id.as_deref(),
-                    prompt_cache_key: prompt_cache_key.as_deref(),
-                    request_turn_state: request_turn_state.as_deref(),
-                    request_session_id: request_session_id.as_deref(),
-                    request_requires_previous_response_affinity,
-                    previous_response_fresh_fallback_shape,
-                    saw_inflight_saturation: loop_state.saw_inflight_saturation,
-                },
-                &mut affinity_state,
-                &mut loop_state.excluded_profiles,
-                &mut loop_state.last_failure,
-                &mut quota_last_chance_profile,
-            )? {
-                match action {
-                    RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
-                    RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
-                        return Ok(*response);
-                    }
-                }
-            }
-            return Ok(runtime_proxy_final_responses_failure_reply(
-                loop_state.last_failure,
-                loop_state.saw_inflight_saturation,
-            ));
         };
         loop_state.record_attempt();
-        let turn_state_override =
-            affinity_state.turn_state_override_for(&candidate_name, request_turn_state.as_deref());
+        if runtime_responses_candidate_saturated(
+            context,
+            affinity_state,
+            loop_state,
+            &candidate_name,
+        )? {
+            continue;
+        }
+        let turn_state_override = affinity_state
+            .turn_state_override_for(&candidate_name, context.request_turn_state)
+            .map(str::to_owned);
         runtime_proxy_log(
-            shared,
+            context.shared,
             format!(
-                "request={request_id} transport=http candidate={} pinned={:?} turn_state_profile={:?} turn_state_override={:?} excluded_count={}",
+                "request={} transport=http candidate={} pinned={:?} turn_state_profile={:?} turn_state_override={:?} excluded_count={}",
+                context.request_id,
                 candidate_name,
                 affinity_state.pinned_profile(),
                 affinity_state.turn_state_profile(),
@@ -291,230 +211,535 @@ pub(crate) fn proxy_runtime_responses_request(
                 loop_state.excluded_profiles.len()
             ),
         );
-        if previous_response_id.is_none()
-            && affinity_state.pinned_profile().is_none()
-            && affinity_state.turn_state_profile().is_none()
-            && runtime_profile_inflight_hard_limited_for_context(
-                shared,
-                &candidate_name,
-                "responses_http",
-            )?
-        {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "profile_inflight_saturated",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("profile", candidate_name.as_str()),
-                        runtime_proxy_log_field(
-                            "hard_limit",
-                            shared
-                                .runtime_config
-                                .tuning
-                                .profile_inflight_hard_limit
-                                .to_string(),
-                        ),
-                    ],
-                ),
-            );
-            loop_state.record_inflight_saturation();
-            if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait {
-                    request_id,
-                    request: &request,
-                    shared,
-                    excluded_profiles: &loop_state.excluded_profiles,
-                    route_kind: RuntimeRouteKind::Responses,
-                    selection_started_at: loop_state.selection_started_at,
-                    continuation: affinity_state.has_continuation_priority(
-                        previous_response_id.as_deref(),
-                        request_turn_state.as_deref(),
-                    ),
-                    wait_affinity_owner: affinity_state.wait_affinity_owner(),
-                },
-            )? {
-                continue;
-            }
-            loop_state.excluded_profiles.insert(candidate_name);
-            continue;
-        }
-
-        match attempt_runtime_responses_request(
-            request_id,
-            &request,
-            shared,
+        if let Some(response) = handle_runtime_responses_attempt(
+            context,
             &candidate_name,
-            turn_state_override,
-            prompt_cache_key.as_deref(),
+            turn_state_override.as_deref(),
+            affinity_state,
+            auto_redeemed_profiles,
+            quota_last_chance_profile,
+            loop_state,
         )? {
-            RuntimeResponsesAttempt::Success {
-                profile_name,
-                response,
-            } => {
-                affinity_state.remember_successful_previous_response_owner(
-                    shared,
-                    &profile_name,
-                    previous_response_id.as_deref(),
-                )?;
-                commit_runtime_proxy_profile_selection_with_notice(
-                    shared,
-                    &profile_name,
-                    RuntimeRouteKind::Responses,
-                )?;
-                runtime_proxy_log(
-                    shared,
-                    format!("request={request_id} transport=http committed profile={profile_name}"),
-                );
-                return Ok(response);
-            }
-            RuntimeResponsesAttempt::QuotaBlocked {
-                profile_name,
-                response,
-            } => {
-                if let Some(response) =
-                    handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
-                        request_id,
-                        shared,
-                        profile_name,
-                        response,
-                        request_model_name: request_model_name.as_deref(),
-                        prompt_cache_key: prompt_cache_key.as_deref(),
-                        previous_response_id: previous_response_id.as_deref(),
-                        request_turn_state: request_turn_state.as_deref(),
-                        request_session_id: request_session_id.as_deref(),
-                        request_requires_previous_response_affinity,
-                        previous_response_fresh_fallback_shape,
-                        affinity_state: &mut affinity_state,
-                        auto_redeemed_profiles: &mut auto_redeemed_profiles,
-                        quota_last_chance_profile: &mut quota_last_chance_profile,
-                        excluded_profiles: &mut loop_state.excluded_profiles,
-                        last_failure: &mut loop_state.last_failure,
-                    })?
-                {
-                    return Ok(response);
-                }
-            }
-            RuntimeResponsesAttempt::Overloaded {
-                profile_name,
-                response,
-            } => {
-                if let Some(response) =
-                    handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
-                        request_id,
-                        shared,
-                        profile_name,
-                        response,
-                        affinity_state: &affinity_state,
-                        excluded_profiles: &mut loop_state.excluded_profiles,
-                        last_failure: &mut loop_state.last_failure,
-                    })?
-                {
-                    return Ok(response);
-                }
-            }
-            RuntimeResponsesAttempt::AuthFailed {
-                profile_name,
-                response,
-            } => {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http auth_failed profile={profile_name}"
-                    ),
-                );
-                if !affinity_state.quota_blocked_affinity_is_releasable(
-                    &profile_name,
-                    request_requires_previous_response_affinity,
-                    previous_response_fresh_fallback_shape,
-                ) {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http upstream_auth_failure_passthrough route=responses profile={profile_name} reason=hard_affinity"
-                        ),
-                    );
-                    return Ok(response);
-                }
-                let released_affinity = release_runtime_auth_failed_affinity(
-                    shared,
-                    &profile_name,
-                    previous_response_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    request_session_id.as_deref(),
-                )?;
-                affinity_state.clear_profile_affinity(&profile_name, true);
-                if released_affinity {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http auth_failed_affinity_released profile={profile_name}"
-                        ),
-                    );
-                }
-                loop_state.excluded_profiles.insert(profile_name);
-                loop_state.last_failure =
-                    Some((RuntimeUpstreamFailureResponse::Http(response), true));
-            }
-            RuntimeResponsesAttempt::LocalSelectionBlocked {
-                profile_name,
-                reason,
-            } => {
-                if let Some(response) = handle_runtime_responses_local_selection_blocked(
-                    RuntimeResponsesLocalSelectionBlocked {
-                        request_id,
-                        shared,
-                        profile_name,
-                        reason,
-                        previous_response_id: previous_response_id.as_deref(),
-                        request_turn_state: request_turn_state.as_deref(),
-                        request_session_id: request_session_id.as_deref(),
-                        request_requires_previous_response_affinity,
-                        previous_response_fresh_fallback_shape,
-                        affinity_state: &mut affinity_state,
-                        excluded_profiles: &mut loop_state.excluded_profiles,
-                    },
-                )? {
-                    return Ok(response);
-                }
-            }
-            RuntimeResponsesAttempt::PreviousResponseNotFound {
-                profile_name,
-                response,
-                turn_state,
-            } => {
-                match handle_runtime_previous_response_not_found(
-                    runtime_responses_previous_response_not_found_context(
-                        RuntimeResponsesPreviousResponseNotFoundContextInput {
-                            shared,
-                            request_id,
-                            profile_name: &profile_name,
-                            turn_state,
-                            via: None,
-                            previous_response_id: previous_response_id.as_deref(),
-                            request_turn_state: request_turn_state.as_deref(),
-                            request_session_id: request_session_id.as_deref(),
-                            request_requires_previous_response_affinity,
-                            trusted_previous_response_affinity: affinity_state
-                                .trusted_previous_response_affinity(),
-                            fresh_fallback_shape: previous_response_fresh_fallback_shape,
-                            policy: RuntimePreviousResponseNotFoundPolicy::responses(true),
-                        },
-                    ),
-                    affinity_state
-                        .previous_response_not_found_state(&mut loop_state.excluded_profiles, true),
-                )? {
-                    RuntimePreviousResponseNotFoundAction::RetryOwner
-                    | RuntimePreviousResponseNotFoundAction::Rotate => {
-                        loop_state.last_failure =
-                            Some((RuntimeUpstreamFailureResponse::Http(response), false));
-                    }
-                    RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                        return Ok(runtime_responses_stale_continuation_reply());
-                    }
-                }
-            }
+            return Ok(response);
         }
     }
+}
+
+fn runtime_responses_next_candidate(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &RuntimeResponsesAffinityState,
+    loop_state: &RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    quota_last_chance_profile: &mut Option<String>,
+) -> Result<Option<String>> {
+    if let Some(profile_name) = quota_last_chance_profile.take() {
+        return Ok(Some(profile_name));
+    }
+    select_runtime_response_candidate_for_route_with_request(
+        context.shared,
+        affinity_state.candidate_selection(
+            &loop_state.excluded_profiles,
+            context.previous_response_id,
+            context.prompt_cache_key,
+        ),
+        Some(context.request_id),
+        context.request_model_name,
+    )
+}
+
+fn runtime_responses_candidate_saturated(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    candidate_name: &str,
+) -> Result<bool> {
+    if context.previous_response_id.is_some()
+        || affinity_state.pinned_profile().is_some()
+        || affinity_state.turn_state_profile().is_some()
+        || !runtime_profile_inflight_hard_limited_for_context(
+            context.shared,
+            candidate_name,
+            "responses_http",
+        )?
+    {
+        return Ok(false);
+    }
+    runtime_proxy_log(
+        context.shared,
+        runtime_proxy_structured_log_message(
+            "profile_inflight_saturated",
+            [
+                runtime_proxy_log_field("request", context.request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("profile", candidate_name),
+                runtime_proxy_log_field(
+                    "hard_limit",
+                    context
+                        .shared
+                        .runtime_config
+                        .tuning
+                        .profile_inflight_hard_limit
+                        .to_string(),
+                ),
+            ],
+        ),
+    );
+    loop_state.record_inflight_saturation();
+    if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        request_id: context.request_id,
+        request: context.request,
+        shared: context.shared,
+        excluded_profiles: &loop_state.excluded_profiles,
+        route_kind: RuntimeRouteKind::Responses,
+        selection_started_at: loop_state.selection_started_at,
+        continuation: affinity_state
+            .has_continuation_priority(context.previous_response_id, context.request_turn_state),
+        wait_affinity_owner: affinity_state.wait_affinity_owner(),
+    })? {
+        return Ok(true);
+    }
+    loop_state
+        .excluded_profiles
+        .insert(candidate_name.to_string());
+    Ok(true)
+}
+
+fn handle_runtime_responses_budget_exhausted(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    quota_last_chance_profile: &mut Option<String>,
+) -> Result<Option<RuntimeResponsesLoopControl>> {
+    let pressure_mode =
+        runtime_proxy_pressure_mode_active_for_route(context.shared, RuntimeRouteKind::Responses);
+    if !loop_state.budget_exhausted(
+        context.shared,
+        affinity_state
+            .has_continuation_priority(context.previous_response_id, context.request_turn_state),
+        pressure_mode,
+    )? {
+        return Ok(None);
+    }
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
+            context.request_id,
+            loop_state.selection_attempts,
+            loop_state.selection_started_at.elapsed().as_millis()
+        ),
+    );
+    if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted",
+                context.request_id
+            ),
+        );
+        return Ok(Some(RuntimeResponsesLoopControl::Return(Box::new(
+            runtime_proxy_final_responses_failure_reply(
+                loop_state.last_failure.take(),
+                loop_state.saw_inflight_saturation,
+            ),
+        ))));
+    }
+    if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
+        RuntimeResponsesDirectCurrentFallback {
+            request_id: context.request_id,
+            request: context.request,
+            shared: context.shared,
+            reason: RuntimeResponsesDirectCurrentFallbackReason::PrecommitBudgetExhausted,
+            previous_response_id: context.previous_response_id,
+            prompt_cache_key: context.prompt_cache_key,
+            request_turn_state: context.request_turn_state,
+            request_session_id: context.request_session_id,
+            request_requires_previous_response_affinity: context
+                .request_requires_previous_response_affinity,
+            previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+            saw_inflight_saturation: loop_state.saw_inflight_saturation,
+        },
+        &mut *affinity_state,
+        &mut loop_state.excluded_profiles,
+        &mut loop_state.last_failure,
+        quota_last_chance_profile,
+    )? {
+        return Ok(Some(match action {
+            RuntimeResponsesDirectCurrentFallbackAction::Continue => {
+                RuntimeResponsesLoopControl::Continue
+            }
+            RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
+                RuntimeResponsesLoopControl::Return(response)
+            }
+        }));
+    }
+    Ok(Some(RuntimeResponsesLoopControl::Return(Box::new(
+        runtime_proxy_final_responses_failure_reply(
+            loop_state.last_failure.take(),
+            loop_state.saw_inflight_saturation,
+        ),
+    ))))
+}
+
+fn handle_runtime_responses_candidate_exhausted(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    quota_last_chance_profile: &mut Option<String>,
+) -> Result<RuntimeResponsesLoopControl> {
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http candidate_exhausted last_failure={}",
+            context.request_id,
+            match &loop_state.last_failure {
+                Some((RuntimeUpstreamFailureResponse::Http(_), _)) => "http",
+                Some((RuntimeUpstreamFailureResponse::Websocket(_), _)) => "websocket",
+                None => "none",
+            }
+        ),
+    );
+    if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        request_id: context.request_id,
+        request: context.request,
+        shared: context.shared,
+        excluded_profiles: &loop_state.excluded_profiles,
+        route_kind: RuntimeRouteKind::Responses,
+        selection_started_at: loop_state.selection_started_at,
+        continuation: affinity_state
+            .has_continuation_priority(context.previous_response_id, context.request_turn_state),
+        wait_affinity_owner: affinity_state.wait_affinity_owner(),
+    })? {
+        return Ok(RuntimeResponsesLoopControl::Continue);
+    }
+    if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted",
+                context.request_id
+            ),
+        );
+        return Ok(RuntimeResponsesLoopControl::Return(Box::new(
+            runtime_proxy_final_responses_failure_reply(
+                loop_state.last_failure.take(),
+                loop_state.saw_inflight_saturation,
+            ),
+        )));
+    }
+    let remaining_cold_start_profiles = runtime_remaining_sync_probe_cold_start_profiles_for_route(
+        context.shared,
+        &loop_state.excluded_profiles,
+        RuntimeRouteKind::Responses,
+    )?;
+    if remaining_cold_start_profiles > 0 {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}",
+                context.request_id
+            ),
+        );
+        runtime_proxy_probe_refresh_pause(context.shared, RuntimeRouteKind::Responses);
+        return Ok(RuntimeResponsesLoopControl::Continue);
+    }
+    if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
+        RuntimeResponsesDirectCurrentFallback {
+            request_id: context.request_id,
+            request: context.request,
+            shared: context.shared,
+            reason: RuntimeResponsesDirectCurrentFallbackReason::CandidateExhausted,
+            previous_response_id: context.previous_response_id,
+            prompt_cache_key: context.prompt_cache_key,
+            request_turn_state: context.request_turn_state,
+            request_session_id: context.request_session_id,
+            request_requires_previous_response_affinity: context
+                .request_requires_previous_response_affinity,
+            previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+            saw_inflight_saturation: loop_state.saw_inflight_saturation,
+        },
+        affinity_state,
+        &mut loop_state.excluded_profiles,
+        &mut loop_state.last_failure,
+        quota_last_chance_profile,
+    )? {
+        return Ok(match action {
+            RuntimeResponsesDirectCurrentFallbackAction::Continue => {
+                RuntimeResponsesLoopControl::Continue
+            }
+            RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
+                RuntimeResponsesLoopControl::Return(response)
+            }
+        });
+    }
+    Ok(RuntimeResponsesLoopControl::Return(Box::new(
+        runtime_proxy_final_responses_failure_reply(
+            loop_state.last_failure.take(),
+            loop_state.saw_inflight_saturation,
+        ),
+    )))
+}
+
+fn handle_runtime_responses_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    candidate_name: &str,
+    turn_state_override: Option<&str>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    auto_redeemed_profiles: &mut BTreeSet<String>,
+    quota_last_chance_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+) -> Result<Option<RuntimeResponsesReply>> {
+    match attempt_runtime_responses_request(
+        context.request_id,
+        context.request,
+        context.shared,
+        candidate_name,
+        turn_state_override,
+        context.prompt_cache_key,
+    )? {
+        RuntimeResponsesAttempt::Success {
+            profile_name,
+            response,
+        } => handle_runtime_responses_success(context, affinity_state, profile_name, response),
+        RuntimeResponsesAttempt::QuotaBlocked {
+            profile_name,
+            response,
+        } => handle_runtime_responses_quota_attempt(
+            context,
+            affinity_state,
+            auto_redeemed_profiles,
+            quota_last_chance_profile,
+            loop_state,
+            profile_name,
+            response,
+        ),
+        RuntimeResponsesAttempt::Overloaded {
+            profile_name,
+            response,
+        } => handle_runtime_responses_overloaded_attempt(
+            context,
+            affinity_state,
+            loop_state,
+            profile_name,
+            response,
+        ),
+        RuntimeResponsesAttempt::AuthFailed {
+            profile_name,
+            response,
+        } => handle_runtime_responses_auth_failed(
+            context,
+            affinity_state,
+            loop_state,
+            profile_name,
+            response,
+        ),
+        RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name,
+            reason,
+        } => handle_runtime_responses_local_selection_attempt(
+            context,
+            affinity_state,
+            loop_state,
+            profile_name,
+            reason,
+        ),
+        RuntimeResponsesAttempt::PreviousResponseNotFound {
+            profile_name,
+            response,
+            turn_state,
+        } => handle_runtime_responses_previous_response_attempt(
+            context,
+            affinity_state,
+            loop_state,
+            profile_name,
+            response,
+            turn_state,
+        ),
+    }
+}
+
+fn handle_runtime_responses_success(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    affinity_state.remember_successful_previous_response_owner(
+        context.shared,
+        &profile_name,
+        context.previous_response_id,
+    )?;
+    commit_runtime_proxy_profile_selection_with_notice(
+        context.shared,
+        &profile_name,
+        RuntimeRouteKind::Responses,
+    )?;
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http committed profile={profile_name}",
+            context.request_id
+        ),
+    );
+    Ok(Some(response))
+}
+
+fn handle_runtime_responses_quota_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    auto_redeemed_profiles: &mut BTreeSet<String>,
+    quota_last_chance_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
+        request_id: context.request_id,
+        shared: context.shared,
+        profile_name,
+        response,
+        request_model_name: context.request_model_name,
+        prompt_cache_key: context.prompt_cache_key,
+        previous_response_id: context.previous_response_id,
+        request_turn_state: context.request_turn_state,
+        request_session_id: context.request_session_id,
+        request_requires_previous_response_affinity: context
+            .request_requires_previous_response_affinity,
+        previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+        affinity_state,
+        auto_redeemed_profiles,
+        quota_last_chance_profile,
+        excluded_profiles: &mut loop_state.excluded_profiles,
+        last_failure: &mut loop_state.last_failure,
+    })
+}
+
+fn handle_runtime_responses_overloaded_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
+        request_id: context.request_id,
+        shared: context.shared,
+        profile_name,
+        response,
+        affinity_state,
+        excluded_profiles: &mut loop_state.excluded_profiles,
+        last_failure: &mut loop_state.last_failure,
+    })
+}
+
+fn handle_runtime_responses_auth_failed(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http auth_failed profile={profile_name}",
+            context.request_id
+        ),
+    );
+    if !affinity_state.quota_blocked_affinity_is_releasable(
+        &profile_name,
+        context.request_requires_previous_response_affinity,
+        context.previous_response_fresh_fallback_shape,
+    ) {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http upstream_auth_failure_passthrough route=responses profile={profile_name} reason=hard_affinity",
+                context.request_id
+            ),
+        );
+        return Ok(Some(response));
+    }
+    let released_affinity = release_runtime_auth_failed_affinity(
+        context.shared,
+        &profile_name,
+        context.previous_response_id,
+        context.request_turn_state,
+        context.request_session_id,
+    )?;
+    affinity_state.clear_profile_affinity(&profile_name, true);
+    if released_affinity {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http auth_failed_affinity_released profile={profile_name}",
+                context.request_id
+            ),
+        );
+    }
+    loop_state.excluded_profiles.insert(profile_name);
+    loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+    Ok(None)
+}
+
+fn handle_runtime_responses_local_selection_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    reason: &'static str,
+) -> Result<Option<RuntimeResponsesReply>> {
+    handle_runtime_responses_local_selection_blocked(RuntimeResponsesLocalSelectionBlocked {
+        request_id: context.request_id,
+        shared: context.shared,
+        profile_name,
+        reason,
+        previous_response_id: context.previous_response_id,
+        request_turn_state: context.request_turn_state,
+        request_session_id: context.request_session_id,
+        request_requires_previous_response_affinity: context
+            .request_requires_previous_response_affinity,
+        previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+        affinity_state,
+        excluded_profiles: &mut loop_state.excluded_profiles,
+    })
+}
+
+fn handle_runtime_responses_previous_response_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+    turn_state: Option<String>,
+) -> Result<Option<RuntimeResponsesReply>> {
+    match handle_runtime_previous_response_not_found(
+        runtime_responses_previous_response_not_found_context(
+            RuntimeResponsesPreviousResponseNotFoundContextInput {
+                shared: context.shared,
+                request_id: context.request_id,
+                profile_name: &profile_name,
+                turn_state,
+                via: None,
+                previous_response_id: context.previous_response_id,
+                request_turn_state: context.request_turn_state,
+                request_session_id: context.request_session_id,
+                request_requires_previous_response_affinity: context
+                    .request_requires_previous_response_affinity,
+                trusted_previous_response_affinity: affinity_state
+                    .trusted_previous_response_affinity(),
+                fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+                policy: RuntimePreviousResponseNotFoundPolicy::responses(true),
+            },
+        ),
+        affinity_state.previous_response_not_found_state(&mut loop_state.excluded_profiles, true),
+    )? {
+        RuntimePreviousResponseNotFoundAction::RetryOwner
+        | RuntimePreviousResponseNotFoundAction::Rotate => {
+            loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
+        }
+        RuntimePreviousResponseNotFoundAction::StaleContinuation => {
+            return Ok(Some(runtime_responses_stale_continuation_reply()));
+        }
+    }
+    Ok(None)
 }

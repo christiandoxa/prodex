@@ -117,19 +117,34 @@ fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&st
 }
 
 fn upstream_payload_binary_kind(payload_bytes: &[u8]) -> &'static str {
-    match payload_bytes {
-        bytes if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "PNG image",
-        [0xff, 0xd8, 0xff, ..] => "JPEG image",
-        bytes if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "GIF image",
-        bytes if bytes.starts_with(b"%PDF-") => "PDF document",
-        bytes if bytes.starts_with(b"PK\x03\x04") => "ZIP archive",
-        [0x1f, 0x8b, ..] => "gzip stream",
-        [0x28, 0xb5, 0x2f, 0xfd, ..] => "zstd stream",
-        bytes if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => {
-            "WebP image"
-        }
-        _ => "unknown binary data",
+    if payload_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return "PNG image";
     }
+    if payload_bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return "JPEG image";
+    }
+    if payload_bytes.starts_with(b"GIF87a") || payload_bytes.starts_with(b"GIF89a") {
+        return "GIF image";
+    }
+    if payload_bytes.starts_with(b"%PDF-") {
+        return "PDF document";
+    }
+    if payload_bytes.starts_with(b"PK\x03\x04") {
+        return "ZIP archive";
+    }
+    if payload_bytes.starts_with(&[0x1f, 0x8b]) {
+        return "gzip stream";
+    }
+    if payload_bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
+        return "zstd stream";
+    }
+    if payload_bytes.len() >= 12
+        && payload_bytes.starts_with(b"RIFF")
+        && &payload_bytes[8..12] == b"WEBP"
+    {
+        return "WebP image";
+    }
+    "unknown binary data"
 }
 
 pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
@@ -137,65 +152,10 @@ pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<
         return render_text_body(payload, width);
     };
 
-    let mut lines = Vec::new();
-    if let Some(object) = value.as_object() {
-        let mut summary = Vec::new();
-        for key in [
-            "model",
-            "stream",
-            "store",
-            "tool_choice",
-            "parallel_tool_calls",
-            "prompt_cache_key",
-        ] {
-            if let Some(value) = object.get(key).and_then(short_json_value) {
-                summary.push(format!("{key}={value}"));
-            }
-        }
-        if !summary.is_empty() {
-            push_wrapped_line(&mut lines, &summary.join(" "), width);
-        }
-
-        if let Some(metadata) = object.get("client_metadata").and_then(Value::as_object) {
-            let mut metadata_fields = Vec::new();
-            for key in [
-                "session_id",
-                "thread_id",
-                "turn_id",
-                "x-codex-window-id",
-                "x-codex-installation-id",
-            ] {
-                if let Some(value) = metadata.get(key).and_then(Value::as_str) {
-                    metadata_fields.push(format!("{key}={value}"));
-                }
-            }
-            if !metadata_fields.is_empty() {
-                push_wrapped_line(
-                    &mut lines,
-                    &format!("client_metadata: {}", metadata_fields.join(" ")),
-                    width,
-                );
-            }
-        }
-
-        if let Some(instructions) = object.get("instructions").and_then(Value::as_str) {
-            push_text_block(&mut lines, "instructions", instructions, width);
-        }
-
-        if let Some(input) = object.get("input") {
-            render_input_value(&mut lines, input, width);
-        }
-
-        if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-            let names = tools.iter().filter_map(tool_name).collect::<Vec<_>>();
-            let summary = if names.is_empty() {
-                format!("tools: {}", tools.len())
-            } else {
-                format!("tools: {} {}", tools.len(), names.join(", "))
-            };
-            push_wrapped_line(&mut lines, &summary, width);
-        }
-    }
+    let lines = value
+        .as_object()
+        .map(|object| render_upstream_payload_object(object, width))
+        .unwrap_or_default();
 
     if lines.is_empty() {
         serde_json::to_string_pretty(&value)
@@ -203,6 +163,89 @@ pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<
             .unwrap_or_else(|_| render_text_body(payload, width))
     } else {
         lines
+    }
+}
+
+fn render_upstream_payload_object(
+    object: &serde_json::Map<String, Value>,
+    width: usize,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    append_payload_summary(&mut lines, object, width);
+    append_payload_metadata(&mut lines, object, width);
+    if let Some(instructions) = object.get("instructions").and_then(Value::as_str) {
+        push_text_block(&mut lines, "instructions", instructions, width);
+    }
+    if let Some(input) = object.get("input") {
+        render_input_value(&mut lines, input, width);
+    }
+    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+        let names = tools.iter().filter_map(tool_name).collect::<Vec<_>>();
+        let summary = if names.is_empty() {
+            format!("tools: {}", tools.len())
+        } else {
+            format!("tools: {} {}", tools.len(), names.join(", "))
+        };
+        push_wrapped_line(&mut lines, &summary, width);
+    }
+    lines
+}
+
+fn append_payload_summary(
+    lines: &mut Vec<String>,
+    object: &serde_json::Map<String, Value>,
+    width: usize,
+) {
+    let summary = [
+        "model",
+        "stream",
+        "store",
+        "tool_choice",
+        "parallel_tool_calls",
+        "prompt_cache_key",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        object
+            .get(key)
+            .and_then(short_json_value)
+            .map(|value| format!("{key}={value}"))
+    })
+    .collect::<Vec<_>>();
+    if !summary.is_empty() {
+        push_wrapped_line(lines, &summary.join(" "), width);
+    }
+}
+
+fn append_payload_metadata(
+    lines: &mut Vec<String>,
+    object: &serde_json::Map<String, Value>,
+    width: usize,
+) {
+    let Some(metadata) = object.get("client_metadata").and_then(Value::as_object) else {
+        return;
+    };
+    let fields = [
+        "session_id",
+        "thread_id",
+        "turn_id",
+        "x-codex-window-id",
+        "x-codex-installation-id",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        metadata
+            .get(key)
+            .and_then(Value::as_str)
+            .map(|value| format!("{key}={value}"))
+    })
+    .collect::<Vec<_>>();
+    if !fields.is_empty() {
+        push_wrapped_line(
+            lines,
+            &format!("client_metadata: {}", fields.join(" ")),
+            width,
+        );
     }
 }
 

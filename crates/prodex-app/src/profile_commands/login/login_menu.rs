@@ -176,48 +176,61 @@ fn prompt_login_menu_action_raw() -> Result<Option<LoginMenuAction>> {
         tui.terminal
             .draw(|frame| render_login_menu_tui(frame, entries, selected, offset, layout))
             .context("failed to draw login TUI")?;
-        let key = loop {
-            match event::read().context("failed to read login TUI input")? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    break login_menu_key_from_event(key);
-                }
-                Event::Resize(_, _) => {
-                    break LoginMenuKey::Ignore;
-                }
-                _ => {}
-            }
-        };
-        match key {
-            LoginMenuKey::Up => {
-                selected = selected.saturating_sub(1);
-            }
-            LoginMenuKey::Down => {
-                selected = (selected + 1).min(entries.len().saturating_sub(1));
-            }
-            LoginMenuKey::PageUp => {
-                let step = layout.visible_items.saturating_sub(1).max(1);
-                selected = selected.saturating_sub(step);
-            }
-            LoginMenuKey::PageDown => {
-                let step = layout.visible_items.saturating_sub(1).max(1);
-                selected = (selected + step).min(entries.len().saturating_sub(1));
-            }
-            LoginMenuKey::Home => {
-                selected = 0;
-            }
-            LoginMenuKey::End => {
-                selected = entries.len().saturating_sub(1);
-            }
-            LoginMenuKey::Enter => return Ok(Some(entries[selected].action)),
-            LoginMenuKey::Digit(index) => {
-                if let Some(entry) = entries.get(index.saturating_sub(1)) {
-                    return Ok(Some(entry.action));
-                }
-            }
-            LoginMenuKey::Cancel => bail!("login cancelled"),
-            LoginMenuKey::Ignore => {}
+        if let Some(action) = apply_login_menu_key(
+            read_login_menu_key()?,
+            &mut selected,
+            layout.visible_items,
+            entries,
+        )? {
+            return Ok(Some(action));
         }
     }
+}
+
+fn read_login_menu_key() -> Result<LoginMenuKey> {
+    loop {
+        match event::read().context("failed to read login TUI input")? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                return Ok(login_menu_key_from_event(key));
+            }
+            Event::Resize(_, _) => return Ok(LoginMenuKey::Ignore),
+            _ => {}
+        }
+    }
+}
+
+fn apply_login_menu_key(
+    key: LoginMenuKey,
+    selected: &mut usize,
+    visible_items: usize,
+    entries: &[LoginMenuEntry],
+) -> Result<Option<LoginMenuAction>> {
+    let last = entries.len().saturating_sub(1);
+    match key {
+        LoginMenuKey::Up => *selected = selected.saturating_sub(1),
+        LoginMenuKey::Down => *selected = (*selected + 1).min(last),
+        LoginMenuKey::PageUp => {
+            *selected = selected.saturating_sub(login_menu_page_step(visible_items))
+        }
+        LoginMenuKey::PageDown => {
+            *selected = (*selected + login_menu_page_step(visible_items)).min(last)
+        }
+        LoginMenuKey::Home => *selected = 0,
+        LoginMenuKey::End => *selected = last,
+        LoginMenuKey::Enter => return Ok(Some(entries[*selected].action)),
+        LoginMenuKey::Digit(index) => {
+            return Ok(entries
+                .get(index.saturating_sub(1))
+                .map(|entry| entry.action));
+        }
+        LoginMenuKey::Cancel => bail!("login cancelled"),
+        LoginMenuKey::Ignore => {}
+    }
+    Ok(None)
+}
+
+fn login_menu_page_step(visible_items: usize) -> usize {
+    visible_items.saturating_sub(1).max(1)
 }
 
 fn login_menu_key_from_event(key: KeyEvent) -> LoginMenuKey {
@@ -365,64 +378,90 @@ fn render_login_menu_tui(
 
     let visible_items = layout.visible_items.max(1).min(entries.len().max(1));
     let end = offset.saturating_add(visible_items).min(entries.len());
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled("Prodex Login", tui_title_style()),
-        Span::raw("  "),
-        Span::styled(
-            format!(
-                "methods {}-{} of {}",
-                offset.saturating_add(1).min(entries.len()),
-                end,
-                entries.len()
-            ),
-            tui_secondary_style(),
-        ),
-    ]))
-    .block(tui_connected_header_block(tui_border_style()));
-    frame.render_widget(header, chunks[0]);
-
-    let items = if entries.is_empty() {
-        vec![ListItem::new(Line::styled(
-            "No login methods available",
-            tui_error_style(),
-        ))]
-    } else {
-        entries
-            .iter()
-            .enumerate()
-            .take(end)
-            .skip(offset)
-            .map(|(index, entry)| {
-                let marker = if index == selected {
-                    ">"
-                } else if index == offset && offset > 0 {
-                    "^"
-                } else if index + 1 == end && end < entries.len() {
-                    "v"
-                } else {
-                    " "
-                };
-                let style = if index == selected {
-                    tui_hint_style().add_modifier(Modifier::BOLD)
-                } else {
-                    tui_primary_style()
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{marker} {:>2}. ", index + 1), style),
-                    Span::styled(entry.title, style),
-                    Span::raw(" "),
-                    Span::styled(format!("[{}]", entry.auth), tui_hint_style()),
-                ]))
-            })
-            .collect()
-    };
+    render_login_menu_header(frame, chunks[0], offset, end, entries.len());
+    let items = login_menu_items(entries, selected, offset, end);
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
             .border_style(tui_border_style()),
     );
     frame.render_widget(list, chunks[1]);
+    render_login_menu_detail(frame, chunks[2], entries, selected, layout);
+}
 
+fn render_login_menu_header(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    offset: usize,
+    end: usize,
+    entry_count: usize,
+) {
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled("Prodex Login", tui_title_style()),
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "methods {}-{} of {}",
+                offset.saturating_add(1).min(entry_count),
+                end,
+                entry_count
+            ),
+            tui_secondary_style(),
+        ),
+    ]))
+    .block(tui_connected_header_block(tui_border_style()));
+    frame.render_widget(header, area);
+}
+
+fn login_menu_items(
+    entries: &[LoginMenuEntry],
+    selected: usize,
+    offset: usize,
+    end: usize,
+) -> Vec<ListItem<'static>> {
+    if entries.is_empty() {
+        return vec![ListItem::new(Line::styled(
+            "No login methods available",
+            tui_error_style(),
+        ))];
+    }
+    entries
+        .iter()
+        .enumerate()
+        .take(end)
+        .skip(offset)
+        .map(|(index, entry)| {
+            let marker = if index == selected {
+                ">"
+            } else if index == offset && offset > 0 {
+                "^"
+            } else if index + 1 == end && end < entries.len() {
+                "v"
+            } else {
+                " "
+            };
+            let style = if index == selected {
+                tui_hint_style().add_modifier(Modifier::BOLD)
+            } else {
+                tui_primary_style()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{marker} {:>2}. ", index + 1), style),
+                Span::styled(entry.title, style),
+                Span::raw(" "),
+                Span::styled(format!("[{}]", entry.auth), tui_hint_style()),
+            ]))
+        })
+        .collect()
+}
+
+fn render_login_menu_detail(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    entries: &[LoginMenuEntry],
+    selected: usize,
+    layout: LoginMenuLayout,
+) {
     let detail = if entries.is_empty() {
         Text::from(Line::styled(
             "No login methods are registered.",
@@ -437,7 +476,7 @@ fn render_login_menu_tui(
     let detail = Paragraph::new(detail)
         .block(tui_connected_footer_block(tui_border_style()))
         .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(detail, chunks[2]);
+    frame.render_widget(detail, area);
 }
 
 fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Text<'static> {

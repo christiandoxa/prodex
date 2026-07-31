@@ -106,43 +106,47 @@ pub(crate) fn app_server_broker_lifecycle_stage(
 ) -> Option<AppServerBrokerLifecycleStage> {
     let method = method?.trim();
     match frame_kind {
-        AppServerBrokerFrameKind::Request => {
-            if method.eq_ignore_ascii_case("initialize") {
-                Some(AppServerBrokerLifecycleStage::InitializeRequest)
-            } else if method.eq_ignore_ascii_case("thread/start") {
-                Some(AppServerBrokerLifecycleStage::ThreadStartRequest)
-            } else if method.eq_ignore_ascii_case("thread/resume") {
-                Some(AppServerBrokerLifecycleStage::ThreadResumeRequest)
-            } else if method.eq_ignore_ascii_case("thread/fork") {
-                Some(AppServerBrokerLifecycleStage::ThreadForkRequest)
-            } else if method.eq_ignore_ascii_case("turn/start") {
-                Some(AppServerBrokerLifecycleStage::TurnStartRequest)
-            } else if method.eq_ignore_ascii_case("turn/interrupt")
-                || method.eq_ignore_ascii_case("turn/cancel")
-            {
-                Some(AppServerBrokerLifecycleStage::TurnInterruptRequest)
-            } else {
-                None
-            }
-        }
-        AppServerBrokerFrameKind::Notification => {
-            if method.eq_ignore_ascii_case("notifications/initialized")
-                || method.eq_ignore_ascii_case("initialized")
-            {
-                Some(AppServerBrokerLifecycleStage::InitializedNotification)
-            } else if method.eq_ignore_ascii_case("thread/started") {
-                Some(AppServerBrokerLifecycleStage::ThreadStartedNotification)
-            } else if method.eq_ignore_ascii_case("turn/started") {
-                Some(AppServerBrokerLifecycleStage::TurnStartedNotification)
-            } else if method.eq_ignore_ascii_case("turn/completed") {
-                Some(AppServerBrokerLifecycleStage::TurnCompletedNotification)
-            } else {
-                None
-            }
-        }
+        AppServerBrokerFrameKind::Request => app_server_broker_request_stage(method),
+        AppServerBrokerFrameKind::Notification => app_server_broker_notification_stage(method),
         AppServerBrokerFrameKind::Batch
         | AppServerBrokerFrameKind::Invalid
         | AppServerBrokerFrameKind::Response => None,
+    }
+}
+
+fn app_server_broker_request_stage(method: &str) -> Option<AppServerBrokerLifecycleStage> {
+    if method.eq_ignore_ascii_case("initialize") {
+        Some(AppServerBrokerLifecycleStage::InitializeRequest)
+    } else if method.eq_ignore_ascii_case("thread/start") {
+        Some(AppServerBrokerLifecycleStage::ThreadStartRequest)
+    } else if method.eq_ignore_ascii_case("thread/resume") {
+        Some(AppServerBrokerLifecycleStage::ThreadResumeRequest)
+    } else if method.eq_ignore_ascii_case("thread/fork") {
+        Some(AppServerBrokerLifecycleStage::ThreadForkRequest)
+    } else if method.eq_ignore_ascii_case("turn/start") {
+        Some(AppServerBrokerLifecycleStage::TurnStartRequest)
+    } else if method.eq_ignore_ascii_case("turn/interrupt")
+        || method.eq_ignore_ascii_case("turn/cancel")
+    {
+        Some(AppServerBrokerLifecycleStage::TurnInterruptRequest)
+    } else {
+        None
+    }
+}
+
+fn app_server_broker_notification_stage(method: &str) -> Option<AppServerBrokerLifecycleStage> {
+    if method.eq_ignore_ascii_case("notifications/initialized")
+        || method.eq_ignore_ascii_case("initialized")
+    {
+        Some(AppServerBrokerLifecycleStage::InitializedNotification)
+    } else if method.eq_ignore_ascii_case("thread/started") {
+        Some(AppServerBrokerLifecycleStage::ThreadStartedNotification)
+    } else if method.eq_ignore_ascii_case("turn/started") {
+        Some(AppServerBrokerLifecycleStage::TurnStartedNotification)
+    } else if method.eq_ignore_ascii_case("turn/completed") {
+        Some(AppServerBrokerLifecycleStage::TurnCompletedNotification)
+    } else {
+        None
     }
 }
 

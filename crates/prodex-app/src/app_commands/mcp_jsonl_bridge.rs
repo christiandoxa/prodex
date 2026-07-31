@@ -81,38 +81,55 @@ fn monitor_mcp_bridge(
         }
 
         if output.as_ref().is_some_and(JoinHandle::is_finished) {
-            let result = join_mcp_bridge_pump(
-                output.take().expect("finished output pump should exist"),
-                "output",
-            );
-            if let Err(err) = result {
-                stop_mcp_child(child);
-                return Err(err);
-            }
-            if let Some(status) = poll_mcp_child(child)? {
-                join_finished_mcp_input(&mut input)?;
-                return mcp_child_status_result(status, join_mcp_stderr(&mut stderr)?);
-            }
-            stop_mcp_child(child);
-            bail!("MCP server closed stdout before exiting");
+            return handle_finished_mcp_output(child, &mut output, &mut input, &mut stderr);
         }
 
         if let Some(status) = poll_mcp_child(child)? {
-            let output = output.take().expect("output pump should exist");
-            let deadline = Instant::now() + MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT;
-            while !output.is_finished() && Instant::now() < deadline {
-                std::thread::sleep(MCP_BRIDGE_MONITOR_INTERVAL);
-            }
-            if !output.is_finished() {
-                bail!("MCP server stdout remained open after child exited");
-            }
-            join_mcp_bridge_pump(output, "output")?;
-            join_finished_mcp_input(&mut input)?;
-            return mcp_child_status_result(status, join_mcp_stderr(&mut stderr)?);
+            return handle_exited_mcp_child(status, &mut output, &mut input, &mut stderr);
         }
 
         std::thread::sleep(MCP_BRIDGE_MONITOR_INTERVAL);
     }
+}
+
+fn handle_finished_mcp_output(
+    child: &mut Child,
+    output: &mut Option<JoinHandle<Result<()>>>,
+    input: &mut Option<JoinHandle<Result<()>>>,
+    stderr: &mut Option<McpStderrReader>,
+) -> Result<()> {
+    if let Err(err) = join_mcp_bridge_pump(
+        output.take().expect("finished output pump should exist"),
+        "output",
+    ) {
+        stop_mcp_child(child);
+        return Err(err);
+    }
+    if let Some(status) = poll_mcp_child(child)? {
+        join_finished_mcp_input(input)?;
+        return mcp_child_status_result(status, join_mcp_stderr(stderr)?);
+    }
+    stop_mcp_child(child);
+    bail!("MCP server closed stdout before exiting");
+}
+
+fn handle_exited_mcp_child(
+    status: ExitStatus,
+    output: &mut Option<JoinHandle<Result<()>>>,
+    input: &mut Option<JoinHandle<Result<()>>>,
+    stderr: &mut Option<McpStderrReader>,
+) -> Result<()> {
+    let output = output.take().expect("output pump should exist");
+    let deadline = Instant::now() + MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT;
+    while !output.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(MCP_BRIDGE_MONITOR_INTERVAL);
+    }
+    if !output.is_finished() {
+        bail!("MCP server stdout remained open after child exited");
+    }
+    join_mcp_bridge_pump(output, "output")?;
+    join_finished_mcp_input(input)?;
+    mcp_child_status_result(status, join_mcp_stderr(stderr)?)
 }
 
 fn join_finished_mcp_input(input: &mut Option<JoinHandle<Result<()>>>) -> Result<()> {

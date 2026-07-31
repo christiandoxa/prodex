@@ -134,20 +134,24 @@ fn wait_for_monitored_child(
             return Ok(status);
         }
         if monitor() {
-            terminate_child_gracefully(child)?;
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                if let Some(status) = child.try_wait()? {
-                    return Ok(status);
-                }
-                if Instant::now() >= deadline {
-                    child.kill()?;
-                    return child.wait();
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
+            return wait_for_child_termination(child);
         }
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn wait_for_child_termination(child: &mut Child) -> io::Result<ExitStatus> {
+    terminate_child_gracefully(child)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            return child.wait();
+        }
+        thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -197,36 +201,50 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
     if !arg0_path_is_regular_dir(arg0_root)? {
         return Ok(());
     }
-    let entries = match fs::read_dir(arg0_root) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-            repair_codex_arg0_permissions_best_effort(arg0_root);
-            fs::read_dir(arg0_root)?
-        }
-        Err(err) => return Err(err),
+    let Some(entries) = read_codex_arg0_entries(arg0_root)? else {
+        return Ok(());
     };
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !arg0_path_is_regular_dir(&path)? || !arg0_dir_name_is_owned(&path) {
-            continue;
-        }
-        let Some(lock_file) = try_lock_codex_arg0_dir(&path)? else {
-            continue;
-        };
-        if let Err(err) = remove_locked_codex_arg0_dir(&path, lock_file) {
-            if err.kind() == io::ErrorKind::NotFound {
-                continue;
-            }
-            repair_codex_arg0_permissions_best_effort(&path);
-            match fs::remove_dir_all(&path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                Err(err) => return Err(err),
-            }
-        }
+        cleanup_codex_arg0_entry(&entry.path())?;
     }
     Ok(())
+}
+
+fn read_codex_arg0_entries(arg0_root: &Path) -> io::Result<Option<fs::ReadDir>> {
+    match fs::read_dir(arg0_root) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            repair_codex_arg0_permissions_best_effort(arg0_root);
+            fs::read_dir(arg0_root).map(Some)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn cleanup_codex_arg0_entry(path: &Path) -> io::Result<()> {
+    if !arg0_path_is_regular_dir(path)? || !arg0_dir_name_is_owned(path) {
+        return Ok(());
+    }
+    let Some(lock_file) = try_lock_codex_arg0_dir(path)? else {
+        return Ok(());
+    };
+    if let Err(err) = remove_locked_codex_arg0_dir(path, lock_file) {
+        remove_codex_arg0_entry_after_failure(path, err)?;
+    }
+    Ok(())
+}
+
+fn remove_codex_arg0_entry_after_failure(path: &Path, err: io::Error) -> io::Result<()> {
+    if err.kind() == io::ErrorKind::NotFound {
+        return Ok(());
+    }
+    repair_codex_arg0_permissions_best_effort(path);
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 #[cfg(not(windows))]

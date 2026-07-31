@@ -219,53 +219,8 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Ok(Cow::Borrowed(&request.body));
     }
     let now = runtime_smart_context_unix_secs_now();
-    let disabled_until = runtime_smart_context_disabled_until_for(shared);
-    if disabled_until > now {
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "panic_cooldown",
-        );
-        return Ok(Cow::Borrowed(&request.body));
-    }
-
-    if runtime_take_fault_injection_budget(
-        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE",
-        shared.runtime_config.fault_smart_context_panic_once,
-    ) {
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "fault_injection",
-        );
-        return Ok(Cow::Borrowed(&request.body));
-    }
-
-    if !matches!(
-        route_kind,
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) {
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "unsupported_route",
-        );
-        return Ok(Cow::Borrowed(&request.body));
-    }
-    if runtime_proxy_crate::runtime_proxy_request_header_value(&request.headers, "content-type")
-        .is_some_and(|value| !value.to_ascii_lowercase().starts_with("application/json"))
+    if let Some(reason) =
+        runtime_smart_context_admission_fallback_reason(shared, route_kind, request, now)
     {
         runtime_smart_context_log_prepare_fallback(
             request_id,
@@ -274,11 +229,10 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             transport,
             profile_name,
             request.body.len(),
-            "unsupported_content_type",
+            reason,
         );
         return Ok(Cow::Borrowed(&request.body));
     }
-
     let rollout = runtime_smart_context_rollout_decision(
         request_id,
         request,
@@ -287,15 +241,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         transport,
         profile_name,
     );
-    let shadow = rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Shadow;
-    if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Disabled
-        || (shadow && rollout.canary_bucket >= SMART_CONTEXT_SHADOW_SAMPLE_BASIS_POINTS)
-    {
-        let reason = if shadow {
-            "rollout_shadow_sampled_out"
-        } else {
-            "rollout_canary_out"
-        };
+    if let Some(reason) = runtime_smart_context_rollout_fallback_reason(&rollout) {
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -315,9 +261,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         ) {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
         }
-        if request.body.len() < SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES
-            && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
-        {
+        if let Some(reason) = runtime_smart_context_body_fallback_reason(request, transport) {
             runtime_smart_context_log_prepare_fallback(
                 request_id,
                 shared,
@@ -325,44 +269,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
                 transport,
                 profile_name,
                 request.body.len(),
-                "below_minimum_body",
-            );
-            return Ok(Cow::Borrowed(request.body.as_slice()));
-        }
-        if transport == RuntimeSmartContextTransport::Websocket
-            && runtime_smart_context_websocket_generate_false_request(&request.body)
-        {
-            runtime_smart_context_log_prepare_fallback(
-                request_id,
-                shared,
-                route_kind,
-                transport,
-                profile_name,
-                request.body.len(),
-                "websocket_generate_false",
-            );
-            return Ok(Cow::Borrowed(request.body.as_slice()));
-        }
-        let rewrite_max_bytes = if transport == RuntimeSmartContextTransport::Websocket {
-            SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
-        } else {
-            SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES
-        };
-        if request.body.len() > rewrite_max_bytes
-            && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
-        {
-            runtime_smart_context_log_prepare_fallback(
-                request_id,
-                shared,
-                route_kind,
-                transport,
-                profile_name,
-                request.body.len(),
-                if transport == RuntimeSmartContextTransport::Websocket {
-                    "websocket_large_payload"
-                } else {
-                    "body_too_large"
-                },
+                reason,
             );
             return Ok(Cow::Borrowed(request.body.as_slice()));
         }
@@ -377,6 +284,112 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         )
     });
 
+    handle_runtime_smart_context_prepare_result(RuntimeSmartContextPrepareResultContext {
+        result,
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        profile_name,
+        now,
+    })
+}
+
+fn runtime_smart_context_admission_fallback_reason(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    request: &RuntimeProxyRequest,
+    now: u64,
+) -> Option<&'static str> {
+    if runtime_smart_context_disabled_until_for(shared) > now {
+        return Some("panic_cooldown");
+    }
+    if runtime_take_fault_injection_budget(
+        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE",
+        shared.runtime_config.fault_smart_context_panic_once,
+    ) {
+        return Some("fault_injection");
+    }
+    if !matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) {
+        return Some("unsupported_route");
+    }
+    runtime_proxy_crate::runtime_proxy_request_header_value(&request.headers, "content-type")
+        .is_some_and(|value| !value.to_ascii_lowercase().starts_with("application/json"))
+        .then_some("unsupported_content_type")
+}
+
+fn runtime_smart_context_rollout_fallback_reason(
+    rollout: &runtime_proxy_crate::SmartContextRolloutDecision,
+) -> Option<&'static str> {
+    let shadow = rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Shadow;
+    if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Disabled {
+        return Some("rollout_canary_out");
+    }
+    (shadow && rollout.canary_bucket >= SMART_CONTEXT_SHADOW_SAMPLE_BASIS_POINTS)
+        .then_some("rollout_shadow_sampled_out")
+}
+
+fn runtime_smart_context_body_fallback_reason(
+    request: &RuntimeProxyRequest,
+    transport: RuntimeSmartContextTransport,
+) -> Option<&'static str> {
+    if request.body.len() < SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES
+        && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
+    {
+        return Some("below_minimum_body");
+    }
+    if transport == RuntimeSmartContextTransport::Websocket
+        && runtime_smart_context_websocket_generate_false_request(&request.body)
+    {
+        return Some("websocket_generate_false");
+    }
+    let rewrite_max_bytes = if transport == RuntimeSmartContextTransport::Websocket {
+        SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
+    } else {
+        SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES
+    };
+    (request.body.len() > rewrite_max_bytes
+        && !runtime_smart_context_body_may_contain_artifact_ref(&request.body))
+    .then_some(if transport == RuntimeSmartContextTransport::Websocket {
+        "websocket_large_payload"
+    } else {
+        "body_too_large"
+    })
+}
+
+type RuntimeSmartContextPrepareTaskResult<'a> = std::result::Result<
+    std::result::Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError>,
+    Box<dyn std::any::Any + Send>,
+>;
+
+struct RuntimeSmartContextPrepareResultContext<'request, 'shared, 'profile> {
+    result: RuntimeSmartContextPrepareTaskResult<'request>,
+    request_id: u64,
+    request: &'request RuntimeProxyRequest,
+    shared: &'shared RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&'profile str>,
+    now: u64,
+}
+
+fn handle_runtime_smart_context_prepare_result<'a>(
+    context: RuntimeSmartContextPrepareResultContext<'a, '_, '_>,
+) -> std::result::Result<Cow<'a, [u8]>, RuntimeSmartContextPrepareError> {
+    let RuntimeSmartContextPrepareResultContext {
+        result,
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        profile_name,
+        now,
+    } = context;
     match result {
         Ok(Ok(body)) => Ok(body),
         Ok(Err(error)) => {

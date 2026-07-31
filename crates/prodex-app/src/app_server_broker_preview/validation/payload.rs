@@ -13,80 +13,106 @@ impl LifecyclePayloadValidation {
         if !preview["preview"]["parse_ok"].as_bool().unwrap_or_default() {
             return None;
         }
-        match preview["preview"]["summary"]["lifecycle_stage"].as_str()? {
-            "thread_started_notification"
-            | "thread_resume_request"
-            | "thread_fork_request"
-            | "turn_start_request"
-                if preview_thread_id(preview).is_none() =>
-            {
-                return Some(payload_failure(preview, "lifecycle_missing_thread_id"));
-            }
-            _ => {}
+        let stage = preview["preview"]["summary"]["lifecycle_stage"].as_str()?;
+        if let Some(failure) = validate_thread_id(preview, stage) {
+            return Some(failure);
         }
-        if preview["preview"]["summary"]["lifecycle_stage"].as_str()?
-            == "thread_started_notification"
-            && frame
-                .and_then(|frame| frame_string(frame, &["params", "thread", "id"]))
-                .is_none()
-        {
-            return Some(payload_failure(
-                preview,
-                "lifecycle_missing_thread_object_id",
-            ));
+        if let Some(failure) = validate_thread_started(preview, frame, stage) {
+            return Some(failure);
         }
-        if preview["preview"]["summary"]["lifecycle_stage"].as_str()?
-            == "thread_started_notification"
-        {
-            if let Some(reason) = frame
-                .map(|frame| thread_status_failure_reason(frame, &["params", "thread", "status"]))
-                .unwrap_or(Some("lifecycle_missing_thread_status"))
-            {
-                return Some(payload_failure(preview, reason));
-            }
-            if !frame.is_some_and(|frame| thread_object_has_context(frame, &["params", "thread"])) {
-                return Some(payload_failure(preview, "lifecycle_missing_thread_context"));
-            }
+        if let Some(failure) = validate_turn_input(preview, frame, stage) {
+            return Some(failure);
         }
-        if preview["preview"]["summary"]["lifecycle_stage"].as_str()? == "turn_start_request"
-            && !frame
-                .and_then(|frame| frame.get("params"))
-                .and_then(|params| params.get("input"))
-                .is_some_and(Value::is_array)
-        {
-            return Some(payload_failure(preview, "lifecycle_missing_turn_input"));
-        }
-        if matches!(
-            preview["preview"]["summary"]["lifecycle_stage"].as_str(),
-            Some("turn_started_notification" | "turn_completed_notification")
-        ) {
-            let turn_status = frame
-                .and_then(|frame| frame.get("params"))
-                .and_then(|params| params.get("turn"))
-                .and_then(|turn| turn.get("status"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|status| !status.is_empty());
-            match turn_status {
-                Some(status) if is_valid_turn_status(status) => {}
-                Some(_) => {
-                    return Some(payload_failure(preview, "lifecycle_invalid_turn_status"));
-                }
-                None => {
-                    return Some(payload_failure(preview, "lifecycle_missing_turn_status"));
-                }
-            }
-            if !frame
-                .and_then(|frame| frame.get("params"))
-                .and_then(|params| params.get("turn"))
-                .and_then(|turn| turn.get("items"))
-                .is_some_and(Value::is_array)
-            {
-                return Some(payload_failure(preview, "lifecycle_missing_turn_items"));
-            }
+        if let Some(failure) = validate_turn_status(preview, frame, stage) {
+            return Some(failure);
         }
         None
     }
+}
+
+fn validate_thread_id(preview: &Value, stage: &str) -> Option<ValidationFailure> {
+    let requires_thread_id = matches!(
+        stage,
+        "thread_started_notification"
+            | "thread_resume_request"
+            | "thread_fork_request"
+            | "turn_start_request"
+    );
+    (requires_thread_id && preview_thread_id(preview).is_none())
+        .then(|| payload_failure(preview, "lifecycle_missing_thread_id"))
+}
+
+fn validate_thread_started(
+    preview: &Value,
+    frame: Option<&Value>,
+    stage: &str,
+) -> Option<ValidationFailure> {
+    if stage != "thread_started_notification" {
+        return None;
+    }
+    if frame
+        .and_then(|frame| frame_string(frame, &["params", "thread", "id"]))
+        .is_none()
+    {
+        return Some(payload_failure(
+            preview,
+            "lifecycle_missing_thread_object_id",
+        ));
+    }
+    if let Some(reason) = frame
+        .map(|frame| thread_status_failure_reason(frame, &["params", "thread", "status"]))
+        .unwrap_or(Some("lifecycle_missing_thread_status"))
+    {
+        return Some(payload_failure(preview, reason));
+    }
+    (!frame.is_some_and(|frame| thread_object_has_context(frame, &["params", "thread"])))
+        .then(|| payload_failure(preview, "lifecycle_missing_thread_context"))
+}
+
+fn validate_turn_input(
+    preview: &Value,
+    frame: Option<&Value>,
+    stage: &str,
+) -> Option<ValidationFailure> {
+    if stage != "turn_start_request" {
+        return None;
+    }
+    let has_input = frame
+        .and_then(|frame| frame.get("params"))
+        .and_then(|params| params.get("input"))
+        .is_some_and(Value::is_array);
+    (!has_input).then(|| payload_failure(preview, "lifecycle_missing_turn_input"))
+}
+
+fn validate_turn_status(
+    preview: &Value,
+    frame: Option<&Value>,
+    stage: &str,
+) -> Option<ValidationFailure> {
+    if !matches!(
+        stage,
+        "turn_started_notification" | "turn_completed_notification"
+    ) {
+        return None;
+    }
+    let turn_status = frame
+        .and_then(|frame| frame.get("params"))
+        .and_then(|params| params.get("turn"))
+        .and_then(|turn| turn.get("status"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|status| !status.is_empty());
+    match turn_status {
+        Some(status) if is_valid_turn_status(status) => {}
+        Some(_) => return Some(payload_failure(preview, "lifecycle_invalid_turn_status")),
+        None => return Some(payload_failure(preview, "lifecycle_missing_turn_status")),
+    }
+    let has_items = frame
+        .and_then(|frame| frame.get("params"))
+        .and_then(|params| params.get("turn"))
+        .and_then(|turn| turn.get("items"))
+        .is_some_and(Value::is_array);
+    (!has_items).then(|| payload_failure(preview, "lifecycle_missing_turn_items"))
 }
 
 pub(super) fn preview_thread_id(preview: &Value) -> Option<String> {

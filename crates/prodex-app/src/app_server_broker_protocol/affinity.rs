@@ -16,86 +16,98 @@ pub(crate) fn app_server_broker_lifecycle_binding(
 
 pub(crate) fn app_server_broker_affinity_keys(value: &Value) -> Vec<AppServerBrokerAffinityKey> {
     if let Some(binding) = app_server_broker_lifecycle_binding(value) {
-        let mut keys = Vec::new();
-        match binding.stage {
-            AppServerBrokerLifecycleStage::InitializeRequest
-            | AppServerBrokerLifecycleStage::InitializedNotification => {
-                if let Some(session_id) = binding.metadata.session_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Session,
-                        value: session_id,
-                    });
-                }
-            }
-            AppServerBrokerLifecycleStage::ThreadStartRequest
-            | AppServerBrokerLifecycleStage::ThreadStartedNotification
-            | AppServerBrokerLifecycleStage::ThreadResumeRequest
-            | AppServerBrokerLifecycleStage::ThreadForkRequest => {
-                if let Some(thread_id) = binding.metadata.thread_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Thread,
-                        value: thread_id,
-                    });
-                }
-                if let Some(session_id) = binding.metadata.session_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Session,
-                        value: session_id,
-                    });
-                }
-            }
-            AppServerBrokerLifecycleStage::TurnStartRequest
-            | AppServerBrokerLifecycleStage::TurnStartedNotification
-            | AppServerBrokerLifecycleStage::TurnCompletedNotification
-            | AppServerBrokerLifecycleStage::TurnInterruptRequest => {
-                if let Some(turn_id) = binding.metadata.turn_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Turn,
-                        value: turn_id,
-                    });
-                }
-                if let Some(thread_id) = binding.metadata.thread_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Thread,
-                        value: thread_id,
-                    });
-                }
-                if let Some(session_id) = binding.metadata.session_id {
-                    keys.push(AppServerBrokerAffinityKey {
-                        kind: AppServerBrokerAffinityKeyKind::Session,
-                        value: session_id,
-                    });
-                }
-            }
-        }
-        return keys;
+        return app_server_broker_lifecycle_affinity_keys(binding);
     }
 
     let summary = app_server_broker_diagnostic_summary(value);
     if !matches!(summary.frame_kind, AppServerBrokerFrameKind::Response) {
         return Vec::new();
     }
+    app_server_broker_response_affinity_keys(summary.metadata)
+}
 
+fn app_server_broker_lifecycle_affinity_keys(
+    binding: AppServerBrokerLifecycleBinding,
+) -> Vec<AppServerBrokerAffinityKey> {
     let mut keys = Vec::new();
-    if let Some(turn_id) = summary.metadata.turn_id {
-        keys.push(AppServerBrokerAffinityKey {
-            kind: AppServerBrokerAffinityKeyKind::Turn,
-            value: turn_id,
-        });
-    }
-    if let Some(thread_id) = summary.metadata.thread_id {
-        keys.push(AppServerBrokerAffinityKey {
-            kind: AppServerBrokerAffinityKeyKind::Thread,
-            value: thread_id,
-        });
-    }
-    if let Some(session_id) = summary.metadata.session_id {
-        keys.push(AppServerBrokerAffinityKey {
-            kind: AppServerBrokerAffinityKeyKind::Session,
-            value: session_id,
-        });
+    match binding.stage {
+        AppServerBrokerLifecycleStage::InitializeRequest
+        | AppServerBrokerLifecycleStage::InitializedNotification => {
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Session,
+                binding.metadata.session_id,
+            );
+        }
+        AppServerBrokerLifecycleStage::ThreadStartRequest
+        | AppServerBrokerLifecycleStage::ThreadStartedNotification
+        | AppServerBrokerLifecycleStage::ThreadResumeRequest
+        | AppServerBrokerLifecycleStage::ThreadForkRequest => {
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Thread,
+                binding.metadata.thread_id,
+            );
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Session,
+                binding.metadata.session_id,
+            );
+        }
+        AppServerBrokerLifecycleStage::TurnStartRequest
+        | AppServerBrokerLifecycleStage::TurnStartedNotification
+        | AppServerBrokerLifecycleStage::TurnCompletedNotification
+        | AppServerBrokerLifecycleStage::TurnInterruptRequest => {
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Turn,
+                binding.metadata.turn_id,
+            );
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Thread,
+                binding.metadata.thread_id,
+            );
+            push_affinity_key(
+                &mut keys,
+                AppServerBrokerAffinityKeyKind::Session,
+                binding.metadata.session_id,
+            );
+        }
     }
     keys
+}
+
+fn app_server_broker_response_affinity_keys(
+    metadata: AppServerBrokerMetadata,
+) -> Vec<AppServerBrokerAffinityKey> {
+    let mut keys = Vec::new();
+    push_affinity_key(
+        &mut keys,
+        AppServerBrokerAffinityKeyKind::Turn,
+        metadata.turn_id,
+    );
+    push_affinity_key(
+        &mut keys,
+        AppServerBrokerAffinityKeyKind::Thread,
+        metadata.thread_id,
+    );
+    push_affinity_key(
+        &mut keys,
+        AppServerBrokerAffinityKeyKind::Session,
+        metadata.session_id,
+    );
+    keys
+}
+
+fn push_affinity_key(
+    keys: &mut Vec<AppServerBrokerAffinityKey>,
+    kind: AppServerBrokerAffinityKeyKind,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        keys.push(AppServerBrokerAffinityKey { kind, value });
+    }
 }
 
 pub(crate) fn app_server_broker_continuation_affinity_summary_json(value: &Value) -> Value {

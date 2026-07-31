@@ -253,19 +253,7 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
     service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
 ) -> Result<ResolvedGatewayLaunchConfig> {
     let secret_resolver = GatewaySecretResolver::from_policy(secrets)?;
-    if secret_resolver.production()
-        && service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway
-    {
-        if policy.require_auth != Some(true) {
-            bail!("production gateway requires gateway.require_auth=true");
-        }
-        if policy.provider_api_key_ref.is_none() {
-            bail!("production gateway requires gateway.provider_api_key_ref");
-        }
-        if policy.auth_token_ref.is_none() && policy.virtual_keys.is_empty() {
-            bail!("production gateway requires gateway.auth_token_ref or a virtual key reference");
-        }
-    }
+    validate_gateway_production_requirements(&secret_resolver, policy, service_mode)?;
     let (provider_name, upstream_base_url, provider_options, auth, route_aliases) =
         match service_mode {
             prodex_runtime_policy::RuntimePolicyServiceMode::Gateway => {
@@ -282,18 +270,11 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
                     &secret_resolver,
                     &runtime_config.gateway.launch,
                 )?;
-                if auth.auth_required
-                    && provider.provider_credential.is_none()
-                    && matches!(
-                        &provider.provider_options,
-                        RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
-                            if api_keys.is_empty()
-                    )
-                {
-                    bail!(
-                        "OpenAI-compatible gateway auth requires a separate upstream key; set --api-key, OPENAI_API_KEY, or OPENAI_API_KEYS"
-                    );
-                }
+                validate_gateway_provider_auth(
+                    auth.auth_required,
+                    provider.provider_credential.is_none(),
+                    &provider.provider_options,
+                )?;
                 let route_aliases = gateway_route_aliases_config(policy, provider.provider)?;
                 let provider_options = match provider.provider_credential {
                     Some(credential) => provider
@@ -329,14 +310,12 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         Some(_) => bail!("gateway.listen_addr must be non-empty without whitespace"),
         None => "127.0.0.1:4000".to_string(),
     };
-    if service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway {
-        gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
-    }
-    if runtime_config.governance.mode == prodex_config::GovernanceMode::BankEnforce
-        && !gateway_private_listen_address(&listen_addr)
-    {
-        bail!("bank governance mode requires a private runtime gateway listen address");
-    }
+    validate_gateway_listen_config(
+        service_mode,
+        &listen_addr,
+        auth.auth_required,
+        runtime_config.governance.mode,
+    )?;
 
     let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
@@ -374,6 +353,65 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         presidio_redaction_enabled: guardrail.presidio_redaction_enabled,
         credential_fingerprint,
     })
+}
+
+fn validate_gateway_production_requirements(
+    secret_resolver: &GatewaySecretResolver,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+) -> Result<()> {
+    if !secret_resolver.production()
+        || service_mode != prodex_runtime_policy::RuntimePolicyServiceMode::Gateway
+    {
+        return Ok(());
+    }
+    if policy.require_auth != Some(true) {
+        bail!("production gateway requires gateway.require_auth=true");
+    }
+    if policy.provider_api_key_ref.is_none() {
+        bail!("production gateway requires gateway.provider_api_key_ref");
+    }
+    if policy.auth_token_ref.is_none() && policy.virtual_keys.is_empty() {
+        bail!("production gateway requires gateway.auth_token_ref or a virtual key reference");
+    }
+    Ok(())
+}
+
+fn validate_gateway_provider_auth(
+    auth_required: bool,
+    provider_credential_missing: bool,
+    provider_options: &RuntimeLocalRewriteProviderOptions,
+) -> Result<()> {
+    if auth_required
+        && provider_credential_missing
+        && matches!(
+            provider_options,
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
+                if api_keys.is_empty()
+        )
+    {
+        bail!(
+            "OpenAI-compatible gateway auth requires a separate upstream key; set --api-key, OPENAI_API_KEY, or OPENAI_API_KEYS"
+        );
+    }
+    Ok(())
+}
+
+fn validate_gateway_listen_config(
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+    listen_addr: &str,
+    auth_required: bool,
+    governance_mode: prodex_config::GovernanceMode,
+) -> Result<()> {
+    if service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway {
+        gateway_validate_listen_auth(listen_addr, auth_required)?;
+    }
+    if governance_mode == prodex_config::GovernanceMode::BankEnforce
+        && !gateway_private_listen_address(listen_addr)
+    {
+        bail!("bank governance mode requires a private runtime gateway listen address");
+    }
+    Ok(())
 }
 
 fn gateway_private_listen_address(value: &str) -> bool {

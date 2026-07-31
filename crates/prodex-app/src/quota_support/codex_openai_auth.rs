@@ -254,67 +254,73 @@ impl TerminalInfo {
 
 fn detect_terminal_info() -> TerminalInfo {
     let tmux = terminal_env_has_non_empty("TMUX") || terminal_env_has_non_empty("TMUX_PANE");
-    if let Some(term_program) = terminal_env_var_non_empty("TERM_PROGRAM") {
-        if term_program.eq_ignore_ascii_case("tmux")
-            && tmux
-            && let Some(terminal) = terminal_from_tmux_client_info(tmux_client_info())
-        {
-            return terminal;
-        }
-
-        let version = terminal_env_var_non_empty("TERM_PROGRAM_VERSION");
-        let name = terminal_name_from_term_program(&term_program).unwrap_or(TerminalName::Unknown);
-        return TerminalInfo::from_term_program(name, term_program, version);
+    if let Some(terminal) = detect_terminal_from_term_program(tmux) {
+        return terminal;
     }
+    detect_terminal_from_environment().unwrap_or_else(TerminalInfo::unknown)
+}
 
+fn detect_terminal_from_term_program(tmux: bool) -> Option<TerminalInfo> {
+    let term_program = terminal_env_var_non_empty("TERM_PROGRAM")?;
+    if term_program.eq_ignore_ascii_case("tmux")
+        && tmux
+        && let Some(terminal) = terminal_from_tmux_client_info(tmux_client_info())
+    {
+        return Some(terminal);
+    }
+    let version = terminal_env_var_non_empty("TERM_PROGRAM_VERSION");
+    let name = terminal_name_from_term_program(&term_program).unwrap_or(TerminalName::Unknown);
+    Some(TerminalInfo::from_term_program(name, term_program, version))
+}
+
+fn detect_terminal_from_environment() -> Option<TerminalInfo> {
     if terminal_env_has("WEZTERM_VERSION") {
-        return TerminalInfo::from_name(
+        return Some(TerminalInfo::from_name(
             TerminalName::WezTerm,
             terminal_env_var_non_empty("WEZTERM_VERSION"),
-        );
+        ));
     }
     if terminal_env_has("ITERM_SESSION_ID")
         || terminal_env_has("ITERM_PROFILE")
         || terminal_env_has("ITERM_PROFILE_NAME")
     {
-        return TerminalInfo::from_name(TerminalName::Iterm2, None);
+        return Some(TerminalInfo::from_name(TerminalName::Iterm2, None));
     }
     if terminal_env_has("TERM_SESSION_ID") {
-        return TerminalInfo::from_name(TerminalName::AppleTerminal, None);
+        return Some(TerminalInfo::from_name(TerminalName::AppleTerminal, None));
     }
     if terminal_env_has("KITTY_WINDOW_ID")
         || terminal_env_var("TERM").is_some_and(|term| term.contains("kitty"))
     {
-        return TerminalInfo::from_name(TerminalName::Kitty, None);
+        return Some(TerminalInfo::from_name(TerminalName::Kitty, None));
     }
     if terminal_env_has("ALACRITTY_SOCKET")
         || terminal_env_var("TERM").is_some_and(|term| term == "alacritty")
     {
-        return TerminalInfo::from_name(TerminalName::Alacritty, None);
+        return Some(TerminalInfo::from_name(TerminalName::Alacritty, None));
     }
     if terminal_env_has("KONSOLE_VERSION") {
-        return TerminalInfo::from_name(
+        return Some(TerminalInfo::from_name(
             TerminalName::Konsole,
             terminal_env_var_non_empty("KONSOLE_VERSION"),
-        );
+        ));
     }
     if terminal_env_has("GNOME_TERMINAL_SCREEN") {
-        return TerminalInfo::from_name(TerminalName::GnomeTerminal, None);
+        return Some(TerminalInfo::from_name(TerminalName::GnomeTerminal, None));
     }
     if terminal_env_has("VTE_VERSION") {
-        return TerminalInfo::from_name(
+        return Some(TerminalInfo::from_name(
             TerminalName::Vte,
             terminal_env_var_non_empty("VTE_VERSION"),
-        );
+        ));
     }
     if terminal_env_has("WT_SESSION") {
-        return TerminalInfo::from_name(TerminalName::WindowsTerminal, None);
+        return Some(TerminalInfo::from_name(TerminalName::WindowsTerminal, None));
     }
     if let Some(term) = terminal_env_var_non_empty("TERM") {
-        return TerminalInfo::from_term(term);
+        return Some(TerminalInfo::from_term(term));
     }
-
-    TerminalInfo::unknown()
+    None
 }
 
 fn terminal_env_var(name: &str) -> Option<String> {

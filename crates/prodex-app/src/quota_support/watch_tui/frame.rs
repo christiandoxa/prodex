@@ -327,34 +327,11 @@ pub(crate) fn quota_human_tui_text(output: &str) -> Text<'_> {
 }
 
 pub(crate) fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
-    if line.starts_with("== ")
-        || line == "Quota Overview"
-        || line.starts_with("Quota ")
-        || line.ends_with("profiles")
-    {
-        return vec![Span::styled(line, quota_watch_title_style())];
+    if let Some(spans) = quota_human_tui_header_spans(line) {
+        return spans;
     }
-    if quota_human_tui_compact_label(line).is_some() {
-        let Some((label, value)) = line.split_once(':') else {
-            return vec![Span::raw(line)];
-        };
-        return vec![
-            Span::styled(format!("{label}:"), tui_title_style()),
-            Span::raw(" "),
-            Span::raw(value.trim_start().to_string()),
-        ];
-    }
-    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
-        return vec![Span::styled(line, quota_watch_muted_style())];
-    }
-    if line.contains("Blocked") || line.contains("Error") {
-        return vec![Span::styled(line, tui_error_style())];
-    }
-    if line.contains("Ready") || line.contains("healthy") {
-        return vec![Span::styled(line, tui_success_style())];
-    }
-    if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
-        return vec![Span::styled(line, tui_error_style())];
+    if let Some(spans) = quota_human_tui_status_spans(line) {
+        return spans;
     }
     if line.starts_with("PROFILE") {
         return vec![Span::styled(
@@ -362,23 +339,69 @@ pub(crate) fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
             Style::default().add_modifier(Modifier::BOLD),
         )];
     }
-    if line.starts_with("workspace:")
-        || line.starts_with("error:")
-        || line.starts_with("resets:")
-        || line.starts_with("status:")
-        || line.starts_with("reset credits:")
-        || line.trim_start().starts_with("workspace:")
-        || line.trim_start().starts_with("error:")
-        || line.trim_start().starts_with("resets:")
-        || line.trim_start().starts_with("status:")
-        || line.trim_start().starts_with("reset credits:")
-    {
-        return vec![Span::styled(line, quota_watch_detail_style())];
+    if let Some(spans) = quota_human_tui_detail_spans(line) {
+        return spans;
     }
-    if line.starts_with("press ") || line.trim_start().starts_with("press ") {
-        return vec![Span::styled(line, quota_watch_muted_style())];
+    if let Some(spans) = quota_human_tui_muted_spans(line) {
+        return spans;
     }
     vec![Span::raw(line)]
+}
+
+fn quota_human_tui_detail_spans(line: &str) -> Option<Vec<Span<'_>>> {
+    let label = line.trim_start();
+    let is_detail = [
+        "workspace:",
+        "error:",
+        "resets:",
+        "status:",
+        "reset credits:",
+    ]
+    .iter()
+    .any(|prefix| line.starts_with(prefix) || label.starts_with(prefix));
+    is_detail.then(|| vec![Span::styled(line, quota_watch_detail_style())])
+}
+
+fn quota_human_tui_muted_spans(line: &str) -> Option<Vec<Span<'_>>> {
+    let is_muted = line.starts_with("press ") || line.trim_start().starts_with("press ");
+    is_muted.then(|| vec![Span::styled(line, quota_watch_muted_style())])
+}
+
+fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
+    if line.starts_with("== ")
+        || line == "Quota Overview"
+        || line.starts_with("Quota ")
+        || line.ends_with("profiles")
+    {
+        return Some(vec![Span::styled(line, quota_watch_title_style())]);
+    }
+    if quota_human_tui_compact_label(line).is_some() {
+        let Some((label, value)) = line.split_once(':') else {
+            return Some(vec![Span::raw(line)]);
+        };
+        return Some(vec![
+            Span::styled(format!("{label}:"), tui_title_style()),
+            Span::raw(" "),
+            Span::raw(value.trim_start().to_string()),
+        ]);
+    }
+    None
+}
+
+fn quota_human_tui_status_spans(line: &str) -> Option<Vec<Span<'_>>> {
+    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
+        return Some(vec![Span::styled(line, quota_watch_muted_style())]);
+    }
+    let style = if line.contains("Blocked") || line.contains("Error") {
+        Some(tui_error_style())
+    } else if line.contains("Ready") || line.contains("healthy") {
+        Some(tui_success_style())
+    } else if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
+        Some(tui_error_style())
+    } else {
+        None
+    };
+    style.map(|style| vec![Span::styled(line, style)])
 }
 
 fn quota_watch_detail_style() -> Style {
