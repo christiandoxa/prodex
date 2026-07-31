@@ -97,6 +97,7 @@ fn transcript_text_looks_binary(text: &str) -> bool {
             || stats.suspicious >= 8)
 }
 
+#[derive(Default)]
 struct TranscriptTextStats {
     total: usize,
     suspicious: usize,
@@ -108,49 +109,37 @@ struct TranscriptTextStats {
 }
 
 fn transcript_text_stats(text: &str) -> TranscriptTextStats {
-    let mut total = 0usize;
-    let mut suspicious = 0usize;
-    let mut replacement = 0usize;
-    let mut control = 0usize;
-    let mut readable_ascii = 0usize;
-    let mut non_ascii = 0usize;
-    let mut whitespace = 0usize;
+    let mut stats = TranscriptTextStats::default();
     for ch in text.chars().take(4096) {
-        total += 1;
-        if ch.is_whitespace() {
-            whitespace += 1;
-        }
-        if ch.is_ascii()
-            && (ch.is_alphanumeric() || ch.is_whitespace() || is_common_punctuation(ch))
-        {
-            readable_ascii += 1;
-        } else if !ch.is_ascii() {
-            non_ascii += 1;
-        }
-        let is_suspicious = ch == '\u{fffd}'
-            || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
-            || (!ch.is_ascii()
-                && !ch.is_alphanumeric()
-                && !ch.is_whitespace()
-                && !is_common_punctuation(ch));
-        if ch == '\u{fffd}' {
-            replacement += 1;
-        }
-        if ch.is_control() && !matches!(ch, '\n' | '\r' | '\t') {
-            control += 1;
-        }
-        if is_suspicious {
-            suspicious += 1;
-        }
+        let char_stats = transcript_char_stats(ch);
+        stats.total += char_stats.total;
+        stats.suspicious += char_stats.suspicious;
+        stats.replacement += char_stats.replacement;
+        stats.control += char_stats.control;
+        stats.readable_ascii += char_stats.readable_ascii;
+        stats.non_ascii += char_stats.non_ascii;
+        stats.whitespace += char_stats.whitespace;
     }
+    stats
+}
+
+fn transcript_char_stats(ch: char) -> TranscriptTextStats {
+    let whitespace = ch.is_whitespace();
+    let replacement = ch == '\u{fffd}';
+    let control = ch.is_control() && !matches!(ch, '\n' | '\r' | '\t');
+    let readable_ascii =
+        ch.is_ascii() && (ch.is_alphanumeric() || whitespace || is_common_punctuation(ch));
+    let suspicious = replacement
+        || control
+        || (!ch.is_ascii() && !ch.is_alphanumeric() && !whitespace && !is_common_punctuation(ch));
     TranscriptTextStats {
-        total,
-        suspicious,
-        replacement,
-        control,
-        readable_ascii,
-        non_ascii,
-        whitespace,
+        total: 1,
+        suspicious: usize::from(suspicious),
+        replacement: usize::from(replacement),
+        control: usize::from(control),
+        readable_ascii: usize::from(readable_ascii),
+        non_ascii: usize::from(!ch.is_ascii()),
+        whitespace: usize::from(whitespace),
     }
 }
 

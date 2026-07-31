@@ -28,55 +28,74 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         args.provider.is_some() && provider_filter != QuotaProviderFilter::All;
 
     if args.all {
-        if state.profiles.is_empty()
-            && !matches!(
-                provider_filter,
-                QuotaProviderFilter::DeepSeek
-                    | QuotaProviderFilter::Local
-                    | QuotaProviderFilter::Agy
-            )
-        {
-            bail!("no profiles configured");
-        }
-        if quota_watch_enabled(&args) {
-            return watch_all_quotas(
-                &paths,
-                args.base_url.as_deref(),
-                args.detail,
-                auth_filter,
-                provider_filter,
-                provider_filter_locked,
-            );
-        }
-        let reports = if matches!(auth_filter, QuotaAuthFilter::All)
-            && matches!(provider_filter, QuotaProviderFilter::All)
-        {
-            collect_quota_reports(&state, args.base_url.as_deref())
-        } else {
-            collect_quota_reports_with_filters(
-                &state,
-                args.base_url.as_deref(),
-                &auth_filter,
-                provider_filter,
-            )
-        };
-        if let Some(mut terminal) = crate::try_inline_stdout_terminal(
-            reports
-                .len()
-                .saturating_mul(if args.detail { 4 } else { 3 })
-                .saturating_add(8)
-                .clamp(8, 32) as u16,
-        ) {
-            terminal
-                .draw(|frame| render_all_quota_reports_once_tui(frame, &reports, args.detail))?;
-            let _ = terminal.show_cursor();
-        } else {
-            print_stdout_text(&render_quota_reports(&reports, args.detail))?;
-        }
-        return Ok(());
+        return handle_all_quota(
+            &paths,
+            &state,
+            &args,
+            auth_filter,
+            provider_filter,
+            provider_filter_locked,
+        );
     }
 
-    let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
+    handle_profile_quota(&state, &args)
+}
+
+fn handle_all_quota(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &QuotaArgs,
+    auth_filter: QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+) -> Result<()> {
+    if state.profiles.is_empty()
+        && !matches!(
+            provider_filter,
+            QuotaProviderFilter::DeepSeek | QuotaProviderFilter::Local | QuotaProviderFilter::Agy
+        )
+    {
+        bail!("no profiles configured");
+    }
+    if quota_watch_enabled(args) {
+        return watch_all_quotas(
+            paths,
+            args.base_url.as_deref(),
+            args.detail,
+            auth_filter,
+            provider_filter,
+            provider_filter_locked,
+        );
+    }
+    let reports = if matches!(auth_filter, QuotaAuthFilter::All)
+        && matches!(provider_filter, QuotaProviderFilter::All)
+    {
+        collect_quota_reports(state, args.base_url.as_deref())
+    } else {
+        collect_quota_reports_with_filters(
+            state,
+            args.base_url.as_deref(),
+            &auth_filter,
+            provider_filter,
+        )
+    };
+    if let Some(mut terminal) = crate::try_inline_stdout_terminal(
+        reports
+            .len()
+            .saturating_mul(if args.detail { 4 } else { 3 })
+            .saturating_add(8)
+            .clamp(8, 32) as u16,
+    ) {
+        terminal.draw(|frame| render_all_quota_reports_once_tui(frame, &reports, args.detail))?;
+        let _ = terminal.show_cursor();
+    } else {
+        print_stdout_text(&render_quota_reports(&reports, args.detail))?;
+    }
+    Ok(())
+}
+
+fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
+    let profile_name = resolve_profile_name(state, args.profile.as_deref())?;
     let profile = state
         .profiles
         .get(&profile_name)
@@ -91,7 +110,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         return Ok(());
     }
 
-    if quota_watch_enabled(&args) {
+    if quota_watch_enabled(args) {
         return watch_quota(
             &profile_name,
             &profile.provider,

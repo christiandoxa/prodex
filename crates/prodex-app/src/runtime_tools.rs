@@ -99,6 +99,25 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        let tool_plan = self.resolve_optional_tool_plan(prepared)?;
+        let overlay_home = self.prepare_overlay_home(prepared)?;
+        let runtime_args = self.prepare_runtime_codex_args(&overlay_home, runtime_proxy)?;
+        prodex_optional_tools::activate_optional_tools_for_codex(
+            &overlay_home,
+            &tool_plan,
+            self.presidio_enabled,
+        )?;
+        let mut child = self.build_child_plan(prepared, &overlay_home, &runtime_args)?;
+        self.finalize_child_plan(&mut child, &overlay_home, runtime_proxy);
+        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
+    }
+}
+
+impl RuntimeToolLaunchStrategy {
+    fn resolve_optional_tool_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+    ) -> Result<prodex_optional_tools::ToolActivationPlan> {
         let selected = self
             .args
             .selected_tool_set()
@@ -132,6 +151,10 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         if self.presidio_enabled {
             ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
+        Ok(tool_plan)
+    }
+
+    fn prepare_overlay_home(&self, prepared: &PreparedRuntimeLaunch) -> Result<std::path::PathBuf> {
         let overlay_home = if self.desktop_command.is_some() {
             prepare_desktop_overlay_home(
                 &prepared.paths,
@@ -146,56 +169,80 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
+        Ok(overlay_home)
+    }
+
+    fn prepare_runtime_codex_args(
+        &self,
+        overlay_home: &std::path::Path,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<Vec<OsString>> {
         let codex_args = if self.args.super_mode {
             trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
         } else {
             self.codex_args.clone()
         };
-        let codex_args =
-            runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args)?;
-        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args)?;
-        let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
-        let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
-        let codex_args = prepare_deepseek_provider_codex_args(&overlay_home, &codex_args)?;
-        let codex_args = prepare_gemini_provider_codex_args(&overlay_home, &codex_args)?;
-        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
-        prodex_optional_tools::activate_optional_tools_for_codex(
-            &overlay_home,
-            &tool_plan,
-            self.presidio_enabled,
-        )?;
-        let mut child = if let Some(desktop) = self.desktop_command.as_ref() {
+        let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
+        let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
+        let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
+        let codex_args = prepare_external_provider_catalog_codex_args(overlay_home, &codex_args)?;
+        let codex_args = prepare_deepseek_provider_codex_args(overlay_home, &codex_args)?;
+        let codex_args = prepare_gemini_provider_codex_args(overlay_home, &codex_args)?;
+        Ok(runtime_proxy_codex_passthrough_args(
+            runtime_proxy,
+            &codex_args,
+        ))
+    }
+
+    fn build_child_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        overlay_home: &std::path::Path,
+        runtime_args: &[OsString],
+    ) -> Result<ChildProcessPlan> {
+        if let Some(desktop) = self.desktop_command.as_ref() {
             let sqlite_home = prepared
                 .managed
                 .then_some(prepared.paths.shared_codex_root.as_path());
             configure_desktop_codex_home(
-                &overlay_home,
-                &runtime_args,
+                overlay_home,
+                runtime_args,
                 self.args.full_access,
                 sqlite_home,
             )?;
             if !self.args.dry_run
                 && let Some(sqlite_home) = sqlite_home
             {
-                repair_desktop_thread_index(&crate::codex_bin(), &overlay_home, sqlite_home)?;
+                repair_desktop_thread_index(&crate::codex_bin(), overlay_home, sqlite_home)?;
             }
-            let mut child = codex_child_plan(overlay_home.clone(), Vec::new());
+            let mut child = codex_child_plan(overlay_home.to_path_buf(), Vec::new());
             child.binary = desktop.binary.clone();
             child.args = desktop.args.clone();
-            child
+            Ok(child)
         } else {
-            codex_tui_child_plan(overlay_home.clone(), runtime_args)
-        };
-        if self.provider_runtime_uses_local_proxy_auth() {
-            force_codex_api_key_auth_for_provider_runtime(&mut child);
-            remove_provider_secret_env(&mut child);
+            Ok(codex_tui_child_plan(
+                overlay_home.to_path_buf(),
+                runtime_args.to_vec(),
+            ))
         }
-        prepend_child_path(&mut child, overlay_home.join("bin"));
+    }
+
+    fn finalize_child_plan(
+        &self,
+        child: &mut ChildProcessPlan,
+        overlay_home: &std::path::Path,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) {
+        if self.provider_runtime_uses_local_proxy_auth() {
+            force_codex_api_key_auth_for_provider_runtime(child);
+            remove_provider_secret_env(child);
+        }
+        prepend_child_path(child, overlay_home.join("bin"));
         if self.rtk_enabled {
-            clear_rtk_auto_wrap_control_env(&mut child);
+            clear_rtk_auto_wrap_control_env(child);
         }
         if self.args.no_proxy && runtime_proxy.is_none() {
-            remove_upstream_proxy_env(&mut child);
+            remove_upstream_proxy_env(child);
         }
         if self.presidio_enabled {
             child.extra_env.push((
@@ -203,7 +250,6 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
                 OsString::from("1"),
             ));
         }
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
 }
 

@@ -254,73 +254,155 @@ fn render_session_reports_tui_scrollable(
             let max_scroll = total.saturating_sub(visible);
             scroll_offset = scroll_offset.min(max_scroll);
 
-            terminal.draw(|frame| {
-                let chunks = Layout::default().direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)])
-                    .split(frame.area());
+            draw_session_scroll(
+                &mut terminal,
+                SessionScrollView {
+                    reports,
+                    empty_message,
+                    lines: &lines,
+                    scroll_offset,
+                    visible,
+                    total,
+                    max_scroll,
+                },
+            )?;
 
-                let header = Paragraph::new(Line::from(vec![
-                    Span::styled("Prodex Sessions", tui_title_style()),
-                    Span::raw("  "),
-                    Span::styled(format!("{} session(s)", reports.len()), tui_secondary_style()),
-                ])).block(tui_connected_header_block(tui_border_style()));
-                frame.render_widget(header, chunks[0]);
-
-                if reports.is_empty() {
-                    let empty = Paragraph::new(Line::styled(empty_message.to_string(), tui_secondary_style()))
-                        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT).border_style(tui_border_style()));
-                    frame.render_widget(empty, chunks[1]);
-                } else {
-                    let slice: Vec<Line<'_>> = lines.iter().skip(scroll_offset).take(visible).cloned().collect();
-                    let body = Paragraph::new(Text::from(slice))
-                        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT).border_style(tui_border_style()))
-                        .wrap(Wrap { trim: false });
-                    frame.render_widget(body, chunks[1]);
-                }
-
-                let footer_text = if max_scroll == 0 {
-                    format!("{} session(s) — q / Esc / Enter to exit", reports.len())
-                } else {
-                    format!(
-                        "lines {}-{} of {} — j/k/Up/Down/PgUp/PgDn/Home/End to scroll, q/Esc/Enter to exit",
-                        scroll_offset.saturating_add(1),
-                        (scroll_offset + visible).min(total),
-                        total,
-                    )
-                };
-                let footer = Paragraph::new(Line::styled(footer_text, tui_hint_style().add_modifier(Modifier::BOLD)))
-                    .block(tui_connected_footer_block(tui_border_style()));
-                frame.render_widget(footer, chunks[2]);
-            }).context("failed to draw session scroll TUI")?;
-
-            if let Event::Key(key) = crossterm::event::read().context("failed to read input")?
-                && key.kind == KeyEventKind::Press
-            {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => break,
-                    KeyCode::Char('c') | KeyCode::Char('z')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
-                        break;
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        scroll_offset = scroll_offset.saturating_add(1).min(max_scroll)
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        scroll_offset = scroll_offset.saturating_sub(1)
-                    }
-                    KeyCode::PageDown => {
-                        scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll)
-                    }
-                    KeyCode::PageUp => scroll_offset = scroll_offset.saturating_sub(visible),
-                    KeyCode::Home => scroll_offset = 0,
-                    KeyCode::End => scroll_offset = max_scroll,
-                    _ => {}
-                }
+            if session_scroll_input(&mut scroll_offset, visible, max_scroll)? {
+                break;
             }
         }
         Ok(())
     })()
+}
+
+struct SessionScrollView<'reports, 'lines> {
+    reports: &'reports [SessionReport],
+    empty_message: &'reports str,
+    lines: &'lines [Line<'lines>],
+    scroll_offset: usize,
+    visible: usize,
+    total: usize,
+    max_scroll: usize,
+}
+
+fn draw_session_scroll(
+    terminal: &mut terminal_ui::AlternateScreenTerminal<io::Stdout>,
+    view: SessionScrollView<'_, '_>,
+) -> Result<()> {
+    let SessionScrollView {
+        reports,
+        empty_message,
+        lines,
+        scroll_offset,
+        visible,
+        total,
+        max_scroll,
+    } = view;
+    terminal
+        .draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled("Prodex Sessions", tui_title_style()),
+                Span::raw("  "),
+                Span::styled(format!("{} session(s)", reports.len()), tui_secondary_style()),
+            ]))
+            .block(tui_connected_header_block(tui_border_style()));
+            frame.render_widget(header, chunks[0]);
+            if reports.is_empty() {
+                let empty = Paragraph::new(Line::styled(
+                    empty_message.to_string(),
+                    tui_secondary_style(),
+                ))
+                .block(
+                    Block::default()
+                        .borders(Borders::LEFT | Borders::RIGHT)
+                        .border_style(tui_border_style()),
+                );
+                frame.render_widget(empty, chunks[1]);
+            } else {
+                let slice: Vec<Line<'_>> = lines
+                    .iter()
+                    .skip(scroll_offset)
+                    .take(visible)
+                    .cloned()
+                    .collect();
+                let body = Paragraph::new(Text::from(slice))
+                    .block(
+                        Block::default()
+                            .borders(Borders::LEFT | Borders::RIGHT)
+                            .border_style(tui_border_style()),
+                    )
+                    .wrap(Wrap { trim: false });
+                frame.render_widget(body, chunks[1]);
+            }
+            let footer_text = if max_scroll == 0 {
+                format!("{} session(s) — q / Esc / Enter to exit", reports.len())
+            } else {
+                format!(
+                    "lines {}-{} of {} — j/k/Up/Down/PgUp/PgDn/Home/End to scroll, q/Esc/Enter to exit",
+                    scroll_offset.saturating_add(1),
+                    (scroll_offset + visible).min(total),
+                    total,
+                )
+            };
+            let footer = Paragraph::new(Line::styled(
+                footer_text,
+                tui_hint_style().add_modifier(Modifier::BOLD),
+            ))
+            .block(tui_connected_footer_block(tui_border_style()));
+            frame.render_widget(footer, chunks[2]);
+        })
+        .context("failed to draw session scroll TUI")
+        .map(|_| ())
+}
+
+fn session_scroll_input(
+    scroll_offset: &mut usize,
+    visible: usize,
+    max_scroll: usize,
+) -> Result<bool> {
+    let Event::Key(key) = crossterm::event::read().context("failed to read input")? else {
+        return Ok(false);
+    };
+    if key.kind != KeyEventKind::Press {
+        return Ok(false);
+    }
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => Ok(true),
+        KeyCode::Char('c') | KeyCode::Char('z')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            Ok(true)
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            *scroll_offset = scroll_offset.saturating_add(1).min(max_scroll);
+            Ok(false)
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            *scroll_offset = scroll_offset.saturating_sub(1);
+            Ok(false)
+        }
+        KeyCode::PageDown => {
+            *scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll);
+            Ok(false)
+        }
+        KeyCode::PageUp => {
+            *scroll_offset = scroll_offset.saturating_sub(visible);
+            Ok(false)
+        }
+        KeyCode::Home => {
+            *scroll_offset = 0;
+            Ok(false)
+        }
+        KeyCode::End => {
+            *scroll_offset = max_scroll;
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
 }
 
 fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {

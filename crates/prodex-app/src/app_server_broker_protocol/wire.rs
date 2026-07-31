@@ -15,30 +15,27 @@ pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFram
     let Some(object) = value.as_object() else {
         return AppServerBrokerFrameKind::Invalid;
     };
-    if !app_server_broker_has_valid_wire_jsonrpc(object) {
+    if !app_server_broker_has_valid_wire_object(object) {
         return AppServerBrokerFrameKind::Invalid;
     }
-    if !app_server_broker_has_valid_wire_id(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if !app_server_broker_has_valid_wire_params(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if !app_server_broker_has_valid_wire_error(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if !app_server_broker_has_valid_wire_error_code(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if !app_server_broker_has_valid_wire_error_message(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if object.contains_key("method") && object.get("method").and_then(Value::as_str).is_none() {
-        return AppServerBrokerFrameKind::Invalid;
-    }
-    if !app_server_broker_has_valid_wire_method_name(object) {
-        return AppServerBrokerFrameKind::Invalid;
-    }
+    app_server_broker_object_frame_kind(object)
+}
+
+fn app_server_broker_has_valid_wire_object(object: &serde_json::Map<String, Value>) -> bool {
+    app_server_broker_has_valid_wire_jsonrpc(object)
+        && app_server_broker_has_valid_wire_id(object)
+        && app_server_broker_has_valid_wire_params(object)
+        && app_server_broker_has_valid_wire_error(object)
+        && app_server_broker_has_valid_wire_error_code(object)
+        && app_server_broker_has_valid_wire_error_message(object)
+        && (!object.contains_key("method")
+            || object.get("method").and_then(Value::as_str).is_some())
+        && app_server_broker_has_valid_wire_method_name(object)
+}
+
+fn app_server_broker_object_frame_kind(
+    object: &serde_json::Map<String, Value>,
+) -> AppServerBrokerFrameKind {
     let has_method = object.get("method").and_then(Value::as_str).is_some();
     let has_id = object.contains_key("id");
     let has_result = object.contains_key("result");
@@ -62,26 +59,36 @@ pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFram
 
 pub(crate) fn app_server_broker_invalid_reason(value: &Value) -> Option<&'static str> {
     if let Some(batch) = value.as_array() {
-        if batch.is_empty() {
-            return Some("empty_batch");
-        }
-        if batch.len() > APP_SERVER_BROKER_MAX_BATCH_ITEMS {
-            return Some("batch_too_large");
-        }
-        if batch.iter().any(Value::is_array) {
-            return Some("nested_batch");
-        }
-        if batch
-            .iter()
-            .any(|frame| app_server_broker_invalid_reason(frame).is_some())
-        {
-            return Some("invalid_batch_member");
-        }
-        return None;
+        return app_server_broker_invalid_batch_reason(batch);
     }
     let Some(object) = value.as_object() else {
         return Some("non_object_frame");
     };
+    app_server_broker_invalid_object_reason(object)
+}
+
+fn app_server_broker_invalid_batch_reason(batch: &[Value]) -> Option<&'static str> {
+    if batch.is_empty() {
+        return Some("empty_batch");
+    }
+    if batch.len() > APP_SERVER_BROKER_MAX_BATCH_ITEMS {
+        return Some("batch_too_large");
+    }
+    if batch.iter().any(Value::is_array) {
+        return Some("nested_batch");
+    }
+    if batch
+        .iter()
+        .any(|frame| app_server_broker_invalid_reason(frame).is_some())
+    {
+        return Some("invalid_batch_member");
+    }
+    None
+}
+
+fn app_server_broker_invalid_object_reason(
+    object: &serde_json::Map<String, Value>,
+) -> Option<&'static str> {
     if object
         .get("jsonrpc")
         .is_some_and(|jsonrpc| jsonrpc.as_str() != Some("2.0"))
@@ -109,6 +116,12 @@ pub(crate) fn app_server_broker_invalid_reason(value: &Value) -> Option<&'static
     if !app_server_broker_has_valid_wire_method_name(object) {
         return Some("invalid_method_name");
     }
+    app_server_broker_invalid_payload_reason(object)
+}
+
+fn app_server_broker_invalid_payload_reason(
+    object: &serde_json::Map<String, Value>,
+) -> Option<&'static str> {
     let has_method = object.get("method").and_then(Value::as_str).is_some();
     let has_result = object.contains_key("result");
     let has_error = object.contains_key("error");

@@ -87,6 +87,54 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
         return stream_token_usage_events_tui();
     }
 
+    print_initial_token_usage_events(json)?;
+    let mut followed_runtime_logs =
+        followed_logs(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut followed_session_logs = if json {
+        BTreeMap::new()
+    } else {
+        followed_logs(recent_session_log_paths()?)
+    };
+    follow_token_usage_events(json, &mut followed_runtime_logs, &mut followed_session_logs)
+}
+
+fn stream_token_usage_events_tui() -> Result<()> {
+    let mut tui = LogTuiTerminal::stdout("log stream TUI")?;
+    let mut view = LogTuiState::default();
+    let mut items = initial_log_stream_items()?;
+    let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
+    let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let mut header_refresh_at =
+        log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
+
+    let mut followed_runtime_logs =
+        followed_logs(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut followed_session_logs = followed_logs(recent_session_log_paths()?);
+
+    loop {
+        collect_log_stream_items(
+            &mut items,
+            &mut followed_runtime_logs,
+            &mut followed_session_logs,
+        )?;
+        update_log_stream_header(
+            &items,
+            &mut header_profile,
+            &mut header_detail,
+            &mut header_refresh_at,
+        );
+
+        tui.terminal
+            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_ref()))
+            .context("failed to draw log stream TUI")?;
+
+        if log_stream_tui_should_quit(&mut view)? {
+            return Ok(());
+        }
+    }
+}
+
+fn print_initial_token_usage_events(json: bool) -> Result<()> {
     if !json && let Some(event) = latest_transcript_event()? {
         print_transcript_event(&event)?;
     }
@@ -98,55 +146,58 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
     } else {
         eprintln!("Waiting for transcript, upstream payload, or token usage events...");
     }
+    Ok(())
+}
 
-    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
-    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let offset = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        followed_runtime_logs.insert(
-            path,
-            FollowedLog {
-                offset,
-                pending: Vec::new(),
-            },
-        );
-    }
-    let mut followed_session_logs = BTreeMap::<PathBuf, FollowedLog>::new();
-    if !json {
-        for path in recent_session_log_paths()? {
+fn followed_logs(paths: impl IntoIterator<Item = PathBuf>) -> BTreeMap<PathBuf, FollowedLog> {
+    paths
+        .into_iter()
+        .map(|path| {
             let offset = fs::metadata(&path)
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
-            followed_session_logs.insert(
+            (
                 path,
                 FollowedLog {
                     offset,
-                    pending: Vec::new(),
+                    ..Default::default()
                 },
-            );
-        }
-    }
+            )
+        })
+        .collect()
+}
 
+fn follow_token_usage_events(
+    json: bool,
+    followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+) -> Result<()> {
     loop {
-        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-            let state = followed_runtime_logs.entry(path.clone()).or_default();
-            read_new_runtime_log_events(&path, state, json)?;
-        }
-        if !json {
-            for path in recent_session_log_paths()? {
-                let state = followed_session_logs.entry(path.clone()).or_default();
-                read_new_transcript_events(&path, state)?;
-            }
-        }
+        read_token_usage_events_tick(json, followed_runtime_logs, followed_session_logs)?;
         thread::sleep(LOG_STREAM_POLL_INTERVAL);
     }
 }
 
-fn stream_token_usage_events_tui() -> Result<()> {
-    let mut tui = LogTuiTerminal::stdout("log stream TUI")?;
-    let mut view = LogTuiState::default();
-    let mut items = VecDeque::<LogStreamItem>::new();
+fn read_token_usage_events_tick(
+    json: bool,
+    followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+) -> Result<()> {
+    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+        let state = followed_runtime_logs.entry(path.clone()).or_default();
+        read_new_runtime_log_events(&path, state, json)?;
+    }
+    if !json {
+        for path in recent_session_log_paths()? {
+            let state = followed_session_logs.entry(path.clone()).or_default();
+            read_new_transcript_events(&path, state)?;
+        }
+    }
+    Ok(())
+}
+
+fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
+    let mut items = VecDeque::new();
     if let Some(event) = latest_transcript_event()? {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
     }
@@ -156,75 +207,52 @@ fn stream_token_usage_events_tui() -> Result<()> {
     if let Some(event) = latest_token_usage_event() {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
     }
-    let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
-    let mut header_detail = log_tui_header_detail(header_profile.as_deref());
-    let mut header_refresh_at =
-        log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
+    Ok(items)
+}
 
-    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
+fn collect_log_stream_items(
+    items: &mut VecDeque<LogStreamItem>,
+    followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+) -> Result<()> {
     for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let offset = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        followed_runtime_logs.insert(
-            path,
-            FollowedLog {
-                offset,
-                pending: Vec::new(),
-            },
-        );
+        let state = followed_runtime_logs.entry(path.clone()).or_default();
+        for event in collect_new_runtime_log_stream_items(&path, state)? {
+            push_log_stream_item(items, event);
+        }
     }
-    let mut followed_session_logs = BTreeMap::<PathBuf, FollowedLog>::new();
     for path in recent_session_log_paths()? {
-        let offset = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        followed_session_logs.insert(
-            path,
-            FollowedLog {
-                offset,
-                pending: Vec::new(),
-            },
-        );
-    }
-
-    loop {
-        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-            let state = followed_runtime_logs.entry(path.clone()).or_default();
-            for event in collect_new_runtime_log_stream_items(&path, state)? {
-                push_log_stream_item(&mut items, event);
-            }
-        }
-        for path in recent_session_log_paths()? {
-            let state = followed_session_logs.entry(path.clone()).or_default();
-            for event in collect_new_transcript_events(&path, state)? {
-                push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
-            }
-        }
-        let latest_profile = latest_log_stream_profile(&items).map(str::to_string);
-        let now = Instant::now();
-        if latest_profile != header_profile || now >= header_refresh_at {
-            header_profile = latest_profile;
-            header_detail = log_tui_header_detail(header_profile.as_deref());
-            header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
-        }
-
-        tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_ref()))
-            .context("failed to draw log stream TUI")?;
-
-        if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
-            match event::read().context("failed to read log stream TUI input")? {
-                Event::Key(key)
-                    if key.kind == KeyEventKind::Press
-                        && view.apply_key(key) == LogTuiInput::Quit =>
-                {
-                    return Ok(());
-                }
-                _ => {}
-            }
+        let state = followed_session_logs.entry(path.clone()).or_default();
+        for event in collect_new_transcript_events(&path, state)? {
+            push_log_stream_item(items, LogStreamItem::Transcript(event));
         }
     }
+    Ok(())
+}
+
+fn update_log_stream_header(
+    items: &VecDeque<LogStreamItem>,
+    header_profile: &mut Option<String>,
+    header_detail: &mut Option<LogTuiHeaderDetail>,
+    header_refresh_at: &mut Instant,
+) {
+    let latest_profile = latest_log_stream_profile(items).map(str::to_string);
+    let now = Instant::now();
+    if latest_profile != *header_profile || now >= *header_refresh_at {
+        *header_profile = latest_profile;
+        *header_detail = log_tui_header_detail(header_profile.as_deref());
+        *header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
+    }
+}
+
+fn log_stream_tui_should_quit(view: &mut LogTuiState) -> Result<bool> {
+    if !event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
+        return Ok(false);
+    }
+    let Event::Key(key) = event::read().context("failed to read log stream TUI input")? else {
+        return Ok(false);
+    };
+    Ok(key.kind == KeyEventKind::Press && view.apply_key(key) == LogTuiInput::Quit)
 }
 
 fn print_log_snapshot(

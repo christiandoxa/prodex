@@ -696,39 +696,53 @@ mod tests {
         let observed_for_thread = Arc::clone(&observed);
         let handle = std::thread::spawn(move || {
             for (path, status, body) in routes {
-                let (mut stream, _) = listener.accept().expect("test server should accept");
-                let mut raw = Vec::new();
-                let mut buffer = [0_u8; 4096];
-                loop {
-                    let read = stream.read(&mut buffer).expect("request should read");
-                    if read == 0 {
-                        break;
-                    }
-                    raw.extend_from_slice(&buffer[..read]);
-                    if raw.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8_lossy(&raw).to_string();
-                let first_line = request.lines().next().unwrap_or_default().to_string();
-                assert_eq!(first_line, format!("GET {path} HTTP/1.1"));
-                observed_for_thread
-                    .lock()
-                    .expect("observed requests lock should not be poisoned")
-                    .push(request);
-                let body = body.to_string();
-                let status_text = if status == 200 { "OK" } else { "Test" };
-                let response = format!(
-                    "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                stream
-                    .write_all(response.as_bytes())
-                    .expect("response should write");
+                serve_copilot_auth_test_route(&listener, &observed_for_thread, path, status, body);
             }
         });
         (base_url, observed, handle)
+    }
+
+    fn serve_copilot_auth_test_route(
+        listener: &TcpListener,
+        observed: &Arc<Mutex<Vec<String>>>,
+        path: &str,
+        status: u16,
+        body: serde_json::Value,
+    ) {
+        let (mut stream, _) = listener.accept().expect("test server should accept");
+        let request = read_copilot_auth_test_request(&mut stream);
+        let first_line = request.lines().next().unwrap_or_default().to_string();
+        assert_eq!(first_line, format!("GET {path} HTTP/1.1"));
+        observed
+            .lock()
+            .expect("observed requests lock should not be poisoned")
+            .push(request);
+        let body = body.to_string();
+        let status_text = if status == 200 { "OK" } else { "Test" };
+        let response = format!(
+            "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should write");
+    }
+
+    fn read_copilot_auth_test_request(stream: &mut std::net::TcpStream) -> String {
+        let mut raw = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let read = stream.read(&mut buffer).expect("request should read");
+            if read == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buffer[..read]);
+            if raw.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&raw).to_string()
     }
 
     fn request_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {

@@ -189,17 +189,32 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     fn validate_loaded_metadata(&mut self) -> bool {
+        let mut valid = self.rebuild_validated_artifacts();
+        self.refresh_loaded_artifact_indexes();
+        self.schema_version = 3;
+
+        let fingerprint_count = self.static_context_fingerprints.len();
+        self.static_context_fingerprints.retain(|fingerprint| {
+            !fingerprint.id.trim().is_empty() && fingerprint.content_hash.starts_with("sc2:")
+        });
+        valid &= self.static_context_fingerprints.len() == fingerprint_count;
+        self.legacy_artifact_ids
+            .retain(|legacy, id| legacy.starts_with("sc:") && self.artifacts.contains_key(id));
+        self.next_artifact_order = self.next_artifact_order.max(
+            self.artifacts
+                .values()
+                .map(|artifact| artifact.order)
+                .max()
+                .unwrap_or(0),
+        );
+        valid
+    }
+
+    fn rebuild_validated_artifacts(&mut self) -> bool {
         let mut valid = true;
         let mut validated = BTreeMap::new();
         for (stored_id, mut artifact) in std::mem::take(&mut self.artifacts) {
-            if stored_id != artifact.id
-                || artifact.id != artifact.content_hash
-                || artifact.byte_len != artifact.text.len()
-                || !runtime_proxy_crate::smart_context_hash_matches_text(
-                    &artifact.content_hash,
-                    &artifact.text,
-                )
-            {
+            if !valid_loaded_artifact(&stored_id, &artifact) {
                 valid = false;
                 continue;
             }
@@ -222,8 +237,10 @@ impl RuntimeSmartContextArtifactStore {
                 .or_insert(artifact);
         }
         self.artifacts = validated;
-        self.schema_version = 3;
+        valid
+    }
 
+    fn refresh_loaded_artifact_indexes(&mut self) {
         for artifact in self.artifacts.values_mut() {
             let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
                 artifact.line_index.as_ref(),
@@ -247,22 +264,6 @@ impl RuntimeSmartContextArtifactStore {
                 }
             }
         }
-
-        let fingerprint_count = self.static_context_fingerprints.len();
-        self.static_context_fingerprints.retain(|fingerprint| {
-            !fingerprint.id.trim().is_empty() && fingerprint.content_hash.starts_with("sc2:")
-        });
-        valid &= self.static_context_fingerprints.len() == fingerprint_count;
-        self.legacy_artifact_ids
-            .retain(|legacy, id| legacy.starts_with("sc:") && self.artifacts.contains_key(id));
-        self.next_artifact_order = self.next_artifact_order.max(
-            self.artifacts
-                .values()
-                .map(|artifact| artifact.order)
-                .max()
-                .unwrap_or(0),
-        );
-        valid
     }
 
     pub(in crate::runtime_state_shared::artifact_store) fn enforce_limits(&mut self) {
@@ -286,6 +287,19 @@ impl RuntimeSmartContextArtifactStore {
             }
         }
     }
+}
+
+fn valid_loaded_artifact(
+    stored_id: &str,
+    artifact: &super::super::RuntimeSmartContextArtifact,
+) -> bool {
+    stored_id == artifact.id
+        && artifact.id == artifact.content_hash
+        && artifact.byte_len == artifact.text.len()
+        && runtime_proxy_crate::smart_context_hash_matches_text(
+            &artifact.content_hash,
+            &artifact.text,
+        )
 }
 
 fn runtime_smart_context_read_artifact_store(

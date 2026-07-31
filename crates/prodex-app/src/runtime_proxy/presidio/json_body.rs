@@ -87,73 +87,140 @@ fn collect_json_content_at(
         return Err(PresidioJsonContentError::TooDeep);
     }
     match value {
-        serde_json::Value::String(text) if inspect_mode != PresidioJsonInspectMode::SchemaOnly => {
-            if state.values.len() >= MAX_PRESIDIO_JSON_VALUES {
-                return Err(PresidioJsonContentError::TooManyValues);
-            }
-            state.total_text_bytes = state
-                .total_text_bytes
-                .checked_add(text.len())
-                .ok_or(PresidioJsonContentError::TextBudgetExhausted)?;
-            if state.total_text_bytes > MAX_PRESIDIO_JSON_TEXT_BYTES {
-                return Err(PresidioJsonContentError::TextBudgetExhausted);
-            }
-            state.values.push(PresidioJsonString {
-                path: path.to_string(),
-                text: text.clone(),
-                sensitive_kind,
-            });
+        serde_json::Value::String(text) => {
+            collect_json_string_content(text, inspect_mode, sensitive_kind, path, state)?
         }
         serde_json::Value::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                collect_json_content_at(
-                    item,
-                    inspect_mode,
-                    sensitive_kind,
-                    &format!("{path}[{index}]"),
-                    depth + 1,
-                    state,
-                )?;
-            }
+            collect_json_array_content(items, inspect_mode, sensitive_kind, path, depth, state)?
         }
         serde_json::Value::Object(fields) => {
-            let skip_tools = path == "$" || json_object_declares_tools(fields);
-            let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
-            for (key, value) in fields {
-                if skip_tools && key == "tools" {
-                    continue;
-                }
-                if unsupported_modality_field(key) && !value.is_null() {
-                    state.unsupported_modality = true;
-                    continue;
-                }
-                let field_mode = json_string_inspection_mode(key);
-                let child_mode = if inspect_all_strings {
-                    PresidioJsonInspectMode::AllStrings
-                } else {
-                    field_mode
-                };
-                let child_sensitive_kind = sensitive_json_key_kind(key).or(sensitive_kind);
-                let child_path = if field_mode != PresidioJsonInspectMode::SchemaOnly {
-                    format!("{path}.{key}")
-                } else if inspect_all_strings {
-                    format!("{path}.*")
-                } else {
-                    path.to_string()
-                };
-                collect_json_content_at(
-                    value,
-                    child_mode,
-                    child_sensitive_kind,
-                    &child_path,
-                    depth + 1,
-                    state,
-                )?;
-            }
+            collect_json_object_content(fields, inspect_mode, sensitive_kind, path, depth, state)?
         }
         _ => {}
     }
     Ok(())
+}
+
+fn collect_json_string_content(
+    text: &str,
+    inspect_mode: PresidioJsonInspectMode,
+    sensitive_kind: Option<FindingKind>,
+    path: &str,
+    state: &mut PresidioJsonWalkState,
+) -> Result<(), PresidioJsonContentError> {
+    if inspect_mode == PresidioJsonInspectMode::SchemaOnly {
+        return Ok(());
+    }
+    if state.values.len() >= MAX_PRESIDIO_JSON_VALUES {
+        return Err(PresidioJsonContentError::TooManyValues);
+    }
+    state.total_text_bytes = state
+        .total_text_bytes
+        .checked_add(text.len())
+        .ok_or(PresidioJsonContentError::TextBudgetExhausted)?;
+    if state.total_text_bytes > MAX_PRESIDIO_JSON_TEXT_BYTES {
+        return Err(PresidioJsonContentError::TextBudgetExhausted);
+    }
+    state.values.push(PresidioJsonString {
+        path: path.to_string(),
+        text: text.to_string(),
+        sensitive_kind,
+    });
+    Ok(())
+}
+
+fn collect_json_array_content(
+    items: &[serde_json::Value],
+    inspect_mode: PresidioJsonInspectMode,
+    sensitive_kind: Option<FindingKind>,
+    path: &str,
+    depth: usize,
+    state: &mut PresidioJsonWalkState,
+) -> Result<(), PresidioJsonContentError> {
+    for (index, item) in items.iter().enumerate() {
+        collect_json_content_at(
+            item,
+            inspect_mode,
+            sensitive_kind,
+            &format!("{path}[{index}]"),
+            depth + 1,
+            state,
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_json_object_content(
+    fields: &serde_json::Map<String, serde_json::Value>,
+    inspect_mode: PresidioJsonInspectMode,
+    sensitive_kind: Option<FindingKind>,
+    path: &str,
+    depth: usize,
+    state: &mut PresidioJsonWalkState,
+) -> Result<(), PresidioJsonContentError> {
+    let skip_tools = path == "$" || json_object_declares_tools(fields);
+    let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
+    for (key, value) in fields {
+        if skip_tools && key == "tools" {
+            continue;
+        }
+        if unsupported_modality_field(key) && !value.is_null() {
+            state.unsupported_modality = true;
+            continue;
+        }
+        collect_json_object_field(
+            value,
+            sensitive_kind,
+            path,
+            depth,
+            key,
+            inspect_all_strings,
+            state,
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_json_object_field(
+    value: &serde_json::Value,
+    sensitive_kind: Option<FindingKind>,
+    path: &str,
+    depth: usize,
+    key: &str,
+    inspect_all_strings: bool,
+    state: &mut PresidioJsonWalkState,
+) -> Result<(), PresidioJsonContentError> {
+    let field_mode = json_string_inspection_mode(key);
+    let child_mode = if inspect_all_strings {
+        PresidioJsonInspectMode::AllStrings
+    } else {
+        field_mode
+    };
+    let child_sensitive_kind = sensitive_json_key_kind(key).or(sensitive_kind);
+    let child_path = json_content_child_path(path, key, field_mode, inspect_all_strings);
+    collect_json_content_at(
+        value,
+        child_mode,
+        child_sensitive_kind,
+        &child_path,
+        depth + 1,
+        state,
+    )
+}
+
+fn json_content_child_path(
+    path: &str,
+    key: &str,
+    field_mode: PresidioJsonInspectMode,
+    inspect_all_strings: bool,
+) -> String {
+    if field_mode != PresidioJsonInspectMode::SchemaOnly {
+        format!("{path}.{key}")
+    } else if inspect_all_strings {
+        format!("{path}.*")
+    } else {
+        path.to_string()
+    }
 }
 
 fn sensitive_json_key_kind(key: &str) -> Option<FindingKind> {
@@ -230,40 +297,57 @@ fn replace_json_string_values_at<'a>(
     root: bool,
 ) {
     match value {
-        serde_json::Value::String(text) if inspect_mode != PresidioJsonInspectMode::SchemaOnly => {
-            if let Some(redacted) = values.next() {
-                *text = redacted.to_string();
-            }
-        }
+        serde_json::Value::String(text) => replace_json_string(text, inspect_mode, values),
         serde_json::Value::Array(items) => {
             for item in items {
                 replace_json_string_values_at(item, inspect_mode, values, false);
             }
         }
         serde_json::Value::Object(fields) => {
-            let skip_tools = root || json_object_declares_tools(fields);
-            let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
-            for (key, value) in fields {
-                if skip_tools && key == "tools" {
-                    continue;
-                }
-                if unsupported_modality_field(key) {
-                    continue;
-                }
-                let field_mode = json_string_inspection_mode(key);
-                replace_json_string_values_at(
-                    value,
-                    if inspect_all_strings {
-                        PresidioJsonInspectMode::AllStrings
-                    } else {
-                        field_mode
-                    },
-                    values,
-                    false,
-                );
-            }
+            replace_json_object_strings(fields, inspect_mode, values, root)
         }
         _ => {}
+    }
+}
+
+fn replace_json_string<'a>(
+    text: &mut String,
+    inspect_mode: PresidioJsonInspectMode,
+    values: &mut impl Iterator<Item = &'a str>,
+) {
+    if inspect_mode != PresidioJsonInspectMode::SchemaOnly
+        && let Some(redacted) = values.next()
+    {
+        *text = redacted.to_string();
+    }
+}
+
+fn replace_json_object_strings<'a>(
+    fields: &mut serde_json::Map<String, serde_json::Value>,
+    inspect_mode: PresidioJsonInspectMode,
+    values: &mut impl Iterator<Item = &'a str>,
+    root: bool,
+) {
+    let skip_tools = root || json_object_declares_tools(fields);
+    let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
+    for (key, value) in fields {
+        if skip_tools && key == "tools" {
+            continue;
+        }
+        if unsupported_modality_field(key) {
+            continue;
+        }
+        let field_mode = json_string_inspection_mode(key);
+        replace_json_string_values_at(
+            value,
+            if inspect_all_strings {
+                PresidioJsonInspectMode::AllStrings
+            } else {
+                field_mode
+            },
+            values,
+            false,
+        );
     }
 }
 

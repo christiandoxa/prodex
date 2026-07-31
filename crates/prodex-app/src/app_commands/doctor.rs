@@ -18,6 +18,20 @@ struct DoctorPanel {
     fields: Vec<(String, String)>,
 }
 
+struct DoctorContext<'a> {
+    args: &'a DoctorArgs,
+    paths: &'a AppPaths,
+    state: &'a AppState,
+    codex_home: &'a std::path::Path,
+    policy_summary: Option<&'a RuntimePolicySummary>,
+    policy_summary_error: Option<&'a str>,
+    runtime_metrics_targets: &'a [String],
+    import_auth_journal_count: usize,
+    repaired_import_auth_journals: Option<usize>,
+    runtime_config: Option<&'a RuntimeConfig>,
+    runtime_config_error: Option<&'a str>,
+}
+
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths);
@@ -54,104 +68,146 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let policy_summary = policy_summary.ok().flatten();
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
 
-    if args.bundle.is_some() {
-        if !args.redacted {
-            bail!("doctor --bundle requires --redacted");
-        }
-        let bundle = doctor_redacted_bundle_json_value(DoctorRedactedBundleContext {
-            args: &args,
-            paths: &paths,
-            state: &state,
-            codex_home: &codex_home,
-            policy_summary: policy_summary.as_ref(),
-            runtime_metrics_targets: &runtime_metrics_targets,
-            import_auth_journal_count,
-            repaired_import_auth_journals,
-            runtime_config: runtime_config.as_ref(),
-            runtime_config_error: runtime_config_error.as_deref(),
-            policy_summary_error: policy_summary_error.as_deref(),
-        });
-        let json = serde_json::to_string_pretty(&bundle)
-            .context("failed to serialize redacted doctor bundle")?;
-        if let Some(bundle_path) = args.bundle.as_ref() {
-            write_doctor_bundle_json(bundle_path, &json)?;
-        }
+    let context = DoctorContext {
+        args: &args,
+        paths: &paths,
+        state: &state,
+        codex_home: &codex_home,
+        policy_summary: policy_summary.as_ref(),
+        policy_summary_error: policy_summary_error.as_deref(),
+        runtime_metrics_targets: &runtime_metrics_targets,
+        import_auth_journal_count,
+        repaired_import_auth_journals,
+        runtime_config: runtime_config.as_ref(),
+        runtime_config_error: runtime_config_error.as_deref(),
+    };
+    if handle_doctor_bundle(&context)? || handle_doctor_runtime_json(&context)? {
         return Ok(());
     }
+    render_human_doctor(context)
+}
 
-    if args.runtime && args.json {
-        let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
-        let mut value = if args.suggest_policy {
-            runtime_config
-                .as_ref()
-                .map(|config| runtime_doctor_json_value_with_policy_suggestions(&summary, config))
-                .unwrap_or_else(|| runtime_doctor_json_value(&summary))
-        } else {
-            runtime_doctor_json_value(&summary)
-        };
-        if let Some(object) = value.as_object_mut() {
-            object.insert(
-                "runtime_policy".to_string(),
-                runtime_policy_json_value(policy_summary.as_ref()),
-            );
-            if let Some(error) = policy_summary_error.as_deref() {
-                object.insert(
-                    "runtime_policy_error".to_string(),
-                    serde_json::Value::String(error.to_string()),
-                );
-            }
-            if let Some(error) = runtime_config_error.as_deref() {
-                object.insert(
-                    "runtime_configuration_error".to_string(),
-                    serde_json::Value::String(error.to_string()),
-                );
-            }
-            object.insert("secret_backend".to_string(), secret_backend_json_value());
-            object.insert("runtime_logs".to_string(), runtime_logs_json_value());
-            object.insert("audit_logs".to_string(), audit_logs_json_value());
-            object.insert(
-                "live_brokers".to_string(),
-                serde_json::to_value(collect_live_runtime_broker_observations(&paths))
-                    .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
-            );
-            object.insert(
-                "live_broker_metrics_targets".to_string(),
-                serde_json::to_value(&runtime_metrics_targets)
-                    .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
-            );
-            object.insert(
-                "import_auth_journals".to_string(),
-                import_auth_journals_json_value(
-                    import_auth_journal_count,
-                    repaired_import_auth_journals,
-                ),
-            );
-            if args.install {
-                object.insert(
-                    "install_checks".to_string(),
-                    serde_json::Value::Array(
-                        collect_install_check_rows(&paths)
-                            .into_iter()
-                            .map(|(name, status)| {
-                                serde_json::json!({ "name": name, "status": status })
-                            })
-                            .collect(),
-                    ),
-                );
-            }
-            if args.quota {
-                object.insert(
-                    "quota_probes".to_string(),
-                    doctor_quota_reports_json_value(&state),
-                );
-            }
-        }
-        let json = serde_json::to_string_pretty(&value)
-            .context("failed to serialize runtime doctor summary")?;
-        print_stdout_line(&json)?;
-        return Ok(());
+fn handle_doctor_bundle(context: &DoctorContext<'_>) -> Result<bool> {
+    let Some(bundle_path) = context.args.bundle.as_ref() else {
+        return Ok(false);
+    };
+    if !context.args.redacted {
+        bail!("doctor --bundle requires --redacted");
     }
+    let bundle = doctor_redacted_bundle_json_value(DoctorRedactedBundleContext {
+        args: context.args,
+        paths: context.paths,
+        state: context.state,
+        codex_home: context.codex_home,
+        policy_summary: context.policy_summary,
+        runtime_metrics_targets: context.runtime_metrics_targets,
+        import_auth_journal_count: context.import_auth_journal_count,
+        repaired_import_auth_journals: context.repaired_import_auth_journals,
+        runtime_config: context.runtime_config,
+        runtime_config_error: context.runtime_config_error,
+        policy_summary_error: context.policy_summary_error,
+    });
+    let json = serde_json::to_string_pretty(&bundle)
+        .context("failed to serialize redacted doctor bundle")?;
+    write_doctor_bundle_json(bundle_path, &json)?;
+    Ok(true)
+}
 
+fn handle_doctor_runtime_json(context: &DoctorContext<'_>) -> Result<bool> {
+    if !context.args.runtime || !context.args.json {
+        return Ok(false);
+    }
+    let summary = collect_runtime_doctor_summary_with_tail_bytes(context.args.tail_bytes);
+    let mut value = if context.args.suggest_policy {
+        context
+            .runtime_config
+            .map(|config| runtime_doctor_json_value_with_policy_suggestions(&summary, config))
+            .unwrap_or_else(|| runtime_doctor_json_value(&summary))
+    } else {
+        runtime_doctor_json_value(&summary)
+    };
+    if let Some(object) = value.as_object_mut() {
+        append_doctor_runtime_json_fields(object, context);
+    }
+    let json = serde_json::to_string_pretty(&value)
+        .context("failed to serialize runtime doctor summary")?;
+    print_stdout_line(&json)?;
+    Ok(true)
+}
+
+fn append_doctor_runtime_json_fields(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    context: &DoctorContext<'_>,
+) {
+    object.insert(
+        "runtime_policy".to_string(),
+        runtime_policy_json_value(context.policy_summary),
+    );
+    if let Some(error) = context.policy_summary_error {
+        object.insert(
+            "runtime_policy_error".to_string(),
+            serde_json::Value::String(error.to_string()),
+        );
+    }
+    if let Some(error) = context.runtime_config_error {
+        object.insert(
+            "runtime_configuration_error".to_string(),
+            serde_json::Value::String(error.to_string()),
+        );
+    }
+    object.insert("secret_backend".to_string(), secret_backend_json_value());
+    object.insert("runtime_logs".to_string(), runtime_logs_json_value());
+    object.insert("audit_logs".to_string(), audit_logs_json_value());
+    object.insert(
+        "live_brokers".to_string(),
+        serde_json::to_value(collect_live_runtime_broker_observations(context.paths))
+            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+    );
+    object.insert(
+        "live_broker_metrics_targets".to_string(),
+        serde_json::to_value(context.runtime_metrics_targets)
+            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+    );
+    object.insert(
+        "import_auth_journals".to_string(),
+        import_auth_journals_json_value(
+            context.import_auth_journal_count,
+            context.repaired_import_auth_journals,
+        ),
+    );
+    if context.args.install {
+        object.insert(
+            "install_checks".to_string(),
+            serde_json::Value::Array(
+                collect_install_check_rows(context.paths)
+                    .into_iter()
+                    .map(|(name, status)| serde_json::json!({ "name": name, "status": status }))
+                    .collect(),
+            ),
+        );
+    }
+    if context.args.quota {
+        object.insert(
+            "quota_probes".to_string(),
+            doctor_quota_reports_json_value(context.state),
+        );
+    }
+}
+
+fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
+    let DoctorContext {
+        args,
+        paths,
+        state,
+        codex_home,
+        policy_summary,
+        policy_summary_error,
+        runtime_metrics_targets,
+        import_auth_journal_count,
+        repaired_import_auth_journals,
+        runtime_config,
+        ..
+    } = context;
     let summary_fields = vec![
         ("Prodex root".to_string(), paths.root.display().to_string()),
         (
@@ -196,7 +252,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         ),
         (
             "Runtime policy".to_string(),
-            doctor_runtime_policy_status(policy_summary.as_ref(), policy_summary_error.as_deref()),
+            doctor_runtime_policy_status(policy_summary, policy_summary_error),
         ),
         (
             "Runtime proxy contract".to_string(),
@@ -210,7 +266,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         ("Audit logs".to_string(), format_audit_logs_summary()),
         (
             "Runtime metrics".to_string(),
-            format_runtime_broker_metrics_targets(&runtime_metrics_targets),
+            format_runtime_broker_metrics_targets(runtime_metrics_targets),
         ),
         (
             "Import auth journals".to_string(),
@@ -234,7 +290,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     if args.install {
         panels.push(DoctorPanel {
             title: "Install Checks".to_string(),
-            fields: collect_install_check_rows(&paths),
+            fields: collect_install_check_rows(paths),
         });
     }
 
@@ -259,114 +315,114 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         return Ok(());
     }
 
-    for report in collect_doctor_profile_reports(&state, args.quota) {
-        let kind = if report.summary.managed {
-            "managed"
-        } else {
-            "external"
-        };
-
-        let mut fields = vec![
-            (
-                "Current".to_string(),
-                if report.summary.active {
-                    "Yes".to_string()
-                } else {
-                    "No".to_string()
-                },
-            ),
-            ("Kind".to_string(), kind.to_string()),
-            (
-                "Provider".to_string(),
-                report.summary.provider.display_name().to_string(),
-            ),
-            (
-                "Runtime route".to_string(),
-                report
-                    .summary
-                    .provider
-                    .capabilities()
-                    .runtime_route_policy
-                    .label()
-                    .to_string(),
-            ),
-            (
-                "Quota shape".to_string(),
-                report
-                    .summary
-                    .provider
-                    .capabilities()
-                    .quota_shape
-                    .label()
-                    .to_string(),
-            ),
-            ("Auth".to_string(), report.summary.auth.label),
-            (
-                "Identity".to_string(),
-                report.summary.email.as_deref().unwrap_or("-").to_string(),
-            ),
-            (
-                "Path".to_string(),
-                report.summary.codex_home.display().to_string(),
-            ),
-            (
-                "Exists".to_string(),
-                if report.summary.codex_home.exists() {
-                    "Yes".to_string()
-                } else {
-                    "No".to_string()
-                },
-            ),
-        ];
-
-        if let Some(quota) = report.quota {
-            match quota {
-                Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
-                    let blocked = collect_blocked_limits(&usage, false);
-                    fields.push((
-                        "Quota".to_string(),
-                        if blocked.is_empty() {
-                            "Ready".to_string()
-                        } else {
-                            format!("Blocked ({})", format_blocked_limits(&blocked))
-                        },
-                    ));
-                    fields.push(("Main".to_string(), format_main_windows(&usage)));
-                }
-                Ok(ProviderQuotaSnapshot::Copilot(info)) => {
-                    fields.push(("Quota".to_string(), format_copilot_quota_status(&info)));
-                    fields.push(("Main".to_string(), format_copilot_main_quota(&info)));
-                    if let Some(reset) = format_copilot_reset_summary(&info) {
-                        fields.push(("Reset".to_string(), reset));
-                    }
-                }
-                Ok(ProviderQuotaSnapshot::Gemini(info)) => {
-                    fields.push(("Quota".to_string(), format_gemini_quota_status(&info)));
-                    fields.push(("Main".to_string(), format_gemini_main_quota(&info)));
-                    if let Some(reset) = format_gemini_reset_summary(&info) {
-                        fields.push(("Reset".to_string(), reset));
-                    }
-                }
-                Ok(ProviderQuotaSnapshot::External(info)) => {
-                    fields.push(("Quota".to_string(), info.status));
-                    fields.push(("Main".to_string(), info.main));
-                    if let Some(reset) = info.reset {
-                        fields.push(("Reset".to_string(), reset));
-                    }
-                }
-                Err(err) => {
-                    fields.push(("Quota".to_string(), doctor_quota_error_summary(&err)));
-                }
-            }
-        }
-        panels.push(DoctorPanel {
-            title: format!("Profile {}", report.summary.name),
-            fields,
-        });
+    for report in collect_doctor_profile_reports(state, args.quota) {
+        panels.push(doctor_profile_panel(report));
     }
 
     print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
+}
+
+fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
+    let summary = report.summary;
+    let kind = if summary.managed {
+        "managed"
+    } else {
+        "external"
+    };
+    let mut fields = vec![
+        (
+            "Current".to_string(),
+            if summary.active { "Yes" } else { "No" }.to_string(),
+        ),
+        ("Kind".to_string(), kind.to_string()),
+        (
+            "Provider".to_string(),
+            summary.provider.display_name().to_string(),
+        ),
+        (
+            "Runtime route".to_string(),
+            summary
+                .provider
+                .capabilities()
+                .runtime_route_policy
+                .label()
+                .to_string(),
+        ),
+        (
+            "Quota shape".to_string(),
+            summary
+                .provider
+                .capabilities()
+                .quota_shape
+                .label()
+                .to_string(),
+        ),
+        ("Auth".to_string(), summary.auth.label),
+        (
+            "Identity".to_string(),
+            summary.email.as_deref().unwrap_or("-").to_string(),
+        ),
+        ("Path".to_string(), summary.codex_home.display().to_string()),
+        (
+            "Exists".to_string(),
+            if summary.codex_home.exists() {
+                "Yes"
+            } else {
+                "No"
+            }
+            .to_string(),
+        ),
+    ];
+    if let Some(quota) = report.quota {
+        append_doctor_quota_fields(&mut fields, quota);
+    }
+    DoctorPanel {
+        title: format!("Profile {}", summary.name),
+        fields,
+    }
+}
+
+fn append_doctor_quota_fields(
+    fields: &mut Vec<(String, String)>,
+    quota: std::result::Result<ProviderQuotaSnapshot, String>,
+) {
+    match quota {
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
+            let blocked = collect_blocked_limits(&usage, false);
+            fields.push((
+                "Quota".to_string(),
+                if blocked.is_empty() {
+                    "Ready".to_string()
+                } else {
+                    format!("Blocked ({})", format_blocked_limits(&blocked))
+                },
+            ));
+            fields.push(("Main".to_string(), format_main_windows(&usage)));
+        }
+        Ok(ProviderQuotaSnapshot::Copilot(info)) => {
+            fields.push(("Quota".to_string(), format_copilot_quota_status(&info)));
+            fields.push(("Main".to_string(), format_copilot_main_quota(&info)));
+            if let Some(reset) = format_copilot_reset_summary(&info) {
+                fields.push(("Reset".to_string(), reset));
+            }
+        }
+        Ok(ProviderQuotaSnapshot::Gemini(info)) => {
+            fields.push(("Quota".to_string(), format_gemini_quota_status(&info)));
+            fields.push(("Main".to_string(), format_gemini_main_quota(&info)));
+            if let Some(reset) = format_gemini_reset_summary(&info) {
+                fields.push(("Reset".to_string(), reset));
+            }
+        }
+        Ok(ProviderQuotaSnapshot::External(info)) => {
+            fields.push(("Quota".to_string(), info.status));
+            fields.push(("Main".to_string(), info.main));
+            if let Some(reset) = info.reset {
+                fields.push(("Reset".to_string(), reset));
+            }
+        }
+        Err(err) => fields.push(("Quota".to_string(), doctor_quota_error_summary(&err))),
+    }
 }
 
 fn doctor_quota_reports_json_value(state: &AppState) -> serde_json::Value {

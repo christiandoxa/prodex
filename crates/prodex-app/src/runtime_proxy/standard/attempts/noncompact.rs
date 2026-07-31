@@ -83,220 +83,300 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                     err,
                 );
             })?;
-        if runtime_wham_usage_path(&request.path_and_query) {
-            let status = response.status().as_u16();
-            let parts = await_runtime_proxy_async_task(
+        if let Some(attempt) = handle_runtime_noncompact_response(
+            RuntimeNoncompactResponseContext {
+                request_id,
+                request,
                 shared,
-                "standard_buffer_usage_response",
-                buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-            )
+                profile_name,
+                request_session_id: request_session_id.as_deref(),
+                recovery_steps: &mut recovery_steps,
+            },
+            response,
+        )? {
+            return Ok(attempt);
+        }
+    }
+}
+
+struct RuntimeNoncompactResponseContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: &'a str,
+    request_session_id: Option<&'a str>,
+    recovery_steps: &'a mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+}
+
+fn handle_runtime_noncompact_response(
+    context: RuntimeNoncompactResponseContext<'_>,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
+    let RuntimeNoncompactResponseContext {
+        request_id,
+        request,
+        shared,
+        profile_name,
+        request_session_id,
+        recovery_steps,
+    } = context;
+    if runtime_wham_usage_path(&request.path_and_query) {
+        let status = response.status().as_u16();
+        let parts = buffer_runtime_noncompact_response(
+            shared,
+            profile_name,
+            "standard_buffer_usage_response",
+            response,
+        )?;
+        if runtime_noncompact_should_recover_auth(
+            request_id,
+            shared,
+            profile_name,
+            status,
+            recovery_steps,
+        ) {
+            return Ok(None);
+        }
+        return handle_runtime_noncompact_usage_parts(
+            request_id,
+            shared,
+            profile_name,
+            request_session_id,
+            status,
+            parts,
+        )
+        .map(Some);
+    }
+    if response.status().is_success() {
+        remember_runtime_session_id(
+            shared,
+            profile_name,
+            request_session_id,
+            RuntimeRouteKind::Standard,
+        )?;
+        let response = forward_runtime_standard_success_response(shared, request, response)
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
-                    "standard_buffer_usage_response",
+                    "standard_forward_response",
                     err,
                 );
             })?;
-            if status == 401
-                && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                    request_id,
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    &mut recovery_steps,
-                )
-            {
-                continue;
-            }
-            if status == 401 {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    status,
-                );
-                return Ok(RuntimeStandardAttempt::AuthFailed {
-                    profile_name: profile_name.to_string(),
-                    response: build_runtime_proxy_response_from_parts(parts),
-                });
-            }
-            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
-                status,
-                &parts.body,
-                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-            );
-            if error_policy.may_retry_or_rotate() {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http standard_usage_retryable_failure profile={profile_name} status={status} rule={} message={}",
-                        error_policy.rule.unwrap_or("-"),
-                        error_policy.message.as_deref().unwrap_or("-"),
-                    ),
-                );
-                return Ok(RuntimeStandardAttempt::RetryableFailure {
-                    profile_name: profile_name.to_string(),
-                    response: build_runtime_proxy_response_from_parts(parts),
-                    overload: error_policy.action
-                        == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile,
-                });
-            }
-            if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
-                update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
-            }
-            remember_runtime_session_id(
-                shared,
-                profile_name,
-                request_session_id.as_deref(),
-                RuntimeRouteKind::Standard,
-            )?;
-            if matches!(status, 401 | 403)
-                || runtime_proxy_body_indicates_token_invalidated(&parts.body)
-            {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    status,
-                );
-            }
-            return Ok(RuntimeStandardAttempt::Success {
-                profile_name: profile_name.to_string(),
-                response: build_runtime_proxy_response_from_parts(parts),
-            });
-        }
-        if response.status().is_success() {
-            remember_runtime_session_id(
-                shared,
-                profile_name,
-                request_session_id.as_deref(),
-                RuntimeRouteKind::Standard,
-            )?;
-            let response = forward_runtime_standard_success_response(shared, request, response)
-                .inspect_err(|err| {
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Standard,
-                        "standard_forward_response",
-                        err,
-                    );
-                })?;
-            return Ok(RuntimeStandardAttempt::Success {
-                profile_name: profile_name.to_string(),
-                response,
-            });
-        }
+        return Ok(Some(RuntimeStandardAttempt::Success {
+            profile_name: profile_name.to_string(),
+            response,
+        }));
+    }
 
-        let status = response.status().as_u16();
-        let parts = await_runtime_proxy_async_task(
-            shared,
-            "standard_buffer_response",
-            buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-        )
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Standard,
-                "standard_buffer_response",
-                err,
-            );
-        })?;
-        if status == 401
-            && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                request_id,
-                shared,
-                profile_name,
-                RuntimeRouteKind::Standard,
-                &mut recovery_steps,
-            )
-        {
-            continue;
-        }
-        let error_policy = runtime_proxy_crate::runtime_http_error_policy(
-            status,
-            &parts.body,
-            runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-        );
-        let retryable_quota =
-            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
-        let retryable_overload =
-            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
-        let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
-        if matches!(status, 402 | 403 | 429) && !retryable_quota {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http standard_quota_unclassified profile={profile_name} status={status} body_snippet={}",
-                    runtime_proxy_body_snippet(&parts.body, 240),
-                ),
-            );
-        }
-        let previous_response_not_found =
-            extract_runtime_proxy_previous_response_message(&parts.body).is_some();
-        let response = build_runtime_proxy_response_from_parts(
-            runtime_proxy_translate_previous_response_http_parts(parts),
-        );
+    let status = response.status().as_u16();
+    let parts = buffer_runtime_noncompact_response(
+        shared,
+        profile_name,
+        "standard_buffer_response",
+        response,
+    )?;
+    if runtime_noncompact_should_recover_auth(
+        request_id,
+        shared,
+        profile_name,
+        status,
+        recovery_steps,
+    ) {
+        return Ok(None);
+    }
+    handle_runtime_noncompact_error_parts(
+        request_id,
+        shared,
+        profile_name,
+        request_session_id,
+        status,
+        parts,
+    )
+    .map(Some)
+}
 
-        if previous_response_not_found {
-            runtime_proxy_record_continuity_failure_reason(
-                shared,
-                "stale_continuation",
-                "previous_response_not_found",
-            );
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http stale_continuation reason=previous_response_not_found route=standard profile={profile_name}"
-                ),
-            );
-            return Ok(RuntimeStandardAttempt::StaleContinuation { response });
-        }
-
-        if status == 401 {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Standard,
-                status,
-            );
-            return Ok(RuntimeStandardAttempt::AuthFailed {
-                profile_name: profile_name.to_string(),
-                response,
-            });
-        }
-
-        if retryable_quota || retryable_overload {
-            return Ok(RuntimeStandardAttempt::RetryableFailure {
-                profile_name: profile_name.to_string(),
-                response,
-                overload: retryable_overload,
-            });
-        }
-
-        if matches!(status, 401 | 403) || token_invalidated {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Standard,
-                status,
-            );
-        }
-
-        remember_runtime_session_id(
+fn buffer_runtime_noncompact_response(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    stage: &'static str,
+    response: reqwest::Response,
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    await_runtime_proxy_async_task(
+        shared,
+        stage,
+        buffer_runtime_proxy_async_response_parts(response, Vec::new()),
+    )
+    .inspect_err(|err| {
+        note_runtime_profile_transport_failure(
             shared,
             profile_name,
-            request_session_id.as_deref(),
             RuntimeRouteKind::Standard,
-        )?;
-        return Ok(RuntimeStandardAttempt::Success {
+            stage,
+            err,
+        );
+    })
+}
+
+fn runtime_noncompact_should_recover_auth(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    status: u16,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+) -> bool {
+    status == 401
+        && runtime_try_recover_profile_auth_from_unauthorized_steps(
+            request_id,
+            shared,
+            profile_name,
+            RuntimeRouteKind::Standard,
+            recovery_steps,
+        )
+}
+
+fn handle_runtime_noncompact_usage_parts(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    status: u16,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> Result<RuntimeStandardAttempt> {
+    if status == 401 {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
+        return Ok(RuntimeStandardAttempt::AuthFailed {
+            profile_name: profile_name.to_string(),
+            response: build_runtime_proxy_response_from_parts(parts),
+        });
+    }
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        &parts.body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    if error_policy.may_retry_or_rotate() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http standard_usage_retryable_failure profile={profile_name} status={status} rule={} message={}",
+                error_policy.rule.unwrap_or("-"),
+                error_policy.message.as_deref().unwrap_or("-"),
+            ),
+        );
+        return Ok(RuntimeStandardAttempt::RetryableFailure {
+            profile_name: profile_name.to_string(),
+            response: build_runtime_proxy_response_from_parts(parts),
+            overload: error_policy.action
+                == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile,
+        });
+    }
+    if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
+        update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
+    }
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id,
+        RuntimeRouteKind::Standard,
+    )?;
+    if matches!(status, 401 | 403) || runtime_proxy_body_indicates_token_invalidated(&parts.body) {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
+    }
+    Ok(RuntimeStandardAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response: build_runtime_proxy_response_from_parts(parts),
+    })
+}
+
+fn handle_runtime_noncompact_error_parts(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    status: u16,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> Result<RuntimeStandardAttempt> {
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        &parts.body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    let retryable_quota =
+        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
+    let retryable_overload =
+        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
+    if matches!(status, 402 | 403 | 429) && !retryable_quota {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http standard_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                runtime_proxy_body_snippet(&parts.body, 240),
+            ),
+        );
+    }
+    let previous_response_not_found =
+        extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+    let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
+    let response = build_runtime_proxy_response_from_parts(
+        runtime_proxy_translate_previous_response_http_parts(parts),
+    );
+    if previous_response_not_found {
+        return Ok(runtime_noncompact_stale_continuation_response(
+            request_id,
+            shared,
+            profile_name,
+            response,
+        ));
+    }
+    if status == 401 {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
+        return Ok(RuntimeStandardAttempt::AuthFailed {
             profile_name: profile_name.to_string(),
             response,
         });
     }
+    if retryable_quota || retryable_overload {
+        return Ok(RuntimeStandardAttempt::RetryableFailure {
+            profile_name: profile_name.to_string(),
+            response,
+            overload: retryable_overload,
+        });
+    }
+    if matches!(status, 401 | 403) || token_invalidated {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
+    }
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id,
+        RuntimeRouteKind::Standard,
+    )?;
+    Ok(RuntimeStandardAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response,
+    })
+}
+
+fn runtime_noncompact_stale_continuation_response(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    response: tiny_http::ResponseBox,
+) -> RuntimeStandardAttempt {
+    runtime_proxy_record_continuity_failure_reason(
+        shared,
+        "stale_continuation",
+        "previous_response_not_found",
+    );
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http stale_continuation reason=previous_response_not_found route=standard profile={profile_name}"
+        ),
+    );
+    RuntimeStandardAttempt::StaleContinuation { response }
 }
 
 fn runtime_wham_usage_path(path_and_query: &str) -> bool {

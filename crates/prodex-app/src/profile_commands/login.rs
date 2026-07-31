@@ -528,30 +528,11 @@ fn login_request_for_method(
     has_selected_profile: bool,
 ) -> Result<LoginRequest> {
     match method {
-        LoginMethod::ChatGpt => {
-            if openai_base_url_specified {
-                bail!("--base-url is only supported for API key login");
-            }
-            Ok(LoginRequest {
-                method,
-                codex_args: Vec::new(),
-                api_key: None,
-                openai_base_url: None,
-                openai_base_url_specified: false,
-                api_key_profile_name: None,
-            })
-        }
+        LoginMethod::ChatGpt => login_request_without_base_url(method, openai_base_url_specified),
         LoginMethod::DeviceCode => {
-            if openai_base_url_specified {
-                bail!("--base-url is only supported for API key login");
-            }
-            Ok(LoginRequest {
-                method,
-                codex_args: vec![OsString::from("--device-auth")],
-                api_key: None,
-                openai_base_url: None,
-                openai_base_url_specified: false,
-                api_key_profile_name: None,
+            login_request_without_base_url(method, openai_base_url_specified).map(|mut request| {
+                request.codex_args.push(OsString::from("--device-auth"));
+                request
             })
         }
         LoginMethod::ApiKey => {
@@ -575,53 +556,37 @@ fn login_request_for_method(
                 api_key_profile_name,
             })
         }
-        LoginMethod::Google => {
-            if openai_base_url_specified {
-                bail!("--base-url is only supported for API key login");
-            }
-            Ok(LoginRequest {
-                method,
-                codex_args: Vec::new(),
-                api_key: None,
-                openai_base_url: None,
-                openai_base_url_specified: false,
-                api_key_profile_name: None,
-            })
-        }
-        LoginMethod::Claude => {
-            if openai_base_url_specified {
-                bail!("--base-url is only supported for API key login");
-            }
-            Ok(LoginRequest {
-                method,
-                codex_args: Vec::new(),
-                api_key: None,
-                openai_base_url: None,
-                openai_base_url_specified: false,
-                api_key_profile_name: None,
-            })
+        LoginMethod::Google | LoginMethod::Claude => {
+            login_request_without_base_url(method, openai_base_url_specified)
         }
         LoginMethod::Antigravity => {
             if openai_base_url_specified {
                 bail!("--base-url is not supported for Antigravity login");
             }
-            Ok(LoginRequest {
-                method,
-                codex_args: Vec::new(),
-                api_key: None,
-                openai_base_url: None,
-                openai_base_url_specified: false,
-                api_key_profile_name: None,
-            })
+            Ok(empty_login_request(method))
         }
-        LoginMethod::AccessToken | LoginMethod::Status => Ok(LoginRequest {
-            method,
-            codex_args: Vec::new(),
-            api_key: None,
-            openai_base_url: None,
-            openai_base_url_specified: false,
-            api_key_profile_name: None,
-        }),
+        LoginMethod::AccessToken | LoginMethod::Status => Ok(empty_login_request(method)),
+    }
+}
+
+fn login_request_without_base_url(
+    method: LoginMethod,
+    base_url_specified: bool,
+) -> Result<LoginRequest> {
+    if base_url_specified {
+        bail!("--base-url is only supported for API key login");
+    }
+    Ok(empty_login_request(method))
+}
+
+fn empty_login_request(method: LoginMethod) -> LoginRequest {
+    LoginRequest {
+        method,
+        codex_args: Vec::new(),
+        api_key: None,
+        openai_base_url: None,
+        openai_base_url_specified: false,
+        api_key_profile_name: None,
     }
 }
 
@@ -715,85 +680,116 @@ fn prompt_login_text_tui(
     let mut tui = LoginTextPromptTui::stderr("login input TUI")?;
     let mut input = String::new();
     loop {
-        tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(5),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled(title.to_string(), tui_title_style()),
-                Span::raw("  "),
-                Span::styled(label.to_string(), tui_secondary_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-
-            let display_value = if secret {
-                "*".repeat(input.chars().count())
-            } else if input.is_empty() {
-                default_value.unwrap_or("").to_string()
-            } else {
-                input.clone()
-            };
-            let value_style = if input.is_empty() && default_value.is_some() && !secret {
-                tui_secondary_style()
-            } else {
-                tui_primary_style()
-            };
-            let body = Paragraph::new(vec![
-                Line::from(Span::styled(
-                    label.to_string(),
-                    tui_primary_style().add_modifier(Modifier::BOLD),
-                )),
-                Line::raw(""),
-                Line::from(Span::styled(detail.to_string(), tui_secondary_style())),
-                Line::raw(""),
-                Line::from(vec![
-                    Span::styled("> ", tui_hint_style()),
-                    Span::styled(display_value, value_style),
-                    Span::styled("_", tui_hint_style()),
-                ]),
-            ])
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(tui_border_style()),
-            )
-            .wrap(Wrap { trim: false });
-            frame.render_widget(body, chunks[1]);
-
-            let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", tui_hint_style()),
-                Span::raw(" accept  "),
-                Span::styled("backspace", tui_hint_style()),
-                Span::raw(" delete  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(" cancel"),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
-        })?;
-
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            match key.code {
-                KeyCode::Enter => return Ok(input),
-                KeyCode::Esc => bail!("login input cancelled"),
-                KeyCode::Backspace => {
-                    input.pop();
-                }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    bail!("login input cancelled");
-                }
-                KeyCode::Char(ch) => input.push(ch),
-                _ => {}
-            }
+        draw_login_text_prompt(
+            &mut tui,
+            title,
+            label,
+            detail,
+            default_value,
+            secret,
+            &input,
+        )?;
+        if let Some(value) = read_login_text_input(&mut input)? {
+            return Ok(value);
         }
+    }
+}
+
+fn draw_login_text_prompt(
+    tui: &mut LoginTextPromptTui,
+    title: &str,
+    label: &str,
+    detail: &str,
+    default_value: Option<&str>,
+    secret: bool,
+    input: &str,
+) -> Result<()> {
+    tui.terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(5),
+                Constraint::Length(3),
+            ])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(title.to_string(), tui_title_style()),
+            Span::raw("  "),
+            Span::styled(label.to_string(), tui_secondary_style()),
+        ]))
+        .block(tui_connected_header_block(tui_border_style()));
+        frame.render_widget(header, chunks[0]);
+
+        let display_value = if secret {
+            "*".repeat(input.chars().count())
+        } else if input.is_empty() {
+            default_value.unwrap_or("").to_string()
+        } else {
+            input.to_string()
+        };
+        let value_style = if input.is_empty() && default_value.is_some() && !secret {
+            tui_secondary_style()
+        } else {
+            tui_primary_style()
+        };
+        let body = Paragraph::new(vec![
+            Line::from(Span::styled(
+                label.to_string(),
+                tui_primary_style().add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(detail.to_string(), tui_secondary_style())),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("> ", tui_hint_style()),
+                Span::styled(display_value, value_style),
+                Span::styled("_", tui_hint_style()),
+            ]),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(tui_border_style()),
+        )
+        .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled("enter", tui_hint_style()),
+            Span::raw(" accept  "),
+            Span::styled("backspace", tui_hint_style()),
+            Span::raw(" delete  "),
+            Span::styled("esc", tui_hint_style()),
+            Span::raw(" cancel"),
+        ]))
+        .block(tui_connected_footer_block(tui_border_style()));
+        frame.render_widget(footer, chunks[2]);
+    })?;
+    Ok(())
+}
+
+fn read_login_text_input(input: &mut String) -> Result<Option<String>> {
+    let Event::Key(key) = event::read()? else {
+        return Ok(None);
+    };
+    if key.kind != KeyEventKind::Press {
+        return Ok(None);
+    }
+    match key.code {
+        KeyCode::Enter => Ok(Some(std::mem::take(input))),
+        KeyCode::Esc => bail!("login input cancelled"),
+        KeyCode::Backspace => {
+            input.pop();
+            Ok(None)
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            bail!("login input cancelled")
+        }
+        KeyCode::Char(ch) => {
+            input.push(ch);
+            Ok(None)
+        }
+        _ => Ok(None),
     }
 }
 

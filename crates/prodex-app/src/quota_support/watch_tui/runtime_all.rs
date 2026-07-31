@@ -166,61 +166,30 @@ fn watch_all_quotas_tui(
     let mut next_auth_backoff_poll_at = Instant::now();
 
     loop {
-        if Instant::now() >= next_auth_backoff_poll_at {
-            let next_auth_backoff_profiles = quota_runtime_auth_backoff_profiles();
-            if next_auth_backoff_profiles != auth_backoff_profiles {
-                auth_backoff_profiles = next_auth_backoff_profiles;
-                redraw_needed = true;
-            }
-            next_auth_backoff_poll_at =
-                Instant::now() + Duration::from_secs(ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS);
-        }
-
-        if let Some(next_snapshot) = refresh.take_latest() {
-            snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
-            redraw_needed = true;
-            next_refresh_at = Some(all_quota_watch_next_refresh_at(
-                paths,
-                &snapshot,
-                detail,
-                &auth_filter,
-                collection_provider_filter,
-            ));
-        }
+        poll_all_quota_watch_tui_state(AllQuotaWatchPollContext {
+            refresh: &mut refresh,
+            snapshot: &mut snapshot,
+            next_refresh_at: &mut next_refresh_at,
+            redraw_needed: &mut redraw_needed,
+            auth_backoff_profiles: &mut auth_backoff_profiles,
+            next_auth_backoff_poll_at: &mut next_auth_backoff_poll_at,
+            paths,
+            detail,
+            auth_filter: &auth_filter,
+            collection_provider_filter,
+        });
 
         if redraw_needed {
-            let size = tui
-                .terminal
-                .size()
-                .context("failed to read quota TUI terminal size")?;
-            let render_snapshot =
-                quota_watch_snapshot_with_auth_backoff(&snapshot, &auth_backoff_profiles);
-            let max_lines = quota_watch_tui_table_lines(
-                size.height,
-                quota_watch_snapshot_overview_field_count(&render_snapshot, provider_filter),
-            );
-            scroll_offset = scroll_offset.min(quota_watch_tui_max_scroll_offset_for_snapshot(
-                &render_snapshot,
+            draw_all_quota_watch_tui(AllQuotaWatchDrawContext {
+                tui: &mut tui,
+                snapshot: &snapshot,
+                auth_backoff_profiles: &auth_backoff_profiles,
+                scroll_offset: &mut scroll_offset,
                 detail,
-                provider_filter,
                 sort,
-                max_lines,
-            ));
-            let frame = build_all_quota_watch_tui_frame(
-                &render_snapshot,
-                AllQuotaWatchLayout {
-                    detail,
-                    scroll_offset,
-                    sort,
-                    provider_filter,
-                    provider_filter_locked,
-                    total_width: usize::from(size.width).saturating_sub(4),
-                    max_lines,
-                },
-            );
-            tui.terminal
-                .draw(|area| render_all_quota_watch_tui(area, &frame))
-                .context("failed to draw quota TUI")?;
+                provider_filter,
+                provider_filter_locked,
+            })?;
             redraw_needed = false;
         }
 
@@ -237,89 +206,287 @@ fn watch_all_quotas_tui(
             continue;
         }
 
-        if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
-            .context("failed to poll quota TUI input")?
-        {
-            match event::read().context("failed to read quota TUI input")? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    let command = match key.code {
-                        _ if quota_watch_quit_key(key) => Some(QuotaWatchCommand::Quit),
-                        KeyCode::Char('j') | KeyCode::Down => Some(QuotaWatchCommand::Down),
-                        KeyCode::Char('k') | KeyCode::Up => Some(QuotaWatchCommand::Up),
-                        KeyCode::Char('s') => Some(QuotaWatchCommand::Sort),
-                        KeyCode::Char('f') => Some(QuotaWatchCommand::Filter),
-                        KeyCode::Char('u') | KeyCode::Char('U') => Some(QuotaWatchCommand::Update),
-                        _ => None,
-                    };
-                    let Some(command) = command else {
-                        continue;
-                    };
-                    match apply_quota_watch_command(
-                        command,
-                        scroll_offset,
-                        quota_watch_tui_max_scroll_offset_for_snapshot(
-                            &snapshot,
-                            detail,
-                            provider_filter,
-                            sort,
-                            quota_watch_tui_table_lines(
-                                tui.terminal.size().map(|size| size.height).unwrap_or(24),
-                                quota_watch_snapshot_overview_field_count(
-                                    &snapshot,
-                                    provider_filter,
-                                ),
-                            ),
-                        ),
-                    ) {
-                        QuotaWatchCommandOutcome::Continue(next_offset) => {
-                            if next_offset != scroll_offset {
-                                scroll_offset = next_offset;
-                                redraw_needed = true;
-                            }
-                        }
-                        QuotaWatchCommandOutcome::Sort => {
-                            sort = sort.next();
-                            scroll_offset = 0;
-                            redraw_needed = true;
-                        }
-                        QuotaWatchCommandOutcome::Filter => {
-                            if !provider_filter_locked {
-                                provider_filter = provider_filter.next();
-                                collection_provider_filter = provider_filter;
-                                scroll_offset = 0;
-                                redraw_needed = true;
-                                if start_all_quota_watch_refresh(
-                                    &mut refresh,
-                                    paths,
-                                    base_url,
-                                    &auth_filter,
-                                    collection_provider_filter,
-                                ) {
-                                    next_refresh_at = None;
-                                }
-                            }
-                        }
-                        QuotaWatchCommandOutcome::Update => {
-                            if start_all_quota_watch_refresh(
-                                &mut refresh,
-                                paths,
-                                base_url,
-                                &auth_filter,
-                                collection_provider_filter,
-                            ) {
-                                next_refresh_at = None;
-                            }
-                        }
-                        QuotaWatchCommandOutcome::Quit => return Ok(()),
-                    }
-                }
-                Event::Resize(_, _) => {
-                    redraw_needed = true;
-                }
-                _ => {}
-            }
+        if handle_all_quota_watch_tui_input(AllQuotaWatchInputContext {
+            tui: &mut tui,
+            snapshot: &snapshot,
+            refresh: &mut refresh,
+            next_refresh_at: &mut next_refresh_at,
+            scroll_offset: &mut scroll_offset,
+            sort: &mut sort,
+            provider_filter: &mut provider_filter,
+            collection_provider_filter: &mut collection_provider_filter,
+            redraw_needed: &mut redraw_needed,
+            paths,
+            base_url,
+            auth_filter: &auth_filter,
+            detail,
+            provider_filter_locked,
+        })? {
+            return Ok(());
         }
     }
+}
+
+struct AllQuotaWatchPollContext<'a> {
+    refresh: &'a mut AllQuotaWatchRefresh,
+    snapshot: &'a mut AllQuotaWatchSnapshot,
+    next_refresh_at: &'a mut Option<Instant>,
+    redraw_needed: &'a mut bool,
+    auth_backoff_profiles: &'a mut std::collections::BTreeSet<String>,
+    next_auth_backoff_poll_at: &'a mut Instant,
+    paths: &'a AppPaths,
+    detail: bool,
+    auth_filter: &'a QuotaAuthFilter,
+    collection_provider_filter: QuotaProviderFilter,
+}
+
+fn poll_all_quota_watch_tui_state(context: AllQuotaWatchPollContext<'_>) {
+    let AllQuotaWatchPollContext {
+        refresh,
+        snapshot,
+        next_refresh_at,
+        redraw_needed,
+        auth_backoff_profiles,
+        next_auth_backoff_poll_at,
+        paths,
+        detail,
+        auth_filter,
+        collection_provider_filter,
+    } = context;
+    if Instant::now() >= *next_auth_backoff_poll_at {
+        let next_profiles = quota_runtime_auth_backoff_profiles();
+        if next_profiles != *auth_backoff_profiles {
+            *auth_backoff_profiles = next_profiles;
+            *redraw_needed = true;
+        }
+        *next_auth_backoff_poll_at =
+            Instant::now() + Duration::from_secs(ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS);
+    }
+    if let Some(next_snapshot) = refresh.take_latest() {
+        *snapshot = merge_all_quota_watch_snapshot(snapshot, next_snapshot);
+        *redraw_needed = true;
+        *next_refresh_at = Some(all_quota_watch_next_refresh_at(
+            paths,
+            snapshot,
+            detail,
+            auth_filter,
+            collection_provider_filter,
+        ));
+    }
+}
+
+struct AllQuotaWatchDrawContext<'a> {
+    tui: &'a mut QuotaWatchTui,
+    snapshot: &'a AllQuotaWatchSnapshot,
+    auth_backoff_profiles: &'a std::collections::BTreeSet<String>,
+    scroll_offset: &'a mut usize,
+    detail: bool,
+    sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+}
+
+fn draw_all_quota_watch_tui(context: AllQuotaWatchDrawContext<'_>) -> Result<()> {
+    let AllQuotaWatchDrawContext {
+        tui,
+        snapshot,
+        auth_backoff_profiles,
+        scroll_offset,
+        detail,
+        sort,
+        provider_filter,
+        provider_filter_locked,
+    } = context;
+    let size = tui
+        .terminal
+        .size()
+        .context("failed to read quota TUI terminal size")?;
+    let render_snapshot = quota_watch_snapshot_with_auth_backoff(snapshot, auth_backoff_profiles);
+    let max_lines = quota_watch_tui_table_lines(
+        size.height,
+        quota_watch_snapshot_overview_field_count(&render_snapshot, provider_filter),
+    );
+    *scroll_offset = (*scroll_offset).min(quota_watch_tui_max_scroll_offset_for_snapshot(
+        &render_snapshot,
+        detail,
+        provider_filter,
+        sort,
+        max_lines,
+    ));
+    let frame = build_all_quota_watch_tui_frame(
+        &render_snapshot,
+        AllQuotaWatchLayout {
+            detail,
+            scroll_offset: *scroll_offset,
+            sort,
+            provider_filter,
+            provider_filter_locked,
+            total_width: usize::from(size.width).saturating_sub(4),
+            max_lines,
+        },
+    );
+    tui.terminal
+        .draw(|area| render_all_quota_watch_tui(area, &frame))
+        .context("failed to draw quota TUI")?;
+    Ok(())
+}
+
+struct AllQuotaWatchInputContext<'a> {
+    tui: &'a mut QuotaWatchTui,
+    snapshot: &'a AllQuotaWatchSnapshot,
+    refresh: &'a mut AllQuotaWatchRefresh,
+    next_refresh_at: &'a mut Option<Instant>,
+    scroll_offset: &'a mut usize,
+    sort: &'a mut QuotaReportSort,
+    provider_filter: &'a mut QuotaProviderFilter,
+    collection_provider_filter: &'a mut QuotaProviderFilter,
+    redraw_needed: &'a mut bool,
+    paths: &'a AppPaths,
+    base_url: Option<&'a str>,
+    auth_filter: &'a QuotaAuthFilter,
+    detail: bool,
+    provider_filter_locked: bool,
+}
+
+fn handle_all_quota_watch_tui_input(context: AllQuotaWatchInputContext<'_>) -> Result<bool> {
+    let AllQuotaWatchInputContext {
+        tui,
+        snapshot,
+        refresh,
+        next_refresh_at,
+        scroll_offset,
+        sort,
+        provider_filter,
+        collection_provider_filter,
+        redraw_needed,
+        paths,
+        base_url,
+        auth_filter,
+        detail,
+        provider_filter_locked,
+    } = context;
+    if !event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
+        .context("failed to poll quota TUI input")?
+    {
+        return Ok(false);
+    }
+    match event::read().context("failed to read quota TUI input")? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            let Some(command) = quota_watch_command(key) else {
+                return Ok(false);
+            };
+            apply_all_quota_watch_command(
+                command,
+                AllQuotaWatchInputContext {
+                    tui,
+                    snapshot,
+                    refresh,
+                    next_refresh_at,
+                    scroll_offset,
+                    sort,
+                    provider_filter,
+                    collection_provider_filter,
+                    redraw_needed,
+                    paths,
+                    base_url,
+                    auth_filter,
+                    detail,
+                    provider_filter_locked,
+                },
+            )
+        }
+        Event::Resize(_, _) => {
+            *redraw_needed = true;
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn quota_watch_command(key: crossterm::event::KeyEvent) -> Option<QuotaWatchCommand> {
+    match key.code {
+        _ if quota_watch_quit_key(key) => Some(QuotaWatchCommand::Quit),
+        KeyCode::Char('j') | KeyCode::Down => Some(QuotaWatchCommand::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(QuotaWatchCommand::Up),
+        KeyCode::Char('s') => Some(QuotaWatchCommand::Sort),
+        KeyCode::Char('f') => Some(QuotaWatchCommand::Filter),
+        KeyCode::Char('u') | KeyCode::Char('U') => Some(QuotaWatchCommand::Update),
+        _ => None,
+    }
+}
+
+fn apply_all_quota_watch_command(
+    command: QuotaWatchCommand,
+    context: AllQuotaWatchInputContext<'_>,
+) -> Result<bool> {
+    let AllQuotaWatchInputContext {
+        tui,
+        snapshot,
+        refresh,
+        next_refresh_at,
+        scroll_offset,
+        sort,
+        provider_filter,
+        collection_provider_filter,
+        redraw_needed,
+        paths,
+        base_url,
+        auth_filter,
+        detail,
+        provider_filter_locked,
+    } = context;
+    let max_offset = quota_watch_tui_max_scroll_offset_for_snapshot(
+        snapshot,
+        detail,
+        *provider_filter,
+        *sort,
+        quota_watch_tui_table_lines(
+            tui.terminal.size().map(|size| size.height).unwrap_or(24),
+            quota_watch_snapshot_overview_field_count(snapshot, *provider_filter),
+        ),
+    );
+    match apply_quota_watch_command(command, *scroll_offset, max_offset) {
+        QuotaWatchCommandOutcome::Continue(next_offset) => {
+            if next_offset != *scroll_offset {
+                *scroll_offset = next_offset;
+                *redraw_needed = true;
+            }
+        }
+        QuotaWatchCommandOutcome::Sort => {
+            *sort = sort.next();
+            *scroll_offset = 0;
+            *redraw_needed = true;
+        }
+        QuotaWatchCommandOutcome::Filter if !provider_filter_locked => {
+            *provider_filter = provider_filter.next();
+            *collection_provider_filter = *provider_filter;
+            *scroll_offset = 0;
+            *redraw_needed = true;
+            if start_all_quota_watch_refresh(
+                refresh,
+                paths,
+                base_url,
+                auth_filter,
+                *collection_provider_filter,
+            ) {
+                *next_refresh_at = None;
+            }
+        }
+        QuotaWatchCommandOutcome::Update => {
+            if start_all_quota_watch_refresh(
+                refresh,
+                paths,
+                base_url,
+                auth_filter,
+                *collection_provider_filter,
+            ) {
+                *next_refresh_at = None;
+            }
+        }
+        QuotaWatchCommandOutcome::Quit => return Ok(true),
+        QuotaWatchCommandOutcome::Filter => {}
+    }
+    Ok(false)
 }
 
 pub(crate) fn render_all_quota_reports_once_tui(

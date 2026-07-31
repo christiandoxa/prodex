@@ -58,26 +58,26 @@ fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
     if runtime_smart_context_value_is_static_context_item(value) {
         return;
     }
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, item) in object {
-                if runtime_smart_context_static_prompt_field_key(key) {
-                    continue;
-                }
-                runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
-                    item, aliases, refs,
-                );
+    if let Some(object) = value.as_object() {
+        for (key, item) in object {
+            if runtime_smart_context_static_prompt_field_key(key) {
+                continue;
             }
+            runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
+                item, aliases, refs,
+            );
         }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
-                    item, aliases, refs,
-                );
-            }
-        }
-        _ => runtime_smart_context_collect_artifact_refs_from_value(value, aliases, refs),
+        return;
     }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
+                item, aliases, refs,
+            );
+        }
+        return;
+    }
+    runtime_smart_context_collect_artifact_refs_from_value(value, aliases, refs);
 }
 
 fn runtime_smart_context_collect_artifact_refs_from_value(
@@ -85,32 +85,35 @@ fn runtime_smart_context_collect_artifact_refs_from_value(
     aliases: &BTreeMap<String, String>,
     refs: &mut BTreeSet<RuntimeSmartContextArtifactReference>,
 ) {
-    match value {
-        serde_json::Value::String(text)
-            if text.contains("prodex-artifact:")
-                || text.contains(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX)
-                || text.contains("psc2:")
-                || text.contains('@')
-                || text.contains("prodex smart context artifact")
-                || text.contains("prodex-sc ") =>
-        {
+    if let Some(text) = value.as_str() {
+        if runtime_smart_context_may_contain_artifact_ref(text) {
             for reference in runtime_smart_context_artifact_ref_occurrences_from_text(text, aliases)
             {
                 refs.insert(reference);
             }
         }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_smart_context_collect_artifact_refs_from_value(item, aliases, refs);
-            }
-        }
-        serde_json::Value::Object(object) => {
-            for item in object.values() {
-                runtime_smart_context_collect_artifact_refs_from_value(item, aliases, refs);
-            }
-        }
-        _ => {}
+        return;
     }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            runtime_smart_context_collect_artifact_refs_from_value(item, aliases, refs);
+        }
+        return;
+    }
+    if let Some(object) = value.as_object() {
+        for item in object.values() {
+            runtime_smart_context_collect_artifact_refs_from_value(item, aliases, refs);
+        }
+    }
+}
+
+fn runtime_smart_context_may_contain_artifact_ref(text: &str) -> bool {
+    text.contains("prodex-artifact:")
+        || text.contains(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX)
+        || text.contains("psc2:")
+        || text.contains('@')
+        || text.contains("prodex smart context artifact")
+        || text.contains("prodex-sc ")
 }
 
 pub(super) fn runtime_smart_context_collect_artifact_aliases(
@@ -125,25 +128,26 @@ fn runtime_smart_context_collect_artifact_aliases_from_value(
     value: &serde_json::Value,
     aliases: &mut BTreeMap<String, String>,
 ) {
-    match value {
-        serde_json::Value::String(text) if text.contains('@') && text.contains('=') => {
+    if let Some(text) = value.as_str() {
+        if text.contains('@') && text.contains('=') {
             for token in runtime_smart_context_artifact_ref_tokens(text) {
                 if let Some((alias, id)) = runtime_smart_context_parse_artifact_alias(token) {
                     aliases.entry(alias).or_insert(id);
                 }
             }
         }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_smart_context_collect_artifact_aliases_from_value(item, aliases);
-            }
+        return;
+    }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            runtime_smart_context_collect_artifact_aliases_from_value(item, aliases);
         }
-        serde_json::Value::Object(object) => {
-            for item in object.values() {
-                runtime_smart_context_collect_artifact_aliases_from_value(item, aliases);
-            }
+        return;
+    }
+    if let Some(object) = value.as_object() {
+        for item in object.values() {
+            runtime_smart_context_collect_artifact_aliases_from_value(item, aliases);
         }
-        _ => {}
     }
 }
 
@@ -251,7 +255,24 @@ pub(super) fn runtime_smart_context_parse_non_alias_artifact_reference(
     token: &str,
 ) -> Option<RuntimeSmartContextArtifactReference> {
     let token = runtime_smart_context_trim_artifact_ref_token(token);
-    let raw = if let Some(raw) = token.strip_prefix("prodex-artifact:") {
+    let raw = runtime_smart_context_normalize_artifact_ref(token);
+    let raw = raw.as_ref();
+    let prefix_len = runtime_smart_context_artifact_prefix_len(raw)?;
+    let id_end = runtime_smart_context_artifact_id_end(raw, prefix_len)?;
+    let id = &raw[..id_end];
+    runtime_smart_context_artifact_id_valid(id).then_some(())?;
+
+    let line_ranges = runtime_smart_context_parse_line_ranges(&raw[id_end..]);
+    Some(RuntimeSmartContextArtifactReference {
+        id: id.to_string(),
+        marker: token.to_string(),
+        line_range: line_ranges.first().copied(),
+        line_ranges,
+    })
+}
+
+fn runtime_smart_context_normalize_artifact_ref<'a>(token: &'a str) -> Cow<'a, str> {
+    if let Some(raw) = token.strip_prefix("prodex-artifact:") {
         Cow::Borrowed(raw)
     } else if let Some(raw) = token.strip_prefix("psc2:") {
         Cow::Owned(format!("sc2:{raw}"))
@@ -263,39 +284,24 @@ pub(super) fn runtime_smart_context_parse_non_alias_artifact_reference(
         }
     } else {
         Cow::Borrowed(token)
-    };
-    let raw = raw.as_ref();
-    let prefix_len = if raw.starts_with("sc2:") {
-        4
-    } else if raw.starts_with("sc:") {
-        3
-    } else {
-        return None;
-    };
+    }
+}
 
-    let mut id_end = prefix_len;
-    for (offset, ch) in raw[prefix_len..].char_indices() {
-        if ch.is_ascii_hexdigit() {
-            id_end = prefix_len + offset + ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if id_end == prefix_len {
-        return None;
-    }
-    let id = &raw[..id_end];
-    if !runtime_smart_context_artifact_id_valid(id) {
-        return None;
-    }
+fn runtime_smart_context_artifact_prefix_len(raw: &str) -> Option<usize> {
+    raw.strip_prefix("sc2:")
+        .map(|_| 4)
+        .or_else(|| raw.strip_prefix("sc:").map(|_| 3))
+}
 
-    let line_ranges = runtime_smart_context_parse_line_ranges(&raw[id_end..]);
-    Some(RuntimeSmartContextArtifactReference {
-        id: id.to_string(),
-        marker: token.to_string(),
-        line_range: line_ranges.first().copied(),
-        line_ranges,
-    })
+fn runtime_smart_context_artifact_id_end(raw: &str, prefix_len: usize) -> Option<usize> {
+    let id_end = raw[prefix_len..]
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_hexdigit())
+        .last()
+        .map_or(prefix_len, |(offset, ch)| {
+            prefix_len + offset + ch.len_utf8()
+        });
+    (id_end > prefix_len).then_some(id_end)
 }
 
 fn runtime_smart_context_parse_line_ranges(suffix: &str) -> Vec<RuntimeSmartContextLineRange> {

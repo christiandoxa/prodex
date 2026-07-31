@@ -92,84 +92,11 @@ fn parse_agy_quota_json(
     value: serde_json::Value,
     preferred_account: Option<&str>,
 ) -> Result<ExternalQuotaInfo> {
-    // Handle both single object and array of objects
-    let accounts = if let Some(arr) = value.as_array() {
-        arr.clone()
-    } else {
-        vec![value]
-    };
-
-    let data = if let Some(preferred) = preferred_account {
-        accounts
-            .iter()
-            .find(|a| {
-                a.get("account").and_then(|v| v.as_str()) == Some(preferred)
-                    || a.get("email").and_then(|v| v.as_str()) == Some(preferred)
-            })
-            .or(accounts.first())
-            .context("no account found in agy output")?
-    } else {
-        accounts.first().context("no account found in agy output")?
-    };
-
-    let account = data
-        .get("account")
-        .or_else(|| data.get("email"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let plan = data
-        .get("plan")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let status = data
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Ready")
-        .to_string();
-
-    let credits = data.get("credits").and_then(|v| v.as_f64());
-    let usage = data.get("usage").and_then(|v| v.as_f64());
-    let main = if let Some(c) = credits {
-        format!("{:.2} credits available", c)
-    } else if let Some(u) = usage {
-        format!("{:.2} usage", u)
-    } else {
-        "quota information available".to_string()
-    };
-
-    let mut details = Vec::new();
-    if let Some(obj) = data.as_object() {
-        for (k, v) in obj {
-            if k == "details" || k == "models" || k == "quotas" {
-                if let Some(inner_obj) = v.as_object() {
-                    for (ik, iv) in inner_obj {
-                        details.push(ExternalQuotaDetail {
-                            label: format!("{k}:{ik}"),
-                            value: quota_json_scalar(iv),
-                        });
-                    }
-                } else if let Some(inner_arr) = v.as_array() {
-                    for (i, iv) in inner_arr.iter().enumerate() {
-                        details.push(ExternalQuotaDetail {
-                            label: format!("{k}[{i}]"),
-                            value: quota_json_scalar(iv),
-                        });
-                    }
-                }
-            } else if k != "account"
-                && k != "email"
-                && k != "plan"
-                && k != "status"
-                && k != "credits"
-                && k != "usage"
-            {
-                details.push(ExternalQuotaDetail {
-                    label: k.clone(),
-                    value: quota_json_scalar(v),
-                });
-            }
-        }
-    }
+    let accounts = agy_accounts(value);
+    let data = agy_selected_account(&accounts, preferred_account)?;
+    let (account, plan, status) = agy_identity(data);
+    let main = agy_main(data);
+    let details = agy_details(data);
 
     Ok(ExternalQuotaInfo {
         provider: "Anti-Gravity".to_string(),
@@ -181,6 +108,102 @@ fn parse_agy_quota_json(
         available: Some(true),
         details,
     })
+}
+
+fn agy_accounts(value: serde_json::Value) -> Vec<serde_json::Value> {
+    value.as_array().cloned().unwrap_or_else(|| vec![value])
+}
+
+fn agy_selected_account<'a>(
+    accounts: &'a [serde_json::Value],
+    preferred_account: Option<&str>,
+) -> Result<&'a serde_json::Value> {
+    preferred_account
+        .and_then(|preferred| {
+            accounts.iter().find(|account| {
+                account.get("account").and_then(|value| value.as_str()) == Some(preferred)
+                    || account.get("email").and_then(|value| value.as_str()) == Some(preferred)
+            })
+        })
+        .or_else(|| accounts.first())
+        .context("no account found in agy output")
+}
+
+fn agy_identity(data: &serde_json::Value) -> (Option<String>, Option<String>, String) {
+    let account = data
+        .get("account")
+        .or_else(|| data.get("email"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let plan = data
+        .get("plan")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let status = data
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("Ready")
+        .to_string();
+    (account, plan, status)
+}
+
+fn agy_main(data: &serde_json::Value) -> String {
+    data.get("credits")
+        .and_then(|value| value.as_f64())
+        .map(|credits| format!("{credits:.2} credits available"))
+        .or_else(|| {
+            data.get("usage")
+                .and_then(|value| value.as_f64())
+                .map(|usage| format!("{usage:.2} usage"))
+        })
+        .unwrap_or_else(|| "quota information available".to_string())
+}
+
+fn agy_details(data: &serde_json::Value) -> Vec<ExternalQuotaDetail> {
+    data.as_object()
+        .into_iter()
+        .flat_map(|object| object.iter())
+        .filter_map(|(key, value)| agy_detail_entries(key, value))
+        .flatten()
+        .collect()
+}
+
+fn agy_detail_entries(key: &str, value: &serde_json::Value) -> Option<Vec<ExternalQuotaDetail>> {
+    if matches!(key, "details" | "models" | "quotas") {
+        return Some(
+            value
+                .as_object()
+                .into_iter()
+                .flat_map(|object| {
+                    object
+                        .iter()
+                        .map(|(inner_key, inner_value)| ExternalQuotaDetail {
+                            label: format!("{key}:{inner_key}"),
+                            value: quota_json_scalar(inner_value),
+                        })
+                })
+                .chain(value.as_array().into_iter().flat_map(|array| {
+                    array
+                        .iter()
+                        .enumerate()
+                        .map(|(index, inner_value)| ExternalQuotaDetail {
+                            label: format!("{key}[{index}]"),
+                            value: quota_json_scalar(inner_value),
+                        })
+                }))
+                .collect(),
+        );
+    }
+    if matches!(
+        key,
+        "account" | "email" | "plan" | "status" | "credits" | "usage"
+    ) {
+        return None;
+    }
+    Some(vec![ExternalQuotaDetail {
+        label: key.to_string(),
+        value: quota_json_scalar(value),
+    }])
 }
 
 pub(super) fn custom_model_provider_quota_info(

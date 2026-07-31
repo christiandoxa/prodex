@@ -237,26 +237,19 @@ fn watch_status(resource_interval: Duration) -> Result<()> {
 
     loop {
         let now = Instant::now();
-        if now >= next_overview_refresh {
-            refresh.start();
-            next_overview_refresh = now + STATUS_OVERVIEW_REFRESH;
-        }
-        if let Some(result) = refresh.take() {
-            match result {
-                Ok(snapshot) => {
-                    overview = Some(snapshot);
-                    overview_error = None;
-                }
-                Err(error) => overview_error = Some(error),
-            }
-            dirty = true;
-        }
-        if now >= next_resource_sample {
-            resource_snapshot = resources.sample();
-            history.push(&resource_snapshot);
-            next_resource_sample = now + resource_interval;
-            dirty = true;
-        }
+        update_status_state(StatusUpdateContext {
+            now,
+            resource_interval,
+            refresh: &mut refresh,
+            overview: &mut overview,
+            overview_error: &mut overview_error,
+            resources: &mut resources,
+            resource_snapshot: &mut resource_snapshot,
+            history: &mut history,
+            next_overview_refresh: &mut next_overview_refresh,
+            next_resource_sample: &mut next_resource_sample,
+            dirty: &mut dirty,
+        });
 
         if dirty {
             tui.terminal.draw(|frame| {
@@ -275,23 +268,91 @@ fn watch_status(resource_interval: Duration) -> Result<()> {
         if !event::poll(STATUS_INPUT_POLL)? {
             continue;
         }
-        match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-                    || (key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z')))
-                {
-                    return Ok(());
-                }
-                if matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')) {
-                    next_overview_refresh = Instant::now();
-                    next_resource_sample = Instant::now();
-                }
-            }
-            Event::Resize(_, _) => dirty = true,
-            _ => {}
+        if handle_status_input(
+            &mut next_overview_refresh,
+            &mut next_resource_sample,
+            &mut dirty,
+        )? {
+            return Ok(());
         }
     }
+}
+
+struct StatusUpdateContext<'a> {
+    now: Instant,
+    resource_interval: Duration,
+    refresh: &'a mut StatusRefresh,
+    overview: &'a mut Option<StatusOverview>,
+    overview_error: &'a mut Option<String>,
+    resources: &'a mut StatusResourceTracker,
+    resource_snapshot: &'a mut StatusResourceSnapshot,
+    history: &'a mut StatusResourceHistory,
+    next_overview_refresh: &'a mut Instant,
+    next_resource_sample: &'a mut Instant,
+    dirty: &'a mut bool,
+}
+
+fn update_status_state(context: StatusUpdateContext<'_>) {
+    let StatusUpdateContext {
+        now,
+        resource_interval,
+        refresh,
+        overview,
+        overview_error,
+        resources,
+        resource_snapshot,
+        history,
+        next_overview_refresh,
+        next_resource_sample,
+        dirty,
+    } = context;
+    if now >= *next_overview_refresh {
+        refresh.start();
+        *next_overview_refresh = now + STATUS_OVERVIEW_REFRESH;
+    }
+    if let Some(result) = refresh.take() {
+        match result {
+            Ok(snapshot) => {
+                *overview = Some(snapshot);
+                *overview_error = None;
+            }
+            Err(error) => *overview_error = Some(error),
+        }
+        *dirty = true;
+    }
+    if now >= *next_resource_sample {
+        *resource_snapshot = resources.sample();
+        history.push(resource_snapshot);
+        *next_resource_sample = now + resource_interval;
+        *dirty = true;
+    }
+}
+
+fn handle_status_input(
+    next_overview_refresh: &mut Instant,
+    next_resource_sample: &mut Instant,
+    dirty: &mut bool,
+) -> Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            if status_quit_key(&key) {
+                return Ok(true);
+            }
+            if matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')) {
+                *next_overview_refresh = Instant::now();
+                *next_resource_sample = Instant::now();
+            }
+        }
+        Event::Resize(_, _) => *dirty = true,
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn status_quit_key(key: &crossterm::event::KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+        || (key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z')))
 }
 
 fn collect_status_overview(paths: &AppPaths) -> Result<StatusOverview> {

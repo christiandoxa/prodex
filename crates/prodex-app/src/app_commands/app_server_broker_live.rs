@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::io::{BufReader, BufWriter};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -92,33 +92,7 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
             ));
         })?;
 
-    let mut first_error = None;
-    let mut input_finished_at = None;
-    let status = loop {
-        match completion_rx.recv_timeout(Duration::from_millis(50)) {
-            Ok((direction, result)) => {
-                if direction == "client_to_server" {
-                    input_finished_at = Some(Instant::now());
-                }
-                if let Err(error) = result {
-                    first_error.get_or_insert_with(|| format!("{direction}: {error}"));
-                    let _ = child.kill();
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {}
-        }
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if input_finished_at.is_some_and(|at| at.elapsed() >= Duration::from_secs(5)) {
-            first_error.get_or_insert_with(|| {
-                "Codex app-server did not stop after client input closed".to_string()
-            });
-            let _ = child.kill();
-            break child.wait()?;
-        }
-    };
+    let (status, mut first_error) = wait_for_app_server_broker(&mut child, &completion_rx)?;
 
     output_worker
         .join()
@@ -146,4 +120,36 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
         bail!("Codex app-server exited with status {status}");
     }
     Ok(())
+}
+
+fn wait_for_app_server_broker(
+    child: &mut Child,
+    completion_rx: &mpsc::Receiver<(&'static str, std::result::Result<(), String>)>,
+) -> Result<(ExitStatus, Option<String>)> {
+    let mut first_error = None;
+    let mut input_finished_at = None;
+    loop {
+        match completion_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok((direction, result)) => {
+                if direction == "client_to_server" {
+                    input_finished_at = Some(Instant::now());
+                }
+                if let Err(error) = result {
+                    first_error.get_or_insert_with(|| format!("{direction}: {error}"));
+                    let _ = child.kill();
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+        if let Some(status) = child.try_wait()? {
+            return Ok((status, first_error));
+        }
+        if input_finished_at.is_some_and(|at| at.elapsed() >= Duration::from_secs(5)) {
+            first_error.get_or_insert_with(|| {
+                "Codex app-server did not stop after client input closed".to_string()
+            });
+            let _ = child.kill();
+            return Ok((child.wait()?, first_error));
+        }
+    }
 }
