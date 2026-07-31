@@ -522,7 +522,7 @@ fn validate_acl_control(
     let mut control = 0u16;
     let mut revision = 0u32;
     // SAFETY: the descriptor returned by GetSecurityInfo remains live in guard.
-    if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
+    if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0 {
         return Err(io::Error::last_os_error());
     }
     if control & SE_DACL_PRESENT == 0
