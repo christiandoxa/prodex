@@ -79,32 +79,19 @@ fn runtime_capability_client_labels(
         runtime_proxy_request_header_value(&request.headers, "x-openai-subagent").is_some();
 
     if has_claude_session
-        || user_agent
-            .as_deref()
-            .is_some_and(|agent| agent.contains("claude-code") || agent.contains("claude-cli"))
+        || runtime_capability_agent_is(&user_agent, &["claude-code", "claude-cli"])
     {
         return ("claude_code", "claude_code");
     }
 
     if is_runtime_anthropic_messages_path(&request.path_and_query) {
-        if runtime_capability_request_origin_label(request) == "anthropic_messages" {
-            return ("claude_code", "claude_code");
-        }
-        if user_agent
-            .as_deref()
-            .is_some_and(|agent| agent.contains("anthropic"))
-        {
-            return ("anthropic", "anthropic_sdk");
-        }
-        return ("anthropic", "anthropic_compatible");
+        return runtime_capability_anthropic_client_labels(request, &user_agent);
     }
 
     if has_codex_turn_state
         || has_codex_subagent
         || route == "websocket"
-        || user_agent
-            .as_deref()
-            .is_some_and(|agent| agent.contains("codex"))
+        || runtime_capability_agent_is(&user_agent, &["codex"])
     {
         return if has_codex_subagent {
             ("codex", "codex_subagent")
@@ -122,6 +109,25 @@ fn runtime_capability_client_labels(
     }
 }
 
+fn runtime_capability_agent_is(user_agent: &Option<String>, markers: &[&str]) -> bool {
+    user_agent
+        .as_deref()
+        .is_some_and(|agent| markers.iter().any(|marker| agent.contains(marker)))
+}
+
+fn runtime_capability_anthropic_client_labels(
+    request: &RuntimeProxyRequest,
+    user_agent: &Option<String>,
+) -> (&'static str, &'static str) {
+    if runtime_capability_request_origin_label(request) == "anthropic_messages" {
+        ("claude_code", "claude_code")
+    } else if runtime_capability_agent_is(user_agent, &["anthropic"]) {
+        ("anthropic", "anthropic_sdk")
+    } else {
+        ("anthropic", "anthropic_compatible")
+    }
+}
+
 fn runtime_capability_collect_tool_surface_from_anthropic(
     value: &serde_json::Value,
     flags: &mut BTreeSet<&'static str>,
@@ -135,63 +141,14 @@ fn runtime_capability_collect_tool_surface_from_anthropic(
     let mut saw_tools = false;
 
     if let Some(tools) = value.get("tools").and_then(serde_json::Value::as_array) {
+        saw_tools = !tools.is_empty();
         for tool in tools {
-            saw_tools = true;
-            let tool_type = tool
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let tool_name = tool
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let unversioned = runtime_proxy_anthropic_unversioned_tool_type(tool_type);
-            match unversioned.as_str() {
-                "mcp_toolset" => {
-                    has_mcp_toolset = true;
-                    flags.insert("mcp");
-                }
-                "bash" => {
-                    flags.insert("shell");
-                }
-                "computer" => {
-                    flags.insert("computer");
-                }
-                "text_editor" => {
-                    flags.insert("editor");
-                }
-                "web_search" | "web_fetch" => {
-                    flags.insert("web");
-                }
-                _ => {
-                    if tool_name.contains("websearch") || tool_name.contains("web_fetch") {
-                        flags.insert("web");
-                    } else if !tool_name.is_empty() {
-                        flags.insert("generic_tool");
-                    }
-                }
-            }
+            has_mcp_toolset |= runtime_capability_collect_anthropic_tool(tool, flags);
         }
     }
 
-    if let Some(messages) = value.get("messages").and_then(serde_json::Value::as_array) {
-        for message in messages {
-            if let Some(content) = message.get("content").and_then(serde_json::Value::as_array) {
-                for block in content {
-                    let block_type = block
-                        .get("type")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default();
-                    if matches!(
-                        block_type,
-                        "mcp_approval_request" | "mcp_approval_response" | "mcp_list_tools"
-                    ) {
-                        flags.insert("approval");
-                    }
-                }
-            }
-        }
+    if runtime_capability_has_anthropic_approval(value) {
+        flags.insert("approval");
     }
 
     if has_mcp_servers && !has_mcp_toolset {
@@ -208,43 +165,111 @@ fn runtime_capability_collect_tool_surface_from_anthropic(
     }
 }
 
+fn runtime_capability_collect_anthropic_tool(
+    tool: &serde_json::Value,
+    flags: &mut BTreeSet<&'static str>,
+) -> bool {
+    let tool_type = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let tool_name = tool
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match runtime_proxy_anthropic_unversioned_tool_type(tool_type).as_str() {
+        "mcp_toolset" => {
+            flags.insert("mcp");
+            true
+        }
+        "bash" => {
+            flags.insert("shell");
+            false
+        }
+        "computer" => {
+            flags.insert("computer");
+            false
+        }
+        "text_editor" => {
+            flags.insert("editor");
+            false
+        }
+        "web_search" | "web_fetch" => {
+            flags.insert("web");
+            false
+        }
+        _ if tool_name.contains("websearch") || tool_name.contains("web_fetch") => {
+            flags.insert("web");
+            false
+        }
+        _ if !tool_name.is_empty() => {
+            flags.insert("generic_tool");
+            false
+        }
+        _ => false,
+    }
+}
+
+fn runtime_capability_has_anthropic_approval(value: &serde_json::Value) -> bool {
+    value
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|message| message.get("content").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|block| block.get("type").and_then(serde_json::Value::as_str))
+        .any(|block_type| {
+            matches!(
+                block_type,
+                "mcp_approval_request" | "mcp_approval_response" | "mcp_list_tools"
+            )
+        })
+}
+
 fn runtime_capability_collect_tool_surface_from_responses(
     value: &serde_json::Value,
     flags: &mut BTreeSet<&'static str>,
 ) {
     if let Some(items) = value.get("input").and_then(serde_json::Value::as_array) {
         for item in items {
-            let item_type = item
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let name = item
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if item_type.starts_with("mcp_") {
-                flags.insert("mcp");
-            }
-            if item_type.contains("approval") {
-                flags.insert("approval");
-            }
-            if item_type.ends_with("_call_output") {
-                flags.insert("tool_result");
-            }
-            if item_type == "function_call" {
-                if matches!(name.as_str(), "websearch" | "webfetch") {
-                    flags.insert("web");
-                } else if name == "bash" {
-                    flags.insert("shell");
-                } else if name == "computer" {
-                    flags.insert("computer");
-                } else {
-                    flags.insert("generic_tool");
-                }
-            }
+            runtime_capability_collect_responses_item(item, flags);
         }
     }
+}
+
+fn runtime_capability_collect_responses_item(
+    item: &serde_json::Value,
+    flags: &mut BTreeSet<&'static str>,
+) {
+    let item_type = item
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let name = item
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if item_type.starts_with("mcp_") {
+        flags.insert("mcp");
+    }
+    if item_type.contains("approval") {
+        flags.insert("approval");
+    }
+    if item_type.ends_with("_call_output") {
+        flags.insert("tool_result");
+    }
+    if item_type != "function_call" {
+        return;
+    }
+    flags.insert(match name.as_str() {
+        "websearch" | "webfetch" => "web",
+        "bash" => "shell",
+        "computer" => "computer",
+        _ => "generic_tool",
+    });
 }
 
 fn runtime_capability_continuation_label(request: &RuntimeProxyRequest) -> String {
@@ -266,30 +291,13 @@ pub fn runtime_detect_request_compatibility_surface(
     stage: &'static str,
     transport: &'static str,
 ) -> RuntimeRequestCompatibilitySurface {
-    let route = if is_runtime_anthropic_messages_path(&request.path_and_query) {
-        "anthropic_messages"
-    } else if is_runtime_compact_path(&request.path_and_query) {
-        "compact"
-    } else if is_runtime_responses_path(&request.path_and_query) {
-        "responses"
-    } else {
-        "standard"
-    };
+    let route = runtime_capability_route_label(request);
     let value = runtime_capability_request_json(request);
     let mut surface = RuntimeRequestCompatibilitySurface::new(stage, route, transport);
     let (family, client) = runtime_capability_client_labels(request, route);
     surface.family = family;
     surface.client = client;
-    let anthropic_streaming = is_runtime_anthropic_messages_path(&request.path_and_query)
-        && value
-            .as_ref()
-            .and_then(|value| value.get("stream"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-    let streaming = transport == "websocket"
-        || anthropic_streaming
-        || is_runtime_responses_path(&request.path_and_query);
-    surface.stream = if streaming { "streaming" } else { "unary" };
+    surface.stream = runtime_capability_stream_label(request, value.as_ref(), transport);
     surface.continuation = runtime_capability_continuation_label(request);
     surface.request_origin = runtime_capability_request_origin_label(request);
     surface.user_agent = runtime_proxy_request_header_value(&request.headers, "user-agent")
@@ -297,21 +305,7 @@ pub fn runtime_detect_request_compatibility_surface(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "-".to_string());
 
-    let mut tool_flags = BTreeSet::new();
-    if let Some(value) = value.as_ref() {
-        if is_runtime_anthropic_messages_path(&request.path_and_query) {
-            runtime_capability_collect_tool_surface_from_anthropic(
-                value,
-                &mut tool_flags,
-                &mut surface.warnings,
-            );
-        }
-        if is_runtime_responses_path(&request.path_and_query)
-            || is_runtime_compact_path(&request.path_and_query)
-        {
-            runtime_capability_collect_tool_surface_from_responses(value, &mut tool_flags);
-        }
-    }
+    let tool_flags = runtime_capability_tool_flags(request, value.as_ref(), &mut surface.warnings);
 
     if surface.family == "unknown" {
         surface.warnings.push("unknown_client_family");
@@ -328,6 +322,58 @@ pub fn runtime_detect_request_compatibility_surface(
     surface.approval = tool_flags.contains("approval");
     surface.tool_surface = runtime_capability_labels_from_flags(&tool_flags, "none");
     surface
+}
+
+fn runtime_capability_route_label(request: &RuntimeProxyRequest) -> &'static str {
+    if is_runtime_anthropic_messages_path(&request.path_and_query) {
+        "anthropic_messages"
+    } else if is_runtime_compact_path(&request.path_and_query) {
+        "compact"
+    } else if is_runtime_responses_path(&request.path_and_query) {
+        "responses"
+    } else {
+        "standard"
+    }
+}
+
+fn runtime_capability_stream_label(
+    request: &RuntimeProxyRequest,
+    value: Option<&serde_json::Value>,
+    transport: &str,
+) -> &'static str {
+    let anthropic_streaming = is_runtime_anthropic_messages_path(&request.path_and_query)
+        && value
+            .and_then(|value| value.get("stream"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    if transport == "websocket"
+        || anthropic_streaming
+        || is_runtime_responses_path(&request.path_and_query)
+    {
+        "streaming"
+    } else {
+        "unary"
+    }
+}
+
+fn runtime_capability_tool_flags(
+    request: &RuntimeProxyRequest,
+    value: Option<&serde_json::Value>,
+    warnings: &mut Vec<&'static str>,
+) -> BTreeSet<&'static str> {
+    let mut flags = BTreeSet::new();
+    let Some(value) = value else {
+        return flags;
+    };
+    if is_runtime_anthropic_messages_path(&request.path_and_query) {
+        runtime_capability_collect_tool_surface_from_anthropic(value, &mut flags, warnings);
+    }
+    if is_runtime_responses_path(&request.path_and_query)
+        || is_runtime_compact_path(&request.path_and_query)
+    {
+        runtime_capability_collect_tool_surface_from_responses(value, &mut flags);
+    }
+    flags
 }
 
 pub fn runtime_detect_websocket_message_compatibility_surface(
