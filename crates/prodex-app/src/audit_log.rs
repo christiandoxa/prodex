@@ -92,7 +92,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn runtime_audit_failure_is_visible_without_leaking_storage_error() {
+    fn runtime_admin_activate_and_release_audit_failures_are_visible() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
@@ -107,19 +107,22 @@ mod tests {
         let runtime_log_path = dir.join("runtime.log");
         crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&runtime_log_path);
 
-        append_runtime_audit_event_to_paths_best_effort(
-            &runtime_log_path,
-            &blocked_parent.join("prodex-audit.jsonl"),
-            "gateway_admin",
-            "request_denied",
-            "failure",
-            serde_json::json!({"secret": "not-logged"}),
-        );
+        for action in ["activate_profile", "release_session_affinity"] {
+            append_runtime_audit_event_to_paths_best_effort(
+                &runtime_log_path,
+                &blocked_parent.join("prodex-audit.jsonl"),
+                "runtime_broker",
+                action,
+                "success",
+                serde_json::json!({"secret": "not-logged"}),
+            );
+        }
 
         let log = fs::read_to_string(&runtime_log_path).expect("failure should be logged");
         assert!(log.contains("gateway_audit_append_failed"));
-        assert!(log.contains("component=gateway_admin"));
-        assert!(log.contains("action=request_denied"));
+        assert!(log.contains("component=runtime_broker"));
+        assert!(log.contains("action=activate_profile"));
+        assert!(log.contains("action=release_session_affinity"));
         assert!(log.contains("error_kind=gateway_audit_persistence_failed"));
         assert!(!log.contains("not-a-directory"));
         assert!(!log.contains("not-logged"));

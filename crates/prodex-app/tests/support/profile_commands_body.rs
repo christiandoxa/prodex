@@ -12,6 +12,47 @@ mod import;
 mod login;
 
 #[test]
+fn profile_add_and_remove_succeed_when_local_audit_persistence_fails() {
+    let root = ProfileCommandsTestDir::new("audit-best-effort");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let audit_blocker = root.path.join("audit-blocker");
+    fs::write(&audit_blocker, "blocked").expect("audit blocker should be written");
+    let _audit_guard =
+        TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &audit_blocker.display().to_string());
+
+    handle_add_profile(AddProfileArgs {
+        name: "main".to_string(),
+        codex_home: None,
+        copy_from: None,
+        copy_current: false,
+        activate: true,
+    })
+    .expect("profile add should not fail after its state commit");
+
+    let paths = AppPaths::discover().expect("paths should resolve");
+    assert!(
+        AppState::load(&paths)
+            .expect("state should load")
+            .profiles
+            .contains_key("main")
+    );
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: false,
+    })
+    .expect("profile remove should not fail after its state commit");
+
+    assert!(
+        !AppState::load(&paths)
+            .expect("state should load")
+            .profiles
+            .contains_key("main")
+    );
+}
+
+#[test]
 fn current_profile_auto_repairs_missing_active_profile() {
     let root = ProfileCommandsTestDir::new("current-repair-missing-active");
     let _env = ProfileCommandsTestEnv::new(&root.path);

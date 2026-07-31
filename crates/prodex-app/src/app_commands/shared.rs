@@ -1,5 +1,5 @@
 use crate::audit_log::append_audit_event;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::cell::RefCell;
@@ -17,8 +17,10 @@ pub(crate) fn audit_log_event(
     outcome: &str,
     details: serde_json::Value,
 ) -> Result<()> {
-    append_audit_event(component, action, outcome, details)
-        .with_context(|| format!("failed to append audit event {component}/{action}"))
+    if append_audit_event(component, action, outcome, details).is_err() {
+        eprintln!("Warning: failed to persist local audit event {component}/{action}.");
+    }
+    Ok(())
 }
 
 pub(crate) fn print_launch_status(message: &str) {
@@ -120,7 +122,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn audit_log_event_surfaces_persistence_failure() {
+    fn audit_log_event_reports_persistence_failure_without_failing_operation() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
@@ -137,10 +139,8 @@ mod tests {
             blocker.to_str().expect("test path should be UTF-8"),
         );
 
-        let error = audit_log_event("profile", "add", "success", serde_json::json!({}))
-            .expect_err("audit persistence failure must be visible");
-
-        assert!(format!("{error:#}").contains("failed to append audit event profile/add"));
+        audit_log_event("profile", "add", "success", serde_json::json!({}))
+            .expect("local audit persistence is best effort");
         let _ = fs::remove_dir_all(root);
     }
 }
