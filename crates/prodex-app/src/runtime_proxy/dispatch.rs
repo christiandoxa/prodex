@@ -120,69 +120,20 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         let _ = request.respond(response);
         return;
     }
-    let mut captured_after_lane_limit = None;
-    let _active_request_guard =
-        match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+    let (active_request_guard, request, captured_after_lane_limit) =
+        match acquire_runtime_proxy_request_slot(
+            request,
             shared,
+            request_id,
             request_transport,
             &request_path,
+            websocket,
             websocket_request.as_ref(),
         ) {
-            Ok(guard) => guard,
-            Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
-                mark_runtime_proxy_local_overload(shared, "active_request_limit");
-                reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
-                return;
-            }
-            Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
-                let captured = match capture_runtime_proxy_request(
-                    &mut request,
-                    shared.runtime_config.max_request_body_bytes,
-                ) {
-                    Ok(captured) => captured,
-                    Err(err) => {
-                        reject_runtime_proxy_capture_error(request, shared, request_id, &err);
-                        return;
-                    }
-                };
-                match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
-                    shared,
-                    request_transport,
-                    &request_path,
-                    Some(&captured),
-                ) {
-                    Ok(guard) => {
-                        captured_after_lane_limit = Some(captured);
-                        guard
-                    }
-                    Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
-                        mark_runtime_proxy_local_overload(shared, "active_request_limit");
-                        reject_runtime_proxy_overloaded_request(
-                            request,
-                            shared,
-                            "active_request_limit",
-                        );
-                        return;
-                    }
-                    Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
-                        let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-                        if runtime_proxy_lane_limit_marks_global_overload(lane) {
-                            mark_runtime_proxy_local_overload(shared, &reason);
-                        }
-                        reject_runtime_proxy_overloaded_request(request, shared, &reason);
-                        return;
-                    }
-                }
-            }
-            Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
-                let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-                if runtime_proxy_lane_limit_marks_global_overload(lane) {
-                    mark_runtime_proxy_local_overload(shared, &reason);
-                }
-                reject_runtime_proxy_overloaded_request(request, shared, &reason);
-                return;
-            }
+            Ok(value) => value,
+            Err(()) => return,
         };
+    let _active_request_guard = active_request_guard;
 
     if websocket {
         runtime_proxy_log(
@@ -201,6 +152,85 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
     }
 
     dispatch_runtime_http_proxy_request(request_id, request, shared, captured_after_lane_limit);
+}
+
+fn acquire_runtime_proxy_request_slot(
+    mut request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    transport: &str,
+    path: &str,
+    websocket: bool,
+    websocket_request: Option<&RuntimeProxyRequest>,
+) -> Result<
+    (
+        RuntimeProxyActiveRequestGuard,
+        tiny_http::Request,
+        Option<RuntimeProxyRequest>,
+    ),
+    (),
+> {
+    match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        transport,
+        path,
+        websocket_request,
+    ) {
+        Ok(guard) => Ok((guard, request, None)),
+        Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+            mark_runtime_proxy_local_overload(shared, "active_request_limit");
+            reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
+            Err(())
+        }
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(_)) if !websocket => {
+            let captured = match capture_runtime_proxy_request(
+                &mut request,
+                shared.runtime_config.max_request_body_bytes,
+            ) {
+                Ok(captured) => captured,
+                Err(err) => {
+                    reject_runtime_proxy_capture_error(request, shared, request_id, &err);
+                    return Err(());
+                }
+            };
+            match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+                shared,
+                transport,
+                path,
+                Some(&captured),
+            ) {
+                Ok(guard) => Ok((guard, request, Some(captured))),
+                Err(rejection) => {
+                    reject_runtime_proxy_admission_rejection(request, shared, rejection);
+                    Err(())
+                }
+            }
+        }
+        Err(rejection) => {
+            reject_runtime_proxy_admission_rejection(request, shared, rejection);
+            Err(())
+        }
+    }
+}
+
+fn reject_runtime_proxy_admission_rejection(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    rejection: RuntimeProxyAdmissionRejection,
+) {
+    match rejection {
+        RuntimeProxyAdmissionRejection::GlobalLimit => {
+            mark_runtime_proxy_local_overload(shared, "active_request_limit");
+            reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
+        }
+        RuntimeProxyAdmissionRejection::LaneLimit(lane) => {
+            let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
+            if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                mark_runtime_proxy_local_overload(shared, &reason);
+            }
+            reject_runtime_proxy_overloaded_request(request, shared, &reason);
+        }
+    }
 }
 
 fn dispatch_runtime_http_proxy_request(
@@ -238,6 +268,15 @@ fn dispatch_runtime_http_proxy_request(
         return;
     }
 
+    log_runtime_http_request_captured(request_id, &captured, shared);
+    dispatch_runtime_http_captured(request_id, request, captured, shared);
+}
+
+fn log_runtime_http_request_captured(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) {
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -248,7 +287,7 @@ fn dispatch_runtime_http_proxy_request(
                 runtime_proxy_log_field("path", runtime_proxy_log_url(&captured.path_and_query)),
                 runtime_proxy_log_field(
                     "previous_response_id",
-                    if runtime_request_previous_response_id(&captured).is_some() {
+                    if runtime_request_previous_response_id(captured).is_some() {
                         "present"
                     } else {
                         "none"
@@ -256,7 +295,7 @@ fn dispatch_runtime_http_proxy_request(
                 ),
                 runtime_proxy_log_field(
                     "turn_state",
-                    if runtime_request_turn_state(&captured).is_some() {
+                    if runtime_request_turn_state(captured).is_some() {
                         "present"
                     } else {
                         "none"
@@ -266,6 +305,14 @@ fn dispatch_runtime_http_proxy_request(
             ],
         ),
     );
+}
+
+fn dispatch_runtime_http_captured(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) {
     let compat_surface = runtime_detect_request_compatibility_surface(&captured, "request", "http");
     runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
     if is_runtime_anthropic_messages_path(&captured.path_and_query)

@@ -171,46 +171,22 @@ pub(crate) fn connect_runtime_proxy_tcp_stream_to_host(
     let mut last_error = None;
 
     while next_index < addrs.len() || in_flight > 0 {
-        if in_flight == 0 && next_index < addrs.len() {
-            runtime_launch_websocket_tcp_connect_attempt(
+        let Some(result) =
+            receive_runtime_websocket_tcp_attempt(RuntimeWebsocketTcpAttemptContext {
                 request_id,
                 shared,
-                sender.clone(),
-                addrs[next_index],
+                sender: &sender,
+                receiver: &receiver,
+                addrs: &addrs,
                 connect_timeout,
-            );
-            next_index += 1;
-            attempted_addrs += 1;
-            in_flight += 1;
-        }
-
-        let next = if in_flight == 1 && next_index < addrs.len() && !happy_eyeballs_delay.is_zero()
-        {
-            match receiver.recv_timeout(happy_eyeballs_delay) {
-                Ok(result) => Some(result),
-                Err(RecvTimeoutError::Timeout) => {
-                    runtime_launch_websocket_tcp_connect_attempt(
-                        request_id,
-                        shared,
-                        sender.clone(),
-                        addrs[next_index],
-                        connect_timeout,
-                    );
-                    next_index += 1;
-                    attempted_addrs += 1;
-                    in_flight += 1;
-                    receiver.recv().ok()
-                }
-                Err(RecvTimeoutError::Disconnected) => None,
-            }
-        } else {
-            receiver.recv().ok()
-        };
-
-        let Some(result) = next else {
+                happy_eyeballs_delay,
+                next_index: &mut next_index,
+                attempted_addrs: &mut attempted_addrs,
+                in_flight: &mut in_flight,
+            })
+        else {
             break;
         };
-        in_flight = in_flight.saturating_sub(1);
         match result.result {
             Ok(stream) => {
                 runtime_configure_upstream_tcp_stream(&stream, io_timeout).map_err(WsError::Io)?;
@@ -233,6 +209,72 @@ pub(crate) fn connect_runtime_proxy_tcp_stream_to_host(
             runtime_websocket_authority(host, port),
         ))),
     }
+}
+
+struct RuntimeWebsocketTcpAttemptContext<'a> {
+    request_id: u64,
+    shared: &'a RuntimeRotationProxyShared,
+    sender: &'a mpsc::Sender<RuntimeWebsocketTcpAttemptResult>,
+    receiver: &'a mpsc::Receiver<RuntimeWebsocketTcpAttemptResult>,
+    addrs: &'a [SocketAddr],
+    connect_timeout: Duration,
+    happy_eyeballs_delay: Duration,
+    next_index: &'a mut usize,
+    attempted_addrs: &'a mut usize,
+    in_flight: &'a mut usize,
+}
+
+fn receive_runtime_websocket_tcp_attempt(
+    context: RuntimeWebsocketTcpAttemptContext<'_>,
+) -> Option<RuntimeWebsocketTcpAttemptResult> {
+    let RuntimeWebsocketTcpAttemptContext {
+        request_id,
+        shared,
+        sender,
+        receiver,
+        addrs,
+        connect_timeout,
+        happy_eyeballs_delay,
+        next_index,
+        attempted_addrs,
+        in_flight,
+    } = context;
+    if *in_flight == 0 && *next_index < addrs.len() {
+        runtime_launch_websocket_tcp_connect_attempt(
+            request_id,
+            shared,
+            sender.clone(),
+            addrs[*next_index],
+            connect_timeout,
+        );
+        *next_index += 1;
+        *attempted_addrs += 1;
+        *in_flight += 1;
+    }
+    let next = if *in_flight == 1 && *next_index < addrs.len() && !happy_eyeballs_delay.is_zero() {
+        match receiver.recv_timeout(happy_eyeballs_delay) {
+            Ok(result) => Some(result),
+            Err(RecvTimeoutError::Timeout) => {
+                runtime_launch_websocket_tcp_connect_attempt(
+                    request_id,
+                    shared,
+                    sender.clone(),
+                    addrs[*next_index],
+                    connect_timeout,
+                );
+                *next_index += 1;
+                *attempted_addrs += 1;
+                *in_flight += 1;
+                receiver.recv().ok()
+            }
+            Err(RecvTimeoutError::Disconnected) => None,
+        }
+    } else {
+        receiver.recv().ok()
+    };
+    let result = next?;
+    *in_flight = in_flight.saturating_sub(1);
+    Some(result)
 }
 
 pub(crate) fn runtime_websocket_target_from_uri(

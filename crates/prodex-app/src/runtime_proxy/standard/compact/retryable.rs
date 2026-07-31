@@ -69,69 +69,39 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         saw_transport_failure,
     } = failure;
 
-    if !overload
-        && !auto_redeemed_profiles.contains(&profile_name)
-        && runtime_auto_redeem_usage_limit_reset_credit(
-            shared,
-            &profile_name,
-            RuntimeRouteKind::Compact,
-            "compact_quota_blocked",
-            false,
-        )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
-    {
-        auto_redeemed_profiles.insert(profile_name);
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=compact"
-            ),
-        );
+    if runtime_compact_try_auto_redeem(
+        request_id,
+        shared,
+        &profile_name,
+        overload,
+        auto_redeemed_profiles,
+    )? {
         return Ok(RuntimeCompactFailureFlow::Retry);
     }
 
-    let mut released_affinity = false;
-    let mut released_compact_lineage = false;
-    if !overload {
-        released_affinity = release_runtime_quota_blocked_affinity(
-            shared,
-            &profile_name,
-            None,
-            None,
-            request_session_id,
-        )?;
-        released_compact_lineage = release_runtime_compact_lineage(
-            shared,
-            &profile_name,
-            request_session_id,
-            None,
-            "quota_blocked",
-        )?;
-        if session_profile.as_deref() == Some(profile_name.as_str()) {
-            *session_profile = None;
-        }
-        if compact_followup_profile
-            .as_ref()
-            .is_some_and(|(owner, _)| owner == &profile_name)
-        {
-            *compact_followup_profile = None;
-        }
-    }
+    let (released_affinity, released_compact_lineage) = release_runtime_compact_quota_state(
+        shared,
+        &profile_name,
+        overload,
+        request_session_id,
+        compact_followup_profile,
+        session_profile,
+    )?;
 
-    let should_retry_same_profile = overload
-        && !conservative_overload_retried_profiles.contains(&profile_name)
-        && (compact_followup_profile
-            .as_ref()
-            .is_some_and(|(owner, _)| owner == &profile_name)
-            || session_profile.as_deref() == Some(profile_name.as_str())
-            || current_profile == profile_name);
-    if should_retry_same_profile {
-        conservative_overload_retried_profiles.insert(profile_name.clone());
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS} reason=non_blocking_retry"
-            ),
-        );
+    if runtime_compact_try_conservative_overload_retry(
+        request_id,
+        shared,
+        &profile_name,
+        overload,
+        current_profile,
+        RuntimeCompactAffinityOwners {
+            compact_followup_profile: compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
+            session_profile: session_profile.as_deref(),
+        },
+        conservative_overload_retried_profiles,
+    ) {
         *last_failure = Some((response, false));
         return Ok(RuntimeCompactFailureFlow::Retry);
     }
@@ -145,28 +115,27 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     );
     mark_runtime_profile_retry_backoff(shared, &profile_name)?;
 
-    if runtime_compact_candidate_has_hard_affinity(
-        &profile_name,
-        compact_followup_profile
-            .as_ref()
-            .map(|(profile_name, _)| profile_name.as_str()),
-        session_profile.as_deref(),
+    if runtime_compact_hard_affinity_failure(
+        shared,
+        RuntimeCompactAffinityOwners {
+            compact_followup_profile: compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
+            session_profile: session_profile.as_deref(),
+        },
+        RuntimeProxyCompactAttemptFailureLog {
+            request_id,
+            exit: "hard_affinity_retryable_failure",
+            reason: if overload { "overload" } else { "quota" },
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            last_failure: last_failure.as_ref(),
+            saw_inflight_saturation,
+            saw_transport_failure,
+            profile_name: &profile_name,
+        },
     ) {
-        log_runtime_proxy_compact_attempt_final_failure(
-            shared,
-            RuntimeProxyCompactAttemptFailureLog {
-                request_id,
-                exit: "hard_affinity_retryable_failure",
-                reason: if overload { "overload" } else { "quota" },
-                selection_attempts,
-                selection_started_at,
-                pressure_mode,
-                last_failure: last_failure.as_ref(),
-                saw_inflight_saturation,
-                saw_transport_failure,
-                profile_name: &profile_name,
-            },
-        );
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
@@ -187,48 +156,180 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         );
     }
     if overload {
-        let _ = bump_runtime_profile_health_score(
-            shared,
-            &profile_name,
-            RuntimeRouteKind::Compact,
-            RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-            "compact_overload",
-        );
-        let _ = bump_runtime_profile_bad_pairing_score(
-            shared,
-            &profile_name,
-            RuntimeRouteKind::Compact,
-            RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
-            "compact_overload",
-        );
+        runtime_compact_record_overload_penalty(shared, &profile_name);
     }
-    if !overload
-        && !runtime_has_route_eligible_quota_fallback(
-            shared,
-            &profile_name,
-            &BTreeSet::new(),
-            RuntimeRouteKind::Compact,
-        )?
-    {
-        log_runtime_proxy_compact_attempt_final_failure(
-            shared,
-            RuntimeProxyCompactAttemptFailureLog {
-                request_id,
-                exit: "quota_fallback_exhausted",
-                reason: "quota",
-                selection_attempts,
-                selection_started_at,
-                pressure_mode,
-                last_failure: last_failure.as_ref(),
-                saw_inflight_saturation,
-                saw_transport_failure,
-                profile_name: &profile_name,
-            },
-        );
+    if runtime_compact_quota_fallback_exhausted(
+        shared,
+        overload,
+        RuntimeProxyCompactAttemptFailureLog {
+            request_id,
+            exit: "quota_fallback_exhausted",
+            reason: "quota",
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            last_failure: last_failure.as_ref(),
+            saw_inflight_saturation,
+            saw_transport_failure,
+            profile_name: &profile_name,
+        },
+    )? {
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
     excluded_profiles.insert(profile_name);
     *last_failure = Some((response, !overload));
     Ok(RuntimeCompactFailureFlow::Retry)
+}
+
+struct RuntimeCompactAffinityOwners<'a> {
+    compact_followup_profile: Option<&'a str>,
+    session_profile: Option<&'a str>,
+}
+
+fn runtime_compact_try_auto_redeem(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    overload: bool,
+    auto_redeemed_profiles: &mut BTreeSet<String>,
+) -> Result<bool> {
+    if overload || auto_redeemed_profiles.contains(profile_name) {
+        return Ok(false);
+    }
+    if runtime_auto_redeem_usage_limit_reset_credit(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Compact,
+        "compact_quota_blocked",
+        false,
+    )? != RuntimeAutoRedeemResetCreditOutcome::Redeemed
+    {
+        return Ok(false);
+    }
+    auto_redeemed_profiles.insert(profile_name.to_string());
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=compact"
+        ),
+    );
+    Ok(true)
+}
+
+fn release_runtime_compact_quota_state(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    overload: bool,
+    request_session_id: Option<&str>,
+    compact_followup_profile: &mut Option<(String, &'static str)>,
+    session_profile: &mut Option<String>,
+) -> Result<(bool, bool)> {
+    if overload {
+        return Ok((false, false));
+    }
+    let released_affinity = release_runtime_quota_blocked_affinity(
+        shared,
+        profile_name,
+        None,
+        None,
+        request_session_id,
+    )?;
+    let released_compact_lineage = release_runtime_compact_lineage(
+        shared,
+        profile_name,
+        request_session_id,
+        None,
+        "quota_blocked",
+    )?;
+    if session_profile.as_deref() == Some(profile_name) {
+        *session_profile = None;
+    }
+    if compact_followup_profile
+        .as_ref()
+        .is_some_and(|(owner, _)| owner == profile_name)
+    {
+        *compact_followup_profile = None;
+    }
+    Ok((released_affinity, released_compact_lineage))
+}
+
+fn runtime_compact_try_conservative_overload_retry(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    overload: bool,
+    current_profile: &str,
+    owners: RuntimeCompactAffinityOwners<'_>,
+    retried_profiles: &mut BTreeSet<String>,
+) -> bool {
+    let owner_match = owners.compact_followup_profile == Some(profile_name)
+        || owners.session_profile == Some(profile_name)
+        || current_profile == profile_name;
+    if !overload || retried_profiles.contains(profile_name) || !owner_match {
+        return false;
+    }
+    retried_profiles.insert(profile_name.to_string());
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS} reason=non_blocking_retry"
+        ),
+    );
+    true
+}
+
+fn runtime_compact_hard_affinity_failure(
+    shared: &RuntimeRotationProxyShared,
+    owners: RuntimeCompactAffinityOwners<'_>,
+    failure: RuntimeProxyCompactAttemptFailureLog<'_>,
+) -> bool {
+    if !runtime_compact_candidate_has_hard_affinity(
+        failure.profile_name,
+        owners.compact_followup_profile,
+        owners.session_profile,
+    ) {
+        return false;
+    }
+    log_runtime_proxy_compact_attempt_final_failure(shared, failure);
+    true
+}
+
+fn runtime_compact_record_overload_penalty(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) {
+    let _ = bump_runtime_profile_health_score(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Compact,
+        RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+        "compact_overload",
+    );
+    let _ = bump_runtime_profile_bad_pairing_score(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Compact,
+        RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+        "compact_overload",
+    );
+}
+
+fn runtime_compact_quota_fallback_exhausted(
+    shared: &RuntimeRotationProxyShared,
+    overload: bool,
+    failure: RuntimeProxyCompactAttemptFailureLog<'_>,
+) -> Result<bool> {
+    if overload
+        || runtime_has_route_eligible_quota_fallback(
+            shared,
+            failure.profile_name,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Compact,
+        )?
+    {
+        return Ok(false);
+    }
+    log_runtime_proxy_compact_attempt_final_failure(shared, failure);
+    Ok(true)
 }

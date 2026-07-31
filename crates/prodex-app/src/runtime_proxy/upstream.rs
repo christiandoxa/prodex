@@ -77,64 +77,18 @@ async fn send_runtime_proxy_upstream_request_with_events(
             request.method
         )
     })?;
-
-    let upstream_client = if events.route_kind == RuntimeRouteKind::Compact {
-        shared.compact_client.clone()
-    } else {
-        shared.async_client.clone()
-    };
-    let mut upstream_request = upstream_client.request(method, &upstream_url);
-    for (name, value) in runtime_forward_request_headers(
-        request
-            .headers
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str())),
-    ) {
-        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
-            continue;
-        }
-        if name.eq_ignore_ascii_case("cookie") {
-            continue;
-        }
-        upstream_request = upstream_request.header(name, value);
-    }
-    if let Some(turn_state) = turn_state_override {
-        upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
-    }
-
-    let upstream_body = prepare_runtime_smart_context_http_body_for_profile(
-        request_id,
-        request,
-        shared,
-        events.route_kind,
-        Some(profile_name),
-    )?;
-    log_runtime_upstream_payload_snapshot(
-        shared,
-        request_id,
-        "http",
-        events.route_kind,
-        profile_name,
-        upstream_body.as_ref(),
-    );
-
-    upstream_request = upstream_request
-        .header("Authorization", format!("Bearer {}", auth.access_token))
-        .body(upstream_body.into_owned());
-
-    if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
-        shared,
-        profile_name,
-        &upstream_url,
-        &request.headers,
-    ) && let Ok(cookie_header) = reqwest::header::HeaderValue::from_str(&cookie_header)
-    {
-        upstream_request = upstream_request.header(reqwest::header::COOKIE, cookie_header);
-    }
-
-    if let Some(account_id) = auth.account_id.as_deref() {
-        upstream_request = upstream_request.header("ChatGPT-Account-Id", account_id);
-    }
+    let upstream_request =
+        build_runtime_proxy_upstream_request(RuntimeProxyUpstreamRequestContext {
+            request_id,
+            request,
+            shared,
+            profile_name,
+            turn_state_override,
+            auth,
+            route_kind: events.route_kind,
+            method,
+            upstream_url: &upstream_url,
+        })?;
 
     runtime_proxy_log(
         shared,
@@ -171,8 +125,123 @@ async fn send_runtime_proxy_upstream_request_with_events(
     ) {
         bail!("injected runtime upstream connect failure");
     }
-    let response = match upstream_request.send().await {
-        Ok(response) => response,
+    let response = send_runtime_proxy_upstream_request_once(
+        upstream_request,
+        shared,
+        request_id,
+        profile_name,
+        &log_url,
+    )
+    .await?;
+    runtime_proxy_capture_reqwest_cookies(shared, profile_name, &response);
+    log_runtime_proxy_upstream_response(
+        shared,
+        request_id,
+        profile_name,
+        events.response,
+        &response,
+    );
+    note_runtime_profile_latency_observation(
+        shared,
+        profile_name,
+        events.route_kind,
+        "connect",
+        started_at.elapsed().as_millis() as u64,
+    );
+    Ok(response)
+}
+
+struct RuntimeProxyUpstreamRequestContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: &'a str,
+    turn_state_override: Option<&'a str>,
+    auth: UsageAuth,
+    route_kind: RuntimeRouteKind,
+    method: reqwest::Method,
+    upstream_url: &'a str,
+}
+
+fn build_runtime_proxy_upstream_request(
+    context: RuntimeProxyUpstreamRequestContext<'_>,
+) -> Result<reqwest::RequestBuilder> {
+    let RuntimeProxyUpstreamRequestContext {
+        request_id,
+        request,
+        shared,
+        profile_name,
+        turn_state_override,
+        auth,
+        route_kind,
+        method,
+        upstream_url,
+    } = context;
+    let upstream_client = if route_kind == RuntimeRouteKind::Compact {
+        shared.compact_client.clone()
+    } else {
+        shared.async_client.clone()
+    };
+    let mut upstream_request = upstream_client.request(method, upstream_url);
+    for (name, value) in runtime_forward_request_headers(
+        request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ) {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
+        upstream_request = upstream_request.header(name, value);
+    }
+    if let Some(turn_state) = turn_state_override {
+        upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
+    }
+    let upstream_body = prepare_runtime_smart_context_http_body_for_profile(
+        request_id,
+        request,
+        shared,
+        route_kind,
+        Some(profile_name),
+    )?;
+    log_runtime_upstream_payload_snapshot(
+        shared,
+        request_id,
+        "http",
+        route_kind,
+        profile_name,
+        upstream_body.as_ref(),
+    );
+    upstream_request = upstream_request
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .body(upstream_body.into_owned());
+    if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
+        shared,
+        profile_name,
+        upstream_url,
+        &request.headers,
+    ) && let Ok(cookie_header) = reqwest::header::HeaderValue::from_str(&cookie_header)
+    {
+        upstream_request = upstream_request.header(reqwest::header::COOKIE, cookie_header);
+    }
+    if let Some(account_id) = auth.account_id.as_deref() {
+        upstream_request = upstream_request.header("ChatGPT-Account-Id", account_id);
+    }
+    Ok(upstream_request)
+}
+
+async fn send_runtime_proxy_upstream_request_once(
+    upstream_request: reqwest::RequestBuilder,
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    profile_name: &str,
+    log_url: &str,
+) -> Result<reqwest::Response> {
+    match upstream_request.send().await {
+        Ok(response) => Ok(response),
         Err(err) => {
             log_runtime_upstream_connect_failure(
                 shared,
@@ -182,17 +251,25 @@ async fn send_runtime_proxy_upstream_request_with_events(
                 runtime_transport_failure_kind_from_reqwest(&err),
                 &err,
             );
-            return Err(anyhow::Error::new(err).context(format!(
+            Err(anyhow::Error::new(err).context(format!(
                 "failed to proxy runtime request for profile '{}' to {}",
                 profile_name, log_url
-            )));
+            )))
         }
-    };
-    runtime_proxy_capture_reqwest_cookies(shared, profile_name, &response);
+    }
+}
+
+fn log_runtime_proxy_upstream_response(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    profile_name: &str,
+    event: &str,
+    response: &reqwest::Response,
+) {
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
-            events.response,
+            event,
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
@@ -221,14 +298,6 @@ async fn send_runtime_proxy_upstream_request_with_events(
             ],
         ),
     );
-    note_runtime_profile_latency_observation(
-        shared,
-        profile_name,
-        events.route_kind,
-        "connect",
-        started_at.elapsed().as_millis() as u64,
-    );
-    Ok(response)
 }
 
 pub(crate) use runtime_proxy_crate::{runtime_forward_request_headers, runtime_proxy_upstream_url};

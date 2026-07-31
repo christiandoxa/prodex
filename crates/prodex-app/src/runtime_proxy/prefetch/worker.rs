@@ -6,7 +6,7 @@ use super::{
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{SyncSender, TrySendError};
@@ -65,24 +65,18 @@ async fn runtime_prefetch_send_with_wait(
             RuntimePrefetchChunk::Data(bytes) => bytes.len(),
             RuntimePrefetchChunk::End | RuntimePrefetchChunk::Error(_, _) => 0,
         };
-        let queued_bytes = shared.queued_bytes.load(Ordering::SeqCst);
-        if queued_bytes.saturating_add(chunk_bytes) > buffered_limit {
-            if started_at.elapsed() >= timeout {
-                return RuntimePrefetchSendOutcome::TimedOut {
-                    message: format!(
-                        "runtime prefetch buffered bytes exceeded safe limit ({} > {})",
-                        queued_bytes.saturating_add(chunk_bytes),
-                        buffered_limit
-                    ),
-                };
-            }
-            retries = retries.saturating_add(1);
-            let remaining = timeout.saturating_sub(started_at.elapsed());
-            let sleep_for = retry_delay.min(remaining);
-            if !sleep_for.is_zero() {
-                tokio::time::sleep(sleep_for).await;
-            }
-            continue;
+        if let Some(outcome) = runtime_prefetch_wait_for_buffer_capacity(
+            shared,
+            started_at,
+            retry_delay,
+            timeout,
+            buffered_limit,
+            chunk_bytes,
+            &mut retries,
+        )
+        .await
+        {
+            return outcome;
         }
         match sender.try_send(pending) {
             Ok(()) => {
@@ -98,23 +92,80 @@ async fn runtime_prefetch_send_with_wait(
                 return RuntimePrefetchSendOutcome::Disconnected;
             }
             Err(TrySendError::Full(returned)) => {
-                if started_at.elapsed() >= timeout {
-                    return RuntimePrefetchSendOutcome::TimedOut {
-                        message: format!(
-                            "runtime prefetch backlog exceeded bounded capacity ({})",
-                            RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY
-                        ),
-                    };
-                }
-                pending = returned;
-                retries = retries.saturating_add(1);
-                let remaining = timeout.saturating_sub(started_at.elapsed());
-                let sleep_for = retry_delay.min(remaining);
-                if !sleep_for.is_zero() {
-                    tokio::time::sleep(sleep_for).await;
+                match runtime_prefetch_retry_after_full(
+                    returned,
+                    started_at,
+                    retry_delay,
+                    timeout,
+                    &mut retries,
+                )
+                .await
+                {
+                    Ok(next) => pending = next,
+                    Err(outcome) => return outcome,
                 }
             }
         }
+    }
+}
+
+async fn runtime_prefetch_wait_for_buffer_capacity(
+    shared: &RuntimePrefetchSharedState,
+    started_at: Instant,
+    retry_delay: Duration,
+    timeout: Duration,
+    buffered_limit: usize,
+    chunk_bytes: usize,
+    retries: &mut usize,
+) -> Option<RuntimePrefetchSendOutcome> {
+    loop {
+        let queued_bytes = shared.queued_bytes.load(Ordering::SeqCst);
+        if queued_bytes.saturating_add(chunk_bytes) <= buffered_limit {
+            return None;
+        }
+        if started_at.elapsed() >= timeout {
+            return Some(RuntimePrefetchSendOutcome::TimedOut {
+                message: format!(
+                    "runtime prefetch buffered bytes exceeded safe limit ({} > {})",
+                    queued_bytes.saturating_add(chunk_bytes),
+                    buffered_limit
+                ),
+            });
+        }
+        *retries = retries.saturating_add(1);
+        runtime_prefetch_sleep_before_retry(started_at, retry_delay, timeout).await;
+    }
+}
+
+async fn runtime_prefetch_retry_after_full(
+    returned: RuntimePrefetchChunk,
+    started_at: Instant,
+    retry_delay: Duration,
+    timeout: Duration,
+    retries: &mut usize,
+) -> Result<RuntimePrefetchChunk, RuntimePrefetchSendOutcome> {
+    if started_at.elapsed() >= timeout {
+        return Err(RuntimePrefetchSendOutcome::TimedOut {
+            message: format!(
+                "runtime prefetch backlog exceeded bounded capacity ({})",
+                RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY
+            ),
+        });
+    }
+    *retries = retries.saturating_add(1);
+    runtime_prefetch_sleep_before_retry(started_at, retry_delay, timeout).await;
+    Ok(returned)
+}
+
+async fn runtime_prefetch_sleep_before_retry(
+    started_at: Instant,
+    retry_delay: Duration,
+    timeout: Duration,
+) {
+    let remaining = timeout.saturating_sub(started_at.elapsed());
+    let sleep_for = retry_delay.min(remaining);
+    if !sleep_for.is_zero() {
+        tokio::time::sleep(sleep_for).await;
     }
 }
 
@@ -144,81 +195,17 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                 break;
             }
             Ok(Some(chunk)) => {
-                if !saw_data {
-                    saw_data = true;
-                    runtime_proxy_log_to_path(
-                        &log_path,
-                        &runtime_proxy_structured_log_message(
-                            "first_upstream_chunk",
-                            [
-                                runtime_proxy_log_field("request", request_id.to_string()),
-                                runtime_proxy_log_field("transport", "http"),
-                                runtime_proxy_log_field("bytes", chunk.len().to_string()),
-                            ],
-                        ),
-                    );
-                }
-                if chunk.len() > RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES {
-                    let message = format!(
-                        "runtime upstream chunk exceeded prefetch limit ({} > {})",
-                        chunk.len(),
-                        RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES
-                    );
-                    runtime_prefetch_set_terminal_error(
-                        &shared,
-                        io::ErrorKind::InvalidData,
-                        message.clone(),
-                    );
-                    runtime_proxy_log_to_path(
-                        &log_path,
-                        &format!(
-                            "request={request_id} transport=http prefetch_chunk_too_large bytes={} limit={} error={message}",
-                            chunk.len(),
-                            RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES,
-                        ),
-                    );
-                    let _ = sender.try_send(RuntimePrefetchChunk::Error(
-                        io::ErrorKind::InvalidData,
-                        message,
-                    ));
+                if !runtime_prefetch_forward_chunk(
+                    chunk,
+                    &sender,
+                    &shared,
+                    &log_path,
+                    request_id,
+                    &mut saw_data,
+                )
+                .await
+                {
                     break;
-                }
-                let chunk_bytes = chunk.len();
-                match runtime_prefetch_send_with_wait(&sender, &shared, chunk.to_vec()).await {
-                    RuntimePrefetchSendOutcome::Sent { wait_ms, retries } => {
-                        if retries > 0 {
-                            runtime_proxy_log_to_path(
-                                &log_path,
-                                &format!(
-                                    "request={request_id} transport=http prefetch_backpressure_recovered bytes={chunk_bytes} retries={retries} wait_ms={wait_ms}",
-                                ),
-                            );
-                        }
-                    }
-                    RuntimePrefetchSendOutcome::TimedOut { message } => {
-                        runtime_prefetch_set_terminal_error(
-                            &shared,
-                            io::ErrorKind::WouldBlock,
-                            message.clone(),
-                        );
-                        runtime_proxy_log_to_path(
-                            &log_path,
-                            &format!(
-                                "request={request_id} transport=http prefetch_backpressure_timeout bytes={chunk_bytes} capacity={} error={message}",
-                                RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY,
-                            ),
-                        );
-                        break;
-                    }
-                    RuntimePrefetchSendOutcome::Disconnected => {
-                        runtime_proxy_log_to_path(
-                            &log_path,
-                            &format!(
-                                "request={request_id} transport=http prefetch_receiver_disconnected"
-                            ),
-                        );
-                        break;
-                    }
                 }
             }
             Err(err) => {
@@ -240,6 +227,83 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                 let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, error));
                 break;
             }
+        }
+    }
+}
+
+async fn runtime_prefetch_forward_chunk(
+    chunk: bytes::Bytes,
+    sender: &SyncSender<RuntimePrefetchChunk>,
+    shared: &RuntimePrefetchSharedState,
+    log_path: &Path,
+    request_id: u64,
+    saw_data: &mut bool,
+) -> bool {
+    if !*saw_data {
+        *saw_data = true;
+        runtime_proxy_log_to_path(
+            log_path,
+            &runtime_proxy_structured_log_message(
+                "first_upstream_chunk",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("bytes", chunk.len().to_string()),
+                ],
+            ),
+        );
+    }
+    if chunk.len() > RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES {
+        let message = format!(
+            "runtime upstream chunk exceeded prefetch limit ({} > {})",
+            chunk.len(),
+            RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES
+        );
+        runtime_prefetch_set_terminal_error(shared, io::ErrorKind::InvalidData, message.clone());
+        runtime_proxy_log_to_path(
+            log_path,
+            &format!(
+                "request={request_id} transport=http prefetch_chunk_too_large bytes={} limit={} error={message}",
+                chunk.len(),
+                RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES,
+            ),
+        );
+        let _ = sender.try_send(RuntimePrefetchChunk::Error(
+            io::ErrorKind::InvalidData,
+            message,
+        ));
+        return false;
+    }
+    let chunk_bytes = chunk.len();
+    match runtime_prefetch_send_with_wait(sender, shared, chunk.to_vec()).await {
+        RuntimePrefetchSendOutcome::Sent { wait_ms, retries } => {
+            if retries > 0 {
+                runtime_proxy_log_to_path(
+                    log_path,
+                    &format!(
+                        "request={request_id} transport=http prefetch_backpressure_recovered bytes={chunk_bytes} retries={retries} wait_ms={wait_ms}",
+                    ),
+                );
+            }
+            true
+        }
+        RuntimePrefetchSendOutcome::TimedOut { message } => {
+            runtime_prefetch_set_terminal_error(shared, io::ErrorKind::WouldBlock, message.clone());
+            runtime_proxy_log_to_path(
+                log_path,
+                &format!(
+                    "request={request_id} transport=http prefetch_backpressure_timeout bytes={chunk_bytes} capacity={} error={message}",
+                    RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY,
+                ),
+            );
+            false
+        }
+        RuntimePrefetchSendOutcome::Disconnected => {
+            runtime_proxy_log_to_path(
+                log_path,
+                &format!("request={request_id} transport=http prefetch_receiver_disconnected"),
+            );
+            false
         }
     }
 }

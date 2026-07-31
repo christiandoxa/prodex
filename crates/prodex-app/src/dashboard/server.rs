@@ -41,26 +41,8 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
             "dashboard only accepts loopback --host values; use an SSH tunnel for remote access"
         );
     }
-    let bind = format!("{}:{}", args.host.trim(), args.port);
-    let (server, fallback_warning) = match Server::http(&bind) {
-        Ok(server) => (server, None),
-        Err(primary_error) if args.fallback_port && args.port != 0 => {
-            let fallback_bind = format!("{}:0", args.host.trim());
-            let server = Server::http(&fallback_bind).map_err(|fallback_error| {
-                anyhow!(
-                    "failed to bind {bind}: {primary_error}; fallback {fallback_bind} failed: {fallback_error}"
-                )
-            })?;
-            (
-                server,
-                Some(format!(
-                    "port {} was unavailable; using an OS-assigned port",
-                    args.port
-                )),
-            )
-        }
-        Err(err) => return Err(anyhow!("failed to bind {bind}: {err}")),
-    };
+    let (server, fallback_warning) =
+        bind_dashboard(args.host.trim(), args.port, args.fallback_port)?;
     let url = dashboard_url(server.server_addr());
     print_dashboard_status(&url, fallback_warning.as_deref())?;
     if args.open
@@ -74,6 +56,45 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
         base_url: args.base_url,
     });
     let (request_tx, request_rx) = mpsc::sync_channel(DASHBOARD_REQUEST_QUEUE_CAPACITY);
+    let workers = spawn_dashboard_workers(Arc::clone(&dashboard), request_rx)?;
+    for request in server.incoming_requests() {
+        if request_tx.send(request).is_err() {
+            break;
+        }
+    }
+    drop(request_tx);
+    for worker in workers {
+        let _ = worker.join();
+    }
+    Ok(())
+}
+
+fn bind_dashboard(host: &str, port: u16, fallback_port: bool) -> Result<(Server, Option<String>)> {
+    let bind = format!("{host}:{port}");
+    match Server::http(&bind) {
+        Ok(server) => Ok((server, None)),
+        Err(primary_error) if fallback_port && port != 0 => {
+            let fallback_bind = format!("{host}:0");
+            let server = Server::http(&fallback_bind).map_err(|fallback_error| {
+                anyhow!(
+                    "failed to bind {bind}: {primary_error}; fallback {fallback_bind} failed: {fallback_error}"
+                )
+            })?;
+            Ok((
+                server,
+                Some(format!(
+                    "port {port} was unavailable; using an OS-assigned port"
+                )),
+            ))
+        }
+        Err(err) => Err(anyhow!("failed to bind {bind}: {err}")),
+    }
+}
+
+fn spawn_dashboard_workers(
+    dashboard: Arc<DashboardServer>,
+    request_rx: mpsc::Receiver<Request>,
+) -> Result<Vec<thread::JoinHandle<()>>> {
     let request_rx = Arc::new(Mutex::new(request_rx));
     let mut workers = Vec::with_capacity(DASHBOARD_WORKER_COUNT);
     for worker_index in 0..DASHBOARD_WORKER_COUNT {
@@ -105,16 +126,7 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
                 .context("failed to start dashboard worker")?,
         );
     }
-    for request in server.incoming_requests() {
-        if request_tx.send(request).is_err() {
-            break;
-        }
-    }
-    drop(request_tx);
-    for worker in workers {
-        let _ = worker.join();
-    }
-    Ok(())
+    Ok(workers)
 }
 
 fn print_dashboard_status(url: &str, warning: Option<&str>) -> Result<()> {

@@ -119,7 +119,29 @@ fn gateway_guardrail_webhook_config_with_resolver(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewayGuardrailWebhookConfig> {
-    let url = policy
+    let url = gateway_guardrail_webhook_url(policy)?;
+    let phases = gateway_guardrail_webhook_phases(policy)?;
+    if policy
+        .guardrails
+        .webhook_bearer_token_env
+        .as_deref()
+        .is_some_and(|value| !gateway_exact_policy_identifier(value))
+    {
+        bail!("gateway.guardrails.webhook_bearer_token_env must be non-empty without whitespace");
+    }
+    let bearer_token = gateway_guardrail_webhook_secret_with_resolver(policy, resolver)?;
+    Ok(RuntimeGatewayGuardrailWebhookConfig {
+        url,
+        phases,
+        bearer_token,
+        fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
+    })
+}
+
+fn gateway_guardrail_webhook_url(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Option<String>> {
+    policy
         .guardrails
         .webhook_url
         .as_deref()
@@ -161,37 +183,29 @@ fn gateway_guardrail_webhook_config_with_resolver(
             }
             Ok(value.to_string())
         })
-        .transpose()?;
-    let mut phases = Vec::new();
-    for phase in &policy.guardrails.webhook_phases {
-        if !gateway_exact_policy_identifier(phase) {
-            bail!(
-                "gateway.guardrails.webhook_phases must be pre/post/request/response without whitespace"
-            );
-        }
-        phases.push(match phase.to_ascii_lowercase().as_str() {
-            "pre" | "request" => "pre".to_string(),
-            "post" | "response" => "post".to_string(),
-            _ => {
-                bail!("gateway.guardrails.webhook_phases must be pre/post/request/response")
-            }
-        });
-    }
-    if policy
+        .transpose()
+}
+
+fn gateway_guardrail_webhook_phases(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Vec<String>> {
+    policy
         .guardrails
-        .webhook_bearer_token_env
-        .as_deref()
-        .is_some_and(|value| !gateway_exact_policy_identifier(value))
-    {
-        bail!("gateway.guardrails.webhook_bearer_token_env must be non-empty without whitespace");
-    }
-    let bearer_token = gateway_guardrail_webhook_secret_with_resolver(policy, resolver)?;
-    Ok(RuntimeGatewayGuardrailWebhookConfig {
-        url,
-        phases,
-        bearer_token,
-        fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
-    })
+        .webhook_phases
+        .iter()
+        .map(|phase| {
+            if !gateway_exact_policy_identifier(phase) {
+                bail!(
+                    "gateway.guardrails.webhook_phases must be pre/post/request/response without whitespace"
+                );
+            }
+            match phase.to_ascii_lowercase().as_str() {
+                "pre" | "request" => Ok("pre".to_string()),
+                "post" | "response" => Ok("post".to_string()),
+                _ => bail!("gateway.guardrails.webhook_phases must be pre/post/request/response"),
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn gateway_guardrail_webhook_secret_with_resolver(

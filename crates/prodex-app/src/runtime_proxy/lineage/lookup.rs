@@ -259,89 +259,27 @@ pub(crate) fn runtime_session_bound_profile(
         .get(session_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
-    if runtime_age_stale_verified_continuation_status(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::SessionId,
+    if runtime_session_binding_status_is_unusable(
+        shared,
+        &mut runtime,
         session_id,
+        profile_name.as_deref(),
         now,
     ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity=session_id profile={} reason=continuation_stale session_id={session_id}",
-                profile_name.as_deref().unwrap_or("-"),
-            ),
-        );
-        schedule_runtime_binding_touch_save(
-            shared,
-            &runtime,
-            RuntimeStateMutation::ContinuationStale(session_id.to_string()),
-        );
-        return Ok(None);
-    }
-    let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
-        runtime_continuation_status_map(
-            &runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::SessionId,
-        )
-        .get(session_id),
-        runtime
-            .session_id_bindings
-            .get(session_id)
-            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name)),
-    );
-    if runtime_continuation_status_map(
-        &runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::SessionId,
-    )
-    .get(session_id)
-    .is_some_and(runtime_continuation_status_is_terminal)
-        && !dead_shadowed_by_binding
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity=session_id profile=- reason=continuation_dead session_id={session_id}",
-            ),
-        );
-        return Ok(None);
-    }
-    if runtime_continuation_status_recently_suspect(
-        &runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::SessionId,
-        session_id,
-        now,
-    ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity=session_id profile=- reason=continuation_suspect session_id={session_id}",
-            ),
-        );
         return Ok(None);
     }
     let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref() {
-        if let Some(binding) = runtime.session_id_bindings.get_mut(session_id)
-            && binding.profile_name == profile_name
-        {
-            if runtime_binding_touch_should_persist(binding.bound_at, now) {
-                persist_touch = true;
-            }
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-        }
-        if let Some(binding) = runtime.state.session_profile_bindings.get_mut(session_id)
-            && binding.profile_name == profile_name
-        {
-            if runtime_binding_touch_should_persist(binding.bound_at, now) {
-                persist_touch = true;
-            }
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-        }
+        persist_touch = touch_runtime_session_binding(
+            runtime.session_id_bindings.get_mut(session_id),
+            profile_name,
+            now,
+        ) || persist_touch;
+        persist_touch = touch_runtime_session_binding(
+            runtime.state.session_profile_bindings.get_mut(session_id),
+            profile_name,
+            now,
+        ) || persist_touch;
         persist_touch = runtime_continuation_status_should_persist_touch(
             &runtime.continuation_statuses,
             RuntimeContinuationBindingKind::SessionId,
@@ -363,4 +301,84 @@ pub(crate) fn runtime_session_bound_profile(
         );
     }
     Ok(profile_name)
+}
+
+fn runtime_session_binding_status_is_unusable(
+    shared: &RuntimeRotationProxyShared,
+    runtime: &mut RuntimeRotationState,
+    session_id: &str,
+    profile_name: Option<&str>,
+    now: i64,
+) -> bool {
+    let kind = RuntimeContinuationBindingKind::SessionId;
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        kind,
+        session_id,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity=session_id profile={} reason=continuation_stale session_id={session_id}",
+                profile_name.unwrap_or("-"),
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            runtime,
+            RuntimeStateMutation::ContinuationStale(session_id.to_string()),
+        );
+        return true;
+    }
+    let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
+        runtime_continuation_status_map(&runtime.continuation_statuses, kind).get(session_id),
+        runtime
+            .session_id_bindings
+            .get(session_id)
+            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name)),
+    );
+    if runtime_continuation_status_map(&runtime.continuation_statuses, kind)
+        .get(session_id)
+        .is_some_and(runtime_continuation_status_is_terminal)
+        && !dead_shadowed_by_binding
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity=session_id profile=- reason=continuation_dead session_id={session_id}"
+            ),
+        );
+        return true;
+    }
+    if runtime_continuation_status_recently_suspect(
+        &runtime.continuation_statuses,
+        kind,
+        session_id,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity=session_id profile=- reason=continuation_suspect session_id={session_id}"
+            ),
+        );
+        return true;
+    }
+    false
+}
+
+fn touch_runtime_session_binding(
+    binding: Option<&mut ResponseProfileBinding>,
+    profile_name: &str,
+    now: i64,
+) -> bool {
+    let Some(binding) = binding.filter(|binding| binding.profile_name == profile_name) else {
+        return false;
+    };
+    let persist_touch = runtime_binding_touch_should_persist(binding.bound_at, now);
+    if binding.bound_at < now {
+        binding.bound_at = now;
+    }
+    persist_touch
 }

@@ -8,17 +8,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         turn_state_override: Option<&str>,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         let reuse_terminal_idle = self.websocket_session.last_terminal_elapsed();
-        let retry_same_profile_with_fresh_connect = !self
-            .websocket_reuse_fresh_retry_profiles
-            .contains(&profile_name)
-            && (self.bound_profile.as_deref() == Some(profile_name.as_str())
-                || self.turn_state_profile.as_deref() == Some(profile_name.as_str())
-                || self
-                    .compact_followup_profile
-                    .as_ref()
-                    .is_some_and(|(owner, _)| owner == &profile_name)
-                || (self.request_session_id.is_some()
-                    && self.session_profile.as_deref() == Some(profile_name.as_str())));
+        let retry_same_profile_with_fresh_connect =
+            self.reuse_watchdog_owner_retry_needed(&profile_name);
         let nonreplayable_previous_response_reuse =
             runtime_websocket_previous_response_reuse_is_nonreplayable(
                 self.previous_response_id.as_deref(),
@@ -45,186 +36,20 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ],
             ),
         );
-        if event == "connection_limit_reached"
-            && !self
-                .websocket_reuse_fresh_retry_profiles
-                .contains(&profile_name)
-        {
-            self.websocket_reuse_fresh_retry_profiles
-                .insert(profile_name.clone());
-            runtime_proxy_log(
-                self.shared,
-                runtime_proxy_structured_log_message(
-                    "websocket_connection_limit_fresh_retry",
-                    [
-                        runtime_proxy_log_field("request", self.request_id.to_string()),
-                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
-                        runtime_proxy_log_field("profile", profile_name.as_str()),
-                    ],
-                ),
-            );
+        if self.reuse_watchdog_connection_limit_retry(&profile_name, event) {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         if nonreplayable_previous_response_reuse && self.request_requires_previous_response_affinity
         {
-            if !self
-                .websocket_reuse_fresh_retry_profiles
-                .contains(&profile_name)
-            {
-                self.websocket_reuse_fresh_retry_profiles
-                    .insert(profile_name.clone());
-                runtime_proxy_log(
-                    self.shared,
-                    runtime_proxy_structured_log_message(
-                        "websocket_reuse_locked_affinity_owner_fresh_retry",
-                        [
-                            runtime_proxy_log_field("request", self.request_id.to_string()),
-                            runtime_proxy_log_field(
-                                "websocket_session",
-                                self.session_id.to_string(),
-                            ),
-                            runtime_proxy_log_field("profile", profile_name.as_str()),
-                            runtime_proxy_log_field("event", event),
-                        ],
-                    ),
-                );
-                runtime_proxy_log_chain_retried_owner(
-                    self.shared,
-                    RuntimeProxyChainLog {
-                        request_id: self.request_id,
-                        transport: "websocket",
-                        route: "websocket",
-                        websocket_session: Some(self.session_id),
-                        profile_name: &profile_name,
-                        previous_response_id: self.previous_response_id.as_deref(),
-                        reason: "websocket_reuse_watchdog_locked_affinity",
-                        via: None,
-                    },
-                    0,
-                );
-                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
-            }
-            runtime_proxy_record_continuity_failure_reason(
-                self.shared,
-                "stale_continuation",
-                "websocket_reuse_watchdog_locked_affinity",
-            );
-            runtime_proxy_log(
-                self.shared,
-                runtime_proxy_structured_log_message(
-                    "stale_continuation",
-                    [
-                        runtime_proxy_log_field("request", self.request_id.to_string()),
-                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
-                        runtime_proxy_log_field(
-                            "reason",
-                            "websocket_reuse_watchdog_locked_affinity",
-                        ),
-                        runtime_proxy_log_field("profile", profile_name.as_str()),
-                        runtime_proxy_log_field("event", event),
-                    ],
-                ),
-            );
-            runtime_proxy_log_chain_dead_upstream_confirmed(
-                self.shared,
-                RuntimeProxyChainLog {
-                    request_id: self.request_id,
-                    transport: "websocket",
-                    route: "websocket",
-                    websocket_session: Some(self.session_id),
-                    profile_name: &profile_name,
-                    previous_response_id: self.previous_response_id.as_deref(),
-                    reason: "websocket_reuse_watchdog_locked_affinity",
-                    via: None,
-                },
-                Some(event),
-            );
-            send_runtime_proxy_stale_continuation_websocket_error(&mut *self.local_socket)?;
-            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            return self.handle_locked_affinity_watchdog(&profile_name, event);
         }
         if nonreplayable_previous_response_reuse {
-            if !self
-                .websocket_reuse_fresh_retry_profiles
-                .contains(&profile_name)
-            {
-                self.websocket_reuse_fresh_retry_profiles
-                    .insert(profile_name.clone());
-                runtime_proxy_log(
-                    self.shared,
-                    runtime_proxy_structured_log_message(
-                        "websocket_reuse_nonreplayable_fresh_retry",
-                        [
-                            runtime_proxy_log_field("request", self.request_id.to_string()),
-                            runtime_proxy_log_field(
-                                "websocket_session",
-                                self.session_id.to_string(),
-                            ),
-                            runtime_proxy_log_field("profile", profile_name.as_str()),
-                            runtime_proxy_log_field("event", event),
-                        ],
-                    ),
-                );
-                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
-            }
-            if stale_previous_response_reuse {
-                runtime_proxy_log(
-                    self.shared,
-                    runtime_proxy_structured_log_message(
-                        "websocket_reuse_stale_previous_response_blocked",
-                        [
-                            runtime_proxy_log_field("request", self.request_id.to_string()),
-                            runtime_proxy_log_field(
-                                "websocket_session",
-                                self.session_id.to_string(),
-                            ),
-                            runtime_proxy_log_field("profile", profile_name.as_str()),
-                            runtime_proxy_log_field("event", event),
-                            runtime_proxy_log_field(
-                                "elapsed_ms",
-                                reuse_terminal_idle
-                                    .map(|elapsed| elapsed.as_millis())
-                                    .unwrap_or(0)
-                                    .to_string(),
-                            ),
-                            runtime_proxy_log_field(
-                                "threshold_ms",
-                                self.shared
-                                    .runtime_config
-                                    .tuning
-                                    .websocket_previous_response_reuse_stale_ms
-                                    .to_string(),
-                            ),
-                        ],
-                    ),
-                );
-            } else {
-                runtime_proxy_log(
-                    self.shared,
-                    runtime_proxy_structured_log_message(
-                        "websocket_reuse_previous_response_blocked",
-                        [
-                            runtime_proxy_log_field("request", self.request_id.to_string()),
-                            runtime_proxy_log_field(
-                                "websocket_session",
-                                self.session_id.to_string(),
-                            ),
-                            runtime_proxy_log_field("profile", profile_name.as_str()),
-                            runtime_proxy_log_field("event", event),
-                            runtime_proxy_log_field("reason", "missing_turn_state"),
-                            runtime_proxy_log_field(
-                                "elapsed_ms",
-                                reuse_terminal_idle
-                                    .map(|elapsed| elapsed.as_millis())
-                                    .unwrap_or(0)
-                                    .to_string(),
-                            ),
-                        ],
-                    ),
-                );
-            }
-            return Err(anyhow::anyhow!(
-                "runtime websocket upstream closed before response.completed for previous_response_id continuation without replayable turn_state: profile={profile_name} event={event}"
-            ));
+            return self.handle_nonreplayable_watchdog(
+                &profile_name,
+                event,
+                reuse_terminal_idle,
+                stale_previous_response_reuse,
+            );
         }
         if retry_same_profile_with_fresh_connect {
             self.websocket_reuse_fresh_retry_profiles
@@ -246,6 +71,184 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.clear_profile_affinity(&profile_name, true);
         self.excluded_profiles.insert(profile_name);
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
+    }
+
+    fn reuse_watchdog_owner_retry_needed(&self, profile_name: &str) -> bool {
+        !self
+            .websocket_reuse_fresh_retry_profiles
+            .contains(profile_name)
+            && (self.bound_profile.as_deref() == Some(profile_name)
+                || self.turn_state_profile.as_deref() == Some(profile_name)
+                || self
+                    .compact_followup_profile
+                    .as_ref()
+                    .is_some_and(|(owner, _)| owner == profile_name)
+                || (self.request_session_id.is_some()
+                    && self.session_profile.as_deref() == Some(profile_name)))
+    }
+
+    fn reuse_watchdog_connection_limit_retry(&mut self, profile_name: &str, event: &str) -> bool {
+        if event != "connection_limit_reached"
+            || self
+                .websocket_reuse_fresh_retry_profiles
+                .contains(profile_name)
+        {
+            return false;
+        }
+        self.websocket_reuse_fresh_retry_profiles
+            .insert(profile_name.to_string());
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "websocket_connection_limit_fresh_retry",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field("profile", profile_name),
+                ],
+            ),
+        );
+        true
+    }
+
+    fn handle_locked_affinity_watchdog(
+        &mut self,
+        profile_name: &str,
+        event: &str,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        if !self
+            .websocket_reuse_fresh_retry_profiles
+            .contains(profile_name)
+        {
+            self.websocket_reuse_fresh_retry_profiles
+                .insert(profile_name.to_string());
+            runtime_proxy_log(
+                self.shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_reuse_locked_affinity_owner_fresh_retry",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field("event", event),
+                    ],
+                ),
+            );
+            runtime_proxy_log_chain_retried_owner(
+                self.shared,
+                RuntimeProxyChainLog {
+                    request_id: self.request_id,
+                    transport: "websocket",
+                    route: "websocket",
+                    websocket_session: Some(self.session_id),
+                    profile_name,
+                    previous_response_id: self.previous_response_id.as_deref(),
+                    reason: "websocket_reuse_watchdog_locked_affinity",
+                    via: None,
+                },
+                0,
+            );
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+        runtime_proxy_record_continuity_failure_reason(
+            self.shared,
+            "stale_continuation",
+            "websocket_reuse_watchdog_locked_affinity",
+        );
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "stale_continuation",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field("reason", "websocket_reuse_watchdog_locked_affinity"),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("event", event),
+                ],
+            ),
+        );
+        runtime_proxy_log_chain_dead_upstream_confirmed(
+            self.shared,
+            RuntimeProxyChainLog {
+                request_id: self.request_id,
+                transport: "websocket",
+                route: "websocket",
+                websocket_session: Some(self.session_id),
+                profile_name,
+                previous_response_id: self.previous_response_id.as_deref(),
+                reason: "websocket_reuse_watchdog_locked_affinity",
+                via: None,
+            },
+            Some(event),
+        );
+        send_runtime_proxy_stale_continuation_websocket_error(&mut *self.local_socket)?;
+        Ok(RuntimeWebsocketMessageLoopAction::Finished)
+    }
+
+    fn handle_nonreplayable_watchdog(
+        &mut self,
+        profile_name: &str,
+        event: &str,
+        reuse_terminal_idle: Option<std::time::Duration>,
+        stale_previous_response_reuse: bool,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        if !self
+            .websocket_reuse_fresh_retry_profiles
+            .contains(profile_name)
+        {
+            self.websocket_reuse_fresh_retry_profiles
+                .insert(profile_name.to_string());
+            runtime_proxy_log(
+                self.shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_reuse_nonreplayable_fresh_retry",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field("event", event),
+                    ],
+                ),
+            );
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+        let event_name = if stale_previous_response_reuse {
+            "websocket_reuse_stale_previous_response_blocked"
+        } else {
+            "websocket_reuse_previous_response_blocked"
+        };
+        let mut fields = vec![
+            runtime_proxy_log_field("request", self.request_id.to_string()),
+            runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+            runtime_proxy_log_field("profile", profile_name),
+            runtime_proxy_log_field("event", event),
+            runtime_proxy_log_field(
+                "elapsed_ms",
+                reuse_terminal_idle
+                    .map_or(0, |elapsed| elapsed.as_millis())
+                    .to_string(),
+            ),
+        ];
+        if !stale_previous_response_reuse {
+            fields.push(runtime_proxy_log_field("reason", "missing_turn_state"));
+        } else {
+            fields.push(runtime_proxy_log_field(
+                "threshold_ms",
+                self.shared
+                    .runtime_config
+                    .tuning
+                    .websocket_previous_response_reuse_stale_ms
+                    .to_string(),
+            ));
+        }
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(event_name, fields),
+        );
+        Err(anyhow::anyhow!(
+            "runtime websocket upstream closed before response.completed for previous_response_id continuation without replayable turn_state: profile={profile_name} event={event}"
+        ))
     }
 
     pub(super) fn handle_previous_response_not_found(

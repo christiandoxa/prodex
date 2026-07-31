@@ -295,37 +295,46 @@ pub(crate) fn cleanup_runtime_broker_stale_registries(paths: &AppPaths) -> Resul
 }
 
 pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> usize {
+    runtime_broker_artifact_keys(paths)
+        .into_iter()
+        .map(|broker_key| {
+            cleanup_runtime_broker_stale_leases_in_dir(&runtime_broker_lease_dir(
+                paths,
+                &broker_key,
+            ))
+        })
+        .sum()
+}
+
+fn cleanup_runtime_broker_stale_leases_in_dir(lease_dir: &Path) -> usize {
+    if !runtime_broker_lease_dir_is_regular_dir(lease_dir) {
+        return 0;
+    }
+    let Ok(entries) = fs::read_dir(lease_dir) else {
+        return 0;
+    };
     let mut removed = 0usize;
-    for broker_key in runtime_broker_artifact_keys(paths) {
-        let lease_dir = runtime_broker_lease_dir(paths, &broker_key);
-        if !runtime_broker_lease_dir_is_regular_dir(&lease_dir) {
-            continue;
-        }
-        let Ok(entries) = fs::read_dir(&lease_dir) else {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if !runtime_broker_lease_path_is_regular_file(&path) {
-                continue;
-            }
-            let pid = runtime_broker_lease_pid(file_name);
-            if pid.is_some_and(runtime_process_pid_alive) {
-                continue;
-            }
-            if fs::remove_file(&path).is_ok() {
-                removed += 1;
-            }
+        if !runtime_broker_lease_path_is_regular_file(&path) {
+            continue;
         }
-        let should_remove_dir = fs::read_dir(&lease_dir)
-            .ok()
-            .is_some_and(|mut remaining| remaining.next().is_none());
-        if should_remove_dir {
-            let _ = fs::remove_dir(&lease_dir);
+        let pid = runtime_broker_lease_pid(file_name);
+        if pid.is_some_and(runtime_process_pid_alive) {
+            continue;
         }
+        if fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    let should_remove_dir = fs::read_dir(lease_dir)
+        .ok()
+        .is_some_and(|mut remaining| remaining.next().is_none());
+    if should_remove_dir {
+        let _ = fs::remove_dir(lease_dir);
     }
     removed
 }

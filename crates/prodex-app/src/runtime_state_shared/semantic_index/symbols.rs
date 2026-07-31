@@ -23,6 +23,13 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_symbol_line(
     }
 
     let rust_test = runtime_smart_context_has_rust_test_attribute(lines, index);
+    runtime_smart_context_parse_symbol_declaration(line, rust_test)
+}
+
+fn runtime_smart_context_parse_symbol_declaration(
+    line: &str,
+    rust_test: bool,
+) -> Option<RuntimeSmartContextParsedSymbolLine> {
     if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, "fn") {
         return Some(RuntimeSmartContextParsedSymbolLine {
             label: if rust_test { "test_symbol" } else { "function" },
@@ -129,28 +136,44 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_brace_symbol_end(
         .take(max_end + 1)
         .skip(declaration_index)
     {
-        for ch in line.chars() {
-            if ch == '{' {
-                saw_open = true;
-                balance += 1;
-            } else if ch == '}' && saw_open {
-                balance -= 1;
-            }
-        }
-        if saw_open && balance <= 0 {
+        if runtime_smart_context_scan_brace_line(line, &mut balance, &mut saw_open) {
             return index;
         }
-        if !saw_open
-            && index > declaration_index
-            && index - declaration_index >= RUNTIME_SMART_CONTEXT_MAX_SYMBOL_SIGNATURE_LINES
-        {
-            return index;
-        }
-        if !saw_open && line.trim_end().ends_with(';') {
+        if runtime_smart_context_brace_signature_ended(line, index, declaration_index, saw_open) {
             return index;
         }
     }
     max_end
+}
+
+fn runtime_smart_context_scan_brace_line(
+    line: &str,
+    balance: &mut isize,
+    saw_open: &mut bool,
+) -> bool {
+    for ch in line.chars() {
+        if ch == '{' {
+            *saw_open = true;
+            *balance += 1;
+        } else if ch == '}' && *saw_open {
+            *balance -= 1;
+        }
+    }
+    *saw_open && *balance <= 0
+}
+
+fn runtime_smart_context_brace_signature_ended(
+    line: &str,
+    index: usize,
+    declaration_index: usize,
+    saw_open: bool,
+) -> bool {
+    if saw_open {
+        return false;
+    }
+    index > declaration_index
+        && (index - declaration_index >= RUNTIME_SMART_CONTEXT_MAX_SYMBOL_SIGNATURE_LINES
+            || line.trim_end().ends_with(';'))
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_python_symbol_end(

@@ -1,10 +1,11 @@
 use super::{
-    AppState, AppStateIoExt, ProdexCleanupSummary, ProfileIdentity, RuntimeContinuationStore,
-    fetch_profile_identity, load_runtime_continuation_journal_with_recovery,
-    load_runtime_continuations_with_recovery, map_parallel, read_profile_identity_from_auth,
-    runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
-    runtime_continuations_file_path, runtime_continuations_last_good_file_path,
-    save_runtime_continuation_journal_for_profiles, save_runtime_continuations_for_profiles,
+    AppState, AppStateIoExt, ProdexCleanupSummary, ProfileIdentity, RuntimeContinuationJournal,
+    RuntimeContinuationStore, fetch_profile_identity,
+    load_runtime_continuation_journal_with_recovery, load_runtime_continuations_with_recovery,
+    map_parallel, read_profile_identity_from_auth, runtime_continuation_journal_file_path,
+    runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
+    runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
+    save_runtime_continuations_for_profiles,
 };
 use anyhow::{Context, Result};
 use prodex_core::{AppPaths, path_is_strictly_under_root, same_path};
@@ -15,6 +16,17 @@ use prodex_state::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::{Path, PathBuf};
+
+struct DuplicateCleanupContext<'a> {
+    paths: &'a AppPaths,
+    state: &'a mut AppState,
+    continuations: &'a mut Option<RuntimeContinuationStore>,
+    continuation_journal: &'a mut Option<RuntimeContinuationJournal>,
+    summary: &'a mut ProdexCleanupSummary,
+    removed_names: &'a mut BTreeSet<String>,
+    homes_to_delete: &'a mut Vec<PathBuf>,
+}
 
 fn remap_runtime_continuation_store_profiles(
     continuations: &mut RuntimeContinuationStore,
@@ -137,60 +149,18 @@ pub(super) fn cleanup_duplicate_profiles(
     let mut summary = ProdexCleanupSummary::default();
     let mut removed_names = BTreeSet::new();
     let mut homes_to_delete = Vec::new();
-    for mut profile_names in duplicate_groups {
-        profile_names.sort();
-        let Some(canonical_name) = select_canonical_duplicate_profile(state, &profile_names) else {
-            continue;
+    {
+        let mut cleanup = DuplicateCleanupContext {
+            paths,
+            state,
+            continuations: &mut continuations,
+            continuation_journal: &mut continuation_journal,
+            summary: &mut summary,
+            removed_names: &mut removed_names,
+            homes_to_delete: &mut homes_to_delete,
         };
-        let canonical_home = state
-            .profiles
-            .get(&canonical_name)
-            .map(|profile| profile.codex_home.clone())
-            .with_context(|| format!("profile '{}' is missing during cleanup", canonical_name))?;
-
-        for duplicate_name in profile_names
-            .into_iter()
-            .filter(|profile_name| profile_name != &canonical_name)
-        {
-            if let Some(continuations) = continuations.as_mut() {
-                remap_runtime_continuation_store_profiles(
-                    continuations,
-                    &duplicate_name,
-                    &canonical_name,
-                );
-            }
-            if let Some(journal) = continuation_journal.as_mut() {
-                remap_runtime_continuation_store_profiles(
-                    &mut journal.continuations,
-                    &duplicate_name,
-                    &canonical_name,
-                );
-            }
-
-            let Some(removed_profile) =
-                remove_duplicate_profile_from_state(state, &duplicate_name, &canonical_name)
-            else {
-                continue;
-            };
-            summary.duplicate_profiles_removed += 1;
-            removed_names.insert(duplicate_name);
-
-            if removed_profile.managed
-                && removed_profile.codex_home.exists()
-                && !same_path(&removed_profile.codex_home, &canonical_home)
-            {
-                prodex_shared_codex_fs::ensure_managed_profiles_root(paths)?;
-                if !path_is_strictly_under_root(
-                    &paths.managed_profiles_root,
-                    &removed_profile.codex_home,
-                ) {
-                    anyhow::bail!(
-                        "refusing to delete duplicate managed profile home outside managed profiles root: {}",
-                        removed_profile.codex_home.display()
-                    );
-                }
-                homes_to_delete.push(removed_profile.codex_home);
-            }
+        for profile_names in duplicate_groups {
+            cleanup_duplicate_profile_group(&mut cleanup, profile_names)?;
         }
     }
 
@@ -220,4 +190,71 @@ pub(super) fn cleanup_duplicate_profiles(
         summary.duplicate_managed_profile_homes_removed += 1;
     }
     Ok(summary)
+}
+
+fn cleanup_duplicate_profile_group(
+    cleanup: &mut DuplicateCleanupContext<'_>,
+    mut profile_names: Vec<String>,
+) -> Result<()> {
+    profile_names.sort();
+    let Some(canonical_name) = select_canonical_duplicate_profile(cleanup.state, &profile_names)
+    else {
+        return Ok(());
+    };
+    let canonical_home = cleanup
+        .state
+        .profiles
+        .get(&canonical_name)
+        .map(|profile| profile.codex_home.clone())
+        .with_context(|| format!("profile '{}' is missing during cleanup", canonical_name))?;
+    for duplicate_name in profile_names
+        .into_iter()
+        .filter(|profile_name| profile_name != &canonical_name)
+    {
+        cleanup_duplicate_profile(cleanup, &duplicate_name, &canonical_name, &canonical_home)?;
+    }
+    Ok(())
+}
+
+fn cleanup_duplicate_profile(
+    cleanup: &mut DuplicateCleanupContext<'_>,
+    duplicate_name: &str,
+    canonical_name: &str,
+    canonical_home: &Path,
+) -> Result<()> {
+    if let Some(continuations) = cleanup.continuations.as_mut() {
+        remap_runtime_continuation_store_profiles(continuations, duplicate_name, canonical_name);
+    }
+    if let Some(journal) = cleanup.continuation_journal.as_mut() {
+        remap_runtime_continuation_store_profiles(
+            &mut journal.continuations,
+            duplicate_name,
+            canonical_name,
+        );
+    }
+    let Some(removed_profile) =
+        remove_duplicate_profile_from_state(cleanup.state, duplicate_name, canonical_name)
+    else {
+        return Ok(());
+    };
+    cleanup.summary.duplicate_profiles_removed += 1;
+    cleanup.removed_names.insert(duplicate_name.to_string());
+    if !removed_profile.managed
+        || !removed_profile.codex_home.exists()
+        || same_path(&removed_profile.codex_home, canonical_home)
+    {
+        return Ok(());
+    }
+    prodex_shared_codex_fs::ensure_managed_profiles_root(cleanup.paths)?;
+    if !path_is_strictly_under_root(
+        &cleanup.paths.managed_profiles_root,
+        &removed_profile.codex_home,
+    ) {
+        anyhow::bail!(
+            "refusing to delete duplicate managed profile home outside managed profiles root: {}",
+            removed_profile.codex_home.display()
+        );
+    }
+    cleanup.homes_to_delete.push(removed_profile.codex_home);
+    Ok(())
 }

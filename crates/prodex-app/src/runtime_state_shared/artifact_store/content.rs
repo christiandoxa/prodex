@@ -69,45 +69,65 @@ impl RuntimeSmartContextArtifactStore {
         let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
         let id = content_hash.clone();
         if self.artifacts.contains_key(&id) {
-            let (artifact_ref, projection_dirty) = {
-                let existing = self.artifacts.get_mut(&id)?;
-                if !Self::artifact_matches_text(existing, text, &content_hash) {
-                    return None;
-                }
-                let mut projection_dirty = existing.order != order;
-                existing.order = order;
-                existing.pending_order = true;
-                let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
-                    existing.line_index.as_ref(),
-                );
-                if refresh_line_index || existing.chunk_index.is_none() {
-                    let line_index = if refresh_line_index {
-                        runtime_smart_context_artifact_line_index(text)
-                    } else if let Some(line_index) = existing.line_index.clone() {
-                        line_index
-                    } else {
-                        projection_dirty = true;
-                        runtime_smart_context_artifact_line_index(text)
-                    };
-                    if refresh_line_index || existing.line_index.is_none() {
-                        existing.line_index = Some(line_index.clone());
-                        projection_dirty = true;
-                    }
-                    if refresh_line_index || existing.chunk_index.is_none() {
-                        existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
-                            text,
-                            &line_index,
-                        ));
-                    }
-                }
-                (Self::artifact_ref(existing), projection_dirty)
-            };
-            if projection_dirty {
-                self.invalidate_prewarmed_projections();
-            }
-            return Some(artifact_ref);
+            return self.refresh_existing_artifact_text(&id, text, &content_hash, order);
         }
 
+        self.insert_new_artifact(id, content_hash, text, order)
+    }
+
+    fn refresh_existing_artifact_text(
+        &mut self,
+        id: &str,
+        text: &str,
+        content_hash: &str,
+        order: u64,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
+        let (artifact_ref, projection_dirty) = {
+            let existing = self.artifacts.get_mut(id)?;
+            if !Self::artifact_matches_text(existing, text, content_hash) {
+                return None;
+            }
+            let mut projection_dirty = existing.order != order;
+            existing.order = order;
+            existing.pending_order = true;
+            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
+                existing.line_index.as_ref(),
+            );
+            if refresh_line_index || existing.chunk_index.is_none() {
+                let line_index = if refresh_line_index {
+                    runtime_smart_context_artifact_line_index(text)
+                } else if let Some(line_index) = existing.line_index.clone() {
+                    line_index
+                } else {
+                    projection_dirty = true;
+                    runtime_smart_context_artifact_line_index(text)
+                };
+                if refresh_line_index || existing.line_index.is_none() {
+                    existing.line_index = Some(line_index.clone());
+                    projection_dirty = true;
+                }
+                if refresh_line_index || existing.chunk_index.is_none() {
+                    existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+                        text,
+                        &line_index,
+                    ));
+                }
+            }
+            (Self::artifact_ref(existing), projection_dirty)
+        };
+        if projection_dirty {
+            self.invalidate_prewarmed_projections();
+        }
+        Some(artifact_ref)
+    }
+
+    fn insert_new_artifact(
+        &mut self,
+        id: String,
+        content_hash: String,
+        text: &str,
+        order: u64,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
         let byte_len = text.len();
         let line_index = runtime_smart_context_artifact_line_index(text);
         let chunk_index = runtime_smart_context_artifact_chunk_index(text, &line_index);

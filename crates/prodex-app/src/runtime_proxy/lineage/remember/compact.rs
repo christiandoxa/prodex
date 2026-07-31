@@ -19,99 +19,34 @@ pub(crate) fn remember_runtime_compact_lineage(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let runtime_state = &mut *runtime;
     let bound_at = Local::now().timestamp();
     let mut changed = false;
 
     if let Some(session_id) = session_id {
         let key = runtime_compact_session_lineage_key(session_id);
-        let should_refresh_binding = match runtime.session_id_bindings.get_mut(&key) {
-            Some(binding) if binding.profile_name == profile_name => {
-                if binding.bound_at < bound_at {
-                    binding.bound_at = bound_at;
-                }
-                false
-            }
-            Some(binding) => {
-                binding.profile_name = profile_name.to_string();
-                binding.bound_at = bound_at;
-                changed = true;
-                true
-            }
-            None => {
-                runtime.session_id_bindings.insert(
-                    key.clone(),
-                    ResponseProfileBinding {
-                        profile_name: profile_name.to_string(),
-                        bound_at,
-                    },
-                );
-                changed = true;
-                true
-            }
-        };
-        if should_refresh_binding
-            || runtime_continuation_status_should_refresh_verified(
-                &runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::SessionId,
-                &key,
-                bound_at,
-                Some(verified_route),
-            )
-        {
-            changed = runtime_mark_continuation_status_verified(
-                &mut runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::SessionId,
-                &key,
-                bound_at,
-                Some(verified_route),
-            ) || changed;
-        }
+        changed = remember_runtime_compact_binding(
+            &mut runtime_state.session_id_bindings,
+            &mut runtime_state.continuation_statuses,
+            key,
+            profile_name,
+            bound_at,
+            verified_route,
+            RuntimeContinuationBindingKind::SessionId,
+        ) || changed;
     }
 
     if let Some(turn_state) = turn_state {
         let key = runtime_compact_turn_state_lineage_key(turn_state);
-        let should_refresh_binding = match runtime.turn_state_bindings.get_mut(&key) {
-            Some(binding) if binding.profile_name == profile_name => {
-                if binding.bound_at < bound_at {
-                    binding.bound_at = bound_at;
-                }
-                false
-            }
-            Some(binding) => {
-                binding.profile_name = profile_name.to_string();
-                binding.bound_at = bound_at;
-                changed = true;
-                true
-            }
-            None => {
-                runtime.turn_state_bindings.insert(
-                    key.clone(),
-                    ResponseProfileBinding {
-                        profile_name: profile_name.to_string(),
-                        bound_at,
-                    },
-                );
-                changed = true;
-                true
-            }
-        };
-        if should_refresh_binding
-            || runtime_continuation_status_should_refresh_verified(
-                &runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::TurnState,
-                &key,
-                bound_at,
-                Some(verified_route),
-            )
-        {
-            changed = runtime_mark_continuation_status_verified(
-                &mut runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::TurnState,
-                &key,
-                bound_at,
-                Some(verified_route),
-            ) || changed;
-        }
+        changed = remember_runtime_compact_binding(
+            &mut runtime_state.turn_state_bindings,
+            &mut runtime_state.continuation_statuses,
+            key,
+            profile_name,
+            bound_at,
+            verified_route,
+            RuntimeContinuationBindingKind::TurnState,
+        ) || changed;
     }
 
     if changed {
@@ -133,4 +68,57 @@ pub(crate) fn remember_runtime_compact_lineage(
         drop(runtime);
     }
     Ok(())
+}
+
+fn remember_runtime_compact_binding(
+    bindings: &mut std::collections::BTreeMap<String, ResponseProfileBinding>,
+    statuses: &mut RuntimeContinuationStatuses,
+    key: String,
+    profile_name: &str,
+    bound_at: i64,
+    verified_route: RuntimeRouteKind,
+    binding_kind: RuntimeContinuationBindingKind,
+) -> bool {
+    let should_refresh_binding = match bindings.get_mut(&key) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+            false
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            true
+        }
+        None => {
+            bindings.insert(
+                key.clone(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            true
+        }
+    };
+    let mut changed = should_refresh_binding;
+    if should_refresh_binding
+        || runtime_continuation_status_should_refresh_verified(
+            statuses,
+            binding_kind,
+            &key,
+            bound_at,
+            Some(verified_route),
+        )
+    {
+        changed = runtime_mark_continuation_status_verified(
+            statuses,
+            binding_kind,
+            &key,
+            bound_at,
+            Some(verified_route),
+        ) || changed;
+    }
+    changed
 }

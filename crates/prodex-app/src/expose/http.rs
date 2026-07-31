@@ -50,9 +50,26 @@ pub(super) struct ExposeHttpParseError {
     pub(super) message: &'static str,
 }
 
+type ExposeHttpRequestHead = (String, String, BTreeMap<String, Vec<String>>, usize);
+
 pub(super) fn expose_read_http_request(
     stream: &mut TcpStream,
 ) -> std::result::Result<ExposeParsedRequest, ExposeHttpParseError> {
+    let (received, header_end) = expose_read_http_headers(stream)?;
+    let (method, target, headers, content_length) =
+        expose_parse_http_request_head(&received, header_end)?;
+    let body = expose_read_http_body(stream, &received[header_end + 4..], content_length)?;
+    Ok(ExposeParsedRequest {
+        method,
+        target,
+        headers,
+        body,
+    })
+}
+
+fn expose_read_http_headers(
+    stream: &mut TcpStream,
+) -> std::result::Result<(Vec<u8>, usize), ExposeHttpParseError> {
     let mut received = Vec::with_capacity(4096);
     let header_end = loop {
         if let Some(index) = received.windows(4).position(|window| window == b"\r\n\r\n") {
@@ -80,6 +97,13 @@ pub(super) fn expose_read_http_request(
     if header_end > EXPOSE_MAX_HEADER_BYTES {
         return Err(expose_parse_error(431, "request headers too large"));
     }
+    Ok((received, header_end))
+}
+
+fn expose_parse_http_request_head(
+    received: &[u8],
+    header_end: usize,
+) -> std::result::Result<ExposeHttpRequestHead, ExposeHttpParseError> {
     let head = std::str::from_utf8(&received[..header_end])
         .map_err(|_| expose_parse_error(400, "invalid request"))?;
     let mut lines = head.split("\r\n");
@@ -141,8 +165,19 @@ pub(super) fn expose_read_http_request(
     if content_length > EXPOSE_MAX_INPUT_BYTES {
         return Err(expose_parse_error(413, "request body too large"));
     }
-    let body_start = header_end + 4;
-    let initial_body = &received[body_start..];
+    Ok((
+        method.to_string(),
+        target.to_string(),
+        headers,
+        content_length,
+    ))
+}
+
+fn expose_read_http_body(
+    stream: &mut TcpStream,
+    initial_body: &[u8],
+    content_length: usize,
+) -> std::result::Result<Vec<u8>, ExposeHttpParseError> {
     if initial_body.len() > content_length {
         return Err(expose_parse_error(400, "unexpected request bytes"));
     }
@@ -167,12 +202,7 @@ pub(super) fn expose_read_http_request(
         }
         body.extend_from_slice(&chunk[..read]);
     }
-    Ok(ExposeParsedRequest {
-        method: method.to_string(),
-        target: target.to_string(),
-        headers,
-        body,
-    })
+    Ok(body)
 }
 
 pub(super) fn expose_parse_error(status: u16, message: &'static str) -> ExposeHttpParseError {
@@ -418,17 +448,52 @@ pub(super) fn expose_empty_body_error(request: &ExposeHttpRequest) -> Option<(u1
 }
 
 pub(super) fn handle_expose_stream(request: ExposeHttpRequest, shared: &Arc<ExposeShared>) {
+    let Ok((session, request)) = expose_authorize_stream(request, shared) else {
+        return;
+    };
+    if !expose_try_acquire_client(shared) {
+        let _ = request.respond(expose_text_response(429, "too many clients"));
+        return;
+    }
+
+    let (client_id, rx) = match expose_register_stream_client(shared) {
+        Ok(client) => client,
+        Err(()) => {
+            shared.active_clients.fetch_sub(1, Ordering::SeqCst);
+            let _ = request.respond(expose_text_response(500, "stream unavailable"));
+            return;
+        }
+    };
+    let _guard = ExposeClientGuard {
+        shared: Arc::clone(shared),
+        client_id,
+    };
+
+    let mut writer = request.stream;
+    if expose_write_stream_headers(&mut writer).is_err() {
+        return;
+    }
+    if expose_write_scrollback(&mut writer, shared).is_err() {
+        return;
+    }
+    expose_stream_loop(&mut writer, shared, &session, rx);
+}
+
+fn expose_authorize_stream(
+    request: ExposeHttpRequest,
+    shared: &Arc<ExposeShared>,
+) -> Result<(String, ExposeHttpRequest), ()> {
     if request.method() != "GET" {
         let _ = request.respond(expose_text_response(405, "method not allowed"));
-        return;
+        return Err(());
     }
     if !expose_optional_origin_allowed(&request) {
         let _ = request.respond(expose_text_response(403, "forbidden"));
-        return;
+        return Err(());
     }
     let Some(session) = expose_session_cookie(&request).map(str::to_string) else {
         let _ = request.respond(expose_text_response(401, "unauthorized"));
-        return;
+        return Err(());
     };
     let authorized = shared
         .sessions
@@ -437,55 +502,56 @@ pub(super) fn handle_expose_stream(request: ExposeHttpRequest, shared: &Arc<Expo
         .unwrap_or(false);
     if !authorized {
         let _ = request.respond(expose_text_response(401, "unauthorized"));
-        return;
+        return Err(());
     }
-    if !expose_try_acquire_client(shared) {
-        let _ = request.respond(expose_text_response(429, "too many clients"));
-        return;
-    }
+    Ok((session, request))
+}
 
+fn expose_register_stream_client(
+    shared: &Arc<ExposeShared>,
+) -> std::result::Result<(u64, mpsc::Receiver<Vec<u8>>), ()> {
     let client_id = shared.next_client_id.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(EXPOSE_CLIENT_QUEUE_CAPACITY);
-    match shared.pty.clients.lock() {
-        Ok(mut clients) => clients.push(ExposeOutputClient {
-            id: client_id,
-            sender: tx,
-        }),
-        Err(_) => {
-            shared.active_clients.fetch_sub(1, Ordering::SeqCst);
-            let _ = request.respond(expose_text_response(500, "stream unavailable"));
-            return;
-        }
-    }
-    let _guard = ExposeClientGuard {
-        shared: Arc::clone(shared),
-        client_id,
-    };
+    let mut clients = shared.pty.clients.lock().map_err(|_| ())?;
+    clients.push(ExposeOutputClient {
+        id: client_id,
+        sender: tx,
+    });
+    Ok((client_id, rx))
+}
 
-    let mut writer = request.stream;
-    if write!(
+fn expose_write_stream_headers(writer: &mut TcpStream) -> io::Result<()> {
+    write!(
         writer,
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
-    )
-    .and_then(|_| writer.flush())
-    .is_err()
-    {
-        return;
-    }
+    )?;
+    writer.flush()
+}
+
+fn expose_write_scrollback(writer: &mut TcpStream, shared: &Arc<ExposeShared>) -> io::Result<()> {
     if let Ok(scrollback) = shared.pty.scrollback.lock() {
         let bytes: Vec<u8> = scrollback.iter().copied().collect();
-        if !bytes.is_empty() && expose_write_sse(&mut writer, &bytes).is_err() {
-            return;
+        if !bytes.is_empty() {
+            expose_write_sse(writer, &bytes)?;
         }
     }
+    Ok(())
+}
+
+fn expose_stream_loop(
+    writer: &mut TcpStream,
+    shared: &Arc<ExposeShared>,
+    session: &str,
+    rx: mpsc::Receiver<Vec<u8>>,
+) {
     let mut last_keepalive = Instant::now();
     while shared.pty.running.load(Ordering::SeqCst)
         && !shared.shutdown.load(Ordering::SeqCst)
-        && expose_session_valid(shared, &session)
+        && expose_session_valid(shared, session)
     {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(bytes) => {
-                if expose_write_sse(&mut writer, &bytes).is_err() {
+                if expose_write_sse(writer, &bytes).is_err() {
                     break;
                 }
             }

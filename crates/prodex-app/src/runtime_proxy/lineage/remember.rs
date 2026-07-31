@@ -227,35 +227,9 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
     let mut changed = false;
     let mut response_turn_state_changed = false;
     for response_id in response_ids {
-        changed =
-            clear_runtime_previous_response_negative_cache(&mut runtime, response_id, profile_name)
-                || changed;
-        let should_refresh_binding =
-            match runtime.state.response_profile_bindings.get_mut(response_id) {
-                Some(binding) if binding.profile_name == profile_name => {
-                    if binding.bound_at < bound_at {
-                        binding.bound_at = bound_at;
-                    }
-                    false
-                }
-                Some(binding) => {
-                    binding.profile_name = profile_name.to_string();
-                    binding.bound_at = bound_at;
-                    changed = true;
-                    true
-                }
-                None => {
-                    runtime.state.response_profile_bindings.insert(
-                        response_id.clone(),
-                        ResponseProfileBinding {
-                            profile_name: profile_name.to_string(),
-                            bound_at,
-                        },
-                    );
-                    changed = true;
-                    true
-                }
-            };
+        let (binding_changed, should_refresh_binding) =
+            remember_runtime_response_binding(&mut runtime, response_id, profile_name, bound_at);
+        changed = binding_changed || changed;
         if should_refresh_binding
             || runtime_continuation_status_should_refresh_verified(
                 &runtime.continuation_statuses,
@@ -275,30 +249,14 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
         }
         if let Some(turn_state) = turn_state {
             let key = runtime_response_turn_state_lineage_key(response_id, turn_state);
-            match runtime.state.response_profile_bindings.get_mut(&key) {
-                Some(binding) if binding.profile_name == profile_name => {
-                    if binding.bound_at < bound_at {
-                        binding.bound_at = bound_at;
-                    }
-                }
-                Some(binding) => {
-                    binding.profile_name = profile_name.to_string();
-                    binding.bound_at = bound_at;
-                    changed = true;
-                    response_turn_state_changed = true;
-                }
-                None => {
-                    runtime.state.response_profile_bindings.insert(
-                        key,
-                        ResponseProfileBinding {
-                            profile_name: profile_name.to_string(),
-                            bound_at,
-                        },
-                    );
-                    changed = true;
-                    response_turn_state_changed = true;
-                }
-            }
+            let turn_state_changed = remember_runtime_response_turn_state_binding(
+                &mut runtime,
+                key,
+                profile_name,
+                bound_at,
+            );
+            changed = turn_state_changed || changed;
+            response_turn_state_changed = turn_state_changed || response_turn_state_changed;
         }
     }
     if changed {
@@ -345,6 +303,73 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
         drop(runtime);
     }
     Ok(())
+}
+
+fn remember_runtime_response_binding(
+    runtime: &mut RuntimeRotationState,
+    response_id: &str,
+    profile_name: &str,
+    bound_at: i64,
+) -> (bool, bool) {
+    let mut changed =
+        clear_runtime_previous_response_negative_cache(runtime, response_id, profile_name);
+    let should_refresh = match runtime.state.response_profile_bindings.get_mut(response_id) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+            false
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            changed = true;
+            true
+        }
+        None => {
+            runtime.state.response_profile_bindings.insert(
+                response_id.to_string(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+            true
+        }
+    };
+    (changed, should_refresh)
+}
+
+fn remember_runtime_response_turn_state_binding(
+    runtime: &mut RuntimeRotationState,
+    key: String,
+    profile_name: &str,
+    bound_at: i64,
+) -> bool {
+    match runtime.state.response_profile_bindings.get_mut(&key) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+            false
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            true
+        }
+        None => {
+            runtime.state.response_profile_bindings.insert(
+                key,
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            true
+        }
+    }
 }
 
 pub(crate) fn remember_runtime_successful_previous_response_owner(

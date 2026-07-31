@@ -339,35 +339,7 @@ impl Read for RuntimePrefetchReader {
                 return Ok(read);
             }
 
-            let next = if let Some(chunk) = self.backlog.pop_front() {
-                Some(chunk)
-            } else {
-                match self.receiver.recv_timeout(Duration::from_millis(
-                    self.shared.config.stream_idle_timeout_ms,
-                )) {
-                    Ok(chunk) => {
-                        if let RuntimePrefetchChunk::Data(bytes) = &chunk {
-                            runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
-                        }
-                        Some(chunk)
-                    }
-                    Err(RecvTimeoutError::Timeout) => {
-                        self.finished = true;
-                        return Err(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            "runtime upstream stream idle timed out",
-                        ));
-                    }
-                    Err(RecvTimeoutError::Disconnected) => {
-                        if let Some((kind, message)) = runtime_prefetch_terminal_error(&self.shared)
-                        {
-                            self.finished = true;
-                            return Err(io::Error::new(kind, message));
-                        }
-                        None
-                    }
-                }
-            };
+            let next = self.receive_next_chunk()?;
 
             match next {
                 Some(RuntimePrefetchChunk::Data(chunk)) => {
@@ -381,6 +353,38 @@ impl Read for RuntimePrefetchReader {
                     self.finished = true;
                     return Err(io::Error::new(kind, message));
                 }
+            }
+        }
+    }
+}
+
+impl RuntimePrefetchReader {
+    fn receive_next_chunk(&mut self) -> io::Result<Option<RuntimePrefetchChunk>> {
+        if let Some(chunk) = self.backlog.pop_front() {
+            return Ok(Some(chunk));
+        }
+        match self.receiver.recv_timeout(Duration::from_millis(
+            self.shared.config.stream_idle_timeout_ms,
+        )) {
+            Ok(chunk) => {
+                if let RuntimePrefetchChunk::Data(bytes) = &chunk {
+                    runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
+                }
+                Ok(Some(chunk))
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                self.finished = true;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "runtime upstream stream idle timed out",
+                ))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                if let Some((kind, message)) = runtime_prefetch_terminal_error(&self.shared) {
+                    self.finished = true;
+                    return Err(io::Error::new(kind, message));
+                }
+                Ok(None)
             }
         }
     }
