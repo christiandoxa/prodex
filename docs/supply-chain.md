@@ -71,7 +71,16 @@ Primary pin sources:
 
 The `supply-chain` CI job runs production-only JSON Clippy plus all-target
 Clippy gates, `cargo audit`, all configured `cargo deny` checks, pinned
-`cargo-machete 0.9.2`, and source SBOM generation. It runs the live Sonar scan
+`cargo-machete 0.9.2`, and source SBOM generation. The production Clippy
+report uses `cargo clippy --locked --workspace --exclude prodex-bench-support
+--lib --bins --all-features --message-format=json -- -D warnings` and writes
+the ignored `target/sonar/clippy-report.json`; the all-target Clippy gate remains
+separate. Sonar scans only Rust under `src` and `crates`, excluding dedicated
+test modules and directories, fixtures, test support, generated/vendor/build
+content, and `crates/prodex-bench-support`; production runtime self-test code
+remains indexed. After the quality gate completes, CI queries the analyzed
+branch or pull request and fails unless it has zero unresolved Sonar issues.
+It runs the live Sonar scan
 only when repository configuration provides `SONAR_TOKEN`,
 `SONAR_PROJECT_KEY`, and either `SONAR_HOST_URL` or `SONAR_ORGANIZATION`;
 partial configuration fails closed, while absent configuration reports the

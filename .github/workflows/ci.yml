@@ -778,7 +778,10 @@ jobs:
 
       - name: Generate production Clippy JSON report
         shell: bash
-        run: cargo clippy --locked --workspace --lib --bins --all-features --message-format=json -- -D warnings > sonar-clippy.json
+        run: |
+          set -euo pipefail
+          mkdir -p target/sonar
+          cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings > target/sonar/clippy-report.json
 
       - name: Run clippy warning gate
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
@@ -821,6 +824,52 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+      - name: Require zero Sonar issues
+        if: ${{ steps.sonar-config.outputs.enabled == 'true' }}
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_EVENT_NAME: ${{ github.event_name }}
+          SONAR_REF_NAME: ${{ github.ref_name }}
+          SONAR_PULL_REQUEST: ${{ github.event.pull_request.number || '' }}
+        run: |
+          set -euo pipefail
+          host="${SONAR_HOST_URL:-https://sonarcloud.io}"
+          request=(
+            --fail --silent --show-error --get
+            --header "Authorization: Bearer ${SONAR_TOKEN}"
+            --data-urlencode "componentKeys=${SONAR_PROJECT_KEY}"
+            --data-urlencode "resolved=false"
+            --data-urlencode "ps=1"
+          )
+          status_request=(
+            --fail --silent --show-error --get
+            --header "Authorization: Bearer ${SONAR_TOKEN}"
+            --data-urlencode "projectKey=${SONAR_PROJECT_KEY}"
+          )
+          if [ -n "${SONAR_ORGANIZATION}" ]; then
+            request+=(--data-urlencode "organization=${SONAR_ORGANIZATION}")
+          fi
+          if [ "${SONAR_EVENT_NAME}" = "pull_request" ]; then
+            request+=(--data-urlencode "pullRequest=${SONAR_PULL_REQUEST}")
+            status_request+=(--data-urlencode "pullRequest=${SONAR_PULL_REQUEST}")
+          else
+            request+=(--data-urlencode "branch=${SONAR_REF_NAME}")
+            status_request+=(--data-urlencode "branch=${SONAR_REF_NAME}")
+          fi
+          status_response="$(curl "${status_request[@]}" "${host%/}/api/qualitygates/project_status")"
+          jq -er '.projectStatus.status | select(type == "string")' <<<"${status_response}" >/dev/null
+          response="$(curl "${request[@]}" "${host%/}/api/issues/search")"
+          total="$(jq -er '(.paging.total // .total) | select(type == "number")' <<<"${response}")"
+          if [ "${total}" -ne 0 ]; then
+            echo "Sonar reported ${total} unresolved issue(s); refusing to continue." >&2
+            exit 1
+          fi
+          echo "Sonar zero-issue gate: passed."
 
       - name: Install cargo-audit
         shell: bash
