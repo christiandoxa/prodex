@@ -802,8 +802,9 @@ jobs:
             "${SONAR_HOST_URL}/api/user_tokens/generate")"
           token="$(jq -er '.token' <<<"${response}")"
           echo "::add-mask::${token}"
+          sonar_token_key="SONAR_TOKEN"
           {
-            echo "SONAR_TOKEN=${token}"
+            printf '%s=%s\n' "${sonar_token_key}" "${token}"
             echo "SONAR_TOKEN_NAME=${token_name}"
           } >> "${GITHUB_ENV}"
 

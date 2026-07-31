@@ -122,7 +122,8 @@ export function validateSonarConfiguration(workflowContents, properties) {
     '--user "${local_admin}:${local_admin}"',
     "/api/user_tokens/generate",
     'echo "::add-mask::${token}"',
-    'echo "SONAR_TOKEN=${token}"',
+    'sonar_token_key="SONAR_TOKEN"',
+    `printf '%s=%s\\n' "\${sonar_token_key}" "\${token}"`,
     SONAR_ACTION,
     "-Dsonar.projectKey=prodex-ci",
     "Require zero Sonar issues",
@@ -519,7 +520,8 @@ function selfTest() {
           local_admin="admin"
           curl --user "\${local_admin}:\${local_admin}" /api/user_tokens/generate
           echo "::add-mask::\${token}"
-          echo "SONAR_TOKEN=\${token}"
+          sonar_token_key="SONAR_TOKEN"
+          printf '%s=%s\\n' "\${sonar_token_key}" "\${token}"
       - uses: ${SONAR_ACTION}
         with:
           args: -Dsonar.projectKey=prodex-ci
