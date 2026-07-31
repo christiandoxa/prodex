@@ -300,9 +300,18 @@ fn release_safe_bytes(held: &mut Vec<u8>, chunk: &[u8], keep_bytes: usize) -> Ve
     pending
 }
 
+fn runtime_gateway_websocket_audit_context(
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
+) -> Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext> {
+    authorized.and_then(
+        super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext::from_authorized,
+    )
+}
+
 pub(super) fn runtime_gateway_guardrail_websocket_block(
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
     reason: &'static str,
 ) {
     RuntimeGatewayGuardrailAudit {
@@ -310,10 +319,9 @@ pub(super) fn runtime_gateway_guardrail_websocket_block(
         runtime_shared: shared.runtime_shared.clone(),
         state_backend: shared.gateway_state_store.label().to_string(),
         shared: shared.clone(),
-        context: None,
+        context: runtime_gateway_websocket_audit_context(authorized),
     }
-    .block(reason, "postcommit", "websocket")
-    .ok();
+    .postcommit_block(reason, "websocket");
 }
 
 struct RuntimeGatewayGuardrailAudit {
@@ -325,6 +333,23 @@ struct RuntimeGatewayGuardrailAudit {
 }
 
 impl RuntimeGatewayGuardrailAudit {
+    fn postcommit_block(&self, reason: &str, transport: &'static str) {
+        if self.block(reason, "postcommit", transport).is_err() {
+            crate::runtime_proxy_log(
+                &self.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_guardrail_postcommit_audit_failed",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("transport", transport),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("error", "governance_audit_unavailable"),
+                    ],
+                ),
+            );
+        }
+    }
+
     fn block(
         &self,
         reason: &str,
@@ -335,18 +360,25 @@ impl RuntimeGatewayGuardrailAudit {
             &self.shared,
         ) && let Some(context) = self.context.as_ref()
         {
-            super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
-                &self.shared,
-                context,
-                self.request_id,
-                if commit_state == "precommit" {
-                    "response_precommit_block"
-                } else {
-                    "response_postcommit_block"
-                },
-                prodex_domain::AuditOutcome::Denied,
-                reason,
-            )
+            if commit_state == "precommit" {
+                super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
+                    &self.shared,
+                    context,
+                    self.request_id,
+                    "response_precommit_block",
+                    prodex_domain::AuditOutcome::Denied,
+                    reason,
+                )
+            } else {
+                super::local_rewrite_governance_audit::persist_runtime_material_governance_audit_reconciling(
+                    &self.shared,
+                    context,
+                    self.request_id,
+                    "response_postcommit_block",
+                    prodex_domain::AuditOutcome::Denied,
+                    reason,
+                )
+            }
         } else {
             let payload = serde_json::json!({
                 "state_backend": self.state_backend,
@@ -431,7 +463,7 @@ impl Read for RuntimeGatewayGuardrailStreamReader {
                 if let Some(reason) = reason {
                     self.blocked = true;
                     self.termination.mark_policy_interrupted();
-                    self.audit.block(reason, "postcommit", "http").ok();
+                    self.audit.postcommit_block(reason, "http");
                     return Err(io::Error::other("response blocked by policy"));
                 }
 
@@ -455,9 +487,19 @@ mod tests {
     use super::{
         RuntimeGatewayIncrementalInspector, release_safe_bytes,
         runtime_gateway_fully_inspect_stream_body, runtime_gateway_response_inspection_coverage,
-        runtime_gateway_response_status_is_governed,
+        runtime_gateway_response_status_is_governed, runtime_gateway_websocket_audit_context,
     };
+    use prodex_application::{
+        ApplicationRequestDeadline, plan_application_data_plane_authorization,
+        plan_application_request_authentication_from_evidence, plan_application_request_context,
+    };
+    use prodex_authn::VerifiedCredentialEvidence;
+    use prodex_domain::{
+        CredentialScope, Principal, PrincipalId, PrincipalKind, RequestId, Role, TenantId,
+    };
+    use prodex_gateway_http::CanonicalRequestTarget;
     use std::io::Cursor;
+    use std::time::{Duration, Instant};
 
     #[derive(Clone, Copy)]
     enum ChunkMode {
@@ -667,6 +709,37 @@ mod tests {
         assert_eq!(consumed, body.into_inner());
         assert!(rendered.contains("<redacted>"));
         assert!(!rendered.contains("user@example.com"));
+    }
+
+    #[test]
+    fn websocket_guardrail_preserves_authorized_audit_context() {
+        let tenant_id = TenantId::from_uuid(uuid::Uuid::from_u128(3));
+        let principal = Principal::new(
+            PrincipalId::from_uuid(uuid::Uuid::from_u128(4)),
+            Some(tenant_id),
+            PrincipalKind::VirtualKey,
+            Role::Operator,
+            CredentialScope::DataPlane,
+        );
+        let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
+        let request = plan_application_request_context(
+            &target,
+            RequestId::from_uuid(uuid::Uuid::from_u128(5)),
+            ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30)),
+            &[],
+        )
+        .unwrap();
+        let authenticated = plan_application_request_authentication_from_evidence(
+            request,
+            Some(VerifiedCredentialEvidence::Principal(principal.clone())),
+            false,
+        )
+        .unwrap();
+        let authorized = plan_application_data_plane_authorization(authenticated).unwrap();
+
+        let context = runtime_gateway_websocket_audit_context(Some(&authorized)).unwrap();
+        assert_eq!(context.tenant.tenant_id, tenant_id);
+        assert_eq!(context.principal, principal);
     }
 
     #[test]

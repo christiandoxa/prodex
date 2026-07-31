@@ -340,6 +340,15 @@ fn runtime_local_rewrite_canonical_context<'target>(
             "gateway credentials are stale",
         )));
     }
+    if state.context.plane() == prodex_gateway_http::GatewayHttpRoutePlane::DataPlane
+        && !super::local_rewrite_governance_audit::runtime_governance_audit_is_available(shared)
+    {
+        return Err(state.reject(build_runtime_proxy_json_error_response(
+            503,
+            "governance_audit_unavailable",
+            "gateway governance audit is temporarily unavailable",
+        )));
+    }
     Ok(RuntimeLocalRewriteCanonicalRequest(state))
 }
 

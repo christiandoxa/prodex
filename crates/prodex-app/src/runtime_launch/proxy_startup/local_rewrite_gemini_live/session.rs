@@ -63,6 +63,7 @@ where
             runtime_gateway_guardrail_websocket_block(
                 request_id,
                 shared,
+                authorized,
                 "realtime_session_duration_limit_exceeded",
             );
             let _ = local_socket.close(Some(CloseFrame {
@@ -103,6 +104,7 @@ where
                     runtime_gateway_guardrail_websocket_block(
                         request_id,
                         shared,
+                        authorized,
                         "realtime_session_token_limit_exceeded",
                     );
                     let _ = local_socket.close(Some(CloseFrame {
@@ -137,6 +139,7 @@ where
                     accounting,
                     usage,
                     shared,
+                    authorized,
                     timeout,
                     translated.wait_for_setup,
                     translated.wait_for_turn,
@@ -211,6 +214,7 @@ where
             runtime_gateway_guardrail_websocket_block(
                 request_id,
                 shared,
+                authorized,
                 "realtime_session_duration_limit_exceeded",
             );
             let _ = local_socket.close(Some(CloseFrame {
@@ -253,6 +257,7 @@ where
                     runtime_gateway_guardrail_websocket_block(
                         request_id,
                         shared,
+                        authorized,
                         "realtime_session_token_limit_exceeded",
                     );
                     let _ = local_socket.close(Some(CloseFrame {
@@ -312,6 +317,7 @@ where
                         response_obligations,
                         (accounting, &mut *usage),
                         shared,
+                        authorized,
                     )? {
                         return Ok(());
                     }
@@ -333,6 +339,7 @@ where
                     local_socket,
                     usage,
                     shared,
+                    authorized,
                 );
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => progressed = true,
@@ -372,6 +379,7 @@ fn runtime_gemini_live_drain_upstream<S>(
     accounting: &RuntimeGatewayRealtimeAccountingPlan,
     usage: &mut RuntimeGatewayRealtimeUsage,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
     timeout: Duration,
     stop_on_setup: bool,
     stop_on_turn: bool,
@@ -394,6 +402,7 @@ where
                         response_obligations,
                         (accounting, &mut *usage),
                         shared,
+                        authorized,
                     )? {
                         return Ok(());
                     }
@@ -419,6 +428,7 @@ where
                     local_socket,
                     usage,
                     shared,
+                    authorized,
                 );
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
@@ -446,6 +456,7 @@ fn runtime_gemini_live_send_guarded_json<S>(
         &mut RuntimeGatewayRealtimeUsage,
     ),
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<bool>
 where
     S: Read + Write,
@@ -469,7 +480,7 @@ where
     };
     if let Some(reason) = reason {
         usage.policy_interrupted = true;
-        runtime_gateway_guardrail_websocket_block(request_id, shared, reason);
+        runtime_gateway_guardrail_websocket_block(request_id, shared, authorized, reason);
         let _ = socket.close(Some(CloseFrame {
             code: CloseCode::Policy,
             reason: "response blocked by policy".into(),
@@ -487,6 +498,7 @@ fn runtime_gemini_live_reject_upstream_binary<S>(
     socket: &mut WsSocket<S>,
     usage: &mut RuntimeGatewayRealtimeUsage,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<()>
 where
     S: Read + Write,
@@ -523,6 +535,7 @@ where
         runtime_gateway_guardrail_websocket_block(
             request_id,
             shared,
+            authorized,
             "response_inspection_unsupported",
         );
     }

@@ -10,6 +10,7 @@ use prodex_observability::{
 use prodex_storage::{
     AppendOnlyAuditCommand, AuditOutboxWriteCommand, GovernanceRepositoryError, TenantStorageKey,
 };
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,7 @@ use crate::runtime_operational_metrics::{
 const AUDIT_CHAIN_RETRIES: usize = 3;
 const AUDIT_WRITER_QUEUE_LIMIT: usize = 128;
 const AUDIT_WRITER_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+const AUDIT_RECONCILIATION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub(super) struct RuntimeGovernanceAuditContext {
@@ -48,7 +50,12 @@ impl RuntimeGovernanceAuditContext {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct RuntimeGovernanceAuditWriter(Arc<Mutex<Option<RuntimeGovernanceAuditQueue>>>);
+pub(super) struct RuntimeGovernanceAuditWriter {
+    queue: Arc<Mutex<Option<RuntimeGovernanceAuditQueue>>>,
+    reconciliation: Arc<Mutex<VecDeque<AuditEvent>>>,
+    reconciliation_overflowed: Arc<AtomicBool>,
+    available: Arc<AtomicBool>,
+}
 
 #[derive(Clone)]
 struct RuntimeGovernanceAuditQueue {
@@ -58,6 +65,7 @@ struct RuntimeGovernanceAuditQueue {
 
 struct RuntimeGovernanceAuditWrite {
     event: AuditEvent,
+    reconcile_on_failure: bool,
     acknowledge: SyncSender<Result<(), GovernanceRepositoryError>>,
 }
 
@@ -76,27 +84,81 @@ impl RuntimeGovernanceAuditWriter {
         let (sender, receiver) = sync_channel(AUDIT_WRITER_QUEUE_LIMIT);
         let depth = Arc::new(AtomicUsize::new(0));
         *self
-            .0
+            .queue
             .lock()
             .map_err(|_| GovernanceRepositoryError::Database)? =
             Some(RuntimeGovernanceAuditQueue {
                 sender,
                 depth: Arc::clone(&depth),
             });
+        self.available.store(true, Ordering::Release);
+        self.reconciliation_overflowed
+            .store(false, Ordering::Release);
         record_audit_queue_depth(0);
+        let available = Arc::clone(&self.available);
+        let reconciliation = Arc::clone(&self.reconciliation);
+        let reconciliation_overflowed = Arc::clone(&self.reconciliation_overflowed);
         Ok(thread::spawn(move || {
-            runtime_governance_audit_writer(authority, sqlite, receiver, depth, shutdown)
+            runtime_governance_audit_writer(
+                authority,
+                sqlite,
+                receiver,
+                depth,
+                reconciliation,
+                reconciliation_overflowed,
+                available,
+                shutdown,
+            )
         }))
     }
 
+    pub(super) fn is_available(&self) -> bool {
+        self.available.load(Ordering::Acquire)
+    }
+
     fn append(&self, event: AuditEvent) -> Result<(), GovernanceRepositoryError> {
+        self.append_inner(event, false)
+    }
+
+    fn append_reconciling(&self, event: AuditEvent) -> Result<(), GovernanceRepositoryError> {
+        self.append_inner(event, true)
+    }
+
+    fn append_inner(
+        &self,
+        event: AuditEvent,
+        reconcile_on_failure: bool,
+    ) -> Result<(), GovernanceRepositoryError> {
         let started_at = Instant::now();
-        let queue = self
-            .0
-            .lock()
-            .map_err(|_| GovernanceRepositoryError::Database)?
-            .clone();
+        let queue = match self.queue.lock() {
+            Ok(queue) => queue.clone(),
+            Err(_) => {
+                self.available.store(false, Ordering::Release);
+                if reconcile_on_failure {
+                    enqueue_audit_reconciliation(
+                        &self.reconciliation,
+                        &self.reconciliation_overflowed,
+                        &self.available,
+                        event,
+                    );
+                }
+                record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Dropped, None);
+                record_runtime_persistence_metric(
+                    PersistenceOperation::Commit,
+                    PersistenceResult::Unavailable,
+                );
+                return Err(GovernanceRepositoryError::Database);
+            }
+        };
         let Some(queue) = queue else {
+            if reconcile_on_failure {
+                enqueue_audit_reconciliation(
+                    &self.reconciliation,
+                    &self.reconciliation_overflowed,
+                    &self.available,
+                    event,
+                );
+            }
             record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Dropped, None);
             record_runtime_persistence_metric(
                 PersistenceOperation::Commit,
@@ -106,25 +168,33 @@ impl RuntimeGovernanceAuditWriter {
         };
         let (acknowledge, response) = sync_channel(1);
         queue.depth.fetch_add(1, Ordering::AcqRel);
-        if let Err(error) = queue
-            .sender
-            .try_send(RuntimeGovernanceAuditWrite { event, acknowledge })
-        {
+        if let Err(error) = queue.sender.try_send(RuntimeGovernanceAuditWrite {
+            event,
+            reconcile_on_failure,
+            acknowledge,
+        }) {
+            let write = match error {
+                TrySendError::Full(write) | TrySendError::Disconnected(write) => write,
+            };
+            if write.reconcile_on_failure {
+                enqueue_audit_reconciliation(
+                    &self.reconciliation,
+                    &self.reconciliation_overflowed,
+                    &self.available,
+                    write.event,
+                );
+            }
             decrement_queue_depth(&queue.depth);
             record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Dropped, None);
             record_runtime_persistence_metric(
                 PersistenceOperation::Commit,
                 PersistenceResult::Unavailable,
             );
-            return Err(match error {
-                TrySendError::Full(_) | TrySendError::Disconnected(_) => {
-                    GovernanceRepositoryError::Database
-                }
-            });
+            return Err(GovernanceRepositoryError::Database);
         }
         record_runtime_audit_metric(AuditOperation::Emit, AuditResult::Success, None);
         record_audit_queue_depth(queue.depth.load(Ordering::Acquire));
-        match response.recv_timeout(AUDIT_WRITER_ACK_TIMEOUT) {
+        let result = match response.recv_timeout(AUDIT_WRITER_ACK_TIMEOUT) {
             Ok(Ok(())) => {
                 record_runtime_audit_metric(
                     AuditOperation::Persist,
@@ -173,6 +243,46 @@ impl RuntimeGovernanceAuditWriter {
                 );
                 Err(GovernanceRepositoryError::Database)
             }
+        };
+        result
+    }
+}
+
+fn enqueue_audit_reconciliation(
+    reconciliation: &Mutex<VecDeque<AuditEvent>>,
+    overflowed: &AtomicBool,
+    available: &AtomicBool,
+    event: AuditEvent,
+) {
+    match reconciliation.lock() {
+        Ok(mut pending) if pending.len() < AUDIT_WRITER_QUEUE_LIMIT => {
+            pending.push_back(event);
+            available.store(false, Ordering::Release);
+        }
+        Ok(_) => {
+            overflowed.store(true, Ordering::Release);
+            available.store(false, Ordering::Release);
+        }
+        Err(_) => {
+            overflowed.store(true, Ordering::Release);
+            available.store(false, Ordering::Release);
+        }
+    }
+}
+
+fn refresh_audit_reconciliation_availability(
+    reconciliation: &Mutex<VecDeque<AuditEvent>>,
+    overflowed: &AtomicBool,
+    available: &AtomicBool,
+) {
+    match reconciliation.lock() {
+        Ok(pending) => {
+            let recovered = !overflowed.load(Ordering::Acquire) && pending.is_empty();
+            available.store(recovered, Ordering::Release);
+        }
+        Err(_) => {
+            overflowed.store(true, Ordering::Release);
+            available.store(false, Ordering::Release);
         }
     }
 }
@@ -287,11 +397,48 @@ pub(super) fn persist_runtime_material_governance_audit(
         action,
         outcome,
         reason_code,
+        false,
+    )
+}
+
+pub(super) fn persist_runtime_material_governance_audit_reconciling(
+    shared: &RuntimeLocalRewriteProxyShared,
+    context: &RuntimeGovernanceAuditContext,
+    request_id: u64,
+    action: &str,
+    outcome: AuditOutcome,
+    reason_code: &str,
+) -> Result<(), GovernanceRepositoryError> {
+    persist_runtime_material_governance_audit_with_writer(
+        &shared.governance_audit_writer,
+        shared
+            .runtime_shared
+            .runtime_config
+            .governance
+            .mandatory_audit,
+        context,
+        request_id,
+        action,
+        outcome,
+        reason_code,
+        true,
     )
 }
 
 pub(super) fn runtime_governance_audit_is_durable(shared: &RuntimeLocalRewriteProxyShared) -> bool {
     shared.governance_authority.is_some()
+}
+
+pub(super) fn runtime_governance_audit_is_available(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> bool {
+    !shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .mandatory_audit
+        || (runtime_governance_audit_is_durable(shared)
+            && shared.governance_audit_writer.is_available())
 }
 
 fn persist_runtime_material_governance_audit_with_writer(
@@ -302,6 +449,7 @@ fn persist_runtime_material_governance_audit_with_writer(
     action: &str,
     outcome: AuditOutcome,
     reason_code: &str,
+    reconcile_on_failure: bool,
 ) -> Result<(), GovernanceRepositoryError> {
     let action = AuditAction::try_new(format!("gateway.governance.{action}"))
         .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
@@ -335,7 +483,11 @@ fn persist_runtime_material_governance_audit_with_writer(
         outcome,
         Some(reason_code.to_string()),
     );
-    let result = writer.append(event);
+    let result = if reconcile_on_failure {
+        writer.append_reconciling(event)
+    } else {
+        writer.append(event)
+    };
     if mandatory { result } else { Ok(()) }
 }
 
@@ -344,19 +496,72 @@ fn runtime_governance_audit_writer(
     sqlite: Option<prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
     receiver: Receiver<RuntimeGovernanceAuditWrite>,
     depth: Arc<AtomicUsize>,
+    reconciliation: Arc<Mutex<VecDeque<AuditEvent>>>,
+    reconciliation_overflowed: Arc<AtomicBool>,
+    available: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
 ) {
+    let mut reconciliation_attempted_at = Instant::now();
     loop {
-        let write = match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(write) => write,
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(write) => {
+                record_audit_queue_depth(decrement_queue_depth(&depth));
+                let event = write.event;
+                let result = append_durable_audit(&authority, sqlite.as_ref(), event.clone());
+                if result.is_err() && write.reconcile_on_failure {
+                    enqueue_audit_reconciliation(
+                        &reconciliation,
+                        &reconciliation_overflowed,
+                        &available,
+                        event,
+                    );
+                }
+                let _ = write.acknowledge.send(result);
+            }
             Err(RecvTimeoutError::Timeout) if shutdown.load(Ordering::SeqCst) => break,
-            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
-        };
-        record_audit_queue_depth(decrement_queue_depth(&depth));
-        let result = append_durable_audit(&authority, sqlite.as_ref(), write.event);
-        let _ = write.acknowledge.send(result);
+        }
+        if reconciliation_attempted_at.elapsed() >= AUDIT_RECONCILIATION_RETRY_INTERVAL {
+            reconcile_audit_failure(
+                &authority,
+                sqlite.as_ref(),
+                &reconciliation,
+                &reconciliation_overflowed,
+                &available,
+            );
+            reconciliation_attempted_at = Instant::now();
+        }
     }
+}
+
+fn reconcile_audit_failure(
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    reconciliation: &Mutex<VecDeque<AuditEvent>>,
+    overflowed: &AtomicBool,
+    available: &AtomicBool,
+) {
+    let event = match reconciliation.lock() {
+        Ok(mut pending) => pending.pop_front(),
+        Err(_) => {
+            overflowed.store(true, Ordering::Release);
+            available.store(false, Ordering::Release);
+            return;
+        }
+    };
+    let Some(event) = event else {
+        return;
+    };
+    if append_durable_audit(authority, sqlite, event.clone()).is_err() {
+        match reconciliation.lock() {
+            Ok(mut pending) => pending.push_front(event),
+            Err(_) => overflowed.store(true, Ordering::Release),
+        }
+        available.store(false, Ordering::Release);
+        return;
+    }
+    refresh_audit_reconciliation_availability(reconciliation, overflowed, available);
 }
 
 fn append_durable_audit(
@@ -430,6 +635,23 @@ mod tests {
         )
     }
 
+    fn audit_event(request_id: u64) -> AuditEvent {
+        let context = audit_context();
+        AuditEvent::new(
+            1_000 + request_id,
+            context.tenant,
+            &context.principal,
+            AuditAction::try_new("gateway.governance.test").unwrap(),
+            AuditResource::new(
+                "gateway_test",
+                Some(format!("request:{request_id}")),
+                Some(context.tenant.tenant_id),
+            ),
+            AuditOutcome::Denied,
+            Some("test"),
+        )
+    }
+
     #[test]
     fn decision_context_is_bounded_explainable_and_content_free() {
         let context = "p:018f77e0-7b5d-7000-8000-000000000001:r:7:s:9:c:restricted:v:openai:q:018f77e0-7b5d-7000-8000-000000000002:i:full:e:allow";
@@ -450,6 +672,7 @@ mod tests {
             "request_transform",
             AuditOutcome::Success,
             "sensitive_fields_masked",
+            false,
         )
         .unwrap_err();
 
@@ -466,6 +689,7 @@ mod tests {
             "response_precommit_block",
             AuditOutcome::Denied,
             "blocked_output_keyword",
+            false,
         )
         .unwrap_err();
 
@@ -482,7 +706,35 @@ mod tests {
             "request_transform",
             AuditOutcome::Success,
             "sensitive_fields_masked",
+            false,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn reconciliation_queue_overflow_never_reports_recovery() {
+        let reconciliation = Mutex::new(VecDeque::new());
+        let overflowed = AtomicBool::new(false);
+        let available = AtomicBool::new(true);
+
+        for request_id in 0..=AUDIT_WRITER_QUEUE_LIMIT {
+            enqueue_audit_reconciliation(
+                &reconciliation,
+                &overflowed,
+                &available,
+                audit_event(request_id as u64),
+            );
+        }
+
+        assert_eq!(
+            reconciliation.lock().unwrap().len(),
+            AUDIT_WRITER_QUEUE_LIMIT
+        );
+        assert!(overflowed.load(Ordering::Acquire));
+        assert!(!available.load(Ordering::Acquire));
+
+        reconciliation.lock().unwrap().clear();
+        refresh_audit_reconciliation_availability(&reconciliation, &overflowed, &available);
+        assert!(!available.load(Ordering::Acquire));
     }
 }
