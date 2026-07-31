@@ -184,13 +184,13 @@ impl RuntimeGeminiSseState {
                 .into_iter()
                 .collect::<Vec<_>>();
         }
+        let finish_reason = self.apply_chunk_metadata(value);
         if let Some((code, message)) = gemini_provider_core_prompt_feedback_failure(value) {
             return self
                 .failed_event(&code, &message)
                 .into_iter()
                 .collect::<Vec<_>>();
         }
-        let finish_reason = self.apply_chunk_metadata(value);
         let mut events = Vec::new();
         if !self.created {
             let sequence_number = self.next_sequence_number();
