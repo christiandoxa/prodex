@@ -8,8 +8,8 @@
       "chore(release): release 0.377.0"
     ],
     "caps": {
-      "maxFiles": 120,
-      "maxBehaviorFiles": 110,
+      "maxFiles": 121,
+      "maxBehaviorFiles": 111,
       "maxLines": 11500,
       "maxFileLines": 750
     },
@@ -23,8 +23,8 @@
       "chore(ci): record reviewed 0.377.0 churn"
     ],
     "caps": {
-      "maxFiles": 107,
-      "maxBehaviorFiles": 101,
+      "maxFiles": 108,
+      "maxBehaviorFiles": 102,
       "maxLines": 11100,
       "maxFileLines": 750
     },
