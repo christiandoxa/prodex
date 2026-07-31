@@ -140,20 +140,12 @@ fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMess
         }
 
         let token_start = index;
-        while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
-            index += 1;
-        }
+        index = runtime_doctor_skip_log_key_or_token(message, index);
         if index < bytes.len() && bytes[index] == b'=' {
-            let key = &message[token_start..index];
-            index += 1;
-            let value_start = index;
-            index = runtime_doctor_skip_log_field_value(message, index);
-            let raw_value = &message[value_start..index];
-            if !key.is_empty() && !raw_value.is_empty() {
-                parsed.fields.push((
-                    key.to_string(),
-                    runtime_doctor_parse_log_field_value(raw_value),
-                ));
+            let (next_index, field) = runtime_doctor_parse_log_field(message, token_start, index);
+            index = next_index;
+            if let Some(field) = field {
+                parsed.fields.push(field);
             }
             continue;
         }
@@ -161,17 +153,49 @@ fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMess
         if token_start < index && parsed.event.is_none() {
             parsed.event = Some(message[token_start..index].to_string());
         }
-        while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
-            index += 1;
-        }
+        index = runtime_doctor_skip_log_token(message, index);
     }
 
     parsed
 }
 
+fn runtime_doctor_parse_log_field(
+    message: &str,
+    key_start: usize,
+    separator: usize,
+) -> (usize, Option<(String, String)>) {
+    let key = &message[key_start..separator];
+    let value_start = separator + 1;
+    let next_index = runtime_doctor_skip_log_field_value(message, value_start);
+    let raw_value = &message[value_start..next_index];
+    let field = (!key.is_empty() && !raw_value.is_empty()).then(|| {
+        (
+            key.to_string(),
+            runtime_doctor_parse_log_field_value(raw_value),
+        )
+    });
+    (next_index, field)
+}
+
 fn runtime_doctor_skip_log_whitespace(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    index
+}
+
+fn runtime_doctor_skip_log_key_or_token(message: &str, mut index: usize) -> usize {
+    let bytes = message.as_bytes();
+    while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
+        index += 1;
+    }
+    index
+}
+
+fn runtime_doctor_skip_log_token(message: &str, mut index: usize) -> usize {
+    let bytes = message.as_bytes();
+    while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
         index += 1;
     }
     index

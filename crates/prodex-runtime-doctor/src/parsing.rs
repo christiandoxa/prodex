@@ -71,6 +71,118 @@ fn runtime_doctor_marker_context_summary(
     summary
 }
 
+fn runtime_doctor_record_marker_reason(
+    summary: &mut RuntimeDoctorSummary,
+    marker: &'static str,
+    fields: &BTreeMap<String, String>,
+) {
+    let Some(reason) = fields.get("reason").cloned() else {
+        return;
+    };
+    match marker {
+        "chain_retried_owner" => {
+            *summary
+                .chain_retried_owner_by_reason
+                .entry(reason)
+                .or_insert(0) += 1;
+        }
+        "chain_dead_upstream_confirmed" => {
+            *summary
+                .chain_dead_upstream_confirmed_by_reason
+                .entry(reason)
+                .or_insert(0) += 1;
+        }
+        "stale_continuation" => {
+            summary.latest_stale_continuation_reason = Some(reason.clone());
+            *summary
+                .stale_continuation_by_reason
+                .entry(reason)
+                .or_insert(0) += 1;
+        }
+        _ => {}
+    }
+}
+
+fn runtime_doctor_record_continuation_fields(
+    summary: &mut RuntimeDoctorSummary,
+    marker: &'static str,
+    fields: &BTreeMap<String, String>,
+) {
+    if marker == "previous_response_not_found" {
+        if let Some(route) = fields.get("route").cloned() {
+            *summary
+                .previous_response_not_found_by_route
+                .entry(route)
+                .or_insert(0) += 1;
+        }
+        if let Some(transport) = fields.get("transport").cloned() {
+            *summary
+                .previous_response_not_found_by_transport
+                .entry(transport)
+                .or_insert(0) += 1;
+        }
+    }
+    if marker == "previous_response_fresh_fallback_blocked"
+        && let Some(request_shape) = fields.get("request_shape").cloned()
+    {
+        *summary
+            .previous_response_fresh_fallback_blocked_by_request_shape
+            .entry(request_shape)
+            .or_insert(0) += 1;
+    }
+}
+
+fn runtime_doctor_record_marker_facets(
+    summary: &mut RuntimeDoctorSummary,
+    fields: &BTreeMap<String, String>,
+) {
+    for facet in RUNTIME_DOCTOR_FACETS {
+        if let Some(value) = fields.get(*facet).cloned() {
+            *summary
+                .facet_counts
+                .entry((*facet).to_string())
+                .or_default()
+                .entry(value)
+                .or_insert(0) += 1;
+        }
+    }
+}
+
+fn runtime_doctor_record_parsed_marker(
+    summary: &mut RuntimeDoctorSummary,
+    request_timelines: &mut BTreeMap<String, RuntimeDoctorRequestTimelineBuilder>,
+    marker_context: &mut BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
+    line: (usize, Option<&str>, &str),
+    marker: &'static str,
+    fields: BTreeMap<String, String>,
+) {
+    let (line_index, line_timestamp, line) = line;
+    *summary.marker_counts.entry(marker).or_insert(0) += 1;
+    summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
+    if matches!(
+        marker,
+        "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"
+    ) {
+        summary.latest_chain_event = Some(runtime_doctor_chain_event_summary(marker, &fields));
+    }
+    runtime_doctor_record_marker_reason(summary, marker, &fields);
+    runtime_doctor_record_continuation_fields(summary, marker, &fields);
+    runtime_doctor_record_marker_context(marker_context, marker, &fields);
+    runtime_doctor_record_marker_facets(summary, &fields);
+    if !fields.is_empty() {
+        summary.marker_last_fields.insert(marker, fields.clone());
+    }
+    runtime_doctor_record_selection_summary(summary, marker, &fields);
+    runtime_doctor_record_route_profile_event(summary, line_timestamp, marker, &fields);
+    runtime_doctor_record_request_timeline_event(
+        request_timelines,
+        line_index,
+        line_timestamp,
+        marker,
+        &fields,
+    );
+}
+
 pub fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
     let mut file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -110,90 +222,14 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             summary.last_timestamp = Some(timestamp);
         }
         if let Some(marker) = parsed_line.marker_name() {
-            *summary.marker_counts.entry(marker).or_insert(0) += 1;
-            summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
             let fields = parsed_line.fields();
-            if matches!(
-                marker,
-                "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"
-            ) {
-                summary.latest_chain_event =
-                    Some(runtime_doctor_chain_event_summary(marker, &fields));
-            }
-            if let Some(reason) = fields.get("reason").cloned() {
-                match marker {
-                    "chain_retried_owner" => {
-                        *summary
-                            .chain_retried_owner_by_reason
-                            .entry(reason)
-                            .or_insert(0) += 1;
-                    }
-                    "chain_dead_upstream_confirmed" => {
-                        *summary
-                            .chain_dead_upstream_confirmed_by_reason
-                            .entry(reason)
-                            .or_insert(0) += 1;
-                    }
-                    "stale_continuation" => {
-                        summary.latest_stale_continuation_reason = Some(reason.clone());
-                        *summary
-                            .stale_continuation_by_reason
-                            .entry(reason)
-                            .or_insert(0) += 1;
-                    }
-                    _ => {}
-                }
-            }
-            if marker == "previous_response_not_found" {
-                if let Some(route) = fields.get("route").cloned() {
-                    *summary
-                        .previous_response_not_found_by_route
-                        .entry(route)
-                        .or_insert(0) += 1;
-                }
-                if let Some(transport) = fields.get("transport").cloned() {
-                    *summary
-                        .previous_response_not_found_by_transport
-                        .entry(transport)
-                        .or_insert(0) += 1;
-                }
-            }
-            if marker == "previous_response_fresh_fallback_blocked"
-                && let Some(request_shape) = fields.get("request_shape").cloned()
-            {
-                *summary
-                    .previous_response_fresh_fallback_blocked_by_request_shape
-                    .entry(request_shape)
-                    .or_insert(0) += 1;
-            }
-            let timeline_fields = fields.clone();
-            runtime_doctor_record_marker_context(&mut marker_context, marker, &timeline_fields);
-            for facet in RUNTIME_DOCTOR_FACETS {
-                if let Some(value) = fields.get(*facet).cloned() {
-                    *summary
-                        .facet_counts
-                        .entry((*facet).to_string())
-                        .or_default()
-                        .entry(value)
-                        .or_insert(0) += 1;
-                }
-            }
-            if !fields.is_empty() {
-                summary.marker_last_fields.insert(marker, fields);
-            }
-            runtime_doctor_record_selection_summary(&mut summary, marker, &timeline_fields);
-            runtime_doctor_record_route_profile_event(
+            runtime_doctor_record_parsed_marker(
                 &mut summary,
-                line_timestamp.as_deref(),
-                marker,
-                &timeline_fields,
-            );
-            runtime_doctor_record_request_timeline_event(
                 &mut request_timelines,
-                line_index,
-                line_timestamp.as_deref(),
+                &mut marker_context,
+                (line_index, line_timestamp.as_deref(), line),
                 marker,
-                &timeline_fields,
+                fields,
             );
         }
     }
