@@ -142,78 +142,10 @@ pub fn runtime_proxy_translate_anthropic_tool(
     {
         let tool_name = tool_name.unwrap_or(canonical_name);
         server_tools.register(tool_name, canonical_name);
-        if canonical_name == "web_search" {
-            let mut translated = serde_json::Map::new();
-            translated.insert(
-                "type".to_string(),
-                serde_json::Value::String("web_search".to_string()),
-            );
-            let allowed_domains = tool
-                .get("allowed_domains")
-                .and_then(serde_json::Value::as_array)
-                .map(|domains| {
-                    domains
-                        .iter()
-                        .filter_map(|domain| {
-                            domain
-                                .as_str()
-                                .map(str::trim)
-                                .filter(|value| !value.is_empty())
-                                .map(|value| serde_json::Value::String(value.to_string()))
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .filter(|domains| !domains.is_empty());
-            if let Some(allowed_domains) = allowed_domains {
-                translated.insert(
-                    "filters".to_string(),
-                    serde_json::json!({
-                        "allowed_domains": allowed_domains,
-                    }),
-                );
-            }
-            if let Some(user_location) = tool
-                .get("user_location")
-                .filter(|value| value.is_object())
-                .cloned()
-            {
-                translated.insert("user_location".to_string(), user_location);
-            }
-            return Ok((serde_json::Value::Object(translated), server_tools));
-        }
-
-        let mut translated = serde_json::Map::new();
-        translated.insert(
-            "type".to_string(),
-            serde_json::Value::String("function".to_string()),
-        );
-        translated.insert(
-            "name".to_string(),
-            serde_json::Value::String(tool_name.to_string()),
-        );
-        if let Some(description) = tool
-            .get("description")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            translated.insert(
-                "description".to_string(),
-                serde_json::Value::String(description.to_string()),
-            );
-        }
-        if let Some(schema) = tool.get("input_schema") {
-            translated.insert(
-                "parameters".to_string(),
-                runtime_proxy_anthropic_normalize_tool_schema(schema),
-            );
-        } else {
-            translated.insert(
-                "parameters".to_string(),
-                runtime_proxy_anthropic_default_tool_schema(),
-            );
-        }
-        return Ok((serde_json::Value::Object(translated), server_tools));
+        return Ok((
+            runtime_proxy_translate_anthropic_server_tool(tool, canonical_name, tool_name),
+            server_tools,
+        ));
     }
 
     if native_shell_enabled
@@ -268,6 +200,84 @@ pub fn runtime_proxy_translate_anthropic_tool(
         );
     }
     Ok((serde_json::Value::Object(translated), server_tools))
+}
+
+fn runtime_proxy_translate_anthropic_server_tool(
+    tool: &serde_json::Value,
+    canonical_name: &str,
+    tool_name: &str,
+) -> serde_json::Value {
+    if canonical_name == "web_search" {
+        return runtime_proxy_translate_anthropic_web_search_tool(tool);
+    }
+    let mut translated = serde_json::Map::from_iter([
+        (
+            "type".to_string(),
+            serde_json::Value::String("function".to_string()),
+        ),
+        (
+            "name".to_string(),
+            serde_json::Value::String(tool_name.to_string()),
+        ),
+    ]);
+    if let Some(description) = tool
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        translated.insert(
+            "description".to_string(),
+            serde_json::Value::String(description.to_string()),
+        );
+    }
+    translated.insert(
+        "parameters".to_string(),
+        tool.get("input_schema")
+            .map(runtime_proxy_anthropic_normalize_tool_schema)
+            .unwrap_or_else(runtime_proxy_anthropic_default_tool_schema),
+    );
+    serde_json::Value::Object(translated)
+}
+
+fn runtime_proxy_translate_anthropic_web_search_tool(
+    tool: &serde_json::Value,
+) -> serde_json::Value {
+    let mut translated = serde_json::Map::new();
+    translated.insert(
+        "type".to_string(),
+        serde_json::Value::String("web_search".to_string()),
+    );
+    let allowed_domains = tool
+        .get("allowed_domains")
+        .and_then(serde_json::Value::as_array)
+        .map(|domains| {
+            domains
+                .iter()
+                .filter_map(|domain| {
+                    domain
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| serde_json::Value::String(value.to_string()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|domains| !domains.is_empty());
+    if let Some(allowed_domains) = allowed_domains {
+        translated.insert(
+            "filters".to_string(),
+            serde_json::json!({ "allowed_domains": allowed_domains }),
+        );
+    }
+    if let Some(user_location) = tool
+        .get("user_location")
+        .filter(|value| value.is_object())
+        .cloned()
+    {
+        translated.insert("user_location".to_string(), user_location);
+    }
+    serde_json::Value::Object(translated)
 }
 
 pub fn runtime_proxy_translate_anthropic_tool_choice(

@@ -92,33 +92,11 @@ pub fn runtime_proxy_translate_anthropic_mcp_tool(
         .and_then(|config| config.get("defer_loading"))
         .and_then(serde_json::Value::as_bool);
 
-    let mut allowlisted_tools = Vec::new();
-    let mut has_unrepresentable_denylist = false;
-    if let Some(configs) = tool.get("configs") {
-        let Some(configs) = configs.as_object() else {
-            return Ok(None);
-        };
-        for (tool_name, config) in configs {
-            let Some(config) = config.as_object() else {
-                return Ok(None);
-            };
-            let enabled = config
-                .get("enabled")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(default_enabled);
-            if default_enabled {
-                if !enabled {
-                    has_unrepresentable_denylist = true;
-                    break;
-                }
-            } else if enabled {
-                allowlisted_tools.push(serde_json::Value::String(tool_name.clone()));
-            }
-        }
-    }
-    if has_unrepresentable_denylist {
+    let Some(allowlisted_tools) =
+        runtime_proxy_anthropic_mcp_allowlisted_tools(tool, default_enabled)
+    else {
         return Ok(None);
-    }
+    };
 
     let mut translated = serde_json::Map::new();
     translated.insert(
@@ -174,4 +152,29 @@ pub fn runtime_proxy_translate_anthropic_mcp_tool(
         );
     }
     Ok(Some(serde_json::Value::Object(translated)))
+}
+
+fn runtime_proxy_anthropic_mcp_allowlisted_tools(
+    tool: &serde_json::Value,
+    default_enabled: bool,
+) -> Option<Vec<serde_json::Value>> {
+    let Some(configs) = tool.get("configs") else {
+        return Some(Vec::new());
+    };
+    let configs = configs.as_object()?;
+    let mut allowed = Vec::new();
+    for (tool_name, config) in configs {
+        let config = config.as_object()?;
+        let enabled = config
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(default_enabled);
+        if default_enabled && !enabled {
+            return None;
+        }
+        if !default_enabled && enabled {
+            allowed.push(serde_json::Value::String(tool_name.clone()));
+        }
+    }
+    Some(allowed)
 }

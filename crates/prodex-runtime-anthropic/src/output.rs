@@ -386,15 +386,7 @@ where
             ));
         }
 
-        if !runtime_response_body_looks_like_sse(&parts.body)
-            && !content_type
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-                .contains("text/event-stream")
-            && serde_json::from_slice::<serde_json::Value>(&parts.body)
-                .ok()
-                .is_some_and(|value| value.get("error").is_some())
-        {
+        if runtime_anthropic_buffered_response_is_json_error(&parts, content_type) {
             return Ok(RuntimeResponsesReply::Buffered(
                 runtime_anthropic_error_from_upstream_parts(parts),
             ));
@@ -411,22 +403,18 @@ where
         if followup_attempt == followup_limit
             || !runtime_anthropic_message_needs_server_tool_followup(&response_message)
         {
-            let response_parts = if request.stream {
-                runtime_anthropic_sse_response_parts_from_message_value(response_message)
-            } else {
-                runtime_anthropic_json_response_parts(response_message)
-            };
-            return Ok(RuntimeResponsesReply::Buffered(response_parts));
+            return Ok(runtime_anthropic_buffered_message_reply(
+                response_message,
+                request.stream,
+            ));
         }
 
         let Some(previous_response_id) = runtime_buffered_response_ids(&parts).last().cloned()
         else {
-            let response_parts = if request.stream {
-                runtime_anthropic_sse_response_parts_from_message_value(response_message)
-            } else {
-                runtime_anthropic_json_response_parts(response_message)
-            };
-            return Ok(RuntimeResponsesReply::Buffered(response_parts));
+            return Ok(runtime_anthropic_buffered_message_reply(
+                response_message,
+                request.stream,
+            ));
         };
 
         let request_for_followup = runtime_request_for_anthropic_server_tool_followup(
@@ -441,6 +429,32 @@ where
     }
 
     unreachable!("anthropic buffered server-tool translation should return inside loop");
+}
+
+fn runtime_anthropic_buffered_message_reply(
+    response_message: serde_json::Value,
+    stream: bool,
+) -> RuntimeResponsesReply {
+    let parts = if stream {
+        runtime_anthropic_sse_response_parts_from_message_value(response_message)
+    } else {
+        runtime_anthropic_json_response_parts(response_message)
+    };
+    RuntimeResponsesReply::Buffered(parts)
+}
+
+fn runtime_anthropic_buffered_response_is_json_error(
+    parts: &RuntimeBufferedResponseParts,
+    content_type: Option<&str>,
+) -> bool {
+    !runtime_response_body_looks_like_sse(&parts.body)
+        && !content_type
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains("text/event-stream")
+        && serde_json::from_slice::<serde_json::Value>(&parts.body)
+            .ok()
+            .is_some_and(|value| value.get("error").is_some())
 }
 
 #[cfg(test)]
