@@ -187,10 +187,10 @@ pub struct RuntimeGatewayAdaptiveShadowDecision {
 pub fn runtime_gateway_adaptive_shadow_decision(
     input: RuntimeGatewayAdaptiveShadowInput,
 ) -> RuntimeGatewayAdaptiveShadowDecision {
-    if let Some(owner) = input.continuation_owner_model {
+    if let Some(owner) = input.continuation_owner_model.as_ref() {
         return RuntimeGatewayAdaptiveShadowDecision {
             actual_model: input.actual_model,
-            recommended_model: Some(owner),
+            recommended_model: Some(owner.clone()),
             quality_score_bps: None,
             override_reason: "continuation_affinity",
         };
@@ -214,26 +214,8 @@ pub fn runtime_gateway_adaptive_shadow_decision(
         .iter()
         .filter(|candidate| !blocked.contains(candidate.as_str()))
         .collect::<Vec<_>>();
-    if input.config.exploration_rate_bps > 0
-        && !candidates.is_empty()
-        && adaptive_seed(input.diagnostic_seed) % 10_000
-            < u64::from(input.config.exploration_rate_bps)
-    {
-        let mut index = adaptive_seed(input.diagnostic_seed ^ 0x9e37_79b9_7f4a_7c15) as usize
-            % candidates.len();
-        if candidates.len() > 1 && candidates[index].as_str() == input.actual_model {
-            index = (index + 1) % candidates.len();
-        }
-        return RuntimeGatewayAdaptiveShadowDecision {
-            actual_model: input.actual_model,
-            recommended_model: Some(candidates[index].to_string()),
-            quality_score_bps: None,
-            override_reason: if input.config.shadow_mode {
-                "shadow_exploration"
-            } else {
-                "adaptive_exploration"
-            },
-        };
+    if let Some(decision) = adaptive_exploration_decision(&input, &candidates) {
+        return decision;
     }
     let mut best: Option<(&str, i64)> = None;
     for candidate in candidates {
@@ -268,6 +250,34 @@ pub fn runtime_gateway_adaptive_shadow_decision(
             "adaptive_enabled"
         },
     }
+}
+
+fn adaptive_exploration_decision(
+    input: &RuntimeGatewayAdaptiveShadowInput,
+    candidates: &[&String],
+) -> Option<RuntimeGatewayAdaptiveShadowDecision> {
+    if input.config.exploration_rate_bps == 0
+        || candidates.is_empty()
+        || adaptive_seed(input.diagnostic_seed) % 10_000
+            >= u64::from(input.config.exploration_rate_bps)
+    {
+        return None;
+    }
+    let mut index =
+        adaptive_seed(input.diagnostic_seed ^ 0x9e37_79b9_7f4a_7c15) as usize % candidates.len();
+    if candidates.len() > 1 && candidates[index].as_str() == input.actual_model {
+        index = (index + 1) % candidates.len();
+    }
+    Some(RuntimeGatewayAdaptiveShadowDecision {
+        actual_model: input.actual_model.clone(),
+        recommended_model: Some(candidates[index].to_string()),
+        quality_score_bps: None,
+        override_reason: if input.config.shadow_mode {
+            "shadow_exploration"
+        } else {
+            "adaptive_exploration"
+        },
+    })
 }
 
 fn adaptive_seed(mut value: u64) -> u64 {

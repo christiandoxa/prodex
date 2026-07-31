@@ -172,92 +172,110 @@ fn smart_context_validate_replay_corpus(corpus: &SmartContextReplayCorpus) -> Re
         return Err("Smart Context replay corpus has no scenarios".to_string());
     }
     let mut ids = BTreeSet::new();
-    let mut concurrent_groups = std::collections::BTreeMap::<&str, usize>::new();
+    let mut concurrent_groups = std::collections::BTreeMap::<String, usize>::new();
     for scenario in &corpus.scenarios {
-        if scenario.id.trim().is_empty() {
-            return Err("Smart Context replay scenario id is empty".to_string());
-        }
-        if !ids.insert(scenario.id.as_str()) {
-            return Err(format!(
-                "duplicate Smart Context replay scenario id {}",
-                scenario.id
-            ));
-        }
-        if scenario.provider.trim().is_empty() || scenario.model.trim().is_empty() {
-            return Err(format!(
-                "Smart Context replay scenario {} has empty provider or model",
-                scenario.id
-            ));
-        }
-        if scenario.context_window_tokens == 0 || scenario.turns.is_empty() {
-            return Err(format!(
-                "Smart Context replay scenario {} needs a context window and at least one turn",
-                scenario.id
-            ));
-        }
-        if (scenario.transport == SmartContextReplayTransport::Websocket)
-            != (scenario.route == SmartContextReplayRoute::Websocket)
-        {
-            return Err(format!(
-                "Smart Context replay scenario {} transport and route disagree",
-                scenario.id
-            ));
-        }
-        if scenario
-            .restart_before_turns
-            .iter()
-            .any(|turn| *turn < 2 || *turn > scenario.turns.len())
-        {
-            return Err(format!(
-                "Smart Context replay scenario {} has an invalid restart boundary",
-                scenario.id
-            ));
-        }
-        if let Some(group) = scenario.concurrent_group.as_deref() {
-            if group.trim().is_empty() {
-                return Err(format!(
-                    "Smart Context replay scenario {} has an empty concurrent group",
-                    scenario.id
-                ));
-            }
-            *concurrent_groups.entry(group).or_default() += 1;
-        }
-        for (index, turn) in scenario.turns.iter().enumerate() {
-            if !turn.request.is_object() {
-                return Err(format!(
-                    "Smart Context replay scenario {} turn {} request must be a JSON object",
-                    scenario.id,
-                    index + 1
-                ));
-            }
-            if turn
-                .request
-                .get("model")
-                .and_then(serde_json::Value::as_str)
-                != Some(scenario.model.as_str())
-            {
-                return Err(format!(
-                    "Smart Context replay scenario {} turn {} model does not match scenario model",
-                    scenario.id,
-                    index + 1
-                ));
-            }
-            if turn
-                .preserve_json_pointers
-                .iter()
-                .any(|pointer| !pointer.starts_with('/'))
-            {
-                return Err(format!(
-                    "Smart Context replay scenario {} turn {} has an invalid JSON pointer",
-                    scenario.id,
-                    index + 1
-                ));
-            }
-        }
+        smart_context_validate_replay_scenario(scenario, &mut ids, &mut concurrent_groups)?;
     }
     if let Some((group, _)) = concurrent_groups.iter().find(|(_, count)| **count < 2) {
         return Err(format!(
             "Smart Context replay concurrent group {group} needs at least two scenarios"
+        ));
+    }
+    Ok(())
+}
+
+fn smart_context_validate_replay_scenario(
+    scenario: &SmartContextReplayScenarioInput,
+    ids: &mut BTreeSet<String>,
+    concurrent_groups: &mut std::collections::BTreeMap<String, usize>,
+) -> Result<(), String> {
+    if scenario.id.trim().is_empty() {
+        return Err("Smart Context replay scenario id is empty".to_string());
+    }
+    if !ids.insert(scenario.id.clone()) {
+        return Err(format!(
+            "duplicate Smart Context replay scenario id {}",
+            scenario.id
+        ));
+    }
+    if scenario.provider.trim().is_empty() || scenario.model.trim().is_empty() {
+        return Err(format!(
+            "Smart Context replay scenario {} has empty provider or model",
+            scenario.id
+        ));
+    }
+    if scenario.context_window_tokens == 0 || scenario.turns.is_empty() {
+        return Err(format!(
+            "Smart Context replay scenario {} needs a context window and at least one turn",
+            scenario.id
+        ));
+    }
+    if (scenario.transport == SmartContextReplayTransport::Websocket)
+        != (scenario.route == SmartContextReplayRoute::Websocket)
+    {
+        return Err(format!(
+            "Smart Context replay scenario {} transport and route disagree",
+            scenario.id
+        ));
+    }
+    if scenario
+        .restart_before_turns
+        .iter()
+        .any(|turn| *turn < 2 || *turn > scenario.turns.len())
+    {
+        return Err(format!(
+            "Smart Context replay scenario {} has an invalid restart boundary",
+            scenario.id
+        ));
+    }
+    if let Some(group) = scenario.concurrent_group.as_deref() {
+        if group.trim().is_empty() {
+            return Err(format!(
+                "Smart Context replay scenario {} has an empty concurrent group",
+                scenario.id
+            ));
+        }
+        *concurrent_groups.entry(group.to_string()).or_default() += 1;
+    }
+    for (index, turn) in scenario.turns.iter().enumerate() {
+        smart_context_validate_replay_turn(scenario, turn, index)?;
+    }
+    Ok(())
+}
+
+fn smart_context_validate_replay_turn(
+    scenario: &SmartContextReplayScenarioInput,
+    turn: &SmartContextReplayTurnInput,
+    index: usize,
+) -> Result<(), String> {
+    if !turn.request.is_object() {
+        return Err(format!(
+            "Smart Context replay scenario {} turn {} request must be a JSON object",
+            scenario.id,
+            index + 1
+        ));
+    }
+    if turn
+        .request
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        != Some(scenario.model.as_str())
+    {
+        return Err(format!(
+            "Smart Context replay scenario {} turn {} model does not match scenario model",
+            scenario.id,
+            index + 1
+        ));
+    }
+    if turn
+        .preserve_json_pointers
+        .iter()
+        .any(|pointer| !pointer.starts_with('/'))
+    {
+        return Err(format!(
+            "Smart Context replay scenario {} turn {} has an invalid JSON pointer",
+            scenario.id,
+            index + 1
         ));
     }
     Ok(())

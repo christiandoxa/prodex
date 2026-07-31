@@ -30,33 +30,8 @@ pub fn smart_context_adaptive_budget_policy(
     input: SmartContextAdaptiveBudgetPolicyInput,
 ) -> SmartContextAdaptiveBudgetPolicy {
     let tier = smart_context_token_budget_tier_from_accounting(&input.accounting);
-    let mut reasons = Vec::new();
+    let mut reasons = smart_context_budget_policy_reasons(&input);
     let available_context_tokens = input.accounting.available_context_tokens;
-
-    if input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact {
-        reasons.push(SmartContextBudgetPolicyReason::ExactnessRequired);
-    }
-    if input.static_context_changed {
-        reasons.push(SmartContextBudgetPolicyReason::StaticContextChanged);
-    }
-    if input
-        .missing_rehydrate_refs
-        .iter()
-        .any(|value| non_empty(value))
-    {
-        reasons.push(SmartContextBudgetPolicyReason::MissingRehydrateRefs);
-    }
-    if input.accounting.available_context_tokens.is_none() {
-        reasons.push(SmartContextBudgetPolicyReason::UnknownTokenWindow);
-    }
-    if input
-        .accounting
-        .accounting_risks
-        .iter()
-        .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow)
-    {
-        reasons.push(SmartContextBudgetPolicyReason::UnsafeAccounting);
-    }
 
     if reasons.iter().any(|reason| {
         matches!(
@@ -149,6 +124,37 @@ pub fn smart_context_adaptive_budget_policy(
         rewrite_budget_decision,
         available_context_tokens,
     )
+}
+
+fn smart_context_budget_policy_reasons(
+    input: &SmartContextAdaptiveBudgetPolicyInput,
+) -> Vec<SmartContextBudgetPolicyReason> {
+    let mut reasons = Vec::new();
+    if input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact {
+        reasons.push(SmartContextBudgetPolicyReason::ExactnessRequired);
+    }
+    if input.static_context_changed {
+        reasons.push(SmartContextBudgetPolicyReason::StaticContextChanged);
+    }
+    if input
+        .missing_rehydrate_refs
+        .iter()
+        .any(|value| non_empty(value))
+    {
+        reasons.push(SmartContextBudgetPolicyReason::MissingRehydrateRefs);
+    }
+    if input.accounting.available_context_tokens.is_none() {
+        reasons.push(SmartContextBudgetPolicyReason::UnknownTokenWindow);
+    }
+    if input
+        .accounting
+        .accounting_risks
+        .iter()
+        .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow)
+    {
+        reasons.push(SmartContextBudgetPolicyReason::UnsafeAccounting);
+    }
+    reasons
 }
 
 pub fn smart_context_apply_rewrite_budget_decision(
