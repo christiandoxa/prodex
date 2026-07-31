@@ -15,6 +15,8 @@ const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
 const SONAR_ACTION =
   "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0";
+const SONAR_IMAGE =
+  "docker.io/library/sonarqube:26.7.0.124771-community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
 const PRODUCTION_CLIPPY_COMMAND =
   "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
@@ -102,34 +104,54 @@ export function validateProcessGuard(contents) {
 }
 
 export function validateSonarConfiguration(workflowContents, properties) {
-  const job = workflowJob(workflowContents, "supply-chain");
-  if (!job) return [".github/workflows/ci.yml: missing supply-chain job"];
+  const job = workflowJob(workflowContents, "rust-quality");
+  const supplyChainJob = workflowJob(workflowContents, "supply-chain");
+  if (!job) return [".github/workflows/ci.yml: missing rust-quality job"];
   const violations = [];
   for (const marker of [
+    `image: ${SONAR_IMAGE}`,
+    'SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"',
+    "SONAR_HOST_URL: http://127.0.0.1:9000",
+    "- 9000:9000",
     PRODUCTION_CLIPPY_COMMAND,
     "mkdir -p target/sonar",
     "> target/sonar/clippy-report.json",
     "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
-    "id: sonar-config",
-    "SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}",
-    "SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}",
-    "SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}",
-    "SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}",
-    "Sonar scan activation boundary",
-    "if: ${{ steps.sonar-config.outputs.enabled == 'true' }}",
+    "Create ephemeral local Sonar token",
+    "--user admin:admin",
+    "/api/user_tokens/generate",
+    'echo "::add-mask::${token}"',
+    'echo "SONAR_TOKEN=${token}"',
     SONAR_ACTION,
+    "-Dsonar.projectKey=prodex-ci",
     "Require zero Sonar issues",
     "/api/qualitygates/project_status",
+    '.projectStatus.status == "OK"',
     "/api/issues/search",
     '--data-urlencode "resolved=false"',
     'if [ "${total}" -ne 0 ]',
+    "Revoke ephemeral local Sonar token",
+    "/api/user_tokens/revoke",
   ]) {
     if (!job.includes(marker)) {
-      violations.push(`.github/workflows/ci.yml: supply-chain job missing ${marker}`);
+      violations.push(`.github/workflows/ci.yml: rust-quality job missing ${marker}`);
+    }
+  }
+  if (supplyChainJob?.includes(PRODUCTION_CLIPPY_COMMAND)) {
+    violations.push(".github/workflows/ci.yml: production Clippy must run in parallel rust-quality job");
+  }
+  for (const marker of [
+    "secrets.SONAR_TOKEN",
+    "vars.SONAR_PROJECT_KEY",
+    "vars.SONAR_HOST_URL",
+    "vars.SONAR_ORGANIZATION",
+  ]) {
+    if (job.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: rust-quality must not require ${marker}`);
     }
   }
   if (workflowContents.includes("sonarlint-vscode") || properties.includes("sonarlint-vscode")) {
-    violations.push("Sonar scan must not clone sonarlint-vscode");
+    violations.push("Sonar Rust gate must not use the unsupported sonarlint-vscode analyzer");
   }
   for (const marker of [
     "sonar.sources=src,crates",
@@ -476,27 +498,40 @@ function selfTest() {
   assert.deepEqual(validateProcessGuard(processJob), []);
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
   const sonarWorkflow = `jobs:
-  supply-chain:
+  rust-quality:
+    env:
+      SONAR_HOST_URL: http://127.0.0.1:9000
+    services:
+      sonarqube:
+        image: ${SONAR_IMAGE}
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+        ports:
+          - 9000:9000
     steps:
       - run: |
           mkdir -p target/sonar
           ${PRODUCTION_CLIPPY_COMMAND} > target/sonar/clippy-report.json
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - id: sonar-config
-        env:
-          SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
-          SONAR_PROJECT_KEY: \${{ vars.SONAR_PROJECT_KEY }}
-          SONAR_HOST_URL: \${{ vars.SONAR_HOST_URL }}
-          SONAR_ORGANIZATION: \${{ vars.SONAR_ORGANIZATION }}
-        run: echo "Sonar scan activation boundary"
-      - if: \${{ steps.sonar-config.outputs.enabled == 'true' }}
-        uses: ${SONAR_ACTION}
+      - name: Create ephemeral local Sonar token
+        run: |
+          curl --user admin:admin /api/user_tokens/generate
+          echo "::add-mask::\${token}"
+          echo "SONAR_TOKEN=\${token}"
+      - uses: ${SONAR_ACTION}
+        with:
+          args: -Dsonar.projectKey=prodex-ci
       - name: Require zero Sonar issues
-        if: \${{ steps.sonar-config.outputs.enabled == 'true' }}
         run: |
           curl /api/qualitygates/project_status
+          jq '.projectStatus.status == "OK"'
           curl --data-urlencode "resolved=false" /api/issues/search
           if [ "\${total}" -ne 0 ]; then exit 1; fi
+      - name: Revoke ephemeral local Sonar token
+        run: curl /api/user_tokens/revoke
+  supply-chain:
+    steps:
+      - run: cargo audit
   other:
     steps: []
 `;
@@ -510,6 +545,10 @@ sonar.qualitygate.wait=true
   assert.deepEqual(validateSonarConfiguration(sonarWorkflow, sonarProperties), []);
   assert.equal(
     validateSonarConfiguration(sonarWorkflow.replace(SONAR_ACTION, "SonarSource/sonarqube-scan-action@v8.1.0"), sonarProperties).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow.replace(SONAR_IMAGE, "sonarqube:community"), sonarProperties).length,
     1,
   );
   assert.equal(
@@ -548,9 +587,16 @@ sonar.qualitygate.wait=true
   assert.equal(
     validateSonarConfiguration(
       sonarWorkflow.replace(
-        '        run: echo "Sonar scan activation boundary"',
-        '        run: echo "Sonar scan activation boundary"\n      - run: git clone https://github.com/SonarSource/sonarlint-vscode',
+        "      - name: Create ephemeral local Sonar token",
+        "      - run: git clone https://github.com/SonarSource/sonarlint-vscode\n      - name: Create ephemeral local Sonar token",
       ),
+      sonarProperties,
+    ).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(
+      sonarWorkflow.replace("      SONAR_HOST_URL: http://127.0.0.1:9000", "      SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}\n      SONAR_HOST_URL: http://127.0.0.1:9000"),
       sonarProperties,
     ).length,
     1,
