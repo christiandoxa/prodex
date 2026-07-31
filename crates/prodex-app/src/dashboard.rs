@@ -745,6 +745,77 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn dashboard_json_request(
+        dashboard: &DashboardServer,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (u16, Value) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = server.server_addr().to_ip().expect("address should be IP");
+        let url = format!("http://{address}{path}");
+        let client = std::thread::spawn(move || {
+            let request = reqwest::blocking::Client::new().request(method, url);
+            let response = match body {
+                Some(body) => request.json(&body),
+                None => request,
+            }
+            .send()
+            .expect("dashboard request should complete");
+            let status = response.status().as_u16();
+            let body = response.json().expect("dashboard response should be JSON");
+            (status, body)
+        });
+        let request = server.recv().expect("dashboard request should arrive");
+        dashboard.handle(request).expect("dashboard should respond");
+        client.join().expect("dashboard client should finish")
+    }
+
+    #[test]
+    fn dashboard_profile_mutations_succeed_when_local_audit_persistence_fails() {
+        let paths = dashboard_test_paths("audit-best-effort");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+        let audit_blocker = paths.root.join("audit-blocker");
+        fs::write(&audit_blocker, "blocked").expect("audit blocker should be written");
+        let _audit_guard = crate::TestEnvVarGuard::set(
+            "PRODEX_AUDIT_LOG_DIR",
+            &audit_blocker.display().to_string(),
+        );
+
+        for name in ["main", "second"] {
+            let (status, _) = dashboard_json_request(
+                &dashboard,
+                reqwest::Method::POST,
+                "/api/profile",
+                Some(json!({ "name": name, "activate": name == "main" })),
+            );
+            assert_eq!(status, 200, "profile add should report success");
+        }
+        let (status, _) = dashboard_json_request(
+            &dashboard,
+            reqwest::Method::POST,
+            "/api/profile/active",
+            Some(json!({ "profile": "second" })),
+        );
+        assert_eq!(status, 200, "profile activation should report success");
+        let (status, _) = dashboard_json_request(
+            &dashboard,
+            reqwest::Method::DELETE,
+            "/api/profile/second",
+            None,
+        );
+        assert_eq!(status, 200, "profile removal should report success");
+
+        let state = AppState::load(&paths).expect("committed state should load");
+        assert!(state.profiles.contains_key("main"));
+        assert!(!state.profiles.contains_key("second"));
+        assert_eq!(state.active_profile.as_deref(), Some("main"));
+        fs::remove_dir_all(paths.root).expect("test root should be removed");
+    }
+
     #[test]
     fn dashboard_status_fields_contain_url_and_warning() {
         let fields = dashboard_status_fields(
