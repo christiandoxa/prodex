@@ -320,8 +320,7 @@ fn alias_request_tool_names(
         .and_then(serde_json::Value::as_array_mut)
     {
         for tool in tools {
-            applied |= alias_name_at(tool, &["name"], aliases, reverse);
-            applied |= alias_name_at(tool, &["function", "name"], aliases, reverse);
+            applied |= alias_request_tool(tool, aliases, reverse);
         }
     }
     if let Some(choice) = value.get_mut("tool_choice") {
@@ -333,20 +332,39 @@ fn alias_request_tool_names(
         .and_then(serde_json::Value::as_array_mut)
     {
         for item in input {
-            if matches!(
-                item.get("type").and_then(serde_json::Value::as_str),
-                Some("function_call" | "custom_tool_call")
-            ) {
-                applied |= alias_name_at(item, &["name"], aliases, reverse);
-            }
-            if let Some(tool_calls) = item
-                .get_mut("tool_calls")
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                for call in tool_calls {
-                    applied |= alias_name_at(call, &["function", "name"], aliases, reverse);
-                }
-            }
+            applied |= alias_request_input_item(item, aliases, reverse);
+        }
+    }
+    applied
+}
+
+fn alias_request_tool(
+    tool: &mut serde_json::Value,
+    aliases: &[HarnessToolAlias],
+    reverse: bool,
+) -> bool {
+    alias_name_at(tool, &["name"], aliases, reverse)
+        | alias_name_at(tool, &["function", "name"], aliases, reverse)
+}
+
+fn alias_request_input_item(
+    item: &mut serde_json::Value,
+    aliases: &[HarnessToolAlias],
+    reverse: bool,
+) -> bool {
+    let mut applied = false;
+    if matches!(
+        item.get("type").and_then(serde_json::Value::as_str),
+        Some("function_call" | "custom_tool_call")
+    ) {
+        applied |= alias_name_at(item, &["name"], aliases, reverse);
+    }
+    if let Some(tool_calls) = item
+        .get_mut("tool_calls")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for call in tool_calls {
+            applied |= alias_name_at(call, &["function", "name"], aliases, reverse);
         }
     }
     applied

@@ -97,86 +97,127 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
                 && !object.contains_key("call_id")
                 && !object.contains_key("tool_call_id") =>
         {
-            let role = object
-                .get("role")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("user");
-            let role = deepseek_provider_core_chat_role(role);
-            let text = deepseek_provider_core_responses_content_text(object.get("content"));
-            if replayed_message_signatures.contains(&(role.to_string(), text.clone())) {
-                return;
-            }
-            if !text.trim().is_empty() {
-                messages.push(serde_json::json!({
-                    "role": role,
-                    "content": text,
-                }));
-            }
+            deepseek_provider_core_push_message_item(object, messages, replayed_message_signatures);
         }
         Some("function_call") => {
-            let call_id = deepseek_provider_core_input_tool_call_id(object);
-            if replayed_tool_call_ids.contains(&call_id) {
-                return;
-            }
-            deepseek_provider_core_push_chat_tool_call_message(object, call_id, messages);
+            deepseek_provider_core_push_tool_call_item(
+                object,
+                messages,
+                replayed_tool_call_ids,
+                deepseek_provider_core_push_chat_tool_call_message,
+            );
         }
         Some("custom_tool_call") => {
-            let call_id = deepseek_provider_core_input_tool_call_id(object);
-            if replayed_tool_call_ids.contains(&call_id) {
-                return;
-            }
-            deepseek_provider_core_push_chat_custom_tool_call_message(object, call_id, messages);
+            deepseek_provider_core_push_tool_call_item(
+                object,
+                messages,
+                replayed_tool_call_ids,
+                deepseek_provider_core_push_chat_custom_tool_call_message,
+            );
         }
         Some("local_shell_call") => {
-            let call_id = deepseek_provider_core_input_tool_call_id(object);
-            if replayed_tool_call_ids.contains(&call_id) {
-                return;
-            }
-            deepseek_provider_core_push_chat_local_shell_call_message(object, call_id, messages);
+            deepseek_provider_core_push_tool_call_item(
+                object,
+                messages,
+                replayed_tool_call_ids,
+                deepseek_provider_core_push_chat_local_shell_call_message,
+            );
         }
         Some("function_call_output") | Some("custom_tool_call_output") => {
-            let call_id = deepseek_provider_core_input_tool_output_call_id(object);
-            if replayed_tool_output_call_ids.contains(&call_id) {
-                return;
-            }
-            let output = deepseek_provider_core_input_tool_output_text(object);
-            messages.push(serde_json::json!({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": output,
-            }));
+            deepseek_provider_core_push_tool_output_item(
+                object,
+                messages,
+                replayed_tool_output_call_ids,
+            );
         }
         Some("mcp_call") => {
-            let call_id = deepseek_provider_core_input_tool_call_id(object);
-            if !replayed_tool_call_ids.contains(&call_id) {
-                deepseek_provider_core_push_chat_tool_call_message(
-                    object,
-                    call_id.clone(),
-                    messages,
-                );
-            }
-            if deepseek_provider_core_mcp_call_has_result(object)
-                && !replayed_tool_output_call_ids.contains(&call_id)
-            {
-                messages.push(serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": deepseek_provider_core_input_tool_output_text(object),
-                }));
-            }
+            deepseek_provider_core_push_mcp_call_item(
+                object,
+                messages,
+                replayed_tool_call_ids,
+                replayed_tool_output_call_ids,
+            );
         }
         Some("mcp_tool_result") | Some("mcp_call_output") => {
-            let call_id = deepseek_provider_core_input_tool_output_call_id(object);
-            if replayed_tool_output_call_ids.contains(&call_id) {
-                return;
-            }
-            messages.push(serde_json::json!({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": deepseek_provider_core_input_tool_output_text(object),
-            }));
+            deepseek_provider_core_push_tool_output_item(
+                object,
+                messages,
+                replayed_tool_output_call_ids,
+            );
         }
         Some(_) => {}
         None => {}
+    }
+}
+
+fn deepseek_provider_core_push_message_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+    messages: &mut Vec<serde_json::Value>,
+    replayed_message_signatures: &BTreeSet<(String, String)>,
+) {
+    let role = object
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("user");
+    let role = deepseek_provider_core_chat_role(role);
+    let text = deepseek_provider_core_responses_content_text(object.get("content"));
+    if replayed_message_signatures.contains(&(role.to_string(), text.clone())) {
+        return;
+    }
+    if !text.trim().is_empty() {
+        messages.push(serde_json::json!({
+            "role": role,
+            "content": text,
+        }));
+    }
+}
+
+fn deepseek_provider_core_push_tool_call_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+    messages: &mut Vec<serde_json::Value>,
+    replayed_tool_call_ids: &BTreeSet<String>,
+    push: fn(&serde_json::Map<String, serde_json::Value>, String, &mut Vec<serde_json::Value>),
+) {
+    let call_id = deepseek_provider_core_input_tool_call_id(object);
+    if replayed_tool_call_ids.contains(&call_id) {
+        return;
+    }
+    push(object, call_id, messages);
+}
+
+fn deepseek_provider_core_push_tool_output_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+    messages: &mut Vec<serde_json::Value>,
+    replayed_tool_output_call_ids: &BTreeSet<String>,
+) {
+    let call_id = deepseek_provider_core_input_tool_output_call_id(object);
+    if replayed_tool_output_call_ids.contains(&call_id) {
+        return;
+    }
+    messages.push(serde_json::json!({
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": deepseek_provider_core_input_tool_output_text(object),
+    }));
+}
+
+fn deepseek_provider_core_push_mcp_call_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+    messages: &mut Vec<serde_json::Value>,
+    replayed_tool_call_ids: &BTreeSet<String>,
+    replayed_tool_output_call_ids: &BTreeSet<String>,
+) {
+    let call_id = deepseek_provider_core_input_tool_call_id(object);
+    if !replayed_tool_call_ids.contains(&call_id) {
+        deepseek_provider_core_push_chat_tool_call_message(object, call_id.clone(), messages);
+    }
+    if deepseek_provider_core_mcp_call_has_result(object)
+        && !replayed_tool_output_call_ids.contains(&call_id)
+    {
+        messages.push(serde_json::json!({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": deepseek_provider_core_input_tool_output_text(object),
+        }));
     }
 }

@@ -1,6 +1,33 @@
 use super::*;
 
 pub(super) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
+    let (
+        strong_signals,
+        cargo_noise_signals,
+        location_signals,
+        backtrace_signals,
+        exit_signals,
+        clippy_signals,
+    ) = rust_diagnostic_signal_counts(lines);
+    if strong_signals > 0 {
+        return strong_signals
+            + cargo_noise_signals
+            + location_signals
+            + backtrace_signals
+            + exit_signals
+            + clippy_signals
+            >= 2;
+    }
+    if backtrace_signals > 0 && location_signals > 0 {
+        return true;
+    }
+    if exit_signals > 0 && (cargo_noise_signals > 0 || location_signals > 0) {
+        return true;
+    }
+    cargo_noise_signals >= 4
+}
+
+fn rust_diagnostic_signal_counts(lines: &[&str]) -> (usize, usize, usize, usize, usize, usize) {
     let mut strong_signals = 0usize;
     let mut cargo_noise_signals = 0usize;
     let mut location_signals = 0usize;
@@ -33,25 +60,33 @@ pub(super) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
         }
     }
 
-    if strong_signals > 0 {
-        return strong_signals
-            + cargo_noise_signals
-            + location_signals
-            + backtrace_signals
-            + exit_signals
-            + clippy_signals
-            >= 2;
-    }
-    if backtrace_signals > 0 && location_signals > 0 {
-        return true;
-    }
-    if exit_signals > 0 && (cargo_noise_signals > 0 || location_signals > 0) {
-        return true;
-    }
-    cargo_noise_signals >= 4
+    (
+        strong_signals,
+        cargo_noise_signals,
+        location_signals,
+        backtrace_signals,
+        exit_signals,
+        clippy_signals,
+    )
 }
 
 pub(super) fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
+    let (strong_signals, location_signals, stack_signals, exit_signals, noise_signals) =
+        diagnostic_signal_counts(lines);
+    if lines
+        .iter()
+        .any(|line| is_junit_xml_failure_line(line) || is_eslint_diagnostic_line(line))
+    {
+        return true;
+    }
+    if strong_signals > 0 {
+        return strong_signals + location_signals + stack_signals + exit_signals + noise_signals
+            >= 2;
+    }
+    stack_signals > 0 && location_signals > 0
+}
+
+fn diagnostic_signal_counts(lines: &[&str]) -> (usize, usize, usize, usize, usize) {
     let mut strong_signals = 0usize;
     let mut location_signals = 0usize;
     let mut stack_signals = 0usize;
@@ -76,17 +111,13 @@ pub(super) fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
         }
     }
 
-    if lines
-        .iter()
-        .any(|line| is_junit_xml_failure_line(line) || is_eslint_diagnostic_line(line))
-    {
-        return true;
-    }
-    if strong_signals > 0 {
-        return strong_signals + location_signals + stack_signals + exit_signals + noise_signals
-            >= 2;
-    }
-    stack_signals > 0 && location_signals > 0
+    (
+        strong_signals,
+        location_signals,
+        stack_signals,
+        exit_signals,
+        noise_signals,
+    )
 }
 
 pub(super) fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
@@ -193,45 +224,66 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         return None;
     }
 
-    if is_coverage_noise_line(trimmed, &lower) {
+    noisy_success_framework_label(trimmed, &lower)
+        .or_else(|| rust_noise_label(line))
+        .or_else(|| noisy_success_language_label(trimmed, &lower))
+        .or_else(|| noisy_success_go_test_label(trimmed, &lower))
+        .or_else(|| noisy_success_test_summary_label(trimmed, &lower))
+        .or_else(|| noisy_success_build_label(&lower))
+        .or_else(|| noisy_success_package_label(&lower))
+        .or_else(|| noisy_success_quality_label(trimmed, &lower))
+}
+
+fn noisy_success_framework_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    if is_coverage_noise_line(trimmed, lower) {
         Some("coverage")
-    } else if is_gradle_test_success_line(trimmed, &lower) {
+    } else if is_gradle_test_success_line(trimmed, lower) {
         Some("gradle_test")
-    } else if is_maven_test_success_line(trimmed, &lower) {
+    } else if is_maven_test_success_line(trimmed, lower) {
         Some("maven_test")
-    } else if is_package_install_success_line(&lower) {
+    } else if is_package_install_success_line(lower) {
         Some("package_install")
-    } else if is_docker_buildx_success_line(&lower) {
+    } else if is_docker_buildx_success_line(lower) {
         Some("docker_buildx")
-    } else if is_bazel_test_success_line(&lower) {
+    } else if is_bazel_test_success_line(lower) {
         Some("bazel_test")
-    } else if is_junit_xml_success_line(trimmed, &lower) {
+    } else if is_junit_xml_success_line(trimmed, lower) {
         Some("junit_xml")
-    } else if is_swift_test_success_line(&lower) {
+    } else if is_swift_test_success_line(lower) {
         Some("swift_test")
-    } else if is_playwright_success_line(trimmed, &lower) {
+    } else if is_playwright_success_line(trimmed, lower) {
         Some("playwright")
-    } else if is_biome_success_summary_line(&lower) {
+    } else if is_biome_success_summary_line(lower) {
         Some("biome_summary")
-    } else if is_oxlint_success_summary_line(&lower) {
+    } else if is_oxlint_success_summary_line(lower) {
         Some("oxlint_summary")
-    } else if let Some(label) = rust_noise_label(line) {
-        Some(label)
-    } else if is_typescript_success_line(trimmed, &lower) {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_language_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    if is_typescript_success_line(trimmed, lower) {
         Some("typecheck_summary")
-    } else if is_vite_success_line(trimmed, &lower) {
+    } else if is_vite_success_line(trimmed, lower) {
         Some("vite")
-    } else if is_next_success_line(trimmed, &lower) {
+    } else if is_next_success_line(trimmed, lower) {
         Some("next")
     } else if is_dot_reporter_success_line(trimmed) {
         Some("dot_progress")
-    } else if is_bun_test_success_line(trimmed, &lower) {
+    } else if is_bun_test_success_line(trimmed, lower) {
         Some("bun_test")
-    } else if is_cypress_success_line(trimmed, &lower) {
+    } else if is_cypress_success_line(trimmed, lower) {
         Some("cypress")
-    } else if is_zig_test_success_line(&lower) {
+    } else if is_zig_test_success_line(lower) {
         Some("zig_test")
-    } else if trimmed.starts_with("PASS ") {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_go_test_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    if trimmed.starts_with("PASS ") {
         Some("passed_suites")
     } else if lower.starts_with("ok ") && lower.split_whitespace().count() >= 2 {
         Some("go_test_ok")
@@ -249,7 +301,13 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("go_test_skip")
     } else if trimmed == "PASS" {
         Some("go_test_pass_summary")
-    } else if lower.starts_with("test suites:") && lower.contains("passed") {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_test_summary_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    if lower.starts_with("test suites:") && lower.contains("passed") {
         Some("test_suites")
     } else if lower.starts_with("tests:") && lower.contains("passed") {
         Some("test_cases")
@@ -271,7 +329,13 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("test_runner_summary")
     } else if lower.starts_with("done in ") {
         Some("done")
-    } else if lower.starts_with("build successful")
+    } else {
+        None
+    }
+}
+
+fn noisy_success_build_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("build successful")
         || lower.starts_with("build success")
         || lower.starts_with("[info] build success")
         || lower.contains(" build success")
@@ -308,7 +372,7 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
     {
         Some("docker_steps")
     } else if lower.starts_with("[+] running ")
-        || (lower.starts_with("container ") && docker_compose_success_state(&lower))
+        || (lower.starts_with("container ") && docker_compose_success_state(lower))
         || (lower.starts_with("network ") && lower.contains("created"))
         || (lower.starts_with("volume ") && lower.contains("created"))
     {
@@ -323,7 +387,13 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("playwright_running")
     } else if lower.contains(" passed (") && lower.chars().any(|ch| ch.is_ascii_digit()) {
         Some("test_summary")
-    } else if lower.starts_with("added ") && lower.contains(" package") {
+    } else {
+        None
+    }
+}
+
+fn noisy_success_package_label(lower: &str) -> Option<&'static str> {
+    if lower.starts_with("added ") && lower.contains(" package") {
         Some("packages_added")
     } else if lower.starts_with("audited ") && lower.contains(" package") {
         Some("packages_audited")
@@ -350,7 +420,13 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("packages_up_to_date")
     } else if lower.starts_with("found 0 vulnerabilities") {
         Some("vulnerability_summary")
-    } else if lower.starts_with("all files pass")
+    } else {
+        None
+    }
+}
+
+fn noisy_success_quality_label(trimmed: &str, lower: &str) -> Option<&'static str> {
+    if lower.starts_with("all files pass")
         || lower.contains("all matched files use prettier code style")
         || lower.contains("eslint found no problems")
         || lower.starts_with("all checks passed")
@@ -368,7 +444,7 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("compile_summary")
     } else if (lower.starts_with("tests/") && lower.contains(" passed"))
         || (lower.contains("::test_") && lower.ends_with(" passed"))
-        || is_pytest_success_summary_line(&lower)
+        || is_pytest_success_summary_line(lower)
     {
         Some("passed_tests")
     } else if is_pytest_progress_line(trimmed) {

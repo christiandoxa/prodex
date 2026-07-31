@@ -17,24 +17,8 @@ pub(super) fn compact_noisy_success_output(
         return smart_truncate_command_output(input, options);
     }
 
-    let mut noise_counts = BTreeMap::<String, usize>::new();
-    let mut key_lines = Vec::<String>::new();
-    let mut critical_lines = Vec::<String>::new();
-    for line in lines {
-        if let Some(label) = noisy_success_label(line) {
-            *noise_counts.entry(label.to_string()).or_default() += 1;
-            if is_noisy_success_key_line(line) {
-                push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
-            }
-            continue;
-        }
-        if is_noisy_success_key_line(line) {
-            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
-        }
-        if is_critical_preserve_line(line) {
-            push_unique_truncated_line(&mut critical_lines, line, options.max_line_chars);
-        }
-    }
+    let (noise_counts, key_lines, critical_lines) =
+        collect_noisy_success_details(&lines, options.max_line_chars);
 
     if noise_counts.is_empty() && key_lines.is_empty() && critical_lines.is_empty() {
         return smart_truncate_command_output(input, options);
@@ -63,4 +47,29 @@ pub(super) fn compact_noisy_success_output(
     );
 
     finalize_compacted_command_output(CommandOutputKind::NoisySuccess, input, output, options)
+}
+
+fn collect_noisy_success_details(
+    lines: &[&str],
+    max_line_chars: usize,
+) -> (BTreeMap<String, usize>, Vec<String>, Vec<String>) {
+    let mut noise_counts = BTreeMap::<String, usize>::new();
+    let mut key_lines = Vec::<String>::new();
+    let mut critical_lines = Vec::<String>::new();
+    for line in lines {
+        if let Some(label) = noisy_success_label(line) {
+            *noise_counts.entry(label.to_string()).or_default() += 1;
+            if is_noisy_success_key_line(line) {
+                push_unique_truncated_line(&mut key_lines, line, max_line_chars);
+            }
+            continue;
+        }
+        if is_noisy_success_key_line(line) {
+            push_unique_truncated_line(&mut key_lines, line, max_line_chars);
+        }
+        if is_critical_preserve_line(line) {
+            push_unique_truncated_line(&mut critical_lines, line, max_line_chars);
+        }
+    }
+    (noise_counts, key_lines, critical_lines)
 }

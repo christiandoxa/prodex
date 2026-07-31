@@ -16,34 +16,28 @@ pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
         return None;
     }
 
-    let (line_number, text) = if let Some((candidate, after_line)) = rest.split_once(':') {
-        if candidate.chars().all(|ch| ch.is_ascii_digit()) {
-            let text = if let Some((column, after_column)) = after_line.split_once(':') {
-                if column.chars().all(|ch| ch.is_ascii_digit()) {
-                    after_column
-                } else {
-                    after_line
-                }
-            } else {
-                after_line
-            };
-            (candidate.parse::<usize>().ok(), text)
-        } else if looks_like_search_path(path) {
-            (None, rest)
-        } else {
-            return None;
-        }
-    } else if looks_like_search_path(path) {
-        (None, rest)
-    } else {
-        return None;
-    };
+    let (line_number, text) = parse_search_match_rest(path, rest)?;
 
     Some(SearchMatch {
         path: normalize_file_list_path(path),
         line_number,
         text: text.trim().to_string(),
     })
+}
+
+fn parse_search_match_rest<'a>(path: &str, rest: &'a str) -> Option<(Option<usize>, &'a str)> {
+    let Some((candidate, after_line)) = rest.split_once(':') else {
+        return looks_like_search_path(path).then_some((None, rest));
+    };
+    if candidate.chars().all(|ch| ch.is_ascii_digit()) {
+        let text = after_line
+            .split_once(':')
+            .filter(|(column, _)| column.chars().all(|ch| ch.is_ascii_digit()))
+            .map(|(_, after_column)| after_column)
+            .unwrap_or(after_line);
+        return Some((candidate.parse::<usize>().ok(), text));
+    }
+    looks_like_search_path(path).then_some((None, rest))
 }
 
 pub(crate) fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {

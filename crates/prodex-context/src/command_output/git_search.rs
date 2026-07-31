@@ -111,21 +111,51 @@ pub(super) fn compact_git_diff_output_with_intent(
         .unwrap_or(0)
         .max(usize::from(detail_budget > 0));
 
-    let mut output = Vec::new();
-    output.push(format!(
+    let mut output = git_diff_summary_output(
+        &summaries,
+        total_added,
+        total_removed,
+        total_hunks,
+        intent_terms,
+        options,
+    );
+    append_git_diff_excerpt_output(
+        &mut output,
+        &sections,
+        &summaries,
+        intent_terms,
+        intent_focused,
+        per_file_budget,
+        options,
+    );
+
+    let output =
+        finalize_compacted_command_output(CommandOutputKind::GitDiff, input, output, options);
+    ensure_no_critical_signal_loss_for_intent(input, &output, options)
+}
+
+fn git_diff_summary_output(
+    summaries: &[GitDiffSummary],
+    total_added: usize,
+    total_removed: usize,
+    total_hunks: usize,
+    intent_terms: &[String],
+    options: &CommandOutputCompactOptions,
+) -> Vec<String> {
+    let mut output = vec![format!(
         "sum: git diff files={}, +{}, -{}, hunks={}",
         summaries.len(),
         total_added,
         total_removed,
         total_hunks,
-    ));
+    )];
     if !intent_terms.is_empty() {
         output.push(format!(
             "int: git diff focus for {}",
             truncate_command_line(&intent_terms.join(", "), options.max_line_chars)
         ));
     }
-    for summary in &summaries {
+    for summary in summaries {
         let binary = if summary.binary { ", binary" } else { "" };
         let mut line = format!(
             "{}: +{}, -{}, {} hunks{}",
@@ -141,7 +171,18 @@ pub(super) fn compact_git_diff_output_with_intent(
     }
     output.push(String::new());
     output.push("diff excerpts:".to_string());
+    output
+}
 
+fn append_git_diff_excerpt_output(
+    output: &mut Vec<String>,
+    sections: &[Vec<&str>],
+    summaries: &[GitDiffSummary],
+    intent_terms: &[String],
+    intent_focused: bool,
+    per_file_budget: usize,
+    options: &CommandOutputCompactOptions,
+) {
     for (section, summary) in sections.iter().zip(summaries.iter()) {
         let section_score = score_git_diff_section_for_intent(section, summary, intent_terms);
         if !intent_terms.is_empty() && section_score == 0 {
@@ -151,9 +192,8 @@ pub(super) fn compact_git_diff_output_with_intent(
             ));
             continue;
         }
-        let section_budget = per_file_budget;
         let selected_detail =
-            select_git_diff_detail_line_indexes(section, section_budget, intent_terms);
+            select_git_diff_detail_line_indexes(section, per_file_budget, intent_terms);
         let mut omitted_detail = 0usize;
         for (line_index, line) in section.iter().enumerate() {
             if is_git_diff_excerpt_structural_line(line, intent_focused)
@@ -171,10 +211,6 @@ pub(super) fn compact_git_diff_output_with_intent(
             ));
         }
     }
-
-    let output =
-        finalize_compacted_command_output(CommandOutputKind::GitDiff, input, output, options);
-    ensure_no_critical_signal_loss_for_intent(input, &output, options)
 }
 
 fn score_git_diff_section_for_intent(

@@ -48,41 +48,8 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
         .and_then(serde_json::Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"));
-    let mut output = Vec::new();
-    let mut tool_call_error = None;
-    if let Some(content) = message
-        .and_then(|message| message.get("content"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|content| !content.is_empty())
-    {
-        output.push(serde_json::json!({
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": content,
-            }],
-        }));
-    }
-    if let Some(tool_calls) = message
-        .and_then(|message| message.get("tool_calls"))
-        .and_then(serde_json::Value::as_array)
-    {
-        for tool_call in tool_calls {
-            match provider_core_chat_compatible_responses_tool_call_item(
-                tool_call,
-                provider_adapter_label,
-                &mut fallback_call_id,
-            ) {
-                Ok(Some(item)) => output.push(item),
-                Ok(None) => {}
-                Err(message) => {
-                    tool_call_error = Some(message);
-                    break;
-                }
-            }
-        }
-    }
+    let (output, tool_call_error) =
+        chat_compatible_response_output(message, provider_adapter_label, &mut fallback_call_id);
     let mut response = serde_json::json!({
         "id": response_id,
         "object": "response",
@@ -102,6 +69,57 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
     }) {
         response["usage"] = usage;
     }
+    let metadata = chat_compatible_response_metadata(value, message);
+    if !metadata.is_empty() {
+        response["metadata"] = serde_json::json!({ provider_metadata_key: metadata });
+    }
+    response
+}
+
+fn chat_compatible_response_output(
+    message: Option<&serde_json::Value>,
+    provider_adapter_label: &str,
+    fallback_call_id: &mut impl FnMut() -> String,
+) -> (Vec<serde_json::Value>, Option<String>) {
+    let mut output = Vec::new();
+    if let Some(content) = message
+        .and_then(|message| message.get("content"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|content| !content.is_empty())
+    {
+        output.push(serde_json::json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": content,
+            }],
+        }));
+    }
+    let Some(tool_calls) = message
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return (output, None);
+    };
+    for tool_call in tool_calls {
+        match provider_core_chat_compatible_responses_tool_call_item(
+            tool_call,
+            provider_adapter_label,
+            fallback_call_id,
+        ) {
+            Ok(Some(item)) => output.push(item),
+            Ok(None) => {}
+            Err(message) => return (output, Some(message)),
+        }
+    }
+    (output, None)
+}
+
+fn chat_compatible_response_metadata(
+    value: &serde_json::Value,
+    message: Option<&serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
     let mut metadata = serde_json::Map::new();
     if let Some(logprobs) = value
         .get("choices")
@@ -112,26 +130,8 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
     {
         metadata.insert("logprobs".to_string(), logprobs.clone());
     }
-    if let Some(reasoning_content) = message
-        .and_then(|message| message.get("reasoning_content"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|reasoning_content| !reasoning_content.is_empty())
-    {
-        metadata.insert(
-            "reasoning_content".to_string(),
-            serde_json::Value::String(reasoning_content.to_string()),
-        );
-    }
-    if let Some(refusal) = message
-        .and_then(|message| message.get("refusal"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|refusal| !refusal.is_empty())
-    {
-        metadata.insert(
-            "refusal".to_string(),
-            serde_json::Value::String(refusal.to_string()),
-        );
-    }
+    insert_non_empty_string_metadata(&mut metadata, message, "reasoning_content");
+    insert_non_empty_string_metadata(&mut metadata, message, "refusal");
     if let Some(annotations) = message
         .and_then(|message| message.get("annotations"))
         .and_then(serde_json::Value::as_array)
@@ -154,18 +154,42 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
             serde_json::Value::String(finish_reason.to_string()),
         );
     }
-    if let Some(system_fingerprint) = value
-        .get("system_fingerprint")
+    insert_non_empty_value_metadata(&mut metadata, value, "system_fingerprint");
+    metadata
+}
+
+fn insert_non_empty_string_metadata(
+    metadata: &mut serde_json::Map<String, serde_json::Value>,
+    message: Option<&serde_json::Value>,
+    key: &str,
+) {
+    let Some(value) = message
+        .and_then(|message| message.get(key))
         .and_then(serde_json::Value::as_str)
-        .filter(|system_fingerprint| !system_fingerprint.is_empty())
-    {
-        metadata.insert(
-            "system_fingerprint".to_string(),
-            serde_json::Value::String(system_fingerprint.to_string()),
-        );
-    }
-    if !metadata.is_empty() {
-        response["metadata"] = serde_json::json!({ provider_metadata_key: metadata });
-    }
-    response
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    metadata.insert(
+        key.to_string(),
+        serde_json::Value::String(value.to_string()),
+    );
+}
+
+fn insert_non_empty_value_metadata(
+    metadata: &mut serde_json::Map<String, serde_json::Value>,
+    value: &serde_json::Value,
+    key: &str,
+) {
+    let Some(value) = value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    metadata.insert(
+        key.to_string(),
+        serde_json::Value::String(value.to_string()),
+    );
 }

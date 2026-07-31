@@ -19,6 +19,8 @@ use web_search::{
 
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
+type AnthropicChatRequest = (Map<String, Value>, BTreeMap<String, Value>);
+
 pub(super) fn translate_responses_request_to_anthropic(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -89,6 +91,39 @@ pub(super) fn translate_chat_request_to_anthropic(
         Ok(messages) => messages,
         Err(reason) => return rejected_chat(reason),
     };
+    let (request, degradation_details) = match build_anthropic_chat_request(&system, messages, chat)
+    {
+        Ok(request) => request,
+        Err(reason) => return rejected_chat(reason),
+    };
+
+    let body = serde_json::to_vec(&Value::Object(request)).expect("Anthropic request serializes");
+    if degradation_details.is_empty() {
+        ProviderTransformResult::lossless(
+            ProviderId::Anthropic,
+            ProviderEndpoint::Responses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::AnthropicMessages,
+            body,
+        )
+    } else {
+        ProviderTransformResult::degraded(
+            ProviderId::Anthropic,
+            ProviderEndpoint::Responses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::AnthropicMessages,
+            body,
+            "Anthropic Messages uses the provider default web-search context size",
+            degradation_details,
+        )
+    }
+}
+
+fn build_anthropic_chat_request(
+    system: &[String],
+    messages: Vec<Value>,
+    chat: &Map<String, Value>,
+) -> Result<AnthropicChatRequest, String> {
     let mut request = Map::new();
     request.insert(
         "model".to_string(),
@@ -121,68 +156,40 @@ pub(super) fn translate_chat_request_to_anthropic(
             match stop {
                 Value::String(_) => Value::Array(vec![stop.clone()]),
                 Value::Array(_) => stop.clone(),
-                _ => return rejected_chat("Responses `stop` must be a string or array"),
+                _ => return Err("Responses `stop` must be a string or array".to_string()),
             },
         );
     }
     let mut degradation_details = BTreeMap::new();
     let mut tools = match chat.get("tools") {
-        Some(tools) => match anthropic_tools(tools) {
-            Ok(tools) => tools,
-            Err(reason) => return rejected_chat(reason),
-        },
+        Some(tools) => anthropic_tools(tools)?,
         None => Vec::new(),
     };
     if let Some(options) = chat.get("web_search_options") {
-        match anthropic_web_search_tool(options) {
-            Ok((tool, ignored_context_size)) => {
-                tools.push(tool);
-                if let Some(context_size) = ignored_context_size {
-                    degradation_details.insert(
-                        "web_search_options.search_context_size".to_string(),
-                        json!({"from": context_size, "to": "provider_default"}),
-                    );
-                }
-            }
-            Err(reason) => return rejected_chat(reason),
+        let (tool, ignored_context_size) = anthropic_web_search_tool(options)?;
+        tools.push(tool);
+        if let Some(context_size) = ignored_context_size {
+            degradation_details.insert(
+                "web_search_options.search_context_size".to_string(),
+                json!({"from": context_size, "to": "provider_default"}),
+            );
         }
     }
     if !tools.is_empty() {
         request.insert("tools".to_string(), Value::Array(tools));
     }
     if let Some(tool_choice) = chat.get("tool_choice") {
-        match anthropic_tool_choice(tool_choice) {
-            Ok(Some(choice)) => {
+        match anthropic_tool_choice(tool_choice)? {
+            Some(choice) => {
                 request.insert("tool_choice".to_string(), choice);
             }
-            Ok(None) => {
+            None => {
                 request.remove("tools");
                 degradation_details.clear();
             }
-            Err(reason) => return rejected_chat(reason),
         }
     }
-
-    let body = serde_json::to_vec(&Value::Object(request)).expect("Anthropic request serializes");
-    if degradation_details.is_empty() {
-        ProviderTransformResult::lossless(
-            ProviderId::Anthropic,
-            ProviderEndpoint::Responses,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::AnthropicMessages,
-            body,
-        )
-    } else {
-        ProviderTransformResult::degraded(
-            ProviderId::Anthropic,
-            ProviderEndpoint::Responses,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::AnthropicMessages,
-            body,
-            "Anthropic Messages uses the provider default web-search context size",
-            degradation_details,
-        )
-    }
+    Ok((request, degradation_details))
 }
 
 fn validate_anthropic_chat_fields(chat: &Map<String, Value>) -> Result<(), String> {
@@ -226,71 +233,10 @@ pub(super) fn translate_anthropic_response_to_responses(
     let Some(content) = value.get("content").and_then(Value::as_array) else {
         return rejected_response("Anthropic Messages response must contain a content array");
     };
-    let mut output = Vec::new();
-    let mut text = Vec::new();
-    for block in content {
-        match block.get("type").and_then(Value::as_str) {
-            Some("text") => {
-                let Some(value) = block.get("text").and_then(Value::as_str) else {
-                    return rejected_response("Anthropic text block must contain text");
-                };
-                text.push(json!({"type": "output_text", "text": value}));
-            }
-            Some("tool_use") => {
-                flush_text_output(&mut output, &mut text);
-                let Some(id) = block.get("id").and_then(Value::as_str) else {
-                    return rejected_response("Anthropic tool_use block must contain id");
-                };
-                let Some(name) = block.get("name").and_then(Value::as_str) else {
-                    return rejected_response("Anthropic tool_use block must contain name");
-                };
-                let arguments =
-                    serde_json::to_string(block.get("input").unwrap_or(&Value::Object(Map::new())))
-                        .expect("Anthropic tool input serializes");
-                let (namespace, name) = crate::provider_core_split_flat_namespace_tool_name(name);
-                let mut item = json!({
-                    "type": "function_call",
-                    "call_id": id,
-                    "name": name,
-                    "arguments": crate::provider_core_chat_compatible_rtk_wrapped_tool_arguments(
-                        block.get("name").and_then(Value::as_str).unwrap_or(&name),
-                        &arguments,
-                    ),
-                });
-                if let Some(namespace) = namespace {
-                    item["namespace"] = Value::String(namespace);
-                }
-                output.push(item);
-            }
-            Some("server_tool_use") => {
-                flush_text_output(&mut output, &mut text);
-                match anthropic_web_search_call(block) {
-                    Ok(item) => output.push(item),
-                    Err(reason) => return rejected_response(reason),
-                }
-            }
-            Some("web_search_tool_result") => {
-                flush_text_output(&mut output, &mut text);
-                merge_anthropic_web_search_result(&mut output, block);
-            }
-            Some("thinking") => {
-                flush_text_output(&mut output, &mut text);
-                if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
-                    output.push(json!({
-                        "type": "reasoning",
-                        "summary": [{"type": "summary_text", "text": thinking}],
-                    }));
-                }
-            }
-            Some(kind) => {
-                return rejected_response(format!(
-                    "unsupported Anthropic Messages content block `{kind}`"
-                ));
-            }
-            None => return rejected_response("Anthropic Messages content block requires type"),
-        }
-    }
-    flush_text_output(&mut output, &mut text);
+    let output = match anthropic_response_output(content) {
+        Ok(output) => output,
+        Err(reason) => return rejected_response(reason),
+    };
 
     let mut response = json!({
         "id": value.get("id").and_then(Value::as_str).unwrap_or("resp_anthropic"),
@@ -316,6 +262,84 @@ pub(super) fn translate_anthropic_response_to_responses(
         ProviderWireFormat::OpenAiResponses,
         serde_json::to_vec(&response).expect("Responses response serializes"),
     )
+}
+
+fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
+    let mut output = Vec::new();
+    let mut text = Vec::new();
+    for block in content {
+        anthropic_append_response_block(block, &mut output, &mut text)?;
+    }
+    flush_text_output(&mut output, &mut text);
+    Ok(output)
+}
+
+fn anthropic_append_response_block(
+    block: &Value,
+    output: &mut Vec<Value>,
+    text: &mut Vec<Value>,
+) -> Result<(), String> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") => {
+            let Some(value) = block.get("text").and_then(Value::as_str) else {
+                return Err("Anthropic text block must contain text".to_string());
+            };
+            text.push(json!({"type": "output_text", "text": value}));
+        }
+        Some("tool_use") => {
+            flush_text_output(output, text);
+            output.push(anthropic_tool_use_item(block)?);
+        }
+        Some("server_tool_use") => {
+            flush_text_output(output, text);
+            output.push(anthropic_web_search_call(block)?);
+        }
+        Some("web_search_tool_result") => {
+            flush_text_output(output, text);
+            merge_anthropic_web_search_result(output, block);
+        }
+        Some("thinking") => {
+            flush_text_output(output, text);
+            if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
+                output.push(json!({
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": thinking}],
+                }));
+            }
+        }
+        Some(kind) => {
+            return Err(format!(
+                "unsupported Anthropic Messages content block `{kind}`"
+            ));
+        }
+        None => return Err("Anthropic Messages content block requires type".to_string()),
+    }
+    Ok(())
+}
+
+fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
+    let Some(id) = block.get("id").and_then(Value::as_str) else {
+        return Err("Anthropic tool_use block must contain id".to_string());
+    };
+    let Some(name) = block.get("name").and_then(Value::as_str) else {
+        return Err("Anthropic tool_use block must contain name".to_string());
+    };
+    let arguments = serde_json::to_string(block.get("input").unwrap_or(&Value::Object(Map::new())))
+        .expect("Anthropic tool input serializes");
+    let (namespace, name) = crate::provider_core_split_flat_namespace_tool_name(name);
+    let mut item = json!({
+        "type": "function_call",
+        "call_id": id,
+        "name": name,
+        "arguments": crate::provider_core_chat_compatible_rtk_wrapped_tool_arguments(
+            block.get("name").and_then(Value::as_str).unwrap_or(&name),
+            &arguments,
+        ),
+    });
+    if let Some(namespace) = namespace {
+        item["namespace"] = Value::String(namespace);
+    }
+    Ok(item)
 }
 
 pub(super) fn translate_anthropic_stream_event_to_responses(
@@ -482,73 +506,100 @@ fn anthropic_messages(value: Option<&Value>) -> Result<(Vec<String>, Vec<Value>)
     let mut system = Vec::new();
     let mut translated = Vec::new();
     for message in messages {
-        let Some(object) = message.as_object() else {
-            return Err("translated message must be an object".to_string());
-        };
-        let role = object.get("role").and_then(Value::as_str).unwrap_or("user");
-        if role == "system" || role == "developer" {
-            if let Some(text) = object.get("content").and_then(Value::as_str) {
-                system.push(text.to_string());
-            }
-            continue;
-        }
-        let role = if role == "assistant" {
-            "assistant"
-        } else {
-            "user"
-        };
-        let mut blocks = Vec::new();
-        if object.get("role").and_then(Value::as_str) != Some("tool")
-            && let Some(text) = object.get("content").and_then(Value::as_str)
-            && !text.is_empty()
-        {
-            blocks.push(json!({"type": "text", "text": text}));
-        }
-        if let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array) {
-            for tool_call in tool_calls {
-                let function = tool_call
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .ok_or_else(|| "function call must contain function".to_string())?;
-                let name = function
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "function call must contain name".to_string())?;
-                let name =
-                    anthropic_tool_name(object.get("namespace").and_then(Value::as_str), name);
-                let arguments = function
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}");
-                let input: Value = serde_json::from_str(arguments)
-                    .map_err(|_| "function call arguments must be valid JSON".to_string())?;
-                if !input.is_object() {
-                    return Err("function call arguments must be a JSON object".to_string());
-                }
-                blocks.push(json!({
-                    "type": "tool_use",
-                    "id": tool_call.get("id").and_then(Value::as_str).unwrap_or("call_prodex"),
-                    "name": name,
-                    "input": input,
-                }));
-            }
-        }
-        if object.get("role").and_then(Value::as_str) == Some("tool") {
-            blocks.push(json!({
-                "type": "tool_result",
-                "tool_use_id": object.get("tool_call_id").and_then(Value::as_str).unwrap_or("call_prodex"),
-                "content": object.get("content").and_then(Value::as_str).unwrap_or(""),
-            }));
-        }
-        if blocks.is_empty() {
-            continue;
-        }
-        append_message(&mut translated, role, blocks);
+        append_anthropic_message(message, &mut system, &mut translated)?;
     }
     if translated.is_empty() {
         return Err("Responses request must contain at least one user or assistant message".into());
     }
     Ok((system, translated))
+}
+
+fn append_anthropic_message(
+    message: &Value,
+    system: &mut Vec<String>,
+    translated: &mut Vec<Value>,
+) -> Result<(), String> {
+    let Some(object) = message.as_object() else {
+        return Err("translated message must be an object".to_string());
+    };
+    let source_role = object.get("role").and_then(Value::as_str).unwrap_or("user");
+    if source_role == "system" || source_role == "developer" {
+        if let Some(text) = object.get("content").and_then(Value::as_str) {
+            system.push(text.to_string());
+        }
+        return Ok(());
+    }
+    let role = if source_role == "assistant" {
+        "assistant"
+    } else {
+        "user"
+    };
+    let blocks = anthropic_message_blocks(object)?;
+    if !blocks.is_empty() {
+        append_message(translated, role, blocks);
+    }
+    Ok(())
+}
+
+fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, String> {
+    let mut blocks = Vec::new();
+    if object.get("role").and_then(Value::as_str) != Some("tool")
+        && let Some(text) = object.get("content").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        blocks.push(json!({"type": "text", "text": text}));
+    }
+    if let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array) {
+        blocks.extend(anthropic_tool_call_blocks(object, tool_calls)?);
+    }
+    if object.get("role").and_then(Value::as_str) == Some("tool") {
+        blocks.push(json!({
+            "type": "tool_result",
+            "tool_use_id": object.get("tool_call_id").and_then(Value::as_str).unwrap_or("call_prodex"),
+            "content": object.get("content").and_then(Value::as_str).unwrap_or(""),
+        }));
+    }
+    Ok(blocks)
+}
+
+fn anthropic_tool_call_blocks(
+    object: &Map<String, Value>,
+    tool_calls: &[Value],
+) -> Result<Vec<Value>, String> {
+    tool_calls
+        .iter()
+        .map(|tool_call| anthropic_tool_call_block(object, tool_call))
+        .collect()
+}
+
+fn anthropic_tool_call_block(
+    object: &Map<String, Value>,
+    tool_call: &Value,
+) -> Result<Value, String> {
+    let function = tool_call
+        .get("function")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "function call must contain function".to_string())?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "function call must contain name".to_string())?;
+    let name = anthropic_tool_name(object.get("namespace").and_then(Value::as_str), name);
+    let arguments = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let input: Value = serde_json::from_str(arguments)
+        .map_err(|_| "function call arguments must be valid JSON".to_string())?;
+    if !input.is_object() {
+        return Err("function call arguments must be a JSON object".to_string());
+    }
+    Ok(json!({
+        "type": "tool_use",
+        "id": tool_call.get("id").and_then(Value::as_str).unwrap_or("call_prodex"),
+        "name": name,
+        "input": input,
+    }))
 }
 
 fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {

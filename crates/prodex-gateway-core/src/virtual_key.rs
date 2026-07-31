@@ -163,60 +163,15 @@ pub fn plan_gateway_virtual_key_admission(
         ..
     } = request;
 
-    if !policy.allowed_models.is_empty()
-        && model.as_ref().is_some_and(|model| {
-            !policy
-                .allowed_models
-                .iter()
-                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
-        })
-    {
-        return Err(GatewayVirtualKeyAdmissionError::ModelNotAllowed);
-    }
-
-    if durable_budget {
-        if policy.budget_microusd.is_some() {
-            usage.spend_microusd = 0;
-        }
-        if policy.request_budget.is_some() {
-            usage.requests_total = 0;
-        }
-    }
-    let same_minute = usage.minute_epoch == minute_epoch;
-    let requests_this_minute = if same_minute {
-        usage.requests_this_minute
-    } else {
-        0
-    };
-    let tokens_this_minute = if same_minute {
-        usage.tokens_this_minute
-    } else {
-        0
-    };
-
-    if policy
-        .request_budget
-        .is_some_and(|limit| usage.requests_total >= limit)
-    {
-        return Err(GatewayVirtualKeyAdmissionError::RequestBudgetExceeded);
-    }
-    if let (Some(limit), Some(cost)) = (policy.budget_microusd, estimated_cost_microusd)
-        && usage.spend_microusd.saturating_add(cost) > limit
-    {
-        return Err(GatewayVirtualKeyAdmissionError::BudgetExceeded);
-    }
-    if policy
-        .rpm_limit
-        .is_some_and(|limit| requests_this_minute.saturating_add(1) > limit)
-    {
-        return Err(GatewayVirtualKeyAdmissionError::RpmLimitExceeded);
-    }
-    if policy
-        .tpm_limit
-        .is_some_and(|limit| tokens_this_minute.saturating_add(reserved_tokens) > limit)
-    {
-        return Err(GatewayVirtualKeyAdmissionError::TpmLimitExceeded);
-    }
+    gateway_virtual_key_validate_admission(
+        &policy,
+        &mut usage,
+        model.as_deref(),
+        reserved_tokens,
+        estimated_cost_microusd,
+        minute_epoch,
+        durable_budget,
+    )?;
 
     let admission = GatewayVirtualKeyAdmission {
         key_name: policy.name.clone(),
@@ -252,6 +207,70 @@ pub fn plan_gateway_virtual_key_admission(
         durable_reservation,
         distributed_rate_limit,
     })
+}
+
+fn gateway_virtual_key_validate_admission(
+    policy: &GatewayVirtualKeyPolicy,
+    usage: &mut GatewayVirtualKeyUsage,
+    model: Option<&str>,
+    reserved_tokens: u64,
+    estimated_cost_microusd: Option<u64>,
+    minute_epoch: u64,
+    durable_budget: bool,
+) -> Result<(), GatewayVirtualKeyAdmissionError> {
+    if !policy.allowed_models.is_empty()
+        && model.is_some_and(|model| {
+            !policy
+                .allowed_models
+                .iter()
+                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
+        })
+    {
+        return Err(GatewayVirtualKeyAdmissionError::ModelNotAllowed);
+    }
+    if durable_budget {
+        if policy.budget_microusd.is_some() {
+            usage.spend_microusd = 0;
+        }
+        if policy.request_budget.is_some() {
+            usage.requests_total = 0;
+        }
+    }
+    let same_minute = usage.minute_epoch == minute_epoch;
+    let requests_this_minute = if same_minute {
+        usage.requests_this_minute
+    } else {
+        0
+    };
+    let tokens_this_minute = if same_minute {
+        usage.tokens_this_minute
+    } else {
+        0
+    };
+    if policy
+        .request_budget
+        .is_some_and(|limit| usage.requests_total >= limit)
+    {
+        return Err(GatewayVirtualKeyAdmissionError::RequestBudgetExceeded);
+    }
+    if let (Some(limit), Some(cost)) = (policy.budget_microusd, estimated_cost_microusd)
+        && usage.spend_microusd.saturating_add(cost) > limit
+    {
+        return Err(GatewayVirtualKeyAdmissionError::BudgetExceeded);
+    }
+    if policy
+        .rpm_limit
+        .is_some_and(|limit| requests_this_minute.saturating_add(1) > limit)
+    {
+        return Err(GatewayVirtualKeyAdmissionError::RpmLimitExceeded);
+    }
+    if policy
+        .tpm_limit
+        .is_some_and(|limit| tokens_this_minute.saturating_add(reserved_tokens) > limit)
+    {
+        return Err(GatewayVirtualKeyAdmissionError::TpmLimitExceeded);
+    }
+    Ok(())
 }
 
 pub fn apply_gateway_virtual_key_usage_update(

@@ -64,29 +64,29 @@ pub(super) fn gemini_provider_core_collect_payload_text(
     value: Option<&serde_json::Value>,
     output: &mut String,
 ) {
+    let Some(value) = value else {
+        return;
+    };
     match value {
-        None => {}
-        Some(value) => match value {
-            serde_json::Value::String(text) => {
-                if !output.is_empty() {
-                    output.push('\n');
-                }
-                output.push_str(text);
+        serde_json::Value::String(text) => {
+            if !output.is_empty() {
+                output.push('\n');
             }
-            serde_json::Value::Array(values) => {
-                for value in values {
+            output.push_str(text);
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                gemini_provider_core_collect_payload_text(Some(value), output);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for key in ["output", "content", "text"] {
+                if let Some(value) = object.get(key) {
                     gemini_provider_core_collect_payload_text(Some(value), output);
+                    break;
                 }
             }
-            serde_json::Value::Object(object) => {
-                for key in ["output", "content", "text"] {
-                    if let Some(value) = object.get(key) {
-                        gemini_provider_core_collect_payload_text(Some(value), output);
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        },
+        }
+        _ => {}
     }
 }

@@ -3,6 +3,13 @@ use std::io::{BufRead, BufReader, Read as _, Write as _};
 
 const CODEX_HISTORY_MERGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
+#[derive(Debug)]
+struct HistoryLine {
+    ts: Option<i64>,
+    line: String,
+    order: usize,
+}
+
 pub(super) fn is_history_jsonl(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -10,61 +17,6 @@ pub(super) fn is_history_jsonl(path: &Path) -> bool {
 }
 
 pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<()> {
-    #[derive(Debug)]
-    struct HistoryLine {
-        ts: Option<i64>,
-        line: String,
-        order: usize,
-    }
-
-    fn load_history_lines(
-        path: &Path,
-        merged: &mut Vec<HistoryLine>,
-        seen: &mut BTreeSet<String>,
-    ) -> Result<()> {
-        let file = open_history_file_for_merge(path)?;
-        let mut reader = BufReader::new(file);
-        let mut raw_line = String::new();
-        let mut read_bytes = 0_u64;
-
-        loop {
-            raw_line.clear();
-            let bytes = read_history_line_bounded(
-                &mut reader,
-                &mut raw_line,
-                CODEX_HISTORY_MERGE_MAX_BYTES.saturating_sub(read_bytes),
-            )
-            .with_context(|| format!("failed to read {}", path.display()))?;
-            if bytes == 0 {
-                break;
-            }
-            read_bytes = read_bytes.saturating_add(bytes as u64);
-            if read_bytes > CODEX_HISTORY_MERGE_MAX_BYTES {
-                bail!(
-                    "history {} exceeds safe size limit ({} bytes)",
-                    path.display(),
-                    CODEX_HISTORY_MERGE_MAX_BYTES
-                );
-            }
-
-            let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
-            if line.is_empty() || !seen.insert(line.to_string()) {
-                continue;
-            }
-
-            let ts = serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|value| value.get("ts").and_then(serde_json::Value::as_i64));
-            merged.push(HistoryLine {
-                ts,
-                line: line.to_string(),
-                order: merged.len(),
-            });
-        }
-
-        Ok(())
-    }
-
     let mut merged = Vec::new();
     let mut seen = BTreeSet::new();
 
@@ -114,6 +66,54 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
         "failed to write merged history",
         |file| file.write_all(content.as_bytes()),
     )
+}
+
+fn load_history_lines(
+    path: &Path,
+    merged: &mut Vec<HistoryLine>,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    let file = open_history_file_for_merge(path)?;
+    let mut reader = BufReader::new(file);
+    let mut raw_line = String::new();
+    let mut read_bytes = 0_u64;
+
+    loop {
+        raw_line.clear();
+        let bytes = read_history_line_bounded(
+            &mut reader,
+            &mut raw_line,
+            CODEX_HISTORY_MERGE_MAX_BYTES.saturating_sub(read_bytes),
+        )
+        .with_context(|| format!("failed to read {}", path.display()))?;
+        if bytes == 0 {
+            break;
+        }
+        read_bytes = read_bytes.saturating_add(bytes as u64);
+        if read_bytes > CODEX_HISTORY_MERGE_MAX_BYTES {
+            bail!(
+                "history {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                CODEX_HISTORY_MERGE_MAX_BYTES
+            );
+        }
+
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        if line.is_empty() || !seen.insert(line.to_string()) {
+            continue;
+        }
+
+        let ts = serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|value| value.get("ts").and_then(serde_json::Value::as_i64));
+        merged.push(HistoryLine {
+            ts,
+            line: line.to_string(),
+            order: merged.len(),
+        });
+    }
+
+    Ok(())
 }
 
 fn read_history_line_bounded(

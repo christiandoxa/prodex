@@ -541,6 +541,13 @@ impl Error for ProviderImplementationRegistryError {}
 fn validate_names(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
+    validate_duplicate_provider_ids(registrations)?;
+    validate_aliases(registrations)
+}
+
+fn validate_duplicate_provider_ids(
+    registrations: &[ProviderImplementationRegistration],
+) -> Result<(), ProviderImplementationRegistryError> {
     for (index, registration) in registrations.iter().enumerate() {
         for (previous, candidate) in registrations[..index].iter().enumerate() {
             if candidate.provider == registration.provider {
@@ -551,6 +558,12 @@ fn validate_names(
             }
         }
     }
+    Ok(())
+}
+
+fn validate_aliases(
+    registrations: &[ProviderImplementationRegistration],
+) -> Result<(), ProviderImplementationRegistryError> {
     let mut seen_aliases = Vec::new();
     for (index, registration) in registrations.iter().enumerate() {
         for alias in registration.aliases {

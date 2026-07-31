@@ -339,100 +339,138 @@ pub fn transition_approval(
         });
     }
 
-    let reason = match request.action {
-        ApprovalAction::Approve => {
-            if request.actor.id == record.maker {
-                return Err(ApprovalError::SelfApprovalDenied);
-            }
-            if record
-                .votes
-                .iter()
-                .any(|vote| vote.checker == request.actor.id)
-            {
-                return Ok(ApprovalTransition {
-                    record,
-                    reason_code: ApprovalReasonCode::new("approval.vote_replayed")?,
-                    changed: false,
-                });
-            }
-            if record.state != ApprovalState::PendingApproval {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.votes.push(ApprovalVote {
-                checker: request.actor.id,
-                approved_at_unix_ms: request.now_unix_ms,
-            });
-            record.votes.sort_by_key(|vote| vote.checker);
-            if record.votes.len() >= usize::from(record.effective_required_quorum()) {
-                record.state = ApprovalState::Approved;
-            }
-            "approval.approved"
-        }
-        ApprovalAction::Reject => {
-            let termination_reason = request
-                .reason
-                .cloned()
-                .unwrap_or(ApprovalReasonCode::new("approval.rejected")?);
-            if record.state == ApprovalState::Rejected {
-                return terminal_replay(record, termination_reason, "approval.rejection_replayed");
-            }
-            if record.state != ApprovalState::PendingApproval {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.state = ApprovalState::Rejected;
-            record.termination_reason = Some(termination_reason);
-            "approval.rejected"
-        }
-        ApprovalAction::Cancel => {
-            let termination_reason = request
-                .reason
-                .cloned()
-                .unwrap_or(ApprovalReasonCode::new("approval.cancelled")?);
-            if record.state == ApprovalState::Cancelled {
-                return terminal_replay(
-                    record,
-                    termination_reason,
-                    "approval.cancellation_replayed",
-                );
-            }
-            if !matches!(
-                record.state,
-                ApprovalState::Draft | ApprovalState::PendingApproval
-            ) {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.state = ApprovalState::Cancelled;
-            record.termination_reason = Some(termination_reason);
-            "approval.cancelled"
-        }
-        ApprovalAction::Activate => {
-            if record.state != ApprovalState::Approved {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.state = ApprovalState::Active;
-            record.activated_at_unix_ms = Some(request.now_unix_ms);
-            "approval.activated"
-        }
-        ApprovalAction::Supersede => {
-            if record.state != ApprovalState::Active {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.state = ApprovalState::Superseded;
-            "approval.superseded"
-        }
-        ApprovalAction::RollBack => {
-            if record.state != ApprovalState::Active {
-                return Err(ApprovalError::InvalidTransition);
-            }
-            record.state = ApprovalState::RolledBack;
-            "approval.rolled_back"
-        }
-    };
+    if request.action == ApprovalAction::Approve && request.actor.id == record.maker {
+        return Err(ApprovalError::SelfApprovalDenied);
+    }
+    if request.action == ApprovalAction::Approve
+        && record
+            .votes
+            .iter()
+            .any(|vote| vote.checker == request.actor.id)
+    {
+        return Ok(ApprovalTransition {
+            record,
+            reason_code: ApprovalReasonCode::new("approval.vote_replayed")?,
+            changed: false,
+        });
+    }
+    if request.action == ApprovalAction::Reject && record.state == ApprovalState::Rejected {
+        let reason = request
+            .reason
+            .cloned()
+            .unwrap_or(ApprovalReasonCode::new("approval.rejected")?);
+        return terminal_replay(record, reason, "approval.rejection_replayed");
+    }
+    if request.action == ApprovalAction::Cancel && record.state == ApprovalState::Cancelled {
+        let reason = request
+            .reason
+            .cloned()
+            .unwrap_or(ApprovalReasonCode::new("approval.cancelled")?);
+        return terminal_replay(record, reason, "approval.cancellation_replayed");
+    }
+
+    let reason = apply_approval_action(&request, &mut record)?;
     record.version = record.version.saturating_add(1);
     Ok(ApprovalTransition {
         record,
         reason_code: ApprovalReasonCode::new(reason)?,
         changed: true,
+    })
+}
+
+fn apply_approval_action(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    match request.action {
+        ApprovalAction::Approve => apply_approval_vote(request, record),
+        ApprovalAction::Reject => apply_approval_rejection(request, record),
+        ApprovalAction::Cancel => apply_approval_cancellation(request, record),
+        ApprovalAction::Activate => apply_approval_activation(request, record),
+        ApprovalAction::Supersede => apply_approval_state_change(record, ApprovalState::Superseded),
+        ApprovalAction::RollBack => apply_approval_state_change(record, ApprovalState::RolledBack),
+    }
+}
+
+fn apply_approval_vote(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    if record.state != ApprovalState::PendingApproval {
+        return Err(ApprovalError::InvalidTransition);
+    }
+    record.votes.push(ApprovalVote {
+        checker: request.actor.id,
+        approved_at_unix_ms: request.now_unix_ms,
+    });
+    record.votes.sort_by_key(|vote| vote.checker);
+    if record.votes.len() >= usize::from(record.effective_required_quorum()) {
+        record.state = ApprovalState::Approved;
+    }
+    Ok("approval.approved")
+}
+
+fn apply_approval_rejection(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    if record.state != ApprovalState::PendingApproval {
+        return Err(ApprovalError::InvalidTransition);
+    }
+    record.state = ApprovalState::Rejected;
+    record.termination_reason = Some(
+        request
+            .reason
+            .cloned()
+            .unwrap_or(ApprovalReasonCode::new("approval.rejected")?),
+    );
+    Ok("approval.rejected")
+}
+
+fn apply_approval_cancellation(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    if !matches!(
+        record.state,
+        ApprovalState::Draft | ApprovalState::PendingApproval
+    ) {
+        return Err(ApprovalError::InvalidTransition);
+    }
+    record.state = ApprovalState::Cancelled;
+    record.termination_reason = Some(
+        request
+            .reason
+            .cloned()
+            .unwrap_or(ApprovalReasonCode::new("approval.cancelled")?),
+    );
+    Ok("approval.cancelled")
+}
+
+fn apply_approval_activation(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    if record.state != ApprovalState::Approved {
+        return Err(ApprovalError::InvalidTransition);
+    }
+    record.state = ApprovalState::Active;
+    record.activated_at_unix_ms = Some(request.now_unix_ms);
+    Ok("approval.activated")
+}
+
+fn apply_approval_state_change(
+    record: &mut ApprovalRecord,
+    state: ApprovalState,
+) -> Result<&'static str, ApprovalError> {
+    if record.state != ApprovalState::Active {
+        return Err(ApprovalError::InvalidTransition);
+    }
+    record.state = state;
+    Ok(match state {
+        ApprovalState::Superseded => "approval.superseded",
+        ApprovalState::RolledBack => "approval.rolled_back",
+        _ => unreachable!(),
     })
 }
 

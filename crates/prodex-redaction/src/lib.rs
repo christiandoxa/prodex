@@ -202,38 +202,43 @@ fn redaction_gateway_json_bytes(result: serde_json::Result<Vec<u8>>) -> Vec<u8> 
 
 fn redaction_redact_gateway_json_value(value: &mut serde_json::Value) -> bool {
     match value {
-        serde_json::Value::Object(map) => {
-            let mut changed = false;
-            for (key, value) in map.iter_mut() {
-                if redaction_key_looks_sensitive(key) {
-                    if value != &serde_json::Value::String(REDACTED.to_string()) {
-                        *value = serde_json::Value::String(REDACTED.to_string());
-                        changed = true;
-                    }
-                } else {
-                    changed |= redaction_redact_gateway_json_value(value);
-                }
-            }
-            changed
-        }
-        serde_json::Value::Array(values) => {
-            let mut changed = false;
-            for value in values {
-                changed |= redaction_redact_gateway_json_value(value);
-            }
-            changed
-        }
-        serde_json::Value::String(value) => {
-            let redacted = redaction_redact_gateway_text(value);
-            if redacted != *value {
-                *value = redacted;
-                true
-            } else {
-                false
-            }
-        }
+        serde_json::Value::Object(map) => redaction_redact_gateway_object(map),
+        serde_json::Value::Array(values) => redaction_redact_gateway_array(values),
+        serde_json::Value::String(value) => redaction_redact_gateway_string(value),
         _ => false,
     }
+}
+
+fn redaction_redact_gateway_object(map: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut changed = false;
+    for (key, value) in map.iter_mut() {
+        if redaction_key_looks_sensitive(key) {
+            if value != &serde_json::Value::String(REDACTED.to_string()) {
+                *value = serde_json::Value::String(REDACTED.to_string());
+                changed = true;
+            }
+        } else {
+            changed |= redaction_redact_gateway_json_value(value);
+        }
+    }
+    changed
+}
+
+fn redaction_redact_gateway_array(values: &mut [serde_json::Value]) -> bool {
+    let mut changed = false;
+    for value in values {
+        changed |= redaction_redact_gateway_json_value(value);
+    }
+    changed
+}
+
+fn redaction_redact_gateway_string(value: &mut String) -> bool {
+    let redacted = redaction_redact_gateway_text(value);
+    if redacted == *value {
+        return false;
+    }
+    *value = redacted;
+    true
 }
 
 fn redaction_redact_gateway_text(value: &str) -> String {
@@ -303,33 +308,9 @@ fn redaction_redact_sensitive_key_value_text(value: &str) -> String {
     let mut index = 0usize;
 
     while index < bytes.len() {
-        if let Some((key, after_key)) = redaction_parse_potential_field_name(value, index) {
-            let separator = redaction_skip_ascii_whitespace(bytes, after_key);
-            if separator < bytes.len() && matches!(bytes[separator], b':' | b'=') {
-                if redaction_key_looks_sensitive(key) {
-                    let value_start = redaction_skip_ascii_whitespace(bytes, separator + 1);
-                    let (value_end, replacement) = if key.to_ascii_lowercase().contains("cookie") {
-                        let value_end = value[value_start..]
-                            .find(['\r', '\n'])
-                            .map_or(bytes.len(), |offset| value_start + offset);
-                        (value_end, REDACTED.to_string())
-                    } else {
-                        redaction_redacted_field_value(value, value_start)
-                    };
-                    redacted.push_str(&value[index..value_start]);
-                    redacted.push_str(&replacement);
-                    index = value_end;
-                    continue;
-                }
-                redacted.push_str(&value[index..after_key]);
-                index = after_key;
-                continue;
-            }
-            if !matches!(bytes[index], b'"' | b'\'') {
-                redacted.push_str(&value[index..after_key]);
-                index = after_key;
-                continue;
-            }
+        if let Some(next_index) = redaction_process_field_name(value, index, &mut redacted) {
+            index = next_index;
+            continue;
         }
 
         let Some(ch) = value[index..].chars().next() else {
@@ -340,6 +321,45 @@ fn redaction_redact_sensitive_key_value_text(value: &str) -> String {
     }
 
     redacted
+}
+
+fn redaction_process_field_name(value: &str, index: usize, redacted: &mut String) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let (key, after_key) = redaction_parse_potential_field_name(value, index)?;
+    let separator = redaction_skip_ascii_whitespace(bytes, after_key);
+    if separator < bytes.len() && matches!(bytes[separator], b':' | b'=') {
+        if redaction_key_looks_sensitive(key) {
+            let value_start = redaction_skip_ascii_whitespace(bytes, separator + 1);
+            let (value_end, replacement) =
+                redaction_sensitive_field_replacement(value, key, value_start);
+            redacted.push_str(&value[index..value_start]);
+            redacted.push_str(&replacement);
+            return Some(value_end);
+        }
+        redacted.push_str(&value[index..after_key]);
+        return Some(after_key);
+    }
+    if !matches!(bytes[index], b'"' | b'\'') {
+        redacted.push_str(&value[index..after_key]);
+        return Some(after_key);
+    }
+    None
+}
+
+fn redaction_sensitive_field_replacement(
+    value: &str,
+    key: &str,
+    value_start: usize,
+) -> (usize, String) {
+    if key.to_ascii_lowercase().contains("cookie") {
+        let bytes = value.as_bytes();
+        let value_end = value[value_start..]
+            .find(['\r', '\n'])
+            .map_or(bytes.len(), |offset| value_start + offset);
+        (value_end, REDACTED.to_string())
+    } else {
+        redaction_redacted_field_value(value, value_start)
+    }
 }
 
 fn redaction_parse_potential_field_name(value: &str, index: usize) -> Option<(&str, usize)> {
@@ -446,26 +466,9 @@ fn redaction_redact_authorization_like_values(value: &str) -> String {
     let mut index = 0usize;
 
     while index < bytes.len() {
-        for scheme in AUTHORIZATION_SCHEMES {
-            if redaction_starts_with_ignore_ascii_case(bytes, index, scheme.as_bytes())
-                && redaction_ascii_boundary_before(bytes, index)
-                && redaction_ascii_boundary_after(bytes, index + scheme.len())
-            {
-                let whitespace = redaction_skip_ascii_whitespace(bytes, index + scheme.len());
-                if whitespace > index + scheme.len() {
-                    let token_end = redaction_secret_token_end(bytes, whitespace);
-                    if token_end > whitespace {
-                        redacted.push_str(&value[index..whitespace]);
-                        redacted.push_str(REDACTED);
-                        index = token_end;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if index >= bytes.len() {
-            break;
+        if let Some(token_end) = redaction_try_authorization_value(value, index, &mut redacted) {
+            index = token_end;
+            continue;
         }
 
         let Some(ch) = value[index..].chars().next() else {
@@ -476,6 +479,31 @@ fn redaction_redact_authorization_like_values(value: &str) -> String {
     }
 
     redacted
+}
+
+fn redaction_try_authorization_value(
+    value: &str,
+    index: usize,
+    redacted: &mut String,
+) -> Option<usize> {
+    let bytes = value.as_bytes();
+    for scheme in AUTHORIZATION_SCHEMES {
+        if redaction_starts_with_ignore_ascii_case(bytes, index, scheme.as_bytes())
+            && redaction_ascii_boundary_before(bytes, index)
+            && redaction_ascii_boundary_after(bytes, index + scheme.len())
+        {
+            let whitespace = redaction_skip_ascii_whitespace(bytes, index + scheme.len());
+            if whitespace > index + scheme.len() {
+                let token_end = redaction_secret_token_end(bytes, whitespace);
+                if token_end > whitespace {
+                    redacted.push_str(&value[index..whitespace]);
+                    redacted.push_str(REDACTED);
+                    return Some(token_end);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn redaction_redact_prefixed_api_key_tokens(value: &str) -> String {

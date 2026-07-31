@@ -13,6 +13,17 @@ pub(super) fn validate_responses_chat_compat_request(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
+    validate_responses_chat_compat_base(provider, obj)?;
+    validate_responses_chat_compat_request_metadata(provider, obj)?;
+    validate_responses_chat_compat_tools(provider, obj)?;
+    validate_responses_chat_compat_output_controls(provider, obj)?;
+    validate_responses_chat_compat_input(provider, obj)
+}
+
+fn validate_responses_chat_compat_base(
+    provider: ProviderId,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     if obj.contains_key("messages") {
         return Err(format!(
             "{} Responses chat-compat expects Responses input, not raw chat-completions messages",
@@ -53,6 +64,13 @@ pub(super) fn validate_responses_chat_compat_request(
             provider.label()
         ));
     }
+    Ok(())
+}
+
+fn validate_responses_chat_compat_request_metadata(
+    provider: ProviderId,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     if obj.contains_key("metadata") {
         return Err(format!(
             "{} Responses chat-compat does not translate request metadata",
@@ -71,6 +89,13 @@ pub(super) fn validate_responses_chat_compat_request(
             provider.label()
         ));
     }
+    Ok(())
+}
+
+fn validate_responses_chat_compat_tools(
+    provider: ProviderId,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     if obj
         .get("tools")
         .and_then(Value::as_array)
@@ -93,6 +118,13 @@ pub(super) fn validate_responses_chat_compat_request(
             provider.label()
         ));
     }
+    Ok(())
+}
+
+fn validate_responses_chat_compat_output_controls(
+    provider: ProviderId,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     if matches!(
         obj.get("parallel_tool_calls").and_then(Value::as_bool),
         Some(false)
@@ -114,6 +146,13 @@ pub(super) fn validate_responses_chat_compat_request(
             provider.label()
         ));
     }
+    Ok(())
+}
+
+fn validate_responses_chat_compat_input(
+    provider: ProviderId,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     if let Some(input) = obj.get("input") {
         if responses_input_has_custom_tool_or_tool_search(input) {
             return Err(format!(

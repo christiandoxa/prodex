@@ -4,6 +4,30 @@ pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<
     let Some(options) = value.as_object() else {
         return Err("web_search_options must be an object".to_string());
     };
+    let ignored_context_size = validate_anthropic_web_search_options(options)?;
+    let mut tool = Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("web_search_20250305".to_string()),
+        ),
+        ("name".to_string(), Value::String("web_search".to_string())),
+    ]);
+    for field in [
+        "allowed_domains",
+        "blocked_domains",
+        "user_location",
+        "max_uses",
+    ] {
+        if let Some(value) = options.get(field) {
+            tool.insert(field.to_string(), value.clone());
+        }
+    }
+    Ok((Value::Object(tool), ignored_context_size))
+}
+
+fn validate_anthropic_web_search_options(
+    options: &Map<String, Value>,
+) -> Result<Option<Value>, String> {
     for field in options.keys() {
         if !matches!(
             field.as_str(),
@@ -61,24 +85,7 @@ pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<
         }
         None => None,
     };
-    let mut tool = Map::from_iter([
-        (
-            "type".to_string(),
-            Value::String("web_search_20250305".to_string()),
-        ),
-        ("name".to_string(), Value::String("web_search".to_string())),
-    ]);
-    for field in [
-        "allowed_domains",
-        "blocked_domains",
-        "user_location",
-        "max_uses",
-    ] {
-        if let Some(value) = options.get(field) {
-            tool.insert(field.to_string(), value.clone());
-        }
-    }
-    Ok((Value::Object(tool), ignored_context_size))
+    Ok(ignored_context_size)
 }
 
 pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> {

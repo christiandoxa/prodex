@@ -65,55 +65,8 @@ impl CodexRuntimeFeatureArgs {
                 toml_string_literal(mode.config_value())
             ));
         }
-        if let Some(limit) = self.rollout_budget_tokens.filter(|limit| *limit > 1) {
-            overrides.push("features.rollout_budget.enabled=true".to_string());
-            overrides.push(format!("features.rollout_budget.limit_tokens={limit}"));
-            let reminders = rollout_budget_reminders(limit, &self.rollout_budget_reminders);
-            overrides.push(format!(
-                "features.rollout_budget.reminder_at_remaining_tokens=[{}]",
-                reminders
-                    .iter()
-                    .map(u64::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-            if let Some(weight) = self
-                .rollout_budget_sampling_weight
-                .filter(|weight| weight.is_finite() && *weight >= 0.0)
-            {
-                overrides.push(format!(
-                    "features.rollout_budget.sampling_token_weight={weight}"
-                ));
-            }
-            if let Some(weight) = self
-                .rollout_budget_prefill_weight
-                .filter(|weight| weight.is_finite() && *weight >= 0.0)
-            {
-                overrides.push(format!(
-                    "features.rollout_budget.prefill_token_weight={weight}"
-                ));
-            }
-        }
-        if self.current_time_reminder
-            || self.current_time_reminder_interval.is_some()
-            || self.current_time_clock_source.is_some()
-        {
-            overrides.push("features.current_time_reminder.enabled=true".to_string());
-            if let Some(interval) = self
-                .current_time_reminder_interval
-                .filter(|interval| *interval > 0)
-            {
-                overrides.push(format!(
-                    "features.current_time_reminder.reminder_interval_model_requests={interval}"
-                ));
-            }
-            if let Some(source) = self.current_time_clock_source {
-                overrides.push(format!(
-                    "features.current_time_reminder.clock_source={}",
-                    toml_string_literal(source.config_value())
-                ));
-            }
-        }
+        overrides.extend(self.rollout_budget_overrides());
+        overrides.extend(self.current_time_reminder_overrides());
 
         if self.respect_system_proxy {
             overrides.push("features.respect_system_proxy=true".to_string());
@@ -127,6 +80,67 @@ impl CodexRuntimeFeatureArgs {
             args.push(OsString::from(override_entry));
         }
         args
+    }
+
+    fn rollout_budget_overrides(&self) -> Vec<String> {
+        let Some(limit) = self.rollout_budget_tokens.filter(|limit| *limit > 1) else {
+            return Vec::new();
+        };
+        let mut overrides = vec![
+            "features.rollout_budget.enabled=true".to_string(),
+            format!("features.rollout_budget.limit_tokens={limit}"),
+        ];
+        let reminders = rollout_budget_reminders(limit, &self.rollout_budget_reminders);
+        overrides.push(format!(
+            "features.rollout_budget.reminder_at_remaining_tokens=[{}]",
+            reminders
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        if let Some(weight) = self
+            .rollout_budget_sampling_weight
+            .filter(|weight| weight.is_finite() && *weight >= 0.0)
+        {
+            overrides.push(format!(
+                "features.rollout_budget.sampling_token_weight={weight}"
+            ));
+        }
+        if let Some(weight) = self
+            .rollout_budget_prefill_weight
+            .filter(|weight| weight.is_finite() && *weight >= 0.0)
+        {
+            overrides.push(format!(
+                "features.rollout_budget.prefill_token_weight={weight}"
+            ));
+        }
+        overrides
+    }
+
+    fn current_time_reminder_overrides(&self) -> Vec<String> {
+        if !self.current_time_reminder
+            && self.current_time_reminder_interval.is_none()
+            && self.current_time_clock_source.is_none()
+        {
+            return Vec::new();
+        }
+        let mut overrides = vec!["features.current_time_reminder.enabled=true".to_string()];
+        if let Some(interval) = self
+            .current_time_reminder_interval
+            .filter(|interval| *interval > 0)
+        {
+            overrides.push(format!(
+                "features.current_time_reminder.reminder_interval_model_requests={interval}"
+            ));
+        }
+        if let Some(source) = self.current_time_clock_source {
+            overrides.push(format!(
+                "features.current_time_reminder.clock_source={}",
+                toml_string_literal(source.config_value())
+            ));
+        }
+        overrides
     }
 }
 

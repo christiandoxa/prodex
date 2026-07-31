@@ -504,47 +504,54 @@ pub fn gemini_provider_core_stream_output_items(
         ]));
     }
     for tool_call in tool_calls {
-        match serde_json::from_str::<Value>(&tool_call.arguments) {
-            Ok(args_value) => {
-                if let Some(blocked) = blocked_tool_call_message(&tool_call.name, &args_value) {
-                    output.push(crate::gemini_provider_core_blocked_tool_call_item(&blocked));
-                    continue;
-                }
-                let mut function_call = json!({
-                    "name": tool_call.name,
-                    "args": args_value,
-                });
-                if let Some(signature) = tool_call.thought_signature.as_deref() {
-                    function_call["thoughtSignature"] = Value::String(signature.to_string());
-                }
-                output.push(super::gemini_response_tool_call_item_with_call_id(
-                    &json!({}),
-                    &function_call,
-                    Some(&tool_call.call_id),
-                ));
-            }
-            Err(_) => {
-                let raw_arguments_value = Value::String(tool_call.arguments.clone());
-                if let Some(blocked) =
-                    blocked_tool_call_message(&tool_call.name, &raw_arguments_value)
-                {
-                    output.push(crate::gemini_provider_core_blocked_tool_call_item(&blocked));
-                    continue;
-                }
-                let mut part = json!({});
-                if let Some(signature) = tool_call.thought_signature.as_deref() {
-                    part["thoughtSignature"] = Value::String(signature.to_string());
-                }
-                output.push(super::gemini_response_tool_call_raw_item_with_call_id(
-                    &part,
-                    &tool_call.name,
-                    &tool_call.arguments,
-                    Some(&tool_call.call_id),
-                ));
-            }
-        }
+        gemini_append_stream_tool_call(&mut output, tool_call, &mut blocked_tool_call_message);
     }
     output
+}
+
+fn gemini_append_stream_tool_call(
+    output: &mut Vec<Value>,
+    tool_call: &GeminiProviderCoreStreamToolCall,
+    blocked_tool_call_message: &mut impl FnMut(&str, &Value) -> Option<String>,
+) {
+    match serde_json::from_str::<Value>(&tool_call.arguments) {
+        Ok(args_value) => {
+            if let Some(blocked) = blocked_tool_call_message(&tool_call.name, &args_value) {
+                output.push(crate::gemini_provider_core_blocked_tool_call_item(&blocked));
+                return;
+            }
+            let mut function_call = json!({
+                "name": tool_call.name,
+                "args": args_value,
+            });
+            if let Some(signature) = tool_call.thought_signature.as_deref() {
+                function_call["thoughtSignature"] = Value::String(signature.to_string());
+            }
+            output.push(super::gemini_response_tool_call_item_with_call_id(
+                &json!({}),
+                &function_call,
+                Some(&tool_call.call_id),
+            ));
+        }
+        Err(_) => {
+            let raw_arguments_value = Value::String(tool_call.arguments.clone());
+            if let Some(blocked) = blocked_tool_call_message(&tool_call.name, &raw_arguments_value)
+            {
+                output.push(crate::gemini_provider_core_blocked_tool_call_item(&blocked));
+                return;
+            }
+            let mut part = json!({});
+            if let Some(signature) = tool_call.thought_signature.as_deref() {
+                part["thoughtSignature"] = Value::String(signature.to_string());
+            }
+            output.push(super::gemini_response_tool_call_raw_item_with_call_id(
+                &part,
+                &tool_call.name,
+                &tool_call.arguments,
+                Some(&tool_call.call_id),
+            ));
+        }
+    }
 }
 
 pub fn gemini_provider_core_stream_text_delta_source(text: &str) -> Value {

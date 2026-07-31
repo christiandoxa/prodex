@@ -1,4 +1,6 @@
 use super::*;
+use std::iter::Peekable;
+use std::str::Chars;
 
 pub(super) fn is_node_stack_error_line(line: &str) -> bool {
     let trimmed = line.trim_start();
@@ -355,27 +357,41 @@ pub(super) fn push_numbered_critical_lines(
     }
 
     if critical.len() <= budget {
-        for (index, line) in critical {
-            output.push(format!(
-                "  L{}: {}",
-                index + 1,
-                truncate_command_line(line.trim(), options.max_line_chars)
-            ));
-        }
+        push_numbered_critical_line_list(output, critical, options);
         return;
     }
 
     if budget == 1 {
-        if let Some((index, line)) = critical.first() {
-            output.push(format!(
-                "  L{}: {}",
-                index + 1,
-                truncate_command_line(line.trim(), options.max_line_chars)
-            ));
-        }
+        push_numbered_critical_line_list(output, &critical[..critical.len().min(1)], options);
         return;
     }
 
+    let selected = select_numbered_critical_lines(critical, budget);
+    push_numbered_critical_line_list(output, &selected, options);
+    output.push(format!(
+        "  [... omitted {} critical lines ...]",
+        critical.len().saturating_sub(selected.len())
+    ));
+}
+
+fn push_numbered_critical_line_list(
+    output: &mut Vec<String>,
+    critical: &[(usize, &str)],
+    options: &CommandOutputCompactOptions,
+) {
+    for (index, line) in critical {
+        output.push(format!(
+            "  L{}: {}",
+            index + 1,
+            truncate_command_line(line.trim(), options.max_line_chars)
+        ));
+    }
+}
+
+fn select_numbered_critical_lines<'a>(
+    critical: &'a [(usize, &'a str)],
+    budget: usize,
+) -> Vec<(usize, &'a str)> {
     let mut candidates = critical.to_vec();
     candidates.sort_by_key(|(index, line)| (critical_preserve_priority(line), *index));
     let selected_budget = budget.saturating_sub(1).max(1);
@@ -398,18 +414,7 @@ pub(super) fn push_numbered_critical_lines(
         }
     }
     selected.sort_by_key(|(index, _)| *index);
-
-    for (index, line) in &selected {
-        output.push(format!(
-            "  L{}: {}",
-            index + 1,
-            truncate_command_line(line.trim(), options.max_line_chars)
-        ));
-    }
-    output.push(format!(
-        "  [... omitted {} critical lines ...]",
-        critical.len().saturating_sub(selected.len())
-    ));
+    selected
 }
 
 pub(super) fn critical_line_selection_key(line: &str) -> String {
@@ -524,30 +529,7 @@ pub(super) fn strip_ansi_codes(input: &str) -> String {
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\u{1b}' {
-            match chars.peek().copied() {
-                Some('[') => {
-                    chars.next();
-                    for code in chars.by_ref() {
-                        if ('@'..='~').contains(&code) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') => {
-                    chars.next();
-                    let mut previous = '\0';
-                    for code in chars.by_ref() {
-                        if code == '\u{7}' || (previous == '\u{1b}' && code == '\\') {
-                            break;
-                        }
-                        previous = code;
-                    }
-                }
-                Some(_) => {
-                    chars.next();
-                }
-                None => {}
-            }
+            skip_ansi_escape(&mut chars);
         } else if ch == '\r' {
             if !matches!(chars.peek(), Some('\n')) {
                 output.push('\n');
@@ -557,6 +539,37 @@ pub(super) fn strip_ansi_codes(input: &str) -> String {
         }
     }
     output
+}
+
+fn skip_ansi_escape(chars: &mut Peekable<Chars<'_>>) {
+    match chars.peek().copied() {
+        Some('[') => skip_csi_escape(chars),
+        Some(']') => skip_osc_escape(chars),
+        Some(_) => {
+            chars.next();
+        }
+        None => {}
+    }
+}
+
+fn skip_csi_escape(chars: &mut Peekable<Chars<'_>>) {
+    chars.next();
+    for code in chars.by_ref() {
+        if ('@'..='~').contains(&code) {
+            break;
+        }
+    }
+}
+
+fn skip_osc_escape(chars: &mut Peekable<Chars<'_>>) {
+    chars.next();
+    let mut previous = '\0';
+    for code in chars.by_ref() {
+        if code == '\u{7}' || (previous == '\u{1b}' && code == '\\') {
+            break;
+        }
+        previous = code;
+    }
 }
 
 pub(crate) fn command_lines(input: &str) -> Vec<&str> {

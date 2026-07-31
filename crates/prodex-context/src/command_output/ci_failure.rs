@@ -35,23 +35,8 @@ pub(super) fn compact_ci_failure_log_output(
     let exit_code = failure_indices
         .iter()
         .find_map(|index| ci_exit_code_from_line(lines[*index]));
-    let mut selected = BTreeSet::<usize>::new();
-    if let Some((index, _)) = &job {
-        selected.insert(*index);
-    }
-    if let Some((index, _)) = &step {
-        selected.insert(*index);
-    }
-    for index in &failure_indices {
-        let start = index.saturating_sub(2);
-        let end = index.saturating_add(2).min(lines.len().saturating_sub(1));
-        for selected_index in start..=end {
-            selected.insert(selected_index);
-        }
-    }
-
     let body_budget = options.max_lines.saturating_sub(4).clamp(6, 48);
-    let selected = trim_ci_selected_indices(&lines, selected, &failure_indices, body_budget);
+    let selected = select_ci_failure_indices(&lines, &failure_indices, &job, &step, body_budget);
 
     let mut output = Vec::<String>::new();
     output.push(format!("pcs: ci-failure ({}->sum)", lines.len()));
@@ -72,6 +57,46 @@ pub(super) fn compact_ci_failure_log_output(
         selected.len()
     ));
     output.push("failure slice:".to_string());
+    push_ci_failure_slice(&mut output, &lines, &selected, options.max_line_chars);
+
+    let text = lines_to_text(output);
+    if text.len() < input.len() {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn select_ci_failure_indices(
+    lines: &[&str],
+    failure_indices: &[usize],
+    job: &Option<(usize, String)>,
+    step: &Option<(usize, String)>,
+    body_budget: usize,
+) -> Vec<usize> {
+    let mut selected = BTreeSet::<usize>::new();
+    if let Some((index, _)) = job {
+        selected.insert(*index);
+    }
+    if let Some((index, _)) = step {
+        selected.insert(*index);
+    }
+    for index in failure_indices {
+        let start = index.saturating_sub(2);
+        let end = index.saturating_add(2).min(lines.len().saturating_sub(1));
+        for selected_index in start..=end {
+            selected.insert(selected_index);
+        }
+    }
+    trim_ci_selected_indices(lines, selected, failure_indices, body_budget)
+}
+
+fn push_ci_failure_slice(
+    output: &mut Vec<String>,
+    lines: &[&str],
+    selected: &[usize],
+    max_line_chars: usize,
+) {
     let mut previous = None::<usize>;
     for index in selected {
         if let Some(previous_index) = previous {
@@ -80,15 +105,8 @@ pub(super) fn compact_ci_failure_log_output(
                 output.push(format!("[... omitted {omitted} ci log lines ...]"));
             }
         }
-        output.push(truncate_command_line(lines[index], options.max_line_chars));
-        previous = Some(index);
-    }
-
-    let text = lines_to_text(output);
-    if text.len() < input.len() {
-        Some(text)
-    } else {
-        None
+        output.push(truncate_command_line(lines[*index], max_line_chars));
+        previous = Some(*index);
     }
 }
 

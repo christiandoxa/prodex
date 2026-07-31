@@ -69,31 +69,36 @@ fn longest_base64ish_span_supplement(
             continue;
         }
         if let Some(span_start) = start.take() {
-            let candidate = &line[span_start..index];
-            if let Some(score) =
-                base64ish_candidate_score_supplement(candidate, min_bytes, min_unique_chars)
-            {
-                best = Some(match best {
-                    Some((bytes, best_score)) if bytes >= candidate.len() => (bytes, best_score),
-                    _ => (candidate.len(), score),
-                });
-            }
+            update_longest_base64ish_span(
+                &mut best,
+                &line[span_start..index],
+                min_bytes,
+                min_unique_chars,
+            );
         }
     }
 
     if let Some(span_start) = start {
-        let candidate = &line[span_start..];
-        if let Some(score) =
-            base64ish_candidate_score_supplement(candidate, min_bytes, min_unique_chars)
-        {
-            best = Some(match best {
-                Some((bytes, best_score)) if bytes >= candidate.len() => (bytes, best_score),
-                _ => (candidate.len(), score),
-            });
-        }
+        update_longest_base64ish_span(&mut best, &line[span_start..], min_bytes, min_unique_chars);
     }
 
     best
+}
+
+fn update_longest_base64ish_span(
+    best: &mut Option<(usize, usize)>,
+    candidate: &str,
+    min_bytes: usize,
+    min_unique_chars: usize,
+) {
+    let Some(score) = base64ish_candidate_score_supplement(candidate, min_bytes, min_unique_chars)
+    else {
+        return;
+    };
+    *best = Some(match *best {
+        Some((bytes, best_score)) if bytes >= candidate.len() => (bytes, best_score),
+        _ => (candidate.len(), score),
+    });
 }
 
 fn base64ish_candidate_score_supplement(

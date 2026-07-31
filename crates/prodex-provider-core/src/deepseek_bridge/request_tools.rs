@@ -59,46 +59,83 @@ pub fn deepseek_provider_core_dedup_and_validate_function_tools(
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut seen_tools = BTreeMap::<String, serde_json::Value>::new();
     let mut deduped = Vec::new();
-    for mut tool in tools {
-        if let Some(name) = deepseek_provider_core_function_tool_name(&tool) {
-            deepseek_provider_core_validate_function_name(&name, provider_label)?;
-            deepseek_provider_core_validate_function_parameters(&tool, &name, provider_label)?;
-            if !strict_tools
-                && tool
-                    .get("function")
-                    .and_then(|function| function.get("strict"))
-                    .and_then(serde_json::Value::as_bool)
-                    == Some(true)
-            {
-                return Err(format!(
-                    "{provider_label} strict function tool `{name}` requires deepseek.strict_tools=true"
-                ));
-            }
-            if strict_tools {
-                deepseek_provider_core_apply_strict_function_schema(&mut tool, provider_label)?;
-            }
-            if let Some(previous) = seen_tools.get(&name) {
-                if previous == &tool {
-                    continue;
-                }
-                let previous_generic = deepseek_provider_core_is_generic_function_tool(previous);
-                let current_generic = deepseek_provider_core_is_generic_function_tool(&tool);
-                if previous_generic && !current_generic {
-                    deduped.retain(|deduped_tool: &serde_json::Value| {
-                        deepseek_provider_core_function_tool_name(deduped_tool).as_deref()
-                            != Some(name.as_str())
-                    });
-                } else if current_generic {
-                    continue;
-                } else {
-                    return Err(format!(
-                        "{provider_label} function tool name `{name}` is duplicated after translation"
-                    ));
-                }
-            }
-            seen_tools.insert(name, tool.clone());
-        }
-        deduped.push(tool);
+    for tool in tools {
+        deepseek_provider_core_process_function_tool(
+            tool,
+            strict_tools,
+            provider_label,
+            &mut seen_tools,
+            &mut deduped,
+        )?;
     }
     Ok(deduped)
+}
+
+fn deepseek_provider_core_process_function_tool(
+    mut tool: serde_json::Value,
+    strict_tools: bool,
+    provider_label: &str,
+    seen_tools: &mut BTreeMap<String, serde_json::Value>,
+    deduped: &mut Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let Some(name) = deepseek_provider_core_function_tool_name(&tool) else {
+        deduped.push(tool);
+        return Ok(());
+    };
+    deepseek_provider_core_validate_function_name(&name, provider_label)?;
+    deepseek_provider_core_validate_function_parameters(&tool, &name, provider_label)?;
+    if !strict_tools
+        && tool
+            .get("function")
+            .and_then(|function| function.get("strict"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    {
+        return Err(format!(
+            "{provider_label} strict function tool `{name}` requires deepseek.strict_tools=true"
+        ));
+    }
+    if strict_tools {
+        deepseek_provider_core_apply_strict_function_schema(&mut tool, provider_label)?;
+    }
+    if let Some(previous) = seen_tools.get(&name)
+        && deepseek_provider_core_handle_duplicate_function_tool(
+            &name,
+            &tool,
+            previous,
+            provider_label,
+            deduped,
+        )?
+    {
+        return Ok(());
+    }
+    seen_tools.insert(name, tool.clone());
+    deduped.push(tool);
+    Ok(())
+}
+
+fn deepseek_provider_core_handle_duplicate_function_tool(
+    name: &str,
+    tool: &serde_json::Value,
+    previous: &serde_json::Value,
+    provider_label: &str,
+    deduped: &mut Vec<serde_json::Value>,
+) -> Result<bool, String> {
+    if previous == tool {
+        return Ok(true);
+    }
+    let previous_generic = deepseek_provider_core_is_generic_function_tool(previous);
+    let current_generic = deepseek_provider_core_is_generic_function_tool(tool);
+    if previous_generic && !current_generic {
+        deduped.retain(|deduped_tool: &serde_json::Value| {
+            deepseek_provider_core_function_tool_name(deduped_tool).as_deref() != Some(name)
+        });
+        return Ok(false);
+    }
+    if current_generic {
+        return Ok(true);
+    }
+    Err(format!(
+        "{provider_label} function tool name `{name}` is duplicated after translation"
+    ))
 }
