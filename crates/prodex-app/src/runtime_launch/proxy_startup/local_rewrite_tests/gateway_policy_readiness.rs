@@ -29,7 +29,7 @@ use crate::{RuntimeConfig, RuntimeRotationProxy};
 
 #[path = "gateway_policy_readiness/artifacts.rs"]
 mod artifacts;
-use artifacts::{bank_artifacts, seed_authority, seed_mismatched_active_revision};
+use artifacts::{bank_artifacts, pointer_table, seed_authority, seed_mismatched_active_revision};
 
 struct BankGatewayFixture {
     proxy: RuntimeRotationProxy,

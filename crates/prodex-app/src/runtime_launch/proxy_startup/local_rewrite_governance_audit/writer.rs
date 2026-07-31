@@ -1,34 +1,34 @@
 use super::*;
 
 #[derive(Clone, Default)]
-pub(super) struct RuntimeGovernanceAuditWriter {
-    queue: Arc<Mutex<Option<RuntimeGovernanceAuditQueue>>>,
-    reconciliation: Arc<Mutex<VecDeque<AuditEvent>>>,
-    reconciliation_overflowed: Arc<AtomicBool>,
-    available: Arc<AtomicBool>,
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeGovernanceAuditWriter {
+    pub(super) queue: Arc<Mutex<Option<RuntimeGovernanceAuditQueue>>>,
+    pub(super) reconciliation: Arc<Mutex<VecDeque<AuditEvent>>>,
+    pub(super) reconciliation_overflowed: Arc<AtomicBool>,
+    pub(super) available: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
-struct RuntimeGovernanceAuditQueue {
-    sender: SyncSender<RuntimeGovernanceAuditWrite>,
-    depth: Arc<AtomicUsize>,
+pub(super) struct RuntimeGovernanceAuditQueue {
+    pub(super) sender: SyncSender<RuntimeGovernanceAuditWrite>,
+    pub(super) depth: Arc<AtomicUsize>,
 }
 
-struct RuntimeGovernanceAuditWrite {
+pub(super) struct RuntimeGovernanceAuditWrite {
     event: AuditEvent,
     reconcile_on_failure: bool,
     acknowledge: SyncSender<Result<(), GovernanceRepositoryError>>,
 }
 
-struct RuntimeGovernanceAuditPersistContext<'a> {
-    writer: &'a RuntimeGovernanceAuditWriter,
-    mandatory: bool,
-    audit_context: &'a RuntimeGovernanceAuditContext,
-    reconcile_on_failure: bool,
+pub(super) struct RuntimeGovernanceAuditPersistContext<'a> {
+    pub(super) writer: &'a RuntimeGovernanceAuditWriter,
+    pub(super) mandatory: bool,
+    pub(super) audit_context: &'a RuntimeGovernanceAuditContext,
+    pub(super) reconcile_on_failure: bool,
 }
 
 impl RuntimeGovernanceAuditWriter {
-    pub(super) fn spawn(
+    pub(in crate::runtime_launch::proxy_startup) fn spawn(
         &self,
         authority: RuntimeGovernanceAuthority,
         shutdown: Arc<AtomicBool>,
@@ -63,7 +63,7 @@ impl RuntimeGovernanceAuditWriter {
         }))
     }
 
-    pub(super) fn is_available(&self) -> bool {
+    pub(in crate::runtime_launch::proxy_startup) fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
 
@@ -71,7 +71,10 @@ impl RuntimeGovernanceAuditWriter {
         self.append_inner(event, false)
     }
 
-    fn append_reconciling(&self, event: AuditEvent) -> Result<(), GovernanceRepositoryError> {
+    pub(super) fn append_reconciling(
+        &self,
+        event: AuditEvent,
+    ) -> Result<(), GovernanceRepositoryError> {
         self.append_inner(event, true)
     }
 
@@ -209,7 +212,7 @@ impl RuntimeGovernanceAuditWriter {
     }
 }
 
-fn enqueue_audit_reconciliation(
+pub(super) fn enqueue_audit_reconciliation(
     reconciliation: &Mutex<VecDeque<AuditEvent>>,
     overflowed: &AtomicBool,
     available: &AtomicBool,
@@ -231,7 +234,7 @@ fn enqueue_audit_reconciliation(
     }
 }
 
-fn refresh_audit_reconciliation_availability(
+pub(super) fn refresh_audit_reconciliation_availability(
     reconciliation: &Mutex<VecDeque<AuditEvent>>,
     overflowed: &AtomicBool,
     available: &AtomicBool,
@@ -286,14 +289,14 @@ fn record_audit_queue_depth(depth: usize) {
     );
 }
 
-pub(super) fn persist_runtime_control_plane_audit_event(
+pub(in crate::runtime_launch::proxy_startup) fn persist_runtime_control_plane_audit_event(
     shared: &RuntimeLocalRewriteProxyShared,
     event: AuditEvent,
 ) -> Result<(), GovernanceRepositoryError> {
     shared.governance_audit_writer.append(event)
 }
 
-pub(super) fn persist_runtime_governance_decision_audit(
+pub(in crate::runtime_launch::proxy_startup) fn persist_runtime_governance_decision_audit(
     shared: &RuntimeLocalRewriteProxyShared,
     tenant: TenantContext,
     principal: &Principal,
@@ -338,7 +341,7 @@ pub(super) fn persist_runtime_governance_decision_audit(
     shared.governance_audit_writer.append(event)
 }
 
-pub(super) fn persist_runtime_material_governance_audit(
+pub(in crate::runtime_launch::proxy_startup) fn persist_runtime_material_governance_audit(
     shared: &RuntimeLocalRewriteProxyShared,
     context: &RuntimeGovernanceAuditContext,
     request_id: u64,
@@ -364,7 +367,7 @@ pub(super) fn persist_runtime_material_governance_audit(
     )
 }
 
-pub(super) fn persist_runtime_material_governance_audit_reconciling(
+pub(in crate::runtime_launch::proxy_startup) fn persist_runtime_material_governance_audit_reconciling(
     shared: &RuntimeLocalRewriteProxyShared,
     context: &RuntimeGovernanceAuditContext,
     request_id: u64,
@@ -390,11 +393,13 @@ pub(super) fn persist_runtime_material_governance_audit_reconciling(
     )
 }
 
-pub(super) fn runtime_governance_audit_is_durable(shared: &RuntimeLocalRewriteProxyShared) -> bool {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_governance_audit_is_durable(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> bool {
     shared.governance_authority.is_some()
 }
 
-pub(super) fn runtime_governance_audit_is_available(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_governance_audit_is_available(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> bool {
     !shared
@@ -406,7 +411,7 @@ pub(super) fn runtime_governance_audit_is_available(
             && shared.governance_audit_writer.is_available())
 }
 
-fn persist_runtime_material_governance_audit_with_writer(
+pub(super) fn persist_runtime_material_governance_audit_with_writer(
     context: RuntimeGovernanceAuditPersistContext<'_>,
     request_id: u64,
     action: &str,

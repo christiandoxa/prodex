@@ -16,9 +16,10 @@ const RESPONSE_INSPECTION_READ_BYTES: usize = 8 * 1024;
 
 #[path = "local_rewrite_response_guardrails/stream.rs"]
 mod stream;
+#[cfg(test)]
+use stream::runtime_gateway_websocket_audit_context;
 use stream::{
     RuntimeGatewayGuardrailAudit, RuntimeGatewayGuardrailStreamReader, release_safe_bytes,
-    runtime_gateway_websocket_audit_context,
 };
 pub(super) use stream::{
     RuntimeGatewayIncrementalInspector, runtime_gateway_guardrail_websocket_block,

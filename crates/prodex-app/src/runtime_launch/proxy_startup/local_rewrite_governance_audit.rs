@@ -51,6 +51,12 @@ impl RuntimeGovernanceAuditContext {
 
 #[path = "local_rewrite_governance_audit/writer.rs"]
 mod writer;
+#[cfg(test)]
+use writer::{
+    RuntimeGovernanceAuditPersistContext, RuntimeGovernanceAuditQueue,
+    enqueue_audit_reconciliation, persist_runtime_material_governance_audit_with_writer,
+    refresh_audit_reconciliation_availability,
+};
 pub(super) use writer::{
     RuntimeGovernanceAuditWriter, persist_runtime_control_plane_audit_event,
     persist_runtime_governance_decision_audit, persist_runtime_material_governance_audit,

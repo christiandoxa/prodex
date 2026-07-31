@@ -76,6 +76,18 @@ const FILES = Object.freeze({
   modules: "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
 });
 
+const SOURCE_PARTS = Object.freeze({
+  dataPlaneAdapter: [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane/provider_dispatch.rs",
+  ],
+  pipeline: [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline/errors.rs",
+  ],
+  providerGemini: [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send/retry.rs",
+  ],
+});
+
 function functionBody(source, name) {
   const start = source.indexOf(`fn ${name}`);
   if (start < 0) return undefined;
@@ -368,8 +380,13 @@ export function validateProductionBoundary(sources) {
     "runtime_gateway_virtual_key_admission(",
     `${FILES.governance}: typed pipeline must retain virtual-key reservation`,
   );
-  const providerDispatch =
-    functionBody(sources.dispatch, "runtime_local_rewrite_dispatch_provider") ?? "";
+  const providerDispatch = [
+    functionBody(sources.dispatch, "runtime_local_rewrite_dispatch_provider"),
+    functionBody(sources.dispatch, "runtime_local_rewrite_try_provider_candidates"),
+    functionBody(sources.dispatch, "runtime_local_rewrite_provider_attempt"),
+  ]
+    .filter(Boolean)
+    .join("\n");
   requirePattern(
     errors,
     providerDispatch,
@@ -470,8 +487,24 @@ export function validateProductionBoundary(sources) {
     `${FILES.applicationProvider}: application provider retry must forward the typed retry cause`,
   );
 
-  const virtualKeyAdmission =
+  const virtualKeyAdmissionEntry =
     functionBody(sources.keys, "runtime_gateway_virtual_key_admission") ?? "";
+  const virtualKeyAdmissionExecution =
+    functionBody(sources.keys, "runtime_gateway_virtual_key_admit_with_context") ?? "";
+  if (virtualKeyAdmissionExecution) {
+    requireText(
+      errors,
+      virtualKeyAdmissionEntry,
+      "runtime_gateway_virtual_key_admit_with_context(",
+      `${FILES.keys}: virtual-key admission must enter its canonical execution path`,
+    );
+  }
+  const virtualKeyAdmission = virtualKeyAdmissionExecution || virtualKeyAdmissionEntry;
+  const durableReservationCall = virtualKeyAdmission.includes(
+    "runtime_gateway_virtual_key_durable_reservation(",
+  )
+    ? "runtime_gateway_virtual_key_durable_reservation("
+    : "runtime_gateway_try_durable_reservation(";
   const virtualKeyPlanner =
     functionBody(sources.keys, "runtime_gateway_application_virtual_key_admission") ?? "";
   requireText(
@@ -487,7 +520,7 @@ export function validateProductionBoundary(sources) {
       "runtime_gateway_application_virtual_key_admission(",
       "runtime_gateway_application_data_plane_admission(",
       "runtime_gateway_distributed_rate_limit_admission(",
-      "runtime_gateway_try_durable_reservation(",
+      durableReservationCall,
       "apply_gateway_virtual_key_usage_update(",
     ],
     `${FILES.keys}: virtual-key policy planning must precede application admission, Redis/durable execution, and local usage writes`,
@@ -496,9 +529,19 @@ export function validateProductionBoundary(sources) {
     errors,
     virtualKeyAdmission,
     "runtime_gateway_application_data_plane_admission(",
-    "runtime_gateway_try_durable_reservation(",
+    durableReservationCall,
     `${FILES.keys}: application data-plane admission must precede durable reservation execution`,
   );
+  const virtualKeyDurableReservation =
+    functionBody(sources.keys, "runtime_gateway_virtual_key_durable_reservation") ?? "";
+  if (virtualKeyDurableReservation) {
+    requireText(
+      errors,
+      virtualKeyDurableReservation,
+      "runtime_gateway_try_durable_reservation(",
+      `${FILES.keys}: virtual-key durable reservation must use canonical storage execution`,
+    );
+  }
   for (const duplicate of [
     "runtime_proxy_crate::runtime_gateway_virtual_key_admission(",
     "runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(",
@@ -1326,8 +1369,19 @@ export function validateProductionBoundary(sources) {
     "governance: runtime_gateway_admin_governance_scope(admin_auth)",
     `${FILES.adminExecution}: mutation execution must retain the exact application-owned governance scope`,
   );
-  const keyUpdate =
+  const keyUpdateEntry =
     functionBody(sources.adminKeys, "runtime_gateway_admin_update_key_response") ?? "";
+  const keyUpdateExecution =
+    functionBody(sources.adminKeys, "runtime_gateway_admin_apply_key_update") ?? "";
+  if (keyUpdateExecution) {
+    requireText(
+      errors,
+      keyUpdateEntry,
+      "runtime_gateway_admin_apply_key_update(",
+      `${FILES.adminKeys}: key update must enter atomic mutation execution`,
+    );
+  }
+  const keyUpdate = `${keyUpdateEntry}\n${keyUpdateExecution}`;
   const keyDelete =
     functionBody(sources.adminKeys, "runtime_gateway_admin_delete_key_response") ?? "";
   const keyCreate =
@@ -2332,10 +2386,13 @@ async function main() {
     return;
   }
   const entries = await Promise.all(
-    Object.entries(FILES).map(async ([key, file]) => [
-      key,
-      await fs.readFile(path.join(repoRoot, file), "utf8"),
-    ]),
+    Object.entries(FILES).map(async ([key, file]) => {
+      const files = [file, ...(SOURCE_PARTS[key] ?? [])];
+      const parts = await Promise.all(
+        files.map((sourceFile) => fs.readFile(path.join(repoRoot, sourceFile), "utf8")),
+      );
+      return [key, parts.join("\n")];
+    }),
   );
   const errors = validateProductionBoundary(Object.fromEntries(entries));
   for (const error of errors) process.stderr.write(`${error}\n`);

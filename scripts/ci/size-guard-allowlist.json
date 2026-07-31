@@ -16,12 +16,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1793,
+    "maxLines": 1459,
     "reason": "Data-plane authorization, bounded HTTP policy projection, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1106,
+    "maxLines": 1045,
     "reason": "Kiro ACP process lifecycle, bounded idle handling, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after blocking stderr handling was removed and pure protocol shaping moved to provider-core."
   },
   {
@@ -175,18 +175,13 @@
     "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1288,
-    "reason": "Gateway launch composes signed governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, and observable SIEM workers after governance refresh and atomic publication moved to focused ownership."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 2142,
+    "maxLines": 1866,
     "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, and payload-free HTTP flow remain capped after retention and HTTP response helpers moved to focused ownership; the shared revoke publication path stays beside activation to preserve one transactional cache boundary."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
-    "maxLines": 1134,
+    "maxLines": 943,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {
@@ -211,7 +206,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1351,
+    "maxLines": 1285,
     "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; tenant snapshot mutation and authoritative pricing validation are split out."
   },
   {

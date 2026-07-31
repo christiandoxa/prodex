@@ -1,7 +1,7 @@
 use super::*;
 use std::path::Path;
 
-pub(super) fn runtime_gateway_virtual_key_entries_is_empty(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_virtual_key_entries_is_empty(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> bool {
     shared
@@ -11,12 +11,13 @@ pub(super) fn runtime_gateway_virtual_key_entries_is_empty(
         .unwrap_or(false)
 }
 
-pub(super) struct RuntimeGatewayVirtualKeySnapshot {
-    pub(super) active_keys: Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
-    pub(super) configured_count: usize,
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeGatewayVirtualKeySnapshot {
+    pub(in crate::runtime_launch::proxy_startup) active_keys:
+        Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
+    pub(in crate::runtime_launch::proxy_startup) configured_count: usize,
 }
 
-pub(super) fn runtime_gateway_virtual_key_snapshot(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_virtual_key_snapshot(
     entries: std::sync::LockResult<std::sync::MutexGuard<'_, Vec<RuntimeGatewayVirtualKeyEntry>>>,
 ) -> Result<RuntimeGatewayVirtualKeySnapshot, runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection>
 {
@@ -33,7 +34,7 @@ pub(super) fn runtime_gateway_virtual_key_snapshot(
     })
 }
 
-pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_virtual_key_entries_from_sources(
     policy_keys: Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
     state_store: &RuntimeGatewayStateStore,
     log_path: &Path,
@@ -90,7 +91,7 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
     Ok(entries)
 }
 
-pub(super) fn runtime_gateway_virtual_key_store_load_strict(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_virtual_key_store_load_strict(
     state_store: &RuntimeGatewayStateStore,
     log_path: &Path,
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile> {
@@ -121,7 +122,7 @@ pub(super) fn runtime_gateway_virtual_key_store_load_strict(
     Ok(runtime_gateway_prepare_virtual_key_store(store))
 }
 
-pub(super) fn runtime_gateway_request_header_virtual_key(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_request_header_virtual_key(
     request_id: u64,
     request: &super::local_rewrite_request::RuntimeLocalRewriteRequest,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -163,7 +164,7 @@ fn runtime_gateway_prepare_virtual_key_store(
     store
 }
 
-pub(super) fn runtime_gateway_virtual_key_admission_snapshot(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_virtual_key_admission_snapshot(
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeGatewayVirtualKeySnapshot, RuntimeGatewayVirtualKeyAdmissionFailure> {

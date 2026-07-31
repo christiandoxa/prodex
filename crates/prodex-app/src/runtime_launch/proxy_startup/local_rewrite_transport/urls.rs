@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn runtime_local_rewrite_upstream_url(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_upstream_url(
     base_url: &str,
     mount_path: &str,
     path_and_query: &str,
@@ -31,7 +31,9 @@ pub(super) fn runtime_local_rewrite_upstream_url(
     upstream_url
 }
 
-pub(super) fn runtime_local_rewrite_log_url(value: &str) -> String {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_log_url(
+    value: &str,
+) -> String {
     if let Ok(mut url) = reqwest::Url::parse(value) {
         let _ = url.set_username("");
         let _ = url.set_password(None);
@@ -46,7 +48,7 @@ pub(super) fn runtime_local_rewrite_log_url(value: &str) -> String {
         .to_string()
 }
 
-pub(super) fn runtime_deepseek_upstream_url(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_upstream_url(
     base_url: &str,
     mount_path: &str,
     path_and_query: &str,
@@ -59,7 +61,9 @@ pub(super) fn runtime_deepseek_upstream_url(
     )
 }
 
-pub(super) fn runtime_deepseek_anthropic_messages_upstream_url(base_url: &str) -> String {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_anthropic_messages_upstream_url(
+    base_url: &str,
+) -> String {
     let mut base_url = base_url.trim_end_matches('/');
     if base_url.ends_with("/anthropic/v1") {
         return format!("{base_url}/messages");
@@ -76,7 +80,7 @@ pub(super) fn runtime_deepseek_anthropic_messages_upstream_url(base_url: &str) -
     format!("{base_url}/anthropic/v1/messages")
 }
 
-pub(super) fn runtime_openai_standard_provider_upstream_url(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_openai_standard_provider_upstream_url(
     provider_kind: RuntimeProviderBridgeKind,
     base_url: &str,
     mount_path: &str,
@@ -95,11 +99,16 @@ pub(super) fn runtime_openai_standard_provider_upstream_url(
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
 }
 
-pub(super) fn runtime_anthropic_messages_upstream_url(base_url: &str, mount_path: &str) -> String {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_anthropic_messages_upstream_url(
+    base_url: &str,
+    mount_path: &str,
+) -> String {
     runtime_local_rewrite_upstream_url(base_url, mount_path, "/messages")
 }
 
-pub(super) fn runtime_gemini_openai_compatible_upstream_url(base_url: &str) -> String {
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gemini_openai_compatible_upstream_url(
+    base_url: &str,
+) -> String {
     let base_url = base_url.trim_end_matches('/');
     if base_url.ends_with("/openai") {
         format!("{base_url}/chat/completions")

@@ -1,13 +1,13 @@
 use super::*;
 
-pub(super) struct RuntimeGatewayIncrementalInspector {
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeGatewayIncrementalInspector {
     keywords: Vec<String>,
     tail: Vec<u8>,
     keep_bytes: usize,
 }
 
 impl RuntimeGatewayIncrementalInspector {
-    pub(super) fn new(keywords: &[String]) -> Self {
+    pub(in crate::runtime_launch::proxy_startup) fn new(keywords: &[String]) -> Self {
         let keywords = keywords
             .iter()
             .map(|keyword| keyword.trim().to_lowercase())
@@ -26,15 +26,15 @@ impl RuntimeGatewayIncrementalInspector {
         }
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(in crate::runtime_launch::proxy_startup) fn is_empty(&self) -> bool {
         self.keywords.is_empty()
     }
 
-    pub(super) fn holdback_bytes(&self) -> usize {
+    pub(in crate::runtime_launch::proxy_startup) fn holdback_bytes(&self) -> usize {
         self.keep_bytes
     }
 
-    pub(super) fn inspect(&mut self, chunk: &[u8]) -> bool {
+    pub(in crate::runtime_launch::proxy_startup) fn inspect(&mut self, chunk: &[u8]) -> bool {
         if chunk.is_empty() || self.keywords.is_empty() {
             return false;
         }
@@ -53,14 +53,18 @@ impl RuntimeGatewayIncrementalInspector {
     }
 }
 
-pub(super) fn release_safe_bytes(held: &mut Vec<u8>, chunk: &[u8], keep_bytes: usize) -> Vec<u8> {
+pub(in crate::runtime_launch::proxy_startup) fn release_safe_bytes(
+    held: &mut Vec<u8>,
+    chunk: &[u8],
+    keep_bytes: usize,
+) -> Vec<u8> {
     let mut pending = std::mem::take(held);
     pending.extend_from_slice(chunk);
     *held = pending.split_off(pending.len().saturating_sub(keep_bytes));
     pending
 }
 
-pub(super) fn runtime_gateway_websocket_audit_context(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_websocket_audit_context(
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Option<super::super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext> {
     authorized.and_then(
@@ -68,7 +72,7 @@ pub(super) fn runtime_gateway_websocket_audit_context(
     )
 }
 
-pub(super) fn runtime_gateway_guardrail_websocket_block(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_guardrail_websocket_block(
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
@@ -84,16 +88,21 @@ pub(super) fn runtime_gateway_guardrail_websocket_block(
     .postcommit_block(reason, "websocket");
 }
 
-pub(super) struct RuntimeGatewayGuardrailAudit {
-    request_id: u64,
-    runtime_shared: RuntimeRotationProxyShared,
-    state_backend: String,
-    shared: RuntimeLocalRewriteProxyShared,
-    context: Option<super::super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeGatewayGuardrailAudit {
+    pub(super) request_id: u64,
+    pub(super) runtime_shared: RuntimeRotationProxyShared,
+    pub(super) state_backend: String,
+    pub(super) shared: RuntimeLocalRewriteProxyShared,
+    pub(super) context:
+        Option<super::super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
 }
 
 impl RuntimeGatewayGuardrailAudit {
-    pub(super) fn postcommit_block(&self, reason: &str, transport: &'static str) {
+    pub(in crate::runtime_launch::proxy_startup) fn postcommit_block(
+        &self,
+        reason: &str,
+        transport: &'static str,
+    ) {
         if self.block(reason, "postcommit", transport).is_err() {
             crate::runtime_proxy_log(
                 &self.runtime_shared,
@@ -110,7 +119,7 @@ impl RuntimeGatewayGuardrailAudit {
         }
     }
 
-    pub(super) fn block(
+    pub(in crate::runtime_launch::proxy_startup) fn block(
         &self,
         reason: &str,
         commit_state: &'static str,
@@ -174,17 +183,17 @@ impl RuntimeGatewayGuardrailAudit {
     }
 }
 
-pub(super) struct RuntimeGatewayGuardrailStreamReader {
-    pending: Cursor<Vec<u8>>,
-    held: Vec<u8>,
-    inner: Box<dyn Read + Send>,
-    inspector: RuntimeGatewayIncrementalInspector,
-    audit: RuntimeGatewayGuardrailAudit,
-    blocked: bool,
-    eof: bool,
-    observed_bytes: usize,
-    maximum_bytes: Option<usize>,
-    termination: RuntimeGatewaySpendTermination,
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeGatewayGuardrailStreamReader {
+    pub(super) pending: Cursor<Vec<u8>>,
+    pub(super) held: Vec<u8>,
+    pub(super) inner: Box<dyn Read + Send>,
+    pub(super) inspector: RuntimeGatewayIncrementalInspector,
+    pub(super) audit: RuntimeGatewayGuardrailAudit,
+    pub(super) blocked: bool,
+    pub(super) eof: bool,
+    pub(super) observed_bytes: usize,
+    pub(super) maximum_bytes: Option<usize>,
+    pub(super) termination: RuntimeGatewaySpendTermination,
 }
 
 impl Read for RuntimeGatewayGuardrailStreamReader {
