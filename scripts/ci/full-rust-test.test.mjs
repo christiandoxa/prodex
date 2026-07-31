@@ -81,6 +81,8 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   }
   assert.equal(job.match(/save_cache: true/g)?.length, 1);
   assert.equal(job.match(/save_cache: false/g)?.length, 3);
+  assert.match(job, /CARGO_INCREMENTAL: "0"/);
+  assert.match(job, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
 
   assertProdexAppPartitionCoverage(job);

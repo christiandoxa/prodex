@@ -378,9 +378,9 @@ export function parseThreshold(value, fallback, name) {
 }
 
 export function assessDrill({
-  rpoSeconds,
+  recoveryPointAgeSeconds,
   rtoSeconds,
-  maxRpoSeconds,
+  maxRecoveryPointAgeSeconds,
   maxRtoSeconds,
   fingerprintsMatch,
   postBackupMarkerAbsent,
@@ -390,7 +390,9 @@ export function assessDrill({
   rlsIsolated,
 }) {
   const failures = [];
-  if (rpoSeconds > maxRpoSeconds) failures.push("rpo_exceeded");
+  if (recoveryPointAgeSeconds > maxRecoveryPointAgeSeconds) {
+    failures.push("recovery_point_age_exceeded");
+  }
   if (rtoSeconds > maxRtoSeconds) failures.push("rto_exceeded");
   if (!fingerprintsMatch) failures.push("fingerprint_mismatch");
   if (!postBackupMarkerAbsent) failures.push("post_backup_marker_restored");
@@ -526,10 +528,10 @@ async function revision() {
 }
 
 async function runManagedDrill() {
-  const maxRpoSeconds = parseThreshold(
-    process.env.PRODEX_BACKUP_DRILL_MAX_RPO_SECONDS,
+  const maxRecoveryPointAgeSeconds = parseThreshold(
+    process.env.PRODEX_BACKUP_DRILL_MAX_RECOVERY_POINT_AGE_SECONDS,
     60,
-    "PRODEX_BACKUP_DRILL_MAX_RPO_SECONDS",
+    "PRODEX_BACKUP_DRILL_MAX_RECOVERY_POINT_AGE_SECONDS",
   );
   const maxRtoSeconds = parseThreshold(
     process.env.PRODEX_BACKUP_DRILL_MAX_RTO_SECONDS,
@@ -543,12 +545,12 @@ async function runManagedDrill() {
   const backupKey = randomBytes(32);
   const containerName = `prodex-backup-drill-${process.pid}-${Date.now()}`;
   const evidence = {
-    schema_version: 1,
+    schema_version: 2,
     backend: "postgres",
     result: "failed",
     source_revision: "unavailable",
     thresholds: {
-      max_rpo_seconds: maxRpoSeconds,
+      max_recovery_point_age_seconds: maxRecoveryPointAgeSeconds,
       max_rto_seconds: maxRtoSeconds,
     },
   };
@@ -629,7 +631,8 @@ async function runManagedDrill() {
     const rls = JSON.parse(await dockerPsql(containerId, restoreDatabase, rlsCheckSql));
     const restoredAt = new Date();
     const rtoSeconds = (performance.now() - restoreStarted) / 1000;
-    const rpoSeconds = (restoredAt.getTime() - recoveryPointAt.getTime()) / 1000;
+    const recoveryPointAgeSeconds =
+      (restoredAt.getTime() - recoveryPointAt.getTime()) / 1000;
     const fingerprintsMatch = JSON.stringify(sourceFingerprint) === JSON.stringify(restoredFingerprint);
     const accountingMatches =
       restoredFingerprint.committed_tokens === 40 &&
@@ -662,9 +665,9 @@ async function runManagedDrill() {
       rls.cross_tenant_reads_blocked === true &&
       rls.cross_tenant_writes_blocked === true;
     const assessment = assessDrill({
-      rpoSeconds,
+      recoveryPointAgeSeconds,
       rtoSeconds,
-      maxRpoSeconds,
+      maxRecoveryPointAgeSeconds,
       maxRtoSeconds,
       fingerprintsMatch,
       postBackupMarkerAbsent: markerCount === 0,
@@ -679,7 +682,7 @@ async function runManagedDrill() {
       failure_codes: assessment.failures,
       recovery_point_at: recoveryPointAt.toISOString(),
       restored_at: restoredAt.toISOString(),
-      rpo_seconds: Number(rpoSeconds.toFixed(3)),
+      recovery_point_age_seconds: Number(recoveryPointAgeSeconds.toFixed(3)),
       rto_seconds: Number(rtoSeconds.toFixed(3)),
       artifact_sha256: artifactSha256,
       artifact_bytes: artifactBytes,
@@ -721,9 +724,9 @@ async function runManagedDrill() {
 async function runSelfTest() {
   if (parseThreshold("60", 1, "rpo") !== 60) throw new Error("threshold parsing failed");
   const assessment = assessDrill({
-    rpoSeconds: 1,
+    recoveryPointAgeSeconds: 1,
     rtoSeconds: 2,
-    maxRpoSeconds: 3,
+    maxRecoveryPointAgeSeconds: 3,
     maxRtoSeconds: 4,
     fingerprintsMatch: true,
     postBackupMarkerAbsent: true,

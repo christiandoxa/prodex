@@ -24,16 +24,21 @@ function workflowJob(contents, name) {
 
 export function validateWindowsSecurityJob(contents) {
   const job = workflowJob(contents, "windows-security");
-  if (!job) return [".github/workflows/ci.yml: missing windows-security job"];
+  const workspace = workflowJob(contents, "windows-workspace");
+  if (!job || !workspace) return [".github/workflows/ci.yml: missing Windows test job"];
   const violations = [];
   for (const marker of [
     "runs-on: windows-latest",
     "timeout-minutes: 30",
+    'CARGO_INCREMENTAL: "0"',
+    'CARGO_PROFILE_DEV_DEBUG: "0"',
+    'CARGO_PROFILE_TEST_DEBUG: "0"',
     "toolchain: 1.97.0",
     "uses: Swatinem/rust-cache@",
     "cache-bin: false",
-    "cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1",
+    "save-if: false",
     "cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1",
+    "cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty",
   ]) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: windows-security job missing ${marker}`);
@@ -41,6 +46,18 @@ export function validateWindowsSecurityJob(contents) {
   }
   if (job.includes("continue-on-error: true")) {
     violations.push(".github/workflows/ci.yml: windows-security job must fail closed");
+  }
+  for (const marker of [
+    "--workspace --exclude prodex --exclude prodex-app --all-features",
+    "- name: Build Windows installer fixture binary",
+    "- name: Test Windows installer",
+  ]) {
+    if (!workspace.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: windows-workspace job missing ${marker}`);
+    }
+  }
+  if (job.includes("prodex-secret-store") || job.includes("installer:test")) {
+    violations.push(".github/workflows/ci.yml: windows-security job duplicates workspace coverage");
   }
   return violations;
 }
@@ -308,6 +325,10 @@ function selfTest() {
   windows-security:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567 # stable
         with:
@@ -315,12 +336,18 @@ function selfTest() {
       - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
         with:
           cache-bin: false
-      - run: cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1
+          save-if: false
       - run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
+      - run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
+  windows-workspace:
+    steps:
+      - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features
+      - name: Build Windows installer fixture binary
+      - name: Test Windows installer
 `;
   assert.deepEqual(validateWindowsSecurityJob(windowsJob), []);
   assert.equal(
-    validateWindowsSecurityJob(windowsJob.replace("prodex-profile-export", "missing-profile-export")).length,
+    validateWindowsSecurityJob(windowsJob.replace("--exclude prodex-app", "--exclude missing-app")).length,
     1,
   );
   assert.equal(validateWindowsSecurityJob("jobs:\n  fmt:\n    runs-on: ubuntu-latest\n").length, 1);

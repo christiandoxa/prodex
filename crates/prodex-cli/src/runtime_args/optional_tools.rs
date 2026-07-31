@@ -1,7 +1,7 @@
 use super::{
     RuntimeToolArgs, SuperArgs, codex_args_with_feature_overrides,
     super_external_provider_base_url, super_external_provider_codex_args,
-    super_local_provider_base_url, super_local_provider_codex_args,
+    super_local_provider_base_url, super_local_provider_codex_args, toml_string_literal,
 };
 use crate::CodexRuntimeFeatureArgs;
 use prodex_optional_tools::{OptionalToolId, OptionalToolSet};
@@ -62,6 +62,17 @@ impl SuperArgs {
         let mut codex_args = Vec::new();
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
+        if !local_mode
+            && let Some(model) = self
+                .local_model
+                .as_deref()
+                .filter(|model| !model.trim().is_empty())
+        {
+            codex_args.extend([
+                "-c".into(),
+                format!("model={}", toml_string_literal(model)).into(),
+            ]);
+        }
         codex_args.extend(feature_overrides);
         codex_args.extend(self.codex_args);
         let mut tools = OptionalToolSet::super_defaults();

@@ -659,6 +659,7 @@ RTK is still an external binary. Install it separately if `rtk gain` is unavaila
 ```bash
 prodex s
 prodex s exec "review this repo"
+prodex s --model gpt-5.3-codex
 ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
 prodex profile import copilot
 prodex s --provider copilot --model gpt-5.3-codex
@@ -671,6 +672,8 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
 `prodex s` is the short alias for `prodex super`. `--dry-run` reports the resolved binary, provider, model, profile, proxy mode, and redacted arguments for both Codex-fronted and native `--cli gemini`, `copilot`, `kiro`, and `agy` launches without reading launch credentials or starting the child.
+Without `--provider` or `--url`, `--model` selects the standard Codex model. With
+either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 

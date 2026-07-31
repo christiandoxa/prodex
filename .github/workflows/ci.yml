@@ -112,6 +112,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
@@ -336,6 +339,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
 
     steps:
@@ -354,9 +360,7 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-bin: false
-
-      - name: Test native secret files, broker bootstrap, and profile export
-        run: cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1
+          save-if: false
 
       - name: Test native broker capability persistence
         run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
@@ -368,18 +372,6 @@ jobs:
           RUST_TEST_NOCAPTURE: "1"
         run: cargo test --locked -q -p prodex-app --lib --all-features 'app_commands::runtime_launch::tests::' -- --test-threads=1 --format pretty
 
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Build Windows installer fixture binary
-        run: cargo build --locked --bin prodex
-
-      - name: Test Windows installer
-        run: npm run installer:test
-
   windows-workspace:
     name: Windows tests (${{ matrix.label }})
     needs: changes
@@ -387,6 +379,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
@@ -435,7 +430,7 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q --workspace --exclude prodex --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
+          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip continuity_failure_reason_metrics_ --skip rtk::tests::
           cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
           cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
 
@@ -457,6 +452,14 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
+
+      - name: Build Windows installer fixture binary
+        if: matrix.suite == 'root-1'
+        run: cargo build --locked --bin prodex
+
+      - name: Test Windows installer
+        if: matrix.suite == 'root-1'
+        run: npm run installer:test
 
   macos-workspace:
     name: macOS full workspace tests

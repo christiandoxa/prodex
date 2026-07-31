@@ -22,6 +22,12 @@ Linux job cheaply reruns the overlay and Smart Context persistence regressions
 through a private symlinked `TMPDIR`, matching the macOS temp-path alias that
 previously exposed non-canonical test fixture paths.
 
+Windows runs native crate coverage, app-specific security regressions, and root
+tests concurrently. The root shard that already compiled `prodex` also builds
+the installer fixture, avoiding a second full Windows binary build. Large
+`prodex-app` and Windows CI test binaries disable incremental artifacts and
+test/dev debug symbols so sccache remains effective and linking is faster.
+
 ## CI Impact Gating
 
 The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
@@ -137,9 +143,10 @@ in the standard local preflight run.
 
 `npm run ci:backup-restore-drill` runs the PostgreSQL recovery gate used by
 heavy CI jobs. It requires Docker and the PostgreSQL client, applies the
-external migrator, performs a real `pg_dump`/`pg_restore`, gates RPO/RTO, verifies tenant and accounting
-fingerprints, and writes redacted evidence to
+external migrator, performs a real `pg_dump`/`pg_restore`, gates recovery-point
+age and restore time, verifies tenant and accounting fingerprints, and writes redacted evidence to
 `target/backup-restore-drill/evidence.json`.
+This logical restore gate does not claim WAL/PITR or production RPO evidence.
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 

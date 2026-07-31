@@ -102,7 +102,7 @@ paths.
 | Stored revision ID differs from the compiled artifact revision | Approval provenance bypass or misleading audit evidence | Create, activation, startup, and refresh require the stored and artifact-internal revisions to match exactly |
 | Invalid active provider registry or routing scores replace usable state | Routing outage or attacker-controlled weights | Strict bounded typed compilers; SQLite/PostgreSQL active-to-LKG validation; compile before atomic `ArcSwap`; retain the prior in-memory snapshot on refresh failure |
 | Provider is revoked or repriced after route planning | Dispatch through stale authority | Re-read the tenant registry and routing-score snapshots at dispatch; require registry, descriptor, pricing, credential, and score revisions to remain current |
-| Backup exists but cannot restore tenant/accounting state | Extended outage, billing loss, or isolation regression | Automated PostgreSQL dump/restore drill, checksum, RPO/RTO gates, full tenant-table fingerprint, ledger uniqueness, and `NOBYPASSRLS` negative checks |
+| Backup exists but cannot restore tenant/accounting state | Extended outage, billing loss, or isolation regression | Automated PostgreSQL logical dump/restore drill, checksum, recovery-point-age/restore-time gates, full tenant-table fingerprint, ledger uniqueness, and `NOBYPASSRLS` negative checks; target environments separately prove WAL/PITR and RPO |
 
 ## Required Negative Tests
 
