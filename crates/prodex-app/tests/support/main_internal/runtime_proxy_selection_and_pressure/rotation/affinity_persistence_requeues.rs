@@ -80,8 +80,7 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
     .expect("second duplicate verification should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let second_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after duplicate binds");
+    let second_log = read_runtime_proxy_test_log(&shared.log_path);
     assert_eq!(
         second_log.matches(binding_marker).count(),
         1,
@@ -160,8 +159,7 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
         .expect("second duplicate response id bind should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let second_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after duplicate binds");
+    let second_log = read_runtime_proxy_test_log(&shared.log_path);
     assert_eq!(
         second_log.matches(binding_marker).count(),
         1,
@@ -320,6 +318,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
     }
     wait_for_runtime_background_queues_idle();
 
+    runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
     let log = fs::read_to_string(&shared.log_path).unwrap_or_default();
     assert_eq!(
         shared.state_save_revision.load(Ordering::SeqCst),

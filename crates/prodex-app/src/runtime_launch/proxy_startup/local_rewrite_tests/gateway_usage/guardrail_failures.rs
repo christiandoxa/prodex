@@ -1,4 +1,4 @@
-use std::{fs, thread};
+use std::thread;
 
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
@@ -79,8 +79,7 @@ fn gateway_guardrail_webhook_fail_closed_blocks_missing_allow_field() {
     assert_eq!(body["error"]["code"], "policy_violation");
     assert!(!root.join("gateway-virtual-key-usage.json").exists());
     assert!(!root.join("gateway-billing-ledger.jsonl").exists());
-    let runtime_log = fs::read_to_string(&proxy.log_path)
-        .expect("invalid webhook response should be written to the runtime log");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_webhook_failed"));
     assert!(runtime_log.contains("error_kind=response_schema"));
 }
@@ -144,8 +143,7 @@ fn gateway_guardrail_webhook_fail_open_logs_invalid_responses_without_blocking()
             .expect("gateway request should be sent");
         assert_eq!(response.status().as_u16(), 200, "case={case}");
 
-        let runtime_log = fs::read_to_string(&proxy.log_path)
-            .expect("webhook failure should be written to the runtime log");
+        let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
         assert!(runtime_log.contains("gateway_guardrail_webhook_failed"));
         assert!(runtime_log.contains("endpoint=redacted"));
         assert!(runtime_log.contains(&format!("error_kind={error_kind}")));

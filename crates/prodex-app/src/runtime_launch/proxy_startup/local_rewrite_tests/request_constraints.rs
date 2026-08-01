@@ -121,7 +121,7 @@ fn strict_live_route_matches_explain_preserves_alias_governance_and_traces_rejec
         .unwrap();
     assert_eq!(denied.status().as_u16(), 403);
 
-    let log = fs::read_to_string(&proxy.log_path).unwrap();
+    let log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert_eq!(log.matches("route_decision").count(), 2);
     assert!(log.contains("gpt-5.4"));
     assert!(log.contains("governance"));

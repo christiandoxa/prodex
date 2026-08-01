@@ -320,7 +320,7 @@ impl Drop for ExposeRequestGuard<'_> {
 
 pub(super) struct ExposePty {
     pub(super) master: Mutex<Option<Box<dyn MasterPty + Send>>>,
-    pub(super) writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pub(super) writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     pub(super) scrollback: Arc<Mutex<VecDeque<u8>>>,
     pub(super) clients: Arc<Mutex<Vec<ExposeOutputClient>>>,
     pub(super) running: Arc<AtomicBool>,
@@ -389,7 +389,7 @@ impl ExposePty {
 
         Ok(Self {
             master: Mutex::new(Some(pair.master)),
-            writer: Arc::new(Mutex::new(writer)),
+            writer: Arc::new(Mutex::new(Some(writer))),
             scrollback,
             clients,
             running,
@@ -401,6 +401,9 @@ impl ExposePty {
 
     pub(super) fn shutdown(&self) {
         self.running.store(false, Ordering::SeqCst);
+        if let Ok(mut writer) = self.writer.lock() {
+            drop(writer.take());
+        }
         if let Ok(mut killer) = self.killer.lock() {
             let _ = killer.kill();
         }

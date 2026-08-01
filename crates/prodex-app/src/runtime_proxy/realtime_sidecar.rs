@@ -7,7 +7,7 @@ use super::{
 };
 use crate::TinyReadWrite;
 use anyhow::{Context, Result};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,33 @@ use std::time::Duration;
 const RUNTIME_REALTIME_PUMP_TIMEOUT: Duration = Duration::from_millis(20);
 const RUNTIME_REALTIME_IDLE_SLEEP: Duration = Duration::from_millis(5);
 const RUNTIME_REALTIME_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct RuntimeRealtimeStream {
+    stream: TcpStream,
+    pump_timeout_enabled: Arc<AtomicBool>,
+    pump_timeout_applied: bool,
+}
+
+impl Read for RuntimeRealtimeStream {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if !self.pump_timeout_applied && self.pump_timeout_enabled.load(Ordering::Acquire) {
+            self.stream
+                .set_read_timeout(Some(RUNTIME_REALTIME_PUMP_TIMEOUT))?;
+            self.pump_timeout_applied = true;
+        }
+        self.stream.read(buffer)
+    }
+}
+
+impl Write for RuntimeRealtimeStream {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
 
 struct RuntimeRealtimeHandshakeCapture {
     captured: Arc<Mutex<Option<RuntimeProxyRequest>>>,
@@ -183,11 +210,13 @@ fn handle_runtime_realtime_websocket_stream(
     stream
         .set_write_timeout(Some(RUNTIME_REALTIME_HANDSHAKE_TIMEOUT))
         .context("failed to configure realtime websocket handshake write timeout")?;
-    let timeout_stream = stream
-        .try_clone()
-        .context("failed to clone realtime websocket stream")?;
     let captured = Arc::new(Mutex::new(None));
-    let stream = Box::new(stream) as Box<dyn TinyReadWrite + Send>;
+    let pump_timeout_enabled = Arc::new(AtomicBool::new(false));
+    let stream = Box::new(RuntimeRealtimeStream {
+        stream,
+        pump_timeout_enabled: Arc::clone(&pump_timeout_enabled),
+        pump_timeout_applied: false,
+    }) as Box<dyn TinyReadWrite + Send>;
     let mut local_socket = tungstenite::accept_hdr(
         stream,
         RuntimeRealtimeHandshakeCapture {
@@ -195,9 +224,7 @@ fn handle_runtime_realtime_websocket_stream(
         },
     )
     .map_err(|error| anyhow::anyhow!("failed to accept realtime websocket: {error}"))?;
-    timeout_stream
-        .set_read_timeout(Some(RUNTIME_REALTIME_PUMP_TIMEOUT))
-        .context("failed to configure realtime websocket pump timeout")?;
+    pump_timeout_enabled.store(true, Ordering::Release);
     let handshake_request = captured
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

@@ -235,7 +235,7 @@ fn standard_get_waits_for_ready_profile_inflight_relief() {
     assert_eq!(status, 200);
     release.join().expect("release thread should join");
     let log =
-        fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
+        read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(log.contains("inflight_wait_started route=standard"));
     assert!(log.contains("inflight_wait_finished route=standard"));
     assert!(log.contains("useful=true"));
@@ -292,7 +292,7 @@ fn scripted_backend_fault_explicit_quota_429_retries_ready_profile_past_soft_inf
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
     );
-    let log = fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(log.contains(
         "transport=http quota_last_chance profile=second failed_profile=main"
     ));

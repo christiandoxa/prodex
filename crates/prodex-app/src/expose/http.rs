@@ -728,7 +728,7 @@ pub(super) fn expose_broadcast_output(
 }
 
 pub(super) fn expose_write_input(
-    writer: &Arc<Mutex<Box<dyn Write + Send>>>,
+    writer: &Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     bytes: &[u8],
 ) -> io::Result<()> {
     if bytes.is_empty() || bytes.len() > EXPOSE_MAX_INPUT_BYTES {
@@ -740,6 +740,7 @@ pub(super) fn expose_write_input(
     let mut writer = writer
         .lock()
         .map_err(|_| io::Error::other("expose PTY writer unavailable"))?;
+    let writer = writer.as_mut().ok_or(io::ErrorKind::BrokenPipe)?;
     writer.write_all(bytes)?;
     writer.flush()
 }

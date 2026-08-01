@@ -1,8 +1,9 @@
 use super::{
     Duration, ResponseProfileBinding, RuntimeProxyBackend, RuntimeProxyBackendFaultRoute,
     RuntimeProxyBackendFaultScript, RuntimeProxyBackendFaultStep, RuntimeProxyProfileHarness,
-    RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest, TestEnvVarGuard, fs,
-    proxy_runtime_standard_request, quota_window_ready, runtime_usage_snapshot,
+    RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest, TestEnvVarGuard,
+    proxy_runtime_standard_request, quota_window_ready, read_runtime_proxy_test_log,
+    runtime_usage_snapshot,
     tiny_http_response_status_and_body,
 };
 use chrono::Local;
@@ -88,7 +89,7 @@ fn compact_transport_timeout_rotates_fresh_request_to_next_profile_once() {
     let response = proxy_runtime_standard_request(45, &compact_request(None), shared)
         .expect("fresh compact transport failure should rotate before returning");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(
         status, 200,
@@ -132,7 +133,7 @@ fn session_affined_compact_transport_failure_does_not_rotate() {
     let response = proxy_runtime_standard_request(46, &compact_request(Some("sess-main")), shared)
         .expect("session-affined compact transport failure should return locally");
     let (status, _) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 503, "{log}");
     assert_eq!(
@@ -167,7 +168,7 @@ fn session_affined_compact_overload_does_not_rotate() {
         .expect("session-affined compact overload should pass through");
     let (status, _) = tiny_http_response_status_and_body(response);
     let accounts = backend.responses_accounts();
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 503, "{log}");
     assert_eq!(
@@ -200,7 +201,7 @@ fn session_affined_compact_auth_failure_does_not_rotate() {
         .expect("session-affined compact auth failure should pass through");
     let (status, _) = tiny_http_response_status_and_body(response);
     let accounts = backend.responses_accounts();
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 401, "{log}");
     assert!(!accounts.is_empty(), "{log}");
@@ -230,7 +231,7 @@ fn generic_compact_429_passes_through_without_rotation() {
     let response = proxy_runtime_standard_request(48, &compact_request(None), shared)
         .expect("generic compact 429 should pass through");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 429, "{log}");
     assert_eq!(body, "Too Many Requests");

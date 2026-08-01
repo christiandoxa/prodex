@@ -232,7 +232,7 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
 
     release.join().expect("release thread should join");
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("inflight_wait_started route=responses"),
         "interactive inflight wait should be logged"
@@ -348,7 +348,7 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
 
     release.join().expect("release thread should join");
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("inflight_wait_started route=responses"),
         "responses inflight wait should be logged"

@@ -317,11 +317,7 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
             .unwrap()
             .contains("follower-ready-admin")
     );
-    assert!(
-        !fs::read_to_string(&proxy.log_path)
-            .unwrap()
-            .contains("follower-ready-admin")
-    );
+    assert!(!crate::read_runtime_proxy_test_log(&proxy.log_path).contains("follower-ready-admin"));
 }
 
 #[test]

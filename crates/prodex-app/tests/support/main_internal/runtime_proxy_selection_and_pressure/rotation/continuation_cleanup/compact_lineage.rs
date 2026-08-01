@@ -107,7 +107,7 @@ fn websocket_success_without_turn_state_keeps_compact_lineage_alive() {
         Some(("second".to_string(), "session_id"))
     );
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("turn_state_coverage route=websocket profile=second status=missing"),
         "missing websocket turn_state should be logged: {log}"
@@ -259,7 +259,7 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
         );
     }
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("turn_state_coverage route=responses profile=second status=missing"),
         "missing responses turn_state should be logged: {log}"
@@ -371,7 +371,7 @@ fn websocket_success_with_turn_state_releases_compact_lineage() {
         );
     }
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("compact_lineage_released profile=second reason=response_committed"),
         "compact lineage release should be logged after successor turn_state is established: {log}"
@@ -515,7 +515,7 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
         );
     }
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("compact_lineage_released profile=second reason=response_committed"),
         "compact lineage release should be logged after successor turn_state is established: {log}"

@@ -195,7 +195,7 @@ mod tests {
 
         assert!(handle.join().is_err());
 
-        let log = fs::read_to_string(&log_path).expect("panic log should be written");
+        let log = crate::read_runtime_proxy_test_log(&log_path);
         assert!(log.contains("runtime_background_worker_panic"));
         assert!(log.contains("worker=prodex-panic-worker"));
         assert!(log.contains("error=<redacted>"));
@@ -245,7 +245,7 @@ mod tests {
             .expect("supervisor should contain worker panic");
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        let log = fs::read_to_string(&log_path).expect("restart log should be written");
+        let log = crate::read_runtime_proxy_test_log(&log_path);
         assert!(log.contains("runtime_worker_restart"));
         assert!(log.contains("worker=prodex-supervised-test-worker"));
         assert!(log.contains("reason=panic"));

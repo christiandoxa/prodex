@@ -178,7 +178,7 @@ fn response_selection_logs_plan_counts_before_pick() {
 
     assert_eq!(selected.as_deref(), Some("second"));
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains(
             "selection_plan route=responses pressure_mode=false sync_probe_pressure=false"
@@ -238,7 +238,7 @@ fn response_selection_trace_preserves_optimistic_current_circuit_rejection() {
     assert_eq!(selected.as_deref(), Some("second"));
 
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     let trace_lines = log
         .lines()
         .filter(|line| line.contains(" route_decision "))
@@ -289,7 +289,7 @@ fn response_selection_emits_one_no_candidate_trace() {
     assert_eq!(selected, None);
 
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     let trace_lines = log
         .lines()
         .filter(|line| line.contains(" route_decision "))
@@ -330,7 +330,7 @@ fn direct_hard_selection_trace_has_explicit_affinity() {
     );
 
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     let trace_json = log
         .lines()
         .find(|line| line.contains(" route_decision "))

@@ -702,7 +702,7 @@ fn gateway_upstream_transport_failure_uses_stable_response_without_endpoint_deta
     assert!(!body.contains(&closed_addr.port().to_string()));
     assert!(!body.contains("Connection refused"));
     assert!(!body.contains(virtual_token));
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("profile_transport_failure"));
     assert!(runtime_log.contains("profile_health"));
     assert!(runtime_log.contains("profile=local"));
@@ -1223,8 +1223,7 @@ fn gateway_rejects_oversized_request_body_before_upstream() {
     assert!(!audit_log.contains(virtual_token));
     assert!(!audit_log.contains(&oversized_input));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("local_rewrite_request_body_too_large"));
     assert!(runtime_log.contains("reason=request_body_too_large"));
     assert!(!runtime_log.contains(virtual_token));

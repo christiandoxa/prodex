@@ -4,7 +4,7 @@ fn selection_trace(
     shared: &RuntimeRotationProxyShared,
 ) -> runtime_proxy_crate::RuntimeRouteDecisionTrace {
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     let trace_line = log
         .lines()
         .find(|line| line.contains(" route_decision "))
@@ -411,7 +411,7 @@ fn hard_affinity_selection_matrix_ignores_local_penalties() {
             case.label
         );
         runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-        let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+        let log = read_runtime_proxy_test_log(&shared.log_path);
         let trace_lines = log
             .lines()
             .filter(|line| line.contains(" route_decision "))

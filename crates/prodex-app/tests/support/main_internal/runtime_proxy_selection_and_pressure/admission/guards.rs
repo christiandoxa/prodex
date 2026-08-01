@@ -585,7 +585,7 @@ fn profile_inflight_guard_drop_records_underflow_and_log_marker() {
             .profile_inflight_release_underflows_total(),
         1
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("profile_inflight_underflow"),
         "profile inflight underflow marker should be logged: {log}"

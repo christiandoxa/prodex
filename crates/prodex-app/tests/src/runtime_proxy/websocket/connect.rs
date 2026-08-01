@@ -404,7 +404,7 @@ fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failur
     }
 
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = std::fs::read_to_string(&shared.log_path).expect("local-pressure log should exist");
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
     for (index, (kind, _message)) in cases.into_iter().enumerate() {
         let request_id = 81 + index as u64;
         let expected_class = format!("class={}", kind.as_str());
