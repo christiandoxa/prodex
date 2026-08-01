@@ -38,6 +38,9 @@ impl UsageServer {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("failed to set accepted usage stream blocking");
                         let response_delay_ms_flag = Arc::clone(&response_delay_ms_flag);
                         let active_requests_flag = Arc::clone(&active_requests_flag);
                         let max_concurrent_requests_flag =
@@ -51,7 +54,14 @@ impl UsageServer {
                             );
                         });
                     }
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    Err(err)
+                        if matches!(
+                            err.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::Interrupted
+                                | std::io::ErrorKind::ConnectionAborted
+                        ) =>
+                    {
                         thread::sleep(Duration::from_millis(1));
                     }
                     Err(_) => break,

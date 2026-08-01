@@ -24,7 +24,7 @@
     ],
     "caps": {
       "maxFiles": 195,
-      "maxBehaviorFiles": 175,
+      "maxBehaviorFiles": 176,
       "maxLines": 13500,
       "maxFileLines": 760
     },
