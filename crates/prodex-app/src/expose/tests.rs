@@ -25,7 +25,7 @@ fn expose_start_test_server(
     max_clients: u16,
 ) -> (SocketAddr, Arc<ExposeShared>, ExposeHttpServer) {
     let args = ExposeArgs {
-        command: Some("sleep 30".to_string()),
+        command: None,
         cols: 80,
         rows: 24,
         max_clients,
@@ -466,6 +466,18 @@ fn expose_status_has_no_separate_long_lived_bearer() {
         !value.contains("one-time-capability") || label.starts_with("One-time ")
     }));
     assert!(fields.iter().any(|(label, _)| label == "WARNING"));
+}
+
+#[test]
+fn expose_command_builder_uses_native_shell() {
+    assert!(expose_command_builder(None).is_default_prog());
+
+    let command = expose_command_builder(Some("echo ready"));
+    #[cfg(windows)]
+    assert_eq!(command.get_argv()[1], "/C");
+    #[cfg(not(windows))]
+    assert_eq!(command.get_argv()[1], "-lc");
+    assert_eq!(command.get_argv().last().unwrap(), "echo ready");
 }
 
 #[test]
