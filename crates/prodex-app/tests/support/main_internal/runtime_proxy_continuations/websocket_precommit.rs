@@ -13,7 +13,6 @@ fn runtime_proxy_realtime_forwards_multiple_client_frames_before_upstream_output
         Vec::new(),
     );
     let mut socket = fixture.connect_realtime_websocket("backend-api/prodex/live");
-    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 30_000));
 
     send_runtime_websocket_json(
         &mut socket,

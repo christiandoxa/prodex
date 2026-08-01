@@ -115,7 +115,7 @@ fn runtime_probe_inline_execution_logs_context_without_queue_lag() {
         Err("timeout".to_string()),
     );
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("startup_probe_warmup_error profile=main error=timeout"),
         "inline probe execution should keep the context-specific marker: {log}"
@@ -166,7 +166,7 @@ fn runtime_probe_queued_execution_logs_refresh_marker_with_queue_lag() {
         Instant::now(),
     );
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("profile_probe_refresh_error profile=main lag_ms="),
         "queued probe execution should keep the queue-aware marker: {log}"
@@ -248,7 +248,7 @@ fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters
     );
     drop(runtime);
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"),
         "suppressed nonlocal probe refresh should be logged"
@@ -348,7 +348,7 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
     );
     drop(runtime);
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         !log.contains(
             "profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"

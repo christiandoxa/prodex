@@ -1,7 +1,7 @@
 use crate::ExposeArgs;
 use anyhow::{Context, Result};
 use base64::Engine;
-use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use redaction::redaction_redact_secret_like_text;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
