@@ -15,11 +15,8 @@ use std::collections::BTreeSet;
 mod pool;
 #[path = "auto_redeem/summary.rs"]
 mod summary;
+use pool::runtime_auto_redeem_pool_has_weekly_remaining_profile;
 pub(crate) use pool::runtime_best_auto_redeem_profile_name;
-use pool::{
-    refresh_runtime_auto_redeem_pool_missing_quota,
-    runtime_auto_redeem_pool_has_weekly_remaining_profile,
-};
 pub(crate) use summary::runtime_auto_redeem_precommit_reason_warrants_credit;
 use summary::{
     runtime_auto_redeem_quota_summary_allows_retry,
@@ -39,6 +36,20 @@ fn runtime_auto_redeem_idempotency_key() -> String {
 
 fn runtime_auto_redeem_error_log_value(err: &anyhow::Error) -> String {
     redaction_redact_secret_like_text(&err.to_string()).replace('\n', " ")
+}
+
+pub(crate) fn refresh_runtime_auto_redeem_pool_missing_quota(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    excluded_profiles: &BTreeSet<String>,
+    context: &str,
+) -> Result<()> {
+    pool::refresh_runtime_auto_redeem_pool_missing_quota(
+        shared,
+        route_kind,
+        excluded_profiles,
+        context,
+    )
 }
 
 pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(

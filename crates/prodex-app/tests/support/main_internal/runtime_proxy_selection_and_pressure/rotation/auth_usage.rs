@@ -442,7 +442,11 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
             .any(|account| account == "main-account"),
         "Plus account should be probed before redeem when its quota cache is missing"
     );
-    assert!(log.contains("mode=auto_redeem"));
+    assert!(
+        log.contains("selection_pick route=responses profile=main mode=auto_redeem"),
+        "{log}"
+    );
+    assert!(!log.contains("candidate=second"), "{log}");
 }
 #[test]
 fn runtime_auto_redeem_waits_while_another_profile_has_weekly_remaining() {

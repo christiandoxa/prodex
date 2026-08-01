@@ -21,6 +21,16 @@ pub(super) fn prepare_runtime_response_selection(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<RuntimeResponseSelectionPrepared> {
+    if shared.auto_redeem_enabled
+        && runtime_best_auto_redeem_profile_name(shared, route_kind, excluded_profiles)?.is_some()
+    {
+        refresh_runtime_auto_redeem_pool_missing_quota(
+            shared,
+            route_kind,
+            excluded_profiles,
+            "selection_pre_rank",
+        )?;
+    }
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let sync_probe_pressure_mode =
