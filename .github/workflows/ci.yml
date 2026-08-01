@@ -586,7 +586,7 @@ jobs:
       - name: Run full macOS Rust suite
         env:
           RUST_BACKTRACE: "1"
-        run: npm run test:full -- --jobs 2 --test-threads 2 --no-prodex-app-lib
+        run: npm run test:full -- --jobs 1 --test-threads 2 --no-prodex-app-lib
 
   process-guard:
     runs-on: ubuntu-latest
