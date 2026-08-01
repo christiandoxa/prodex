@@ -55,6 +55,20 @@ pub fn prepare_runtime_proxy_claude_import_target(target_dir: &Path) -> Result<(
 }
 
 pub fn maybe_import_runtime_proxy_claude_legacy_home(target_dir: &Path) -> Result<()> {
+    let legacy_dir = legacy_default_claude_config_dir().ok();
+    let legacy_config_path = legacy_default_claude_config_path().ok();
+    import_runtime_proxy_claude_legacy_sources(
+        target_dir,
+        legacy_dir.as_deref(),
+        legacy_config_path.as_deref(),
+    )
+}
+
+fn import_runtime_proxy_claude_legacy_sources(
+    target_dir: &Path,
+    legacy_dir: Option<&Path>,
+    legacy_config_path: Option<&Path>,
+) -> Result<()> {
     let marker_path = runtime_proxy_claude_legacy_import_marker_path(target_dir);
     if marker_path.exists() {
         return Ok(());
@@ -62,20 +76,16 @@ pub fn maybe_import_runtime_proxy_claude_legacy_home(target_dir: &Path) -> Resul
 
     let mut import_found = false;
     let mut import_absorbed = true;
-    if let Ok(legacy_dir) = legacy_default_claude_config_dir()
-        && legacy_dir.is_dir()
-    {
+    if let Some(legacy_dir) = legacy_dir.filter(|path| path.is_dir()) {
         import_found = true;
-        import_absorbed = merge_runtime_proxy_claude_directory_contents(&legacy_dir, target_dir)?
+        import_absorbed = merge_runtime_proxy_claude_directory_contents(legacy_dir, target_dir)?
             .absorbed()
             && import_absorbed;
     }
-    if let Ok(legacy_config_path) = legacy_default_claude_config_path()
-        && legacy_config_path.is_file()
-    {
+    if let Some(legacy_config_path) = legacy_config_path.filter(|path| path.is_file()) {
         import_found = true;
         import_absorbed = merge_runtime_proxy_claude_file(
-            &legacy_config_path,
+            legacy_config_path,
             &runtime_proxy_claude_config_path(target_dir),
         )?
         .absorbed()
@@ -474,6 +484,40 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn legacy_import_uses_explicit_sources_portably() {
+        let root = TestDir::new("legacy-import");
+        let legacy_dir = root.0.join("home/.claude");
+        let legacy_config = root.0.join("home/.claude.json");
+        let target = root.0.join("target");
+        fs::create_dir_all(legacy_dir.join("projects/workspace")).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(
+            legacy_dir.join("projects/workspace/session.jsonl"),
+            "{\"message\":\"first\"}\n",
+        )
+        .unwrap();
+        fs::write(legacy_dir.join(DEFAULT_CLAUDE_SETTINGS_FILE_NAME), "{}").unwrap();
+        fs::write(&legacy_config, "{\"customField\":\"keep-me\"}").unwrap();
+
+        import_runtime_proxy_claude_legacy_sources(
+            &target,
+            Some(&legacy_dir),
+            Some(&legacy_config),
+        )
+        .unwrap();
+
+        assert!(runtime_proxy_claude_legacy_import_marker_path(&target).exists());
+        assert_eq!(
+            fs::read_to_string(target.join("projects/workspace/session.jsonl")).unwrap(),
+            "{\"message\":\"first\"}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(runtime_proxy_claude_config_path(&target)).unwrap(),
+            "{\"customField\":\"keep-me\"}"
+        );
     }
 
     #[test]

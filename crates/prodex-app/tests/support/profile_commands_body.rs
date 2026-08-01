@@ -313,7 +313,8 @@ impl Drop for ProfileCommandsTestDir {
 }
 
 struct ProfileCommandsTestEnv {
-    _home_guard: TestEnvVarGuard,
+    _home_guards: (TestEnvVarGuard, TestEnvVarGuard),
+    _copilot_home_guard: TestEnvVarGuard,
     _kiro_bin_guard: TestEnvVarGuard,
     _prodex_guard: TestEnvVarGuard,
     _shared_override_guard: TestEnvVarGuard,
@@ -327,7 +328,11 @@ impl ProfileCommandsTestEnv {
         profile_commands_create_private_test_dir(&prodex_home);
         profile_commands_create_private_test_dir(&prodex_home.join("profiles"));
         Self {
-            _home_guard: TestEnvVarGuard::set("HOME", &home.display().to_string()),
+            _home_guards: TestEnvVarGuard::set_home(&home),
+            _copilot_home_guard: TestEnvVarGuard::set(
+                "COPILOT_HOME",
+                &home.join(".copilot").display().to_string(),
+            ),
             _kiro_bin_guard: TestEnvVarGuard::set(
                 "PRODEX_KIRO_BIN",
                 &root.join("missing-kiro-cli").display().to_string(),
@@ -480,18 +485,17 @@ fn profile_commands_import_auth_journal_paths(paths: &AppPaths) -> Vec<PathBuf> 
 
 struct ProfileCommandsOneShotHttpServer {
     base_url: String,
+    wake_addr: std::net::SocketAddr,
     handle: Option<JoinHandle<()>>,
 }
 
 impl ProfileCommandsOneShotHttpServer {
     fn start_json(body: serde_json::Value) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
-        let base_url = format!(
-            "http://{}",
-            listener
-                .local_addr()
-                .expect("server address should resolve")
-        );
+        let wake_addr = listener
+            .local_addr()
+            .expect("server address should resolve");
+        let base_url = format!("http://{wake_addr}");
         let body = body.to_string();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("test server should accept");
@@ -508,6 +512,7 @@ impl ProfileCommandsOneShotHttpServer {
         });
         Self {
             base_url,
+            wake_addr,
             handle: Some(handle),
         }
     }
@@ -516,6 +521,7 @@ impl ProfileCommandsOneShotHttpServer {
 impl Drop for ProfileCommandsOneShotHttpServer {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
+            let _ = std::net::TcpStream::connect(self.wake_addr);
             let _ = handle.join();
         }
     }

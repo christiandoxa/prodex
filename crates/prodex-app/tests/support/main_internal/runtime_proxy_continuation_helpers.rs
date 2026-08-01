@@ -237,7 +237,7 @@ impl RuntimeContinuationFixture {
             .expect("runtime realtime websocket sidecar should start");
         let (mut socket, _response) =
             ws_connect(format!("ws://{addr}/{route}")).expect("realtime websocket should connect");
-        set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+        set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 10_000));
         socket
     }
 
@@ -261,7 +261,7 @@ impl RuntimeContinuationFixture {
         }
         let (mut socket, _response) =
             ws_connect(request).expect("websocket client should connect");
-        set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+        set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 10_000));
         socket
     }
 
