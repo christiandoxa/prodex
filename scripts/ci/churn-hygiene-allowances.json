@@ -23,12 +23,12 @@
       "chore(release): release 0.377.0"
     ],
     "caps": {
-      "maxFiles": 195,
-      "maxBehaviorFiles": 176,
-      "maxLines": 13500,
+      "maxFiles": 200,
+      "maxBehaviorFiles": 181,
+      "maxLines": 13550,
       "maxFileLines": 760
     },
-    "reason": "Reviewed the complete 0.377.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata; source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
+    "reason": "Reviewed the complete 0.377.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, changelog metadata, and cross-platform audit-log reader synchronization; source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
   },
   {
     "id": "audited-reliability-and-ci-feature-0.377.0",

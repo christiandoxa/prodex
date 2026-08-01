@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3552,
+    "maxLines": 3546,
     "reason": "Local rewrite cross-provider regression coverage remains capped after harness-mode cases and governance-failure behavior moved to focused sibling modules; provider-specific cases continue to split from the shared harness."
   },
   {
@@ -91,7 +91,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
-    "maxLines": 1206,
+    "maxLines": 1203,
     "reason": "Gateway admin CRUD and typed provider/harness catalog compatibility coverage remain capped while tenant, key, SCIM, and audit fixtures are split by resource."
   },
   {
@@ -156,7 +156,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1595,
+    "maxLines": 1594,
     "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh, bounded authentication-assurance configuration, and repeatable live PostgreSQL SCIM compatibility fixtures; the remaining legacy matrix stays capped."
   },
   {

@@ -147,8 +147,7 @@ fn gateway_sso_headers_can_authenticate_scoped_admin() {
         "gateway_admin_role_forbidden"
     );
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("gateway admin audit log should be written");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"role_forbidden""#));
     assert!(audit_log.contains(r#""role":"viewer""#));
