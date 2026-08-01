@@ -224,7 +224,7 @@ fn smart_context_prepare_affinity_without_candidate_is_exact_noop() {
             value, original,
             "{name} affinity payload changed semantically"
         );
-        let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+        let log = read_runtime_proxy_test_log(&shared.log_path);
         assert!(
             log.contains("reason=no_duplicate_candidate"),
             "{name} affinity payload should decline without a rewrite candidate: {log}"
@@ -349,7 +349,7 @@ fn smart_context_large_websocket_payload_returns_original_bytes() {
         value["input"][0]["output"].as_str().unwrap().len(),
         output.len()
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=websocket_large_payload"));
     assert!(!log.contains("smart_context_panic"));
     assert!(!log.contains("panic_cooldown"));
@@ -409,7 +409,7 @@ fn smart_context_websocket_generate_false_prewarm_skips_rewrite() {
         value["tools"][0]["description"].as_str().unwrap().len(),
         tool_description.len()
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=websocket_generate_false"));
     assert!(!log.contains("smart_context_panic"));
     assert!(!log.contains("decision=rewritten"));
@@ -469,7 +469,7 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
         )
         .passed()
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("decision=rewritten"));
     assert!(log.contains("reasons=affinity_pressure"));
     assert!(log.contains("policy_reasons=critical_budget"));
@@ -527,7 +527,7 @@ fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressu
         )
         .passed()
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("decision=rewritten"));
     assert!(log.contains("reasons=affinity_pressure"));
     assert!(log.contains("policy_reasons=critical_budget"));
@@ -552,7 +552,7 @@ fn smart_context_prepare_missing_rehydrate_ref_fails_before_upstream() {
             .expect_err("an unresolved mandatory reference must fail closed");
 
     assert_eq!(error.missing_artifact_count, 1);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("smart_context_prepare_error"));
     assert!(log.contains("reason=missing_artifact_refs"));
     assert!(log.contains("missing_artifact_count=1"));
@@ -603,7 +603,7 @@ fn smart_context_prepare_changed_static_context_stays_exact_without_learning() {
             .unwrap()
             .contains("error: static changed path src/lib.rs:9:1")
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("decision=pass_through"));
     assert!(log.contains("reason=no_duplicate_candidate"));
     assert!(!log.contains("static_context_changed"));
@@ -692,7 +692,7 @@ fn smart_context_prepare_canary_out_returns_original_body() {
 
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=rollout_canary_out"));
 }
 
@@ -736,7 +736,7 @@ fn smart_context_prepare_shadow_returns_original_without_live_state_mutation() {
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
     assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("decision=shadow_rewrite"));
     assert!(log.contains("rollout_mode=shadow"));
 }
@@ -758,7 +758,7 @@ fn smart_context_prepare_shadow_sampled_out_skips_state() {
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
     assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("reason=rollout_shadow_sampled_out") || log.contains("decision=pass_through")
     );

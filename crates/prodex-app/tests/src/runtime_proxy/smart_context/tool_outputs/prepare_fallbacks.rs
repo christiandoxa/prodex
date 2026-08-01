@@ -27,7 +27,7 @@ fn smart_context_large_http_body_declines_before_transform() {
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
     assert_eq!(smart_context_test_state_snapshot(&shared), before);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=body_too_large"));
 }
 
@@ -83,7 +83,7 @@ fn smart_context_compact_session_body_does_not_panic() {
     .expect("smart context prepare");
 
     assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("smart_context_prepare_fallback"));
     assert!(log.contains("reason=unsupported_route"));
 }
@@ -128,7 +128,7 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
 
     assert!(matches!(rewritten, Cow::Borrowed(_)));
     assert_eq!(rewritten.as_ref(), request.body.as_slice());
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("smart_context_prepare_fallback"));
     assert!(log.contains("route=compact"));
     assert!(log.contains("profile=main"));
@@ -178,7 +178,7 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
 
     assert!(matches!(rewritten, Cow::Borrowed(_)));
     assert_eq!(rewritten.as_ref(), request_text.as_str());
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("smart_context_panic"));
     assert!(log.contains("transport=websocket"));
     assert!(log.contains("route=websocket"));
@@ -198,7 +198,7 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
     .expect("smart context prepare");
     assert!(matches!(rewritten_after_panic, Cow::Borrowed(_)));
     assert_eq!(rewritten_after_panic.as_ref(), request_text.as_str());
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=panic_cooldown"));
 }
 
@@ -250,7 +250,7 @@ fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown(
     .expect("smart context prepare");
 
     assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=no_duplicate_candidate"));
     assert!(!log.contains("smart_context_panic"));
     assert!(!log.contains("smart_context_disabled"));

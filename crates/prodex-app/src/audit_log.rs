@@ -118,7 +118,7 @@ mod tests {
             );
         }
 
-        let log = fs::read_to_string(&runtime_log_path).expect("failure should be logged");
+        let log = crate::read_runtime_proxy_test_log(&runtime_log_path);
         assert!(log.contains("gateway_audit_append_failed"));
         assert!(log.contains("component=runtime_broker"));
         assert!(log.contains("action=activate_profile"));

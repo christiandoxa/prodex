@@ -91,7 +91,7 @@ fn smart_context_subthreshold_rewrite_discards_planned_state() {
     assert!(matches!(prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
     assert_eq!(smart_context_test_state_snapshot(&shared), before);
-    let log = fs::read_to_string(&shared.log_path).unwrap();
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("self_check=token_savings_below_safety_margin"));
 }
 
@@ -145,7 +145,7 @@ fn smart_context_prepare_passes_too_deep_json_unchanged_without_panic_fallback()
 
     assert!(matches!(&prepared, Cow::Borrowed(_)));
     assert_eq!(prepared.as_ref(), request.body.as_slice());
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("smart_context_prepare_fallback"));
     assert!(log.contains("reason=json_depth_limit"));
     assert!(log.contains("decision=pass_through"));

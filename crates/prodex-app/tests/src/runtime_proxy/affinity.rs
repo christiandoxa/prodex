@@ -272,7 +272,7 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
         }),
     });
 
-    let log = fs::read_to_string(&shared.log_path).expect("token usage log should exist");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("token_usage"));
     assert!(log.contains("request=77"));
     assert!(log.contains("route=responses"));
@@ -354,7 +354,7 @@ fn runtime_proxy_affinity_refresh_context_updates_slots_and_logs_presence() {
     assert_eq!(session_profile.as_deref(), Some("websocket-owner"));
     assert_eq!(pinned_profile, None);
 
-    let log = fs::read_to_string(&shared.log_path).expect("route affinity log should exist");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("request=42 websocket_session=7 route_affinity_recompute reason=test_refresh")
     );

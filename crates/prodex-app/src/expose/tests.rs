@@ -503,11 +503,10 @@ fn expose_tunnel_status_redacts_secret_like_error() {
     assert!(!status.contains("expose-tunnel-token"));
 }
 
-#[cfg(unix)]
 #[test]
 fn expose_pty_shutdown_terminates_and_joins_shell_threads() {
     let args = ExposeArgs {
-        command: Some("sleep 30".to_string()),
+        command: None,
         cols: 80,
         rows: 24,
         max_clients: 1,
@@ -515,10 +514,12 @@ fn expose_pty_shutdown_terminates_and_joins_shell_threads() {
         no_tunnel: false,
     };
     let pty = ExposePty::spawn(&args).unwrap();
+    assert!(pty.running.load(Ordering::SeqCst));
 
     pty.shutdown();
 
     assert!(!pty.running.load(Ordering::SeqCst));
+    assert!(pty.master.lock().unwrap().is_none());
     assert!(pty.reader_thread.lock().unwrap().is_none());
     assert!(pty.wait_thread.lock().unwrap().is_none());
 }

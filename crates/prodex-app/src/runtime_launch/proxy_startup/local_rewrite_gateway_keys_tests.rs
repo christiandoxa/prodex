@@ -7,6 +7,7 @@ use super::{
     RuntimeGatewayVirtualKeyStoreFile, estimate_request_input_tokens,
     runtime_gateway_conversation_namespace, runtime_gateway_virtual_key_store_load_strict,
 };
+use crate::read_runtime_proxy_test_log;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
     RuntimeGatewayScimUser, runtime_gateway_virtual_key_store_version,
@@ -60,7 +61,7 @@ fn key_store_load_failure_is_fail_closed_and_logs_without_path_details() {
     };
 
     assert!(runtime_gateway_virtual_key_store_load_strict(&state_store, &log_path).is_err());
-    let runtime_log = std::fs::read_to_string(&log_path).expect("runtime log should exist");
+    let runtime_log = read_runtime_proxy_test_log(&log_path);
     assert!(runtime_log.contains("gateway_virtual_key_store_load_failed"));
     assert!(runtime_log.contains("error_kind=gateway_key_store_persistence_failed"));
     assert!(!runtime_log.contains("gateway-virtual-keys.json"));

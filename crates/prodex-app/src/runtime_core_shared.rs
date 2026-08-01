@@ -14,11 +14,6 @@ fn runtime_proxy_async_logger_set_pause_writes(paused: bool) {
     runtime_log::RuntimeAsyncLogger::set_pause_writes_for_test(paused);
 }
 
-#[cfg(test)]
-fn runtime_proxy_async_logger_pause_writes() -> bool {
-    runtime_log::runtime_async_logger_writes_are_paused_for_test()
-}
-
 fn runtime_proxy_async_logger() -> io::Result<&'static runtime_log::RuntimeAsyncLogger> {
     static LOGGER: OnceLock<Result<runtime_log::RuntimeAsyncLogger, (io::ErrorKind, String)>> =
         OnceLock::new();
@@ -393,14 +388,16 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     };
     let line = runtime_proxy_format_log_line(message, runtime_proxy_log_format());
     logger.try_enqueue(log_path, line);
-    #[cfg(test)]
-    if !runtime_proxy_async_logger_pause_writes() {
-        let _ = logger.flush_path(log_path);
-    }
 }
 
 pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) -> io::Result<()> {
     runtime_proxy_async_logger()?.flush_path(log_path)
+}
+
+#[cfg(test)]
+pub(crate) fn read_runtime_proxy_test_log(log_path: &Path) -> String {
+    runtime_proxy_flush_logs_for_path(log_path).expect("runtime test log should flush");
+    fs::read_to_string(log_path).expect("runtime test log should be readable")
 }
 
 #[derive(Debug)]
