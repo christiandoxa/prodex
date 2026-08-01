@@ -91,3 +91,10 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
   assert.match(appBlock, /--test-threads=1/);
   assert.match(appBlock, /save-if: false/);
 });
+
+test("macOS keeps process-heavy auto-rotate integration tests serial", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const block = workflow.match(/\n  macos-workspace:\n([\s\S]*?)\n  process-guard:/)?.[1];
+  assert.ok(block, "macOS workspace job missing");
+  assert.match(block, /npm run test:full -- --jobs 1 --test-threads 2 --no-prodex-app-lib/);
+});
