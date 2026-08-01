@@ -227,7 +227,7 @@ fn runtime_responses_auto_redeems_reset_credit_before_rotating() {
             .is_some_and(|value| value.starts_with("prodex-auto-redeem-"))
     );
     assert!(
-        String::from_utf8_lossy(&fs::read(&shared.log_path).expect("log should be readable"))
+        crate::read_runtime_proxy_test_log(&shared.log_path)
             .contains("responses_precommit_reprobe_auto_redeem_result")
     );
     let runtime = shared.runtime.lock().expect("runtime lock should succeed");
@@ -425,8 +425,7 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
         RuntimeResponsesReply::Buffered(parts) => assert_eq!(parts.status, 200),
         RuntimeResponsesReply::Streaming(response) => assert_eq!(response.status, 200),
     }
-    let log = String::from_utf8_lossy(&fs::read(&shared.log_path).expect("log should be readable"))
-        .to_string();
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
     assert_eq!(
         backend.reset_credit_consume_accounts(),
         vec!["main-account".to_string()],
@@ -545,8 +544,7 @@ fn runtime_auto_redeem_waits_while_another_profile_has_weekly_remaining() {
         backend.reset_credit_consume_accounts().is_empty(),
         "redeem must not consume a credit while another profile still has weekly quota"
     );
-    let log_bytes = fs::read(&shared.log_path).expect("log should be readable");
-    let log = String::from_utf8_lossy(&log_bytes);
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
     assert!(log.contains("reason=weekly_pool_profile"));
 }
 #[test]
