@@ -28,7 +28,7 @@ sync_probe_pressure_pause_ms = 2
     let shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
     runtime_proxy_probe_refresh_pause(&shared, RuntimeRouteKind::Responses);
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let policy_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let policy_log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         policy_log.contains("runtime_proxy_probe_refresh_pause route=responses pause_ms=2"),
         "policy pause override should be logged as effective pause: {policy_log}"
@@ -42,7 +42,7 @@ sync_probe_pressure_pause_ms = 2
     let env_shared = RuntimeProxyFixtureBuilder::new().build_shared(&env_temp_dir);
     runtime_proxy_probe_refresh_pause(&env_shared, RuntimeRouteKind::Responses);
     runtime_proxy_flush_logs_for_path(&env_shared.log_path).expect("runtime log should flush");
-    let env_log = fs::read_to_string(&env_shared.log_path).expect("runtime log should be readable");
+    let env_log = read_runtime_proxy_test_log(&env_shared.log_path);
     assert!(
         env_log.contains("runtime_proxy_probe_refresh_pause route=responses pause_ms=1"),
         "env pause override should beat policy and be logged as effective pause: {env_log}"

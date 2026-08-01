@@ -57,7 +57,7 @@ fn rotation_is_observed_without_environment_reload() {
 
     assert_eq!(send(&client, proxy.listen_addr).status().as_u16(), 200);
     assert_authorization(&upstream, "Bearer second-projected-key");
-    let log = fs::read_to_string(&proxy.log_path).unwrap();
+    let log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     for secret in [
         "first-projected-key",
         "second-projected-key",

@@ -150,8 +150,7 @@ fn gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_lea
     assert!(!audit_log.contains("presidio-endpoint-secret"));
     assert!(!audit_log.contains("127.0.0.1:9"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("local_rewrite_presidio_redaction_failed"));
     assert!(runtime_log.contains("reason=presidio_redaction_failed"));
     assert!(!runtime_log.contains(gateway_token));
@@ -234,7 +233,7 @@ fn gateway_presidio_fail_open_forwards_request_when_local_inspection_hits_limits
             .expect("fail-open request should reach upstream"),
         request_body
     );
-    let runtime_log = std::fs::read_to_string(&proxy.log_path).unwrap();
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("presidio_redaction_error"));
     assert!(runtime_log.contains("fail_mode=open"));
     assert!(!runtime_log.contains("local_rewrite_presidio_redaction_failed"));

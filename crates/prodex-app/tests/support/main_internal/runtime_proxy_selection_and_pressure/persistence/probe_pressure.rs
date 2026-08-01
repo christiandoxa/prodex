@@ -21,7 +21,7 @@ fn cold_start_candidate_probe_is_queued_without_blocking_selection() {
     drop(runtime);
 
     runtime_proxy_flush_logs_for_path(&shared.log_path).expect("runtime log should flush");
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("profile_probe_refresh_queued profile=second reason=queued"),
         "cold-start probing should move to the background queue: {log}"

@@ -94,7 +94,7 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
         Some("service_unavailable")
     );
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("inflight_wait_started route=responses"),
         "responses inflight timeout should log wait start"
@@ -258,7 +258,7 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
         .expect("non-owner release thread should join");
     drop(main_inflight);
 
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("inflight_wait_finished route=responses"),
         "owner-scoped wait should log completion"

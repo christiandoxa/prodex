@@ -431,7 +431,8 @@ fn expose_http_session_flow_fails_closed_and_revokes_rotated_session() {
 
 #[test]
 fn expose_input_rejects_empty_and_oversized_batches() {
-    let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(io::sink())));
+    let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
+        Arc::new(Mutex::new(Some(Box::new(io::sink()))));
 
     assert_eq!(
         expose_write_input(&writer, b"").unwrap_err().kind(),
@@ -444,6 +445,13 @@ fn expose_input_rejects_empty_and_oversized_batches() {
         io::ErrorKind::InvalidInput
     );
     expose_write_input(&writer, b"batched input").unwrap();
+    writer.lock().unwrap().take();
+    assert_eq!(
+        expose_write_input(&writer, b"after shutdown")
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::BrokenPipe
+    );
 }
 
 #[test]
@@ -519,6 +527,7 @@ fn expose_pty_shutdown_terminates_and_joins_shell_threads() {
     pty.shutdown();
 
     assert!(!pty.running.load(Ordering::SeqCst));
+    assert!(pty.writer.lock().unwrap().is_none());
     assert!(pty.master.lock().unwrap().is_none());
     assert!(pty.reader_thread.lock().unwrap().is_none());
     assert!(pty.wait_thread.lock().unwrap().is_none());

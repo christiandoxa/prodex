@@ -184,7 +184,7 @@ fn runtime_smart_context_proxy_disabled_passes_large_tool_output_unchanged() {
     assert_eq!(responses_bodies.len(), 1);
     assert!(!responses_bodies[0].contains("prodex-sc artifact"));
     assert!(responses_bodies[0].contains("line 1200: repeated command output"));
-    let log = fs::read_to_string(&proxy.log_path).expect("runtime proxy log should be readable");
+    let log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(!log.contains("smart_context_autopilot"));
 }
 
@@ -429,7 +429,7 @@ fn runtime_proxy_presidio_redaction_failure_uses_generic_response_and_logs_no_en
         "gateway PII redaction failed"
     );
 
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("presidio_redaction_error"));
     assert!(runtime_log.contains("reason=presidio_redaction_failed"));
     assert!(runtime_log.contains("presidio_redaction_failed"));
@@ -484,7 +484,7 @@ fn runtime_proxy_oversized_request_body_uses_generic_response_and_redacted_log()
         "proxied request body is too large"
     );
 
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("request_body_too_large"));
     assert!(!runtime_log.contains(bearer_token));
     assert!(!runtime_log.contains(&oversized_input));

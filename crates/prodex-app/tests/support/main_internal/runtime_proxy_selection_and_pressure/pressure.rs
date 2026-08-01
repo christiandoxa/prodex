@@ -470,7 +470,7 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
     wait_for_runtime_background_queues_idle();
 
     let log =
-        fs::read_to_string(&shared.log_path).expect("runtime state save log should be readable");
+        read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("state_save_ok"),
         "legacy backoffs should not break runtime saves: {log}"

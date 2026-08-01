@@ -111,7 +111,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
         backend.responses_accounts().is_empty(),
         "fresh compact request should be shed before reaching upstream"
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("compact_final_failure exit=pressure reason=pressure"),
         "compact pressure failure should emit a terminal marker: {log}"
@@ -161,7 +161,7 @@ fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
     ));
     let (status, response_body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 200, "unexpected compact response: {response_body}");
     assert_eq!(
@@ -255,7 +255,7 @@ fn compact_final_failure_logs_overload_terminal_reason() {
     let response = proxy_runtime_standard_request(41, &request, &shared)
         .expect("compact overload request should return upstream failure");
     let (status, _body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 500);
     let overload_terminal_marker = log
@@ -340,7 +340,7 @@ fn compact_final_failure_logs_quota_terminal_reason() {
     let response = proxy_runtime_standard_request(42, &request, &shared)
         .expect("hard-affinity compact quota request should return upstream failure");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 429);
     assert!(
@@ -436,7 +436,7 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
         .expect("compact quota request should rotate to another ready profile");
     let (status, body) = tiny_http_response_status_and_body(response);
     let responses_accounts = backend.responses_accounts();
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 200);
     assert!(
@@ -533,7 +533,7 @@ fn compact_workspace_credits_error_rotates_to_ready_profile() {
     let response = proxy_runtime_standard_request(46, &request, &shared)
         .expect("workspace credits compact request should rotate to another ready profile");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 200, "unexpected compact response body: {body}");
     assert!(
@@ -622,7 +622,7 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
     let response = proxy_runtime_standard_request(43, &request, &shared)
         .expect("exhausted compact request should receive a local failure");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 503);
     assert!(
@@ -754,7 +754,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
     let response = proxy_runtime_standard_request(44, &request, &shared)
         .expect("saturated compact request should receive a local failure");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
 
     assert_eq!(status, 503);
     assert!(

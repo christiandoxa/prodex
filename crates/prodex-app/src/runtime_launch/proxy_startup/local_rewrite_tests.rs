@@ -3161,8 +3161,7 @@ fn gateway_request_guardrail_blocked_keywords_are_audited_without_token_leakage(
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains("do-not-send"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_blocked"));
     assert!(runtime_log.contains("matched_value_redacted"));
     assert!(!runtime_log.contains(gateway_token));
@@ -3234,8 +3233,7 @@ fn gateway_response_guardrail_blocked_output_is_audited_without_token_or_value_l
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains("do-not-emit-sensitive-marker"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_response_blocked"));
     assert!(runtime_log.contains("matched_value_redacted"));
     assert!(!runtime_log.contains(gateway_token));
@@ -3319,8 +3317,7 @@ fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains("do-not-stream-sensitive-marker"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_stream_blocked"));
     assert!(runtime_log.contains("matched_value_redacted"));
     assert!(!runtime_log.contains(gateway_token));
@@ -3395,8 +3392,7 @@ fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     assert!(!audit_log.contains(webhook_token));
     assert!(!audit_log.contains("do-not-log-webhook-message"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
     assert!(runtime_log.contains("matched_value_redacted"));
     assert!(!runtime_log.contains(gateway_token));
@@ -3471,8 +3467,7 @@ fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     assert!(!audit_log.contains(webhook_token));
     assert!(!audit_log.contains("do-not-log-webhook-message"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
     assert!(runtime_log.contains("matched_value_redacted"));
     assert!(!runtime_log.contains(gateway_token));
@@ -3546,8 +3541,7 @@ fn gateway_pre_guardrail_webhook_failure_redacts_url_and_is_audited() {
     assert!(!audit_log.contains(webhook_url_secret));
     assert!(!audit_log.contains("failure-webhook-bearer-secret"));
 
-    let runtime_log =
-        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(runtime_log.contains("gateway_guardrail_webhook_failed"));
     assert!(runtime_log.contains("endpoint=redacted"));
     assert!(runtime_log.contains("error_kind="));

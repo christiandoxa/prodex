@@ -172,7 +172,7 @@ fn previous_response_owner_profile_changes_still_persist() {
     )
     .expect("first owner verification should succeed");
     wait_for_runtime_background_queues_idle();
-    let initial_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let initial_log = read_runtime_proxy_test_log(&shared.log_path);
     let initial_revision = shared.state_save_revision.load(Ordering::SeqCst);
     assert_eq!(
         initial_revision, 1,
@@ -188,8 +188,7 @@ fn previous_response_owner_profile_changes_still_persist() {
     .expect("owner change verification should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let updated_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after rebinding");
+    let updated_log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         updated_log.contains("binding previous_response_owner profile=second response_id=resp-2"),
         "owner changes should still be logged and persisted: {updated_log}"
@@ -306,8 +305,7 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
     .expect("duplicate compact lineage verification should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let second_log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after duplicate bindings");
+    let second_log = read_runtime_proxy_test_log(&shared.log_path);
     assert_eq!(
         shared.state_save_revision.load(Ordering::SeqCst),
         first_revision,
@@ -536,8 +534,7 @@ fn previous_response_release_preserves_session_and_compact_session_lineage_for_c
         backend.responses_accounts(),
         vec!["second-account".to_string()]
     );
-    let log = fs::read_to_string(&shared.log_path)
-        .expect("runtime log should be readable after compact follow-up");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("compact_followup_owner profile=second source=session_id"),
         "compact follow-up should still resolve the preserved session lineage owner: {log}"
@@ -623,7 +620,7 @@ fn fresh_runtime_responses_rotates_after_unrecoverable_401() {
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
     );
-    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
         log.contains("auth_failed profile=main"),
         "unrecoverable 401 should be logged as an auth failure: {log}"

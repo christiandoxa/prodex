@@ -88,7 +88,7 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     })
     .unwrap();
 
-    let log_text = std::fs::read_to_string(&shared.log_path).unwrap();
+    let log_text = crate::read_runtime_proxy_test_log(&shared.log_path);
     assert!(log_text.contains("tokens_before="));
     assert!(log_text.contains("token_count_source=estimated"));
     assert!(log_text.contains("rewrite_kind=rewritten"));

@@ -606,7 +606,7 @@ fn gateway_route_explain_does_not_mutate_counters_state_or_emit_sensitive_data()
     assert!(!audit.contains(sensitive_tool_argument));
     assert!(!audit.contains("admin-token"));
     assert!(!audit.contains("route-explain-webhook-secret"));
-    let runtime_log = fs::read_to_string(&proxy.log_path).unwrap_or_default();
+    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
     assert!(!runtime_log.contains(sensitive));
     assert!(!runtime_log.contains(sensitive_tool_argument));
     assert!(!runtime_log.contains("admin-token"));
