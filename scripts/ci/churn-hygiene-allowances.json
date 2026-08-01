@@ -17,12 +17,14 @@
       "chore(ci): record completed 0.377.0 Windows churn",
       "chore(ci): record final verified 0.377.0 churn",
       "chore(ci): record stall-free 0.377.0 churn",
+      "fix: make Windows runtime tests deterministic",
+      "chore(ci): record deterministic 0.377.0 runtime churn",
       "chore(release): release 0.377.0"
     ],
     "caps": {
-      "maxFiles": 170,
-      "maxBehaviorFiles": 150,
-      "maxLines": 13250,
+      "maxFiles": 195,
+      "maxBehaviorFiles": 175,
+      "maxLines": 13500,
       "maxFileLines": 760
     },
     "reason": "Reviewed the complete 0.377.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata; source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
@@ -44,15 +46,17 @@
       "chore(ci): record final 0.377.0 Windows churn",
       "chore(ci): record completed 0.377.0 Windows churn",
       "chore(ci): record final verified 0.377.0 churn",
-      "chore(ci): record stall-free 0.377.0 churn"
+      "chore(ci): record stall-free 0.377.0 churn",
+      "fix: make Windows runtime tests deterministic",
+      "chore(ci): record deterministic 0.377.0 runtime churn"
     ],
     "caps": {
-      "maxFiles": 154,
-      "maxBehaviorFiles": 148,
-      "maxLines": 12770,
+      "maxFiles": 180,
+      "maxBehaviorFiles": 175,
+      "maxLines": 13050,
       "maxFileLines": 759
     },
-    "reason": "Reviewed the whole-repository production audit covering crash-safe profile lifecycle recovery, optional-tool planning and cleanup, SIEM schema and lease enforcement, quota refresh, context audit bounds, Copilot vision compatibility, Windows terminal behavior, and parallel Linux and Windows test execution; verified with focused regressions, the full locked all-features suite, live PostgreSQL proof, strict Clippy, security and dependency guards, an optimized locked build, and tracked-diff identifier scanning."
+    "reason": "Reviewed the whole-repository production audit covering crash-safe profile lifecycle recovery, optional-tool planning and cleanup, SIEM schema and lease enforcement, quota refresh, context audit bounds, Copilot vision compatibility, deterministic async runtime logs, realtime websocket timeout handoff, PTY shutdown, Windows terminal behavior, and parallel Linux and Windows test execution; verified with focused regressions, the full locked all-features suite, live PostgreSQL proof, strict Clippy, security and dependency guards, an optimized locked build, and tracked-diff identifier scanning."
   },
   {
     "id": "windows-application-portability-0.377.0",
@@ -66,15 +70,17 @@
       "fix: finish Windows test portability",
       "chore(ci): record final verified 0.377.0 churn",
       "fix: eliminate Windows test stalls",
-      "chore(ci): record stall-free 0.377.0 churn"
+      "chore(ci): record stall-free 0.377.0 churn",
+      "fix: make Windows runtime tests deterministic",
+      "chore(ci): record deterministic 0.377.0 runtime churn"
     ],
     "caps": {
-      "maxFiles": 53,
-      "maxBehaviorFiles": 53,
-      "maxLines": 900,
-      "maxFileLines": 94
+      "maxFiles": 80,
+      "maxBehaviorFiles": 80,
+      "maxLines": 1150,
+      "maxFileLines": 112
     },
-    "reason": "Reviewed the bounded Windows application-test portability fixes for path discovery, executable fixtures, line endings, socket behavior, HTTP half-close behavior, SQLite teardown, file-lock handling, timeout policy, native home discovery, environment restoration, and failure-safe one-shot server teardown; verified by the affected shard suites, the locked full workspace suite, strict Clippy, size ratchets, Gitleaks, and tracked-diff identifier scanning."
+    "reason": "Reviewed the bounded Windows application-test portability fixes for path discovery, executable fixtures, line endings, socket behavior, HTTP half-close behavior, SQLite teardown, file-lock handling, timeout policy, native home discovery, environment restoration, deterministic async log flushing, realtime websocket timeout handoff, PTY writer shutdown, and failure-safe one-shot server teardown; verified by the affected shard suites, the locked full workspace suite, strict Clippy, size ratchets, Gitleaks, and tracked-diff identifier scanning."
   },
   {
     "id": "final-windows-application-portability-0.377.0",
