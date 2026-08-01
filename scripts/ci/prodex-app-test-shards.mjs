@@ -56,8 +56,13 @@ const TARGETED_SHARDS = Object.freeze([
   },
   {
     suite: "runtime",
-    label: "prodex-app runtime and profiles",
-    filters: ["runtime_proxy::", "profile_commands::"],
+    label: "prodex-app runtime",
+    filters: ["runtime_proxy::"],
+  },
+  {
+    suite: "profiles",
+    label: "prodex-app profiles",
+    filters: ["profile_commands::"],
   },
   {
     suite: "brokers",

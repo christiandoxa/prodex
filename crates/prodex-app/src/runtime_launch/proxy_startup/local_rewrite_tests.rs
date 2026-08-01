@@ -45,28 +45,7 @@ fn runtime_gateway_test_secret(value: &str) -> RuntimeGatewaySecret {
 }
 
 fn write_fake_kiro_agent(root: &Path, name: &str, body: &str) -> std::path::PathBuf {
-    #[cfg(windows)]
-    {
-        let script = root.join(format!("{name}.py"));
-        fs::write(&script, body).expect("fake kiro agent should be written");
-        let launcher = root.join(format!("{name}.cmd"));
-        fs::write(
-            &launcher,
-            format!("@echo off\r\npython \"%~dp0{name}.py\" %*\r\n"),
-        )
-        .expect("fake kiro agent launcher should be written");
-        launcher
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let script = root.join(name);
-        fs::write(&script, body).expect("fake kiro agent should be written");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("permissions should update");
-        script
-    }
+    crate::test_support::write_test_python_executable(root, name, body)
 }
 
 fn write_fake_kiro_runtime_agent(root: &Path) -> std::path::PathBuf {

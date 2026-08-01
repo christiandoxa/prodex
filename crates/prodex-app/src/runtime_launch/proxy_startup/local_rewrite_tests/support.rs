@@ -676,6 +676,22 @@ pub(super) fn wait_for_json_file(path: &std::path::Path) -> serde_json::Value {
     panic!("usage file was not written at {}", path.display());
 }
 
+pub(super) fn wait_for_text_file(path: &std::path::Path) -> String {
+    let mut last_error = None;
+    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
+        match fs::read_to_string(path) {
+            Ok(contents) => return contents,
+            Err(error) => last_error = Some(error),
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!(
+        "text file was not readable at {}: {}",
+        path.display(),
+        last_error.expect("a failed read should record an error")
+    );
+}
+
 pub(super) struct TestGuardrailWebhook {
     pub(super) addr: SocketAddr,
     _thread: thread::JoinHandle<()>,

@@ -71,6 +71,20 @@ fn assert_files_exclude_canaries(root: &Path, canaries: &[&str]) {
             assert_files_exclude_canaries(&path, canaries);
             continue;
         }
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("lock"))
+        {
+            assert_eq!(
+                fs::metadata(&path)
+                    .unwrap_or_else(|error| panic!("failed to stat {}: {error}", path.display()))
+                    .len(),
+                0,
+                "gateway lock files must remain empty"
+            );
+            continue;
+        }
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,

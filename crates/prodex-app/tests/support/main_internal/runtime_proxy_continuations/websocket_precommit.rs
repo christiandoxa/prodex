@@ -3,6 +3,8 @@ use super::*;
 #[test]
 fn runtime_proxy_realtime_forwards_multiple_client_frames_before_upstream_output() {
     let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_websocket_realtime_sideband(),
         "main",

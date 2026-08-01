@@ -458,9 +458,9 @@ mod tests {
     }
 
     fn write_fake_kiro_binary(root: &Path) -> PathBuf {
-        let script = root.join("fake-kiro-cli");
-        fs::write(
-            &script,
+        crate::test_support::write_test_python_executable(
+            root,
+            "fake-kiro-cli",
             r#"#!/usr/bin/env python3
 import json, os, sys
 assert os.environ['KIRO_DATA_DIR'] == os.environ['Q_CLI_DATA_DIR']
@@ -481,15 +481,6 @@ if len(sys.argv) > 2 and sys.argv[1] == 'whoami' and sys.argv[2] == '--format':
 sys.exit(1)
 "#,
         )
-        .expect("fake kiro binary should be written");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&script).expect("metadata").permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&script, perms).expect("permissions should update");
-        }
-        script
     }
 
     #[test]

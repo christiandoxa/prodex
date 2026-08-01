@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3579,
+    "maxLines": 3558,
     "reason": "Local rewrite cross-provider regression coverage remains capped after harness-mode cases and governance-failure behavior moved to focused sibling modules; provider-specific cases continue to split from the shared harness."
   },
   {
@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
-    "maxLines": 1590,
+    "maxLines": 1582,
     "reason": "Gateway usage regressions cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; realtime and guardrail-failure coverage have moved to focused sibling modules."
   },
   {

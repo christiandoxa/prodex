@@ -41,9 +41,9 @@ fn kiro_streaming_queue_applies_backpressure() {
 }
 
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-compact");
-    fs::write(
-        &script,
+    crate::test_support::write_test_python_executable(
+        root,
+        "fake-kiro-compact",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -60,15 +60,6 @@ print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
-    .expect("fake kiro compact agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 #[test]

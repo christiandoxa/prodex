@@ -23,9 +23,9 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
 }
 
 fn write_fake_kiro_acp_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro");
-    fs::write(
-        &script,
+    crate::test_support::write_test_python_executable(
+        root,
+        "fake-kiro",
         r#"#!/usr/bin/env python3
 import json, sys
 first = json.loads(sys.stdin.readline())
@@ -37,21 +37,12 @@ print(json.dumps({"jsonrpc":"2.0","method":"_kiro.dev/subagent/list_update","par
 print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"},{"modelId":"claude-sonnet-4.5","name":"claude-sonnet-4.5"}]}},"id":1}), flush=True)
 "#,
     )
-    .expect("fake agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
 
 fn write_fake_kiro_prompt_agent(root: &Path) -> std::path::PathBuf {
-    let script = root.join("fake-kiro-prompt");
-    fs::write(
-        &script,
+    crate::test_support::write_test_python_executable(
+        root,
+        "fake-kiro-prompt",
         r#"#!/usr/bin/env python3
 import json, os, sys
 if os.environ.get("EXPECT_MODEL"):
@@ -73,13 +64,4 @@ if os.environ.get("LINGER_AFTER_RESPONSE"):
     time.sleep(5)
 "#,
     )
-    .expect("fake prompt agent should be written");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("permissions should update");
-    }
-    script
 }
