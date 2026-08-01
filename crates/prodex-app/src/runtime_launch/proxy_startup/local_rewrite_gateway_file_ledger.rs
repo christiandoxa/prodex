@@ -490,6 +490,7 @@ mod tests {
             serde_json::to_writer(&mut file, &entry).unwrap();
             file.write_all(b"\n").unwrap();
         }
+        drop(file);
         let event = RuntimeProviderGatewaySpendEvent {
             event: "gateway_spend",
             phase: "response",
@@ -561,6 +562,7 @@ mod tests {
             serde_json::to_writer(&mut file, &entry).unwrap();
             file.write_all(b"\n").unwrap();
         }
+        drop(file);
 
         assert!(
             runtime_gateway_file_ledger_reconcile_response(

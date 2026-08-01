@@ -196,8 +196,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         rejected_root_token_body["error"]["code"],
         "invalid_gateway_key"
     );
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("invalid virtual-key auth should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"auth_failed""#));
     assert!(audit_log.contains(r#""reason":"invalid_gateway_key""#));
@@ -1137,8 +1136,7 @@ fn gateway_budget_id_request_budget_is_shared_across_virtual_keys() {
     let rejected: serde_json::Value = rejected.json().expect("rejection should be json");
     assert_eq!(rejected["error"]["code"], "request_budget_exceeded");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("request-budget denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"request_budget_exceeded""#));
@@ -1217,8 +1215,7 @@ fn gateway_rejects_oversized_request_body_before_upstream() {
             .is_err()
     );
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("oversized request rejection should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"request_body_too_large""#));
     assert!(audit_log.contains(r#""reason":"request_body_too_large""#));
@@ -1288,8 +1285,7 @@ fn gateway_data_plane_legacy_token_auth_failures_are_audited_without_token_leaka
         .expect("invalid auth request should be sent");
     assert_eq!(invalid.status().as_u16(), 401);
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("data-plane auth failures should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"auth_failed""#));
     assert!(audit_log.contains(r#""reason":"missing_or_invalid_gateway_bearer_token""#));
@@ -1356,8 +1352,7 @@ fn gateway_virtual_key_model_policy_denials_are_audited_without_token_leakage() 
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "model_not_allowed");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("model policy denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"model_not_allowed""#));
@@ -1432,8 +1427,7 @@ fn gateway_virtual_key_rpm_limit_denials_are_audited_without_token_leakage() {
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "rpm_limit_exceeded");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("RPM denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"rpm_limit_exceeded""#));
@@ -1499,8 +1493,7 @@ fn gateway_virtual_key_tpm_limit_denials_are_audited_without_token_leakage() {
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "tpm_limit_exceeded");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("TPM denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"tpm_limit_exceeded""#));
@@ -1580,8 +1573,7 @@ fn gateway_virtual_key_spend_budget_denials_are_audited_without_token_leakage() 
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "budget_exceeded");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("spend-budget denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"budget_exceeded""#));

@@ -234,8 +234,7 @@ fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state
         .expect("legacy Claude config should serialize"),
     )
     .expect("legacy Claude config should write");
-    let _home_guard =
-        TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+    let (_home_guard, _userprofile_guard) = TestEnvVarGuard::set_home(&home_dir);
 
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -286,8 +285,7 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
     let temp_dir = TestDir::isolated();
     let home_dir = temp_dir.path.join("home");
     fs::create_dir_all(&home_dir).expect("home dir should exist");
-    let _home_guard =
-        TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+    let (_home_guard, _userprofile_guard) = TestEnvVarGuard::set_home(&home_dir);
 
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),

@@ -93,6 +93,39 @@ impl TestEnvVarGuard {
     }
 }
 
+pub(crate) fn write_test_python_executable(
+    root: &Path,
+    name: &str,
+    body: &str,
+) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let script = root.join(format!("{name}.py"));
+        std::fs::write(&script, body).expect("test Python script should be written");
+        let launcher = root.join(format!("{name}.cmd"));
+        std::fs::write(
+            &launcher,
+            format!("@echo off\r\npython \"%~dp0{name}.py\" %*\r\n"),
+        )
+        .expect("test Python launcher should be written");
+        launcher
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = root.join(name);
+        std::fs::write(&script, body).expect("test Python script should be written");
+        let mut permissions = std::fs::metadata(&script)
+            .expect("test Python script metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions)
+            .expect("test Python script permissions should update");
+        script
+    }
+}
+
 impl Drop for TestEnvVarGuard {
     fn drop(&mut self) {
         if let Some(key) = self.key {
