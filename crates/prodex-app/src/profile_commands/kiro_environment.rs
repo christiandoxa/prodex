@@ -67,6 +67,11 @@ mod tests {
         assert_eq!(env[1].0, "Q_CLI_DATA_DIR");
         assert_eq!(env[2].0, "KIRO_TEST_DB_PATH");
         assert_eq!(env[0].1, env[1].1);
-        assert_eq!(env[2].1, "/tmp/kiro-data/data.sqlite3");
+        assert_eq!(
+            env[2].1,
+            Path::new("/tmp/kiro-data")
+                .join("data.sqlite3")
+                .into_os_string()
+        );
     }
 }

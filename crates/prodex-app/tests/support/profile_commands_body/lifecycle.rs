@@ -67,7 +67,7 @@ fn profile_lifecycle_lock_serializes_recovery_until_owner_drops() {
         let error = file
             .try_lock_exclusive()
             .expect_err("owner should block a second lifecycle writer");
-        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(error.kind(), fs2::lock_contended_error().kind());
         ready_tx
             .send(())
             .expect("lock contention should be reported");

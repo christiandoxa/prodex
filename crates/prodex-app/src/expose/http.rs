@@ -699,16 +699,16 @@ impl Drop for ExposeClientGuard {
 }
 
 pub(super) fn expose_command_builder(command: Option<&str>) -> CommandBuilder {
-    match command {
-        Some(command) if !command.trim().is_empty() => {
-            let shell = env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-            let mut builder = CommandBuilder::new(shell);
-            builder.arg("-lc");
-            builder.arg(command);
-            builder
-        }
-        _ => CommandBuilder::new(env::var("SHELL").unwrap_or_else(|_| "sh".to_string())),
-    }
+    let Some(command) = command.filter(|command| !command.trim().is_empty()) else {
+        return CommandBuilder::new_default_prog();
+    };
+    let mut builder = CommandBuilder::new(CommandBuilder::new_default_prog().get_shell());
+    #[cfg(windows)]
+    builder.arg("/C");
+    #[cfg(not(windows))]
+    builder.arg("-lc");
+    builder.arg(command);
+    builder
 }
 
 pub(super) fn expose_broadcast_output(

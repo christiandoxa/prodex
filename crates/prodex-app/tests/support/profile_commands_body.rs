@@ -313,11 +313,12 @@ impl Drop for ProfileCommandsTestDir {
 }
 
 struct ProfileCommandsTestEnv {
-    _home_guards: (TestEnvVarGuard, TestEnvVarGuard),
     _copilot_home_guard: TestEnvVarGuard,
     _kiro_bin_guard: TestEnvVarGuard,
+    _kiro_db_guard: TestEnvVarGuard,
     _prodex_guard: TestEnvVarGuard,
     _shared_override_guard: TestEnvVarGuard,
+    _home_guards: (TestEnvVarGuard, TestEnvVarGuard),
 }
 
 impl ProfileCommandsTestEnv {
@@ -328,6 +329,7 @@ impl ProfileCommandsTestEnv {
         profile_commands_create_private_test_dir(&prodex_home);
         profile_commands_create_private_test_dir(&prodex_home.join("profiles"));
         Self {
+            // Acquire the outer env lock first; this field is declared last so it drops last.
             _home_guards: TestEnvVarGuard::set_home(&home),
             _copilot_home_guard: TestEnvVarGuard::set(
                 "COPILOT_HOME",
@@ -336,6 +338,10 @@ impl ProfileCommandsTestEnv {
             _kiro_bin_guard: TestEnvVarGuard::set(
                 "PRODEX_KIRO_BIN",
                 &root.join("missing-kiro-cli").display().to_string(),
+            ),
+            _kiro_db_guard: TestEnvVarGuard::set(
+                "KIRO_TEST_DB_PATH",
+                &home.join(".local/share/kiro-cli/data.sqlite3").display().to_string(),
             ),
             _prodex_guard: TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string()),
             _shared_override_guard: TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME"),
