@@ -250,12 +250,18 @@ fn scripted_backend_fault_explicit_quota_429_retries_ready_profile_past_soft_inf
                 "main-account",
             ),
         ]));
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
     let mut harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
         .active_profile("main")
         .current_profile("main")
         .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
         .build();
     let tuning = &mut std::sync::Arc::make_mut(&mut harness.shared_mut().runtime_config).tuning;
     tuning.profile_inflight_soft_limit = 4;
