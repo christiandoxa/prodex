@@ -19,6 +19,7 @@
       "chore(ci): record stall-free 0.377.0 churn",
       "fix: make Windows runtime tests deterministic",
       "chore(ci): record deterministic 0.377.0 runtime churn",
+      "chore(ci): cover deterministic 0.377.0 runtime range",
       "chore(release): release 0.377.0"
     ],
     "caps": {
@@ -48,7 +49,8 @@
       "chore(ci): record final verified 0.377.0 churn",
       "chore(ci): record stall-free 0.377.0 churn",
       "fix: make Windows runtime tests deterministic",
-      "chore(ci): record deterministic 0.377.0 runtime churn"
+      "chore(ci): record deterministic 0.377.0 runtime churn",
+      "chore(ci): cover deterministic 0.377.0 runtime range"
     ],
     "caps": {
       "maxFiles": 180,
@@ -72,7 +74,8 @@
       "fix: eliminate Windows test stalls",
       "chore(ci): record stall-free 0.377.0 churn",
       "fix: make Windows runtime tests deterministic",
-      "chore(ci): record deterministic 0.377.0 runtime churn"
+      "chore(ci): record deterministic 0.377.0 runtime churn",
+      "chore(ci): cover deterministic 0.377.0 runtime range"
     ],
     "caps": {
       "maxFiles": 80,
@@ -81,6 +84,21 @@
       "maxFileLines": 112
     },
     "reason": "Reviewed the bounded Windows application-test portability fixes for path discovery, executable fixtures, line endings, socket behavior, HTTP half-close behavior, SQLite teardown, file-lock handling, timeout policy, native home discovery, environment restoration, deterministic async log flushing, realtime websocket timeout handoff, PTY writer shutdown, and failure-safe one-shot server teardown; verified by the affected shard suites, the locked full workspace suite, strict Clippy, size ratchets, Gitleaks, and tracked-diff identifier scanning."
+  },
+  {
+    "id": "deterministic-windows-runtime-0.377.0",
+    "requiredSubjects": [
+      "fix: make Windows runtime tests deterministic",
+      "chore(ci): record deterministic 0.377.0 runtime churn",
+      "chore(ci): cover deterministic 0.377.0 runtime range"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 35,
+      "maxLines": 320,
+      "maxFileLines": 60
+    },
+    "reason": "Reviewed the final deterministic Windows runtime range covering async log flushes, realtime websocket timeout handoff, and PTY writer shutdown; verified with the complete prodex-app suite, focused hosted-run reproductions, strict preflight, size ratchets, Gitleaks, and tracked-diff identifier scanning."
   },
   {
     "id": "final-windows-application-portability-0.377.0",
