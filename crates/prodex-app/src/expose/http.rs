@@ -279,7 +279,8 @@ pub(super) fn expose_write_http_response(
     }
     stream.write_all(b"\r\n")?;
     stream.write_all(&response.body)?;
-    stream.flush()
+    stream.flush()?;
+    stream.shutdown(std::net::Shutdown::Write)
 }
 
 pub(super) fn expose_http_reason(status: u16) -> &'static str {
