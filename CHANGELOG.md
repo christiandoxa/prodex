@@ -2,6 +2,20 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.377.0 - 2026-08-01
+
+### Runtime
+
+- Make Windows runtime tests deterministic (`5cb36da`)
+
+### Misc
+
+- Eliminate Windows test stalls (`d716574`)
+- Finish Windows test portability (`7d440ec`)
+- Complete Windows CI portability (`c79b524`)
+- Close audited cross-platform quality gaps (`a8320e5`)
+- Close audited reliability gaps (`805983d`)
+
 ## 0.376.0 - 2026-07-31
 
 - No grouped changes.
@@ -94,9 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Support Codex 0.146.0 (`48c4b94`)
-
-## 0.365.0 - 2026-07-28
-
-### Misc
-
-- Complete atomic mutation lifecycle (`5a957e6`)
