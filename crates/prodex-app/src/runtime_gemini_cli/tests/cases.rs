@@ -7,9 +7,9 @@ use super::{
     runtime_super_gemini_cli_oauth_env, runtime_super_gemini_cli_system_settings_from,
     runtime_super_native_cli_launch_args, super_native_cli_dry_run_report,
 };
-use crate::{
-    AppPaths, GeminiOAuthSecret, RuntimeLaunchStrategy, TestEnvVarGuard, write_gemini_oauth_secret,
-};
+#[cfg(unix)]
+use crate::TestEnvVarGuard;
+use crate::{AppPaths, GeminiOAuthSecret, RuntimeLaunchStrategy, write_gemini_oauth_secret};
 use prodex_cli::CodexRuntimeFeatureArgs;
 use std::ffi::OsString;
 use std::time::{SystemTime, UNIX_EPOCH};

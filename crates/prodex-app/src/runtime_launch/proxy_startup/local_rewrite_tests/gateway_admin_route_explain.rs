@@ -4,7 +4,7 @@ use super::{
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, TestUpstream, app_paths_for_root,
     runtime_gateway_test_admin_token, runtime_gateway_test_secret,
-    start_runtime_local_rewrite_proxy, temp_root,
+    start_runtime_local_rewrite_proxy, temp_root, wait_for_text_file,
 };
 use crate::TestEnvVarGuard;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_admin_route_explain::RUNTIME_GATEWAY_ROUTE_EXPLAIN_MAX_BODY_BYTES;
@@ -251,7 +251,7 @@ fn gateway_route_explain_requires_admin_auth_and_allows_scoped_viewer_and_admin(
         unscoped.json::<serde_json::Value>().unwrap()["current_load_included"],
         true
     );
-    let audit = fs::read_to_string(audit_dir.join("prodex-audit.log")).unwrap();
+    let audit = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit.contains(&format!(r#""tenant_id":"{tenant_id}""#)));
     assert!(audit.contains(r#""control_plane_action":"control_plane.route.explain""#));
 }
@@ -593,7 +593,7 @@ fn gateway_route_explain_does_not_mutate_counters_state_or_emit_sensitive_data()
     assert_eq!(fs::read(&usage_file).ok(), usage_file_before);
     assert_eq!(fs::read(&ledger_file).ok(), ledger_file_before);
 
-    let audit = fs::read_to_string(audit_dir.join("prodex-audit.log")).unwrap();
+    let audit = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit.contains(r#""action":"route_explain""#));
     assert!(audit.contains(r#""control_plane_action":"control_plane.route.explain""#));
     assert!(audit.contains(r#""selected_route_id":"candidate-0001""#));

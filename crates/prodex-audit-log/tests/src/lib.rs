@@ -75,6 +75,57 @@ fn append_audit_event_writes_json_line() {
 }
 
 #[test]
+fn audit_reader_waits_for_an_active_writer() {
+    let dir = temp_dir("reader-lock");
+    let path = dir.join(AUDIT_LOG_FILE_NAME);
+    append_audit_event(
+        &path,
+        "profile",
+        "add",
+        "success",
+        serde_json::json!({"profile_name": "main"}),
+    )
+    .unwrap();
+
+    let writer = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    writer.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let read_path = path.clone();
+    let reader = std::thread::spawn(move || {
+        tx.send(read_recent_audit_events(
+            &read_path,
+            &AuditLogQuery {
+                tail: 1,
+                component: None,
+                action: None,
+                outcome: None,
+            },
+        ))
+        .unwrap();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "reader must wait for the writer lock"
+    );
+    drop(writer);
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .unwrap()
+            .len(),
+        1
+    );
+    reader.join().unwrap();
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn read_recent_audit_events_applies_tail_and_filters() {
     let dir = temp_dir("query");
     let path = dir.join(AUDIT_LOG_FILE_NAME);

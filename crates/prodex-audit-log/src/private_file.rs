@@ -40,7 +40,7 @@ pub(super) fn open_private_append_locked(path: &Path) -> Result<fs::File> {
 
 pub(super) fn open_no_follow_read(path: &Path) -> Result<fs::File> {
     #[cfg(unix)]
-    {
+    let file = {
         use std::os::unix::fs::OpenOptionsExt;
 
         OpenOptions::new()
@@ -48,13 +48,17 @@ pub(super) fn open_no_follow_read(path: &Path) -> Result<fs::File> {
             .custom_flags(libc::O_NOFOLLOW)
             .open(path)
             .with_context(|| format!("failed to open {}", path.display()))
-    }
+    }?;
 
     #[cfg(not(unix))]
-    {
+    let file = {
         if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
             anyhow::bail!("refusing audit symlink {}", path.display());
         }
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))
-    }
+    }?;
+
+    file.lock_shared()
+        .with_context(|| format!("failed to lock {} for reading", path.display()))?;
+    Ok(file)
 }

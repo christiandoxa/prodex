@@ -518,8 +518,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             "missing canonical audit {action}"
         );
     }
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("gateway admin audit log should be written");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_admin""#));
     assert!(audit_log.contains(r#""action":"auth_failed""#));
     assert!(audit_log.contains(r#""reason":"admin_authentication_required""#));
@@ -803,8 +802,7 @@ fn gateway_admin_key_mutations_honor_if_match_etag() {
         .expect("stale delete response should be json");
     assert_eq!(stale_delete["error"]["code"], "precondition_failed");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("precondition denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_admin""#));
     assert!(audit_log.contains(r#""action":"request_denied""#));
     assert!(audit_log.contains(r#""reason":"precondition_failed""#));
@@ -904,8 +902,7 @@ fn gateway_admin_policy_backed_key_mutation_denials_are_audited() {
     let delete: serde_json::Value = delete.json().expect("delete response should be json");
     assert_eq!(delete["error"]["code"], "gateway_key_read_only");
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("read-only mutation denials should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_admin""#));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"gateway_key_read_only""#));

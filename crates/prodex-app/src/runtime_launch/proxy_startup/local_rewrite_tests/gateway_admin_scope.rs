@@ -1,6 +1,5 @@
 use super::*;
 use crate::TestEnvVarGuard;
-use std::fs;
 
 #[test]
 fn gateway_admin_token_key_prefix_scope_limits_key_access() {
@@ -215,8 +214,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
         .expect("scoped forbidden delete key request should be sent");
     assert_eq!(scoped_delete_forbidden.status().as_u16(), 403);
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("gateway admin audit log should be written");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""reason":"scope_forbidden""#));
     assert!(audit_log.contains(r#""resource":"key""#));
@@ -492,8 +490,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
         .expect("team-scoped forbidden SCIM delete request should be sent");
     assert_eq!(forbidden_scim_delete.status().as_u16(), 403);
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("gateway admin audit log should be written");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""action":"authorization_denied""#));
     assert!(audit_log.contains(r#""resource":"scim_user""#));
     assert!(audit_log.contains(r#""action":"update_scim_user""#));

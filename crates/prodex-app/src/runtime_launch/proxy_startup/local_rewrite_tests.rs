@@ -3152,8 +3152,7 @@ fn gateway_request_guardrail_blocked_keywords_are_audited_without_token_leakage(
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "blocked_keyword");
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("guardrail denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"guardrail_blocked""#));
     assert!(audit_log.contains(r#""reason":"blocked_keyword""#));
@@ -3225,8 +3224,7 @@ fn gateway_response_guardrail_blocked_output_is_audited_without_token_or_value_l
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "policy_violation");
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("response guardrail denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
     assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
@@ -3308,8 +3306,7 @@ fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_
     assert!(body.contains(r#""code":"blocked_output_keyword""#));
     assert!(!body.contains("do-not-stream-sensitive-marker"));
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("stream guardrail denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
     assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
@@ -3380,8 +3377,7 @@ fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "policy_violation");
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("webhook denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
     assert!(audit_log.contains(r#""phase":"pre""#));
@@ -3456,8 +3452,7 @@ fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "policy_violation");
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("webhook response denial should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"response_guardrail_webhook_blocked""#));
     assert!(audit_log.contains(r#""phase":"post""#));
@@ -3532,8 +3527,7 @@ fn gateway_pre_guardrail_webhook_failure_redacts_url_and_is_audited() {
     let denied: serde_json::Value = denied.json().expect("denied response should be json");
     assert_eq!(denied["error"]["code"], "policy_violation");
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("webhook failure should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
     assert!(audit_log.contains(r#""phase":"pre""#));
     assert!(audit_log.contains(r#""reason":"webhook_error""#));

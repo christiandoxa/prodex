@@ -139,8 +139,7 @@ fn gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_lea
             .is_err()
     );
 
-    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("presidio failure should be audited");
+    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"presidio_redaction_failed""#));
     assert!(audit_log.contains(r#""reason":"presidio_redaction_failed""#));

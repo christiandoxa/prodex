@@ -271,7 +271,7 @@ fn finish_login_into_profile_locked(
     Ok(status)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::{AppStateIoExt, TestEnvVarGuard, create_codex_home_if_missing};
@@ -279,7 +279,6 @@ mod tests {
     use std::sync::mpsc;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    #[cfg(unix)]
     #[test]
     fn named_login_rejects_profile_recreated_during_external_login() {
         use std::os::unix::fs::PermissionsExt;
