@@ -8,15 +8,17 @@
       "ci: balance application test shards",
       "test: make Windows application coverage portable",
       "test: finish Windows application portability",
+      "fix: complete Windows CI portability",
       "chore(ci): record reviewed 0.377.0 churn",
       "chore(ci): record reviewed 0.377.0 Windows churn",
       "chore(ci): record final 0.377.0 Windows churn",
+      "chore(ci): record completed 0.377.0 Windows churn",
       "chore(release): release 0.377.0"
     ],
     "caps": {
-      "maxFiles": 154,
-      "maxBehaviorFiles": 136,
-      "maxLines": 12900,
+      "maxFiles": 157,
+      "maxBehaviorFiles": 139,
+      "maxLines": 13100,
       "maxFileLines": 760
     },
     "reason": "Reviewed the complete 0.377.0 source-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata; source verification is recorded by the matching feature allowance, while final publication remains gated by source CI and the standalone artifact build, malware scan, checksums, SBOM, provenance, and GitHub Release verification."
@@ -30,14 +32,16 @@
       "ci: balance application test shards",
       "test: make Windows application coverage portable",
       "test: finish Windows application portability",
+      "fix: complete Windows CI portability",
       "chore(ci): record reviewed 0.377.0 churn",
       "chore(ci): record reviewed 0.377.0 Windows churn",
-      "chore(ci): record final 0.377.0 Windows churn"
+      "chore(ci): record final 0.377.0 Windows churn",
+      "chore(ci): record completed 0.377.0 Windows churn"
     ],
     "caps": {
-      "maxFiles": 140,
-      "maxBehaviorFiles": 134,
-      "maxLines": 12500,
+      "maxFiles": 143,
+      "maxBehaviorFiles": 137,
+      "maxLines": 12650,
       "maxFileLines": 759
     },
     "reason": "Reviewed the whole-repository production audit covering crash-safe profile lifecycle recovery, optional-tool planning and cleanup, SIEM schema and lease enforcement, quota refresh, context audit bounds, Copilot vision compatibility, Windows terminal behavior, and parallel Linux and Windows test execution; verified with focused regressions, the full locked all-features suite, live PostgreSQL proof, strict Clippy, security and dependency guards, an optimized locked build, and tracked-diff identifier scanning."
@@ -48,15 +52,17 @@
       "test: make Windows application coverage portable",
       "chore(ci): record reviewed 0.377.0 Windows churn",
       "test: finish Windows application portability",
-      "chore(ci): record final 0.377.0 Windows churn"
+      "chore(ci): record final 0.377.0 Windows churn",
+      "fix: complete Windows CI portability",
+      "chore(ci): record completed 0.377.0 Windows churn"
     ],
     "caps": {
-      "maxFiles": 37,
-      "maxBehaviorFiles": 37,
-      "maxLines": 600,
+      "maxFiles": 41,
+      "maxBehaviorFiles": 41,
+      "maxLines": 760,
       "maxFileLines": 94
     },
-    "reason": "Reviewed the bounded Windows application-test portability fixes for path discovery, executable fixtures, line endings, socket behavior, SQLite teardown, file-lock handling, timeout policy, and environment restoration; verified by the affected shard suites, the locked full workspace suite, strict Clippy, size ratchets, Gitleaks, and tracked-diff identifier scanning."
+    "reason": "Reviewed the bounded Windows application-test portability fixes for path discovery, executable fixtures, line endings, socket behavior, HTTP half-close behavior, SQLite teardown, file-lock handling, timeout policy, native home discovery, environment restoration, and failure-safe one-shot server teardown; verified by the affected shard suites, the locked full workspace suite, strict Clippy, size ratchets, Gitleaks, and tracked-diff identifier scanning."
   },
   {
     "id": "final-windows-application-portability-0.377.0",
