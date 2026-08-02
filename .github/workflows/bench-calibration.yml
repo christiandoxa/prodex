@@ -80,7 +80,7 @@ jobs:
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Cache Rust dependencies
         if: ${{ inputs.log_source == 'fresh-benchmark' }}

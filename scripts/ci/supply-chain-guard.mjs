@@ -352,9 +352,9 @@ export function validateWorkflow(filePath, contents) {
     }
     if (target.startsWith("dtolnay/rust-toolchain@")) rustActions += 1;
   }
-  const exactToolchains = contents.match(/^\s*toolchain:\s*1\.97\.0\s*$/gmu)?.length ?? 0;
+  const exactToolchains = contents.match(/^\s*toolchain:\s*1\.97\.1\s*$/gmu)?.length ?? 0;
   if (rustActions !== exactToolchains) {
-    violations.push(`${filePath}: every rust-toolchain action must install exact toolchain 1.97.0`);
+    violations.push(`${filePath}: every rust-toolchain action must install exact toolchain 1.97.1`);
   }
   for (const match of contents.matchAll(CONTAINER)) {
     if (!match[3]) {
@@ -369,7 +369,7 @@ export function validateWorkflow(filePath, contents) {
   return violations;
 }
 
-export function validateDockerfile(contents, rustToolchain = "1.97.0") {
+export function validateDockerfile(contents, rustToolchain = "1.97.1") {
   const fromLines = contents.split(/\r?\n/u).filter((line) => /^FROM\s+/iu.test(line));
   const violations = fromLines
     .filter((line) => !/^FROM\s+(?:--platform=\S+\s+)?\S+:[^@\s]+@sha256:[0-9a-f]{64}(?:\s+AS\s+\S+)?$/iu.test(line))
@@ -449,12 +449,12 @@ function selfTest() {
   );
   assert.equal(validateWorkflow("bad.yml", "run: cargo test --workspace\n").length, 1);
   assert.deepEqual(
-    validateDockerfile("FROM rust:1.97.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n"),
+    validateDockerfile("FROM rust:1.97.1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n"),
     [],
   );
   assert.equal(validateDockerfile("FROM rust:latest\n").length, 2);
   assert.equal(
-    validateDockerfile("FROM rust:1.97.1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n").length,
+    validateDockerfile("FROM rust:1.97.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS builder\n").length,
     1,
   );
   assert.deepEqual(
@@ -736,7 +736,7 @@ async function main() {
   }
   violations.push(...validateCompose(await fs.readFile(path.join(repoRoot, "compose.yaml"), "utf8")));
 
-  for (const marker of ['channel = "1.97.0"', 'components = ["clippy", "rustfmt"]']) {
+  for (const marker of ['channel = "1.97.1"', 'components = ["clippy", "rustfmt"]']) {
     if (!toolchain.includes(marker)) violations.push(`rust-toolchain.toml: missing ${marker}`);
   }
   await fs.access(path.join(repoRoot, "Cargo.lock"));
