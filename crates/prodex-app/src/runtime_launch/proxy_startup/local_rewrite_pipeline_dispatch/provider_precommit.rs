@@ -1,4 +1,6 @@
-use super::super::super::local_rewrite_upstream::RuntimeLocalRewritePrefetchChunk;
+use super::super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewritePrefetchChunk,
+};
 use super::super::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult, RuntimeProviderBridgeKind, runtime_provider_error_class,
@@ -154,22 +156,7 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
     let RuntimeLocalRewriteUpstreamResponse::Live(live) = &mut response.response else {
         return Ok(());
     };
-    if live.native_anthropic_messages
-        || !matches!(
-            provider,
-            RuntimeProviderBridgeKind::Anthropic
-                | RuntimeProviderBridgeKind::DeepSeek
-                | RuntimeProviderBridgeKind::Gemini
-        )
-        || !responses_route
-        || !(200..300).contains(&live.status)
-        || !live
-            .headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
-        || !live.prefix.is_empty()
-    {
+    if !runtime_local_rewrite_should_prefetch_provider_response(live, provider, responses_route) {
         return Ok(());
     }
 
@@ -216,4 +203,26 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
     live.prefix = prefix;
     live.set_sse_continuation(prefetch);
     Ok(())
+}
+
+fn runtime_local_rewrite_should_prefetch_provider_response(
+    live: &RuntimeLocalRewriteLiveResponse,
+    provider: RuntimeProviderBridgeKind,
+    responses_route: bool,
+) -> bool {
+    !live.native_anthropic_messages
+        && matches!(
+            provider,
+            RuntimeProviderBridgeKind::Anthropic
+                | RuntimeProviderBridgeKind::DeepSeek
+                | RuntimeProviderBridgeKind::Gemini
+        )
+        && responses_route
+        && (200..300).contains(&live.status)
+        && live
+            .headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+        && live.prefix.is_empty()
 }

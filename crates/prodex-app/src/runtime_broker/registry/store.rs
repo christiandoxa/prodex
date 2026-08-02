@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::Path;
 use zeroize::Zeroizing;
+
+mod legacy;
 
 use crate::{
     AppPaths, RuntimeBrokerRegistry, acquire_json_file_lock, delete_runtime_secret,
@@ -16,25 +17,6 @@ use secret_store::SecretValue;
 
 const RUNTIME_BROKER_CAPABILITY_MAX_BYTES: u64 =
     prodex_runtime_broker::RUNTIME_BROKER_CAPABILITY_MAX_BYTES as u64;
-const RUNTIME_BROKER_REGISTRY_MAX_BYTES: u64 = 64 * 1024;
-
-#[derive(Deserialize)]
-struct LegacyRuntimeBrokerRegistry {
-    #[serde(deserialize_with = "deserialize_runtime_broker_secret")]
-    instance_token: RuntimeBrokerSecret,
-    #[serde(deserialize_with = "deserialize_runtime_broker_secret")]
-    admin_token: RuntimeBrokerSecret,
-}
-
-fn deserialize_runtime_broker_secret<'de, D>(
-    deserializer: D,
-) -> std::result::Result<RuntimeBrokerSecret, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = String::deserialize(deserializer)?;
-    RuntimeBrokerSecret::new(value).map_err(serde::de::Error::custom)
-}
 
 pub(crate) fn load_runtime_broker_registry(
     paths: &AppPaths,
@@ -71,34 +53,15 @@ fn load_runtime_broker_registry_unlocked(
     if !path.exists() && !backup_path.exists() {
         return Ok(None);
     }
-    let primary_has_legacy_secrets = runtime_broker_registry_has_legacy_secrets(&path);
-    let backup_has_legacy_secrets = runtime_broker_registry_has_legacy_secrets(&backup_path);
+    let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path);
+    let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path);
     if backup_has_legacy_secrets
         && !primary_has_legacy_secrets
-        && runtime_broker_registry_file_is_current(&path)
+        && legacy::registry_file_is_current(&path)
     {
         remove_runtime_broker_file_checked(&backup_path)?;
     } else if primary_has_legacy_secrets || backup_has_legacy_secrets {
-        if let Ok(legacy) =
-            load_json_file_with_backup::<LegacyRuntimeBrokerRegistry>(&path, &backup_path)
-        {
-            let LegacyRuntimeBrokerRegistry {
-                instance_token,
-                admin_token,
-            } = legacy.value;
-            drop(instance_token);
-            drop(admin_token);
-        }
-        remove_runtime_broker_registry_files_checked(paths, broker_key)?;
-        let capability_path = runtime_broker_capability_file_path(paths, broker_key);
-        if fs::symlink_metadata(&capability_path).is_ok() {
-            if load_runtime_broker_capability_record(paths, broker_key).is_ok() {
-                remove_runtime_broker_capability_unlocked(paths, broker_key);
-            }
-            if fs::symlink_metadata(&capability_path).is_ok() {
-                anyhow::bail!("failed to remove legacy runtime broker capability");
-            }
-        }
+        legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
     let current = load_json_file_with_backup::<RuntimeBrokerRegistry>(&path, &backup_path);
@@ -107,35 +70,6 @@ fn load_runtime_broker_registry_unlocked(
         Err(_err) if !path.exists() && !backup_path.exists() => Ok(None),
         Err(err) => Err(err),
     }
-}
-
-fn runtime_broker_registry_has_legacy_secrets(path: &Path) -> bool {
-    let Some(bytes) = read_runtime_broker_registry_bytes(path) else {
-        return false;
-    };
-    prodex_runtime_broker::runtime_broker_registry_contains_legacy_secrets(bytes)
-}
-
-fn runtime_broker_registry_file_is_current(path: &Path) -> bool {
-    read_runtime_broker_registry_bytes(path)
-        .and_then(|bytes| serde_json::from_slice::<RuntimeBrokerRegistry>(&bytes).ok())
-        .is_some()
-}
-
-fn read_runtime_broker_registry_bytes(path: &Path) -> Option<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if !metadata.file_type().is_file() || metadata.len() > RUNTIME_BROKER_REGISTRY_MAX_BYTES {
-        return None;
-    }
-    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
-    if !prodex_core::opened_file_matches_path(&metadata, path, &file).ok()? {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    file.take(RUNTIME_BROKER_REGISTRY_MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    (bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES).then_some(bytes)
 }
 #[cfg(test)]
 pub(crate) fn save_runtime_broker_registry(

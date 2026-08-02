@@ -667,7 +667,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
-        process_birth_identity: None,
+        process_birth_identity: runtime_process_birth_identity(child.id()),
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
@@ -676,7 +676,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
-        prodex_version: None,
+        prodex_version: Some(runtime_current_prodex_version().to_string()),
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),

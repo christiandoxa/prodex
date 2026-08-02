@@ -314,12 +314,18 @@ fn scripted_responses_overload_rotates_fresh_request() {
                 "main-account",
             ),
         ]));
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
         .active_profile("main")
         .current_profile("main")
         .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
         .build();
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),

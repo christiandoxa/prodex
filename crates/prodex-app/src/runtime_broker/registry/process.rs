@@ -8,7 +8,9 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 #[cfg(test)]
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(target_os = "linux", test))]
+use std::time::Instant;
 
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -318,21 +320,20 @@ fn windows_open_process(pid: u32) -> io::Result<OwnedHandle> {
 
 #[cfg(windows)]
 fn windows_process_birth_identity(handle: &OwnedHandle) -> Option<String> {
-    use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::GetProcessTimes;
 
-    let mut creation_time = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
+    let mut creation_time = FILETIME::default();
+    let mut exit_time = FILETIME::default();
+    let mut kernel_time = FILETIME::default();
+    let mut user_time = FILETIME::default();
     let success = unsafe {
         GetProcessTimes(
             handle.as_raw_handle(),
             &mut creation_time,
-            null_mut(),
-            null_mut(),
-            null_mut(),
+            &mut exit_time,
+            &mut kernel_time,
+            &mut user_time,
         )
     } != 0;
     success.then(|| {
