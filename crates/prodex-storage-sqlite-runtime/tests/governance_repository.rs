@@ -1119,23 +1119,27 @@ fn outbox_retries_with_stable_id_then_dead_letters() {
         Err(GovernanceRepositoryError::InvalidInput)
     );
     let retry = SiemOutboxRetryPolicy::bounded(3, 100, 1_000).unwrap();
+    let started_at = std::time::Instant::now();
+    let logical_now = |cumulative_backoff_ms: u64| {
+        1_000 + u64::try_from(started_at.elapsed().as_millis()).unwrap() + cumulative_backoff_ms
+    };
     let mut observed = Vec::new();
     let first = repository
-        .run_siem_outbox_batch(1_000, 1, retry, |event| {
+        .run_siem_outbox_batch(logical_now(0), 1, retry, |event| {
             observed.push(event.event_id);
             Err::<(), ()>(())
         })
         .unwrap();
     assert_eq!(first.retried, 1);
     let second = repository
-        .run_siem_outbox_batch(2_000, 1, retry, |event| {
+        .run_siem_outbox_batch(logical_now(100), 1, retry, |event| {
             observed.push(event.event_id);
             Err::<(), ()>(())
         })
         .unwrap();
     assert_eq!(second.retried, 1);
     let third = repository
-        .run_siem_outbox_batch(3_000, 1, retry, |event| {
+        .run_siem_outbox_batch(logical_now(300), 1, retry, |event| {
             observed.push(event.event_id);
             Err::<(), ()>(())
         })
