@@ -2,6 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.379.0 - 2026-08-03
+
+### Deps
+
+- Defer fuzz base64 0.23 (`92469a6`)
+- Defer base64 0.23 (`4718816`)
+- Bump rust from 1.97.0-bookworm to 1.97.1-bookworm (`c599d15`)
+- Bump the fuzz-cargo group in /fuzz with 2 updates (`eea022c`)
+- Bump the cargo group with 3 updates (`f82f090`)
+
+### Misc
+
+- Merge pull request #45 from christiandoxa/dependabot/docker/rust-1.97.1-bookworm (`b1eb26f`)
+- Merge pull request #44 from christiandoxa/dependabot/github_actions/github-actions-5eb7864991 (`17f159b`)
+- Merge pull request #43 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-83702f5d0b (`6db4406`)
+- Merge pull request #42 from christiandoxa/dependabot/cargo/cargo-8ee9223565 (`04bf95a`)
+
 ## 0.378.0 - 2026-08-02
 
 ### Runtime
@@ -98,9 +115,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Log all guardrail webhook failures (`1537859`)
 - Fail readiness on unavailable policy snapshots (`cd6cb74`)
 - Make gateway accounting reconciliation durable (`649b9bf`)
-
-## 0.367.0 - 2026-07-29
-
-### Misc
-
-- Close audited maintenance gaps (`fd0a751`)
