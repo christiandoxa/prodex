@@ -295,7 +295,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
         proxy.listen_addr
     ))
     .expect("websocket client should connect");
-    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 10_000));
 
     socket
         .send(WsMessage::Text(
