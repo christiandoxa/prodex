@@ -2771,6 +2771,7 @@ dependencies = [
  "getrandom 0.4.3",
  "http-body-util",
  "jsonwebtoken",
+ "libc",
  "os_info",
  "portable-pty",
  "postgres",

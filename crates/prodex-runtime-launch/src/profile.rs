@@ -43,9 +43,20 @@ pub fn record_run_selection_at(
     state
         .last_run_selected_at
         .retain(|name, _| state.profiles.contains_key(name));
+    let selected_at = selected_at.max(
+        state
+            .last_run_selected_at
+            .values()
+            .copied()
+            .max()
+            .unwrap_or_default()
+            .saturating_add(1),
+    );
     state
         .last_run_selected_at
-        .insert(profile_name.to_string(), selected_at);
+        .entry(profile_name.to_string())
+        .and_modify(|current| *current = (*current).max(selected_at))
+        .or_insert(selected_at);
 }
 
 pub fn resolve_profile_name(

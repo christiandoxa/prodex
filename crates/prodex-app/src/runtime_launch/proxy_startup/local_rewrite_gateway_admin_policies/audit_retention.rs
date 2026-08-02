@@ -56,19 +56,29 @@ fn audit_retention_holds_response(
     context: &AuditRetentionResponseContext<'_>,
 ) -> tiny_http::ResponseBox {
     if context.captured.method.eq_ignore_ascii_case("GET") {
-        return match context
+        let holds = match context
             .repository
             .list_audit_legal_holds(context.base_action.tenant.tenant_id)
         {
-            Ok(holds) => runtime_gateway_admin_json_response(
-                200,
-                serde_json::json!({
-                    "object": "governance.audit_legal_hold.list",
-                    "data": holds.into_iter().map(audit_legal_hold_json).collect::<Vec<_>>(),
-                }),
-            ),
-            Err(error) => repository_error(error),
+            Ok(holds) => holds,
+            Err(error) => return repository_error(error),
         };
+        if let Err(error) = append_control_plane_audit_command(
+            context.repository,
+            context.base_action,
+            "governance.audit_legal_hold.read",
+            "audit_legal_hold",
+            None,
+        ) {
+            return repository_error(error);
+        }
+        return runtime_gateway_admin_json_response(
+            200,
+            serde_json::json!({
+                "object": "governance.audit_legal_hold.list",
+                "data": holds.into_iter().map(audit_legal_hold_json).collect::<Vec<_>>(),
+            }),
+        );
     }
     if context.captured.method.eq_ignore_ascii_case("POST") {
         return audit_retention_hold_create_response(context);
@@ -177,7 +187,7 @@ fn audit_retention_hold_response(
             context.path,
             context.admin_auth,
             context.base_action,
-            ControlPlaneOperation::AuditRetentionPurge,
+            ControlPlaneOperation::AuditLegalHoldDelete,
         ) {
             Ok(execution) => execution,
             Err(response) => return response,

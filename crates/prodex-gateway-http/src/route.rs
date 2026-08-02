@@ -113,6 +113,9 @@ pub enum GatewayControlPlaneOperation {
     BudgetUpdate,
     BillingRead,
     AuditExport,
+    AuditLegalHoldRead,
+    AuditLegalHoldUpsert,
+    AuditLegalHoldDelete,
     AuditRetentionPurge,
     ConfigurationPublish,
 }
@@ -129,6 +132,7 @@ impl GatewayControlPlaneOperation {
                 | Self::PolicyValidate
                 | Self::BillingRead
                 | Self::AuditExport
+                | Self::AuditLegalHoldRead
         )
     }
 
@@ -494,7 +498,8 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::ScimUserRead
         | GatewayControlPlaneOperation::VirtualKeyRead
         | GatewayControlPlaneOperation::PolicyRead
-        | GatewayControlPlaneOperation::BillingRead => method == GatewayHttpMethod::Get,
+        | GatewayControlPlaneOperation::BillingRead
+        | GatewayControlPlaneOperation::AuditLegalHoldRead => method == GatewayHttpMethod::Get,
         GatewayControlPlaneOperation::RouteExplain
         | GatewayControlPlaneOperation::TenantCreate
         | GatewayControlPlaneOperation::UserInvite
@@ -505,7 +510,8 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::VirtualKeyRotateSecret
         | GatewayControlPlaneOperation::ProviderCredentialRotate
         | GatewayControlPlaneOperation::ConfigurationPublish
-        | GatewayControlPlaneOperation::AuditExport => method == GatewayHttpMethod::Post,
+        | GatewayControlPlaneOperation::AuditExport
+        | GatewayControlPlaneOperation::AuditLegalHoldUpsert => method == GatewayHttpMethod::Post,
         GatewayControlPlaneOperation::PolicyValidate
         | GatewayControlPlaneOperation::PolicyCreate
         | GatewayControlPlaneOperation::PolicySubmit
@@ -525,6 +531,7 @@ fn control_plane_operation_allows_method(
         GatewayControlPlaneOperation::ScimUserDelete
         | GatewayControlPlaneOperation::RoleBindingRevoke
         | GatewayControlPlaneOperation::VirtualKeyDelete
+        | GatewayControlPlaneOperation::AuditLegalHoldDelete
         | GatewayControlPlaneOperation::AuditRetentionPurge => method == GatewayHttpMethod::Delete,
     }
 }

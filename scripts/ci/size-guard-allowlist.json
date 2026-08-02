@@ -166,7 +166,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 1866,
+    "maxLines": 1864,
     "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, and payload-free HTTP flow remain capped after retention and HTTP response helpers moved to focused ownership; the shared revoke publication path stays beside activation to preserve one transactional cache boundary."
   },
   {

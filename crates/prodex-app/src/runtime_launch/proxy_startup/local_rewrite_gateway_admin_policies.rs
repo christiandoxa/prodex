@@ -1694,38 +1694,13 @@ fn audit_export_response(
         Ok(records) => records,
         Err(error) => return repository_error(error),
     };
-    let mut audit_result = Err(GovernanceRepositoryError::AuditChainConflict);
-    for _ in 0..3 {
-        let mut event = base_action.audit_event.clone();
-        event.action = AuditAction::new("control_plane.audit.export");
-        event.resource = AuditResource::new(
-            "governance_audit_export",
-            Some(format!("limit:{limit}")),
-            Some(tenant_id),
-        );
-        let previous_digest = match repository.latest_audit_digest(tenant_id) {
-            Ok(digest) => digest,
-            Err(error) => return repository_error(error),
-        };
-        let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), &event);
-        let command = AuditOutboxWriteCommand {
-            outbox_event_id: AuditEventId::new(),
-            audit: AppendOnlyAuditCommand {
-                storage_key: TenantStorageKey::tenant(tenant_id),
-                event,
-                previous_digest,
-                event_digest,
-            },
-        };
-        audit_result = repository.append_audit_outbox(command);
-        if !matches!(
-            audit_result,
-            Err(GovernanceRepositoryError::AuditChainConflict)
-        ) {
-            break;
-        }
-    }
-    if let Err(error) = audit_result {
+    if let Err(error) = append_control_plane_audit_command(
+        &repository,
+        base_action,
+        "control_plane.audit.export",
+        "governance_audit_export",
+        Some(&format!("limit:{limit}")),
+    ) {
         return repository_error(error);
     }
     runtime_gateway_admin_json_response(
@@ -1819,6 +1794,29 @@ fn control_plane_audit_command(
             event_digest,
         },
     })
+}
+
+fn append_control_plane_audit_command(
+    repository: &RuntimeGovernanceRepository<'_>,
+    action: &ControlPlaneActionPlan,
+    audit_action: &str,
+    resource_kind: &str,
+    resource_id: Option<&str>,
+) -> Result<(), GovernanceRepositoryError> {
+    let mut result = Err(GovernanceRepositoryError::AuditChainConflict);
+    for _ in 0..3 {
+        result = repository.append_audit_outbox(control_plane_audit_command(
+            repository,
+            action,
+            audit_action,
+            resource_kind,
+            resource_id,
+        )?);
+        if !matches!(result, Err(GovernanceRepositoryError::AuditChainConflict)) {
+            break;
+        }
+    }
+    result
 }
 
 fn actor(action: &ControlPlaneActionPlan) -> Principal {

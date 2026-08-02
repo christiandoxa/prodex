@@ -8,13 +8,14 @@ use super::runtime_local_rewrite_buffered_response_parts;
 use super::runtime_local_rewrite_governed_response_with_call_id;
 use super::runtime_local_rewrite_invalid_response;
 use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
+use std::io::Read;
 use std::time::Instant;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_passthrough_rewrite(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
-    response: reqwest::blocking::Response,
+    response: Box<dyn Read + Send>,
     status: u16,
     text_headers: Vec<(String, String)>,
     headers: Vec<(String, Vec<u8>)>,

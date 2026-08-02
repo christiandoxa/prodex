@@ -30,6 +30,7 @@ pub(super) struct RuntimeGeminiRewriteContext<'a> {
     pub(super) prefix: Vec<u8>,
     pub(super) status: u16,
     pub(super) content_type: &'a str,
+    pub(super) upstream_headers: reqwest::header::HeaderMap,
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
@@ -39,13 +40,14 @@ pub(super) struct RuntimeGeminiRewriteContext<'a> {
 pub(super) fn respond_runtime_gemini_rewrite(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
-    response: reqwest::blocking::Response,
+    response: Box<dyn Read + Send>,
     context: RuntimeGeminiRewriteContext<'_>,
 ) {
     let RuntimeGeminiRewriteContext {
         prefix,
         status,
         content_type,
+        upstream_headers,
         shared,
         captured,
         gemini_context,
@@ -71,7 +73,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
     if rate_limit_headers.is_empty() {
         rate_limit_headers = runtime_provider_codex_rate_limit_headers(
             RuntimeProviderBridgeKind::Gemini,
-            response.headers(),
+            &upstream_headers,
         );
     }
     if content_type.contains("text/event-stream") {

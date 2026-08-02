@@ -370,11 +370,16 @@ fn activate_imported_profile_from_payload(
     payload: &ProfileExportPayload,
     prepared: &PreparedImportedProfiles,
 ) {
-    state.active_profile = prodex_profile_export::resolve_imported_active_profile(
+    let active_profile = prodex_profile_export::resolve_imported_active_profile(
         state.active_profile.as_deref(),
         payload.active_profile.as_deref(),
         &prepared.resolved_profile_names,
     );
+    if state.active_profile != active_profile
+        && let Some(profile_name) = active_profile
+    {
+        crate::activate_profile(state, profile_name);
+    }
 }
 
 fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCommit) -> Result<()> {

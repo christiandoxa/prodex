@@ -118,6 +118,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
     let client = runtime_broker_client().expect("broker client should build");
     let registry = RuntimeBrokerRegistry {
         pid: std::process::id(),
+        process_birth_identity: None,
         listen_addr: target_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -156,6 +157,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
 fn runtime_broker_realtime_endpoint_requires_loopback_and_preserves_mount() {
     let mut registry = RuntimeBrokerRegistry {
         pid: 42,
+        process_birth_identity: None,
         listen_addr: "127.0.0.1:4567".to_string(),
         started_at: 100,
         upstream_base_url: "https://upstream.example".to_string(),
@@ -208,6 +210,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
+        process_birth_identity: None,
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -356,6 +359,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
+        process_birth_identity: runtime_process_birth_identity(child.id()),
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
@@ -467,6 +471,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
 
     let registry = RuntimeBrokerRegistry {
         pid: child_pid,
+        process_birth_identity: None,
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
@@ -564,6 +569,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         .expect("health server should expose a TCP address");
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
+        process_birth_identity: None,
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -661,6 +667,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
+        process_birth_identity: None,
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),

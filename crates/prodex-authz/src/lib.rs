@@ -35,6 +35,8 @@ pub enum BoundaryKind {
     ControlPlaneConfigurationPublish,
     ControlPlaneBillingRead,
     ControlPlaneAuditExport,
+    ControlPlaneAuditLegalHoldRead,
+    ControlPlaneAuditLegalHoldUpsert,
     ControlPlaneAuditRetentionPurge,
     BreakGlassAdmin,
 }
@@ -156,6 +158,18 @@ impl BoundaryKind {
                 CredentialScope::ControlPlane,
                 Role::Admin,
             ),
+            Self::ControlPlaneAuditLegalHoldRead => AuthorizationRequirement::new(
+                ResourceKind::AuditLog,
+                ResourceAction::Read,
+                CredentialScope::ControlPlane,
+                Role::Viewer,
+            ),
+            Self::ControlPlaneAuditLegalHoldUpsert => AuthorizationRequirement::new(
+                ResourceKind::AuditLog,
+                ResourceAction::Update,
+                CredentialScope::ControlPlane,
+                Role::Admin,
+            ),
             Self::ControlPlaneAuditRetentionPurge => AuthorizationRequirement::new(
                 ResourceKind::AuditLog,
                 ResourceAction::Delete,
@@ -236,6 +250,12 @@ pub fn control_plane_boundary_for_requirement(
         }
         (ResourceKind::AuditLog, ResourceAction::Export, Role::Admin) => {
             Some(BoundaryKind::ControlPlaneAuditExport)
+        }
+        (ResourceKind::AuditLog, ResourceAction::Read, Role::Viewer) => {
+            Some(BoundaryKind::ControlPlaneAuditLegalHoldRead)
+        }
+        (ResourceKind::AuditLog, ResourceAction::Update, Role::Admin) => {
+            Some(BoundaryKind::ControlPlaneAuditLegalHoldUpsert)
         }
         (ResourceKind::AuditLog, ResourceAction::Delete, Role::Admin) => {
             Some(BoundaryKind::ControlPlaneAuditRetentionPurge)

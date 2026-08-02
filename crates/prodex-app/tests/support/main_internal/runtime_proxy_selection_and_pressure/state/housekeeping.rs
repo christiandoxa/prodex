@@ -276,6 +276,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
         stale_broker_key,
         &RuntimeBrokerRegistry {
             pid: 999_999_999,
+            process_birth_identity: None,
             listen_addr: "127.0.0.1:1".to_string(),
             started_at: 1,
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),

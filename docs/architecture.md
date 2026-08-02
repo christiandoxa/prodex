@@ -40,7 +40,7 @@ Key crates and files:
 
 Common command edit points:
 
-- `prodex session`: `crates/prodex-app/src/app_commands/session.rs`, `crates/prodex-session-store`, `prodex-app-reports/src/session.rs`.
+- `prodex session`: `crates/prodex-app/src/app_commands/session.rs`, `crates/prodex-session-store`, `crates/prodex-app-reports/src/session.rs`.
 - `prodex quota`: `crates/prodex-app/src/app_commands/quota.rs`, `crates/prodex-app/src/quota_support`, `prodex-quota`, `prodex-runtime-quota`, `prodex-app-reports`.
 - `prodex doctor`: `crates/prodex-app/src/app_commands/doctor.rs`, `crates/prodex-app/src/runtime_doctor`, `prodex-runtime-doctor`, `prodex-runtime-broker-log`.
 - Profile commands: `crates/prodex-app/src/profile_commands`, `prodex-profile-identity`, `prodex-profile-export`, `prodex-shared-codex-fs`.

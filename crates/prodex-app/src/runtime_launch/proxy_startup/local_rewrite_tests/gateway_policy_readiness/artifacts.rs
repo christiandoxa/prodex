@@ -118,6 +118,87 @@ pub(super) fn bank_artifacts(
     ]
 }
 
+pub(super) fn two_provider_bank_artifacts(
+    settings: &RuntimePolicyGovernanceSettings,
+    deepseek_base_url: &str,
+    openai_base_url: &str,
+) -> Vec<(GovernanceArtifactKind, String, Vec<u8>)> {
+    let mut artifacts = bank_artifacts(settings);
+    let (_, _, provider_registry) = artifacts
+        .iter_mut()
+        .find(|(kind, _, _)| *kind == GovernanceArtifactKind::ProviderRegistry)
+        .unwrap();
+    let descriptor = |provider: ProviderId,
+                      credential_name: &str,
+                      upstream_base_url: &str,
+                      cost: u64,
+                      latency: u64,
+                      priority: u64| {
+        let adapter = provider_adapter(provider);
+        let endpoints = adapter
+            .supported_endpoints()
+            .iter()
+            .copied()
+            .filter(|endpoint| {
+                crate::runtime_launch::proxy_startup::local_rewrite_application_data_plane::runtime_gateway_provider_capability_is_executable(
+                    adapter.capability_status(*endpoint),
+                )
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "revision": 1,
+            "pricing_revision": 1,
+            "provider": provider.label(),
+            "credential_ref": SecretRef::new("external", credential_name, None::<String>),
+            "enabled": true,
+            "revoked": false,
+            "executable": true,
+            "upstream_base_url": upstream_base_url,
+            "endpoints": endpoints,
+            "capabilities": crate::runtime_launch::proxy_startup::local_rewrite_application_data_plane::runtime_gateway_provider_executable_capabilities(provider),
+            "regions": ["*"],
+            "local_execution": true,
+            "trust_tier": "restricted_approved",
+            "maximum_classification": "restricted",
+            "retention_seconds": 0,
+            "training_use": false,
+            "model_costs": {"*": {
+                "input_cost_per_million_microusd": 1_000_000,
+                "output_cost_per_million_microusd": 2_000_000
+            }},
+            "cost": cost,
+            "latency": latency,
+            "risk": 100,
+            "priority": priority
+        })
+    };
+    *provider_registry = serde_json::to_vec(&serde_json::json!({
+        "schema_version": 2,
+        "revision": 1,
+        "pricing_revision": 1,
+        "descriptors": [
+            descriptor(
+                ProviderId::DeepSeek,
+                "deepseek-key",
+                deepseek_base_url,
+                100,
+                100,
+                10_000,
+            ),
+            descriptor(
+                ProviderId::OpenAi,
+                "openai-key",
+                openai_base_url,
+                9_000,
+                9_000,
+                1_000,
+            )
+        ]
+    }))
+    .unwrap();
+    artifacts
+}
+
 pub(super) fn seed_authority(
     database_path: &Path,
     tenant_id: TenantId,

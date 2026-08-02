@@ -23,6 +23,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
         "doctor-mismatch",
         &RuntimeBrokerRegistry {
             pid: std::process::id(),
+            process_birth_identity: None,
             listen_addr: listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -114,6 +115,7 @@ fn runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases()
         "doctor-dead",
         &RuntimeBrokerRegistry {
             pid: 999_999,
+            process_birth_identity: None,
             listen_addr: "127.0.0.1:9".to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -189,6 +191,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
         "doctor-timeout",
         &RuntimeBrokerRegistry {
             pid: std::process::id(),
+            process_birth_identity: None,
             listen_addr: listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),

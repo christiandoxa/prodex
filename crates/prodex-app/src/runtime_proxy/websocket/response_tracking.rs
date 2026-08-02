@@ -237,7 +237,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
         if let Some(attempt) = self.retry_attempt(&inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));
         }
-        let promoted_precommit_hold = match self.buffer_precommit_hold(&inspected, &text) {
+        let promoted_precommit_hold = match self.buffer_precommit_hold(&inspected, &text)? {
             Some(false) => return Ok(RuntimeWebsocketTextResult::Continue),
             Some(true) => true,
             None => false,
@@ -288,12 +288,6 @@ impl RuntimeWebsocketResponseLoop<'_> {
             inspected.terminal_event = true;
         }
         if let Some(turn_state) = inspected.turn_state.as_deref() {
-            remember_runtime_turn_state(
-                self.shared,
-                self.profile_name,
-                Some(turn_state),
-                RuntimeRouteKind::Websocket,
-            )?;
             self.upstream_turn_state = Some(turn_state.to_string());
         }
         Ok(inspected)
@@ -358,25 +352,32 @@ impl RuntimeWebsocketResponseLoop<'_> {
         &mut self,
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
         text: &str,
-    ) -> Option<bool> {
+    ) -> Result<Option<bool>> {
         if self.committed || !inspected.precommit_hold {
-            return None;
+            return Ok(None);
         }
         let promoted =
-            runtime_websocket_buffer_precommit_hold(RuntimeWebsocketPrecommitHoldRequest {
+            match runtime_websocket_buffer_precommit_hold(RuntimeWebsocketPrecommitHoldRequest {
                 request_id: self.request_id,
                 shared: self.shared,
                 profile_name: self.profile_name,
                 reuse_existing_session: self.reuse_existing_session,
                 precommit_hold_promotion_allowed: self.precommit_hold_promotion_allowed,
+                precommit_transport_retry_allowed: self.precommit_transport_retry_allowed,
                 inspected,
                 text,
                 buffered_precommit_text_frames: &mut self.buffered_precommit_text_frames,
                 precommit_hold_count: &mut self.precommit_hold_count,
                 precommit_hold_bytes: &mut self.precommit_hold_bytes,
                 precommit_hold_promotion_event_seen: &mut self.precommit_hold_promotion_event_seen,
-            });
-        Some(promoted)
+            }) {
+                Ok(promoted) => promoted,
+                Err(error) => {
+                    self.close_and_reset();
+                    return Err(error);
+                }
+            };
+        Ok(Some(promoted))
     }
 
     fn commit(&mut self, log_event: &'static str) -> Result<()> {

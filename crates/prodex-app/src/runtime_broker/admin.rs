@@ -187,7 +187,7 @@ fn apply_runtime_broker_activation(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     runtime.current_profile = current_profile.to_string();
-    runtime.state.active_profile = Some(current_profile.to_string());
+    crate::activate_profile(&mut runtime.state, current_profile);
     Ok(())
 }
 

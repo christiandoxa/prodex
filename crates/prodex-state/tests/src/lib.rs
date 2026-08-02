@@ -350,6 +350,33 @@ fn merge_app_state_for_save_does_not_restore_stale_active_profile() {
 }
 
 #[test]
+fn explicit_profile_activation_survives_merge_against_older_active_profile() {
+    let profiles = BTreeMap::from([profile("first"), profile("second")]);
+    let existing = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
+        ..AppState::default()
+    };
+    let mut desired = AppState {
+        profiles,
+        ..AppState::default()
+    };
+
+    activate_profile(&mut desired, "first");
+
+    let merged = merge_app_state_for_save_with_policy(
+        existing,
+        &desired,
+        20,
+        AppStateCompactionPolicy::default(),
+    );
+
+    assert_eq!(merged.active_profile.as_deref(), Some("first"));
+    assert!(merged.last_run_selected_at["first"] > 20);
+}
+
+#[test]
 fn profile_governance_policy_normalizes_tags_weight_and_note() {
     let policy = normalize_profile_governance_policy(ProfileGovernancePolicy {
         tags: vec![

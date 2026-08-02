@@ -18,7 +18,7 @@ use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS,
-    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, absolutize, audit_log_event,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, absolutize, activate_profile, audit_log_event,
     create_codex_home_if_missing, ensure_path_is_unique, format_response_body,
     managed_profile_home_path, prepare_managed_codex_home, read_blocking_response_body_with_limit,
 };
@@ -129,7 +129,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             profile.provider = provider.clone();
             profile.email = Some(context.login.clone());
             if activate {
-                state.active_profile = Some(existing_name.clone());
+                activate_profile(&mut state, &existing_name);
             }
             state.save(&paths)?;
             cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
@@ -212,7 +212,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
 
     state.profiles.insert(profile_name.clone(), desired_profile);
     if activate {
-        state.active_profile = Some(profile_name.clone());
+        activate_profile(&mut state, &profile_name);
     }
     state.save(&paths)?;
 

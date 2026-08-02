@@ -141,7 +141,7 @@ pub(super) fn update_existing_profile_auth(
         profile_entry.email = Some(email.to_string());
     }
     if activate {
-        state.active_profile = Some(profile_name.to_string());
+        crate::activate_profile(state, profile_name);
     }
 
     Ok(ExistingProfileAuthUpdate {

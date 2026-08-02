@@ -20,6 +20,7 @@ pub enum RuntimeBrokerVersionGuardOutcome {
     Compatible,
     Replaced,
     DeferredActiveRequests,
+    TerminationFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

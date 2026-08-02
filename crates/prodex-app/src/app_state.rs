@@ -9,7 +9,8 @@ use crate::{
 };
 
 pub(crate) use prodex_state::{
-    AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding, prune_profile_bindings,
+    AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding, activate_profile,
+    prune_profile_bindings,
 };
 
 pub(crate) trait ProfileProviderExt {
@@ -105,11 +106,13 @@ impl AppStateIoExt for AppState {
 
 fn save_app_state(state: &AppState, paths: &AppPaths, removed: &[String]) -> Result<()> {
     let _lock = acquire_state_file_lock(paths)?;
-    let existing = AppState::load(paths)?;
-    let mut merged = merge_app_state_for_save(existing, state);
+    let mut existing = AppState::load(paths)?;
+    let mut desired = state.clone();
     for profile_name in removed {
-        merged.profiles.remove(profile_name);
+        existing.profiles.remove(profile_name);
+        desired.profiles.remove(profile_name);
     }
+    let merged = merge_app_state_for_save(existing, &desired);
     let merged = compact_app_state(merged, Local::now().timestamp());
     let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
     write_state_json_atomic(paths, &json)?;

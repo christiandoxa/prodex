@@ -600,6 +600,11 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         governance_refresh_requested: Arc::new(AtomicBool::new(false)),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
+        // ponytail: bounded blocking lookahead; use async response streaming if saturated
+        // upstream reads must remain fully inspectable instead of passing through.
+        provider_sse_prefetch_slots: Arc::new(tokio::sync::Semaphore::new(
+            active_request_limit.max(1),
+        )),
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_oidc_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),
         gateway_workload_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),

@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    audit_log_event, create_codex_home_if_missing, ensure_path_is_unique,
+    activate_profile, audit_log_event, create_codex_home_if_missing, ensure_path_is_unique,
     managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
 };
 use anyhow::{Context, Result, bail};
@@ -289,7 +289,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
             .with_context(|| format!("profile '{}' is missing", existing_name))?;
         *profile = desired_profile;
         if activate {
-            state.active_profile = Some(existing_name.clone());
+            activate_profile(&mut state, &existing_name);
         }
         state.save(&paths)?;
         let model_catalog_refreshed =
@@ -360,7 +360,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
     write_kiro_auth_secret(&codex_home, &auth_secret)?;
     state.profiles.insert(profile_name.clone(), desired_profile);
     if activate {
-        state.active_profile = Some(profile_name.clone());
+        activate_profile(&mut state, &profile_name);
     }
     state.save(&paths)?;
     let model_catalog_refreshed =

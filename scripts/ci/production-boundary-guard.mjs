@@ -83,6 +83,9 @@ const SOURCE_PARTS = Object.freeze({
   pipeline: [
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline/errors.rs",
   ],
+  dispatch: [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
+  ],
   providerGemini: [
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send/retry.rs",
   ],

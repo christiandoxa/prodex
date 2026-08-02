@@ -18,18 +18,24 @@ use prodex_storage::{GovernanceArtifactKind, governance_support};
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 
+use super::super::write_private_test_secret;
 use super::{
     AppState, RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, TestUpstream, app_paths_for_root, temp_root,
 };
+use crate::runtime_launch::proxy_startup::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
+use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeProjectedProviderCredential;
 use crate::runtime_launch::proxy_startup::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use crate::{RuntimeConfig, RuntimeRotationProxy};
 
 #[path = "gateway_policy_readiness/artifacts.rs"]
 mod artifacts;
-use artifacts::{bank_artifacts, pointer_table, seed_authority, seed_mismatched_active_revision};
+use artifacts::{
+    bank_artifacts, pointer_table, seed_authority, seed_mismatched_active_revision,
+    two_provider_bank_artifacts,
+};
 
 struct BankGatewayFixture {
     proxy: RuntimeRotationProxy,
@@ -144,6 +150,107 @@ fn enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers()
         .unwrap();
     assert_eq!(tenant_id, fixture.tenant_id.to_string());
     assert!(!principal_id.is_empty());
+}
+
+#[test]
+fn governed_chat_compatible_sse_fallback_forwards_only_the_second_provider_body() {
+    // This end-to-end guard covers the chat-compatible provider adapters behind
+    // /v1/responses. Native provider protocols need their own explicit contract.
+    const SECOND_BODY: &str =
+        r#"{"id":"second-provider-response","output":[{"content":"second-provider-body"}]}"#;
+    let first_upstream = TestUpstream::start_with_response(
+        "text/event-stream",
+        concat!(r#"data: {"error":{"code":"insufficient_quota"}}"#, "\n\n"),
+    );
+    let second_upstream = TestUpstream::start_with_response_body(SECOND_BODY);
+    let first_base_url = format!("http://{}/v1", first_upstream.addr);
+    let second_base_url = format!("http://{}/v1", second_upstream.addr);
+    let secret_root = temp_root("gateway-two-provider-projected");
+    write_private_test_secret(secret_root.join("deepseek-key"), "deepseek-key").unwrap();
+    write_private_test_secret(secret_root.join("openai-key"), "openai-key").unwrap();
+    let credential = RuntimeProjectedProviderCredential::new(
+        SecretRef::new("external", "deepseek-key", None::<String>),
+        secret_store::ProjectedSecretProvider::new(&secret_root, "external").unwrap(),
+    );
+    let provider = RuntimeLocalRewriteProviderOptions::DeepSeek {
+        api_keys: Vec::new(),
+        strict_tools: false,
+        beta_base_url: first_base_url.clone(),
+        web_search_mode: RuntimeDeepSeekWebSearchMode::default(),
+    }
+    .with_projected_credential(credential);
+    let fixture = start_gateway_with_provider_options(
+        "gateway-two-provider-sse-fallback",
+        VALID_FAR_FUTURE_UNIX_MS,
+        None,
+        (first_upstream, first_base_url.clone(), provider),
+        runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        |settings| two_provider_bank_artifacts(settings, &first_base_url, &second_base_url),
+        (
+            RuntimeGovernanceMode::BankEnforce,
+            RuntimeGovernanceDataClassification::Public,
+            vec![RuntimeGovernancePolicyRule {
+                id: "test.allow-api".to_string(),
+                condition: RuntimeGovernancePolicyRuleCondition {
+                    channel: Some(RuntimeGovernancePolicyChannel::Api),
+                    ..Default::default()
+                },
+                effect: RuntimeGovernancePolicyEffect::Allow,
+                obligations: Vec::new(),
+                reason_code: "policy.test_allow".to_string(),
+            }],
+        ),
+    );
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", fixture.proxy.listen_addr))
+        .bearer_auth(fixture.data_token)
+        .json(&serde_json::json!({
+            "model": "gpt-5",
+            "input": "hello"
+        }))
+        .send()
+        .unwrap();
+    let response_status = response.status().as_u16();
+    let response_body = response.text().unwrap();
+    assert_eq!(
+        response_status, 200,
+        "unexpected gateway response: {response_body}"
+    );
+    assert_eq!(response_body.as_bytes(), SECOND_BODY.as_bytes());
+
+    assert_eq!(
+        fixture
+            .upstream
+            .path_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        "/v1/chat/completions"
+    );
+    assert!(
+        fixture
+            .upstream
+            .path_rx
+            .recv_timeout(Duration::from_millis(300))
+            .is_err(),
+        "the first provider must not be retried after its precommit error"
+    );
+    let second_path = second_upstream
+        .path_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(second_path, "/v1/responses");
+    assert!(
+        second_upstream
+            .path_rx
+            .recv_timeout(Duration::from_millis(300))
+            .is_err(),
+        "a committed second-provider response must not rotate again"
+    );
+
+    let runtime_log = crate::read_runtime_proxy_test_log(&fixture.proxy.log_path);
+    assert!(runtime_log.contains("profile_commit profile=openai route=responses"));
+    assert!(!runtime_log.contains("profile_commit profile=local route=responses"));
 }
 
 #[test]
@@ -340,6 +447,40 @@ fn start_gateway_with_options(
         Vec<RuntimeGovernancePolicyRule>,
     ),
 ) -> BankGatewayFixture {
+    let upstream_base_url = format!("http://{}/v1", upstream.addr);
+    start_gateway_with_provider_options(
+        name,
+        policy_valid_until_unix_ms,
+        mismatched_active,
+        (
+            upstream,
+            upstream_base_url,
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                api_keys: vec!["upstream-key".to_string()],
+            },
+        ),
+        gateway_guardrails,
+        bank_artifacts,
+        governance,
+    )
+}
+
+fn start_gateway_with_provider_options(
+    name: &str,
+    policy_valid_until_unix_ms: u64,
+    mismatched_active: Option<GovernanceArtifactKind>,
+    provider_upstream: (TestUpstream, String, RuntimeLocalRewriteProviderOptions),
+    gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
+    artifact_builder: impl FnOnce(
+        &RuntimePolicyGovernanceSettings,
+    ) -> Vec<(GovernanceArtifactKind, String, Vec<u8>)>,
+    governance: (
+        RuntimeGovernanceMode,
+        RuntimeGovernanceDataClassification,
+        Vec<RuntimeGovernancePolicyRule>,
+    ),
+) -> BankGatewayFixture {
+    let (upstream, upstream_base_url, provider) = provider_upstream;
     let (mode, classification_default, policy_rules) = governance;
     let root = temp_root(name);
     let paths = app_paths_for_root(root.clone());
@@ -391,7 +532,7 @@ fn start_gateway_with_options(
         },
         ..RuntimePolicyGovernanceSettings::default()
     };
-    let artifacts = bank_artifacts(&settings);
+    let artifacts = artifact_builder(&settings);
     seed_authority(&database_path, tenant_id, &signing_key, &artifacts);
     if let Some(kind) = mismatched_active {
         seed_mismatched_active_revision(&database_path, tenant_id, &signing_key, &artifacts, kind);
@@ -405,10 +546,8 @@ fn start_gateway_with_options(
         RuntimeLocalRewriteProxyStartOptions {
             paths: &paths,
             state: &AppState::default(),
-            upstream_base_url: format!("http://{}/v1", upstream.addr),
-            provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-                api_keys: vec!["upstream-key".to_string()],
-            },
+            upstream_base_url,
+            provider,
             upstream_no_proxy: false,
             smart_context_enabled: false,
             presidio_redaction_enabled: false,

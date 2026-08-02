@@ -7,7 +7,9 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-use crate::{AppPaths, RuntimeBrokerLease, runtime_broker_lease_dir, runtime_process_pid_alive};
+use crate::{
+    AppPaths, RuntimeBrokerLease, runtime_broker_lease_dir, runtime_process_absence_proven,
+};
 
 pub(crate) fn runtime_random_token(prefix: &str) -> Result<String> {
     let mut bytes = [0_u8; 32];
@@ -71,7 +73,7 @@ pub(crate) fn cleanup_runtime_broker_stale_leases(paths: &AppPaths, broker_key: 
             .split('-')
             .next()
             .and_then(|value| value.parse::<u32>().ok());
-        if pid.is_some_and(runtime_process_pid_alive) {
+        if pid.is_some_and(|pid| !runtime_process_absence_proven(pid)) {
             live += 1;
         } else {
             let _ = fs::remove_file(path);

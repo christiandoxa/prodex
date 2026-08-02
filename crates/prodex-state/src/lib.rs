@@ -423,7 +423,6 @@ pub fn profile_selection_eligibility_reason(
     }
     ProfileSelectionEligibilityReason::Eligible
 }
-
 pub fn merge_last_run_selection(
     existing: &BTreeMap<String, i64>,
     incoming: &BTreeMap<String, i64>,
@@ -439,7 +438,16 @@ pub fn merge_last_run_selection(
     merged.retain(|profile_name, _| profiles.contains_key(profile_name));
     merged
 }
-
+pub fn activate_profile(state: &mut AppState, profile_name: impl Into<String>) {
+    let profile_name = profile_name.into();
+    let selected_at =
+        current_unix_timestamp().max(match state.last_run_selected_at.values().max() {
+            Some(timestamp) => timestamp.saturating_add(1),
+            None => 1,
+        });
+    state.active_profile = Some(profile_name.clone());
+    state.last_run_selected_at.insert(profile_name, selected_at);
+}
 pub fn prune_last_run_selection(
     selections: &mut BTreeMap<String, i64>,
     profiles: &BTreeMap<String, ProfileEntry>,
@@ -452,7 +460,6 @@ pub fn prune_last_run_selection(
         APP_STATE_LAST_RUN_RETENTION_SECONDS,
     );
 }
-
 pub fn prune_last_run_selection_with_retention(
     selections: &mut BTreeMap<String, i64>,
     profiles: &BTreeMap<String, ProfileEntry>,

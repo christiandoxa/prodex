@@ -169,7 +169,7 @@ pub struct SetupArgs {
     /// Preview planned setup/repair actions without writing files.
     #[arg(long)]
     pub dry_run: bool,
-    /// Verify externally installed optional tools.
+    /// Verify the externally installed optional-tool catalog: Caveman, RTK, Codebase Memory MCP, Playwright MCP, and Ponytail.
     #[arg(long = "verify-tools")]
     pub verify_tools: bool,
     /// Emit machine-readable JSON output.

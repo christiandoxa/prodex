@@ -19,7 +19,7 @@ use super::import_export::{
 };
 use crate::{
     AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileProviderExt, ProfileSelector,
-    absolutize, audit_log_event, collect_profile_summaries, default_codex_home,
+    absolutize, activate_profile, audit_log_event, collect_profile_summaries, default_codex_home,
     fetch_profile_identity, find_profile_by_identity, print_panel, read_auth_json_text,
     repair_missing_active_profile_and_save, resolve_profile_name, update_existing_profile_auth,
 };
@@ -320,7 +320,7 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
     let _lock = acquire_profile_lifecycle_lock(&paths)?;
     let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     let name = resolve_profile_name(&state, selector.profile.as_deref())?;
-    state.active_profile = Some(name.clone());
+    activate_profile(&mut state, &name);
     state.save(&paths)?;
 
     let profile = state

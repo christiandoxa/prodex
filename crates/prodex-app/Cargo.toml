@@ -30,6 +30,7 @@ dirs = { workspace = true }
 fs2 = { workspace = true }
 getrandom = { workspace = true }
 http-body-util = { workspace = true }
+libc = { workspace = true }
 portable-pty = { workspace = true }
 os_info = { workspace = true }
 prodex_audit_log = { workspace = true }
@@ -112,7 +113,11 @@ jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 zstd = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+] }
 
 [lints]
 workspace = true

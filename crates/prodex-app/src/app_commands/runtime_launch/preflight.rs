@@ -496,7 +496,7 @@ fn activate_runtime_launch_profile(
         request.model_provider_override,
         request.profile_v2_name,
     )?;
-    state.active_profile = Some(profile_name.to_string());
+    crate::activate_profile(state, profile_name);
     state.save(paths)?;
     Ok(())
 }

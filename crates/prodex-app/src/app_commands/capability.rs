@@ -21,6 +21,13 @@ use terminal_ui::{
     tui_secondary_style, tui_title_style,
 };
 
+#[path = "capability/setup_optional_tools.rs"]
+mod setup_optional_tools;
+use setup_optional_tools::{
+    collect_setup_optional_tool_health, ensure_optional_tools_installed, setup_optional_tool_rows,
+    setup_optional_tool_verification_json,
+};
+
 #[derive(Debug, Clone)]
 struct CapabilityPanel {
     title: String,
@@ -38,8 +45,16 @@ struct ProdexCapability {
 
 fn capability_redacted_detail(value: &str) -> String {
     redaction_redact_secret_like_text(value)
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
 }
-
 #[cfg(test)]
 fn capability_failed_status(err: &anyhow::Error) -> String {
     format!("fail ({})", capability_redacted_detail(&format!("{err:#}")))
@@ -206,7 +221,7 @@ fn optional_tool_health_status(health: &prodex_optional_tools::ToolHealth) -> St
     if let Some(digest) = &health.digest {
         fields.push(format!("digest={digest}"));
     }
-    fields.join(", ")
+    capability_redacted_detail(&fields.join(", "))
 }
 
 fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
@@ -251,8 +266,11 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     } else {
         collect_install_check_rows(&paths)
     };
-    let caveman =
-        prodex_optional_tools::optional_tool_status(prodex_optional_tools::OptionalToolId::Caveman);
+    let optional_tools =
+        (args.verify_tools && !args.dry_run).then(collect_setup_optional_tool_health);
+    let standalone_caveman = (args.json && !args.verify_tools && !args.dry_run).then(|| {
+        prodex_optional_tools::optional_tool_status(prodex_optional_tools::OptionalToolId::Caveman)
+    });
 
     if !args.dry_run {
         fs::create_dir_all(&paths.root)
@@ -271,17 +289,25 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
                 .iter()
                 .map(|(name, status)| serde_json::json!({ "name": name, "status": status }))
                 .collect::<Vec<_>>(),
-            "optional_tool_verification": {
-                "id": "caveman",
-                "status": optional_tool_health_status(&caveman),
-                "detail": capability_redacted_detail(&caveman.detail),
-            },
+            "optional_tool_verification": setup_optional_tool_verification_json(
+                optional_tools.as_deref().and_then(|tools| {
+                    tools.iter().find(|tool| {
+                        tool.id == prodex_optional_tools::OptionalToolId::Caveman
+                    })
+                }).or(standalone_caveman.as_ref()),
+                optional_tools.as_deref(),
+                args.verify_tools,
+                args.dry_run,
+            ),
         });
         print_stdout_line(
             &serde_json::to_string_pretty(&value).context("failed to serialize setup report")?,
         )?;
         if args.verify_tools {
-            ensure_optional_tool_installed(&caveman)?;
+            let tools = optional_tools.as_deref().context(
+                "optional-tool verification is not executed during --dry-run; rerun without --dry-run",
+            )?;
+            ensure_optional_tools_installed(tools)?;
         }
         return Ok(());
     }
@@ -291,7 +317,7 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     } else {
         "Setup"
     };
-    print_capability_panels(&[
+    let mut panels = vec![
         CapabilityPanel {
             title: title.to_string(),
             fields: setup_planned_actions(&paths),
@@ -300,10 +326,28 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
             title: "Install Checks".to_string(),
             fields: install_rows.clone(),
         },
-    ])?;
+    ];
+    if args.verify_tools {
+        panels.push(CapabilityPanel {
+            title: "Optional Tool Checks".to_string(),
+            fields: optional_tools.as_deref().map_or_else(
+                || {
+                    prodex_optional_tools::OptionalToolSet::super_defaults()
+                        .iter()
+                        .map(|id| (id.to_string(), "not checked (dry-run)".to_string()))
+                        .collect()
+                },
+                setup_optional_tool_rows,
+            ),
+        });
+    }
+    print_capability_panels(&panels)?;
 
     if args.verify_tools {
-        ensure_optional_tool_installed(&caveman)?;
+        let tools = optional_tools.as_deref().context(
+            "optional-tool verification is not executed during --dry-run; rerun without --dry-run",
+        )?;
+        ensure_optional_tools_installed(tools)?;
     }
 
     Ok(())

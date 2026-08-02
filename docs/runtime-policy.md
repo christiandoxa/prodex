@@ -75,13 +75,13 @@ hash instead of the source path.
 
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
-| `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or `gateway.virtual_keys`. |
+| `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token`, `PRODEX_GATEWAY_TOKEN`, `gateway.auth_token_ref`, or `gateway.virtual_keys`. |
 | `gateway.expected_host` | none | Exact loopback listen authority on loopback; required otherwise | Exact HTTP `Host` authority accepted by the control-plane/admin edge. Values are bounded and must not contain a scheme, path, query, userinfo, comma, or whitespace. |
 | `gateway.provider` | CLI `--provider` | OpenAI-compatible upstream | Exact provider preset: `anthropic`, `copilot`, `deepseek`, `gemini`, or `kiro`. Unsupported values fail closed instead of falling back to the OpenAI-compatible default. |
 | `gateway.harness` | CLI `--harness` | `native` | Model-facing request policy: `native`, `minimal`, or `evaluated`. CLI selection wins; the resolved mode is fixed for the gateway lifetime. |
 | `gateway.base_url` | CLI `--base-url`; `OPENAI_BASE_URL` for OpenAI-compatible mode | Provider default, or `https://api.openai.com/v1` | Upstream base URL. Explicit values must be non-empty and whitespace-free. OpenAI-compatible mode appends `/v1` when the URL has no path. |
 | OpenAI-compatible upstream API keys | CLI `--api-key`; `OPENAI_API_KEYS`; `OPENAI_API_KEY` | empty unless gateway auth is enabled | Optional upstream provider credentials. Explicit values must resolve to at least one non-empty key; singular `--api-key` and `OPENAI_API_KEY` values must be whitespace-free, while `OPENAI_API_KEYS` may contain comma-, semicolon-, or newline-separated keys. The Mem0 memory gateway applies the same env boundary and treats selected-profile `auth.json` `OPENAI_API_KEY` as an exact singular key. |
-| `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from non-empty, whitespace-free `--auth-token`, non-empty, whitespace-free `PRODEX_GATEWAY_TOKEN`, or configured virtual key env vars. |
+| `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from non-empty, whitespace-free `--auth-token`, non-empty, whitespace-free `PRODEX_GATEWAY_TOKEN`, `gateway.auth_token_ref`, or configured virtual keys. |
 | `gateway.auth_token_ref` | none | empty | Projected data-plane bearer-token reference. Required in production unless at least one `gateway.virtual_keys[].token_ref` exists. |
 | `gateway.provider_api_key_ref` | none | empty | Projected upstream provider API-key reference. Required in production. |
 | `gateway.adaptive_routing.enabled` | none | `false` | Enable bounded adaptive recommendations for configured route aliases. At least one `gateway.route_aliases` entry is required. |

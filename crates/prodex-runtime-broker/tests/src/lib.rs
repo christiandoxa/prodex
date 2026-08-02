@@ -9,6 +9,7 @@ mod version_guard;
 fn test_registry() -> RuntimeBrokerRegistry {
     RuntimeBrokerRegistry {
         pid: 42,
+        process_birth_identity: None,
         listen_addr: "127.0.0.1:4567".to_string(),
         started_at: 100,
         upstream_base_url: "https://upstream.example".to_string(),

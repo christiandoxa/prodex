@@ -3,6 +3,9 @@
 use super::super::*;
 use super::*;
 
+use ControlPlaneOperation as Control;
+use GatewayControlPlaneOperation as Gateway;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationControlPlaneIdempotencyRequest {
     pub action: ControlPlaneActionRequest,
@@ -639,6 +642,9 @@ fn control_plane_operation_from_gateway_route(
         GatewayControlPlaneOperation::BudgetUpdate => ControlPlaneOperation::BudgetUpdate,
         GatewayControlPlaneOperation::BillingRead => ControlPlaneOperation::BillingRead,
         GatewayControlPlaneOperation::AuditExport => ControlPlaneOperation::AuditExport,
+        Gateway::AuditLegalHoldRead => Control::AuditLegalHoldRead,
+        Gateway::AuditLegalHoldUpsert => Control::AuditLegalHoldUpsert,
+        Gateway::AuditLegalHoldDelete => Control::AuditLegalHoldDelete,
         GatewayControlPlaneOperation::AuditRetentionPurge => {
             ControlPlaneOperation::AuditRetentionPurge
         }
@@ -709,6 +715,10 @@ fn control_plane_operations_share_route_family(
                 AuditExport | AuditRetentionPurge,
                 AuditExport | AuditRetentionPurge
             )
+            | (
+                AuditLegalHoldRead | AuditLegalHoldUpsert | AuditLegalHoldDelete,
+                AuditLegalHoldRead | AuditLegalHoldUpsert | AuditLegalHoldDelete
+            )
     )
 }
 
@@ -770,6 +780,9 @@ fn gateway_operation_from_control_plane_action(
         }
         ControlPlaneOperation::BillingRead => GatewayControlPlaneOperation::BillingRead,
         ControlPlaneOperation::AuditExport => GatewayControlPlaneOperation::AuditExport,
+        Control::AuditLegalHoldRead => Gateway::AuditLegalHoldRead,
+        Control::AuditLegalHoldUpsert => Gateway::AuditLegalHoldUpsert,
+        Control::AuditLegalHoldDelete => Gateway::AuditLegalHoldDelete,
         ControlPlaneOperation::AuditRetentionPurge => {
             GatewayControlPlaneOperation::AuditRetentionPurge
         }
@@ -780,41 +793,31 @@ fn control_plane_operation_allows_http_method(
     operation: ControlPlaneOperation,
     method: prodex_gateway_http::GatewayHttpMethod,
 ) -> bool {
+    use ControlPlaneOperation::*;
     use prodex_gateway_http::GatewayHttpMethod::{Delete, Get, Patch, Post, Put};
 
     match operation {
-        ControlPlaneOperation::GatewayAdminRead
-        | ControlPlaneOperation::ScimUserRead
-        | ControlPlaneOperation::VirtualKeyRead
-        | ControlPlaneOperation::PolicyRead
-        | ControlPlaneOperation::BillingRead => method == Get,
-        ControlPlaneOperation::RouteExplain
-        | ControlPlaneOperation::TenantCreate
-        | ControlPlaneOperation::UserInvite
-        | ControlPlaneOperation::ScimUserCreate
-        | ControlPlaneOperation::RoleBindingGrant
-        | ControlPlaneOperation::ServiceIdentityCreate
-        | ControlPlaneOperation::VirtualKeyCreate
-        | ControlPlaneOperation::VirtualKeyRotateSecret
-        | ControlPlaneOperation::ProviderCredentialRotate
-        | ControlPlaneOperation::ConfigurationPublish
-        | ControlPlaneOperation::AuditExport => method == Post,
-        ControlPlaneOperation::PolicyValidate
-        | ControlPlaneOperation::PolicyCreate
-        | ControlPlaneOperation::PolicySubmit
-        | ControlPlaneOperation::PolicyVote
-        | ControlPlaneOperation::PolicyActivate
-        | ControlPlaneOperation::PolicyRollback
-        | ControlPlaneOperation::PolicyRevoke => method == Post,
-        ControlPlaneOperation::PolicyPublish => matches!(method, Get | Post),
-        ControlPlaneOperation::TenantUpdate
-        | ControlPlaneOperation::VirtualKeyUpdate
-        | ControlPlaneOperation::BudgetUpdate => method == Patch,
-        ControlPlaneOperation::ScimUserUpdate => matches!(method, Patch | Put),
-        ControlPlaneOperation::ScimUserDelete
-        | ControlPlaneOperation::RoleBindingRevoke
-        | ControlPlaneOperation::VirtualKeyDelete
-        | ControlPlaneOperation::AuditRetentionPurge => method == Delete,
+        GatewayAdminRead | ScimUserRead | VirtualKeyRead | PolicyRead | BillingRead
+        | AuditLegalHoldRead => method == Get,
+        RouteExplain
+        | TenantCreate
+        | UserInvite
+        | ScimUserCreate
+        | RoleBindingGrant
+        | ServiceIdentityCreate
+        | VirtualKeyCreate
+        | VirtualKeyRotateSecret
+        | ProviderCredentialRotate
+        | ConfigurationPublish
+        | AuditExport
+        | AuditLegalHoldUpsert => method == Post,
+        PolicyValidate | PolicyCreate | PolicySubmit | PolicyVote | PolicyActivate
+        | PolicyRollback | PolicyRevoke => method == Post,
+        PolicyPublish => matches!(method, Get | Post),
+        TenantUpdate | VirtualKeyUpdate | BudgetUpdate => method == Patch,
+        ScimUserUpdate => matches!(method, Patch | Put),
+        ScimUserDelete | RoleBindingRevoke | VirtualKeyDelete | AuditLegalHoldDelete
+        | AuditRetentionPurge => method == Delete,
     }
 }
 

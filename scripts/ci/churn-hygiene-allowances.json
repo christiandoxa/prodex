@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-runtime-control-plane-release-0.378.0",
+    "requiredSubjects": [
+      "fix: close audited runtime and control-plane gaps",
+      "chore(release): release 0.378.0"
+    ],
+    "caps": {
+      "maxFiles": 115,
+      "maxBehaviorFiles": 100,
+      "maxLines": 4000,
+      "maxFileLines": 580
+    },
+    "reason": "Reviewed the complete 0.378.0 audit and GitHub-only release range covering monotonic profile state, verified broker process ownership, durable legal-hold audit reads, provider precommit retry and affinity, bounded streaming inspection, and parallel CI test execution; publication remains gated by source CI, locked release builds, artifact scanning, checksums, SBOM, provenance, and GitHub Release verification."
+  },
+  {
+    "id": "audited-runtime-control-plane-feature-0.378.0",
+    "requiredSubjects": [
+      "fix: close audited runtime and control-plane gaps"
+    ],
+    "caps": {
+      "maxFiles": 99,
+      "maxBehaviorFiles": 93,
+      "maxLines": 3650,
+      "maxFileLines": 580
+    },
+    "reason": "Reviewed the whole-repository production audit covering monotonic cross-process profile state, fail-closed native broker ownership, legal-hold authorization and durable audit emission, bounded provider SSE and websocket precommit handling, optional-tool dry-run safety, and Linux and Windows CI test parallelism; verified with focused regressions, the full locked all-features suite, strict Clippy, repository guards, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-reliability-and-ci-release-0.377.0",
     "requiredSubjects": [
       "fix: close audited reliability gaps",

@@ -69,7 +69,6 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   for (const job of [
     "docs-lint",
     "secret-scan",
-    "windows-security",
     "windows-workspace",
     "windows-prodex-app",
     "redis-integration",
@@ -78,6 +77,14 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   ]) {
     assert.match(workflow, new RegExp(`^  ${job}:`, "m"), `${job} job missing`);
   }
+  assert.doesNotMatch(workflow, /^  windows-security:/m);
+  assert.ok(PRODEX_APP_LIB_FILTERS.includes("app_commands::"));
+  assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_broker::"));
+  const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  redis-integration:/)?.[1];
+  assert.ok(processGuard, "process-guard job missing");
+  assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
+  assert.match(processGuard, /mozilla-actions\/sccache-action@/);
+  assert.match(processGuard, /Swatinem\/rust-cache@/);
   for (const command of [
     "npm run docs:lint",
     "npm run ci:secret-boundary-guard",

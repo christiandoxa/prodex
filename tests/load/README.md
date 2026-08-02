@@ -69,7 +69,7 @@ CI smoke:
 npm run ci:runtime-load-smoke
 ```
 
-The CI smoke runs a small mock-only baseline with zero tolerated request errors and admission pressure, plus a bounded p95 TTFT threshold. It does not build or launch `prodex`, so it is cheap enough for scheduled/manual CI and heavy PR paths. For local proxy coverage after `cargo build`, use:
+The command defaults to a small mock-only baseline with zero tolerated request errors and admission pressure, plus a bounded p95 TTFT threshold. The heavy CI job builds an instrumented `prodex` binary and runs proxy mode. For equivalent local proxy coverage after `cargo build`, use:
 
 ```bash
 npm run ci:runtime-load-smoke -- --mode proxy --prodex ./target/debug/prodex

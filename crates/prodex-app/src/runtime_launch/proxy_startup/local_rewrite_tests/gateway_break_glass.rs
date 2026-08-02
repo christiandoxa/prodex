@@ -245,6 +245,14 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
     let replayed_hold = upsert_hold();
     assert_eq!(replayed_hold.status().as_u16(), 200);
     assert_eq!(replayed_hold.text().unwrap(), first_hold_body);
+    let listed_holds: serde_json::Value = client
+        .get(&holds_url)
+        .bearer_auth("checker-one-token")
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(listed_holds["data"].as_array().unwrap().len(), 1);
     assert_eq!(
         client
             .post(&holds_url)
@@ -325,11 +333,12 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
         )
         .unwrap();
     assert_eq!(lifecycle_audits, 6);
-    let idempotent_mutation_audits = connection
+    let retention_audits = connection
         .query_row(
             "SELECT COUNT(*) FROM prodex_audit_log
              WHERE tenant_id = ?1 AND action IN (
                  'governance.audit_retention.purge',
+                 'governance.audit_legal_hold.read',
                  'governance.audit_legal_hold.upsert',
                  'governance.audit_legal_hold.delete'
              )",
@@ -337,7 +346,7 @@ fn gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit() {
             |row| row.get::<_, i64>(0),
         )
         .unwrap();
-    assert_eq!(idempotent_mutation_audits, 3);
+    assert_eq!(retention_audits, 4);
     drop(connection);
     let integrity: serde_json::Value = client
         .get(format!(

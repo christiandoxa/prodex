@@ -16,10 +16,12 @@ use super::super::provider_bridge::{
 use super::{
     RuntimeGatewayResponseGovernance, respond_runtime_local_rewrite_stream,
     runtime_local_rewrite_append_call_id_header,
-    runtime_local_rewrite_buffered_response_from_response,
     runtime_local_rewrite_governed_response_with_call_id, runtime_local_rewrite_invalid_response,
 };
-use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    RuntimeProxyRequest, RuntimeStreamingResponse, read_blocking_response_body_with_limit,
+};
 use prodex_provider_core::{
     ProviderEndpoint, ProviderTransformInput, anthropic_messages_translator,
     provider_core_rewritten_json_value,
@@ -31,6 +33,7 @@ use std::time::Instant;
 pub(super) struct RuntimeAnthropicMessagesRewriteContext<'a> {
     pub(super) status: u16,
     pub(super) content_type: &'a str,
+    pub(super) upstream_headers: reqwest::header::HeaderMap,
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) provider_kind: RuntimeProviderBridgeKind,
@@ -41,12 +44,13 @@ pub(super) struct RuntimeAnthropicMessagesRewriteContext<'a> {
 pub(super) fn respond_runtime_anthropic_messages_rewrite(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
-    response: reqwest::blocking::Response,
+    response: Box<dyn Read + Send>,
     context: RuntimeAnthropicMessagesRewriteContext<'_>,
 ) {
     let RuntimeAnthropicMessagesRewriteContext {
         status,
         content_type,
+        upstream_headers,
         shared,
         captured,
         provider_kind,
@@ -55,7 +59,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
     } = context;
     let conversations = shared.deepseek_conversations_for_request(captured);
     let rate_limit_headers =
-        runtime_provider_codex_rate_limit_headers(provider_kind, response.headers());
+        runtime_provider_codex_rate_limit_headers(provider_kind, &upstream_headers);
     if content_type.contains("text/event-stream") {
         let mut headers = vec![(
             "content-type".to_string(),
@@ -93,7 +97,16 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
 
     let response_started_at = Instant::now();
     let translated = (|| -> anyhow::Result<_> {
-        let mut parts = runtime_local_rewrite_buffered_response_from_response(response)?;
+        let body = read_blocking_response_body_with_limit(
+            response,
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+            "failed to read native Anthropic response body",
+        )?;
+        let mut parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status,
+            headers: Vec::new(),
+            body: body.into(),
+        };
         let native: Value = serde_json::from_slice(&parts.body)?;
         let mut input =
             ProviderTransformInput::new(ProviderEndpoint::Responses, parts.body.to_vec());

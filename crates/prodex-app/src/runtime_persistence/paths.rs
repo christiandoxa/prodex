@@ -1,40 +1,10 @@
-use chrono::Local;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::{
-    AppPaths, AppState, compact_app_state, last_good_file_path, merge_last_run_selection,
-    merge_profile_bindings,
-};
+use crate::{AppPaths, AppState, last_good_file_path};
 
 pub(crate) fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
-    let mut profiles = existing.profiles.clone();
-    profiles.extend(desired.profiles.clone());
-    let active_profile = desired
-        .active_profile
-        .clone()
-        .or(existing.active_profile.clone())
-        .filter(|profile_name| profiles.contains_key(profile_name));
-    let merged = AppState {
-        active_profile,
-        profiles: profiles.clone(),
-        last_run_selected_at: merge_last_run_selection(
-            &existing.last_run_selected_at,
-            &desired.last_run_selected_at,
-            &profiles,
-        ),
-        response_profile_bindings: merge_profile_bindings(
-            &existing.response_profile_bindings,
-            &desired.response_profile_bindings,
-            &profiles,
-        ),
-        session_profile_bindings: merge_profile_bindings(
-            &existing.session_profile_bindings,
-            &desired.session_profile_bindings,
-            &profiles,
-        ),
-    };
-    compact_app_state(merged, Local::now().timestamp())
+    prodex_state::merge_app_state_for_save(existing, desired)
 }
 
 pub(crate) fn runtime_continuations_file_path(paths: &AppPaths) -> PathBuf {

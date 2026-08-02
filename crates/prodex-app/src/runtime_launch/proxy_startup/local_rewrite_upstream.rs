@@ -28,6 +28,11 @@ use anyhow::Result;
 use prodex_provider_core::{ProviderEndpoint, ProviderId};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::{Value, json};
+use std::collections::VecDeque;
+use std::io::{self, Cursor, Read};
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::time::Duration;
 
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) response: RuntimeLocalRewriteUpstreamResponse,
@@ -38,7 +43,7 @@ pub(super) struct RuntimeLocalRewriteUpstreamResult {
 impl RuntimeLocalRewriteUpstreamResult {
     pub(super) fn status(&self) -> u16 {
         match &self.response {
-            RuntimeLocalRewriteUpstreamResponse::Live(live) => live.response.status().as_u16(),
+            RuntimeLocalRewriteUpstreamResponse::Live(live) => live.status,
             RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => parts.status,
             RuntimeLocalRewriteUpstreamResponse::Streaming(streaming) => streaming.status,
         }
@@ -52,10 +57,48 @@ pub(super) enum RuntimeLocalRewriteUpstreamResponse {
 }
 
 pub(super) struct RuntimeLocalRewriteLiveResponse {
-    pub(super) response: reqwest::blocking::Response,
+    pub(super) status: u16,
+    pub(super) headers: reqwest::header::HeaderMap,
+    pub(super) body: Option<RuntimeLocalRewriteLiveBody>,
     pub(super) prefix: Vec<u8>,
     pub(super) native_anthropic_messages: bool,
     pub(super) chat_compatible_request: Option<RuntimeDeepSeekPendingRequest>,
+}
+
+pub(super) enum RuntimeLocalRewriteLiveBody {
+    Response(Box<reqwest::blocking::Response>),
+    Prefetched(Box<RuntimeLocalRewriteContinuationReader>),
+}
+
+impl RuntimeLocalRewriteLiveBody {
+    pub(super) fn into_reader(self) -> Box<dyn Read + Send> {
+        match self {
+            Self::Response(response) => response,
+            Self::Prefetched(reader) => reader,
+        }
+    }
+}
+
+pub(super) enum RuntimeLocalRewritePrefetchChunk {
+    Data(Vec<u8>),
+    End,
+    Error(io::ErrorKind, String),
+}
+
+pub(super) struct RuntimeLocalRewriteSsePrefetch {
+    receiver: Option<Receiver<RuntimeLocalRewritePrefetchChunk>>,
+    backlog: VecDeque<RuntimeLocalRewritePrefetchChunk>,
+    worker_abort: Option<tokio::task::AbortHandle>,
+    stream_idle_timeout_ms: u64,
+}
+
+pub(super) struct RuntimeLocalRewriteContinuationReader {
+    receiver: Receiver<RuntimeLocalRewritePrefetchChunk>,
+    backlog: VecDeque<RuntimeLocalRewritePrefetchChunk>,
+    pending: Cursor<Vec<u8>>,
+    finished: bool,
+    worker_abort: tokio::task::AbortHandle,
+    stream_idle_timeout_ms: u64,
 }
 
 pub(super) struct RuntimeLocalRewriteStreamingResponse {
@@ -67,8 +110,12 @@ pub(super) struct RuntimeLocalRewriteStreamingResponse {
 
 impl RuntimeLocalRewriteLiveResponse {
     pub(super) fn new(response: reqwest::blocking::Response) -> Self {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
         Self {
-            response,
+            status,
+            headers,
+            body: Some(RuntimeLocalRewriteLiveBody::Response(Box::new(response))),
             prefix: Vec::new(),
             native_anthropic_messages: false,
             chat_compatible_request: None,
@@ -76,8 +123,12 @@ impl RuntimeLocalRewriteLiveResponse {
     }
 
     pub(super) fn with_prefix(response: reqwest::blocking::Response, prefix: Vec<u8>) -> Self {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
         Self {
-            response,
+            status,
+            headers,
+            body: Some(RuntimeLocalRewriteLiveBody::Response(Box::new(response))),
             prefix,
             native_anthropic_messages: false,
             chat_compatible_request: None,
@@ -85,8 +136,12 @@ impl RuntimeLocalRewriteLiveResponse {
     }
 
     pub(super) fn with_native_anthropic_messages(response: reqwest::blocking::Response) -> Self {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
         Self {
-            response,
+            status,
+            headers,
+            body: Some(RuntimeLocalRewriteLiveBody::Response(Box::new(response))),
             prefix: Vec::new(),
             native_anthropic_messages: true,
             chat_compatible_request: None,
@@ -99,6 +154,175 @@ impl RuntimeLocalRewriteLiveResponse {
     ) -> Self {
         self.chat_compatible_request = Some(request);
         self
+    }
+
+    pub(super) fn take_sse_prefetch(
+        &mut self,
+        async_runtime: &Arc<tokio::runtime::Runtime>,
+        stream_idle_timeout_ms: u64,
+        slot: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<RuntimeLocalRewriteSsePrefetch> {
+        let body = self.body.take();
+        match body {
+            Some(RuntimeLocalRewriteLiveBody::Response(response)) => {
+                Ok(RuntimeLocalRewriteSsePrefetch::spawn(
+                    response,
+                    async_runtime,
+                    stream_idle_timeout_ms,
+                    slot,
+                ))
+            }
+            other => {
+                self.body = other;
+                Err(anyhow::anyhow!(
+                    "runtime local rewrite SSE body was already handed off"
+                ))
+            }
+        }
+    }
+
+    pub(super) fn set_sse_continuation(&mut self, prefetch: RuntimeLocalRewriteSsePrefetch) {
+        self.body = Some(RuntimeLocalRewriteLiveBody::Prefetched(Box::new(
+            prefetch.into_reader(),
+        )));
+    }
+}
+
+impl RuntimeLocalRewriteSsePrefetch {
+    fn spawn(
+        mut response: Box<reqwest::blocking::Response>,
+        async_runtime: &Arc<tokio::runtime::Runtime>,
+        stream_idle_timeout_ms: u64,
+        slot: tokio::sync::OwnedSemaphorePermit,
+    ) -> Self {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let worker = async_runtime.spawn_blocking(move || {
+            let _slot = slot;
+            let mut chunk = vec![0_u8; 16 * 1024];
+            loop {
+                match response.read(&mut chunk) {
+                    Ok(0) => {
+                        let _ = sender.send(RuntimeLocalRewritePrefetchChunk::End);
+                        break;
+                    }
+                    Ok(read) => {
+                        if sender
+                            .send(RuntimeLocalRewritePrefetchChunk::Data(
+                                chunk[..read].to_vec(),
+                            ))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(RuntimeLocalRewritePrefetchChunk::Error(
+                            error.kind(),
+                            error.to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+        });
+        Self {
+            receiver: Some(receiver),
+            backlog: VecDeque::new(),
+            worker_abort: Some(worker.abort_handle()),
+            stream_idle_timeout_ms,
+        }
+    }
+
+    pub(super) fn recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> std::result::Result<RuntimeLocalRewritePrefetchChunk, RecvTimeoutError> {
+        if let Some(chunk) = self.backlog.pop_front() {
+            return Ok(chunk);
+        }
+        self.receiver
+            .as_ref()
+            .map_or(Err(RecvTimeoutError::Disconnected), |receiver| {
+                receiver.recv_timeout(timeout)
+            })
+    }
+
+    pub(super) fn push_backlog(&mut self, chunk: RuntimeLocalRewritePrefetchChunk) {
+        self.backlog.push_back(chunk);
+    }
+
+    fn into_reader(mut self) -> RuntimeLocalRewriteContinuationReader {
+        RuntimeLocalRewriteContinuationReader {
+            receiver: self
+                .receiver
+                .take()
+                .expect("runtime local rewrite prefetch receiver should be present"),
+            backlog: std::mem::take(&mut self.backlog),
+            pending: Cursor::new(Vec::new()),
+            finished: false,
+            worker_abort: self
+                .worker_abort
+                .take()
+                .expect("runtime local rewrite prefetch abort handle should be present"),
+            stream_idle_timeout_ms: self.stream_idle_timeout_ms,
+        }
+    }
+}
+
+impl Drop for RuntimeLocalRewriteSsePrefetch {
+    fn drop(&mut self) {
+        if let Some(worker_abort) = self.worker_abort.take() {
+            worker_abort.abort();
+        }
+    }
+}
+
+impl Read for RuntimeLocalRewriteContinuationReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.finished {
+            return Ok(0);
+        }
+        loop {
+            let read = self.pending.read(buffer)?;
+            if read > 0 {
+                return Ok(read);
+            }
+            let next = if let Some(chunk) = self.backlog.pop_front() {
+                Ok(chunk)
+            } else {
+                self.receiver
+                    .recv_timeout(Duration::from_millis(self.stream_idle_timeout_ms.max(1)))
+                    .map_err(|error| match error {
+                        RecvTimeoutError::Timeout => io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "runtime upstream stream idle timed out",
+                        ),
+                        RecvTimeoutError::Disconnected => io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "runtime upstream stream ended unexpectedly",
+                        ),
+                    })
+            }?;
+            match next {
+                RuntimeLocalRewritePrefetchChunk::Data(chunk) => {
+                    self.pending = Cursor::new(chunk);
+                }
+                RuntimeLocalRewritePrefetchChunk::End => {
+                    self.finished = true;
+                    return Ok(0);
+                }
+                RuntimeLocalRewritePrefetchChunk::Error(kind, message) => {
+                    self.finished = true;
+                    return Err(io::Error::new(kind, message));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for RuntimeLocalRewriteContinuationReader {
+    fn drop(&mut self) {
+        self.worker_abort.abort();
     }
 }
 

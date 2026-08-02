@@ -7,7 +7,7 @@ use super::super::import_export::{
 use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
     claude_oauth_profile_identity, copy_claude_oauth_credentials, managed_profile_home_path,
     prepare_managed_codex_home, prepare_profile_codex_home, remove_dir_if_exists,
 };
@@ -51,7 +51,7 @@ pub(super) fn finish_named_anthropic_profile_login(
             auth_method: auth_method.clone(),
         };
     }
-    state.active_profile = Some(profile_name.to_string());
+    activate_profile(state, profile_name);
     state.save(paths)?;
 
     let fields = vec![
@@ -143,7 +143,7 @@ fn finish_anthropic_login_for_existing_profile(
             auth_method: auth_method.clone(),
         };
     }
-    state.active_profile = Some(profile_name.to_string());
+    activate_profile(state, profile_name);
     state.save(paths)?;
     remove_dir_if_exists(login_home)?;
 
@@ -212,7 +212,7 @@ fn finish_anthropic_login_for_new_profile(
     copy_claude_oauth_credentials(login_home, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
-    state.active_profile = Some(profile_name.clone());
+    activate_profile(state, &profile_name);
     state.save(paths)?;
     remove_dir_if_exists(login_home)?;
 

@@ -8,9 +8,10 @@ use super::super::manage::print_profile_panel;
 use super::super::write_secret_text_file;
 use super::{default_api_key_profile_name, unique_profile_name_for_slug};
 use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, create_codex_home_if_missing,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home,
-    remove_dir_if_exists, update_existing_profile_auth, write_profile_openai_compatible_base_url,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
+    create_codex_home_if_missing, managed_profile_home_path, persist_login_home,
+    prepare_managed_codex_home, remove_dir_if_exists, update_existing_profile_auth,
+    write_profile_openai_compatible_base_url,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::json;
@@ -181,7 +182,7 @@ fn finish_api_key_login_for_new_profile(
     prepare_managed_codex_home(paths, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
-    state.active_profile = Some(profile_name.clone());
+    activate_profile(state, &profile_name);
     state.save(paths)?;
 
     let fields = vec![

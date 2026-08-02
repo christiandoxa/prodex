@@ -11,7 +11,7 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:runtime-manifest` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `npm run ci:runtime-manifest` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
-  The full workflow runs the workspace and eight disjoint `prodex-app` library
+  The full workflow runs the workspace and twelve disjoint `prodex-app` library
   partitions concurrently; its workspace partition excludes `prodex-app`, and
   each risky partition remains internally serial.
 - `npm run ci:full-test-shards` validates the shared app-library shard manifest;
@@ -36,6 +36,12 @@ test/dev debug symbols so sccache remains effective and linking is faster.
 ## CI Impact Gating
 
 The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
+
+The process guard uses sccache and its own dependency cache, so repeated Smart
+Context evidence compilation is cheaper without adding more runner jobs to the
+already-wide matrix. Windows `prodex-app` partitions cover
+the runtime-broker and runtime-launch namespaces; those tests are not repeated
+in a second dedicated Windows job.
 
 When the classifier returns `heavy=false`, cheap and broadly relevant checks still run: formatting, docs lint, secret scan, process guards, and release sync. Use this path for docs-only or similarly low-impact changes once the classifier recognizes them.
 

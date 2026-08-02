@@ -28,6 +28,7 @@ pub(super) fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_regi
 
     let registry = RuntimeBrokerRegistry {
         pid: 999_999_999,
+        process_birth_identity: None,
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -102,6 +103,7 @@ pub(super) fn find_compatible_runtime_broker_registry_prunes_dead_registry_witho
 
     let registry = RuntimeBrokerRegistry {
         pid: 999_999_999,
+        process_birth_identity: None,
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),

@@ -23,13 +23,15 @@ use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_governed_response_with_call_id;
 use super::runtime_local_rewrite_invalid_response;
 use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::sync::Arc;
 use std::time::Instant;
 
 pub(super) struct RuntimeChatCompatibleRewriteContext<'a> {
     pub(super) status: u16,
     pub(super) content_type: &'a str,
+    pub(super) upstream_headers: reqwest::header::HeaderMap,
+    pub(super) prefix: Vec<u8>,
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) provider_kind: RuntimeProviderBridgeKind,
@@ -42,12 +44,14 @@ pub(super) struct RuntimeChatCompatibleRewriteContext<'a> {
 pub(super) fn respond_runtime_chat_compatible_rewrite(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
-    response: reqwest::blocking::Response,
+    response: Box<dyn Read + Send>,
     context: RuntimeChatCompatibleRewriteContext<'_>,
 ) {
     let RuntimeChatCompatibleRewriteContext {
         status,
         content_type,
+        upstream_headers,
+        prefix,
         shared,
         captured,
         provider_kind,
@@ -59,9 +63,9 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
     let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     let conversations = shared.deepseek_conversations_for_request(captured);
     let rate_limit_headers = if provider_kind == RuntimeProviderBridgeKind::DeepSeek {
-        runtime_deepseek_codex_rate_limit_headers(response.headers())
+        runtime_deepseek_codex_rate_limit_headers(&upstream_headers)
     } else {
-        runtime_provider_codex_rate_limit_headers(provider_kind, response.headers())
+        runtime_provider_codex_rate_limit_headers(provider_kind, &upstream_headers)
     };
     let conversation_messages = pending_request.messages;
     let response_metadata = pending_request.response_metadata;
@@ -84,6 +88,11 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
                     &result,
                 );
             })
+        };
+        let response: Box<dyn Read + Send> = if prefix.is_empty() {
+            Box::new(response)
+        } else {
+            Box::new(Cursor::new(prefix).chain(response))
         };
         let reader = RuntimeChatCompatibleSseReader::new_with_provider_and_observer(
             response,
