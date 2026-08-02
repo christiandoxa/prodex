@@ -191,7 +191,7 @@
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 1486,
+    "maxLines": 1421,
     "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency, session revocation, audit integrity, export, and SIEM behavior after retention, revision-recovery, and outbox-claim tests moved to focused modules."
   },
   {
