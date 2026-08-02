@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.378.0 - 2026-08-02
+
+### Runtime
+
+- Close audited runtime and control-plane gaps (`e24f7aa`)
+
+### Misc
+
+- Close cross-platform CI regressions (`2d02ea8`)
+
 ## 0.377.0 - 2026-08-01
 
 ### Runtime
@@ -10,6 +20,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Synchronize cross-platform log reads (`c52403a`)
+- Make auto-redeem selection deterministic (`ebd9c44`)
 - Eliminate Windows test stalls (`d716574`)
 - Finish Windows test portability (`7d440ec`)
 - Complete Windows CI portability (`c79b524`)
@@ -92,19 +104,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited maintenance gaps (`fd0a751`)
-
-## 0.366.0 - 2026-07-29
-
-### Runtime
-
-- Bound Windows proxy test shutdown (`8f377b8`)
-- Harden Windows launch maintenance (`0cb8fe2`)
-- Harden profile links and replay evidence (`50491ec`)
-
-### Deps
-
-- Sync Codex 0.146.0 lockfile (`0a64694`)
-
-### Misc
-
-- Support Codex 0.146.0 (`48c4b94`)
