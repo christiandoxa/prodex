@@ -2,7 +2,7 @@
 
 ## Rust support
 
-Prodex's minimum supported Rust version (MSRV) is **1.97.0**. The root
+Prodex's minimum supported Rust version (MSRV) is **1.97.1**. The root
 `Cargo.toml`, `rust-toolchain.toml`, CI, and the Docker builder use that exact
 release. The toolchain file also installs `clippy` and `rustfmt`, so local and
 CI checks use the same compiler components.
