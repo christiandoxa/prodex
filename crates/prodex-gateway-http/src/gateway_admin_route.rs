@@ -193,8 +193,11 @@ impl GatewayAdminRoute<'_> {
                 GatewayControlPlaneOperation::BillingRead
             }
             Self::AuditExports => GatewayControlPlaneOperation::AuditExport,
-            Self::AuditRetentionHolds => GatewayControlPlaneOperation::PolicyPublish,
-            Self::AuditRetentionHold { .. } => GatewayControlPlaneOperation::AuditRetentionPurge,
+            Self::AuditRetentionHolds if method == GatewayHttpMethod::Get => {
+                GatewayControlPlaneOperation::AuditLegalHoldRead
+            }
+            Self::AuditRetentionHolds => GatewayControlPlaneOperation::AuditLegalHoldUpsert,
+            Self::AuditRetentionHold { .. } => GatewayControlPlaneOperation::AuditLegalHoldDelete,
             Self::AuditRetentionPurge => GatewayControlPlaneOperation::AuditRetentionPurge,
             Self::Governance { resource, .. } => governance_operation(resource, method)?,
             Self::SessionRevoke { .. } => GatewayControlPlaneOperation::PolicyRevoke,

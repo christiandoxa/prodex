@@ -35,29 +35,30 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
 ) {
     let RuntimeLocalRewriteLiveResponse {
         prefix,
-        response,
+        status,
+        headers: upstream_headers,
+        body,
         native_anthropic_messages,
         mut chat_compatible_request,
     } = live_response;
-    let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
-        response
-            .headers()
+        upstream_headers
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_bytes())),
     );
     let text_headers = runtime_proxy_crate::runtime_forward_text_response_headers(
-        response
-            .headers()
+        upstream_headers
             .iter()
             .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
     );
-    let content_type = response
-        .headers()
+    let content_type = upstream_headers
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let response = body
+        .expect("live response body should be present before dispatch")
+        .into_reader();
 
     if runtime_local_rewrite_is_responses_route(
         &shared.provider,
@@ -73,6 +74,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 RuntimeAnthropicMessagesRewriteContext {
                     status,
                     content_type: &content_type,
+                    upstream_headers: upstream_headers.clone(),
                     shared,
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::DeepSeek,
@@ -89,6 +91,8 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             RuntimeChatCompatibleRewriteContext {
                 status,
                 content_type: &content_type,
+                upstream_headers: upstream_headers.clone(),
+                prefix,
                 shared,
                 captured,
                 provider_kind: RuntimeProviderBridgeKind::DeepSeek,
@@ -115,6 +119,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 RuntimeAnthropicMessagesRewriteContext {
                     status,
                     content_type: &content_type,
+                    upstream_headers: upstream_headers.clone(),
                     shared,
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::Anthropic,
@@ -131,6 +136,8 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             RuntimeChatCompatibleRewriteContext {
                 status,
                 content_type: &content_type,
+                upstream_headers: upstream_headers.clone(),
+                prefix,
                 shared,
                 captured,
                 provider_kind: RuntimeProviderBridgeKind::Anthropic,
@@ -157,6 +164,8 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 RuntimeChatCompatibleRewriteContext {
                     status,
                     content_type: &content_type,
+                    upstream_headers: upstream_headers.clone(),
+                    prefix,
                     shared,
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::Gemini,
@@ -175,6 +184,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     prefix,
                     status,
                     content_type: &content_type,
+                    upstream_headers: upstream_headers.clone(),
                     shared,
                     captured,
                     gemini_context,

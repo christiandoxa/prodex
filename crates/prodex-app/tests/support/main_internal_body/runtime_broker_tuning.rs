@@ -249,6 +249,7 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
     fs::write(&live_lease, "live").expect("live child lease should write");
     let registry = RuntimeBrokerRegistry {
         pid: std::process::id(),
+        process_birth_identity: None,
         listen_addr: "127.0.0.1:33475".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),

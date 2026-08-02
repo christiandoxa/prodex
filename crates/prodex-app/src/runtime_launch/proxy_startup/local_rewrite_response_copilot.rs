@@ -19,7 +19,7 @@ use std::time::Instant;
 pub(super) fn respond_runtime_copilot_rewrite(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
-    response: reqwest::blocking::Response,
+    response: Box<dyn Read + Send>,
     status: u16,
     content_type: &str,
     text_headers: Vec<(String, String)>,

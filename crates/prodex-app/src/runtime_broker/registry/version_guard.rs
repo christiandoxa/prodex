@@ -7,7 +7,8 @@ use crate::{
     AppPaths, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeBrokerVersionGuardOutcome,
     audit_log_event, cleanup_runtime_broker_stale_leases,
     remove_runtime_broker_registry_if_instance_matches, runtime_current_prodex_binary_identity,
-    runtime_current_prodex_version_identity, runtime_process_pid_alive, terminate_runtime_process,
+    runtime_current_prodex_version_identity, runtime_process_absence_proven,
+    terminate_runtime_process,
 };
 
 pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
@@ -16,7 +17,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
     registry: &RuntimeBrokerRegistry,
     health: Option<&RuntimeBrokerHealth>,
 ) -> Result<RuntimeBrokerVersionGuardOutcome> {
-    if !runtime_process_pid_alive(registry.pid) {
+    if runtime_process_absence_proven(registry.pid) {
         return Ok(RuntimeBrokerVersionGuardOutcome::Compatible);
     }
 
@@ -56,6 +57,15 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             &observed_identity,
         )
     });
+    let termination =
+        terminate_runtime_process(registry.pid, registry.process_birth_identity.as_deref());
+    if !matches!(
+        termination,
+        super::process::RuntimeProcessTerminationOutcome::Terminated
+            | super::process::RuntimeProcessTerminationOutcome::NotRunning
+    ) {
+        return Ok(RuntimeBrokerVersionGuardOutcome::TerminationFailed);
+    }
     audit_log_event(
         "runtime_broker",
         "replace_stale_broker",
@@ -64,6 +74,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             "reason": replacement_reason,
             "broker_key": broker_key,
             "pid": registry.pid,
+            "termination_outcome": format!("{termination:?}"),
             "listen_addr": registry.listen_addr,
             "started_at": registry.started_at,
             "instance_id": registry.instance_id,
@@ -83,7 +94,6 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             "platform": env::consts::OS,
         }),
     )?;
-    terminate_runtime_process(registry.pid);
     remove_runtime_broker_registry_if_instance_matches(paths, broker_key, &registry.instance_id);
     Ok(RuntimeBrokerVersionGuardOutcome::Replaced)
 }

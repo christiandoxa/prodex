@@ -4,6 +4,8 @@ use super::*;
 mod connect;
 #[path = "websocket/precommit_hold.rs"]
 mod precommit_hold;
+#[path = "websocket/precommit_regressions.rs"]
+mod precommit_regressions;
 
 pub(super) fn websocket_test_log_path(name: &str) -> PathBuf {
     static NEXT_LOG_ID: AtomicU64 = AtomicU64::new(1);

@@ -65,10 +65,12 @@ pub(super) fn runtime_gemini_compact_response(
                 .unwrap_or(RUNTIME_LOCAL_REWRITE_PROFILE);
             let parts = match response {
                 RuntimeLocalRewriteUpstreamResponse::Live(live) if live.prefix.is_empty() => {
-                    let status = live.response.status().as_u16();
+                    let status = live.status;
                     runtime_gemini_semantic_compact_response_parts(
                         status,
-                        live.response,
+                        live.body
+                            .expect("live compact response body should be present")
+                            .into_reader(),
                         request_id,
                         &captured.body,
                     )?
@@ -150,7 +152,7 @@ pub(super) fn runtime_gemini_compact_response(
 
 pub(super) fn runtime_gemini_semantic_compact_response_parts(
     status: u16,
-    response: reqwest::blocking::Response,
+    response: impl std::io::Read,
     request_id: u64,
     compact_request_body: &[u8],
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {

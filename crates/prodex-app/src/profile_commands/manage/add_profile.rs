@@ -6,9 +6,9 @@ use super::super::import_export::{
     write_profile_lifecycle_plan,
 };
 use crate::{
-    AddProfileArgs, AppPaths, AppState, ProfileEntry, ProfileProvider, absolutize, copy_codex_home,
-    create_codex_home_if_missing, ensure_path_is_unique, managed_profile_home_path,
-    prepare_managed_codex_home,
+    AddProfileArgs, AppPaths, AppState, ProfileEntry, ProfileProvider, absolutize,
+    activate_profile as mark_profile_active, copy_codex_home, create_codex_home_if_missing,
+    ensure_path_is_unique, managed_profile_home_path, prepare_managed_codex_home,
 };
 
 pub(super) fn add_new_profile_to_state(
@@ -73,7 +73,7 @@ pub(super) fn add_new_profile_to_state(
     }
     state.profiles.insert(args.name.clone(), desired_profile);
     if activate_profile {
-        state.active_profile = Some(args.name.clone());
+        mark_profile_active(state, &args.name);
     }
     Ok((codex_home, lifecycle_path))
 }

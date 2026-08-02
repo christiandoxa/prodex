@@ -7,8 +7,8 @@ use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, GeminiOAuthSecret, ProfileEntry, ProfileProvider,
-    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
-    remove_dir_if_exists, write_gemini_oauth_secret,
+    activate_profile, managed_profile_home_path, prepare_managed_codex_home,
+    prepare_profile_codex_home, remove_dir_if_exists, write_gemini_oauth_secret,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ pub(super) fn finish_named_gemini_profile_login(
             project_id: secret.project_id.clone(),
         };
     }
-    state.active_profile = Some(profile_name.to_string());
+    activate_profile(state, profile_name);
     state.save(paths)?;
 
     let fields = vec![
@@ -127,7 +127,7 @@ fn finish_gemini_login_for_existing_profile(
             project_id: secret.project_id.clone(),
         };
     }
-    state.active_profile = Some(profile_name.to_string());
+    activate_profile(state, profile_name);
     state.save(paths)?;
     remove_dir_if_exists(login_home)?;
 
@@ -192,7 +192,7 @@ fn finish_gemini_login_for_new_profile(
     write_gemini_oauth_secret(&codex_home, secret)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
-    state.active_profile = Some(profile_name.clone());
+    activate_profile(state, &profile_name);
     state.save(paths)?;
     remove_dir_if_exists(login_home)?;
 

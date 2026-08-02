@@ -17,12 +17,13 @@ use prodex_provider_core::{
     provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids,
     provider_core_rewritten_json_value,
 };
+use std::io::Read;
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
     provider_kind: RuntimeProviderBridgeKind,
     status: u16,
-    response: reqwest::blocking::Response,
+    response: impl Read,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     response_metadata: Option<serde_json::Value>,

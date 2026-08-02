@@ -241,7 +241,7 @@ fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key
                 .split('-')
                 .next()
                 .and_then(|value| value.parse::<u32>().ok());
-            !pid.is_some_and(runtime_process_pid_alive)
+            pid.is_none_or(runtime_process_absence_proven)
         })
         .count()
 }
@@ -298,7 +298,7 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
             continue;
         };
         let stale_leases = runtime_doctor_count_stale_runtime_broker_leases(paths, &broker_key);
-        if !runtime_process_pid_alive(registry.pid) {
+        if runtime_process_absence_proven(registry.pid) {
             summary.runtime_broker_identities.push(format!(
                 "broker_key={} pid={} listen_addr={} status=dead_pid mismatch=none version={} path={} sha256={} source=registry stale_leases={}",
                 broker_key,

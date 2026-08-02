@@ -193,6 +193,24 @@ fn setup_parse_as_top_level_command() {
     ])));
     assert!(parse_cli_command_from(["prodex", "setup", "--verify-assets"]).is_err());
 }
+
+#[test]
+fn setup_help_lists_optional_tool_catalog() {
+    let help = parse_cli_command_from(["prodex", "setup", "--help"])
+        .expect_err("setup help should be returned as a CLI error")
+        .to_string();
+
+    for tool in [
+        "Caveman",
+        "RTK",
+        "Codebase Memory MCP",
+        "Playwright MCP",
+        "Ponytail",
+    ] {
+        assert!(help.contains(tool), "setup help omitted {tool}: {help}");
+    }
+}
+
 #[test]
 fn capability_list_parse_as_top_level_command() {
     let command = parse_cli_command_from(["prodex", "capability", "list", "--json"])

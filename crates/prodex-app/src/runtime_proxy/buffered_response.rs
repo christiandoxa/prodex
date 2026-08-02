@@ -135,7 +135,7 @@ fn buffered_response_limit_error(max_bytes: usize) -> anyhow::Error {
 }
 
 pub(crate) fn read_blocking_response_body_with_limit(
-    response: reqwest::blocking::Response,
+    response: impl Read,
     max_bytes: usize,
     context: &str,
 ) -> Result<Vec<u8>> {

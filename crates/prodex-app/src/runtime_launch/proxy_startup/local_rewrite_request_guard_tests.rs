@@ -1,11 +1,41 @@
 use super::super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
-use super::{RuntimeGovernanceAuthority, runtime_gateway_try_reserve_background_task};
+use super::{
+    RuntimeGovernanceAuthority, build_runtime_local_rewrite_http_client,
+    runtime_gateway_try_reserve_background_task,
+};
 use prodex_domain::TenantId;
 use prodex_storage::GovernanceRepositoryError;
 use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[test]
+fn local_rewrite_streaming_client_has_no_total_request_timeout() {
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let address = server.server_addr().to_ip().unwrap();
+    let responder = std::thread::spawn(move || {
+        let request = server.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        request
+            .respond(tiny_http::Response::from_string("ok"))
+            .unwrap();
+    });
+    let mut config = crate::RuntimeConfig::compatibility_current();
+    config.tuning.stream_idle_timeout_ms = 20;
+    config.tuning.http_connect_timeout_ms = 500;
+
+    let body = build_runtime_local_rewrite_http_client(&config)
+        .unwrap()
+        .get(format!("http://{address}"))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+
+    assert_eq!(body, "ok");
+    responder.join().unwrap();
+}
 
 #[test]
 fn gateway_usage_request_guard_releases_request_id() {

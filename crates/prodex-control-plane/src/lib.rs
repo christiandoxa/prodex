@@ -52,12 +52,15 @@ pub enum ControlPlaneOperation {
     BudgetUpdate,
     BillingRead,
     AuditExport,
+    AuditLegalHoldRead,
+    AuditLegalHoldUpsert,
+    AuditLegalHoldDelete,
     AuditRetentionPurge,
     ConfigurationPublish,
 }
 
 impl ControlPlaneOperation {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 35] = [
         Self::GatewayAdminRead,
         Self::RouteExplain,
         Self::TenantCreate,
@@ -88,6 +91,9 @@ impl ControlPlaneOperation {
         Self::BudgetUpdate,
         Self::BillingRead,
         Self::AuditExport,
+        Self::AuditLegalHoldRead,
+        Self::AuditLegalHoldUpsert,
+        Self::AuditLegalHoldDelete,
         Self::AuditRetentionPurge,
         Self::ConfigurationPublish,
     ];
@@ -180,6 +186,15 @@ impl ControlPlaneOperation {
             Self::AuditExport => {
                 ControlPlaneRequirement::admin(ResourceKind::AuditLog, ResourceAction::Export)
             }
+            Self::AuditLegalHoldRead => {
+                ControlPlaneRequirement::viewer(ResourceKind::AuditLog, ResourceAction::Read)
+            }
+            Self::AuditLegalHoldUpsert => {
+                ControlPlaneRequirement::admin(ResourceKind::AuditLog, ResourceAction::Update)
+            }
+            Self::AuditLegalHoldDelete => {
+                ControlPlaneRequirement::admin(ResourceKind::AuditLog, ResourceAction::Delete)
+            }
             Self::AuditRetentionPurge => {
                 ControlPlaneRequirement::admin(ResourceKind::AuditLog, ResourceAction::Delete)
             }
@@ -222,6 +237,9 @@ impl ControlPlaneOperation {
             Self::BudgetUpdate => "control_plane.budget.update",
             Self::BillingRead => "control_plane.billing.read",
             Self::AuditExport => "control_plane.audit.export",
+            Self::AuditLegalHoldRead => "control_plane.audit.legal_hold.read",
+            Self::AuditLegalHoldUpsert => "control_plane.audit.legal_hold.upsert",
+            Self::AuditLegalHoldDelete => "control_plane.audit.legal_hold.delete",
             Self::AuditRetentionPurge => "control_plane.audit.retention_purge",
             Self::ConfigurationPublish => "control_plane.configuration.publish",
         })
@@ -238,6 +256,7 @@ impl ControlPlaneOperation {
                 | Self::PolicyValidate
                 | Self::BillingRead
                 | Self::AuditExport
+                | Self::AuditLegalHoldRead
         )
     }
 

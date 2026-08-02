@@ -15,6 +15,8 @@ pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bo
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeBrokerRegistry {
     pub pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_birth_identity: Option<String>,
     pub listen_addr: String,
     pub started_at: i64,
     pub upstream_base_url: String,

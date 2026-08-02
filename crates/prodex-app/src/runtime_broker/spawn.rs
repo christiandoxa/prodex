@@ -89,7 +89,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
             return Ok(None);
         };
 
-        if !runtime_process_pid_alive(existing.pid) {
+        if runtime_process_absence_proven(existing.pid) {
             remove_runtime_broker_registry_if_instance_matches(
                 paths,
                 broker_key,
@@ -109,6 +109,9 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
             RuntimeBrokerVersionGuardOutcome::Replaced => return Ok(None),
             RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {
                 return Ok(None);
+            }
+            RuntimeBrokerVersionGuardOutcome::TerminationFailed => {
+                bail!("could not prove ownership before replacing runtime broker")
             }
         }
 
@@ -173,7 +176,7 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
         if !launch_config.matches_registry(&registry) {
             continue;
         }
-        if !runtime_process_pid_alive(registry.pid) {
+        if runtime_process_absence_proven(registry.pid) {
             remove_runtime_broker_registry_if_instance_matches(
                 paths,
                 &broker_key,
@@ -190,7 +193,8 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
         )? {
             RuntimeBrokerVersionGuardOutcome::Compatible => {}
             RuntimeBrokerVersionGuardOutcome::Replaced
-            | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => continue,
+            | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests
+            | RuntimeBrokerVersionGuardOutcome::TerminationFailed => continue,
         }
         if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
             &registry,
@@ -266,7 +270,7 @@ pub(crate) fn preferred_runtime_broker_listen_addr(
 ) -> Result<Option<String>> {
     Ok(
         load_runtime_broker_registry(paths, broker_key)?.and_then(|registry| {
-            (!runtime_process_pid_alive(registry.pid)).then_some(registry.listen_addr)
+            runtime_process_absence_proven(registry.pid).then_some(registry.listen_addr)
         }),
     )
 }
@@ -328,7 +332,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     }
 
     if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
-        if !runtime_process_pid_alive(existing.pid) {
+        if runtime_process_absence_proven(existing.pid) {
             remove_runtime_broker_registry_if_instance_matches(
                 paths,
                 &broker_key,
@@ -367,6 +371,9 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
                 }
                 RuntimeBrokerVersionGuardOutcome::Replaced
                 | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {}
+                RuntimeBrokerVersionGuardOutcome::TerminationFailed => {
+                    bail!("could not prove ownership before replacing runtime broker")
+                }
             }
         }
     }

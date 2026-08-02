@@ -53,7 +53,7 @@ The maintained enterprise contract is split by responsibility:
 
 ## Generated Evidence
 
-These files are regenerated and checked for drift:
+These files are regenerated; CI checks the Smart Context replay report for drift:
 
 - [Smart Context replay report](generated/smart-context-replay-report.md) via
   `npm run docs:smart-context-evidence`;
@@ -62,5 +62,5 @@ These files are regenerated and checked for drift:
 - [Provider capabilities](provider-capabilities.md) via
   `npm run docs:provider-capabilities`.
 
-Broken local links, duplicate canonical numeric prefixes, and generated-document
+Broken local links, duplicate canonical numeric prefixes, and Smart Context replay
 drift are CI failures.

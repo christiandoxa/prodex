@@ -520,7 +520,7 @@ pub(super) fn runtime_local_rewrite_append_call_id_header(
 pub(super) fn runtime_local_rewrite_buffered_response_parts(
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
-    response: reqwest::blocking::Response,
+    response: impl std::io::Read,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let body = read_blocking_response_body_with_limit(
         response,

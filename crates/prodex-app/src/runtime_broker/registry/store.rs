@@ -6,10 +6,10 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 use crate::{
-    AppPaths, RuntimeBrokerRegistry, delete_runtime_secret, load_json_file_with_backup,
-    read_runtime_secret_bounded, runtime_broker_capability_file_path,
+    AppPaths, RuntimeBrokerRegistry, acquire_json_file_lock, delete_runtime_secret,
+    load_json_file_with_backup, read_runtime_secret_bounded, runtime_broker_capability_file_path,
     runtime_broker_registry_file_path, runtime_broker_registry_last_good_file_path,
-    terminate_runtime_process, write_json_file_with_backup, write_runtime_secret_bounded,
+    write_json_file_with_backup, write_runtime_secret_bounded,
 };
 use prodex_runtime_broker::{RuntimeBrokerCapability, RuntimeBrokerSecret};
 use secret_store::SecretValue;
@@ -20,7 +20,6 @@ const RUNTIME_BROKER_REGISTRY_MAX_BYTES: u64 = 64 * 1024;
 
 #[derive(Deserialize)]
 struct LegacyRuntimeBrokerRegistry {
-    pid: u32,
     #[serde(deserialize_with = "deserialize_runtime_broker_secret")]
     instance_token: RuntimeBrokerSecret,
     #[serde(deserialize_with = "deserialize_runtime_broker_secret")]
@@ -43,6 +42,32 @@ pub(crate) fn load_runtime_broker_registry(
 ) -> Result<Option<RuntimeBrokerRegistry>> {
     let path = runtime_broker_registry_file_path(paths, broker_key);
     let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
+    let capability_path = runtime_broker_capability_file_path(paths, broker_key);
+    if !path.exists() && !backup_path.exists() && !capability_path.exists() {
+        return Ok(None);
+    }
+    let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
+    load_runtime_broker_registry_unlocked(paths, broker_key)
+}
+
+fn acquire_runtime_broker_artifact_lock(
+    paths: &AppPaths,
+    broker_key: &str,
+) -> Result<crate::JsonFileLock> {
+    let path = runtime_broker_registry_file_path(paths, broker_key);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    acquire_json_file_lock(&path)
+}
+
+fn load_runtime_broker_registry_unlocked(
+    paths: &AppPaths,
+    broker_key: &str,
+) -> Result<Option<RuntimeBrokerRegistry>> {
+    let path = runtime_broker_registry_file_path(paths, broker_key);
+    let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
     if !path.exists() && !backup_path.exists() {
         return Ok(None);
     }
@@ -58,18 +83,21 @@ pub(crate) fn load_runtime_broker_registry(
             load_json_file_with_backup::<LegacyRuntimeBrokerRegistry>(&path, &backup_path)
         {
             let LegacyRuntimeBrokerRegistry {
-                pid,
                 instance_token,
                 admin_token,
             } = legacy.value;
-            terminate_runtime_process(pid);
             drop(instance_token);
             drop(admin_token);
         }
         remove_runtime_broker_registry_files_checked(paths, broker_key)?;
-        remove_runtime_broker_capability(paths, broker_key);
-        if fs::symlink_metadata(runtime_broker_capability_file_path(paths, broker_key)).is_ok() {
-            anyhow::bail!("failed to remove legacy runtime broker capability");
+        let capability_path = runtime_broker_capability_file_path(paths, broker_key);
+        if fs::symlink_metadata(&capability_path).is_ok() {
+            if load_runtime_broker_capability_record(paths, broker_key).is_ok() {
+                remove_runtime_broker_capability_unlocked(paths, broker_key);
+            }
+            if fs::symlink_metadata(&capability_path).is_ok() {
+                anyhow::bail!("failed to remove legacy runtime broker capability");
+            }
         }
         return Ok(None);
     }
@@ -109,8 +137,17 @@ fn read_runtime_broker_registry_bytes(path: &Path) -> Option<Vec<u8>> {
         .ok()?;
     (bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES).then_some(bytes)
 }
-
+#[cfg(test)]
 pub(crate) fn save_runtime_broker_registry(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<()> {
+    let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
+    save_runtime_broker_registry_unlocked(paths, broker_key, registry)
+}
+
+fn save_runtime_broker_registry_unlocked(
     paths: &AppPaths,
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
@@ -133,8 +170,18 @@ pub(crate) fn save_runtime_broker_registry(
         },
     )
 }
-
+#[cfg(test)]
 pub(crate) fn save_runtime_broker_capability(
+    paths: &AppPaths,
+    broker_key: &str,
+    instance_id: &str,
+    capability: &RuntimeBrokerSecret,
+) -> Result<()> {
+    let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
+    save_runtime_broker_capability_unlocked(paths, broker_key, instance_id, capability)
+}
+
+fn save_runtime_broker_capability_unlocked(
     paths: &AppPaths,
     broker_key: &str,
     instance_id: &str,
@@ -151,6 +198,27 @@ pub(crate) fn save_runtime_broker_capability(
         RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
     )
     .with_context(|| format!("failed to write {}", path.display()))
+}
+
+pub(crate) fn save_runtime_broker_artifacts(
+    paths: &AppPaths,
+    broker_key: &str,
+    instance_id: &str,
+    capability: &RuntimeBrokerSecret,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<()> {
+    let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
+    save_runtime_broker_capability_unlocked(paths, broker_key, instance_id, capability)?;
+    if let Err(error) = save_runtime_broker_registry_unlocked(paths, broker_key, registry) {
+        remove_runtime_broker_capability_if_matches_unlocked(
+            paths,
+            broker_key,
+            instance_id,
+            capability,
+        );
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub(crate) fn load_runtime_broker_capability(
@@ -185,31 +253,67 @@ pub(crate) fn remove_runtime_broker_registry_if_instance_matches(
     broker_key: &str,
     instance_id: &str,
 ) {
-    let Ok(Some(existing)) = load_runtime_broker_registry(paths, broker_key) else {
+    let Ok(_lock) = acquire_runtime_broker_artifact_lock(paths, broker_key) else {
+        return;
+    };
+    let Ok(Some(existing)) = load_runtime_broker_registry_unlocked(paths, broker_key) else {
         return;
     };
     if existing.instance_id != instance_id {
         return;
     }
     remove_runtime_broker_registry_files(paths, broker_key);
-    remove_runtime_broker_capability_if_instance_matches(paths, broker_key, instance_id);
+    remove_runtime_broker_capability_if_instance_matches_unlocked(paths, broker_key, instance_id);
 }
 
+#[cfg(test)]
 pub(crate) fn remove_runtime_broker_capability_if_instance_matches(
+    paths: &AppPaths,
+    broker_key: &str,
+    expected_instance_id: &str,
+) {
+    let Ok(_lock) = acquire_runtime_broker_artifact_lock(paths, broker_key) else {
+        return;
+    };
+    remove_runtime_broker_capability_if_instance_matches_unlocked(
+        paths,
+        broker_key,
+        expected_instance_id,
+    );
+}
+
+fn remove_runtime_broker_capability_if_instance_matches_unlocked(
     paths: &AppPaths,
     broker_key: &str,
     expected_instance_id: &str,
 ) {
     match load_runtime_broker_capability_record(paths, broker_key) {
         Ok(existing) if existing.instance_id == expected_instance_id => {
-            remove_runtime_broker_capability(paths, broker_key);
+            remove_runtime_broker_capability_unlocked(paths, broker_key);
         }
         Ok(_) => {}
-        Err(_) => remove_runtime_broker_capability(paths, broker_key),
+        Err(_) => {}
     }
 }
 
 pub(crate) fn remove_runtime_broker_capability_if_matches(
+    paths: &AppPaths,
+    broker_key: &str,
+    expected_instance_id: &str,
+    expected: &RuntimeBrokerSecret,
+) {
+    let Ok(_lock) = acquire_runtime_broker_artifact_lock(paths, broker_key) else {
+        return;
+    };
+    remove_runtime_broker_capability_if_matches_unlocked(
+        paths,
+        broker_key,
+        expected_instance_id,
+        expected,
+    );
+}
+
+fn remove_runtime_broker_capability_if_matches_unlocked(
     paths: &AppPaths,
     broker_key: &str,
     expected_instance_id: &str,
@@ -221,11 +325,42 @@ pub(crate) fn remove_runtime_broker_capability_if_matches(
     if existing.instance_id == expected_instance_id
         && existing.admin_token.matches(expected.expose())
     {
-        remove_runtime_broker_capability(paths, broker_key);
+        remove_runtime_broker_capability_unlocked(paths, broker_key);
     }
 }
 
+#[cfg(test)]
 pub(crate) fn remove_runtime_broker_capability(paths: &AppPaths, broker_key: &str) {
+    let Ok(_lock) = acquire_runtime_broker_artifact_lock(paths, broker_key) else {
+        return;
+    };
+    remove_runtime_broker_capability_unlocked(paths, broker_key);
+}
+
+pub(crate) fn remove_runtime_broker_orphaned_capability(
+    paths: &AppPaths,
+    broker_key: &str,
+) -> bool {
+    let Ok(_lock) = acquire_runtime_broker_artifact_lock(paths, broker_key) else {
+        return false;
+    };
+    if fs::symlink_metadata(runtime_broker_registry_file_path(paths, broker_key)).is_ok()
+        || fs::symlink_metadata(runtime_broker_registry_last_good_file_path(
+            paths, broker_key,
+        ))
+        .is_ok()
+    {
+        return false;
+    }
+    if load_runtime_broker_capability_record(paths, broker_key).is_err() {
+        return false;
+    }
+    let path = runtime_broker_capability_file_path(paths, broker_key);
+    remove_runtime_broker_capability_unlocked(paths, broker_key);
+    fs::symlink_metadata(path).is_err()
+}
+
+fn remove_runtime_broker_capability_unlocked(paths: &AppPaths, broker_key: &str) {
     let path = runtime_broker_capability_file_path(paths, broker_key);
     delete_runtime_secret(paths, &path);
 }
@@ -262,6 +397,8 @@ mod tests {
     use super::*;
     use crate::RUNTIME_PROXY_OPENAI_MOUNT_PATH;
     use prodex_runtime_broker::RuntimeBrokerRegistry;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_paths(label: &str) -> AppPaths {
@@ -291,6 +428,7 @@ mod tests {
     fn test_registry(instance_id: &str) -> RuntimeBrokerRegistry {
         RuntimeBrokerRegistry {
             pid: std::process::id(),
+            process_birth_identity: None,
             listen_addr: "127.0.0.1:4567".to_string(),
             started_at: 100,
             upstream_base_url: "https://upstream.example".to_string(),
@@ -419,20 +557,74 @@ mod tests {
     }
 
     #[test]
-    fn old_instance_cleanup_preserves_a_new_capability_generation() {
+    fn capability_cleanup_preserves_unreadable_capability() {
+        let paths = test_paths("invalid-cleanup");
+        let broker_key = "broker";
+        let capability_path = runtime_broker_capability_file_path(&paths, broker_key);
+        let capability = RuntimeBrokerSecret::new("current-admin-capability").unwrap();
+        save_runtime_broker_capability(&paths, broker_key, "current-instance", &capability)
+            .unwrap();
+        fs::write(&capability_path, b"not-a-capability").unwrap();
+
+        remove_runtime_broker_capability_if_instance_matches(
+            &paths,
+            broker_key,
+            "current-instance",
+        );
+
+        assert_eq!(fs::read(&capability_path).unwrap(), b"not-a-capability");
+        let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[test]
+    fn old_cleanup_cannot_delete_a_newer_instance_generation() {
         let paths = test_paths("generation-race");
         let broker_key = "broker";
-        let capability = RuntimeBrokerSecret::new("new-admin-capability").unwrap();
+        let old_capability = RuntimeBrokerSecret::new("old-admin-capability").unwrap();
         save_runtime_broker_registry(&paths, broker_key, &test_registry("old-instance")).unwrap();
-        save_runtime_broker_capability(&paths, broker_key, "new-instance", &capability).unwrap();
+        save_runtime_broker_capability(&paths, broker_key, "old-instance", &old_capability)
+            .unwrap();
 
-        remove_runtime_broker_registry_if_instance_matches(&paths, broker_key, "old-instance");
+        let barrier = Arc::new(Barrier::new(3));
+        let cleanup_paths = paths.clone();
+        let cleanup_barrier = Arc::clone(&barrier);
+        let cleanup = thread::spawn(move || {
+            cleanup_barrier.wait();
+            remove_runtime_broker_registry_if_instance_matches(
+                &cleanup_paths,
+                broker_key,
+                "old-instance",
+            );
+        });
+        let publish_paths = paths.clone();
+        let publish_barrier = Arc::clone(&barrier);
+        let publish = thread::spawn(move || {
+            publish_barrier.wait();
+            let new_capability = RuntimeBrokerSecret::new("new-admin-capability").unwrap();
+            save_runtime_broker_artifacts(
+                &publish_paths,
+                broker_key,
+                "new-instance",
+                &new_capability,
+                &test_registry("new-instance"),
+            )
+            .unwrap();
+        });
+        barrier.wait();
+        cleanup.join().unwrap();
+        publish.join().unwrap();
 
-        assert!(!runtime_broker_registry_file_path(&paths, broker_key).exists());
+        assert_eq!(
+            load_runtime_broker_registry(&paths, broker_key)
+                .unwrap()
+                .unwrap()
+                .instance_id,
+            "new-instance"
+        );
         assert!(
             load_runtime_broker_capability(&paths, broker_key, "new-instance")
                 .unwrap()
-                .matches(capability.expose())
+                .matches("new-admin-capability")
         );
 
         let _ = fs::remove_dir_all(paths.root);

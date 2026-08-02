@@ -63,6 +63,9 @@ fn app_state_save_merges_existing_runtime_bindings() {
     desired
         .save(&paths)
         .expect("merged state save should succeed");
+    existing
+        .save(&paths)
+        .expect("stale state save should preserve the newer activation");
 
     let loaded = AppState::load(&paths).expect("state should reload");
     assert_eq!(loaded.active_profile.as_deref(), Some("second"));

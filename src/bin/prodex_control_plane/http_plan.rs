@@ -631,6 +631,9 @@ fn control_plane_operation_label(operation: ControlPlaneOperation) -> &'static s
         ControlPlaneOperation::BudgetUpdate => "budget_update",
         ControlPlaneOperation::BillingRead => "billing_read",
         ControlPlaneOperation::AuditExport => "audit_export",
+        ControlPlaneOperation::AuditLegalHoldRead => "audit_legal_hold_read",
+        ControlPlaneOperation::AuditLegalHoldUpsert => "audit_legal_hold_upsert",
+        ControlPlaneOperation::AuditLegalHoldDelete => "audit_legal_hold_delete",
         ControlPlaneOperation::AuditRetentionPurge => "audit_retention_purge",
         ControlPlaneOperation::ConfigurationPublish => "configuration_publish",
     }

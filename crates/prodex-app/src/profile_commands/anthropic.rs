@@ -11,7 +11,7 @@ use super::import_export::{
 use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    claude_config_dir_from_env_or_default, claude_oauth_profile_identity,
+    activate_profile, claude_config_dir_from_env_or_default, claude_oauth_profile_identity,
     copy_claude_oauth_credentials, ensure_path_is_unique, managed_profile_home_path,
     prepare_managed_codex_home, prepare_profile_codex_home,
 };
@@ -156,7 +156,7 @@ fn update_existing_claude_profile(
         auth_method: auth_method.clone(),
     };
     if activate {
-        state.active_profile = Some(existing.to_string());
+        activate_profile(state, existing);
     }
     state.save(paths)?;
     cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
@@ -224,7 +224,7 @@ fn add_new_claude_profile(
     copy_claude_oauth_credentials(source_config_dir, &codex_home)?;
     state.profiles.insert(profile_name.clone(), desired_profile);
     if activate || state.active_profile.is_none() {
-        state.active_profile = Some(profile_name.clone());
+        activate_profile(state, &profile_name);
     }
     state.save(paths)?;
     prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);

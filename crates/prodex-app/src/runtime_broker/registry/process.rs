@@ -2,12 +2,18 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::io::Read as _;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+#[cfg(test)]
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use crate::{
     ProcessRow, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeProdexBinaryIdentity,
@@ -15,6 +21,15 @@ use crate::{
 };
 
 const RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeProcessTerminationOutcome {
+    NotRunning,
+    OwnershipUnproven,
+    OwnershipChanged,
+    Terminated,
+    StillRunning,
+}
 
 #[derive(Debug, Clone)]
 struct RuntimeProcessVersionResolution {
@@ -25,8 +40,13 @@ struct RuntimeProcessVersionResolution {
 
 trait RuntimeProcessPlatform {
     fn pid_alive(pid: u32) -> bool;
+    fn process_absence_proven(pid: u32) -> bool;
+    fn process_birth_identity(pid: u32) -> Option<String>;
     fn executable_path(pid: u32) -> Option<PathBuf>;
-    fn terminate_step(pid_value: &str, force: bool);
+    fn terminate(
+        pid: u32,
+        expected_birth_identity: Option<&str>,
+    ) -> RuntimeProcessTerminationOutcome;
 }
 
 #[cfg(target_os = "linux")]
@@ -61,112 +81,392 @@ impl RuntimeProcessPlatform for RuntimeProcessLinux {
         PathBuf::from(format!("/proc/{pid}")).exists()
     }
 
+    fn process_absence_proven(pid: u32) -> bool {
+        if linux_process_is_zombie(pid) {
+            return true;
+        }
+        match linux_pidfd_open(pid) {
+            Ok(_) => false,
+            Err(error) => error.raw_os_error() == Some(libc::ESRCH),
+        }
+    }
+
+    fn process_birth_identity(pid: u32) -> Option<String> {
+        let _pidfd = linux_pidfd_open(pid).ok()?;
+        linux_process_birth_identity(pid)
+    }
+
     fn executable_path(pid: u32) -> Option<PathBuf> {
         fs::read_link(format!("/proc/{pid}/exe")).ok()
     }
 
-    fn terminate_step(pid_value: &str, force: bool) {
-        let signal = if force { "-KILL" } else { "-TERM" };
-        let _ = Command::new("kill")
-            .args([signal, pid_value])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    fn terminate(
+        pid: u32,
+        expected_birth_identity: Option<&str>,
+    ) -> RuntimeProcessTerminationOutcome {
+        terminate_runtime_process_linux(pid, expected_birth_identity)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_pidfd_open(pid: u32) -> io::Result<OwnedFd> {
+    let pid = libc::pid_t::try_from(pid).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pid does not fit the platform pid_t",
+        )
+    })?;
+    if pid <= 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"));
+    }
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0 as libc::c_uint) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = i32::try_from(fd).map_err(|_| io::Error::other("pidfd did not fit RawFd"))?;
+    // SAFETY: successful pidfd_open returns an owned file descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_birth_identity(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let start_time = stat.rsplit_once(") ")?.1.split_whitespace().nth(19)?;
+    let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let boot_id = boot_id.trim();
+    (!boot_id.is_empty() && !start_time.is_empty()).then(|| format!("linux:{boot_id}:{start_time}"))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_is_zombie(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| stat.rsplit_once(") ").map(|(_, rest)| rest.to_string()))
+        .and_then(|rest| rest.split_whitespace().next().map(str::to_string))
+        .is_some_and(|state| state == "Z")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_pidfd_send_signal(pidfd: &OwnedFd, signal: libc::c_int) -> io::Result<()> {
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pidfd.as_raw_fd(),
+            signal,
+            std::ptr::null::<libc::siginfo_t>(),
+            0 as libc::c_uint,
+        )
+    };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+enum LinuxPidfdWait {
+    Exited,
+    TimedOut,
+    Failed,
+}
+
+#[cfg(target_os = "linux")]
+fn linux_pidfd_wait(pidfd: &OwnedFd, timeout: Duration) -> LinuxPidfdWait {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as libc::c_int;
+        let mut pollfd = libc::pollfd {
+            fd: pidfd.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+        if result > 0 {
+            return if pollfd.revents != 0 {
+                LinuxPidfdWait::Exited
+            } else {
+                LinuxPidfdWait::Failed
+            };
+        }
+        if result == 0 {
+            return LinuxPidfdWait::TimedOut;
+        }
+        if io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return LinuxPidfdWait::Failed;
+        }
+        if deadline <= Instant::now() {
+            return LinuxPidfdWait::TimedOut;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn terminate_runtime_process_linux(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+) -> RuntimeProcessTerminationOutcome {
+    let Some(expected_birth_identity) = expected_birth_identity else {
+        return RuntimeProcessTerminationOutcome::OwnershipUnproven;
+    };
+    let pidfd = match linux_pidfd_open(pid) {
+        Ok(pidfd) => pidfd,
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
+            return RuntimeProcessTerminationOutcome::NotRunning;
+        }
+        Err(_) => return RuntimeProcessTerminationOutcome::OwnershipUnproven,
+    };
+
+    match linux_process_birth_identity(pid) {
+        Some(actual) if actual == expected_birth_identity => {}
+        Some(_) => return RuntimeProcessTerminationOutcome::OwnershipChanged,
+        None => {
+            return match linux_pidfd_wait(&pidfd, Duration::ZERO) {
+                LinuxPidfdWait::Exited => RuntimeProcessTerminationOutcome::NotRunning,
+                LinuxPidfdWait::TimedOut | LinuxPidfdWait::Failed => {
+                    RuntimeProcessTerminationOutcome::OwnershipUnproven
+                }
+            };
+        }
+    }
+
+    match linux_pidfd_wait(&pidfd, Duration::ZERO) {
+        LinuxPidfdWait::Exited => return RuntimeProcessTerminationOutcome::NotRunning,
+        LinuxPidfdWait::Failed => return RuntimeProcessTerminationOutcome::OwnershipUnproven,
+        LinuxPidfdWait::TimedOut => {}
+    }
+
+    if let Err(error) = linux_pidfd_send_signal(&pidfd, libc::SIGTERM) {
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            RuntimeProcessTerminationOutcome::Terminated
+        } else {
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        };
+    }
+    match linux_pidfd_wait(&pidfd, Duration::from_millis(500)) {
+        LinuxPidfdWait::Exited => return RuntimeProcessTerminationOutcome::Terminated,
+        LinuxPidfdWait::Failed => return RuntimeProcessTerminationOutcome::OwnershipUnproven,
+        LinuxPidfdWait::TimedOut => {}
+    }
+
+    if let Err(error) = linux_pidfd_send_signal(&pidfd, libc::SIGKILL) {
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            RuntimeProcessTerminationOutcome::Terminated
+        } else {
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        };
+    }
+    match linux_pidfd_wait(&pidfd, Duration::from_millis(250)) {
+        LinuxPidfdWait::Exited => RuntimeProcessTerminationOutcome::Terminated,
+        LinuxPidfdWait::TimedOut => RuntimeProcessTerminationOutcome::StillRunning,
+        LinuxPidfdWait::Failed => RuntimeProcessTerminationOutcome::OwnershipUnproven,
     }
 }
 
 #[cfg(windows)]
 impl RuntimeProcessPlatform for RuntimeProcessWindows {
     fn pid_alive(pid: u32) -> bool {
-        let Ok(output) = Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-        else {
-            return false;
-        };
-        if !output.status.success() {
-            return false;
-        }
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                trimmed
-                    .strip_prefix('"')
-                    .and_then(|value| value.split("\",\"").nth(1))
-                    .and_then(|value| value.parse::<u32>().ok())
+        windows_open_process(pid).is_ok()
+    }
+
+    fn process_absence_proven(pid: u32) -> bool {
+        windows_open_process(pid)
+            .err()
+            .and_then(|error| error.raw_os_error())
+            .is_some_and(|error| {
+                error == windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32
             })
-            .any(|listed_pid| listed_pid == pid)
+    }
+
+    fn process_birth_identity(pid: u32) -> Option<String> {
+        windows_open_process(pid)
+            .ok()
+            .and_then(|handle| windows_process_birth_identity(&handle))
     }
 
     fn executable_path(pid: u32) -> Option<PathBuf> {
-        for shell in ["powershell", "pwsh"] {
-            let Ok(output) = Command::new(shell)
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).Path"),
-                ])
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output()
-            else {
-                continue;
-            };
-            if !output.status.success() {
-                continue;
-            }
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
-        }
-        None
+        windows_open_process(pid)
+            .ok()
+            .and_then(|handle| windows_process_image_path(&handle))
     }
 
-    fn terminate_step(pid_value: &str, force: bool) {
-        let mut command = Command::new("taskkill");
-        command.args(["/PID", pid_value, "/T"]);
-        if force {
-            command.arg("/F");
+    fn terminate(
+        pid: u32,
+        expected_birth_identity: Option<&str>,
+    ) -> RuntimeProcessTerminationOutcome {
+        terminate_runtime_process_windows(pid, expected_birth_identity)
+    }
+}
+
+#[cfg(windows)]
+fn windows_open_process(pid: u32) -> io::Result<OwnedHandle> {
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    };
+
+    let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
+    let handle = unsafe { OpenProcess(access, 0, pid) };
+    if handle.is_null() {
+        Err(io::Error::last_os_error())
+    } else {
+        // SAFETY: successful OpenProcess returns an owned process handle.
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
+    }
+}
+
+#[cfg(windows)]
+fn windows_process_birth_identity(handle: &OwnedHandle) -> Option<String> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+
+    let mut creation_time = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let success = unsafe {
+        GetProcessTimes(
+            handle.as_raw_handle(),
+            &mut creation_time,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+        )
+    } != 0;
+    success.then(|| {
+        let ticks = (u64::from(creation_time.dwHighDateTime) << 32)
+            | u64::from(creation_time.dwLowDateTime);
+        format!("windows:{ticks}")
+    })
+}
+
+#[cfg(windows)]
+fn windows_process_image_path(handle: &OwnedHandle) -> Option<PathBuf> {
+    use windows_sys::Win32::System::Threading::{PROCESS_NAME_WIN32, QueryFullProcessImageNameW};
+
+    let mut buffer = vec![0_u16; 32_768];
+    let mut length = buffer.len() as u32;
+    let success = unsafe {
+        QueryFullProcessImageNameW(
+            handle.as_raw_handle(),
+            PROCESS_NAME_WIN32,
+            buffer.as_mut_ptr(),
+            &mut length,
+        )
+    } != 0;
+    success.then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+enum WindowsProcessWait {
+    Exited,
+    TimedOut,
+    Failed,
+}
+
+#[cfg(windows)]
+fn windows_process_wait(handle: &OwnedHandle, timeout: Duration) -> WindowsProcessWait {
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+    let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+    match unsafe { WaitForSingleObject(handle.as_raw_handle(), timeout_ms) } {
+        WAIT_OBJECT_0 => WindowsProcessWait::Exited,
+        WAIT_TIMEOUT => WindowsProcessWait::TimedOut,
+        _ => WindowsProcessWait::Failed,
+    }
+}
+
+#[cfg(windows)]
+fn terminate_runtime_process_windows(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+) -> RuntimeProcessTerminationOutcome {
+    use windows_sys::Win32::System::Threading::TerminateProcess;
+
+    let Some(expected_birth_identity) = expected_birth_identity else {
+        return RuntimeProcessTerminationOutcome::OwnershipUnproven;
+    };
+    let handle = match windows_open_process(pid) {
+        Ok(handle) => handle,
+        Err(error)
+            if error.raw_os_error()
+                == Some(windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32) =>
+        {
+            return RuntimeProcessTerminationOutcome::NotRunning;
         }
-        let _ = command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        Err(_) => return RuntimeProcessTerminationOutcome::OwnershipUnproven,
+    };
+    match windows_process_birth_identity(&handle) {
+        Some(actual) if actual == expected_birth_identity => {}
+        Some(_) => return RuntimeProcessTerminationOutcome::OwnershipChanged,
+        None => {
+            return match windows_process_wait(&handle, Duration::ZERO) {
+                WindowsProcessWait::Exited => RuntimeProcessTerminationOutcome::NotRunning,
+                WindowsProcessWait::TimedOut | WindowsProcessWait::Failed => {
+                    RuntimeProcessTerminationOutcome::OwnershipUnproven
+                }
+            };
+        }
+    }
+    match windows_process_wait(&handle, Duration::ZERO) {
+        WindowsProcessWait::Exited => return RuntimeProcessTerminationOutcome::NotRunning,
+        WindowsProcessWait::Failed => return RuntimeProcessTerminationOutcome::OwnershipUnproven,
+        WindowsProcessWait::TimedOut => {}
+    }
+    if unsafe { TerminateProcess(handle.as_raw_handle(), 1) } == 0 {
+        return match windows_process_wait(&handle, Duration::ZERO) {
+            WindowsProcessWait::Exited => RuntimeProcessTerminationOutcome::Terminated,
+            WindowsProcessWait::TimedOut | WindowsProcessWait::Failed => {
+                RuntimeProcessTerminationOutcome::OwnershipUnproven
+            }
+        };
+    }
+    match windows_process_wait(&handle, Duration::from_millis(500)) {
+        WindowsProcessWait::Exited => RuntimeProcessTerminationOutcome::Terminated,
+        WindowsProcessWait::TimedOut => RuntimeProcessTerminationOutcome::StillRunning,
+        WindowsProcessWait::Failed => RuntimeProcessTerminationOutcome::OwnershipUnproven,
     }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
 impl RuntimeProcessPlatform for RuntimeProcessFallback {
-    fn pid_alive(pid: u32) -> bool {
-        let pid_value = pid.to_string();
-        Command::new("kill")
-            .arg("-0")
-            .arg(pid_value)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+    fn pid_alive(_pid: u32) -> bool {
+        false
+    }
+
+    fn process_absence_proven(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            let Ok(pid) = libc::pid_t::try_from(pid) else {
+                return false;
+            };
+            // SAFETY: signal 0 only probes whether this validated PID exists.
+            if pid <= 0 || unsafe { libc::kill(pid, 0) } == 0 {
+                return false;
+            }
+            return io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        }
+        #[cfg(not(unix))]
+        false
+    }
+
+    fn process_birth_identity(_pid: u32) -> Option<String> {
+        None
     }
 
     fn executable_path(_pid: u32) -> Option<PathBuf> {
         None
     }
 
-    fn terminate_step(pid_value: &str, force: bool) {
-        let signal = if force { "-KILL" } else { "-TERM" };
-        let _ = Command::new("kill")
-            .args([signal, pid_value])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    fn terminate(
+        _pid: u32,
+        _expected_birth_identity: Option<&str>,
+    ) -> RuntimeProcessTerminationOutcome {
+        RuntimeProcessTerminationOutcome::OwnershipUnproven
     }
 }
 
@@ -235,6 +535,14 @@ pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
         return true;
     }
     runtime_process_row(pid).is_some()
+}
+
+pub(crate) fn runtime_process_absence_proven(pid: u32) -> bool {
+    RuntimeProcessPlatformImpl::process_absence_proven(pid)
+}
+
+pub(crate) fn runtime_process_birth_identity(pid: u32) -> Option<String> {
+    RuntimeProcessPlatformImpl::process_birth_identity(pid)
 }
 
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
@@ -372,30 +680,11 @@ pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
     runtime_process_version_resolution(pid).version
 }
 
-pub(crate) fn terminate_runtime_process(pid: u32) {
-    if !runtime_process_pid_alive(pid) {
-        return;
-    }
-
-    let pid_value = pid.to_string();
-    let wait_for_exit = |timeout_ms: u64| -> bool {
-        let started_at = Instant::now();
-        while started_at.elapsed() < Duration::from_millis(timeout_ms) {
-            if !runtime_process_pid_alive(pid) {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        !runtime_process_pid_alive(pid)
-    };
-
-    RuntimeProcessPlatformImpl::terminate_step(&pid_value, false);
-    if wait_for_exit(500) {
-        return;
-    }
-
-    RuntimeProcessPlatformImpl::terminate_step(&pid_value, true);
-    let _ = wait_for_exit(250);
+pub(crate) fn terminate_runtime_process(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+) -> RuntimeProcessTerminationOutcome {
+    RuntimeProcessPlatformImpl::terminate(pid, expected_birth_identity)
 }
 
 #[cfg(test)]
@@ -438,6 +727,86 @@ mod tests {
 
         assert!(format!("{err:#}").contains("exceeds executable hash size limit"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn termination_requires_proven_process_ownership() {
+        let pid = std::process::id();
+
+        assert_eq!(
+            terminate_runtime_process(pid, None),
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        );
+        assert_eq!(
+            terminate_runtime_process(pid, Some("not-this-process")),
+            if cfg!(any(target_os = "linux", windows)) {
+                RuntimeProcessTerminationOutcome::OwnershipChanged
+            } else {
+                RuntimeProcessTerminationOutcome::OwnershipUnproven
+            }
+        );
+        assert!(runtime_process_pid_alive(pid));
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn current_process_has_a_birth_identity() {
+        assert!(runtime_process_birth_identity(std::process::id()).is_some());
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    #[test]
+    fn current_process_absence_is_not_proven() {
+        assert!(!runtime_process_absence_proven(std::process::id()));
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn native_child_smoke_uses_stable_process_reference() {
+        if env::var_os("PRODEX_RUNTIME_PROCESS_CHILD").is_some() {
+            loop {
+                thread::sleep(Duration::from_secs(60));
+            }
+        }
+
+        let mut child = Command::new(env::current_exe().expect("test executable should exist"))
+            .args([
+                "native_child_smoke_uses_stable_process_reference",
+                "--nocapture",
+            ])
+            .env("PRODEX_RUNTIME_PROCESS_CHILD", "1")
+            .spawn()
+            .expect("native child should spawn");
+        let started_at = Instant::now();
+        let expected_birth_identity = loop {
+            if let Some(identity) = runtime_process_birth_identity(child.id()) {
+                break identity;
+            }
+            if child
+                .try_wait()
+                .expect("native child status should be readable")
+                .is_some()
+            {
+                panic!("native child exited before becoming observable");
+            }
+            assert!(
+                started_at.elapsed() < Duration::from_secs(5),
+                "native child birth identity should become observable"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        let outcome = terminate_runtime_process(child.id(), Some(&expected_birth_identity));
+        assert!(
+            matches!(
+                outcome,
+                RuntimeProcessTerminationOutcome::Terminated
+                    | RuntimeProcessTerminationOutcome::NotRunning
+            ),
+            "native child termination outcome: {outcome:?}"
+        );
+        let status = child.wait().expect("native child should be reapable");
+        assert!(!status.success(), "native child should be terminated");
     }
 
     fn runtime_process_test_path(name: &str) -> PathBuf {

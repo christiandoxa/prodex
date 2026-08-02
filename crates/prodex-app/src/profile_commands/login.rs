@@ -50,7 +50,7 @@ use super::manage::print_profile_panel;
 use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
-    agy_bin, claude_oauth_profile_identity, codex_child_plan, exit_with_status,
+    activate_profile, agy_bin, claude_oauth_profile_identity, codex_child_plan, exit_with_status,
     fetch_profile_email, fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
     login_with_google_oauth, managed_profile_home_path, persist_login_home,
     prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists,
@@ -152,7 +152,7 @@ fn finish_named_profile_login(
         refresh_profile_email_from_home(state, profile_name, codex_home);
     }
     let account_email = profile_email_label(state, profile_name);
-    state.active_profile = Some(profile_name.to_string());
+    activate_profile(state, profile_name);
     state.save(paths)?;
 
     let result = if auth_label == "api-key" {
@@ -348,7 +348,7 @@ fn finish_auto_login_for_new_profile(
     prepare_managed_codex_home(paths, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
-    state.active_profile = Some(profile_name.clone());
+    activate_profile(state, &profile_name);
     state.save(paths)?;
 
     let fields = vec![

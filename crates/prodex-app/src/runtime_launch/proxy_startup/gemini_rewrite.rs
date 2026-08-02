@@ -22,6 +22,7 @@ use prodex_provider_core::{
     gemini_provider_core_response_terminal_without_history,
 };
 use std::fmt;
+use std::io::Read;
 use std::path::PathBuf;
 
 #[path = "gemini_request.rs"]
@@ -133,7 +134,7 @@ pub(super) struct RuntimeGeminiBufferedResponseContext<'a> {
 
 pub(super) fn runtime_gemini_generate_buffered_response_parts(
     status: u16,
-    response: reqwest::blocking::Response,
+    response: impl Read,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     context: RuntimeGeminiBufferedResponseContext<'_>,

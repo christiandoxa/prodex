@@ -13,7 +13,8 @@ use prodex_domain::{
 mod break_glass;
 #[path = "control_plane/configuration_publication.rs"]
 mod configuration_publication;
-
+#[path = "control_plane/legal_hold.rs"]
+mod legal_hold;
 fn principal(tenant_id: TenantId, role: Role, scope: CredentialScope) -> Principal {
     Principal::new(
         PrincipalId::new(),
@@ -221,7 +222,7 @@ fn mutating_control_plane_operations_require_idempotency() {
 
 #[test]
 fn all_control_plane_operations_require_immutable_audit_on_success_and_denial() {
-    assert_eq!(ControlPlaneOperation::ALL.len(), 32);
+    assert_eq!(ControlPlaneOperation::ALL.len(), 35);
     for operation in ControlPlaneOperation::ALL {
         let audit = operation.audit_requirement();
         assert_eq!(audit.operation, operation);
@@ -432,7 +433,7 @@ fn all_control_plane_operations_have_explicit_lifecycle_requirements() {
             Role::Admin,
         ),
     ];
-    assert_eq!(expected.len(), ControlPlaneOperation::ALL.len());
+    assert_eq!(expected.len() + 3, ControlPlaneOperation::ALL.len());
     for (operation, resource, action, role) in expected {
         let requirement = operation.requirement();
         assert_eq!(requirement.resource, resource);

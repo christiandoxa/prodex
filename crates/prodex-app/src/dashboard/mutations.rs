@@ -10,10 +10,11 @@ use super::server::{
 };
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileLifecycleHomeAction,
-    ProfileLifecyclePlan, ProfileProvider, acquire_profile_lifecycle_lock, audit_log_event,
-    create_codex_home_if_missing, ensure_path_is_unique, finalize_recovered_profile_removals,
-    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
-    managed_profile_home_path, persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
+    ProfileLifecyclePlan, ProfileProvider, acquire_profile_lifecycle_lock, activate_profile,
+    audit_log_event, create_codex_home_if_missing, ensure_path_is_unique,
+    finalize_recovered_profile_removals, lifecycle_profile_state,
+    load_profile_state_with_profile_recovery_locked, managed_profile_home_path,
+    persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
     prune_removed_profile_metadata, write_profile_lifecycle_plan,
 };
 use std::path::PathBuf;
@@ -47,7 +48,7 @@ impl DashboardServer {
                 anyhow!("profile '{}' is missing", payload.profile),
             );
         }
-        state.active_profile = Some(payload.profile);
+        activate_profile(&mut state, payload.profile);
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
@@ -239,7 +240,7 @@ fn prepare_added_profile(
     }
     state.profiles.insert(name.to_string(), desired_profile);
     if activate || state.active_profile.is_none() {
-        state.active_profile = Some(name.to_string());
+        activate_profile(state, name);
     }
     Ok((codex_home, lifecycle_path))
 }

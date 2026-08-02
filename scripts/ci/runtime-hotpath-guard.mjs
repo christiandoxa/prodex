@@ -130,6 +130,16 @@ const ALLOWLIST = Object.freeze([
       "in-process gateway requests are semaphore-bounded and move the synchronous rewrite pipeline off the async executor",
   },
   {
+    name: "provider-sse-bounded-prefetch",
+    file:
+      "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+    id: "spawn-blocking",
+    pattern: /\basync_runtime\.spawn_blocking\s*\(/,
+    maxHits: 1,
+    reason:
+      "provider SSE lookahead is capped by the active-request semaphore and remains owned by the live response continuation",
+  },
+  {
     name: "gateway-reconciliation-bounded-worker",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reconciliation_worker.rs",
     id: "spawn-blocking",

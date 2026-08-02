@@ -47,6 +47,7 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) governance_refresh_requested: Arc<AtomicBool>,
     pub(in super::super) api_key_cursor: Arc<AtomicUsize>,
     pub(in super::super) client: reqwest::blocking::Client,
+    pub(in super::super) provider_sse_prefetch_slots: Arc<tokio::sync::Semaphore>,
     pub(in super::super) gateway_oidc_http_cache:
         Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
     pub(in super::super) gateway_oidc_jwks_snapshot:

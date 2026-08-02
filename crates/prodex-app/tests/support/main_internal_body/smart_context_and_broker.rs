@@ -204,6 +204,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
         broker_key,
         &RuntimeBrokerRegistry {
             pid: 999_999_999,
+            process_birth_identity: None,
             listen_addr: "127.0.0.1:33475".to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -232,6 +233,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
         broker_key,
         &RuntimeBrokerRegistry {
             pid: std::process::id(),
+            process_birth_identity: None,
             listen_addr: "127.0.0.1:33475".to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),

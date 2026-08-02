@@ -12,11 +12,29 @@ fn record_run_selection_prunes_missing_profiles_before_insert() {
     };
 
     record_run_selection_at(&mut state, "main", 30);
+    record_run_selection_at(&mut state, "main", 25);
 
     assert_eq!(
         state.last_run_selected_at,
-        BTreeMap::from([("main".to_string(), 30)])
+        BTreeMap::from([("main".to_string(), 31)])
     );
+}
+
+#[test]
+fn later_run_selection_advances_past_another_profile() {
+    let mut state = prodex_state::AppState {
+        profiles: BTreeMap::from([
+            ("first".to_string(), test_profile("/tmp/first")),
+            ("second".to_string(), test_profile("/tmp/second")),
+        ]),
+        ..prodex_state::AppState::default()
+    };
+    prodex_state::activate_profile(&mut state, "first");
+    let explicit_at = state.last_run_selected_at["first"];
+
+    record_run_selection_at(&mut state, "second", explicit_at.saturating_sub(10));
+
+    assert!(state.last_run_selected_at["second"] > explicit_at);
 }
 
 #[test]

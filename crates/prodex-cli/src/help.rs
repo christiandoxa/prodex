@@ -183,7 +183,9 @@ pub const CLI_SETUP_AFTER_HELP: &str = "\
 Examples:
   prodex setup --dry-run
   prodex setup --verify-tools
-  prodex setup --dry-run --json";
+  prodex setup --dry-run --json
+
+`--verify-tools` checks Caveman, RTK, Codebase Memory MCP, Playwright MCP, and Ponytail.";
 pub const CLI_CAPABILITY_AFTER_HELP: &str = "\
 Examples:
   prodex capability list

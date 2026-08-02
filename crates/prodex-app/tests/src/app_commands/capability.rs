@@ -59,6 +59,14 @@ fn capability_detail_redacts_secret_like_material() {
 }
 
 #[test]
+fn capability_detail_removes_terminal_control_characters() {
+    assert_eq!(
+        capability_redacted_detail("ok\n\u{1b}[31mred"),
+        "ok  [31mred"
+    );
+}
+
+#[test]
 fn capability_failed_status_redacts_secret_like_chain() {
     let err = anyhow::anyhow!("failed: Authorization: Bearer capability-token")
         .context("capability check failed");
@@ -128,4 +136,71 @@ fn setup_dry_run_uses_passive_binary_discovery() {
         rows.iter()
             .any(|(name, status)| { name == "Codex auth" && status == "not checked (dry-run)" })
     );
+}
+
+#[test]
+fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
+    let ids = prodex_optional_tools::OptionalToolSet::super_defaults()
+        .iter()
+        .collect::<Vec<_>>();
+
+    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Caveman));
+    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Rtk));
+    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::PlaywrightMcp));
+
+    let caveman = prodex_optional_tools::ToolHealth {
+        id: prodex_optional_tools::OptionalToolId::Caveman,
+        status: prodex_optional_tools::ToolHealthStatus::Installed,
+        source: None,
+        path: None,
+        version: None,
+        digest: None,
+        can_activate: true,
+        detail: "installed and validated".to_string(),
+    };
+    let report = setup_optional_tool_verification_json(Some(&caveman), None, true, true);
+    assert_eq!(report["id"], "caveman");
+    assert_eq!(report["status"], "installed");
+    assert_eq!(report["ready"], serde_json::Value::Null);
+    let report_ids = report["tools"]
+        .as_array()
+        .expect("optional-tool report should contain tools")
+        .iter()
+        .filter_map(|tool| tool["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(report_ids.contains(&"rtk"));
+    assert!(report_ids.contains(&"playwright-mcp"));
+    assert!(
+        report["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["status"] == "not checked (dry-run)")
+    );
+}
+
+#[test]
+fn setup_optional_tool_verification_reports_dry_run_without_a_probe() {
+    let report = setup_optional_tool_verification_json(None, None, true, true);
+
+    assert_eq!(report["status"], "not checked (dry-run)");
+    assert_eq!(report["detail"], "verification skipped during dry-run");
+}
+
+#[test]
+fn setup_optional_tool_verification_exit_checks_non_caveman_tools() {
+    let missing_rtk = prodex_optional_tools::ToolHealth {
+        id: prodex_optional_tools::OptionalToolId::Rtk,
+        status: prodex_optional_tools::ToolHealthStatus::Missing,
+        source: None,
+        path: None,
+        version: None,
+        digest: None,
+        can_activate: false,
+        detail: "rtk was not found".to_string(),
+    };
+
+    let error = ensure_optional_tools_installed(&[missing_rtk])
+        .expect_err("missing non-Caveman tools must fail verification");
+    assert!(error.to_string().contains("rtk"));
 }

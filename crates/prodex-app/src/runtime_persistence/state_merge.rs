@@ -11,7 +11,7 @@ use crate::{
     SESSION_ID_PROFILE_BINDING_LIMIT, TURN_STATE_PROFILE_BINDING_LIMIT,
 };
 
-pub(crate) use prodex_state::{merge_last_run_selection, merge_profile_bindings};
+pub(crate) use prodex_state::merge_profile_bindings;
 
 pub(crate) fn app_state_compaction_policy() -> prodex_state::AppStateCompactionPolicy {
     prodex_state::AppStateCompactionPolicy {

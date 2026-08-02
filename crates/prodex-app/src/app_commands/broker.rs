@@ -14,10 +14,9 @@ use crate::{
     cleanup_runtime_broker_stale_leases, register_runtime_broker_metadata,
     register_runtime_proxy_persistence_mode, remove_runtime_broker_capability_if_matches,
     remove_runtime_broker_registry_if_instance_matches, runtime_broker_startup_grace_seconds,
-    runtime_current_prodex_version_identity, runtime_proxy_log_to_path,
-    runtime_upstream_proxy_mode_label, save_runtime_broker_capability,
-    save_runtime_broker_registry, start_runtime_rotation_proxy_with_options,
-    try_acquire_runtime_owner_lock,
+    runtime_current_prodex_version_identity, runtime_process_birth_identity,
+    runtime_proxy_log_to_path, runtime_upstream_proxy_mode_label, save_runtime_broker_artifacts,
+    start_runtime_rotation_proxy_with_options, try_acquire_runtime_owner_lock,
 };
 
 pub(crate) fn handle_runtime_broker(_args: RuntimeBrokerArgs) -> Result<()> {
@@ -173,6 +172,7 @@ pub(crate) fn runtime_broker_publish_start(
     };
     let registry = RuntimeBrokerRegistry {
         pid: std::process::id(),
+        process_birth_identity: runtime_process_birth_identity(std::process::id()),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: metadata.started_at,
         upstream_base_url: bootstrap.upstream_base_url.clone(),
@@ -190,21 +190,13 @@ pub(crate) fn runtime_broker_publish_start(
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         realtime_ws_addr: proxy.realtime_ws_sidecar_addr.map(|addr| addr.to_string()),
     };
-    save_runtime_broker_capability(
+    save_runtime_broker_artifacts(
         paths,
         &bootstrap.broker_key,
         &bootstrap.instance_id,
         &bootstrap.admin_token,
+        &registry,
     )?;
-    if let Err(err) = save_runtime_broker_registry(paths, &bootstrap.broker_key, &registry) {
-        remove_runtime_broker_capability_if_matches(
-            paths,
-            &bootstrap.broker_key,
-            &bootstrap.instance_id,
-            &bootstrap.admin_token,
-        );
-        return Err(err);
-    }
     register_runtime_broker_metadata(&proxy.log_path, metadata.clone());
     runtime_proxy_log_to_path(
         &proxy.log_path,
