@@ -232,12 +232,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "base64"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
-
-[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1288,7 +1282,7 @@ dependencies = [
  "aes-gcm-siv",
  "anyhow",
  "argon2",
- "base64 0.23.0",
+ "base64",
  "getrandom 0.4.3",
  "pbkdf2",
  "prodex-secret-store",
@@ -1302,7 +1296,7 @@ dependencies = [
 name = "prodex-provider-core"
 version = "0.378.0"
 dependencies = [
- "base64 0.23.0",
+ "base64",
  "serde",
  "serde_json",
 ]
@@ -1327,7 +1321,7 @@ name = "prodex-runtime-policy"
 version = "0.378.0"
 dependencies = [
  "anyhow",
- "base64 0.23.0",
+ "base64",
  "prodex-authn",
  "prodex-core",
  "prodex-domain",
@@ -1342,7 +1336,7 @@ dependencies = [
 name = "prodex-runtime-proxy"
 version = "0.378.0"
 dependencies = [
- "base64 0.23.0",
+ "base64",
  "prodex-gateway-core",
  "prodex-provider-core",
  "prodex-redaction",
@@ -1724,7 +1718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "027853bbf8c7763b77c5c595f1c271c7d536ced7d6f83452911b944621e57fc2"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64",
  "bstr",
  "fancy-regex",
  "lazy_static",
