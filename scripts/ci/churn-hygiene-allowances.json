@@ -1,5 +1,28 @@
 [
   {
+    "id": "audited-runtime-provider-ci-feature-0.380.0",
+    "requiredSubjects": [
+      "fix(runtime): preserve provider stream terminal failures",
+      "fix(profile): harden filesystem lifecycle",
+      "fix(profile): prevent implicit export races",
+      "fix(runtime): commit noncompact profile selection",
+      "fix(kiro): preserve ACP terminal states",
+      "fix(runtime): reject unsuccessful buffered terminal states",
+      "refactor: consolidate low-risk helpers",
+      "refactor(runtime): share terminal response validation",
+      "ci: harden gates and reuse Windows caches",
+      "ci: require zero security findings and reduce Windows fanout",
+      "chore(ci): record reviewed 0.380.0 audit churn"
+    ],
+    "caps": {
+      "maxFiles": 70,
+      "maxBehaviorFiles": 60,
+      "maxLines": 1700,
+      "maxFileLines": 200
+    },
+    "reason": "Reviewed the whole-repository 0.380.0 audit covering precommit profile selection, provider and Kiro terminal integrity, crash-safe profile lifecycle and export concurrency, shared response validation, deployment hardening, zero-finding KICS enforcement, stronger Sonar gates, and reduced Windows CI fanout; verified with focused regressions, the full locked all-features suite, strict Clippy, live PostgreSQL and encrypted backup/restore proofs, an optimized locked build, KICS and Gitleaks scans, and tracked-diff identifier checks."
+  },
+  {
     "id": "audited-runtime-control-plane-release-0.378.0",
     "requiredSubjects": [
       "fix: close audited runtime and control-plane gaps",
