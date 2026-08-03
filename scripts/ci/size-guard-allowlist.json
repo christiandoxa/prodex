@@ -161,7 +161,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
-    "maxLines": 1277,
+    "maxLines": 1267,
     "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {

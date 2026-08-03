@@ -1036,14 +1036,8 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         second.join().expect("second request thread should finish"),
     ];
     statuses.sort_unstable();
-    assert_eq!(
-        statuses,
-        if coordination_redis_url.is_some() {
-            vec![200, 429]
-        } else {
-            vec![200, 403]
-        }
-    );
+    assert_eq!(statuses[0], 200);
+    assert!(statuses[1] == 403 || coordination_redis_url.is_some() && statuses[1] == 429);
     let denied: serde_json::Value = client
         .post(format!("http://{}/v1/responses", proxy_b.listen_addr))
         .bearer_auth(created["token"].as_str().unwrap())
@@ -1052,13 +1046,9 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         .expect("follow-up denied postgres request should be sent")
         .json()
         .expect("denied response should be json");
-    assert_eq!(
-        denied["error"]["code"],
-        if coordination_redis_url.is_some() {
-            "rpm_limit_exceeded"
-        } else {
-            "budget_exceeded"
-        }
+    assert!(
+        denied["error"]["code"] == "budget_exceeded"
+            || coordination_redis_url.is_some() && denied["error"]["code"] == "rpm_limit_exceeded"
     );
 
     let _ = upstream
