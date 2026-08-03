@@ -17,6 +17,7 @@ pub struct RuntimeAnthropicCollectedResponse {
     pending_thinking: String,
     active_tool_use: Option<RuntimeAnthropicCollectedToolUse>,
     final_output: Option<Vec<serde_json::Value>>,
+    completed: bool,
     input_tokens: u64,
     output_tokens: u64,
     cached_tokens: Option<u64>,
@@ -143,7 +144,7 @@ impl RuntimeAnthropicCollectedResponse {
             Some("response.completed") => {
                 self.observe_completed(value);
             }
-            Some("error" | "response.failed") => {
+            Some("error" | "response.failed" | "response.incomplete") => {
                 bail!(runtime_anthropic_response_event_error_message(value).to_string());
             }
             _ => {}
@@ -314,6 +315,7 @@ impl RuntimeAnthropicCollectedResponse {
             self.merge_output_usage(output);
         }
         self.final_output = final_output;
+        self.completed = true;
     }
 
     fn add_output_item_server_tool_usage(&mut self, item: &serde_json::Value) {
@@ -462,5 +464,8 @@ pub fn runtime_anthropic_response_from_sse_bytes_with_carried_usage(
         }
     }
     process_event(&mut data_lines)?;
+    if !collected.completed {
+        bail!("buffered Responses SSE ended before response.completed");
+    }
     Ok(collected.into_response(requested_model))
 }

@@ -175,6 +175,23 @@ fn deepseek_sse_reader_wraps_text_delta_in_message_item() {
 }
 
 #[test]
+fn deepseek_sse_reader_rejects_premature_eof() {
+    let stream = "data: {\"id\":\"chatcmpl_eof\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n";
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"), "{output}");
+    assert!(!output.contains("event: response.completed"), "{output}");
+}
+
+#[test]
 fn deepseek_sse_missing_response_id_fallback_uses_request_id_uuidv7() {
     let stream = concat!(
         "data: {\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n",
