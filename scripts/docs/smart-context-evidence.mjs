@@ -21,7 +21,7 @@ const report = runCheckedJson(
   ["run", "--locked", "-q", "--features", "allocation-bench-support", "--bin", "prodex", "--", "context", "replay-report", corpus, "--json", "--strict"],
   {
     cwd: repoRoot,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
     maxOutputBytes: 16 * 1024 * 1024,
     env: { ...process.env, PRODEX_GIT_COMMIT: commit, PRODEX_RUST_TOOLCHAIN: rustToolchain },
   },
