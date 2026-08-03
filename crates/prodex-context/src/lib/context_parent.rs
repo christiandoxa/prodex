@@ -162,7 +162,11 @@ impl ContextParent {
     }
 
     pub(super) fn sync(&self) -> io::Result<()> {
-        self.file.sync_all()
+        match self.file.sync_all() {
+            #[cfg(target_os = "macos")]
+            Err(error) if error.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+            result => result,
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -298,13 +302,19 @@ mod windows_parent {
     use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
     use std::os::windows::io::AsRawHandle as _;
     use std::ptr;
+    use windows_sys::Wdk::Storage::FileSystem::{
+        FILE_RENAME_INFORMATION, FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS,
+        FileRenameInformation, FileRenameInformationEx, NtSetInformationFile,
+    };
+    use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
     use windows_sys::Win32::Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-        FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_RENAME_INFO, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo,
-        GetFinalPathNameByHandleW, SetFileInformationByHandle, VOLUME_NAME_DOS,
+        FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FileDispositionInfo, GetFinalPathNameByHandleW,
+        SetFileInformationByHandle, VOLUME_NAME_DOS,
     };
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
     pub(crate) struct ContextParent {
         file: File,
@@ -535,23 +545,40 @@ mod windows_parent {
         if name.is_empty() || name.contains(&0) {
             return Err(invalid_input("context path contains an invalid name"));
         }
-        let size = size_of::<FILE_RENAME_INFO>() + (name.len() - 1) * size_of::<u16>();
+        let size =
+            std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName) + name.len() * size_of::<u16>();
         let mut storage = vec![0u64; size.div_ceil(size_of::<u64>())];
-        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+        let size = u32::try_from(size).map_err(|_| invalid_input("context path is too long"))?;
         unsafe {
-            (*info).Anonymous.ReplaceIfExists = true;
+            (*info).Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
             (*info).RootDirectory = parent.as_raw_handle().cast();
             (*info).FileNameLength = u32::try_from(name.len() * size_of::<u16>())
                 .map_err(|_| invalid_input("context path is too long"))?;
             ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
-            if SetFileInformationByHandle(
+            let mut io_status = IO_STATUS_BLOCK::default();
+            if NtSetInformationFile(
                 file.as_raw_handle().cast(),
-                FileRenameInfo,
+                &mut io_status,
                 info.cast(),
-                u32::try_from(size).map_err(|_| invalid_input("context path is too long"))?,
-            ) == 0
+                size,
+                FileRenameInformationEx,
+            ) >= 0
             {
-                return Err(io::Error::last_os_error());
+                return Ok(());
+            }
+            (*info).Anonymous.ReplaceIfExists = true;
+            let status = NtSetInformationFile(
+                file.as_raw_handle().cast(),
+                &mut IO_STATUS_BLOCK::default(),
+                info.cast(),
+                size,
+                FileRenameInformation,
+            );
+            if status < 0 {
+                return Err(io::Error::from_raw_os_error(
+                    RtlNtStatusToDosError(status) as i32
+                ));
             }
         }
         Ok(())

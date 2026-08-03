@@ -196,8 +196,8 @@
   },
   {
     "file": "crates/prodex-secret-store/src/secure_file/windows.rs",
-    "maxLines": 872,
-    "reason": "Windows secure-file ownership keeps ACL validation, no-follow containment, and handle-bound rename/delete in one platform module; the exact cap covers parent-handle race hardening."
+    "maxLines": 922,
+    "reason": "Windows secure-file ownership keeps ACL validation, no-follow containment, and native handle-relative rename/delete in one platform module; the exact cap covers the NT rename fallback and focused regression."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
