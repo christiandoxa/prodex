@@ -103,12 +103,17 @@ heuristics are disabled because the separate pinned Gitleaks job owns secret
 detection; other KICS queries remain enabled. The scanner container has no
 network, capabilities, or writable root filesystem, and the IaC sources contain
 no inline KICS suppressions or broad exclusions. The pinned KICS engine has two
-reviewed INFO-only policy advisories that cannot both be satisfied with the
-manifest's explicit `prodex` namespace and required three-replica HPA floor, so
+reviewed INFO-only policies that do not model these manifests correctly: one
+always emits a review reminder for any namespaced workload, and one labels each
+declared Compose named volume as shared even when exactly one service mounts it.
 CI excludes only their exact query IDs:
 
 - `e84eaf4d-2f45-47b2-abe8-e581b06deb66` (`Ensure Administrative Boundaries Between Resources`)
-- `5744cbb8-5946-4b75-a196-ade44449525b` (`HPA Targeted Deployments With Configured Replica Count`)
+- `8c978947-0ff6-485c-b0c2-0bfca6026466` (`Shared Volumes Between Containers`)
+
+Every other query remains enabled. CI also reads the JSON report and requires
+`total_counter` to equal zero, so a TRACE finding cannot bypass the severity
+exit-code gate.
 
 The parallel `supply-chain` job runs `cargo audit`, all configured `cargo deny`
 checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
@@ -142,7 +147,7 @@ docker run --rm \
   docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602 \
   scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif \
   --disable-secrets --disable-full-descriptions \
-  --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b \
+  --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466 \
   --fail-on critical,high,medium,low,info \
   --minimal-ui --no-progress
 cargo deny check advisories bans licenses sources

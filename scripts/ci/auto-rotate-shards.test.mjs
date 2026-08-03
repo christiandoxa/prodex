@@ -85,7 +85,7 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
 
   const appBlock = workflow.match(/\n  windows-prodex-app:\n([\s\S]*?)\n  macos-workspace:/)?.[1];
   assert.ok(appBlock, "windows-prodex-app job missing");
-  assert.match(appBlock, /fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\)/);
+  assert.match(appBlock, /fromJSON\(needs\.changes\.outputs\.windows_prodex_app_matrix\)/);
   assert.match(appBlock, /PRODEX_APP_FILTERS/);
   assert.match(appBlock, /PRODEX_APP_SKIP_FILTERS/);
   assert.match(appBlock, /--test-threads=1/);

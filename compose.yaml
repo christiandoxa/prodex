@@ -22,8 +22,8 @@ services:
       - source: prodex_gateway_redis_url
         target: PRODEX_GATEWAY_REDIS_URL
     volumes:
-      - ./data/prodex:/var/lib/prodex
-      - ./data/runtime-logs:/var/log/prodex
+      - prodex-data:/var/lib/prodex
+      - prodex-runtime-logs:/var/log/prodex
       - ./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro
     read_only: true
     cap_drop:
@@ -57,7 +57,7 @@ services:
       - source: prodex_postgres_password
         target: PRODEX_POSTGRES_PASSWORD
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - prodex-postgres:/var/lib/postgresql/data
     cap_drop:
       - ALL
     security_opt:
@@ -77,7 +77,7 @@ services:
     user: "999:1000"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - ./data/redis:/data
+      - prodex-redis:/data
     cap_drop:
       - ALL
     security_opt:
@@ -88,6 +88,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  prodex-data:
+  prodex-runtime-logs:
+  prodex-postgres:
+  prodex-redis:
 
 secrets:
   prodex_gateway_token:

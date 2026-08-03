@@ -30,8 +30,11 @@ macOS temp-path alias that previously exposed non-canonical test fixture paths.
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds
 the installer fixture, avoiding a second full Windows binary build. Large
-`prodex-app` and Windows CI test binaries disable incremental artifacts and
-test/dev debug symbols so sccache remains effective and linking is faster.
+`prodex-app` coverage uses seven balanced Windows groups instead of the twelve
+Linux partitions, retaining parallel execution while avoiding five duplicate
+Windows compilations and late hosted-runner queueing. One group writes the
+shared dependency cache. Windows CI test binaries disable incremental artifacts
+and test/dev debug symbols so sccache remains effective and linking is faster.
 
 ## CI Impact Gating
 

@@ -20,7 +20,7 @@ const SONAR_IMAGE =
 const KICS_IMAGE =
   "docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602";
 const KICS_NON_ACTIONABLE_QUERY_IDS =
-  "e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b";
+  "e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466";
 const PRODUCTION_CLIPPY_COMMAND =
   "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
@@ -75,7 +75,7 @@ export function validateWindowsSecurityJob(contents) {
   }
   for (const marker of [
     "runs-on: windows-latest",
-    "matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}",
+    "matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}",
     "PRODEX_APP_FILTERS:",
     "PRODEX_APP_SKIP_FILTERS:",
     "cargo test --locked -q -p prodex-app --lib --all-features",
@@ -135,6 +135,13 @@ export function validateSonarConfiguration(workflowContents, properties) {
     '--data-urlencode "resolved=false"',
     "Sonar unresolved issues:",
     'if [ "${total}" -ne 0 ]',
+    "/api/hotspots/search",
+    '--data-urlencode "status=TO_REVIEW"',
+    "unreviewed security hotspot(s)",
+    "/api/measures/component",
+    "security_rating,reliability_rating,sqale_rating,duplicated_lines_density",
+    ".duplicated_lines_density <= 3",
+    "Sonar zero-issue, zero-hotspot, A-rating, and duplication gates: passed.",
     "Revoke ephemeral local Sonar token",
     "/api/user_tokens/revoke",
   ]) {
@@ -216,6 +223,8 @@ export function validateKicsConfiguration(workflowContents) {
     "--disable-full-descriptions",
     `--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`,
     "--fail-on critical,high,medium,low,info",
+    "'.total_counter | select(type == \"number\")'",
+    "KICS zero-finding JSON gate: passed.",
     "if: always()",
     "name: kics-iac-results",
     "if-no-files-found: error",
@@ -535,7 +544,7 @@ function selfTest() {
   windows-prodex-app:
     runs-on: windows-latest
     strategy:
-      matrix: \${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
+      matrix: \${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
     steps:
       - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
         with:
@@ -601,6 +610,12 @@ function selfTest() {
           jq '.projectStatus.status == "OK"'
           curl --data-urlencode "resolved=false" /api/issues/search
           if [ "\${total}" -ne 0 ]; then echo "Sonar unresolved issues:"; exit 1; fi
+          curl --data-urlencode "status=TO_REVIEW" /api/hotspots/search
+          echo "unreviewed security hotspot(s)"
+          curl /api/measures/component
+          echo "security_rating,reliability_rating,sqale_rating,duplicated_lines_density"
+          jq '.duplicated_lines_density <= 3'
+          echo "Sonar zero-issue, zero-hotspot, A-rating, and duplication gates: passed."
       - name: Revoke ephemeral local Sonar token
         run: curl /api/user_tokens/revoke
   supply-chain:
@@ -617,6 +632,9 @@ function selfTest() {
           kics_image="${KICS_IMAGE}"
           docker pull "\${kics_image}"
           docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS} --fail-on critical,high,medium,low,info
+          kics_total="$(jq -er '.total_counter | select(type == \"number\")' target/kics/prodex-kics.json)"
+          test "\${kics_total}" -eq 0
+          echo "KICS zero-finding JSON gate: passed."
       - name: Upload KICS reports
         if: always()
         with:
@@ -665,11 +683,23 @@ sonar.qualitygate.wait=true
     true,
   );
   assert.equal(
+    validateKicsConfiguration(sonarWorkflow.replace("KICS zero-finding JSON gate: passed.", "KICS scan passed.")).length,
+    1,
+  );
+  assert.equal(
     validateSonarConfiguration(sonarWorkflow.replace(SONAR_ACTION, "SonarSource/sonarqube-scan-action@v8.2.1"), sonarProperties).length,
     1,
   );
   assert.equal(
     validateSonarConfiguration(sonarWorkflow.replace(SONAR_IMAGE, "sonarqube:community"), sonarProperties).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow.replace("/api/hotspots/search", "/api/hotspots/ignored"), sonarProperties).length,
+    1,
+  );
+  assert.equal(
+    validateSonarConfiguration(sonarWorkflow.replace(".duplicated_lines_density <= 3", ".duplicated_lines_density <= 5"), sonarProperties).length,
     1,
   );
   assert.equal(

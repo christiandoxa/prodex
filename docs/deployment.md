@@ -18,11 +18,6 @@ sudo chown 10001:10001 deploy/secrets/*
 chmod 0600 deploy/secrets/*
 node scripts/ci/deployment-security-guard.mjs --secret-env deploy/gateway.env
 
-install -d -m 0700 data/prodex data/runtime-logs data/postgres data/redis
-sudo chown 10001:10001 data/prodex data/runtime-logs
-sudo chown 70:70 data/postgres
-sudo chown 999:1000 data/redis
-
 docker compose --env-file deploy/gateway.env build prodex-gateway
 docker compose --profile postgres --profile redis \
   --env-file deploy/gateway.env up -d postgres redis
@@ -68,12 +63,12 @@ production.
 
 ## Persistent Paths
 
-The compose stack uses four private bind-mounted directories:
+The compose stack mounts four named volumes:
 
-- `data/prodex` → `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
-- `data/runtime-logs` → `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
-- `data/postgres` → `/var/lib/postgresql/data`: PostgreSQL state.
-- `data/redis` → `/data`: Redis append-only state.
+- `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
+- `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
+- `/var/lib/postgresql/data`: PostgreSQL state.
+- `/data`: Redis append-only state.
 
 The gateway exposes the admin OpenAPI document at:
 
