@@ -2,6 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.380.0 - 2026-08-03
+
+### Runtime
+
+- Reject unsuccessful buffered terminal states (`bae6476`)
+- Commit noncompact profile selection (`1feba09`)
+- Preserve provider stream terminal failures (`e5d975d`)
+
+### CLI
+
+- Prevent implicit export races (`5f9cd3c`)
+- Harden filesystem lifecycle (`679fcfd`)
+
+### Misc
+
+- Preserve ACP terminal states (`e0298b5`)
+
 ## 0.379.0 - 2026-08-03
 
 ### Deps
@@ -106,12 +123,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Clean partial Codex home copies (`9a099a1`)
 - Skip Codex managed packages directory when copying CODEX_HOME (`953ad03`)
-
-## 0.368.0 - 2026-07-29
-
-### Misc
-
-- Preserve postgres reconciliation parameter types (`1bf7ef6`)
-- Log all guardrail webhook failures (`1537859`)
-- Fail readiness on unavailable policy snapshots (`cd6cb74`)
-- Make gateway accounting reconciliation durable (`649b9bf`)
