@@ -544,11 +544,14 @@ mod tests {
 
     #[test]
     fn failed_changed_file_removes_owned_backup_and_allows_retry() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-context-compress-retry-{}-{}",
-            std::process::id(),
-            CONTEXT_COMPRESS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .expect("resolve temp root")
+            .join(format!(
+                "prodex-context-compress-retry-{}-{}",
+                std::process::id(),
+                CONTEXT_COMPRESS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create context root");
         let path = root.join("AGENTS.md");
