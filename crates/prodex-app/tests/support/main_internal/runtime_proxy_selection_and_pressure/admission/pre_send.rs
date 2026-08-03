@@ -185,6 +185,97 @@ fn scripted_noncompact_overload_rotates_fresh_request() {
 }
 
 #[test]
+fn scripted_noncompact_success_commits_rotated_profile() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::overloaded_503(
+            RuntimeProxyBackendFaultRoute::Status,
+            "main-account",
+        ),
+    ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/status".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(16, &request, harness.shared())
+        .expect("fresh noncompact overload should retry and commit another profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("second-account"), "{body}");
+    let runtime = harness.shared().runtime.lock().expect("runtime lock");
+    assert_eq!(runtime.current_profile, "second");
+    assert_eq!(runtime.state.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn noncompact_bound_session_success_does_not_promote_profile() {
+    let backend = RuntimeProxyBackend::start();
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("second")
+        .current_profile("second")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready)
+        .build();
+    {
+        let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
+        let binding = ResponseProfileBinding {
+            profile_name: "main".to_string(),
+            bound_at: Local::now().timestamp(),
+        };
+        runtime
+            .session_id_bindings
+            .insert("sess-bound".to_string(), binding.clone());
+        runtime
+            .state
+            .session_profile_bindings
+            .insert("sess-bound".to_string(), binding);
+    }
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/status".to_string(),
+        headers: vec![("session_id".to_string(), "sess-bound".to_string())],
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(17, &request, harness.shared())
+        .expect("bound noncompact request should use its session owner");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("main-account"), "{body}");
+    let runtime = harness.shared().runtime.lock().expect("runtime lock");
+    assert_eq!(runtime.current_profile, "second");
+    assert_eq!(runtime.state.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        runtime
+            .session_id_bindings
+            .get("sess-bound")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+}
+
+#[test]
 fn standard_get_waits_for_ready_profile_inflight_relief() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let usage = usage_with_main_windows(90, 3600, 90, 604_800);

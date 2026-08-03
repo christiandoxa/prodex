@@ -272,6 +272,7 @@ fn run_runtime_noncompact_standard_loop(
             request_id,
             shared,
             request_session_id,
+            !preferred_is_session,
             &mut *session_profile,
             &mut *loop_state,
             attempt,
@@ -405,13 +406,25 @@ fn handle_runtime_noncompact_attempt(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     request_session_id: Option<&str>,
+    promote_committed_profile: bool,
     session_profile: &mut Option<String>,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
     attempt: RuntimeStandardAttempt,
 ) -> Result<Option<tiny_http::ResponseBox>> {
     match attempt {
-        RuntimeStandardAttempt::Success { response, .. }
-        | RuntimeStandardAttempt::StaleContinuation { response } => Ok(Some(response)),
+        RuntimeStandardAttempt::Success {
+            profile_name,
+            response,
+        } => {
+            let _ = commit_runtime_proxy_profile_selection_with_policy(
+                shared,
+                &profile_name,
+                RuntimeRouteKind::Standard,
+                promote_committed_profile,
+            )?;
+            Ok(Some(response))
+        }
+        RuntimeStandardAttempt::StaleContinuation { response } => Ok(Some(response)),
         RuntimeStandardAttempt::RetryableFailure {
             profile_name,
             response,
