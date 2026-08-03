@@ -410,7 +410,7 @@ mod tests {
             request,
             RuntimeGatewayDurableReservationState {
                 storage_key: prodex_storage::TenantStorageKey::tenant(tenant_id),
-                record: record.clone(),
+                record,
             },
         )])));
         let poisoned = Arc::clone(&reservations);

@@ -306,13 +306,13 @@ mod windows_parent {
         GetFinalPathNameByHandleW, SetFileInformationByHandle, VOLUME_NAME_DOS,
     };
 
-    pub(super) struct ContextParent {
+    pub(crate) struct ContextParent {
         file: File,
         path: PathBuf,
     }
 
     impl ContextParent {
-        pub(super) fn open_for(path: &Path) -> io::Result<(Self, OsString)> {
+        pub(crate) fn open_for(path: &Path) -> io::Result<(Self, OsString)> {
             let name = context_file_name(path)?;
             let parent = path.parent().unwrap_or_else(|| Path::new("."));
             let absolute = if parent.is_absolute() {
@@ -355,14 +355,14 @@ mod windows_parent {
             ))
         }
 
-        pub(super) fn open_existing(&self, name: &OsStr) -> io::Result<File> {
+        pub(crate) fn open_existing(&self, name: &OsStr) -> io::Result<File> {
             let file = open_regular(&self.path.join(name), false)?;
             validate_regular(&file)?;
             require_beneath(&self.file, &file)?;
             Ok(file)
         }
 
-        pub(super) fn create_new(
+        pub(crate) fn create_new(
             &self,
             name: &OsStr,
             _permissions: &fs::Permissions,
@@ -377,7 +377,7 @@ mod windows_parent {
             Ok(file)
         }
 
-        pub(super) fn entry_exists(&self, name: &OsStr) -> io::Result<bool> {
+        pub(crate) fn entry_exists(&self, name: &OsStr) -> io::Result<bool> {
             match fs::symlink_metadata(self.path.join(name)) {
                 Ok(_) => Ok(true),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -385,7 +385,7 @@ mod windows_parent {
             }
         }
 
-        pub(super) fn remove_if_owned(
+        pub(crate) fn remove_if_owned(
             &self,
             name: &OsStr,
             expected: &Metadata,
@@ -405,7 +405,7 @@ mod windows_parent {
             Ok(true)
         }
 
-        pub(super) fn remove_entry(&self, name: &OsStr) -> io::Result<()> {
+        pub(crate) fn remove_entry(&self, name: &OsStr) -> io::Result<()> {
             let file = match open_regular_for_delete(&self.path.join(name)) {
                 Ok(file) => file,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -416,7 +416,7 @@ mod windows_parent {
             delete_opened_file(&file)
         }
 
-        pub(super) fn replace(
+        pub(crate) fn replace(
             &self,
             source: &OsStr,
             _temp: &OsStr,
@@ -436,7 +436,7 @@ mod windows_parent {
             Ok(())
         }
 
-        pub(super) fn sync(&self) -> io::Result<()> {
+        pub(crate) fn sync(&self) -> io::Result<()> {
             Ok(())
         }
     }
