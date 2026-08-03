@@ -26,6 +26,7 @@ pub struct RuntimeAnthropicCollectedResponse {
     code_execution_requests: u64,
     tool_search_requests: u64,
     has_tool_calls: bool,
+    terminal_stop_reason: Option<&'static str>,
     want_thinking: bool,
     server_tools: RuntimeAnthropicServerTools,
 }
@@ -63,6 +64,16 @@ pub fn runtime_anthropic_response_event_error_message(value: &serde_json::Value)
         .get("error")
         .and_then(|error| error.get("message"))
         .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .pointer("/response/error/message")
+                .and_then(serde_json::Value::as_str)
+        })
+        .or_else(|| {
+            value
+                .pointer("/response/incomplete_details/message")
+                .and_then(serde_json::Value::as_str)
+        })
         .unwrap_or("Codex returned an error.")
 }
 
@@ -144,7 +155,10 @@ impl RuntimeAnthropicCollectedResponse {
             Some("response.completed") => {
                 self.observe_completed(value);
             }
-            Some("error" | "response.failed" | "response.incomplete") => {
+            Some("response.incomplete") => {
+                self.observe_incomplete(value)?;
+            }
+            Some("error" | "response.failed") => {
                 bail!(runtime_anthropic_response_event_error_message(value).to_string());
             }
             _ => {}
@@ -318,6 +332,16 @@ impl RuntimeAnthropicCollectedResponse {
         self.completed = true;
     }
 
+    fn observe_incomplete(&mut self, value: &serde_json::Value) -> Result<()> {
+        if runtime_anthropic_response_is_max_tokens_incomplete(value) {
+            self.terminal_stop_reason = Some("max_tokens");
+            self.observe_completed(value);
+            Ok(())
+        } else {
+            bail!(runtime_anthropic_response_event_error_message(value).to_string());
+        }
+    }
+
     fn add_output_item_server_tool_usage(&mut self, item: &serde_json::Value) {
         let usage = runtime_anthropic_output_item_server_tool_usage(item, Some(&self.server_tools));
         self.web_search_requests += usage.web_search_requests;
@@ -387,7 +411,9 @@ impl RuntimeAnthropicCollectedResponse {
             "role": "assistant",
             "content": self.content,
             "model": requested_model,
-            "stop_reason": if self.has_tool_calls { "tool_use" } else { "end_turn" },
+            "stop_reason": self
+                .terminal_stop_reason
+                .unwrap_or(if self.has_tool_calls { "tool_use" } else { "end_turn" }),
             "stop_sequence": serde_json::Value::Null,
             "usage": usage,
         })

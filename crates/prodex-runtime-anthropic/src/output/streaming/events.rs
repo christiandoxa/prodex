@@ -24,7 +24,10 @@ impl RuntimeAnthropicSseReader {
             Some("response.completed") => {
                 self.observe_stream_completed(value);
             }
-            Some("error" | "response.failed" | "response.incomplete") => {
+            Some("response.incomplete") => {
+                self.observe_stream_incomplete(value);
+            }
+            Some("error" | "response.failed") => {
                 self.finish_error(runtime_anthropic_response_event_error_message(value));
             }
             _ => {}
@@ -224,6 +227,15 @@ impl RuntimeAnthropicSseReader {
             self.merge_stream_output_usage(output);
         }
         self.finish_success();
+    }
+
+    fn observe_stream_incomplete(&mut self, value: &serde_json::Value) {
+        if runtime_anthropic_response_is_max_tokens_incomplete(value) {
+            self.terminal_stop_reason = Some("max_tokens");
+            self.observe_stream_completed(value);
+        } else {
+            self.finish_error(runtime_anthropic_response_event_error_message(value));
+        }
     }
 
     fn add_stream_output_item_server_tool_usage(&mut self, item: &serde_json::Value) {

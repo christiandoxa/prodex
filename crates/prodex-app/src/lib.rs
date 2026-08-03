@@ -557,6 +557,12 @@ mod kiro_bin_tests {
 ",
         )
         .expect("fake binary should write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(root.join("kiro-cli"), fs::Permissions::from_mode(0o755))
+                .expect("fake binary should be executable");
+        }
 
         assert_eq!(
             kiro_bin_from(None, Some(root.clone().into_os_string())),

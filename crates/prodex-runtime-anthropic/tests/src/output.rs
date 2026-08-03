@@ -87,3 +87,63 @@ fn anthropic_buffered_conversion_requires_a_completed_event() {
         );
     }
 }
+
+#[test]
+fn responses_terminal_events_preserve_anthropic_failure_and_max_tokens() {
+    let max_tokens = format!(
+        "event: response.incomplete\ndata: {}\n\n",
+        serde_json::json!({
+            "type": "response.incomplete",
+            "response": {
+                "status": "incomplete",
+                "incomplete_details": {
+                    "reason": "max_output_tokens",
+                    "message": "limit"
+                },
+                "usage": {"input_tokens": 2, "output_tokens": 3}
+            }
+        })
+    );
+    let mut reader = RuntimeAnthropicSseReader::new(
+        Box::new(Cursor::new(max_tokens.as_bytes().to_vec())),
+        "claude-sonnet-4".to_string(),
+        false,
+        RuntimeAnthropicServerToolUsage::default(),
+        RuntimeAnthropicServerTools::default(),
+    );
+    let mut streamed = String::new();
+    reader
+        .read_to_string(&mut streamed)
+        .expect("Anthropic stream should translate");
+    assert!(streamed.contains("\"stop_reason\":\"max_tokens\""));
+    assert!(!streamed.contains("\"stop_reason\":\"end_turn\""));
+
+    let failed = format!(
+        "event: response.failed\ndata: {}\n\n",
+        serde_json::json!({
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {"message": "ACP failed"}
+            }
+        })
+    );
+    let mut reader = RuntimeAnthropicSseReader::new(
+        Box::new(Cursor::new(failed.as_bytes().to_vec())),
+        "claude-sonnet-4".to_string(),
+        false,
+        RuntimeAnthropicServerToolUsage::default(),
+        RuntimeAnthropicServerTools::default(),
+    );
+    let mut failed_stream = String::new();
+    reader
+        .read_to_string(&mut failed_stream)
+        .expect("Anthropic failure stream should translate");
+    assert!(failed_stream.contains("\"type\":\"error\""));
+    assert!(failed_stream.contains("ACP failed"));
+
+    let buffered =
+        runtime_anthropic_response_from_sse_bytes(max_tokens.as_bytes(), "claude-sonnet-4", false)
+            .expect("buffered Anthropic response should translate");
+    assert_eq!(buffered["stop_reason"], "max_tokens");
+}

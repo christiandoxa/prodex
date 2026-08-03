@@ -253,12 +253,11 @@ pub fn kiro_provider_core_anthropic_message_value_from_response(
 
 fn kiro_provider_core_anthropic_stop_reason(response: &Value) -> &'static str {
     response
-        .get("metadata")
-        .and_then(|metadata| metadata.get("kiro"))
-        .and_then(|kiro| kiro.get("stop_reason"))
+        .pointer("/incomplete_details/reason")
+        .or_else(|| response.pointer("/metadata/kiro/stop_reason"))
         .and_then(Value::as_str)
         .map(|reason| match reason {
-            "max_output_tokens" => "max_tokens",
+            "max_output_tokens" | "max_tokens" => "max_tokens",
             "tool_use" => "tool_use",
             _ => "end_turn",
         })

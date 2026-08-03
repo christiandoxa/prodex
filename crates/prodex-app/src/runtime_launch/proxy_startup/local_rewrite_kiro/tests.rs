@@ -40,6 +40,159 @@ fn kiro_streaming_queue_applies_backpressure() {
     ));
 }
 
+#[test]
+fn kiro_responses_stream_preserves_terminal_status() {
+    for (status, event_type, response) in [
+        (
+            "completed",
+            "response.completed",
+            json!({"id": "resp_1", "status": "completed"}),
+        ),
+        (
+            "failed",
+            "response.failed",
+            json!({
+                "id": "resp_1",
+                "status": "failed",
+                "error": {"code": "-1", "message": "ACP failed"}
+            }),
+        ),
+        (
+            "incomplete",
+            "response.incomplete",
+            json!({
+                "id": "resp_1",
+                "status": "incomplete",
+                "incomplete_details": {
+                    "reason": "max_output_tokens",
+                    "message": "ACP reached the token limit"
+                }
+            }),
+        ),
+    ] {
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let mut state = RuntimeKiroStreamingState::new(1, Some("claude-sonnet-4"));
+        super::stream::runtime_kiro_send_final_stream(&sender, &response, &mut state, false)
+            .expect("Kiro terminal event should be emitted");
+
+        let mut body = Vec::new();
+        while let Ok(chunk) = receiver.try_recv() {
+            if let RuntimeKiroStreamingChunk::Data(bytes) = chunk {
+                body.extend(bytes);
+            }
+        }
+        let body = String::from_utf8(body).expect("Kiro SSE should be UTF-8");
+        assert!(
+            body.contains(&format!("event: {event_type}")),
+            "{status}: {body}"
+        );
+        assert!(
+            body.contains(&format!("\"status\":\"{status}\"")),
+            "{status}: {body}"
+        );
+        if status != "completed" {
+            assert!(
+                !body.contains("event: response.completed"),
+                "{status}: {body}"
+            );
+        }
+    }
+}
+
+fn test_kiro_anthropic_request() -> RuntimeAnthropicMessagesRequest {
+    translate_runtime_anthropic_messages_request(&RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages".to_string(),
+        headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
+        body: serde_json::to_vec(&json!({
+            "model": "claude-sonnet-4",
+            "max_tokens": 128,
+            "stream": false,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .unwrap(),
+    })
+    .expect("Anthropic request should translate")
+}
+
+fn test_kiro_anthropic_response(value: Value) -> RuntimeLocalRewriteUpstreamResponse {
+    RuntimeLocalRewriteUpstreamResponse::Buffered(RuntimeHeapTrimmedBufferedResponseParts {
+        status: 200,
+        headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+        body: serde_json::to_vec(&value).unwrap().into(),
+    })
+}
+
+#[test]
+fn kiro_anthropic_buffered_translation_preserves_terminal_status() {
+    let request = test_kiro_anthropic_request();
+    let cases = [
+        (
+            json!({
+                "status": "failed",
+                "error": {"code": "-1", "message": "ACP failed"}
+            }),
+            502,
+            Some("ACP failed"),
+            None,
+        ),
+        (
+            json!({
+                "status": "incomplete",
+                "incomplete_details": {
+                    "reason": "cancelled",
+                    "message": "ACP stopped early"
+                }
+            }),
+            502,
+            Some("ACP stopped early"),
+            None,
+        ),
+        (
+            json!({
+                "status": "incomplete",
+                "incomplete_details": {
+                    "reason": "max_output_tokens",
+                    "message": "ACP reached the token limit"
+                },
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "limited"}]
+                }]
+            }),
+            200,
+            None,
+            Some("max_tokens"),
+        ),
+        (
+            json!({
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "done"}]
+                }]
+            }),
+            200,
+            None,
+            Some("end_turn"),
+        ),
+    ];
+
+    for (value, expected_status, error_message, stop_reason) in cases {
+        let response = test_kiro_anthropic_response(value);
+        let parts = runtime_kiro_anthropic_message_parts_from_response(&response, &request);
+        assert_eq!(parts.status, expected_status);
+        let body: Value = serde_json::from_slice(&parts.body).expect("Anthropic body should parse");
+        if let Some(error_message) = error_message {
+            assert_eq!(body["type"], "error");
+            assert_eq!(body["error"]["message"], error_message);
+        } else {
+            assert_eq!(body["type"], "message");
+            assert_eq!(body["stop_reason"], stop_reason.unwrap());
+        }
+    }
+}
+
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
     crate::test_support::write_test_python_executable(
         root,

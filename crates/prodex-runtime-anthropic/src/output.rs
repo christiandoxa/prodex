@@ -14,6 +14,23 @@ pub use streaming::*;
 pub use tool_blocks::*;
 pub use usage::*;
 
+pub(crate) fn runtime_anthropic_response_incomplete_reason(
+    value: &serde_json::Value,
+) -> Option<&str> {
+    value
+        .pointer("/response/incomplete_details/reason")
+        .and_then(serde_json::Value::as_str)
+}
+
+pub(crate) fn runtime_anthropic_response_is_max_tokens_incomplete(
+    value: &serde_json::Value,
+) -> bool {
+    matches!(
+        runtime_anthropic_response_incomplete_reason(value),
+        Some("max_output_tokens" | "max_tokens")
+    )
+}
+
 struct RuntimeAnthropicOutputBlockTranslator<'a> {
     content: Vec<serde_json::Value>,
     has_tool_calls: bool,
