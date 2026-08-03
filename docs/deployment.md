@@ -18,6 +18,11 @@ sudo chown 10001:10001 deploy/secrets/*
 chmod 0600 deploy/secrets/*
 node scripts/ci/deployment-security-guard.mjs --secret-env deploy/gateway.env
 
+install -d -m 0700 data/prodex data/runtime-logs data/postgres data/redis
+sudo chown 10001:10001 data/prodex data/runtime-logs
+sudo chown 70:70 data/postgres
+sudo chown 999:1000 data/redis
+
 docker compose --env-file deploy/gateway.env build prodex-gateway
 docker compose --profile postgres --profile redis \
   --env-file deploy/gateway.env up -d postgres redis
@@ -63,10 +68,12 @@ production.
 
 ## Persistent Paths
 
-The compose stack mounts two named volumes:
+The compose stack uses four private bind-mounted directories:
 
-- `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
-- `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
+- `data/prodex` → `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
+- `data/runtime-logs` → `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
+- `data/postgres` → `/var/lib/postgresql/data`: PostgreSQL state.
+- `data/redis` → `/data`: Redis append-only state.
 
 The gateway exposes the admin OpenAPI document at:
 
@@ -239,6 +246,16 @@ baseline with:
   Every standalone release publishes a rendered `prodex-gateway-<version>.yaml`
   asset whose three workload references use the exact attested GHCR image
   digest; deploy that release asset rather than the source template.
+
+The manifest creates and targets the dedicated `prodex` namespace. Apply it as
+a unit so the namespace labels, policies, and namespaced resources are
+installed together:
+
+```bash
+kubectl apply -f deploy/kubernetes/prodex-gateway.yaml
+```
+
+Standalone release assets use the same command with the downloaded asset path.
 
 The gateway workload mounts `prodex-gateway-secrets`, which contains the
 gateway bearer token, provider API key references, PostgreSQL, and Redis

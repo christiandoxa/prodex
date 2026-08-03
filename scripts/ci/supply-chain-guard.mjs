@@ -19,6 +19,8 @@ const SONAR_IMAGE =
   "docker.io/library/sonarqube:26.7.0.124771-community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
 const KICS_IMAGE =
   "docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602";
+const KICS_NON_ACTIONABLE_QUERY_IDS =
+  "e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b";
 const PRODUCTION_CLIPPY_COMMAND =
   "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
@@ -78,7 +80,7 @@ export function validateWindowsSecurityJob(contents) {
     "PRODEX_APP_SKIP_FILTERS:",
     "cargo test --locked -q -p prodex-app --lib --all-features",
     "--test-threads=1",
-    "save-if: false",
+    "save-if: ${{ matrix.save_cache }}",
     "prodex-app filter matched no Windows tests",
   ]) {
     if (!app.includes(marker)) {
@@ -212,7 +214,8 @@ export function validateKicsConfiguration(workflowContents) {
     "--report-formats json,sarif",
     "--disable-secrets",
     "--disable-full-descriptions",
-    "--fail-on critical,high",
+    `--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`,
+    "--fail-on critical,high,medium,low,info",
     "if: always()",
     "name: kics-iac-results",
     "if-no-files-found: error",
@@ -226,6 +229,21 @@ export function validateKicsConfiguration(workflowContents) {
   }
   if (job.includes("continue-on-error") || job.includes("--ignore-on-exit")) {
     violations.push(".github/workflows/ci.yml: kics must fail closed");
+  }
+  for (const broadExclusion of [
+    "--exclude-severities",
+    "--exclude-categories",
+    "--exclude-paths",
+    "--exclude-files",
+    "kics-scan ignore",
+  ]) {
+    if (job.includes(broadExclusion)) {
+      violations.push(`.github/workflows/ci.yml: kics must not use broad or inline exclusions: ${broadExclusion}`);
+    }
+  }
+  const queryExclusions = [...job.matchAll(/--exclude-queries\s+([^\s]+)/gu)].map((match) => match[1]);
+  if (queryExclusions.length !== 1 || queryExclusions[0] !== KICS_NON_ACTIONABLE_QUERY_IDS) {
+    violations.push(".github/workflows/ci.yml: kics query exclusions must remain the exact reviewed INFO-only set");
   }
   if (!telemetry?.includes("- kics")) {
     violations.push(".github/workflows/ci.yml: CI telemetry must wait for kics");
@@ -521,7 +539,7 @@ function selfTest() {
     steps:
       - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
         with:
-          save-if: false
+          save-if: \${{ matrix.save_cache }}
       - env:
           PRODEX_APP_FILTERS: filters
           PRODEX_APP_SKIP_FILTERS: skips
@@ -598,7 +616,7 @@ function selfTest() {
       - run: |
           kics_image="${KICS_IMAGE}"
           docker pull "\${kics_image}"
-          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --fail-on critical,high
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS} --fail-on critical,high,medium,low,info
       - name: Upload KICS reports
         if: always()
         with:
@@ -637,7 +655,15 @@ sonar.qualitygate.wait=true
     1,
   );
   assert.equal(validateKicsConfiguration(sonarWorkflow.replace(KICS_IMAGE, "checkmarx/kics:latest")).length, 1);
-  assert.equal(validateKicsConfiguration(sonarWorkflow.replace("--fail-on critical,high", "--fail-on critical")).length, 1);
+  assert.equal(validateKicsConfiguration(sonarWorkflow.replace("--fail-on critical,high,medium,low,info", "--fail-on critical,high,medium,low")).length, 1);
+  assert.equal(
+    validateKicsConfiguration(sonarWorkflow.replace(`--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`, "--exclude-queries wrong")).length > 0,
+    true,
+  );
+  assert.equal(
+    validateKicsConfiguration(sonarWorkflow.replace(`--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`, "--exclude-severities info")).length > 0,
+    true,
+  );
   assert.equal(
     validateSonarConfiguration(sonarWorkflow.replace(SONAR_ACTION, "SonarSource/sonarqube-scan-action@v8.2.1"), sonarProperties).length,
     1,

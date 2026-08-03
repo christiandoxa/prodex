@@ -15,7 +15,9 @@ RUN cargo build --locked --release
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates=20230311+deb12u1 \
+      curl=7.88.1-10+deb12u15 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 10001 prodex \
@@ -31,6 +33,9 @@ ENV PRODEX_RUNTIME_LOG_DIR=/var/log/prodex
 
 USER prodex
 EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:4000/readyz || exit 1
 
 ENTRYPOINT ["/usr/local/bin/prodex-gateway"]
 CMD ["serve", "--listen", "0.0.0.0:4000"]

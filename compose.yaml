@@ -22,8 +22,8 @@ services:
       - source: prodex_gateway_redis_url
         target: PRODEX_GATEWAY_REDIS_URL
     volumes:
-      - prodex-data:/var/lib/prodex
-      - prodex-runtime-logs:/var/log/prodex
+      - ./data/prodex:/var/lib/prodex
+      - ./data/runtime-logs:/var/log/prodex
       - ./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro
     read_only: true
     cap_drop:
@@ -48,6 +48,7 @@ services:
     image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     profiles: ["postgres"]
     restart: unless-stopped
+    user: "70:70"
     environment:
       POSTGRES_DB: ${PRODEX_POSTGRES_DB:-prodex}
       POSTGRES_USER: ${PRODEX_POSTGRES_USER:-prodex}
@@ -56,7 +57,11 @@ services:
       - source: prodex_postgres_password
         target: PRODEX_POSTGRES_PASSWORD
     volumes:
-      - prodex-postgres:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 30s
@@ -69,21 +74,20 @@ services:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     profiles: ["redis"]
     restart: unless-stopped
+    user: "999:1000"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - prodex-redis:/data
+      - ./data/redis:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  prodex-data:
-  prodex-runtime-logs:
-  prodex-postgres:
-  prodex-redis:
 
 secrets:
   prodex_gateway_token:
