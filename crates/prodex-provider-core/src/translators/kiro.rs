@@ -59,6 +59,7 @@ pub use self::stream::{
     kiro_provider_core_chat_completion_tool_call_delta, kiro_provider_core_output_item_added_event,
     kiro_provider_core_output_item_done_event, kiro_provider_core_output_text_delta_event,
     kiro_provider_core_response_completed_event, kiro_provider_core_response_created_event,
+    kiro_provider_core_response_failed_event, kiro_provider_core_response_incomplete_event,
     kiro_provider_core_stream_content_text, kiro_provider_core_stream_tool_arguments,
     kiro_provider_core_stream_tool_call_item,
     kiro_provider_core_tool_call_arguments_delta_chat_value,

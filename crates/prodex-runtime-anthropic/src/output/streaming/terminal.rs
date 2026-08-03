@@ -26,7 +26,9 @@ impl RuntimeAnthropicSseReader {
             serde_json::json!({
                 "type": "message_delta",
                 "delta": {
-                    "stop_reason": if self.has_tool_calls { "tool_use" } else { "end_turn" },
+                    "stop_reason": self
+                        .terminal_stop_reason
+                        .unwrap_or(if self.has_tool_calls { "tool_use" } else { "end_turn" }),
                 },
                 "usage": usage,
             }),

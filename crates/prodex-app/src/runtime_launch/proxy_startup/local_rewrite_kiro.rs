@@ -491,6 +491,29 @@ fn runtime_kiro_anthropic_message_parts_from_response(
             );
         }
     };
+    match value.get("status").and_then(Value::as_str) {
+        Some("failed") => {
+            let message = value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("Kiro ACP turn failed.");
+            return build_runtime_anthropic_error_parts(502, "api_error", message);
+        }
+        Some("incomplete") => {
+            let reason = value
+                .pointer("/incomplete_details/reason")
+                .or_else(|| value.pointer("/metadata/kiro/stop_reason"))
+                .and_then(Value::as_str);
+            if !matches!(reason, Some("max_output_tokens" | "max_tokens")) {
+                let message = value
+                    .pointer("/incomplete_details/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Kiro ACP turn did not complete.");
+                return build_runtime_anthropic_error_parts(502, "api_error", message);
+            }
+        }
+        _ => {}
+    }
     runtime_kiro_json_parts(
         200,
         prodex_provider_core::kiro_provider_core_anthropic_message_value_from_response(

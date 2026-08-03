@@ -39,6 +39,7 @@ pub struct RuntimeAnthropicSseReader {
     tool_search_requests: u64,
     server_tools: RuntimeAnthropicServerTools,
     active_tool_use: Option<RuntimeAnthropicStreamToolUse>,
+    terminal_stop_reason: Option<&'static str>,
     terminal_sent: bool,
     inner_finished: bool,
 }
@@ -73,6 +74,7 @@ impl RuntimeAnthropicSseReader {
             tool_search_requests: carried_usage.tool_search_requests,
             server_tools,
             active_tool_use: None,
+            terminal_stop_reason: None,
             terminal_sent: false,
             inner_finished: false,
         };

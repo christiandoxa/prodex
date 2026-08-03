@@ -117,8 +117,48 @@ pub fn kiro_provider_core_response_completed_event(
     created_at: u64,
     response: &Value,
 ) -> Value {
+    kiro_provider_core_response_terminal_event(
+        "response.completed",
+        sequence_number,
+        created_at,
+        response,
+    )
+}
+
+pub fn kiro_provider_core_response_failed_event(
+    sequence_number: u64,
+    created_at: u64,
+    response: &Value,
+) -> Value {
+    kiro_provider_core_response_terminal_event(
+        "response.failed",
+        sequence_number,
+        created_at,
+        response,
+    )
+}
+
+pub fn kiro_provider_core_response_incomplete_event(
+    sequence_number: u64,
+    created_at: u64,
+    response: &Value,
+) -> Value {
+    kiro_provider_core_response_terminal_event(
+        "response.incomplete",
+        sequence_number,
+        created_at,
+        response,
+    )
+}
+
+fn kiro_provider_core_response_terminal_event(
+    event_type: &str,
+    sequence_number: u64,
+    created_at: u64,
+    response: &Value,
+) -> Value {
     json!({
-        "type": "response.completed",
+        "type": event_type,
         "sequence_number": sequence_number,
         "created_at": created_at,
         "response": response,
