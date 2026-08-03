@@ -34,6 +34,7 @@ fn postgres_validation_migration_is_append_only_and_complete() {
         (1_u32..=18).collect::<Vec<_>>()
     );
     assert!(!migration.sql.contains("NOT VALID"));
+    let sql = migration.sql.replace("\r\n", "\n");
     for (table, constraint) in [
         (
             "prodex_policy_pointers",
@@ -151,7 +152,7 @@ fn postgres_validation_migration_is_append_only_and_complete() {
         ),
     ] {
         assert!(
-            migration.sql.contains(&format!(
+            sql.contains(&format!(
                 "ALTER TABLE {table}\n    VALIDATE CONSTRAINT {constraint};"
             )),
             "missing validation for {table}.{constraint}"
