@@ -787,7 +787,7 @@ fn gateway_sqlite_shared_backend_allows_only_one_budget_limited_reservation_acro
         request_body.clone(),
     );
     let second = send(proxy_b.listen_addr, barrier, token, request_body.clone());
-    let mut statuses = vec![
+    let mut statuses = [
         first.join().expect("first request thread should finish"),
         second.join().expect("second request thread should finish"),
     ];
