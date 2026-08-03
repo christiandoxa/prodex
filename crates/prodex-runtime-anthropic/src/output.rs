@@ -18,7 +18,8 @@ pub(crate) fn runtime_anthropic_response_incomplete_reason(
     value: &serde_json::Value,
 ) -> Option<&str> {
     value
-        .pointer("/response/incomplete_details/reason")
+        .pointer("/incomplete_details/reason")
+        .or_else(|| value.pointer("/response/incomplete_details/reason"))
         .and_then(serde_json::Value::as_str)
 }
 
@@ -29,6 +30,20 @@ pub(crate) fn runtime_anthropic_response_is_max_tokens_incomplete(
         runtime_anthropic_response_incomplete_reason(value),
         Some("max_output_tokens" | "max_tokens")
     )
+}
+
+fn runtime_anthropic_validate_response_terminal_state(value: &serde_json::Value) -> Result<()> {
+    let status = value
+        .get("status")
+        .or_else(|| value.pointer("/response/status"))
+        .and_then(serde_json::Value::as_str);
+    match status {
+        Some("failed") => bail!(runtime_anthropic_response_event_error_message(value).to_string()),
+        Some("incomplete") if !runtime_anthropic_response_is_max_tokens_incomplete(value) => {
+            bail!(runtime_anthropic_response_event_error_message(value).to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 struct RuntimeAnthropicOutputBlockTranslator<'a> {
@@ -263,7 +278,13 @@ pub fn runtime_anthropic_response_from_json_value_with_carried_usage(
         "role": "assistant",
         "content": content,
         "model": requested_model,
-        "stop_reason": if has_tool_calls { "tool_use" } else { "end_turn" },
+        "stop_reason": if has_tool_calls {
+            "tool_use"
+        } else if runtime_anthropic_response_is_max_tokens_incomplete(value) {
+            "max_tokens"
+        } else {
+            "end_turn"
+        },
         "stop_sequence": serde_json::Value::Null,
         "usage": usage,
     })
@@ -313,6 +334,7 @@ pub fn translate_runtime_buffered_responses_reply_to_anthropic(
     } else {
         let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
             .context("failed to parse buffered Responses JSON body")?;
+        runtime_anthropic_validate_response_terminal_state(&value)?;
         if value.get("error").is_some() {
             return Ok(RuntimeResponsesReply::Buffered(
                 runtime_anthropic_error_from_upstream_parts(parts),

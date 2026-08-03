@@ -147,3 +147,51 @@ fn responses_terminal_events_preserve_anthropic_failure_and_max_tokens() {
             .expect("buffered Anthropic response should translate");
     assert_eq!(buffered["stop_reason"], "max_tokens");
 }
+
+#[test]
+fn buffered_json_terminal_states_do_not_become_success() {
+    let request = test_messages_request();
+    let translate = |body: serde_json::Value| {
+        translate_runtime_buffered_responses_reply_to_anthropic(
+            RuntimeBufferedResponseParts {
+                status: 200,
+                headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+                body: serde_json::to_vec(&body).unwrap(),
+            },
+            &request,
+        )
+    };
+
+    let reply = translate(serde_json::json!({
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "output": [],
+    }))
+    .expect("max-token response should translate");
+    let RuntimeResponsesReply::Buffered(parts) = reply else {
+        panic!("translation should be buffered");
+    };
+    let message: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+    assert_eq!(message["stop_reason"], "max_tokens");
+
+    assert!(
+        translate(serde_json::json!({
+            "status": "failed",
+            "error": {"message": "provider failed"},
+        }))
+        .err()
+        .expect("failed response should be rejected")
+        .to_string()
+        .contains("provider failed")
+    );
+    assert!(
+        translate(serde_json::json!({
+            "status": "incomplete",
+            "incomplete_details": {"reason": "content_filter", "message": "filtered"},
+        }))
+        .err()
+        .expect("non-token incomplete response should be rejected")
+        .to_string()
+        .contains("filtered")
+    );
+}

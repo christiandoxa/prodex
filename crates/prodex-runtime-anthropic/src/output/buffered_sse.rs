@@ -71,6 +71,11 @@ pub fn runtime_anthropic_response_event_error_message(value: &serde_json::Value)
         })
         .or_else(|| {
             value
+                .pointer("/incomplete_details/message")
+                .and_then(serde_json::Value::as_str)
+        })
+        .or_else(|| {
+            value
                 .pointer("/response/incomplete_details/message")
                 .and_then(serde_json::Value::as_str)
         })
