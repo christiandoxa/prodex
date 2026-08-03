@@ -1,28 +1,19 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
+import { formatCommand, parsePositiveInteger } from "./guard-common.mjs";
 
 const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
-
-export function parsePositiveInteger(value, name) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return parsed;
-}
 
 export function defaultJobCount() {
   const available = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
   return Math.max(1, Math.min(6, available || 1));
 }
 
-export function formatCommand(command, args) {
-  return [command, ...args].join(" ");
-}
-
 export function cargoFeatureArgs({ allFeatures = false } = {}) {
   return allFeatures ? ["--all-features"] : [];
 }
+
+export { formatCommand, parsePositiveInteger };
 
 export function cargoTestStep(label, filter, extraArgs = [], options = {}) {
   return {

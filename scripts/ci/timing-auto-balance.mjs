@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parsePositiveInteger } from "./guard-common.mjs";
 import { formatDurationMs } from "./main-internal-test-runner.mjs";
 
 const DEFAULT_LIMIT = 10;
@@ -10,14 +11,6 @@ function requiredValue(value, name) {
     throw new Error(`${name} requires a value`);
   }
   return value;
-}
-
-function parsePositiveInteger(value, name) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return parsed;
 }
 
 export function parseArgs(argv) {

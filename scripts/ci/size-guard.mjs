@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
-import { git, normalizeGitPath, parsePositiveInteger } from "./guard-common.mjs";
+import {
+  git,
+  normalizeGitPath,
+  parsePositiveInteger,
+  readExistingRustFile,
+} from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_PRODUCTION_LINE_LIMIT = 850;
@@ -422,17 +427,6 @@ async function rustFiles() {
   ].sort();
 }
 
-async function readExistingRustFile(filePath) {
-  try {
-    return await fs.readFile(path.join(repoRoot, filePath), "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
 function allowlistMap(entries) {
   const map = new Map();
   for (const entry of entries) {
@@ -548,7 +542,7 @@ async function scan(args) {
   const seenAllowlistFiles = new Set();
 
   for (const filePath of await rustFiles()) {
-    const contents = await readExistingRustFile(filePath);
+    const contents = await readExistingRustFile(repoRoot, filePath);
     if (contents === null) {
       continue;
     }

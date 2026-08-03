@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { formatCommand } from "./guard-common.mjs";
 import {
   RUNTIME_CI_BROAD_SHARD_FILTERS,
   RUNTIME_CI_TEST_CASES,
@@ -41,10 +42,6 @@ function parseArgs(argv) {
     throw new Error(`unknown argument: ${value}`);
   }
   return args;
-}
-
-function formatCommand(command, args) {
-  return [command, ...args].join(" ");
 }
 
 function formatCase(testCase, index) {

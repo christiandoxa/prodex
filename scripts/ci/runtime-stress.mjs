@@ -8,6 +8,7 @@ import {
   RUNTIME_STRESS_SKIP_TESTS,
   RUNTIME_STRESS_WEIGHT_HINTS,
 } from "./runtime-test-manifest.mjs";
+import { parsePositiveInteger } from "./guard-common.mjs";
 
 const VALID_SUITES = new Set(["stress", "serialized", "continuation", "all"]);
 const SHARD_STRATEGY_ALIASES = new Map([
@@ -20,14 +21,6 @@ const SHARD_STRATEGY_ALIASES = new Map([
   ["modulo", "modulo"],
 ]);
 const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
-
-function parsePositiveInteger(value, name) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return parsed;
-}
 
 function parseShardIndex(value, shardCount) {
   const parsed = Number(value);

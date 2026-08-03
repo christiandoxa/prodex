@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { formatCommand } from "./guard-common.mjs";
 
 const DEFAULT_FILTER = "main_internal_tests::runtime_proxy_";
 const DEFAULT_TIMEOUT_MINUTES = 25;
@@ -78,10 +79,6 @@ function parseArgs(argv) {
   }
 
   return args;
-}
-
-function formatCommand(command, args) {
-  return [command, ...args].join(" ");
 }
 
 function tailLines(text, lineCount) {
