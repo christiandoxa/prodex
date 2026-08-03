@@ -259,7 +259,8 @@ fn rename_noreplace(
     let from = c_name(from)?;
     let to = c_name(to)?;
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             from_directory,
             from.as_ptr(),
             to_directory,
