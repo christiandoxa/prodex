@@ -38,6 +38,7 @@ Evidence includes `production_edge_security_uses_peer_trust_and_rejects_host_ori
 `validated_peer_metadata_maps_to_low_cardinality_governance_zone`,
 `workload_evidence_requires_exact_identity_and_bound_mtls_when_configured`, and
 `session_reuse_with_another_principal_is_revoked`, and
-`cross_replica_revocation_epoch_invalidates_cached_sessions_promptly`. Shared
-browser-session storage, IdP logout propagation, managed PKI rotation, and a
-deployed two-gateway chaos proof remain acceptance gaps.
+`cross_replica_revocation_epoch_invalidates_cached_sessions_promptly`. Browser
+transactions and sessions use Redis when configured, and OIDC back-channel
+logout propagates revocation by hashed subject/session indexes. Managed PKI
+rotation and a deployed two-gateway chaos proof remain acceptance gaps.

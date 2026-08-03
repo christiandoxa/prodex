@@ -105,6 +105,15 @@ const WORKSPACE_SHARD = Object.freeze({
   label: "workspace and auto-rotate",
 });
 
+const WINDOWS_SHARD_GROUPS = Object.freeze([
+  { suite: "selection-support", label: "prodex-app selection and support", members: ["selection", "support"] },
+  { suite: "admission-commands", label: "prodex-app admission and commands", members: ["admission", "commands"] },
+  { suite: "local-runtime", label: "prodex-app local rewrite and runtime", members: ["launch-local", "runtime"] },
+  { suite: "providers-brokers", label: "prodex-app providers and brokers", members: ["launch-providers", "brokers"] },
+  { suite: "gateway-gemini", label: "prodex-app gateway and Gemini", members: ["launch-gateway", "launch-gemini"] },
+  { suite: "profiles", label: "prodex-app profiles", members: ["profiles"] },
+]);
+
 function collectDuplicates(values) {
   const indexesByValue = new Map();
   values.forEach((value, index) => {
@@ -216,6 +225,21 @@ export function githubMatrix({ includeWorkspace = false } = {}) {
   return { include };
 }
 
+export function windowsGithubMatrix() {
+  const grouped = WINDOWS_SHARD_GROUPS.map((group) => ({
+    suite: group.suite,
+    label: group.label,
+    filters: group.members.flatMap((suite) => {
+      const shard = TARGETED_SHARDS.find((candidate) => candidate.suite === suite);
+      if (!shard) throw new Error(`unknown Windows prodex-app shard: ${suite}`);
+      return shard.filters;
+    }),
+  }));
+  return {
+    include: [...grouped, PRODEX_APP_LIB_SHARDS.at(-1)].map(matrixEntry),
+  };
+}
+
 function stepCommand(shard) {
   if (shard.suite === "workspace") {
     return "node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib";
@@ -250,6 +274,10 @@ function parseArgs(argv) {
       args.githubMatrix = true;
       continue;
     }
+    if (value === "--windows-github-matrix") {
+      args.windowsGithubMatrix = true;
+      continue;
+    }
     if (value === "--full-test-matrix") {
       args.fullTestMatrix = true;
       continue;
@@ -266,10 +294,11 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/prodex-app-test-shards.mjs --check|--dry-run|--github-matrix|--full-test-matrix",
+      "Usage: node scripts/ci/prodex-app-test-shards.mjs --check|--dry-run|--github-matrix|--windows-github-matrix|--full-test-matrix",
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the app-only GitHub Actions matrix.",
+      "--windows-github-matrix emits fewer balanced Windows groups to avoid duplicate compilation.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );
@@ -281,9 +310,17 @@ function main() {
     printHelp();
     return;
   }
-  const selectedModes = [args.check, args.dryRun, args.githubMatrix, args.fullTestMatrix].filter(Boolean).length;
+  const selectedModes = [
+    args.check,
+    args.dryRun,
+    args.githubMatrix,
+    args.windowsGithubMatrix,
+    args.fullTestMatrix,
+  ].filter(Boolean).length;
   if (selectedModes !== 1) {
-    throw new Error("choose exactly one of --check, --dry-run, --github-matrix, or --full-test-matrix");
+    throw new Error(
+      "choose exactly one of --check, --dry-run, --github-matrix, --windows-github-matrix, or --full-test-matrix",
+    );
   }
 
   const issues = validateShards();
@@ -296,6 +333,10 @@ function main() {
   }
   if (args.githubMatrix || args.fullTestMatrix) {
     process.stdout.write(`${JSON.stringify(githubMatrix({ includeWorkspace: args.fullTestMatrix }))}\n`);
+    return;
+  }
+  if (args.windowsGithubMatrix) {
+    process.stdout.write(`${JSON.stringify(windowsGithubMatrix())}\n`);
     return;
   }
 

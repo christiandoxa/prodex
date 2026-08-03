@@ -29,6 +29,7 @@ jobs:
       heavy: ${{ steps.impact.outputs.heavy }}
       reason: ${{ steps.impact.outputs.reason }}
       prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.matrix }}
+      windows_prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.windows_matrix }}
       runtime_proxy_matrix: ${{ steps.runtime-matrix.outputs.matrix }}
 
     steps:
@@ -96,6 +97,8 @@ jobs:
           set -euo pipefail
           matrix="$(node scripts/ci/prodex-app-test-shards.mjs --github-matrix)"
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          windows_matrix="$(node scripts/ci/prodex-app-test-shards.mjs --windows-github-matrix)"
+          echo "windows_matrix=${windows_matrix}" >> "${GITHUB_OUTPUT}"
 
   fmt:
     runs-on: ubuntu-latest
@@ -448,7 +451,7 @@ jobs:
       RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
+      matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
 
     steps:
       - name: Check out repository
@@ -894,7 +897,34 @@ jobs:
             echo "Sonar reported ${total} unresolved issue(s); refusing to continue." >&2
             exit 1
           fi
-          echo "Sonar zero-issue gate: passed."
+          hotspots_response="$(curl --fail --silent --show-error --get \
+            --header "Authorization: Bearer ${SONAR_TOKEN}" \
+            --data-urlencode "projectKey=prodex-ci" \
+            --data-urlencode "status=TO_REVIEW" \
+            --data-urlencode "ps=1" \
+            "${SONAR_HOST_URL}/api/hotspots/search")"
+          hotspot_total="$(jq -er '(.paging.total // .total) | select(type == "number")' <<<"${hotspots_response}")"
+          if [ "${hotspot_total}" -ne 0 ]; then
+            echo "Sonar reported ${hotspot_total} unreviewed security hotspot(s); refusing to continue." >&2
+            exit 1
+          fi
+          measures_response="$(curl --fail --silent --show-error --get \
+            --header "Authorization: Bearer ${SONAR_TOKEN}" \
+            --data-urlencode "component=prodex-ci" \
+            --data-urlencode "metricKeys=security_rating,reliability_rating,sqale_rating,duplicated_lines_density" \
+            "${SONAR_HOST_URL}/api/measures/component")"
+          measures="$(jq -cer '.component.measures | map({key: .metric, value: (.value | tonumber)}) | from_entries' \
+            <<<"${measures_response}")"
+          if ! jq -e '
+            .security_rating == 1 and
+            .reliability_rating == 1 and
+            .sqale_rating == 1 and
+            .duplicated_lines_density <= 3
+          ' <<<"${measures}" >/dev/null; then
+            echo "Sonar rating or duplication gate failed: ${measures}" >&2
+            exit 1
+          fi
+          echo "Sonar zero-issue, zero-hotspot, A-rating, and duplication gates: passed."
 
       - name: Revoke ephemeral local Sonar token
         if: ${{ always() && env.SONAR_TOKEN_NAME != '' }}
@@ -937,10 +967,18 @@ jobs:
             --report-formats json,sarif \
             --disable-secrets \
             --disable-full-descriptions \
-            --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b \
+            --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466 \
             --fail-on critical,high,medium,low,info \
             --minimal-ui \
             --no-progress
+          kics_total="$(jq -er '.total_counter | select(type == "number")' target/kics/prodex-kics.json)"
+          if [ "${kics_total}" -ne 0 ]; then
+            jq -r '.queries[]? | "\(.severity) \(.query_id) \(.query_name): \(.files | length) finding(s)"' \
+              target/kics/prodex-kics.json >&2
+            echo "KICS reported ${kics_total} finding(s); refusing to continue." >&2
+            exit 1
+          fi
+          echo "KICS zero-finding JSON gate: passed."
 
       - name: Upload KICS reports
         if: always()

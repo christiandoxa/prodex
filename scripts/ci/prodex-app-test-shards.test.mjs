@@ -7,6 +7,7 @@ import {
   PRODEX_APP_LIB_FILTERS,
   PRODEX_APP_LIB_SHARDS,
   validateShards,
+  windowsGithubMatrix,
 } from "./prodex-app-test-shards.mjs";
 
 function runPlanner(...args) {
@@ -27,11 +28,23 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
 
   const appMatrix = githubMatrix();
   const fullMatrix = githubMatrix({ includeWorkspace: true });
+  const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 12);
   assert.equal(fullMatrix.include.length, 13);
+  assert.equal(windowsMatrix.include.length, 7);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
+  assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include[0].suite, "workspace");
+  const windowsFilters = windowsMatrix.include
+    .flatMap((entry) => entry.filters.split("\n"))
+    .filter(Boolean);
+  assert.equal(windowsFilters.length, PRODEX_APP_LIB_FILTERS.length);
+  assert.deepEqual(new Set(windowsFilters), new Set(PRODEX_APP_LIB_FILTERS));
+  assert.deepEqual(
+    windowsMatrix.include.at(-1).skip_filters.split("\n"),
+    PRODEX_APP_LIB_FILTERS,
+  );
 });
 
 test("shard planner dry-run and matrix output are compile-free", () => {
@@ -45,6 +58,10 @@ test("shard planner dry-run and matrix output are compile-free", () => {
   assert.equal(matrixRun.status, 0, matrixRun.stderr);
   assert.deepEqual(JSON.parse(matrixRun.stdout), githubMatrix());
 
+  const windowsMatrixRun = runPlanner("--windows-github-matrix");
+  assert.equal(windowsMatrixRun.status, 0, windowsMatrixRun.stderr);
+  assert.deepEqual(JSON.parse(windowsMatrixRun.stdout), windowsGithubMatrix());
+
   const fullMatrixRun = runPlanner("--full-test-matrix");
   assert.equal(fullMatrixRun.status, 0, fullMatrixRun.stderr);
   assert.deepEqual(JSON.parse(fullMatrixRun.stdout), githubMatrix({ includeWorkspace: true }));
@@ -55,7 +72,15 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   const fullWorkflow = readFileSync(".github/workflows/full-test.yml", "utf8");
 
   assert.match(workflow, /prodex_app_matrix: \$\{\{ steps\.prodex-app-matrix\.outputs\.matrix \}\}/);
+  assert.match(
+    workflow,
+    /windows_prodex_app_matrix: \$\{\{ steps\.prodex-app-matrix\.outputs\.windows_matrix \}\}/,
+  );
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\) \}\}/);
+  assert.match(
+    workflow,
+    /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.windows_prodex_app_matrix\) \}\}/,
+  );
   assert.match(workflow, /PRODEX_APP_SKIP_FILTERS/);
   assert.match(workflow, /PRODEX_APP_FILTERS/);
   assert.match(workflow, /--test-threads=1/);

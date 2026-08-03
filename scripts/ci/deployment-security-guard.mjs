@@ -675,8 +675,8 @@ export function validateDeploymentSecurity(inputs) {
     if (!/^\s*serviceAccountName:\s*prodex-control-plane\s*$/mu.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must use prodex-control-plane service account`);
     }
-    if (!/^\s*replicas:\s*3\s*$/mu.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane Deployment must start with three replicas`);
+    if (/^\s*replicas:/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment replica floor must be owned by its HPA`);
     }
     if (
       !/topologySpreadConstraints:[\s\S]*?topologyKey:\s*topology\.kubernetes\.io\/zone[\s\S]*?topologyKey:\s*kubernetes\.io\/hostname[\s\S]*?whenUnsatisfiable:\s*DoNotSchedule/u.test(
@@ -1135,7 +1135,6 @@ kind: Deployment
 metadata:
   name: prodex-control-plane
 spec:
-  replicas: 3
   template:
     spec:
       serviceAccountName: prodex-control-plane
@@ -2050,9 +2049,12 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("  replicas: 3\n  template:", "  replicas: 0\n  template:"),
-    }).some((error) => error.includes("start with three replicas")),
-    "scaled-to-zero control-plane accepted",
+      kubernetes: valid.kubernetes.replace(
+        "  name: prodex-control-plane\nspec:\n  template:",
+        "  name: prodex-control-plane\nspec:\n  replicas: 3\n  template:",
+      ),
+    }).some((error) => error.includes("replica floor must be owned by its HPA")),
+    "static control-plane replica count accepted beside HPA",
   );
   assertSelfTest(
     validateDeploymentSecurity({
