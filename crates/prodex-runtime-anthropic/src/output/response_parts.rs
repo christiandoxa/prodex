@@ -425,6 +425,7 @@ pub fn runtime_anthropic_message_from_buffered_responses_parts_with_carried_usag
 
     let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
         .context("failed to parse buffered Responses JSON body")?;
+    runtime_anthropic_validate_response_terminal_state(&value)?;
     Ok(
         runtime_anthropic_response_from_json_value_with_carried_usage(
             &value,
