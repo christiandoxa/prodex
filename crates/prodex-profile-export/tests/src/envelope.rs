@@ -42,6 +42,16 @@ fn profile_export_bundle_private_io_round_trips() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn profile_export_bundle_create_new_preserves_existing_bundle() {
+    let root = profile_export_private_temp_dir("private-create-new");
+    let path = root.join("profiles.json");
+    assert!(write_profile_export_bundle_if_absent(&path, b"first").unwrap());
+    assert!(!write_profile_export_bundle_if_absent(&path, b"second").unwrap());
+    assert_eq!(std::fs::read(&path).unwrap(), b"first");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn profile_export_bundle_uses_no_follow_private_atomic_io() {

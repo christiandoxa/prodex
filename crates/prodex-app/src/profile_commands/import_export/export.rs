@@ -25,12 +25,12 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         &payload,
         password.as_ref().map(|password| password.as_str()),
     )?);
-    let output_path = args
-        .output
-        .map(absolutize)
-        .transpose()?
-        .unwrap_or_else(default_profile_export_path);
-    prodex_profile_export::write_profile_export_bundle(&output_path, &encoded)?;
+    let output_path = if let Some(output_path) = args.output.map(absolutize).transpose()? {
+        prodex_profile_export::write_profile_export_bundle(&output_path, &encoded)?;
+        output_path
+    } else {
+        write_default_profile_export_bundle(&encoded)?
+    };
     audit_log_event(
         "profile",
         "export",
@@ -163,29 +163,40 @@ fn read_exported_secret_file(
     })
 }
 
-fn default_profile_export_path() -> PathBuf {
+fn write_default_profile_export_bundle(content: &[u8]) -> Result<PathBuf> {
     let stem = format!("prodex-profiles-{}", Local::now().format("%Y%m%d-%H%M%S"));
     let directory = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    next_profile_export_path(&directory, &stem)
+    write_implicit_profile_export_bundle(&directory, &stem, content)
 }
 
-fn next_profile_export_path(directory: &Path, stem: &str) -> PathBuf {
-    let mut path = directory.join(format!("{stem}.json"));
-    let mut suffix = 1;
-    while fs::symlink_metadata(&path).is_ok() {
-        path = directory.join(format!("{stem}-{suffix}.json"));
-        suffix += 1;
+fn write_implicit_profile_export_bundle(
+    directory: &Path,
+    stem: &str,
+    content: &[u8],
+) -> Result<PathBuf> {
+    for suffix in 0..=10_000 {
+        let suffix = if suffix == 0 {
+            String::new()
+        } else {
+            format!("-{suffix}")
+        };
+        let path = directory.join(format!("{stem}{suffix}.json"));
+        if prodex_profile_export::write_profile_export_bundle_if_absent(&path, content)? {
+            return Ok(path);
+        }
     }
-    path
+    bail!("failed to allocate a unique default profile export path")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use std::sync::{Arc, Barrier};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn implicit_export_path_skips_existing_bundles() {
+    fn implicit_export_writes_concurrent_bundles_without_replacement() {
         let root = env::temp_dir().join(format!(
             "prodex-profile-export-path-{}-{}",
             std::process::id(),
@@ -195,13 +206,43 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).unwrap();
-        let stem = "prodex-profiles-20260803-120000";
-        fs::write(root.join(format!("{stem}.json")), b"first").unwrap();
-        fs::write(root.join(format!("{stem}-1.json")), b"second").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
 
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let stem = "prodex-profiles-20260803-120000";
+        let barrier = Arc::new(Barrier::new(4));
+        let paths = std::thread::scope(|scope| {
+            let handles = (0..4)
+                .map(|index| {
+                    let barrier = Arc::clone(&barrier);
+                    let root = &root;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        write_implicit_profile_export_bundle(
+                            root,
+                            stem,
+                            format!("bundle-{index}").as_bytes(),
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(paths.iter().collect::<BTreeSet<_>>().len(), 4);
         assert_eq!(
-            next_profile_export_path(&root, stem),
-            root.join(format!("{stem}-2.json"))
+            paths
+                .iter()
+                .map(|path| fs::read_to_string(path).unwrap())
+                .collect::<BTreeSet<_>>(),
+            (0..4).map(|index| format!("bundle-{index}")).collect()
         );
 
         let _ = fs::remove_dir_all(root);

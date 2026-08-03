@@ -137,6 +137,21 @@ pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
         .with_context(|| format!("failed to replace {}", path.display()))
 }
 
+pub fn write_profile_export_bundle_if_absent(path: &Path, content: &[u8]) -> Result<bool> {
+    if content.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    match secret_store::write_private_file_create_new(path, content) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to create {}", path.display())),
+    }
+}
+
 pub fn decode_profile_export_envelope<T>(
     envelope: ProfileExportEnvelope<T>,
     resolve_password: impl FnOnce() -> Result<String>,
