@@ -4,6 +4,8 @@ mod launch_config;
 mod paths;
 mod state_merge;
 
+pub use prodex_shared_codex_fs::shared_codex_symlink_target_path as runtime_proxy_resolve_symlink_target;
+
 pub use constants::{
     DEFAULT_CLAUDE_CONFIG_DIR_NAME, DEFAULT_CLAUDE_CONFIG_FILE_NAME,
     DEFAULT_CLAUDE_SETTINGS_FILE_NAME, PRODEX_CLAUDE_CONFIG_DIR_NAME,
@@ -33,5 +35,4 @@ pub use state_merge::{
     migrate_runtime_proxy_claude_profile_dir_to_target, prepare_runtime_proxy_claude_config_dir,
     prepare_runtime_proxy_claude_import_target, runtime_proxy_create_directory_symlink,
     runtime_proxy_create_symlink, runtime_proxy_merge_json_defaults, runtime_proxy_remove_path,
-    runtime_proxy_resolve_symlink_target,
 };

@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 export function normalizeGitPath(filePath) {
   return filePath.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -14,6 +16,17 @@ export function parsePositiveInteger(value, name) {
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
+}
+
+export async function readExistingRustFile(root, filePath) {
+  try {
+    return await readFile(path.join(root, filePath), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function run(command, args, options = {}) {

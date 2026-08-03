@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
-import path from "node:path";
-import { git, normalizeGitPath } from "./guard-common.mjs";
+import { git, normalizeGitPath, readExistingRustFile } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 const SCAN_ROOT = "crates/prodex-app/src";
@@ -53,17 +51,6 @@ async function rustFiles() {
   ].sort();
 }
 
-async function readExistingRustFile(filePath) {
-  try {
-    return await fs.readFile(path.join(repoRoot, filePath), "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
 function countSuperWildcardLines(contents) {
   let count = 0;
   for (const line of contents.split(/\r\n|\n|\r/)) {
@@ -78,7 +65,7 @@ async function scan() {
   let count = 0;
   const files = [];
   for (const filePath of await rustFiles()) {
-    const contents = await readExistingRustFile(filePath);
+    const contents = await readExistingRustFile(repoRoot, filePath);
     if (contents === null) {
       continue;
     }

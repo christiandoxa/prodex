@@ -19,6 +19,7 @@ use self::copy::*;
 pub use self::entries::{SharedCodexEntry, SharedCodexEntryKind};
 use self::history::*;
 pub use self::image_attachments::persist_codex_session_image_attachments;
+pub use self::migration::shared_codex_symlink_target_path;
 use self::migration::*;
 use self::ops::*;
 pub use self::ops::{create_codex_home_if_missing, ensure_managed_profiles_root};

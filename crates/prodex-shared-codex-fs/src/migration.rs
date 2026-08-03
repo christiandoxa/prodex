@@ -84,7 +84,7 @@ fn migrate_shared_codex_symlink_target(
     }
 }
 
-fn shared_codex_symlink_target_path(local_path: &Path) -> Result<PathBuf> {
+pub fn shared_codex_symlink_target_path(local_path: &Path) -> Result<PathBuf> {
     let target = fs::read_link(local_path)
         .with_context(|| format!("failed to read symlink {}", local_path.display()))?;
     Ok(if target.is_absolute() {

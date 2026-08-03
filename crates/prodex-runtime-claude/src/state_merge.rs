@@ -122,7 +122,7 @@ pub fn migrate_runtime_proxy_claude_profile_dir_to_target(
     };
 
     if metadata.file_type().is_symlink() {
-        let source_dir = runtime_proxy_resolve_symlink_target(profile_dir)?;
+        let source_dir = prodex_shared_codex_fs::shared_codex_symlink_target_path(profile_dir)?;
         if !source_dir.exists() || prodex_core::same_path(&source_dir, target_dir) {
             return Ok(());
         }
@@ -170,7 +170,8 @@ pub fn ensure_runtime_proxy_claude_profile_link(link_path: &Path, target_dir: &P
     match fs::symlink_metadata(link_path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
-                let existing_target = runtime_proxy_resolve_symlink_target(link_path)?;
+                let existing_target =
+                    prodex_shared_codex_fs::shared_codex_symlink_target_path(link_path)?;
                 if prodex_core::same_path(&existing_target, target_dir) {
                     return Ok(());
                 }
@@ -380,16 +381,6 @@ pub fn merge_runtime_proxy_claude_symlink(
         .with_context(|| format!("failed to read symlink {}", source.display()))?;
     runtime_proxy_create_symlink(&target, destination, true)?;
     Ok(RuntimeProxyClaudeMergeOutcome::Merged)
-}
-
-pub fn runtime_proxy_resolve_symlink_target(path: &Path) -> Result<PathBuf> {
-    let target = fs::read_link(path)
-        .with_context(|| format!("failed to read symlink {}", path.display()))?;
-    Ok(if target.is_absolute() {
-        target
-    } else {
-        path.parent().unwrap_or_else(|| Path::new(".")).join(target)
-    })
 }
 
 pub fn runtime_proxy_remove_path(path: &Path) -> Result<()> {
