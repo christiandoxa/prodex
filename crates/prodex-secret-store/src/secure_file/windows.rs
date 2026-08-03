@@ -30,11 +30,12 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
-    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO,
+    FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, GetFileInformationByHandle,
-    GetFinalPathNameByHandleW, READ_CONTROL, SetFileInformationByHandle, VOLUME_NAME_DOS,
-    WRITE_DAC, WRITE_OWNER,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileDispositionInfoEx,
+    GetFileInformationByHandle, GetFinalPathNameByHandleW, READ_CONTROL,
+    SetFileInformationByHandle, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE};
@@ -111,10 +112,10 @@ impl Directory {
     pub(super) fn ensure_private_child(&self, name: &OsStr) -> io::Result<Self> {
         self.require_path_identity()?;
         let path = self.path.join(name);
-        if let Err(error) = fs::create_dir(&path) {
-            if error.kind() != io::ErrorKind::AlreadyExists {
-                return Err(error);
-            }
+        if let Err(error) = fs::create_dir(&path)
+            && error.kind() != io::ErrorKind::AlreadyExists
+        {
+            return Err(error);
         }
         let file = open_directory(&path, true)?;
         validate_directory(&file)?;
@@ -404,6 +405,21 @@ fn rename_opened_file(parent: &File, name: &OsStr, file: &File) -> io::Result<()
 }
 
 fn delete_opened_file(file: &File) -> io::Result<()> {
+    let information = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    };
+    unsafe {
+        if SetFileInformationByHandle(
+            file.as_raw_handle().cast(),
+            FileDispositionInfoEx,
+            (&information as *const FILE_DISPOSITION_INFO_EX).cast(),
+            u32::try_from(size_of::<FILE_DISPOSITION_INFO_EX>()).unwrap_or(u32::MAX),
+        ) != 0
+        {
+            return Ok(());
+        }
+    }
+
     let information = FILE_DISPOSITION_INFO { DeleteFile: true };
     unsafe {
         if SetFileInformationByHandle(
