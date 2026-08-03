@@ -169,11 +169,16 @@ impl Directory {
         result
     }
 
-    pub(super) fn replace(&self, _from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
+    pub(super) fn replace(&self, from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
         self.require_path_identity()?;
         require_beneath(&self.file, file)?;
+        let source = open_regular_for_delete(&self.path.join(from))?;
+        require_beneath(&self.file, &source)?;
+        if file_identity(file)? != file_identity(&source)? {
+            return Err(permission_denied("secret file changed before replacement"));
+        }
         let to_path = self.path.join(to);
-        rename_opened_file(&self.file, to, file)?;
+        rename_opened_file(&self.file, to, &source)?;
         let replaced = open_regular(&to_path, false)?;
         require_beneath(&self.file, &replaced)?;
         if file_identity(file)? != file_identity(&replaced)? {
@@ -340,7 +345,7 @@ fn open_private_regular(path: &Path) -> io::Result<File> {
     options
         .read(true)
         .write(true)
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER | DELETE)
+        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
