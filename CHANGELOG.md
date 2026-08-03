@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.381.0 - 2026-08-03
+
+### Misc
+
+- Close audited reliability gaps (`710b4bc`)
+
 ## 0.380.0 - 2026-08-03
 
 ### Runtime
@@ -17,6 +23,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Validate Redis ledger indexes atomically (`a085ce4`)
 - Preserve ACP terminal states (`e0298b5`)
 
 ## 0.379.0 - 2026-08-03
@@ -116,10 +123,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden cross-platform tooling and CI (`f95887c`)
-
-## 0.369.0 - 2026-07-29
-
-### Misc
-
-- Clean partial Codex home copies (`9a099a1`)
-- Skip Codex managed packages directory when copying CODEX_HOME (`953ad03`)
