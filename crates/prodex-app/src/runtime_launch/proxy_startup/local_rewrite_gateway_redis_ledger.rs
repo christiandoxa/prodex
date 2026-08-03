@@ -37,6 +37,14 @@ const RUNTIME_GATEWAY_REDIS_LEDGER_ID_INDEX_BACKFILL_SCRIPT: &str = r#"
         redis.call('SET', KEYS[3], '1')
         return list_count
         "#;
+const RUNTIME_GATEWAY_REDIS_LEDGER_ID_INDEX_VALIDATE_SCRIPT: &str = r#"
+        local list_count = redis.call('LLEN', KEYS[1])
+        local set_count = redis.call('SCARD', KEYS[2])
+        if list_count ~= set_count then
+            return redis.error_reply('gateway ledger list and ID index counts differ')
+        end
+        return list_count
+        "#;
 const RUNTIME_GATEWAY_REDIS_LEGACY_LEDGER_FINALIZE_SCRIPT: &str = r#"
         local actual_type = redis.call('TYPE', KEYS[1]).ok
         if actual_type ~= 'none' and actual_type ~= 'list' then
@@ -288,11 +296,12 @@ fn runtime_gateway_redis_validate_ledger_id_index_counts(
     conn: &mut redis::Connection,
     ledger_key: &str,
 ) -> Result<()> {
-    let list_count: usize = conn.llen(runtime_gateway_redis_ledger_index_key(ledger_key))?;
-    let set_count: usize = conn.scard(runtime_gateway_redis_ledger_id_index_key(ledger_key))?;
-    if list_count != set_count {
-        anyhow::bail!("gateway redis ledger list and ID index counts differ");
-    }
+    let _: usize = redis::cmd("EVAL")
+        .arg(RUNTIME_GATEWAY_REDIS_LEDGER_ID_INDEX_VALIDATE_SCRIPT)
+        .arg(2)
+        .arg(runtime_gateway_redis_ledger_index_key(ledger_key))
+        .arg(runtime_gateway_redis_ledger_id_index_key(ledger_key))
+        .query(conn)?;
     Ok(())
 }
 
