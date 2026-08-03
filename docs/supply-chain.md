@@ -97,13 +97,18 @@ list does not include Rust, and its analysis is editor-triggered rather than a
 deterministic headless CI interface.
 
 The `kics` job scans the checked-in Dockerfile, Compose file, Kubernetes
-manifests, and GitHub workflows through a read-only repository mount. Any high
-or critical infrastructure finding fails CI. KICS secret heuristics are disabled
-because the separate pinned Gitleaks job owns secret detection; other KICS
-queries remain enabled. The scanner container has no network, capabilities, or
-writable root filesystem. The only inline suppression covers a read-only
-projected Kubernetes Secret volume that KICS otherwise mistakes for a writable
-host mount.
+manifests, and GitHub workflows through a read-only repository mount. Any
+finding at critical, high, medium, low, or info severity fails CI. KICS secret
+heuristics are disabled because the separate pinned Gitleaks job owns secret
+detection; other KICS queries remain enabled. The scanner container has no
+network, capabilities, or writable root filesystem, and the IaC sources contain
+no inline KICS suppressions or broad exclusions. The pinned KICS engine has two
+reviewed INFO-only policy advisories that cannot both be satisfied with the
+manifest's explicit `prodex` namespace and required three-replica HPA floor, so
+CI excludes only their exact query IDs:
+
+- `e84eaf4d-2f45-47b2-abe8-e581b06deb66` (`Ensure Administrative Boundaries Between Resources`)
+- `5744cbb8-5946-4b75-a196-ade44449525b` (`HPA Targeted Deployments With Configured Replica Count`)
 
 The parallel `supply-chain` job runs `cargo audit`, all configured `cargo deny`
 checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
@@ -136,7 +141,9 @@ docker run --rm \
   --volume "${PWD}/target/kics:/results" \
   docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602 \
   scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif \
-  --disable-secrets --disable-full-descriptions --fail-on critical,high \
+  --disable-secrets --disable-full-descriptions \
+  --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b \
+  --fail-on critical,high,medium,low,info \
   --minimal-ui --no-progress
 cargo deny check advisories bans licenses sources
 cargo machete --with-metadata

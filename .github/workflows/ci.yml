@@ -466,7 +466,7 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-bin: false
-          save-if: false
+          save-if: ${{ matrix.save_cache }}
 
       - name: Run Windows prodex-app partition ${{ matrix.label }}
         shell: bash
@@ -915,7 +915,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Run KICS high and critical gate
+      - name: Run KICS zero-finding gate
         shell: bash
         run: |
           set -euo pipefail
@@ -937,7 +937,8 @@ jobs:
             --report-formats json,sarif \
             --disable-secrets \
             --disable-full-descriptions \
-            --fail-on critical,high \
+            --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,5744cbb8-5946-4b75-a196-ade44449525b \
+            --fail-on critical,high,medium,low,info \
             --minimal-ui \
             --no-progress
 

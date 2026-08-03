@@ -89,5 +89,5 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
   assert.match(appBlock, /PRODEX_APP_FILTERS/);
   assert.match(appBlock, /PRODEX_APP_SKIP_FILTERS/);
   assert.match(appBlock, /--test-threads=1/);
-  assert.match(appBlock, /save-if: false/);
+  assert.match(appBlock, /save-if: \$\{\{ matrix\.save_cache \}\}/);
 });

@@ -59,6 +59,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(workflow, /PRODEX_APP_SKIP_FILTERS/);
   assert.match(workflow, /PRODEX_APP_FILTERS/);
   assert.match(workflow, /--test-threads=1/);
+  assert.match(workflow, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(workflow, /prodex-app shard matched no tests/);
   assert.match(fullWorkflow, /full_test_shards:/);
   assert.match(fullWorkflow, /--full-test-matrix/);
