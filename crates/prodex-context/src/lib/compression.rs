@@ -564,7 +564,10 @@ mod tests {
             fs::write(&changed_path, changed).expect("change context before replace");
         })
         .expect_err("changed context must reject replacement");
-        assert!(format!("{error:#}").contains("changed during compression"));
+        assert!(
+            format!("{error:#}").contains("changed during compression"),
+            "{error:#}"
+        );
         assert!(!root.join("AGENTS.original.md").exists());
         assert_eq!(
             fs::read_to_string(&path).expect("read changed context"),

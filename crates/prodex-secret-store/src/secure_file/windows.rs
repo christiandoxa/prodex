@@ -7,8 +7,13 @@ use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
 use std::path::{Component, Path, PathBuf};
+use windows_sys::Wdk::Storage::FileSystem::{
+    FILE_RENAME_INFORMATION, FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS,
+    FileRenameInformation, FileRenameInformationEx, NtSetInformationFile,
+};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_SUCCESS, GENERIC_ALL, GENERIC_READ, GENERIC_WRITE, HANDLE, LocalFree,
+    RtlNtStatusToDosError,
 };
 use windows_sys::Win32::Security::Authorization::{
     GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo,
@@ -26,11 +31,12 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
     FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_RENAME_INFO,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo,
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, READ_CONTROL,
-    SetFileInformationByHandle, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, READ_CONTROL, SetFileInformationByHandle, VOLUME_NAME_DOS,
+    WRITE_DAC, WRITE_OWNER,
 };
+use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -353,23 +359,40 @@ fn rename_opened_file(parent: &File, name: &OsStr, file: &File) -> io::Result<()
     if name.is_empty() || name.contains(&0) {
         return Err(invalid_input("secret path contains an invalid name"));
     }
-    let size = size_of::<FILE_RENAME_INFO>() + (name.len() - 1) * size_of::<u16>();
+    let size =
+        std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName) + name.len() * size_of::<u16>();
     let mut storage = vec![0u64; size.div_ceil(size_of::<u64>())];
-    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+    let size = u32::try_from(size).map_err(|_| invalid_input("secret path is too long"))?;
     unsafe {
-        (*info).Anonymous.ReplaceIfExists = true;
+        (*info).Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
         (*info).RootDirectory = parent.as_raw_handle().cast();
         (*info).FileNameLength = u32::try_from(name.len() * size_of::<u16>())
             .map_err(|_| invalid_input("secret path is too long"))?;
         std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
-        if SetFileInformationByHandle(
+        let mut io_status = IO_STATUS_BLOCK::default();
+        if NtSetInformationFile(
             file.as_raw_handle().cast(),
-            FileRenameInfo,
+            &mut io_status,
             info.cast(),
-            u32::try_from(size).map_err(|_| invalid_input("secret path is too long"))?,
-        ) == 0
+            size,
+            FileRenameInformationEx,
+        ) >= 0
         {
-            return Err(io::Error::last_os_error());
+            return Ok(());
+        }
+        (*info).Anonymous.ReplaceIfExists = true;
+        let status = NtSetInformationFile(
+            file.as_raw_handle().cast(),
+            &mut IO_STATUS_BLOCK::default(),
+            info.cast(),
+            size,
+            FileRenameInformation,
+        );
+        if status < 0 {
+            return Err(io::Error::from_raw_os_error(
+                RtlNtStatusToDosError(status) as i32
+            ));
         }
     }
     Ok(())
@@ -772,6 +795,33 @@ mod tests {
     use windows_sys::Win32::Security::{
         CreateWellKnownSid, SECURITY_MAX_SID_SIZE, WinInteractiveSid,
     };
+
+    #[test]
+    fn handle_relative_replace_works() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-secret-windows-rename-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.tmp");
+        let target = root.join("target.json");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&target, b"old").unwrap();
+        let parent = open_directory(&root, false).unwrap();
+        let file = OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&source)
+            .unwrap();
+
+        rename_opened_file(&parent, OsStr::new("target.json"), &file).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        drop(file);
+        drop(parent);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn private_acl_round_trip_is_handle_verified() {
