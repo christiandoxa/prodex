@@ -56,9 +56,9 @@ pub struct PresidioRedactArgs {
     /// If omitted, defaults to the config file or "en".
     #[arg(long, value_name = "LANGS", value_delimiter = ',')]
     pub languages: Vec<String>,
-    /// Language detection mode: fixed (default), auto, multi.
-    #[arg(long, value_enum, value_name = "MODE", default_value_t = PresidioLanguageMode::Fixed)]
-    pub language_mode: PresidioLanguageMode,
+    /// Override the configured language detection mode: fixed, auto, or multi.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub language_mode: Option<PresidioLanguageMode>,
     /// Override the Presidio Analyzer service URL.
     #[arg(long, value_name = "URL")]
     pub analyzer_url: Option<String>,
@@ -181,7 +181,7 @@ mod tests {
                 text: Some(sentinel.to_string()),
                 language: None,
                 languages: vec!["en".to_string()],
-                language_mode: PresidioLanguageMode::Fixed,
+                language_mode: Some(PresidioLanguageMode::Fixed),
                 analyzer_url: None,
                 anonymizer_url: Some(format!("https://example.test?token={sentinel}")),
                 json: false,

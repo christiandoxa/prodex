@@ -218,10 +218,11 @@ pub(super) fn quota_human_tui_compact_label(line: &str) -> Option<&'static str> 
 pub(super) fn quota_watch_profile_fields(
     updated: &str,
     snapshot: &ProviderQuotaSnapshot,
+    detail: bool,
 ) -> Vec<(String, String)> {
     match snapshot {
         ProviderQuotaSnapshot::OpenAi(usage) => {
-            vec![
+            let mut fields = vec![
                 (
                     "Account".to_string(),
                     quota_watch_optional(usage.email.as_deref()).to_string(),
@@ -232,14 +233,17 @@ pub(super) fn quota_watch_profile_fields(
                 ),
                 ("Status".to_string(), format_openai_quota_status(usage)),
                 ("Main".to_string(), format_main_windows(usage)),
-                (
+            ];
+            if detail {
+                fields.push((
                     "Reset".to_string(),
                     quota_watch_openai_reset_summary(usage)
                         .trim_start_matches("resets: ")
                         .to_string(),
-                ),
-                ("Last Updated".to_string(), updated.to_string()),
-            ]
+                ));
+            }
+            fields.push(("Last Updated".to_string(), updated.to_string()));
+            fields
         }
         ProviderQuotaSnapshot::Copilot(info) => vec![
             (

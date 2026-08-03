@@ -1,10 +1,14 @@
 use super::*;
-use std::fs::{File, Metadata, OpenOptions};
+use std::ffi::{OsStr, OsString};
+use std::fs::{File, Metadata};
 use std::io::{self, Read as _, Write as _};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const CONTEXT_COMPRESS_MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 static CONTEXT_COMPRESS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+mod context_parent;
+use context_parent::ContextParent;
 
 pub fn compress_context_path(path: &Path, dry_run: bool) -> Result<ContextCompressReport> {
     let mut paths = Vec::new();
@@ -40,7 +44,7 @@ fn compress_context_file_before_replace(
         });
     }
 
-    let (original, original_metadata) = read_context_file_no_follow(path)?;
+    let (original, original_metadata, parent, source_name) = read_context_file_no_follow(path)?;
     let compressed = compress_context_text(&original);
     let original_bytes = original.len() as u64;
     let compressed_bytes = compressed.len() as u64;
@@ -52,9 +56,12 @@ fn compress_context_file_before_replace(
         compressed.chars().count(),
         compressed.split_whitespace().count(),
     );
-    let backup_path = context_backup_path(path);
+    let backup_path = context_backup_path(path, &parent)?;
+    let backup_name = backup_path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "context backup name is empty")
+    })?;
 
-    if backup_path.exists() {
+    if parent.entry_exists(backup_name)? {
         return Ok(ContextCompressEntry {
             path: path.to_path_buf(),
             backup_path: Some(backup_path),
@@ -80,7 +87,8 @@ fn compress_context_file_before_replace(
 
     if !dry_run {
         let backup_metadata = match write_context_backup_create_new(
-            &backup_path,
+            &parent,
+            backup_name,
             original.as_bytes(),
             original_metadata.permissions(),
         ) {
@@ -101,13 +109,14 @@ fn compress_context_file_before_replace(
                     .with_context(|| format!("failed to write backup {}", backup_path.display()));
             }
         };
-        before_replace();
-        if let Err(replace_error) =
-            replace_context_file_if_unchanged(path, compressed.as_bytes(), &original_metadata)
-        {
-            if let Err(cleanup_error) =
-                remove_context_backup_if_owned(&backup_path, &backup_metadata)
-            {
+        if let Err(replace_error) = replace_context_file_if_unchanged(
+            &parent,
+            &source_name,
+            compressed.as_bytes(),
+            &original_metadata,
+            before_replace,
+        ) {
+            if let Err(cleanup_error) = parent.remove_if_owned(backup_name, &backup_metadata) {
                 return Err(cleanup_error).with_context(|| {
                     format!(
                         "failed to clean backup {} after replacement failed: {replace_error}",
@@ -118,7 +127,8 @@ fn compress_context_file_before_replace(
             return Err(replace_error)
                 .with_context(|| format!("failed to write compressed context {}", path.display()));
         }
-        sync_context_parent(path)
+        parent
+            .sync()
             .with_context(|| format!("failed to sync compressed context {}", path.display()))?;
     }
 
@@ -312,33 +322,73 @@ pub(crate) fn is_context_backup(path: &Path) -> bool {
         .is_some_and(|name| name.ends_with(".original.md"))
 }
 
-fn context_backup_path(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+fn context_backup_path(path: &Path, parent: &ContextParent) -> io::Result<PathBuf> {
+    let path_parent = path.parent().unwrap_or_else(|| Path::new(""));
     let stem = path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("context");
-    parent.join(format!("{stem}.original.md"))
+    let legacy = path_parent.join(format!("{stem}.original.md"));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("context");
+    let qualified = path_parent.join(format!("{file_name}.original.md"));
+
+    let qualified_name = qualified.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "qualified context backup name is empty",
+        )
+    })?;
+    if parent.entry_exists(qualified_name)?
+        || (path.extension().and_then(|extension| extension.to_str()) != Some("md")
+            && has_same_stem_context_file(path, path_parent))
+    {
+        Ok(qualified)
+    } else {
+        Ok(legacy)
+    }
 }
 
-fn read_context_file_no_follow(path: &Path) -> Result<(String, Metadata)> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+fn has_same_stem_context_file(path: &Path, parent: &Path) -> bool {
+    let Some(stem) = path.file_stem() else {
+        return false;
+    };
+    let directory = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+
+    // ponytail: one directory scan per source keeps legacy backup names compatible; precompute stems if this scales up.
+    fs::read_dir(directory)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .any(|candidate| {
+            candidate != path
+                && candidate
+                    .file_stem()
+                    .is_some_and(|candidate_stem| same_context_stem(candidate_stem, stem))
+                && is_compressible_context_file(&candidate)
+        })
+}
+
+fn same_context_stem(left: &OsStr, right: &OsStr) -> bool {
+    match (left.to_str(), right.to_str()) {
+        (Some(left), Some(right)) => left.to_lowercase() == right.to_lowercase(),
+        _ => left == right,
     }
-    #[cfg(not(unix))]
-    if fs::symlink_metadata(path)?.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "context file must not be a symlink",
-        ))
-        .with_context(|| format!("failed to read context file {}", path.display()));
-    }
-    let file = options
-        .open(path)
+}
+
+fn read_context_file_no_follow(path: &Path) -> Result<(String, Metadata, ContextParent, OsString)> {
+    let (parent, name) = ContextParent::open_for(path)
+        .with_context(|| format!("failed to open context parent {}", path.display()))?;
+    let file = parent
+        .open_existing(&name)
         .with_context(|| format!("failed to open context file {}", path.display()))?;
     let metadata = file
         .metadata()
@@ -361,25 +411,19 @@ fn read_context_file_no_follow(path: &Path) -> Result<(String, Metadata)> {
         ))
         .with_context(|| format!("failed to read context file {}", path.display()));
     }
-    Ok((original, metadata))
+    Ok((original, metadata, parent, name))
 }
 
 fn write_context_backup_create_new(
-    path: &Path,
+    parent: &ContextParent,
+    name: &OsStr,
     bytes: &[u8],
     permissions: fs::Permissions,
 ) -> io::Result<Metadata> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        options.mode(permissions.mode());
-    }
-    let mut file = options.open(path)?;
+    let mut file = parent.create_new(name, &permissions)?;
     if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
         drop(file);
-        let _ = fs::remove_file(path);
+        let _ = parent.remove_entry(name);
         return Err(error);
     }
     if let Err(error) = file
@@ -387,53 +431,41 @@ fn write_context_backup_create_new(
         .and_then(|()| file.sync_all())
     {
         drop(file);
-        let _ = fs::remove_file(path);
+        let _ = parent.remove_entry(name);
         return Err(error);
     }
     let metadata = file.metadata()?;
-    if let Err(error) = sync_context_parent(path) {
+    if let Err(error) = parent.sync() {
         drop(file);
-        let _ = fs::remove_file(path);
-        let _ = sync_context_parent(path);
+        let _ = parent.remove_entry(name);
+        let _ = parent.sync();
         return Err(error);
     }
     Ok(metadata)
 }
 
-fn remove_context_backup_if_owned(path: &Path, expected: &Metadata) -> io::Result<bool> {
-    let current = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    if current.file_type().is_symlink() || !same_context_file_version(expected, &current) {
-        return Ok(false);
-    }
-    fs::remove_file(path)?;
-    sync_context_parent(path)?;
-    Ok(true)
-}
-
 fn replace_context_file_if_unchanged(
-    path: &Path,
+    parent: &ContextParent,
+    source_name: &OsStr,
     bytes: &[u8],
     original_metadata: &Metadata,
+    before_commit: impl FnOnce(),
 ) -> io::Result<()> {
-    let current_metadata = fs::symlink_metadata(path)?;
+    let current_metadata = parent.open_existing(source_name)?.metadata()?;
     if !same_context_file_version(original_metadata, &current_metadata) {
         return Err(io::Error::new(
             io::ErrorKind::WouldBlock,
             "context file changed during compression",
         ));
     }
-    let (temp_path, mut temp_file) =
-        create_context_temp_file(path, original_metadata.permissions())?;
+    let (temp_name, mut temp_file) =
+        create_context_temp_file(parent, source_name, original_metadata.permissions())?;
     if let Err(error) = temp_file
         .write_all(bytes)
         .and_then(|()| temp_file.sync_all())
     {
         drop(temp_file);
-        let _ = fs::remove_file(&temp_path);
+        let _ = parent.remove_entry(&temp_name);
         return Err(error);
     }
     if let Err(error) = temp_file
@@ -441,49 +473,41 @@ fn replace_context_file_if_unchanged(
         .and_then(|()| temp_file.sync_all())
     {
         drop(temp_file);
-        let _ = fs::remove_file(&temp_path);
+        let _ = parent.remove_entry(&temp_name);
         return Err(error);
     }
-    drop(temp_file);
-    let current_metadata = fs::symlink_metadata(path)?;
+    let current_metadata = parent.open_existing(source_name)?.metadata()?;
     if !same_context_file_version(original_metadata, &current_metadata) {
-        let _ = fs::remove_file(&temp_path);
+        let _ = parent.remove_entry(&temp_name);
         return Err(io::Error::new(
             io::ErrorKind::WouldBlock,
             "context file changed during compression",
         ));
     }
-    if let Err(error) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
+    before_commit();
+    if let Err(error) = parent.replace(source_name, &temp_name, original_metadata, &temp_file) {
+        let _ = parent.remove_entry(&temp_name);
         return Err(error);
     }
+    drop(temp_file);
     Ok(())
 }
 
 fn create_context_temp_file(
-    path: &Path,
-    _permissions: fs::Permissions,
-) -> io::Result<(PathBuf, File)> {
+    parent: &ContextParent,
+    source_name: &OsStr,
+    permissions: fs::Permissions,
+) -> io::Result<(OsString, File)> {
     for _ in 0..16 {
         let counter = CONTEXT_COMPRESS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let file_name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("context.md");
-        let temp_path = path.with_file_name(format!(
+        let file_name = source_name.to_string_lossy();
+        let temp_name = OsString::from(format!(
             ".{file_name}.{}.{}.tmp",
             std::process::id(),
             counter
         ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            options.mode(_permissions.mode());
-        }
-        match options.open(&temp_path) {
-            Ok(file) => return Ok((temp_path, file)),
+        match parent.create_new(&temp_name, &permissions) {
+            Ok(file) => return Ok((temp_name, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
         }
@@ -514,16 +538,6 @@ fn same_context_file_version(before: &Metadata, after: &Metadata) -> bool {
         && before.modified().ok() == after.modified().ok()
 }
 
-#[cfg(unix)]
-fn sync_context_parent(path: &Path) -> io::Result<()> {
-    File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_context_parent(_path: &Path) -> io::Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,7 +565,7 @@ mod tests {
         })
         .expect_err("changed context must reject replacement");
         assert!(format!("{error:#}").contains("changed during compression"));
-        assert!(!context_backup_path(&path).exists());
+        assert!(!root.join("AGENTS.original.md").exists());
         assert_eq!(
             fs::read_to_string(&path).expect("read changed context"),
             changed
@@ -560,9 +574,42 @@ mod tests {
         let retry = compress_context_file(&path, false).expect("retry compression");
         assert_eq!(retry.status, "compressed");
         assert_eq!(
-            fs::read_to_string(context_backup_path(&path)).expect("read retry backup"),
+            fs::read_to_string(root.join("AGENTS.original.md")).expect("read retry backup"),
             changed
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn replacement_race_does_not_overwrite_replaced_source() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-context-compress-race-{}-{}",
+            std::process::id(),
+            CONTEXT_COMPRESS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create context root");
+        let path = root.join("AGENTS.md");
+        let writer_path = root.join("writer.md");
+        fs::write(
+            &path,
+            "This is actually a very verbose paragraph in order to make sure to reduce tokens.\n",
+        )
+        .expect("write original context");
+        let writer = "This is the concurrent writer's content and it must survive replacement.\n";
+        fs::write(&writer_path, writer).expect("write concurrent context");
+
+        let error = compress_context_file_before_replace(&path, false, || {
+            fs::rename(&writer_path, &path).expect("replace source during race window");
+        })
+        .expect_err("replacement race must reject compression");
+        assert!(format!("{error:#}").contains("changed during compression"));
+        assert_eq!(
+            fs::read_to_string(&path).expect("read concurrent context"),
+            writer
+        );
+        assert!(!root.join("AGENTS.original.md").exists());
         let _ = fs::remove_dir_all(root);
     }
 }

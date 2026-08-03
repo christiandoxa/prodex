@@ -115,14 +115,16 @@ fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
             &profile_name,
             &profile.provider,
             &codex_home,
+            args.detail,
             args.base_url.as_deref(),
         );
     }
 
     let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
     if let Some(mut terminal) = crate::try_inline_stdout_terminal(12) {
-        terminal
-            .draw(|frame| render_profile_quota_once_tui(frame, &profile_name, quota.clone()))?;
+        terminal.draw(|frame| {
+            render_profile_quota_once_tui(frame, &profile_name, quota.clone(), args.detail)
+        })?;
         let _ = terminal.show_cursor();
     } else {
         print_stdout_text(

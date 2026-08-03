@@ -5,8 +5,10 @@ use prodex_storage_postgres::{
     ENTERPRISE_GOVERNANCE_MIGRATION, GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION,
     GOVERNANCE_LIFECYCLE_MIGRATION, GOVERNANCE_REVOCATION_MIGRATION,
     GOVERNANCE_SESSION_INDEX_MIGRATION, GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
-    INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS, SIEM_OUTBOX_LEASING_MIGRATION,
-    TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION, postgres_governance_pointer_statements,
+    INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS, PostgresMigrationPhase,
+    PostgresMigrationVersion, REQUIRED_POSTGRES_SCHEMA_VERSION, SIEM_OUTBOX_LEASING_MIGRATION,
+    TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION, VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION,
+    postgres_governance_pointer_statements,
 };
 use std::time::Duration;
 
@@ -15,6 +17,146 @@ fn migration_creates_only_missing_rls_policies() {
     let sql = INITIAL_TENANT_ACCOUNTING_MIGRATION.sql;
     assert!(sql.contains("FROM pg_policies"));
     assert!(sql.contains("policyname = tenant_table || '_tenant_isolation'"));
+}
+
+#[test]
+fn postgres_validation_migration_is_append_only_and_complete() {
+    let migration = VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION;
+    assert_eq!(migration.version, PostgresMigrationVersion(18));
+    assert_eq!(migration.phase, PostgresMigrationPhase::Validate);
+    assert_eq!(migration.version, REQUIRED_POSTGRES_SCHEMA_VERSION);
+    assert_eq!(POSTGRES_MIGRATIONS.last(), Some(&migration));
+    assert_eq!(
+        POSTGRES_MIGRATIONS
+            .iter()
+            .map(|migration| migration.version.0)
+            .collect::<Vec<_>>(),
+        (1_u32..=18).collect::<Vec<_>>()
+    );
+    assert!(!migration.sql.contains("NOT VALID"));
+    for (table, constraint) in [
+        (
+            "prodex_policy_pointers",
+            "prodex_policy_pointers_active_revision_fk",
+        ),
+        (
+            "prodex_policy_pointers",
+            "prodex_policy_pointers_lkg_revision_fk",
+        ),
+        (
+            "prodex_policy_activation_history",
+            "prodex_policy_activation_revision_fk",
+        ),
+        (
+            "prodex_policy_activation_history",
+            "prodex_policy_activation_previous_revision_fk",
+        ),
+        (
+            "prodex_provider_descriptors",
+            "prodex_provider_descriptors_pricing_revision_fk",
+        ),
+        (
+            "prodex_governance_sessions",
+            "prodex_governance_sessions_policy_revision_fk",
+        ),
+        (
+            "prodex_governance_sessions",
+            "prodex_governance_sessions_registry_revision_fk",
+        ),
+        (
+            "prodex_session_revocations",
+            "prodex_session_revocations_session_fk",
+        ),
+        ("prodex_siem_outbox", "prodex_siem_outbox_audit_event_fk"),
+        (
+            "prodex_siem_dead_letters",
+            "prodex_siem_dead_letters_audit_event_fk",
+        ),
+        ("prodex_policy_revisions", "prodex_policy_revisions_bounded"),
+        ("prodex_policy_pointers", "prodex_policy_pointers_bounded"),
+        (
+            "prodex_policy_activation_history",
+            "prodex_policy_activation_history_bounded",
+        ),
+        ("prodex_approvals", "prodex_approvals_bounded"),
+        (
+            "prodex_classification_rule_revisions",
+            "prodex_classification_rule_revisions_bounded",
+        ),
+        (
+            "prodex_provider_registry_revisions",
+            "prodex_provider_registry_revisions_bounded",
+        ),
+        (
+            "prodex_provider_descriptors",
+            "prodex_provider_descriptors_bounded",
+        ),
+        (
+            "prodex_routing_score_revisions",
+            "prodex_routing_score_revisions_bounded",
+        ),
+        (
+            "prodex_governance_sessions",
+            "prodex_governance_sessions_bounded",
+        ),
+        (
+            "prodex_session_revocations",
+            "prodex_session_revocations_bounded",
+        ),
+        ("prodex_siem_outbox", "prodex_siem_outbox_bounded"),
+        (
+            "prodex_siem_dead_letters",
+            "prodex_siem_dead_letters_bounded",
+        ),
+        ("prodex_siem_outbox", "prodex_siem_outbox_claim_pair"),
+        (
+            "prodex_governance_sessions",
+            "prodex_governance_sessions_provider_descriptor_revision_check",
+        ),
+        (
+            "prodex_approvals",
+            "prodex_approvals_termination_reason_bounded",
+        ),
+        (
+            "prodex_tenants",
+            "prodex_tenants_session_revocation_epoch_nonnegative",
+        ),
+        (
+            "prodex_governance_revision_artifacts",
+            "prodex_governance_artifact_signature_pair",
+        ),
+        (
+            "prodex_policy_revisions",
+            "prodex_policy_revisions_lifecycle_state_check",
+        ),
+        (
+            "prodex_policy_activation_history",
+            "prodex_policy_activation_history_action_check",
+        ),
+        (
+            "prodex_governance_activation_history",
+            "prodex_governance_activation_history_action_check",
+        ),
+        (
+            "prodex_governance_mutation_idempotency",
+            "prodex_governance_mutation_idempotency_action_check",
+        ),
+        (
+            "prodex_governance_activation_history",
+            "prodex_governance_activation_history_result_ids_bounded",
+        ),
+        (
+            "prodex_governance_mutation_idempotency",
+            "prodex_governance_mutation_idempotency_result_ids_bounded",
+        ),
+    ] {
+        assert!(
+            migration.sql.contains(&format!(
+                "ALTER TABLE {table}\n    VALIDATE CONSTRAINT {constraint};"
+            )),
+            "missing validation for {table}.{constraint}"
+        );
+    }
 }
 
 #[test]
@@ -209,6 +351,16 @@ fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
             .batch_execute(migration.sql)
             .expect("migration should apply idempotently");
     }
+    let unvalidated_constraint_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM pg_constraint
+             WHERE connamespace = current_schema()::regnamespace
+               AND NOT convalidated",
+            &[],
+        )
+        .expect("constraint validation state should load")
+        .get(0);
+    assert_eq!(unvalidated_constraint_count, 0);
     let policy_count: i64 = client
         .query_one(
             "SELECT COUNT(*) FROM pg_policies

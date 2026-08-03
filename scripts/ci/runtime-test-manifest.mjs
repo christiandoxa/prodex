@@ -25,6 +25,8 @@ const CONTINUATION_TAGS = Object.freeze([
   TAGS.serial,
   TAGS.quarantine,
 ]);
+const ADMISSION_PREFIX =
+  "main_internal_tests::runtime_proxy_selection_and_pressure::admission::";
 
 export const RUNTIME_TEST_TAGS = TAGS;
 
@@ -126,13 +128,69 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "admission",
-    label: "admission and request paths",
+    suite: "admission-core",
+    label: "admission core",
     filters: [
       {
-        id: "admission",
-        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::",
-        label: "admission",
+        id: "admission-compact",
+        filter: `${ADMISSION_PREFIX}compact::`,
+        label: "admission-compact",
+      },
+      {
+        id: "admission-continuation-store",
+        filter: `${ADMISSION_PREFIX}continuation_store::`,
+        label: "admission-continuation-store",
+      },
+      {
+        id: "admission-doctor-summary",
+        filter: `${ADMISSION_PREFIX}doctor_summary::`,
+        label: "admission-doctor-summary",
+      },
+      {
+        id: "admission-pressure-budget",
+        filter: `${ADMISSION_PREFIX}pressure_budget::`,
+        label: "admission-pressure-budget",
+      },
+      {
+        id: "admission-turn-state",
+        filter: `${ADMISSION_PREFIX}turn_state::`,
+        label: "admission-turn-state",
+      },
+    ],
+  },
+  {
+    suite: "admission-affinity",
+    label: "admission guards and affinity",
+    filters: [
+      {
+        id: "admission-cli-mount",
+        filter: `${ADMISSION_PREFIX}cli_mount::`,
+        label: "admission-cli-mount",
+      },
+      {
+        id: "admission-guards",
+        filter: `${ADMISSION_PREFIX}guards::`,
+        label: "admission-guards",
+      },
+      {
+        id: "admission-pre-send",
+        filter: `${ADMISSION_PREFIX}pre_send::`,
+        label: "admission-pre-send",
+      },
+      {
+        id: "admission-previous-response",
+        filter: `${ADMISSION_PREFIX}previous_response::`,
+        label: "admission-previous-response",
+      },
+      {
+        id: "admission-response-affinity",
+        filter: `${ADMISSION_PREFIX}response_affinity::`,
+        label: "admission-response-affinity",
+      },
+      {
+        id: "admission-sse-tap",
+        filter: `${ADMISSION_PREFIX}sse_tap::`,
+        label: "admission-sse-tap",
       },
     ],
   },

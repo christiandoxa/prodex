@@ -203,7 +203,12 @@
         let frame = build_profile_quota_watch_tui_frame(
             "main",
             "2026-06-26 10:00:00 UTC",
-            Ok(test_usage("main@example.com")),
+            Ok(ProviderQuotaSnapshot::OpenAi(test_openai_usage_with_windows(
+                20,
+                10,
+                1_700_001_800,
+            ))),
+            false,
         );
 
         assert_eq!(frame.title, "Prodex Quota main");
@@ -213,6 +218,10 @@
             .overview_fields
             .iter()
             .any(|(label, value)| label == "Account" && value == "main@example.com"));
+        assert!(!frame
+            .overview_fields
+            .iter()
+            .any(|(label, _)| label == "Reset"));
         assert!(frame
             .overview_fields
             .iter()
@@ -222,11 +231,33 @@
     }
 
     #[test]
+    fn profile_quota_watch_tui_detail_includes_reset_windows() {
+        let frame = build_profile_quota_watch_tui_frame(
+            "main",
+            "2026-06-26 10:00:00 UTC",
+            Ok(ProviderQuotaSnapshot::OpenAi(test_openai_usage_with_windows(
+                20,
+                10,
+                1_700_001_800,
+            ))),
+            true,
+        );
+
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, value)| label == "Reset"
+                && value.contains("5h")
+                && value.contains("weekly")));
+    }
+
+    #[test]
     fn profile_quota_watch_tui_error_uses_native_fields() {
         let frame = build_profile_quota_watch_tui_frame(
             "main",
             "2026-06-26 10:00:00 UTC",
             Err("quota failed".to_string()),
+            false,
         );
 
         assert_eq!(frame.body, "Quota main");
@@ -237,4 +268,3 @@
             .any(|(label, value)| label == "Status" && value == "quota failed"));
         assert!(!frame.body.contains("[ Quota main ]"));
     }
-

@@ -9,7 +9,7 @@ use super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_eve
 use super::*;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
-    read_blocking_response_body_with_limit,
+    build_runtime_proxy_text_response_parts, read_blocking_response_body_with_limit,
 };
 use anyhow::{Context, Result, bail};
 #[cfg(test)]
@@ -36,7 +36,7 @@ pub(super) fn runtime_gemini_compact_response(
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeGeminiProviderAuth,
 ) -> tiny_http::ResponseBox {
-    let semantic = gemini_provider_core_semantic_compact_request_body(&captured.body)
+    let upstream = gemini_provider_core_semantic_compact_request_body(&captured.body)
         .map_err(anyhow::Error::msg)
         .and_then(|body| {
             let semantic_request = RuntimeProxyRequest {
@@ -45,7 +45,7 @@ pub(super) fn runtime_gemini_compact_response(
                 headers: captured.headers.clone(),
                 body: body.clone(),
             };
-            let result = send_runtime_gemini_upstream_request(
+            send_runtime_gemini_upstream_request(
                 request_id,
                 &semantic_request,
                 shared,
@@ -53,7 +53,11 @@ pub(super) fn runtime_gemini_compact_response(
                 auth,
                 ProviderEndpoint::Responses,
                 ProviderStreamMode::Unary,
-            )?;
+            )
+        });
+
+    let (parts, provider_completed) = match upstream {
+        Ok(result) => {
             let RuntimeLocalRewriteUpstreamResult {
                 response,
                 gemini_context,
@@ -63,53 +67,60 @@ pub(super) fn runtime_gemini_compact_response(
                 .as_ref()
                 .map(|context| context.profile_name.as_str())
                 .unwrap_or(RUNTIME_LOCAL_REWRITE_PROFILE);
-            let parts = match response {
-                RuntimeLocalRewriteUpstreamResponse::Live(live) if live.prefix.is_empty() => {
-                    let status = live.status;
-                    runtime_gemini_semantic_compact_response_parts(
-                        status,
-                        live.body
-                            .expect("live compact response body should be present")
-                            .into_reader(),
-                        request_id,
-                        &captured.body,
-                    )?
+            match runtime_gemini_compact_response_parts_from_upstream(
+                response,
+                request_id,
+                &captured.body,
+            ) {
+                Ok((parts, provider_completed)) => {
+                    if provider_completed {
+                        runtime_proxy_log(
+                            &shared.runtime_shared,
+                            runtime_proxy_structured_log_message(
+                                "local_rewrite_gemini_compact_semantic",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field("transport", "http"),
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field(
+                                        "path",
+                                        path_without_query(&captured.path_and_query),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "body_bytes",
+                                        captured.body.len().to_string(),
+                                    ),
+                                ],
+                            ),
+                        );
+                    }
+                    (parts, provider_completed)
                 }
-                RuntimeLocalRewriteUpstreamResponse::Live(_) => {
-                    bail!("Gemini semantic compact unexpectedly returned a stream prefix")
-                }
-                RuntimeLocalRewriteUpstreamResponse::Streaming(_) => {
-                    bail!("Gemini semantic compact unexpectedly returned a local stream")
-                }
-                RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
-                    bail!(
-                        "Gemini semantic compact returned buffered HTTP {}",
-                        parts.status
+                Err(err) => {
+                    runtime_proxy_log(
+                        &shared.runtime_shared,
+                        runtime_proxy_structured_log_message(
+                            "local_rewrite_gemini_compact_invalid_response",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("transport", "http"),
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field(
+                                    "reason",
+                                    runtime_gemini_compact_error_log_value(&err),
+                                ),
+                            ],
+                        ),
+                    );
+                    (
+                        build_runtime_proxy_text_response_parts(
+                            502,
+                            "provider response could not be processed",
+                        ),
+                        false,
                     )
                 }
-            };
-            Ok((parts, profile_name.to_string()))
-        });
-
-    let (parts, provider_completed) = match semantic {
-        Ok((parts, profile_name)) => {
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "local_rewrite_gemini_compact_semantic",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("profile", profile_name),
-                        runtime_proxy_log_field(
-                            "path",
-                            path_without_query(&captured.path_and_query),
-                        ),
-                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
-                    ],
-                ),
-            );
-            (parts, true)
+            }
         }
         Err(err) => {
             runtime_proxy_log(
@@ -148,6 +159,34 @@ pub(super) fn runtime_gemini_compact_response(
         );
     }
     runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
+}
+
+fn runtime_gemini_compact_response_parts_from_upstream(
+    response: RuntimeLocalRewriteUpstreamResponse,
+    request_id: u64,
+    compact_request_body: &[u8],
+) -> Result<(RuntimeHeapTrimmedBufferedResponseParts, bool)> {
+    match response {
+        RuntimeLocalRewriteUpstreamResponse::Live(live) if live.prefix.is_empty() => {
+            let status = live.status;
+            let parts = runtime_gemini_semantic_compact_response_parts(
+                status,
+                live.body
+                    .context("Gemini semantic compact response body was missing")?
+                    .into_reader(),
+                request_id,
+                compact_request_body,
+            )?;
+            Ok((parts, true))
+        }
+        RuntimeLocalRewriteUpstreamResponse::Live(_) => {
+            bail!("Gemini semantic compact unexpectedly returned a stream prefix")
+        }
+        RuntimeLocalRewriteUpstreamResponse::Streaming(_) => {
+            bail!("Gemini semantic compact unexpectedly returned a local stream")
+        }
+        RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => Ok((parts, false)),
+    }
 }
 
 pub(super) fn runtime_gemini_semantic_compact_response_parts(
@@ -370,6 +409,35 @@ mod tests {
         assert!(text.contains("Goal: fix compact."));
         assert!(text.contains("Tests: cargo test passed."));
         assert!(text.contains("Continue the active user request."));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_preserves_final_upstream_http_errors() {
+        for (status, body) in [
+            (401, br#"{"error":"unauthorized"}"#.as_slice()),
+            (429, b"too many requests".as_slice()),
+            (
+                429,
+                br#"{"error":{"code":"insufficient_quota","message":"quota exhausted"}}"#
+                    .as_slice(),
+            ),
+            (500, b"upstream failure".as_slice()),
+        ] {
+            let response = RuntimeLocalRewriteUpstreamResponse::Buffered(
+                RuntimeHeapTrimmedBufferedResponseParts {
+                    status,
+                    headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+                    body: body.to_vec().into(),
+                },
+            );
+            let (parts, provider_completed) =
+                runtime_gemini_compact_response_parts_from_upstream(response, 102, b"{}")
+                    .expect("buffered upstream response should be returned");
+
+            assert_eq!(parts.status, status);
+            assert_eq!(parts.body.as_slice(), body);
+            assert!(!provider_completed);
+        }
     }
 
     #[test]

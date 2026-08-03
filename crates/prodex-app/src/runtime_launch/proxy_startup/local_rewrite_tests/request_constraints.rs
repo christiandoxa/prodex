@@ -3,7 +3,8 @@ use super::{
     AppState, RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, TestUpstream, app_paths_for_root,
-    runtime_gateway_test_admin_token, start_runtime_gateway_rewrite_proxy, temp_root,
+    runtime_gateway_test_admin_token, start_runtime_gateway_rewrite_proxy,
+    start_runtime_local_rewrite_proxy, temp_root,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -434,5 +435,78 @@ fn strict_gemini_oauth_gateway_blocks_host_files_and_remembers_the_concrete_mode
             "gemini-3.1-pro-preview".to_string(),
             "gemini-3.1-pro-preview".to_string(),
         ]
+    );
+}
+
+#[test]
+fn gemini_compact_sender_preserves_status_on_oversized_upstream_error_body() {
+    let root = temp_root("gemini-compact-oversized-error-body");
+    let paths = app_paths_for_root(root.clone());
+    let oversized: &'static str = Box::leak(
+        "x".repeat(crate::RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES + 1)
+            .into_boxed_str(),
+    );
+    let upstream = TestUpstream::start_with_statuses(&[401], "application/json", oversized);
+    let endpoint = format!("http://{}/v1internal", upstream.addr);
+    let _endpoint = crate::TestEnvVarGuard::set("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT", &endpoint);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: endpoint,
+        provider: RuntimeLocalRewriteProviderOptions::Gemini {
+            auth: RuntimeGeminiProviderAuth::OAuthProfiles {
+                profiles: vec![RuntimeGeminiOAuthProfileAuth {
+                    profile_name: "profile-a".to_string(),
+                    codex_home: root.join("profile-a"),
+                    email: None,
+                    access_token: "oauth-token".to_string(),
+                    project_id: Some("project-a".to_string()),
+                }],
+            },
+            thinking_budget_tokens: None,
+            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("Gemini proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses/compact", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "auto",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "compact this"}]
+            }]
+        }))
+        .send()
+        .expect("compact request should be sent");
+
+    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(
+        response.text().unwrap(),
+        "provider response could not be processed"
     );
 }

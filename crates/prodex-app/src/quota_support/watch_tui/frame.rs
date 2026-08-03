@@ -157,11 +157,12 @@ pub(crate) fn build_profile_quota_watch_tui_frame(
     profile_name: &str,
     updated: &str,
     quota_result: std::result::Result<ProviderQuotaSnapshot, String>,
+    detail: bool,
 ) -> AllQuotaWatchTuiFrame {
     let (body, overview_fields) = match quota_result {
         Ok(snapshot) => (
             format!("Quota {profile_name}"),
-            quota_watch_profile_fields(updated, &snapshot),
+            quota_watch_profile_fields(updated, &snapshot, detail),
         ),
         Err(err) => (
             format!("Quota {profile_name}"),

@@ -1097,7 +1097,8 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 
 ## Documentation
 
-- [QUICKSTART.md](./QUICKSTART.md) — longer walkthrough
+- [Documentation index](./docs/README.md) — complete map of maintained documentation
+- [QUICKSTART.md](./QUICKSTART.md) — first successful launch
 - [LOCAL.md](./LOCAL.md) — self-hosted local model setup and testing
 - [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution

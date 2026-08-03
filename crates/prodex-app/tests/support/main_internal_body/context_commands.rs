@@ -29,13 +29,18 @@ fn context_export_command_accepts_id_and_optional_path() {
         "export",
         "019c9e3d",
         "./context_session.md",
+        "--force",
     ])
     .expect("context export command");
     let Commands::Context(ContextCommands::Export(args)) = command else {
         panic!("expected context export command");
     };
     assert_eq!(args.id, "019c9e3d");
-    assert_eq!(args.path.as_deref(), Some(Path::new("./context_session.md")));
+    assert_eq!(
+        args.path.as_deref(),
+        Some(Path::new("./context_session.md"))
+    );
+    assert!(args.force);
 }
 
 #[test]

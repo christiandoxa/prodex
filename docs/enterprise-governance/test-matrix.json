@@ -446,6 +446,9 @@
       "evidence": [
         "all_governance_artifact_kinds_use_revisioned_authority",
         "governance migration catalog tests",
+        "postgres_validation_migration_is_append_only_and_complete",
+        "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
+        "postgres_migrator_fails_closed_before_recording_constraint_validation",
         "npm run ci:backup-restore-drill: encrypted logical dump/restore, post-backup exclusion marker, recovery-point age, restore time, governance fingerprint and audit-link verification"
       ]
     },

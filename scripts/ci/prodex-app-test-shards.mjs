@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 const SELECTION_PREFIX = "main_internal_tests::runtime_proxy_selection_and_pressure::";
 const LAUNCH_PREFIX = "runtime_launch::proxy_startup::";
+const ADMISSION_PREFIX = `${SELECTION_PREFIX}admission::`;
 
 const TARGETED_SHARDS = Object.freeze([
   {
@@ -11,13 +12,29 @@ const TARGETED_SHARDS = Object.freeze([
     filters: [`${SELECTION_PREFIX}selection::`, `${SELECTION_PREFIX}pressure::`, `${SELECTION_PREFIX}incidents::`],
   },
   {
-    suite: "admission",
-    label: "prodex-app admission and recovery",
+    suite: "admission-core",
+    label: "prodex-app admission core",
     filters: [
-      `${SELECTION_PREFIX}admission::`,
+      `${ADMISSION_PREFIX}compact::`,
+      `${ADMISSION_PREFIX}continuation_store::`,
+      `${ADMISSION_PREFIX}doctor_summary::`,
+      `${ADMISSION_PREFIX}pressure_budget::`,
+      `${ADMISSION_PREFIX}turn_state::`,
       `${SELECTION_PREFIX}state::`,
       `${SELECTION_PREFIX}rotation::`,
       `${SELECTION_PREFIX}health::`,
+    ],
+  },
+  {
+    suite: "admission-affinity",
+    label: "prodex-app admission guards and affinity",
+    filters: [
+      `${ADMISSION_PREFIX}cli_mount::`,
+      `${ADMISSION_PREFIX}guards::`,
+      `${ADMISSION_PREFIX}pre_send::`,
+      `${ADMISSION_PREFIX}previous_response::`,
+      `${ADMISSION_PREFIX}response_affinity::`,
+      `${ADMISSION_PREFIX}sse_tap::`,
     ],
   },
   {
@@ -107,7 +124,12 @@ const WORKSPACE_SHARD = Object.freeze({
 
 const WINDOWS_SHARD_GROUPS = Object.freeze([
   { suite: "selection-support", label: "prodex-app selection and support", members: ["selection", "support"] },
-  { suite: "admission-commands", label: "prodex-app admission and commands", members: ["admission", "commands"] },
+  {
+    suite: "admission-core-commands",
+    label: "prodex-app admission core and commands",
+    members: ["admission-core", "commands"],
+  },
+  { suite: "admission-affinity", label: "prodex-app admission guards and affinity", members: ["admission-affinity"] },
   { suite: "local-runtime", label: "prodex-app local rewrite and runtime", members: ["launch-local", "runtime"] },
   { suite: "providers-brokers", label: "prodex-app providers and brokers", members: ["launch-providers", "brokers"] },
   { suite: "gateway-gemini", label: "prodex-app gateway and Gemini", members: ["launch-gateway", "launch-gemini"] },

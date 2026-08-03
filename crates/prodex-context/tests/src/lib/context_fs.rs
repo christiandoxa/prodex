@@ -30,6 +30,35 @@ fn context_walk_and_compress_skip_symlinks() {
     let _ = std::fs::remove_dir_all(outside_dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn context_compress_rejects_symlink_parent() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_context_root("symlink-parent");
+    let outside = root.with_file_name("prodex-context-outside-parent");
+    std::fs::create_dir_all(&outside).expect("outside directory created");
+    let outside_file = outside.join("AGENTS.md");
+    std::fs::write(
+        &outside_file,
+        "This verbose outside context must never be modified through a linked parent.\n",
+    )
+    .expect("outside context written");
+    symlink(&outside, root.join("linked")).expect("parent symlink created");
+
+    let path = root.join("linked/AGENTS.md");
+    let error = compress_context_path(&path, false).expect_err("linked parent must be rejected");
+    assert!(format!("{error:#}").contains("context parent"));
+    assert_eq!(
+        std::fs::read_to_string(&outside_file).expect("outside context readable"),
+        "This verbose outside context must never be modified through a linked parent.\n"
+    );
+    assert!(!outside.join("AGENTS.original.md").exists());
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside);
+}
+
 #[test]
 fn context_walk_rejects_excessive_depth() {
     let root = temp_context_root("depth");
@@ -179,5 +208,56 @@ fn context_compress_preserves_private_mode() {
             & 0o777,
         0o600
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn context_compress_disambiguates_same_stem_backup_names() {
+    let root = temp_context_root("same-stem-backups");
+    let markdown_path = root.join("Notes.md");
+    let text_path = root.join("notes.txt");
+    let markdown =
+        "This is actually a verbose Markdown paragraph in order to reduce repeated wording.\n";
+    let text = "This is really a verbose text paragraph in order to reduce repeated wording.\n";
+    std::fs::write(&markdown_path, markdown).expect("Markdown context written");
+    std::fs::write(&text_path, text).expect("text context written");
+
+    let report = compress_context_path(&root, false).expect("compress succeeds");
+    assert_eq!(report.entries.len(), 2);
+    assert_eq!(
+        report
+            .entries
+            .iter()
+            .find(|entry| entry.path == markdown_path)
+            .expect("Markdown entry present")
+            .status,
+        "compressed"
+    );
+    assert_eq!(
+        report
+            .entries
+            .iter()
+            .find(|entry| entry.path == text_path)
+            .expect("text entry present")
+            .status,
+        "compressed"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("Notes.original.md")).unwrap(),
+        markdown
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("notes.txt.original.md")).unwrap(),
+        text
+    );
+
+    let rerun = compress_context_path(&root, false).expect("rerun succeeds");
+    assert!(rerun.entries.iter().all(|entry| {
+        !matches!(
+            entry.path.file_name().and_then(|name| name.to_str()),
+            Some("Notes.md" | "notes.txt")
+        ) || entry.status == "skipped_backup_exists"
+    }));
     let _ = std::fs::remove_dir_all(root);
 }

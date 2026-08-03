@@ -11,12 +11,15 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:runtime-manifest` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `npm run ci:runtime-manifest` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
-  The full workflow runs the workspace and twelve disjoint `prodex-app` library
+  The full workflow runs the workspace and thirteen disjoint `prodex-app` library
   partitions concurrently; its workspace partition excludes `prodex-app`, and
   each risky partition remains internally serial.
 - `npm run ci:full-test-shards` validates the shared app-library shard manifest;
   `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
   without compiling or running tests.
+- The generated runtime-proxy matrix uses weighted packs and keeps the two
+  admission process groups in separate packs; every runtime command remains
+  internally serial with `--test-threads=1`.
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
@@ -30,11 +33,14 @@ macOS temp-path alias that previously exposed non-canonical test fixture paths.
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds
 the installer fixture, avoiding a second full Windows binary build. Large
-`prodex-app` coverage uses seven balanced Windows groups instead of the twelve
+`prodex-app` coverage uses eight balanced Windows groups instead of the thirteen
 Linux partitions, retaining parallel execution while avoiding five duplicate
-Windows compilations and late hosted-runner queueing. One group writes the
-shared dependency cache. Windows CI test binaries disable incremental artifacts
-and test/dev debug symbols so sccache remains effective and linking is faster.
+Windows compilations and late hosted-runner queueing. Windows keeps the measured
+admission bottleneck in two disjoint groups, with commands attached to admission
+core; the split adds one test-binary link to shorten the critical path. One group
+writes the shared dependency cache. Windows CI test binaries disable incremental
+artifacts and test/dev debug symbols so sccache remains effective and linking is
+faster.
 
 ## CI Impact Gating
 

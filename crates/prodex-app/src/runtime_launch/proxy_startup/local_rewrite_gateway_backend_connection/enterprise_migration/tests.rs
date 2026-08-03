@@ -1,10 +1,11 @@
 //! Enterprise migration regression tests.
 
-use super::enterprise_migration::infer_legacy_postgres_version;
+use super::enterprise_migration::{apply_postgres_migrations, infer_legacy_postgres_version};
 use super::{
     runtime_gateway_sqlite_create_current_schema_for_tests,
     runtime_gateway_sqlite_migrate_enterprise_state, runtime_gateway_sqlite_open,
 };
+use prodex_storage_postgres::POSTGRES_MIGRATIONS;
 use prodex_storage_sqlite::{
     REQUIRED_SQLITE_SCHEMA_VERSION, SqliteRuntimeMode, plan_sqlite_migrations,
 };
@@ -379,6 +380,86 @@ fn postgres_ledgerless_siem_shape_uses_catalog_semantics() {
             .unwrap();
         assert!(error.contains(expected), "{name}: {error}");
     }
+}
+
+#[test]
+#[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
+fn postgres_migrator_fails_closed_before_recording_constraint_validation() {
+    let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+        .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
+    let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+    let mut client = prodex_storage_postgres_runtime::connect_blocking(&url, &tls).unwrap();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let schema = format!("prodex_validation_{}_{}", std::process::id(), stamp);
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .unwrap();
+    for migration in POSTGRES_MIGRATIONS
+        .iter()
+        .take_while(|migration| migration.version.0 < 4)
+    {
+        client.batch_execute(migration.sql).unwrap();
+    }
+    // This row predates the v4 NOT VALID bounded check. PostgreSQL checks new
+    // rows even for NOT VALID constraints, so insert it before expansion.
+    client
+        .batch_execute(
+            "INSERT INTO prodex_tenants (
+                 tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms
+             ) VALUES ('00000000-0000-7000-8000-000000000061', 'Invalid Legacy Row', 1, 1);
+             INSERT INTO prodex_policy_revisions (
+                 tenant_id, revision_id, artifact_checksum, compiled_metadata,
+                 lifecycle_state, created_by, created_at_unix_ms
+             ) VALUES (
+                 '00000000-0000-7000-8000-000000000061',
+                 '00000000-0000-7000-8000-000000000062', repeat('x', 129), '{}',
+                 'draft', '00000000-0000-7000-8000-000000000063', 1
+             );",
+        )
+        .unwrap();
+    for migration in POSTGRES_MIGRATIONS
+        .iter()
+        .filter(|migration| (4..18).contains(&migration.version.0))
+    {
+        client.batch_execute(migration.sql).unwrap();
+    }
+
+    let error = apply_postgres_migrations(&mut client).unwrap_err();
+    assert!(
+        error.to_string().contains("018_validate_constraints"),
+        "unexpected migration error: {error}"
+    );
+    let ledger = client
+        .query_one(
+            "SELECT MAX(version), COUNT(*) FROM prodex_enterprise_schema_migrations",
+            &[],
+        )
+        .unwrap();
+    let max_version: Option<i64> = ledger.get(0);
+    let ledger_count: i64 = ledger.get(1);
+    assert_eq!(max_version, Some(17));
+    assert_eq!(ledger_count, 17);
+    let unvalidated_constraint_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM pg_constraint
+             WHERE connamespace = current_schema()::regnamespace
+               AND NOT convalidated",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(unvalidated_constraint_count, 33);
+
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA {schema} CASCADE; SET search_path TO public;"
+        ))
+        .unwrap();
 }
 
 #[test]

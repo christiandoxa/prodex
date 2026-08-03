@@ -227,13 +227,31 @@ fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
         Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
             63, 18_000, 12, 604_800,
         ))),
+        false,
     );
 
     assert!(output.contains("Quota main"));
     assert!(!output.contains("Quota Watch"));
     assert!(!output.contains("Updated"));
     assert!(!output.contains("2026-03-22 10:00:00 WIB"));
+    assert!(!output.contains("Reset:"));
     assert!(!output.ends_with('\n'));
+}
+
+#[test]
+fn profile_quota_watch_output_passes_detail_to_snapshot_renderer() {
+    let output = render_profile_quota_watch_output(
+        "main",
+        "2026-03-22 10:00:00 WIB",
+        Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+            63, 18_000, 12, 604_800,
+        ))),
+        true,
+    );
+
+    assert!(output.contains("Reset"));
+    assert!(output.contains("5h"));
+    assert!(output.contains("weekly"));
 }
 
 #[test]

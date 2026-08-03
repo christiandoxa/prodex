@@ -10,6 +10,11 @@
     "reason": "Data-plane authorization, bounded HTTP policy projection, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules; the narrow increase covers a cross-platform source-boundary regression assertion."
   },
   {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
+    "maxLines": 854,
+    "reason": "Gateway billing and durable reconciliation stay together at their atomic accounting boundary; the exact cap includes poisoned-state recovery and SQLite durable restart coverage."
+  },
+  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
     "maxLines": 1005,
     "reason": "Kiro ACP process lifecycle, bounded idle handling, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after blocking stderr handling was removed and pure protocol shaping moved to provider-core."
@@ -190,6 +195,11 @@
     "reason": "Runtime-policy validation coverage remains capped after control-plane and bank-mode composition tests moved into a focused sibling module."
   },
   {
+    "file": "crates/prodex-secret-store/src/secure_file/windows.rs",
+    "maxLines": 872,
+    "reason": "Windows secure-file ownership keeps ACL validation, no-follow containment, and handle-bound rename/delete in one platform module; the exact cap covers parent-handle race hardening."
+  },
+  {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
     "maxLines": 1421,
     "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency, session revocation, audit integrity, export, and SIEM behavior after retention, revision-recovery, and outbox-claim tests moved to focused modules."
@@ -226,7 +236,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 1083,
-    "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata and fail-closed future-version checks beside schema planning; migration 17 SQL lives in a versioned sidecar so its durable invalidation schema remains reviewable without growing Rust source."
+    "maxLines": 1091,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata and fail-closed future-version checks beside schema planning; migrations 17 and 18 keep their SQL in versioned sidecars while their ordered metadata remains explicit."
   }
 ]

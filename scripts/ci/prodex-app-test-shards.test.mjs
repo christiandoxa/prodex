@@ -19,19 +19,21 @@ function runPlanner(...args) {
 
 test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(), []);
-  assert.equal(PRODEX_APP_LIB_SHARDS.length, 12);
+  assert.equal(PRODEX_APP_LIB_SHARDS.length, 13);
   assert.deepEqual(
     PRODEX_APP_LIB_SHARDS.filter((shard) => shard.filters).flatMap((shard) => shard.filters),
     PRODEX_APP_LIB_FILTERS,
   );
   assert.deepEqual(PRODEX_APP_LIB_SHARDS.at(-1).skipFilters, PRODEX_APP_LIB_FILTERS);
+  assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-core").filters.length, 8);
+  assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-affinity").filters.length, 6);
 
   const appMatrix = githubMatrix();
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
-  assert.equal(appMatrix.include.length, 12);
-  assert.equal(fullMatrix.include.length, 13);
-  assert.equal(windowsMatrix.include.length, 7);
+  assert.equal(appMatrix.include.length, 13);
+  assert.equal(fullMatrix.include.length, 14);
+  assert.equal(windowsMatrix.include.length, 8);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -48,9 +50,13 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
 });
 
 test("shard planner dry-run and matrix output are compile-free", () => {
+  const check = runPlanner("--check");
+  assert.equal(check.status, 0, check.stderr);
+  assert.match(check.stdout, /13 app shard\(s\), one cache writer/);
+
   const dryRun = runPlanner("--dry-run");
   assert.equal(dryRun.status, 0, dryRun.stderr);
-  assert.match(dryRun.stdout, /dry-run: 13 full-test shard\(s\)/);
+  assert.match(dryRun.stdout, /dry-run: 14 full-test shard\(s\)/);
   assert.match(dryRun.stdout, /selection: cargo test .*--test-threads=1/);
   assert.match(dryRun.stdout, /remainder: cargo test .*--skip/);
 

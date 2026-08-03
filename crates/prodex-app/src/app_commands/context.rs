@@ -62,14 +62,49 @@ pub(crate) fn handle_context_export(args: ContextExportArgs) -> Result<()> {
         Some(path) => absolutize(path)?,
         None => default_context_export_path(&report.id)?,
     };
-    fs::write(&output_path, markdown)
-        .with_context(|| format!("failed to write {}", output_path.display()))?;
+    write_context_export_file(&output_path, markdown.as_bytes(), args.force)?;
     print_stdout_line(&format!(
         "Exported session context {} -> {}",
         report.id,
         output_path.display()
     ))?;
     Ok(())
+}
+
+fn write_context_export_file(path: &Path, bytes: &[u8], force: bool) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!(
+                "refusing to write context export {}: output is a symlink",
+                path.display()
+            )
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    }
+
+    let result = if force {
+        secret_store::write_private_file_atomic(path, bytes)
+    } else {
+        secret_store::write_private_file_create_new(path, bytes)
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if !force && error.kind() == io::ErrorKind::AlreadyExists => bail!(
+            "refusing to overwrite existing context export {}; pass --force to replace it",
+            path.display()
+        ),
+        Err(error) => Err(error).with_context(|| {
+            if force {
+                format!("failed to replace {}", path.display())
+            } else {
+                format!("failed to write {}", path.display())
+            }
+        }),
+    }
 }
 
 pub(crate) fn handle_context_compress(args: ContextCompressArgs) -> Result<()> {
@@ -212,6 +247,9 @@ fn render_session_context_export_markdown(
         output.push_str(&format!("- cwd: `{cwd}`\n"));
     }
     output.push_str(&format!("- source_path: `{}`\n\n", session_path.display()));
+    output.push_str(
+        "> Warning: raw tool content may contain sensitive data. Tool-call arguments and tool output are included without redaction; review before sharing.\n\n",
+    );
 
     let mut events = Vec::new();
     for line in raw.lines() {
@@ -351,6 +389,9 @@ mod tests {
         assert!(markdown.contains("- thread_name: Issue triage"));
         assert!(markdown.contains("### 1. prompt-engineering"));
         assert!(markdown.contains("System prompt."));
+        assert!(markdown.contains(
+            "> Warning: raw tool content may contain sensitive data. Tool-call arguments and tool output are included without redaction; review before sharing."
+        ));
         assert!(markdown.contains("### 2. user"));
         assert!(markdown.contains("Hello model."));
         assert!(markdown.contains("tool-call:exec_command"));
@@ -358,6 +399,61 @@ mod tests {
         assert!(markdown.contains("tool-output"));
         assert!(markdown.contains("/tmp/work"));
         assert!(markdown.contains("### 5. assistant"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn context_export_file_is_private_non_overwriting_and_force_replaces() {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+
+        let root = env::temp_dir().join(format!(
+            "prodex-context-export-file-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        secret_store::ensure_private_directory(&root).unwrap();
+        let path = root.join("export.md");
+
+        write_context_export_file(&path, b"first", false).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"first");
+        #[cfg(unix)]
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+
+        let error = write_context_export_file(&path, b"second", false)
+            .expect_err("export should not overwrite without force");
+        assert!(error.to_string().contains("pass --force"));
+        assert_eq!(fs::read(&path).unwrap(), b"first");
+
+        write_context_export_file(&path, b"second", true).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        #[cfg(unix)]
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = root.join("target.md");
+            let link = root.join("link.md");
+            fs::write(&target, b"target").unwrap();
+            symlink(&target, &link).unwrap();
+
+            let error = write_context_export_file(&link, b"replacement", true)
+                .expect_err("export should refuse symlink output");
+            assert!(error.to_string().contains("output is a symlink"));
+            assert!(
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            assert_eq!(fs::read(&target).unwrap(), b"target");
+        }
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -409,6 +505,8 @@ mod tests {
             .join("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9.jsonl");
         fs::create_dir_all(session_path.parent().unwrap()).unwrap();
         fs::create_dir_all(&cwd).unwrap();
+        secret_store::ensure_private_directory(&root).unwrap();
+        secret_store::ensure_private_directory(&cwd).unwrap();
         fs::write(
             &session_path,
             concat!(
@@ -427,6 +525,7 @@ mod tests {
         let result = handle_context_export(ContextExportArgs {
             id: "019c9e3d".to_string(),
             path: None,
+            force: false,
         });
 
         env::set_current_dir(previous_cwd).unwrap();

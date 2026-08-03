@@ -75,6 +75,52 @@ fn runtime_gateway_siem_wait(shutdown: &AtomicBool) {
     }
 }
 
+fn aggregate_siem_outbox_health(
+    health: impl IntoIterator<Item = prodex_storage::GovernanceOutboxHealth>,
+) -> prodex_storage::GovernanceOutboxHealth {
+    health.into_iter().fold(
+        prodex_storage::GovernanceOutboxHealth::default(),
+        |mut total, health| {
+            total.pending = total.pending.saturating_add(health.pending);
+            total.dead_lettered = total.dead_lettered.saturating_add(health.dead_lettered);
+            total.oldest_pending_at_unix_ms = [
+                total.oldest_pending_at_unix_ms,
+                health.oldest_pending_at_unix_ms,
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            total
+        },
+    )
+}
+
+fn aggregate_siem_outbox_health_results(
+    health: impl IntoIterator<
+        Item = Result<
+            prodex_storage::GovernanceOutboxHealth,
+            prodex_storage::GovernanceRepositoryError,
+        >,
+    >,
+) -> Result<prodex_storage::GovernanceOutboxHealth, prodex_storage::GovernanceRepositoryError> {
+    health
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map(aggregate_siem_outbox_health)
+}
+
+fn runtime_gateway_siem_postgres_health(
+    repository: &prodex_storage_postgres_runtime::PostgresRepository,
+    runtime: &tokio::runtime::Handle,
+    tenant_ids: &[prodex_domain::TenantId],
+) -> Result<prodex_storage::GovernanceOutboxHealth, prodex_storage::GovernanceRepositoryError> {
+    aggregate_siem_outbox_health_results(
+        tenant_ids
+            .iter()
+            .map(|tenant_id| runtime.block_on(repository.governance_outbox_health(*tenant_id))),
+    )
+}
+
 fn runtime_gateway_siem_postgres_loop(
     siem_worker: Arc<RuntimeSiemWorkerConfig>,
     repository: prodex_storage_postgres_runtime::PostgresRepository,
@@ -90,27 +136,56 @@ fn runtime_gateway_siem_postgres_loop(
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX);
-        let tenant_ids = governance_authority
-            .as_ref()
-            .ok_or(prodex_storage::GovernanceRepositoryError::Database)
-            .and_then(RuntimeGovernanceAuthority::tenant_ids);
-        let (status, phase) = match tenant_ids {
-            Ok(tenant_ids)
-                if siem_worker
-                    .run_once_postgres(&repository, &runtime, &tenant_ids, now_unix_ms)
-                    .is_ok() =>
-            {
-                ("success", "export")
-            }
-            Ok(_) => ("error", "export"),
-            Err(_) => ("error", "tenant_discovery"),
-        };
-        runtime_proxy_log_to_path(
+        runtime_gateway_siem_postgres_iteration(
+            &siem_worker,
+            &repository,
+            &runtime,
+            governance_authority.as_ref(),
             &log_path,
-            &format!("governance_siem_worker status={status} backend=postgres phase={phase}"),
+            now_unix_ms,
         );
         runtime_gateway_siem_wait(&shutdown);
     }
+}
+
+fn runtime_gateway_siem_postgres_iteration(
+    siem_worker: &RuntimeSiemWorkerConfig,
+    repository: &prodex_storage_postgres_runtime::PostgresRepository,
+    runtime: &tokio::runtime::Handle,
+    governance_authority: Option<&RuntimeGovernanceAuthority>,
+    log_path: &std::path::Path,
+    now_unix_ms: u64,
+) -> (&'static str, &'static str) {
+    let tenant_ids = governance_authority
+        .ok_or(prodex_storage::GovernanceRepositoryError::Database)
+        .and_then(RuntimeGovernanceAuthority::tenant_ids);
+    let (status, phase) = match tenant_ids {
+        Ok(tenant_ids) => {
+            match siem_worker.run_once_postgres(repository, runtime, &tenant_ids, now_unix_ms) {
+                Ok(()) => {
+                    match runtime_gateway_siem_postgres_health(repository, runtime, &tenant_ids)
+                        .and_then(|health| {
+                            siem_worker
+                                .plan_health(health, now_unix_ms)
+                                .map_err(|_| prodex_storage::GovernanceRepositoryError::Database)
+                        }) {
+                        Ok(metric) => {
+                            crate::record_runtime_siem_outbox_health_metric(&metric);
+                            ("success", "export")
+                        }
+                        Err(_) => ("error", "health"),
+                    }
+                }
+                Err(_) => ("error", "export"),
+            }
+        }
+        Err(_) => ("error", "tenant_discovery"),
+    };
+    runtime_proxy_log_to_path(
+        log_path,
+        &format!("governance_siem_worker status={status} backend=postgres phase={phase}"),
+    );
+    (status, phase)
 }
 
 fn runtime_gateway_siem_sqlite_iteration(
@@ -334,4 +409,250 @@ pub(in crate::runtime_launch::proxy_startup) fn spawn_runtime_local_rewrite_work
         worker_threads,
         gemini_live_sidecar_addr,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RuntimeGovernanceAuthority, RuntimeSiemWorkerConfig, aggregate_siem_outbox_health,
+        aggregate_siem_outbox_health_results, runtime_gateway_siem_postgres_health,
+        runtime_gateway_siem_postgres_iteration,
+    };
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    #[test]
+    fn postgres_siem_health_aggregation_sums_tenants_and_keeps_oldest_pending() {
+        let health = aggregate_siem_outbox_health([
+            prodex_storage::GovernanceOutboxHealth {
+                pending: 2,
+                dead_lettered: 1,
+                oldest_pending_at_unix_ms: Some(900),
+            },
+            prodex_storage::GovernanceOutboxHealth {
+                pending: 3,
+                dead_lettered: 0,
+                oldest_pending_at_unix_ms: Some(1_100),
+            },
+            prodex_storage::GovernanceOutboxHealth {
+                pending: 0,
+                dead_lettered: 2,
+                oldest_pending_at_unix_ms: None,
+            },
+        ]);
+
+        assert_eq!(health.pending, 5);
+        assert_eq!(health.dead_lettered, 3);
+        assert_eq!(health.oldest_pending_at_unix_ms, Some(900));
+    }
+
+    #[test]
+    fn postgres_siem_health_aggregation_saturates_counters() {
+        let health = aggregate_siem_outbox_health([
+            prodex_storage::GovernanceOutboxHealth {
+                pending: u64::MAX,
+                dead_lettered: u64::MAX,
+                oldest_pending_at_unix_ms: None,
+            },
+            prodex_storage::GovernanceOutboxHealth {
+                pending: 1,
+                dead_lettered: 1,
+                oldest_pending_at_unix_ms: None,
+            },
+        ]);
+
+        assert_eq!(health.pending, u64::MAX);
+        assert_eq!(health.dead_lettered, u64::MAX);
+        assert_eq!(health.oldest_pending_at_unix_ms, None);
+    }
+
+    #[test]
+    fn postgres_siem_health_propagates_a_tenant_error() {
+        let result = aggregate_siem_outbox_health_results([
+            Ok::<_, prodex_storage::GovernanceRepositoryError>(
+                prodex_storage::GovernanceOutboxHealth {
+                    pending: 1,
+                    dead_lettered: 0,
+                    oldest_pending_at_unix_ms: Some(1),
+                },
+            ),
+            Err(prodex_storage::GovernanceRepositoryError::Database),
+        ]);
+
+        assert!(matches!(
+            result,
+            Err(prodex_storage::GovernanceRepositoryError::Database)
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires PRODEX_TEST_POSTGRES_URL"]
+    fn postgres_siem_health_uses_all_authority_tenants_and_publishes_the_plan() {
+        let url = std::env::var("PRODEX_TEST_POSTGRES_URL")
+            .expect("PRODEX_TEST_POSTGRES_URL must point to the test PostgreSQL instance");
+        let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+        crate::runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(&url, &tls)
+            .expect("postgres enterprise migrations should apply");
+        crate::runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(&url, &tls)
+            .expect("postgres compatibility migrations should apply");
+
+        let config = prodex_storage_postgres_runtime::PostgresRuntimeConfig::new(&url, 4)
+            .expect("postgres test config should be valid");
+        let pool = config
+            .create_pool_explicit_no_tls()
+            .expect("postgres test pool should build");
+        let repository = prodex_storage_postgres_runtime::PostgresRepository::from_pool_with_config(
+            pool.clone(),
+            &config,
+        );
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("postgres test runtime should build"),
+        );
+        let tenant_ids = [
+            prodex_domain::TenantId::new(),
+            prodex_domain::TenantId::new(),
+            prodex_domain::TenantId::new(),
+        ];
+
+        runtime.block_on(async {
+            for (tenant_id, (pending, dead_lettered)) in
+                tenant_ids.iter().zip([(2, 1), (1, 2), (0, 0)])
+            {
+                let mut client = pool.get().await.expect("postgres pool should connect");
+                let transaction = client
+                    .transaction()
+                    .await
+                    .expect("tenant setup transaction should start");
+                transaction
+                    .query_one(
+                        prodex_storage_postgres::SET_TENANT_STATEMENT.sql,
+                        &[&tenant_id.to_string()],
+                    )
+                    .await
+                    .expect("tenant context should be set");
+                transaction
+                    .query_one(
+                        prodex_storage_postgres::UPSERT_TENANT_LIFECYCLE_STATEMENT.sql,
+                        &[
+                            &tenant_id.as_uuid(),
+                            &"SIEM health test tenant",
+                            &1_800_000_000_000_i64,
+                        ],
+                    )
+                    .await
+                    .expect("tenant should be created");
+                for index in 0..pending {
+                    let event_id = prodex_domain::AuditEventId::new();
+                    let envelope = format!(r#"{{"event_id":"{event_id}"}}"#);
+                    transaction
+                        .execute(
+                            "INSERT INTO prodex_audit_log
+                             (tenant_id, audit_event_id, event_digest, occurred_at_unix_ms,
+                              principal_id, action, resource_kind, outcome)
+                             VALUES ($1, $2, $3, $4, $5, 'test', 'siem', 'success')",
+                            &[
+                                &tenant_id.as_uuid(),
+                                &event_id.as_uuid(),
+                                &format!("siem-health-{event_id}"),
+                                &(700_i64 + i64::from(index) * 500),
+                                &prodex_domain::PrincipalId::new().as_uuid(),
+                            ],
+                        )
+                        .await
+                        .expect("audit event should be inserted");
+                    transaction
+                        .execute(
+                            "INSERT INTO prodex_siem_outbox
+                             (tenant_id, event_id, audit_event_id, event_envelope,
+                              attempt_count, next_attempt_at_unix_ms, created_at_unix_ms)
+                             VALUES ($1, $2, $2, $3::text::jsonb, 0, $4, $4)",
+                            &[
+                                &tenant_id.as_uuid(),
+                                &event_id.as_uuid(),
+                                &envelope,
+                                &(700_i64 + i64::from(index) * 500),
+                            ],
+                        )
+                        .await
+                        .expect("SIEM outbox event should be inserted");
+                }
+                for _ in 0..dead_lettered {
+                    let event_id = prodex_domain::AuditEventId::new();
+                    let envelope = format!(r#"{{"event_id":"{event_id}"}}"#);
+                    transaction
+                        .execute(
+                            "INSERT INTO prodex_audit_log
+                             (tenant_id, audit_event_id, event_digest, occurred_at_unix_ms,
+                              principal_id, action, resource_kind, outcome)
+                             VALUES ($1, $2, $3, 900, $4, 'test', 'siem', 'failure')",
+                            &[
+                                &tenant_id.as_uuid(),
+                                &event_id.as_uuid(),
+                                &format!("siem-health-dead-{event_id}"),
+                                &prodex_domain::PrincipalId::new().as_uuid(),
+                            ],
+                        )
+                        .await
+                        .expect("dead-letter audit event should be inserted");
+                    transaction
+                        .execute(
+                            "INSERT INTO prodex_siem_dead_letters
+                             (tenant_id, event_id, audit_event_id, event_envelope,
+                              attempt_count, stable_reason_code, failed_at_unix_ms)
+                             VALUES ($1, $2, $2, $3::text::jsonb, 1, 'test', 900)",
+                            &[&tenant_id.as_uuid(), &event_id.as_uuid(), &envelope],
+                        )
+                        .await
+                        .expect("SIEM dead letter should be inserted");
+                }
+                transaction
+                    .commit()
+                    .await
+                    .expect("tenant SIEM fixture should commit");
+            }
+        });
+
+        let health =
+            runtime_gateway_siem_postgres_health(&repository, runtime.handle(), &tenant_ids)
+                .expect("all authority tenant health reads should succeed");
+        assert_eq!(health.pending, 3);
+        assert_eq!(health.dead_lettered, 3);
+        assert_eq!(health.oldest_pending_at_unix_ms, Some(700));
+
+        let worker = Arc::new(RuntimeSiemWorkerConfig::for_health_tests(100));
+        let metric = worker
+            .plan_health(health, 1_000)
+            .expect("aggregate health should produce a metric plan");
+        assert_eq!(metric.pending, 3);
+        assert_eq!(metric.dead_lettered, 3);
+        assert_eq!(metric.lag_milliseconds, 300);
+        assert_eq!(
+            metric.status_label.as_metric_label().unwrap().1,
+            "dead_lettered"
+        );
+
+        let log_path = std::env::temp_dir().join(format!(
+            "prodex-siem-health-{}.log",
+            prodex_domain::RequestId::new()
+        ));
+        let authority = RuntimeGovernanceAuthority::Postgres {
+            repository: repository.clone(),
+            runtime: Arc::clone(&runtime),
+            tenant_ids: Arc::new(std::sync::Mutex::new(
+                tenant_ids.iter().copied().collect::<BTreeSet<_>>(),
+            )),
+        };
+        let outcome = runtime_gateway_siem_postgres_iteration(
+            &worker,
+            &repository,
+            runtime.handle(),
+            Some(&authority),
+            &log_path,
+            1_000,
+        );
+        assert_eq!(outcome, ("success", "export"));
+    }
 }

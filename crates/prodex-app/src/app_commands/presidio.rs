@@ -383,13 +383,8 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
         languages_to_use = normalize_languages(vec![language]);
         language_mode_to_use = PresidioLanguageMode::Fixed;
     }
-    // If language_mode is provided via CLI, it overrides the config
-    // Need to check if the argument was explicitly provided for `language_mode`
-    // clap provides a way to check if an argument was "present" or "set_by_user"
-    // However, PresidioRedactArgs does not store ValueSource, so we have to assume a default_value_t.
-    // So, we'll override if it's not the default.
-    if args.language_mode != PresidioLanguageMode::Fixed {
-        language_mode_to_use = args.language_mode;
+    if let Some(language_mode) = args.language_mode {
+        language_mode_to_use = language_mode;
     }
     validate_language_config(&languages_to_use, language_mode_to_use)?;
 

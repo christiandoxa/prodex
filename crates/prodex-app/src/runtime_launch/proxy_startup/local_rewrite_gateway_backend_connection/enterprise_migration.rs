@@ -208,7 +208,7 @@ fn apply_sqlite_migration_plan(
     Ok(applied)
 }
 
-fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
+pub(super) fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
     let ledger_exists = runtime_gateway_postgres_table_exists(client, MIGRATIONS_TABLE)?;
     if ledger_exists
         && postgres_observed_version(client)?
