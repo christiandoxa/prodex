@@ -1,5 +1,7 @@
 mod request_validation;
+mod response;
 mod stream;
+use self::response::{runtime_kiro_anthropic_message_parts_from_response, runtime_kiro_json_parts};
 use self::stream::{runtime_kiro_finish_stream, runtime_kiro_stream_notification};
 
 use self::request_validation::runtime_kiro_request_body_for_endpoint;
@@ -456,71 +458,6 @@ fn schedule_runtime_kiro_blocking_work(
     work: impl FnOnce() + Send + 'static,
 ) {
     drop(async_runtime.spawn_blocking(work));
-}
-
-fn runtime_kiro_json_parts(status: u16, body: Value) -> RuntimeHeapTrimmedBufferedResponseParts {
-    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
-    RuntimeHeapTrimmedBufferedResponseParts {
-        status,
-        headers: vec![(
-            "content-type".to_string(),
-            b"application/json; charset=utf-8".to_vec(),
-        )],
-        body: body.into(),
-    }
-}
-
-fn runtime_kiro_anthropic_message_parts_from_response(
-    response: &RuntimeLocalRewriteUpstreamResponse,
-    anthropic_request: &RuntimeAnthropicMessagesRequest,
-) -> RuntimeHeapTrimmedBufferedResponseParts {
-    let RuntimeLocalRewriteUpstreamResponse::Buffered(parts) = response else {
-        return build_runtime_anthropic_error_parts(
-            500,
-            "api_error",
-            "Kiro Anthropic messages translation expected a buffered response",
-        );
-    };
-    let value: Value = match serde_json::from_slice(&parts.body) {
-        Ok(value) => value,
-        Err(_) => {
-            return build_runtime_anthropic_error_parts(
-                502,
-                "api_error",
-                "Kiro provider returned an invalid JSON response",
-            );
-        }
-    };
-    match value.get("status").and_then(Value::as_str) {
-        Some("failed") => {
-            let message = value
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("Kiro ACP turn failed.");
-            return build_runtime_anthropic_error_parts(502, "api_error", message);
-        }
-        Some("incomplete") => {
-            let reason = value
-                .pointer("/incomplete_details/reason")
-                .or_else(|| value.pointer("/metadata/kiro/stop_reason"))
-                .and_then(Value::as_str);
-            if !matches!(reason, Some("max_output_tokens" | "max_tokens")) {
-                let message = value
-                    .pointer("/incomplete_details/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Kiro ACP turn did not complete.");
-                return build_runtime_anthropic_error_parts(502, "api_error", message);
-            }
-        }
-        _ => {}
-    }
-    runtime_kiro_json_parts(
-        200,
-        prodex_provider_core::kiro_provider_core_anthropic_message_value_from_response(
-            &value,
-            &anthropic_request.requested_model,
-        ),
-    )
 }
 
 fn runtime_kiro_anthropic_streaming_local_response(
