@@ -672,15 +672,34 @@ fn finish_home_actions(actions: &[ProfileLifecycleHomeAction], committed: bool) 
 }
 
 fn finish_quarantine_home(source: &str, quarantine: &str, committed: bool) -> Result<()> {
+    let source = Path::new(source);
+    let quarantine = Path::new(quarantine);
     if committed {
-        remove_home(Path::new(quarantine))?;
-    } else if !Path::new(source).exists() && Path::new(quarantine).exists() {
-        fs::rename(quarantine, source)
-            .with_context(|| format!("failed to restore quarantined profile home {}", source))?;
-    } else if Path::new(source).exists() && Path::new(quarantine).exists() {
-        remove_home(Path::new(quarantine))?;
+        remove_home(quarantine)?;
+        remove_home(source)?;
+    } else {
+        let source_exists = lifecycle_path_exists(source)?;
+        let quarantine_exists = lifecycle_path_exists(quarantine)?;
+        if !source_exists && quarantine_exists {
+            fs::rename(quarantine, source).with_context(|| {
+                format!(
+                    "failed to restore quarantined profile home {}",
+                    source.display()
+                )
+            })?;
+        } else if source_exists && quarantine_exists {
+            remove_home(quarantine)?;
+        }
     }
     Ok(())
+}
+
+fn lifecycle_path_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
 }
 
 fn promote_home(source: &Path, destination: &Path) -> Result<()> {
@@ -729,7 +748,7 @@ fn rollback_promoted_home(
     Ok(())
 }
 
-pub(super) fn remove_home(path: &Path) -> Result<()> {
+pub(crate) fn remove_home(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))

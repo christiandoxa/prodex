@@ -472,19 +472,35 @@ pub fn resolve_binary_path_in_path(
 }
 
 fn existing_binary_path(candidate: &Path) -> Option<PathBuf> {
-    if candidate.is_file() {
-        return Some(fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf()));
+    if let Some(path) = executable_file_path(candidate) {
+        return Some(path);
     }
     #[cfg(windows)]
     for suffix in [".exe", ".cmd", ".bat", ".com"] {
         let mut path = candidate.as_os_str().to_os_string();
         path.push(suffix);
         let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(fs::canonicalize(&path).unwrap_or(path));
+        if let Some(path) = executable_file_path(&path) {
+            return Some(path);
         }
     }
     None
+}
+
+fn executable_file_path(candidate: &Path) -> Option<PathBuf> {
+    let metadata = fs::metadata(candidate).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    Some(fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf()))
 }
 
 #[cfg(test)]

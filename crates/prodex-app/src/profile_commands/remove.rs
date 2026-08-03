@@ -1,6 +1,6 @@
 use super::import_export::{
     ProfileLifecycleHomeAction, ProfileLifecyclePlan, acquire_profile_lifecycle_lock,
-    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked, remove_home,
     write_profile_lifecycle_plan,
 };
 use super::manage::print_profile_panel;
@@ -192,10 +192,7 @@ fn delete_removed_profile_homes(removed_profiles: &mut [RemovedProfileRecord]) -
             .quarantine_home
             .as_deref()
             .unwrap_or(&profile.codex_home);
-        if home.exists() {
-            fs::remove_dir_all(home)
-                .with_context(|| format!("failed to delete {}", home.display()))?;
-        }
+        remove_home(home)?;
         profile.deleted_home = true;
     }
     Ok(())
@@ -224,8 +221,17 @@ fn quarantine_removed_profile_homes(removed_profiles: &mut [RemovedProfileRecord
         .iter()
         .filter(|profile| profile.delete_home)
     {
-        if !profile.codex_home.exists() {
-            continue;
+        match fs::symlink_metadata(&profile.codex_home) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to inspect profile home {}",
+                        profile.codex_home.display()
+                    )
+                });
+            }
         }
         let quarantine = profile
             .quarantine_home
