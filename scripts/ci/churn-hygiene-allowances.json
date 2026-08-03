@@ -1,5 +1,19 @@
 [
   {
+    "id": "audited-reliability-context-ci-feature-0.381.0",
+    "requiredSubjects": [
+      "fix: close audited reliability gaps",
+      "chore(ci): record reviewed 0.381.0 audit churn"
+    ],
+    "caps": {
+      "maxFiles": 50,
+      "maxBehaviorFiles": 45,
+      "maxLines": 3100,
+      "maxFileLines": 710
+    },
+    "reason": "Reviewed the whole-repository 0.381.0 audit covering atomic context and private-file operations, transparent Gemini terminal failures, durable gateway reconciliation and SIEM health, validated PostgreSQL constraints, quota and Presidio CLI behavior, dependency simplification, and parallel Linux and Windows CI shards; verified with the locked workspace suite, isolated deadline regression rerun, live PostgreSQL and Redis proof, runtime manifest and preflight guards, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-runtime-provider-ci-feature-0.380.0",
     "requiredSubjects": [
       "fix(runtime): preserve provider stream terminal failures",
