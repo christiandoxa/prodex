@@ -792,7 +792,7 @@ fn gateway_sqlite_shared_backend_allows_only_one_budget_limited_reservation_acro
         second.join().expect("second request thread should finish"),
     ];
     statuses.sort_unstable();
-    assert_eq!(statuses, vec![200, 403]);
+    assert_eq!(statuses, [200, 403]);
     let denied: serde_json::Value = client
         .post(format!("http://{}/v1/responses", proxy_b.listen_addr))
         .bearer_auth(created["token"].as_str().unwrap())
@@ -1031,7 +1031,7 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         request_body.clone(),
     );
     let second = send(proxy_b.listen_addr, barrier, token, request_body.clone());
-    let mut statuses = vec![
+    let mut statuses = [
         first.join().expect("first request thread should finish"),
         second.join().expect("second request thread should finish"),
     ];
