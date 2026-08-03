@@ -12,7 +12,8 @@
       "refactor(runtime): share terminal response validation",
       "ci: harden gates and reuse Windows caches",
       "ci: require zero security findings and reduce Windows fanout",
-      "chore(ci): record reviewed 0.380.0 audit churn"
+      "chore(ci): record reviewed 0.380.0 audit churn",
+      "fix(ci): allow cold Smart Context evidence builds"
     ],
     "caps": {
       "maxFiles": 70,
