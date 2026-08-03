@@ -11,10 +11,9 @@ use super::server::{
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileLifecycleHomeAction,
     ProfileLifecyclePlan, ProfileProvider, acquire_profile_lifecycle_lock, activate_profile,
-    audit_log_event, create_codex_home_if_missing, ensure_path_is_unique,
-    finalize_recovered_profile_removals, lifecycle_profile_state,
-    load_profile_state_with_profile_recovery_locked, managed_profile_home_path,
-    persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
+    audit_log_event, ensure_path_is_unique, finalize_recovered_profile_removals,
+    lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
+    managed_profile_home_path, persist_pruned_profile_runtime_sidecars, prepare_managed_codex_home,
     prune_removed_profile_metadata, write_profile_lifecycle_plan,
 };
 use std::path::PathBuf;
@@ -232,12 +231,7 @@ fn prepare_added_profile(
             auth_journal_paths: Vec::new(),
         },
     )?;
-    for result in [
-        create_codex_home_if_missing(&codex_home),
-        prepare_managed_codex_home(paths, &codex_home),
-    ] {
-        result?;
-    }
+    prepare_managed_codex_home(paths, &codex_home)?;
     state.profiles.insert(name.to_string(), desired_profile);
     if activate || state.active_profile.is_none() {
         activate_profile(state, name);

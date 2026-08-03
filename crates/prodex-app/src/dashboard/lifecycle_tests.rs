@@ -9,6 +9,56 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 
+#[cfg(unix)]
+#[test]
+fn dashboard_profile_creation_rejects_symlink_without_chmodding_target() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let paths = dashboard_test_paths("profile-create-symlink");
+    let dashboard = DashboardServer {
+        paths: paths.clone(),
+        base_url: None,
+    };
+    let target = paths.root.join("outside-home");
+    let profile_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&target).expect("symlink target should be created");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+        .expect("symlink target permissions should be set");
+    symlink(&target, &profile_home).expect("profile home symlink should be created");
+
+    let (status, _) = dashboard_json_request(
+        &dashboard,
+        reqwest::Method::POST,
+        "/api/profile",
+        Some(json!({"name": "main", "activate": true})),
+    );
+    assert_eq!(
+        status, 500,
+        "dashboard should reject a symlinked profile home"
+    );
+    assert_eq!(
+        fs::metadata(&target)
+            .expect("symlink target should remain readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755,
+        "rejecting the symlink must not chmod its target"
+    );
+    assert!(
+        fs::symlink_metadata(&profile_home)
+            .expect("profile home symlink should remain")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        !AppState::load(&paths)
+            .expect("dashboard state should remain readable")
+            .profiles
+            .contains_key("main")
+    );
+}
+
 #[test]
 fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
     let paths = dashboard_test_paths("profile-removal-runtime-prune");

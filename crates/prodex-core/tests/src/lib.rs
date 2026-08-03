@@ -65,11 +65,46 @@ fn binary_resolution_uses_explicit_path_list() {
     };
     let expected = root.join(name);
     fs::write(&expected, b"test").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        fs::set_permissions(&expected, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let path = env::join_paths([&root]).unwrap();
 
     assert_eq!(
         resolve_binary_path_in_path(&OsString::from("prodex-test"), Some(&path)),
         Some(fs::canonicalize(&expected).unwrap())
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn binary_resolution_rejects_non_executable_regular_file() {
+    let root = env::temp_dir().join(format!(
+        "prodex-core-binary-resolution-no-exec-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let candidate = root.join("prodex-test");
+    fs::write(&candidate, b"test").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let path = env::join_paths([&root]).unwrap();
+
+    assert_eq!(
+        resolve_binary_path_in_path(&OsString::from("prodex-test"), Some(&path)),
+        None
     );
 
     let _ = fs::remove_dir_all(root);

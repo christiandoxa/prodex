@@ -29,7 +29,7 @@ pub(crate) use self::lifecycle::{
     ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
     ProfileLifecyclePromoteRollback, acquire_profile_lifecycle_lock,
     cleanup_profile_lifecycle_and_auth_journal, lifecycle_profile_state,
-    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
+    prepare_existing_profile_lifecycle, remove_home, write_profile_lifecycle_plan,
 };
 pub(crate) use self::secrets::{
     read_optional_secret_text_file, write_imported_auth_update_journal, write_secret_text_file,

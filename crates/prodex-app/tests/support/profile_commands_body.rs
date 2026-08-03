@@ -129,6 +129,59 @@ fn profile_remove_recovers_quarantined_home_after_state_save_failure() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn profile_remove_recovers_and_deletes_dangling_home_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let root = ProfileCommandsTestDir::new("remove-dangling-home");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let profile_home = paths.managed_profiles_root.join("main");
+    symlink(paths.root.join("missing-home-target"), &profile_home)
+        .expect("dangling profile home symlink should be created");
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("initial state should save");
+
+    {
+        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "1");
+        handle_remove_profile(RemoveProfileArgs {
+            name: Some("main".to_string()),
+            all: false,
+            delete_home: true,
+        })
+        .expect_err("remove should fail when its state commit fails");
+    }
+    assert!(
+        fs::symlink_metadata(&profile_home).is_err(),
+        "failed remove should quarantine the dangling symlink"
+    );
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: true,
+    })
+    .expect("retry should recover and complete remove");
+    assert!(
+        fs::symlink_metadata(&profile_home).is_err(),
+        "completed remove must not leave a dangling home symlink"
+    );
+}
+
 #[test]
 fn profile_remove_recovers_after_continuation_sidecar_failure() {
     let root = ProfileCommandsTestDir::new("remove-sidecar-recovery");

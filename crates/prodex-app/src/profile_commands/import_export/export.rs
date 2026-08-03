@@ -164,11 +164,46 @@ fn read_exported_secret_file(
 }
 
 fn default_profile_export_path() -> PathBuf {
-    let file_name = format!(
-        "prodex-profiles-{}.json",
-        Local::now().format("%Y%m%d-%H%M%S")
-    );
-    env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(file_name)
+    let stem = format!("prodex-profiles-{}", Local::now().format("%Y%m%d-%H%M%S"));
+    let directory = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    next_profile_export_path(&directory, &stem)
+}
+
+fn next_profile_export_path(directory: &Path, stem: &str) -> PathBuf {
+    let mut path = directory.join(format!("{stem}.json"));
+    let mut suffix = 1;
+    while fs::symlink_metadata(&path).is_ok() {
+        path = directory.join(format!("{stem}-{suffix}.json"));
+        suffix += 1;
+    }
+    path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn implicit_export_path_skips_existing_bundles() {
+        let root = env::temp_dir().join(format!(
+            "prodex-profile-export-path-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let stem = "prodex-profiles-20260803-120000";
+        fs::write(root.join(format!("{stem}.json")), b"first").unwrap();
+        fs::write(root.join(format!("{stem}-1.json")), b"second").unwrap();
+
+        assert_eq!(
+            next_profile_export_path(&root, stem),
+            root.join(format!("{stem}-2.json"))
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
