@@ -34,6 +34,36 @@ impl fmt::Debug for RuntimeSiemWorkerConfig {
 }
 
 impl RuntimeSiemWorkerConfig {
+    #[cfg(test)]
+    pub(crate) fn for_health_tests(maximum_lag_ms: u64) -> Self {
+        let capabilities = SiemExporterCapabilities::bounded(
+            prodex_domain::SecretRef::new("test", "siem", None::<String>),
+            None,
+            None,
+            1,
+            1_024,
+        )
+        .expect("test SIEM capabilities should be valid");
+        Self {
+            exporter: Mutex::new(BoundedGovernanceAuditExporter::new(
+                capabilities,
+                RuntimeSiemHttpsTransport {
+                    endpoint: strict_https_endpoint("https://siem.example.com/events")
+                        .expect("test SIEM endpoint should be valid"),
+                    client: Client::builder()
+                        .build()
+                        .expect("test HTTP client should build"),
+                    bearer_token: Zeroizing::new("test-token".to_string()),
+                    signing_key: None,
+                },
+            )),
+            retry_policy: SiemOutboxRetryPolicy::bounded(1, 1, 1)
+                .expect("test SIEM retry policy should be valid"),
+            batch_limit: 0,
+            maximum_lag_ms,
+        }
+    }
+
     pub(crate) fn from_policy(
         policy: &prodex_runtime_policy::RuntimePolicyGatewayObservabilitySettings,
         resolver: &GatewaySecretResolver,
@@ -144,7 +174,7 @@ impl RuntimeSiemWorkerConfig {
 
     pub(crate) fn plan_health(
         &self,
-        health: prodex_storage_sqlite_runtime::GovernanceOutboxHealth,
+        health: prodex_storage::GovernanceOutboxHealth,
         now_unix_ms: u64,
     ) -> Result<
         prodex_observability::SiemOutboxHealthMetricPlan,

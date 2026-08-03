@@ -8,8 +8,13 @@ pub(crate) fn render_profile_quota_once_tui(
     frame: &mut ratatui::Frame<'_>,
     profile_name: &str,
     quota: ProviderQuotaSnapshot,
+    detail: bool,
 ) {
-    let data =
-        build_profile_quota_watch_tui_frame(profile_name, &quota_watch_updated_at(), Ok(quota));
+    let data = build_profile_quota_watch_tui_frame(
+        profile_name,
+        &quota_watch_updated_at(),
+        Ok(quota),
+        detail,
+    );
     render_all_quota_watch_tui(frame, &data);
 }

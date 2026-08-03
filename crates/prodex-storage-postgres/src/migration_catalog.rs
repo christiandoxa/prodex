@@ -1014,6 +1014,13 @@ pub const GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION: PostgresMigration = Postgres
     sql: include_str!("migrations/017_governance_invalidation_outbox.sql"),
 };
 
+pub const VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(18),
+    phase: PostgresMigrationPhase::Validate,
+    name: "018_validate_constraints",
+    sql: include_str!("migrations/018_validate_constraints.sql"),
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -1032,6 +1039,7 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION,
     GOVERNANCE_REVOCATION_MIGRATION,
     GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION,
+    VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION,
 ];
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

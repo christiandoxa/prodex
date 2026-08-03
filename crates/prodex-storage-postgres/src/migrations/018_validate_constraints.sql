@@ -1,0 +1,72 @@
+-- Migrations 004-016 deferred these checks so legacy rows could be preserved
+-- during expansion. Validation is intentionally fail-closed: the
+-- external migrator wraps this file and its ledger row in one transaction.
+ALTER TABLE prodex_policy_pointers
+    VALIDATE CONSTRAINT prodex_policy_pointers_active_revision_fk;
+ALTER TABLE prodex_policy_pointers
+    VALIDATE CONSTRAINT prodex_policy_pointers_lkg_revision_fk;
+ALTER TABLE prodex_policy_activation_history
+    VALIDATE CONSTRAINT prodex_policy_activation_revision_fk;
+ALTER TABLE prodex_policy_activation_history
+    VALIDATE CONSTRAINT prodex_policy_activation_previous_revision_fk;
+ALTER TABLE prodex_provider_descriptors
+    VALIDATE CONSTRAINT prodex_provider_descriptors_pricing_revision_fk;
+ALTER TABLE prodex_governance_sessions
+    VALIDATE CONSTRAINT prodex_governance_sessions_policy_revision_fk;
+ALTER TABLE prodex_governance_sessions
+    VALIDATE CONSTRAINT prodex_governance_sessions_registry_revision_fk;
+ALTER TABLE prodex_session_revocations
+    VALIDATE CONSTRAINT prodex_session_revocations_session_fk;
+ALTER TABLE prodex_siem_outbox
+    VALIDATE CONSTRAINT prodex_siem_outbox_audit_event_fk;
+ALTER TABLE prodex_siem_dead_letters
+    VALIDATE CONSTRAINT prodex_siem_dead_letters_audit_event_fk;
+
+ALTER TABLE prodex_policy_revisions
+    VALIDATE CONSTRAINT prodex_policy_revisions_bounded;
+ALTER TABLE prodex_policy_pointers
+    VALIDATE CONSTRAINT prodex_policy_pointers_bounded;
+ALTER TABLE prodex_policy_activation_history
+    VALIDATE CONSTRAINT prodex_policy_activation_history_bounded;
+ALTER TABLE prodex_approvals
+    VALIDATE CONSTRAINT prodex_approvals_bounded;
+ALTER TABLE prodex_classification_rule_revisions
+    VALIDATE CONSTRAINT prodex_classification_rule_revisions_bounded;
+ALTER TABLE prodex_provider_registry_revisions
+    VALIDATE CONSTRAINT prodex_provider_registry_revisions_bounded;
+ALTER TABLE prodex_provider_descriptors
+    VALIDATE CONSTRAINT prodex_provider_descriptors_bounded;
+ALTER TABLE prodex_routing_score_revisions
+    VALIDATE CONSTRAINT prodex_routing_score_revisions_bounded;
+ALTER TABLE prodex_governance_sessions
+    VALIDATE CONSTRAINT prodex_governance_sessions_bounded;
+ALTER TABLE prodex_session_revocations
+    VALIDATE CONSTRAINT prodex_session_revocations_bounded;
+ALTER TABLE prodex_siem_outbox
+    VALIDATE CONSTRAINT prodex_siem_outbox_bounded;
+ALTER TABLE prodex_siem_dead_letters
+    VALIDATE CONSTRAINT prodex_siem_dead_letters_bounded;
+
+ALTER TABLE prodex_siem_outbox
+    VALIDATE CONSTRAINT prodex_siem_outbox_claim_pair;
+ALTER TABLE prodex_governance_sessions
+    VALIDATE CONSTRAINT prodex_governance_sessions_provider_descriptor_revision_check;
+ALTER TABLE prodex_approvals
+    VALIDATE CONSTRAINT prodex_approvals_termination_reason_bounded;
+ALTER TABLE prodex_tenants
+    VALIDATE CONSTRAINT prodex_tenants_session_revocation_epoch_nonnegative;
+ALTER TABLE prodex_governance_revision_artifacts
+    VALIDATE CONSTRAINT prodex_governance_artifact_signature_pair;
+
+ALTER TABLE prodex_policy_revisions
+    VALIDATE CONSTRAINT prodex_policy_revisions_lifecycle_state_check;
+ALTER TABLE prodex_policy_activation_history
+    VALIDATE CONSTRAINT prodex_policy_activation_history_action_check;
+ALTER TABLE prodex_governance_activation_history
+    VALIDATE CONSTRAINT prodex_governance_activation_history_action_check;
+ALTER TABLE prodex_governance_mutation_idempotency
+    VALIDATE CONSTRAINT prodex_governance_mutation_idempotency_action_check;
+ALTER TABLE prodex_governance_activation_history
+    VALIDATE CONSTRAINT prodex_governance_activation_history_result_ids_bounded;
+ALTER TABLE prodex_governance_mutation_idempotency
+    VALIDATE CONSTRAINT prodex_governance_mutation_idempotency_result_ids_bounded;

@@ -84,9 +84,25 @@ fn presidio_commands_parse_as_top_level_commands() {
         command,
         Commands::Presidio(PresidioCommands::Redact(PresidioRedactArgs {
             json: true,
+            language_mode: None,
             ..
         }))
     ));
+
+    let command = parse_cli_command_from([
+        "prodex",
+        "presidio",
+        "redact",
+        "--text",
+        "hello",
+        "--language-mode",
+        "fixed",
+    ])
+    .expect("explicit fixed language mode should parse");
+    let Commands::Presidio(PresidioCommands::Redact(args)) = command else {
+        panic!("expected presidio redact command");
+    };
+    assert_eq!(args.language_mode, Some(PresidioLanguageMode::Fixed));
 }
 #[test]
 fn doctor_install_parse_as_top_level_command() {
@@ -573,6 +589,7 @@ fn context_export_parses_id_and_optional_path() {
         "export",
         "019c9e3d",
         "./context_session.md",
+        "--force",
     ])
     .expect("context export should parse");
     let Commands::Context(ContextCommands::Export(args)) = command else {
@@ -583,6 +600,7 @@ fn context_export_parses_id_and_optional_path() {
         args.path.as_deref(),
         Some(std::path::Path::new("./context_session.md"))
     );
+    assert!(args.force);
 }
 
 #[test]

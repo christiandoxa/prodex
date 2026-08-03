@@ -26,6 +26,7 @@ struct RuntimeGatewayReconciliationJob {
     _permit: tokio::sync::OwnedSemaphorePermit,
     attempt: u8,
     ledger_reconciled: bool,
+    durable_reconciled: bool,
     storage_error_observed: bool,
     retry_logged: bool,
 }
@@ -85,6 +86,7 @@ impl RuntimeGatewayReconciliationQueue {
                 _permit: permit,
                 attempt: 0,
                 ledger_reconciled: false,
+                durable_reconciled: false,
                 storage_error_observed: false,
                 retry_logged: false,
             });
@@ -230,7 +232,7 @@ fn runtime_gateway_reconcile_once(
             Err(_err) => job.storage_error_observed = true,
         }
     }
-    if job.ledger_reconciled {
+    if !job.durable_reconciled {
         match runtime_gateway_durable_reconcile_response(
             &shared.runtime_shared,
             state_store,
@@ -238,18 +240,19 @@ fn runtime_gateway_reconcile_once(
             &shared.gateway_usage.durable_reservations,
             event,
         ) {
-            Ok(()) => {
-                runtime_gateway_record_reconciliation_audit(
-                    &shared.runtime_shared,
-                    event,
-                    reconciliation,
-                    ApplicationUsageReconciliationAuditOutcome::Success,
-                );
-                runtime_gateway_finish_reconciliation(shared, event.request);
-                return true;
-            }
+            Ok(()) => job.durable_reconciled = true,
             Err(_err) => job.storage_error_observed = true,
         }
+    }
+    if job.ledger_reconciled && job.durable_reconciled {
+        runtime_gateway_record_reconciliation_audit(
+            &shared.runtime_shared,
+            event,
+            reconciliation,
+            ApplicationUsageReconciliationAuditOutcome::Success,
+        );
+        runtime_gateway_finish_reconciliation(shared, event.request);
+        return true;
     }
     if job.attempt == terminal_attempt && !job.retry_logged {
         job.retry_logged = true;

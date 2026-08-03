@@ -141,18 +141,14 @@ pub(super) fn exchange_google_oauth_code(
     let client_secret = gemini_oauth_client_secret();
     let response = client
         .post(GEMINI_OAUTH_TOKEN_URL)
-        .header(
-            reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded",
-        )
-        .body(oauth_form_body(&[
-            ("client_id", &client_id),
-            ("client_secret", &client_secret),
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
             ("code", code),
             ("code_verifier", code_verifier),
             ("redirect_uri", redirect_uri),
             ("grant_type", "authorization_code"),
-        ]))
+        ])
         .send()
         .context("failed to exchange Google OAuth code")?;
     parse_google_token_response(response, "Google OAuth code exchange")
@@ -166,16 +162,12 @@ pub(super) fn refresh_google_oauth_token(
     let client_secret = gemini_oauth_client_secret();
     let response = client
         .post(GEMINI_OAUTH_TOKEN_URL)
-        .header(
-            reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded",
-        )
-        .body(oauth_form_body(&[
-            ("client_id", &client_id),
-            ("client_secret", &client_secret),
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
-        ]))
+        ])
         .send()
         .context("failed to refresh Google OAuth token")?;
     parse_google_token_response(response, "Google OAuth token refresh")
@@ -223,28 +215,6 @@ fn parse_google_token_response(
         bail!("{context_label} failed (HTTP {}): {body}", status.as_u16());
     }
     serde_json::from_str(&body).with_context(|| format!("failed to parse {context_label} response"))
-}
-
-fn oauth_form_body(params: &[(&str, &str)]) -> String {
-    params
-        .iter()
-        .map(|(key, value)| format!("{}={}", percent_encode(key), percent_encode(value)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-fn percent_encode(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                encoded.push(byte as char);
-            }
-            b' ' => encoded.push('+'),
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 pub(super) fn fetch_google_user_email(client: &Client, access_token: &str) -> Result<String> {

@@ -25,10 +25,11 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-    FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, MOVEFILE_REPLACE_EXISTING,
-    MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
+    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_RENAME_INFO,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileRenameInfo,
+    GetFileInformationByHandle, GetFinalPathNameByHandleW, READ_CONTROL,
+    SetFileInformationByHandle, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -140,6 +141,7 @@ impl Directory {
         let created = open_regular(&path, true)?;
         let result = (|| {
             validate_regular(&created)?;
+            require_beneath(&self.file, &created)?;
             set_private_acl(&created, false)?;
             validate_acl(&created, AclUse::PrivateFile)?;
 
@@ -148,36 +150,26 @@ impl Directory {
             // while it observes the inherited, not-yet-protected ACL.
             let file = open_private_regular(&path)?;
             validate_regular(&file)?;
+            require_beneath(&self.file, &file)?;
             if file_identity(&created)? != file_identity(&file)? {
                 return Err(permission_denied("secret file changed during creation"));
             }
             Ok(file)
         })();
-        drop(created);
         if result.is_err() {
-            let _ = fs::remove_file(&path);
+            let _ = delete_opened_file(&created);
         }
+        drop(created);
         result
     }
 
-    pub(super) fn replace(&self, from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
+    pub(super) fn replace(&self, _from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
         self.require_path_identity()?;
-        let from = wide_path(&self.path.join(from))?;
+        require_beneath(&self.file, file)?;
         let to_path = self.path.join(to);
-        let to = wide_path(&to_path)?;
-        // SAFETY: both buffers are NUL-terminated Windows paths and remain live
-        // for the call. The source and target share one verified parent.
-        let result = unsafe {
-            MoveFileExW(
-                from.as_ptr(),
-                to.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        rename_opened_file(&self.file, to, file)?;
         let replaced = open_regular(&to_path, false)?;
+        require_beneath(&self.file, &replaced)?;
         if file_identity(file)? != file_identity(&replaced)? {
             return Err(permission_denied("secret file changed during replacement"));
         }
@@ -187,15 +179,16 @@ impl Directory {
     pub(super) fn remove_verified(&self, name: &OsStr, file: &File) -> io::Result<()> {
         self.require_path_identity()?;
         let path = self.path.join(name);
-        let current = match open_regular(&path, false) {
+        let current = match open_regular_for_delete(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
         };
+        require_beneath(&self.file, &current)?;
         if file_identity(file)? != file_identity(&current)? {
             return Err(permission_denied("secret file changed during removal"));
         }
-        fs::remove_file(path)
+        delete_opened_file(&current)
     }
 
     pub(super) fn verify(&self, name: &OsStr, file: &File) -> io::Result<()> {
@@ -209,11 +202,14 @@ impl Directory {
 
     pub(super) fn remove_entry(&self, name: &OsStr) -> io::Result<()> {
         self.require_path_identity()?;
-        match fs::remove_file(self.path.join(name)) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
+        let file = match open_regular_for_delete(&self.path.join(name)) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        validate_regular(&file)?;
+        require_beneath(&self.file, &file)?;
+        delete_opened_file(&file)
     }
 
     pub(super) fn read_link(&self, name: &OsStr) -> io::Result<OsString> {
@@ -229,8 +225,7 @@ impl Directory {
     }
 
     pub(super) fn sync(&self) -> io::Result<()> {
-        // MoveFileExW uses WRITE_THROUGH. Windows directory handles do not
-        // consistently support FlushFileBuffers, so no second flush is needed.
+        // Windows directory handles do not consistently support FlushFileBuffers.
         Ok(())
     }
 
@@ -339,10 +334,61 @@ fn open_private_regular(path: &Path) -> io::Result<File> {
     options
         .read(true)
         .write(true)
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER)
+        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER | DELETE)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
+}
+
+fn open_regular_for_delete(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ | DELETE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+fn rename_opened_file(parent: &File, name: &OsStr, file: &File) -> io::Result<()> {
+    let name: Vec<u16> = name.encode_wide().collect();
+    if name.is_empty() || name.contains(&0) {
+        return Err(invalid_input("secret path contains an invalid name"));
+    }
+    let size = size_of::<FILE_RENAME_INFO>() + (name.len() - 1) * size_of::<u16>();
+    let mut storage = vec![0u64; size.div_ceil(size_of::<u64>())];
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*info).Anonymous.ReplaceIfExists = true;
+        (*info).RootDirectory = parent.as_raw_handle().cast();
+        (*info).FileNameLength = u32::try_from(name.len() * size_of::<u16>())
+            .map_err(|_| invalid_input("secret path is too long"))?;
+        std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
+        if SetFileInformationByHandle(
+            file.as_raw_handle().cast(),
+            FileRenameInfo,
+            info.cast(),
+            u32::try_from(size).map_err(|_| invalid_input("secret path is too long"))?,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+fn delete_opened_file(file: &File) -> io::Result<()> {
+    let information = FILE_DISPOSITION_INFO { DeleteFile: true };
+    unsafe {
+        if SetFileInformationByHandle(
+            file.as_raw_handle().cast(),
+            FileDispositionInfo,
+            (&information as *const FILE_DISPOSITION_INFO).cast(),
+            u32::try_from(size_of::<FILE_DISPOSITION_INFO>()).unwrap_or(u32::MAX),
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 fn validate_directory(file: &File) -> io::Result<()> {
@@ -710,15 +756,6 @@ impl Drop for LocalSecurityDescriptor {
             }
         }
     }
-}
-
-fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if wide.contains(&0) {
-        return Err(invalid_input("secret path contains NUL"));
-    }
-    wide.push(0);
-    Ok(wide)
 }
 
 fn invalid_input(message: &'static str) -> io::Error {

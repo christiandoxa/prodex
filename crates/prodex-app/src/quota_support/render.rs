@@ -210,13 +210,6 @@ pub(crate) fn format_gemini_reset_summary(info: &prodex_quota::GeminiQuotaInfo) 
     prodex_quota::format_gemini_reset_summary(info)
 }
 
-pub(crate) fn render_profile_quota_snapshot(
-    profile_name: &str,
-    snapshot: &ProviderQuotaSnapshot,
-) -> String {
-    prodex_quota::render_profile_quota_snapshot(profile_name, &render_quota_snapshot(snapshot))
-}
-
 pub(crate) fn render_profile_quota_snapshot_with_detail(
     profile_name: &str,
     snapshot: &ProviderQuotaSnapshot,

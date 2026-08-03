@@ -7,6 +7,7 @@ pub struct PostgresMigrationVersion(pub u32);
 pub enum PostgresMigrationPhase {
     Expand,
     Backfill,
+    Validate,
     Contract,
 }
 
@@ -18,7 +19,7 @@ pub struct PostgresMigration {
     pub sql: &'static str,
 }
 
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(17);
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(18);
 
 pub const CONFIG_PUBLICATION_TRANSPORT_MIGRATION: PostgresMigration = PostgresMigration {
     version: PostgresMigrationVersion(14),

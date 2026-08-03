@@ -14,6 +14,7 @@ use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
 use super::local_rewrite_gateway_reconciliation_runtime::{
     runtime_gateway_durable_actual_usage, runtime_gateway_postgres_load_durable_reservation_state,
     runtime_gateway_postgres_reconcile_usage,
+    runtime_gateway_sqlite_load_durable_reservation_state,
 };
 use super::local_rewrite_gateway_redis_ledger::{
     runtime_gateway_redis_ledger_load, runtime_gateway_redis_ledger_reconcile_response,
@@ -55,6 +56,17 @@ pub(super) fn runtime_gateway_billing_ledger_load(
     }
 }
 
+fn runtime_gateway_durable_reservation_state(
+    durable_reservations: &Arc<Mutex<BTreeMap<u64, RuntimeGatewayDurableReservationState>>>,
+    request: u64,
+) -> Option<RuntimeGatewayDurableReservationState> {
+    durable_reservations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&request)
+        .cloned()
+}
+
 pub(super) fn runtime_gateway_durable_reconcile_response(
     runtime_shared: &RuntimeRotationProxyShared,
     state_store: &RuntimeGatewayStateStore,
@@ -62,10 +74,7 @@ pub(super) fn runtime_gateway_durable_reconcile_response(
     durable_reservations: &Arc<Mutex<BTreeMap<u64, RuntimeGatewayDurableReservationState>>>,
     event: &RuntimeProviderGatewaySpendEvent,
 ) -> std::io::Result<()> {
-    let state = durable_reservations
-        .lock()
-        .ok()
-        .and_then(|reservations| reservations.get(&event.request).cloned());
+    let state = runtime_gateway_durable_reservation_state(durable_reservations, event.request);
     let state = match (state, state_store) {
         (None, RuntimeGatewayStateStore::Postgres { .. }) => {
             runtime_gateway_postgres_load_durable_reservation_state(
@@ -74,19 +83,12 @@ pub(super) fn runtime_gateway_durable_reconcile_response(
                 event,
             )?
         }
+        (None, RuntimeGatewayStateStore::Sqlite { path }) => {
+            runtime_gateway_sqlite_load_durable_reservation_state(path, event)?
+        }
         (state, _) => state,
     };
     let Some(state) = state else {
-        runtime_proxy_log(
-            runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_durable_reservation_state_missing",
-                [
-                    runtime_proxy_log_field("request", event.request.to_string()),
-                    runtime_proxy_log_field("backend", state_store.label()),
-                ],
-            ),
-        );
         return Ok(());
     };
     let actual = runtime_gateway_durable_actual_usage(event);
@@ -386,6 +388,83 @@ mod tests {
         BudgetSnapshot, IdempotencyKey, ReservationRecord, ReservationRequest, TenantId,
         VirtualKeyId,
     };
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn durable_reservation_state_lookup_recovers_poisoned_mutex() {
+        let tenant_id = TenantId::new();
+        let record = ReservationRecord::from_request(
+            ReservationRequest {
+                tenant_id,
+                call_id: prodex_domain::CallId::new(),
+                reservation_id: prodex_domain::ReservationId::new(),
+                estimate: UsageAmount::new(1, 1),
+            },
+            1,
+            60_000,
+        )
+        .expect("reservation record");
+        let request = 41;
+        let reservations = Arc::new(Mutex::new(BTreeMap::from([(
+            request,
+            RuntimeGatewayDurableReservationState {
+                storage_key: prodex_storage::TenantStorageKey::tenant(tenant_id),
+                record: record.clone(),
+            },
+        )])));
+        let poisoned = Arc::clone(&reservations);
+        assert!(
+            std::thread::spawn(move || {
+                let _guard = poisoned.lock().expect("reservation state lock");
+                panic!("poison reservation state lock");
+            })
+            .join()
+            .is_err()
+        );
+
+        let recovered = runtime_gateway_durable_reservation_state(&reservations, request)
+            .expect("poisoned reservation state should be recovered");
+        assert_eq!(recovered.record.reservation_id, record.reservation_id);
+    }
+
+    #[test]
+    fn sqlite_policy_key_without_durable_reservation_is_not_retried() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-policy-reconcile-{}",
+            prodex_domain::RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        let path = root.join("state.sqlite");
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path)
+            .expect("sqlite schema fixture should be created");
+        let event = RuntimeProviderGatewaySpendEvent {
+            event: "gateway_spend",
+            phase: "response",
+            request: 7,
+            key_name: Some("policy-key".to_string()),
+            tenant_id: Some(TenantId::new().to_string()),
+            request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            legacy_request_sequence: 7,
+            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
+            provider: "openai".to_string(),
+            path: "/v1/responses".to_string(),
+            model: "gpt-5.4".to_string(),
+            status: 200,
+            elapsed_ms: 1,
+            request_bytes: 1,
+            response_bytes: Some(1),
+            input_tokens: Some(1),
+            output_tokens: Some(1),
+            cost_usd: None,
+            reconciliation_reason: Some(prodex_domain::ReservationReconciliationReason::Completed),
+            sink: "runtime-log".to_string(),
+        };
+        let state = runtime_gateway_sqlite_load_durable_reservation_state(&path, &event)
+            .expect("policy-key lookup should succeed");
+        assert!(state.is_none());
+        std::fs::remove_dir_all(root).expect("test root should clean up");
+    }
 
     #[test]
     fn durable_actual_usage_prefers_actual_when_reservation_covers_it() {
@@ -461,6 +540,56 @@ mod tests {
             runtime_gateway_durable_actual_usage(&event),
             UsageAmount::new(18, 0)
         );
+    }
+
+    #[test]
+    fn sqlite_durable_reconcile_missing_reservation_is_error() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-missing-reservation-{}",
+            prodex_domain::RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        let path = root.join("state.sqlite");
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path)
+            .expect("sqlite schema fixture should be created");
+
+        let tenant_id = TenantId::new();
+        let storage_key = prodex_storage::TenantStorageKey::tenant(tenant_id);
+        let record = ReservationRecord::from_request(
+            ReservationRequest {
+                tenant_id,
+                call_id: prodex_domain::CallId::new(),
+                reservation_id: prodex_domain::ReservationId::new(),
+                estimate: UsageAmount::new(2, 3),
+            },
+            1_000,
+            60_000,
+        )
+        .expect("reservation record");
+        let actual = UsageAmount::new(1, 1);
+        let plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
+            prodex_storage::UsageReconciliationCommand {
+                storage_key,
+                snapshot: BudgetSnapshot {
+                    reserved: record.reserved,
+                    committed: UsageAmount::ZERO,
+                },
+                record,
+                actual,
+                reason: prodex_domain::ReservationReconciliationReason::Completed,
+            },
+        )
+        .expect("sqlite reconciliation plan");
+
+        let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &record, actual)
+            .expect_err("missing durable reservation must not reconcile successfully");
+        assert!(
+            error
+                .to_string()
+                .contains("durable reservation was not found")
+        );
+
+        std::fs::remove_dir_all(root).expect("test root should clean up");
     }
 
     #[test]

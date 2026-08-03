@@ -107,7 +107,20 @@ test("runtime proxy timing packs reduce runner pressure without losing filters",
   assert.equal(result.status, 0, result.stderr);
   const matrix = JSON.parse(result.stdout);
   const filters = matrix.include.flatMap((entry) => entry.filters.split("\n"));
-  assert.equal(matrix.include.length, 12);
-  assert.equal(filters.length, 36);
+  assert.equal(matrix.include.length, 14);
+  assert.equal(filters.length, 46);
   assert.equal(new Set(filters).size, filters.length);
+  const admissionCorePack = matrix.include.find((entry) =>
+    entry.filters.includes(
+      "|main_internal_tests::runtime_proxy_selection_and_pressure::admission::compact::",
+    ),
+  );
+  const admissionAffinityPack = matrix.include.find((entry) =>
+    entry.filters.includes(
+      "|main_internal_tests::runtime_proxy_selection_and_pressure::admission::cli_mount::",
+    ),
+  );
+  assert.ok(admissionCorePack, "admission core filter missing from runtime matrix");
+  assert.ok(admissionAffinityPack, "admission affinity filter missing from runtime matrix");
+  assert.notEqual(admissionCorePack.suite, admissionAffinityPack.suite);
 });

@@ -18,10 +18,11 @@ pub(crate) fn watch_quota(
     profile_name: &str,
     provider: &ProfileProvider,
     codex_home: &Path,
+    detail: bool,
     base_url: Option<&str>,
 ) -> Result<()> {
     if io::stdout().is_terminal() && io::stdin().is_terminal() {
-        match watch_profile_quota_tui(profile_name, provider, codex_home, base_url) {
+        match watch_profile_quota_tui(profile_name, provider, codex_home, detail, base_url) {
             Ok(()) => return Ok(()),
             Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
                 eprintln!("{}", quota_watch_tui_fallback_message(&err));
@@ -36,6 +37,7 @@ pub(crate) fn watch_quota(
             &quota_watch_updated_at(),
             fetch_profile_quota(provider, codex_home, base_url)
                 .map_err(|err| quota_error_message(&err)),
+            detail,
         );
         print_quota_watch_plain_snapshot(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
@@ -54,6 +56,7 @@ fn watch_profile_quota_tui(
     profile_name: &str,
     provider: &ProfileProvider,
     codex_home: &Path,
+    detail: bool,
     base_url: Option<&str>,
 ) -> Result<()> {
     let mut tui = QuotaWatchTui::stdout("quota TUI")?;
@@ -78,6 +81,7 @@ fn watch_profile_quota_tui(
                 profile_name,
                 &snapshot.updated,
                 snapshot.quota.clone(),
+                detail,
             );
             tui.terminal
                 .draw(|area| render_all_quota_watch_tui(area, &frame))

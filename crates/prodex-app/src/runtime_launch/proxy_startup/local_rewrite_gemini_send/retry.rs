@@ -18,7 +18,9 @@ use super::{
     runtime_local_rewrite_buffered_response_from_response, runtime_provider_error_class,
     runtime_provider_error_cooldown_ms,
 };
+use crate::build_runtime_proxy_text_response_parts;
 use anyhow::Result;
+use runtime_proxy_crate::runtime_forward_binary_response_headers;
 use std::thread;
 use std::time::Duration;
 
@@ -50,7 +52,23 @@ pub(super) fn runtime_gemini_handle_error(
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
+    let response_headers = runtime_forward_binary_response_headers(
+        response
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_bytes())),
+    );
+    let parts = match runtime_local_rewrite_buffered_response_from_response(response) {
+        Ok(parts) => parts,
+        Err(_) => {
+            let mut parts = build_runtime_proxy_text_response_parts(
+                status,
+                "provider response could not be processed",
+            );
+            parts.headers = response_headers;
+            return Ok(RuntimeGeminiErrorAction::Buffered(parts));
+        }
+    };
     let class =
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, status, &parts.body);
     let quota_blocked = runtime_gemini_buffered_parts_are_quota_blocked(status, &parts);

@@ -262,6 +262,9 @@ pub struct ContextExportArgs {
     /// Output Markdown path. Defaults to `./context_<resolved-session-id>.md`.
     #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
+    /// Replace an existing output file.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]

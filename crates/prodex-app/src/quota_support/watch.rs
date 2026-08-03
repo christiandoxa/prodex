@@ -164,9 +164,10 @@ pub(crate) fn render_profile_quota_watch_output(
     profile_name: &str,
     _updated: &str,
     quota_result: std::result::Result<ProviderQuotaSnapshot, String>,
+    detail: bool,
 ) -> String {
     match quota_result {
-        Ok(quota) => render_profile_quota_snapshot(profile_name, &quota),
+        Ok(quota) => render_profile_quota_snapshot_with_detail(profile_name, &quota, detail),
         Err(err) => render_quota_watch_error_panel(&format!("Quota {profile_name}"), &err),
     }
 }
