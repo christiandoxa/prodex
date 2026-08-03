@@ -4,6 +4,7 @@ use runtime_anthropic_crate as anthropic;
 pub(super) use anthropic::{
     RuntimeAnthropicServerToolUsage, RuntimeAnthropicServerTools, RuntimeAnthropicSseReader,
     runtime_anthropic_buffered_reply_parts, runtime_anthropic_error_type_for_status,
+    runtime_anthropic_validate_response_terminal_state,
 };
 
 #[cfg(test)]

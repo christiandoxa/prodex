@@ -32,7 +32,7 @@ pub(crate) fn runtime_anthropic_response_is_max_tokens_incomplete(
     )
 }
 
-fn runtime_anthropic_validate_response_terminal_state(value: &serde_json::Value) -> Result<()> {
+pub fn runtime_anthropic_validate_response_terminal_state(value: &serde_json::Value) -> Result<()> {
     let status = value
         .get("status")
         .or_else(|| value.pointer("/response/status"))

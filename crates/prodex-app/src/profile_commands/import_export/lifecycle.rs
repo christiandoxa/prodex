@@ -12,7 +12,7 @@ use crate::{
 use prodex_core::path_is_strictly_under_root;
 
 mod home_action_validation;
-use home_action_validation::validate_home_actions;
+use home_action_validation::{lifecycle_path_exists, validate_home_actions};
 
 pub(crate) struct ProfileLifecycleLock {
     _lock: crate::JsonFileLock,
@@ -682,24 +682,13 @@ fn finish_quarantine_home(source: &str, quarantine: &str, committed: bool) -> Re
         let quarantine_exists = lifecycle_path_exists(quarantine)?;
         if !source_exists && quarantine_exists {
             fs::rename(quarantine, source).with_context(|| {
-                format!(
-                    "failed to restore quarantined profile home {}",
-                    source.display()
-                )
+                format!("failed to restore quarantined home {}", source.display())
             })?;
         } else if source_exists && quarantine_exists {
             remove_home(quarantine)?;
         }
     }
     Ok(())
-}
-
-fn lifecycle_path_exists(path: &Path) -> Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
-    }
 }
 
 fn promote_home(source: &Path, destination: &Path) -> Result<()> {
