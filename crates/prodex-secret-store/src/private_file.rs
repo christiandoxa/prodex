@@ -33,6 +33,11 @@ pub fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     secure_file::write_private_atomic(path, bytes)
 }
 
+/// Creates and flushes a current-user-private regular file without replacing an existing entry.
+pub fn write_private_file_create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    secure_file::create_private(path, bytes).map(drop)
+}
+
 /// Encrypts a private payload with a random nonce prepended to the ciphertext.
 pub fn encrypt_private_payload(
     key: &[u8],

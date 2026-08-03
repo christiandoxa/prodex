@@ -168,7 +168,11 @@ pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> 
 pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> io::Result<File> {
     let (directory, name) = open_parent(path, true)?;
     let mut file = directory.0.create_private_file(&name)?;
-    if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+    if let Err(error) = file
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| directory.0.sync())
+    {
         let _ = directory.0.remove_entry(&name);
         return Err(error);
     }
