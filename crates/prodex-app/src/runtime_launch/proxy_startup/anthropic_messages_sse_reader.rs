@@ -417,6 +417,16 @@ mod tests {
     }
 
     #[test]
+    fn native_anthropic_stream_rejects_premature_eof() {
+        let output = render(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_eof\",\"model\":\"claude-sonnet-4-6\"}}\n\n",
+        );
+
+        assert!(output.contains("event: response.failed"), "{output}");
+        assert!(!output.contains("event: response.completed"), "{output}");
+    }
+
+    #[test]
     fn native_anthropic_stream_accumulates_tool_input_json() {
         let output = render(concat!(
             "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_tool\",\"model\":\"claude-sonnet-4-6\"}}\n\n",

@@ -133,7 +133,14 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
             {
                 self.pending = event.into_bytes();
             }
-        } else if let Some(event) = self.state.complete_event() {
+        } else if self.state.eof() {
+            if let Some(event) = self.state.complete_event() {
+                self.pending = event.into_bytes();
+            }
+        } else if let Some(event) = self
+            .state
+            .failed_event("provider_stream_error", "unexpected end of stream")
+        {
             self.pending = event.into_bytes();
         }
         self.state.set_eof(true);

@@ -56,6 +56,23 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn gemini_sse_reader_rejects_premature_eof() {
+    let stream = "data: {\"responseId\":\"resp_eof\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n";
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"), "{output}");
+    assert!(!output.contains("event: response.completed"), "{output}");
+}
+
+#[test]
 fn evaluated_gemini_sse_restores_native_shell_alias_in_every_tool_call_event() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_alias\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"run_shell_command\",\"args\":{\"cmd\":\"pwd\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",

@@ -24,7 +24,7 @@ impl RuntimeAnthropicSseReader {
             Some("response.completed") => {
                 self.observe_stream_completed(value);
             }
-            Some("error" | "response.failed") => {
+            Some("error" | "response.failed" | "response.incomplete") => {
                 self.finish_error(runtime_anthropic_response_event_error_message(value));
             }
             _ => {}

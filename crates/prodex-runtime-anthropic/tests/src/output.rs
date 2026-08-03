@@ -1,5 +1,6 @@
 use super::*;
 use std::cell::Cell;
+use std::io::{Cursor, Read};
 
 fn test_messages_request() -> RuntimeAnthropicMessagesRequest {
     let mut server_tools = RuntimeAnthropicServerTools::default();
@@ -48,5 +49,41 @@ fn server_tool_followup_translation_passes_upstream_errors_without_followup() {
     match result {
         RuntimeResponsesReply::Buffered(parts) => assert_eq!(parts.status, 429),
         RuntimeResponsesReply::Streaming(_) => panic!("translation should be buffered"),
+    }
+}
+
+#[test]
+fn anthropic_streaming_conversion_preserves_incomplete_failed_and_eof_errors() {
+    for upstream in [
+        "data: {\"type\":\"response.incomplete\",\"response\":{}}\n\n",
+        "data: {\"type\":\"response.failed\",\"response\":{}}\n\n",
+        "",
+    ] {
+        let mut reader = RuntimeAnthropicSseReader::new(
+            Box::new(Cursor::new(upstream.as_bytes())),
+            "claude-sonnet-4-6".to_string(),
+            false,
+            RuntimeAnthropicServerToolUsage::default(),
+            RuntimeAnthropicServerTools::default(),
+        );
+        let mut body = String::new();
+        reader.read_to_string(&mut body).unwrap();
+
+        assert!(body.contains("event: error"), "{body}");
+        assert!(!body.contains("\"stop_reason\":\"end_turn\""), "{body}");
+    }
+}
+
+#[test]
+fn anthropic_buffered_conversion_requires_a_completed_event() {
+    for upstream in [
+        b"data: {\"type\":\"response.incomplete\",\"response\":{}}\n\n".as_slice(),
+        b"data: {\"type\":\"response.failed\",\"response\":{}}\n\n".as_slice(),
+        b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".as_slice(),
+    ] {
+        assert!(
+            runtime_anthropic_response_from_sse_bytes(upstream, "claude-sonnet-4-6", false)
+                .is_err()
+        );
     }
 }

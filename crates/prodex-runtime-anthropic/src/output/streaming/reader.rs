@@ -17,7 +17,7 @@ impl Read for RuntimeAnthropicSseReader {
             let mut upstream_buffer = [0_u8; 8192];
             let read = self.inner.read(&mut upstream_buffer)?;
             if read == 0 {
-                self.finish_success();
+                self.finish_error("Codex stream ended before response.completed.");
                 continue;
             }
             self.observe_upstream_bytes(&upstream_buffer[..read])?;
