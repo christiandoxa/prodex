@@ -209,36 +209,18 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     {
         return None;
     }
-    let (profile_name, dead_shadowed_by_binding) = {
-        let bindings = if session_binding {
-            &runtime.session_id_bindings
-        } else {
-            &runtime.turn_state_bindings
+    let (profile_name, dead_shadowed_by_binding) =
+        match runtime_compact_binding_lookup(runtime, key, status_kind, session_binding, now) {
+            RuntimeCompactBindingLookup::Conflict => {
+                return Some(
+                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string(),
+                );
+            }
+            RuntimeCompactBindingLookup::Resolved {
+                profile_name,
+                dead_shadowed_by_binding,
+            } => (profile_name, dead_shadowed_by_binding),
         };
-        let binding = bindings.get(key);
-        if binding.is_some_and(|binding| {
-            binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
-                || !runtime.state.profiles.contains_key(&binding.profile_name)
-                || runtime_profile_auth_failure_active_with_auth_cache(
-                    &runtime.profile_health,
-                    &runtime.profile_usage_auth,
-                    &binding.profile_name,
-                    now,
-                )
-        }) {
-            return Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string());
-        }
-        let binding =
-            binding.filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
-        (
-            binding.map(|binding| binding.profile_name.clone()),
-            runtime_dead_continuation_status_shadowed_by_live_binding(
-                runtime_continuation_status_map(&runtime.continuation_statuses, status_kind)
-                    .get(key),
-                binding,
-            ),
-        )
-    };
     if runtime_compact_lineage_status_is_dead(
         shared,
         &runtime.continuation_statuses,
@@ -249,39 +231,103 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     ) {
         return None;
     }
+    let persist_touch = runtime_touch_compact_profile_binding(
+        runtime,
+        key,
+        status_kind,
+        session_binding,
+        profile_name.as_deref(),
+        now,
+    );
+    if persist_touch {
+        schedule_runtime_binding_touch_save(shared, runtime, mutation);
+    }
+    profile_name
+}
+
+enum RuntimeCompactBindingLookup {
+    Conflict,
+    Resolved {
+        profile_name: Option<String>,
+        dead_shadowed_by_binding: bool,
+    },
+}
+
+fn runtime_compact_binding_lookup(
+    runtime: &RuntimeRotationState,
+    key: &str,
+    status_kind: RuntimeContinuationBindingKind,
+    session_binding: bool,
+    now: i64,
+) -> RuntimeCompactBindingLookup {
+    let bindings = if session_binding {
+        &runtime.session_id_bindings
+    } else {
+        &runtime.turn_state_bindings
+    };
+    let binding = bindings.get(key);
+    if binding.is_some_and(|binding| {
+        binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+            || !runtime.state.profiles.contains_key(&binding.profile_name)
+            || runtime_profile_auth_failure_active_with_auth_cache(
+                &runtime.profile_health,
+                &runtime.profile_usage_auth,
+                &binding.profile_name,
+                now,
+            )
+    }) {
+        return RuntimeCompactBindingLookup::Conflict;
+    }
+    let binding =
+        binding.filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
+    RuntimeCompactBindingLookup::Resolved {
+        profile_name: binding.map(|binding| binding.profile_name.clone()),
+        dead_shadowed_by_binding: runtime_dead_continuation_status_shadowed_by_live_binding(
+            runtime_continuation_status_map(&runtime.continuation_statuses, status_kind).get(key),
+            binding,
+        ),
+    }
+}
+
+fn runtime_touch_compact_profile_binding(
+    runtime: &mut RuntimeRotationState,
+    key: &str,
+    status_kind: RuntimeContinuationBindingKind,
+    session_binding: bool,
+    profile_name: Option<&str>,
+    now: i64,
+) -> bool {
     let bindings = if session_binding {
         &mut runtime.session_id_bindings
     } else {
         &mut runtime.turn_state_bindings
     };
-    let mut persist_touch = false;
-    if let Some(profile_name) = profile_name.as_deref()
-        && let Some(binding) = bindings.get_mut(key)
-        && binding.profile_name == profile_name
-    {
-        if runtime_binding_touch_should_persist(binding.bound_at, now) {
-            persist_touch = true;
-        }
-        if binding.bound_at < now {
-            binding.bound_at = now;
-        }
-        persist_touch = runtime_continuation_status_should_persist_touch(
-            &runtime.continuation_statuses,
-            status_kind,
-            key,
-            now,
-        ) || persist_touch;
-        let _ = runtime_mark_continuation_status_touched(
-            &mut runtime.continuation_statuses,
-            status_kind,
-            key,
-            now,
-        );
+    let Some(profile_name) = profile_name else {
+        return false;
+    };
+    let Some(binding) = bindings.get_mut(key) else {
+        return false;
+    };
+    if binding.profile_name != profile_name {
+        return false;
     }
-    if persist_touch {
-        schedule_runtime_binding_touch_save(shared, runtime, mutation);
+    let mut persist_touch = runtime_binding_touch_should_persist(binding.bound_at, now);
+    if binding.bound_at < now {
+        binding.bound_at = now;
     }
-    profile_name
+    persist_touch = runtime_continuation_status_should_persist_touch(
+        &runtime.continuation_statuses,
+        status_kind,
+        key,
+        now,
+    ) || persist_touch;
+    let _ = runtime_mark_continuation_status_touched(
+        &mut runtime.continuation_statuses,
+        status_kind,
+        key,
+        now,
+    );
+    persist_touch
 }
 
 fn runtime_compact_lineage_status_is_unusable(

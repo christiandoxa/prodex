@@ -607,89 +607,116 @@ fn redact_audit_reason_detail(value: &str) -> String {
     let tokens = value.split(' ').collect::<Vec<_>>();
     let mut index = 0;
 
-    while let Some(word) = tokens.get(index) {
-        let lower = word.to_ascii_lowercase();
-        if matches!(lower.as_str(), "bearer" | "basic" | "token") {
-            words.push((*word).to_string());
-            if tokens.get(index + 1).is_some() {
-                words.push("<redacted>".to_string());
-                index += 2;
-            } else {
-                index += 1;
-            }
-            continue;
-        }
-
-        if let Some(separator) = word.find(['=', ':']) {
-            let key = word[..separator].to_ascii_lowercase();
-            if is_secret_key(&key) {
-                let prefix = &word[..=separator];
-                if word.len() == separator + 1
-                    && tokens.get(index + 1).is_some_and(|next| {
-                        matches!(
-                            next.to_ascii_lowercase().as_str(),
-                            "bearer" | "basic" | "token"
-                        )
-                    })
-                    && tokens.get(index + 2).is_some()
-                {
-                    words.push(format!("{prefix} {} <redacted>", tokens[index + 1]));
-                    index += 3;
-                } else {
-                    words.push(format!("{prefix}<redacted>"));
-                    if word.len() == separator + 1 && tokens.get(index + 1).is_some() {
-                        index += 2;
-                    } else {
-                        index += 1;
-                    }
-                }
-                continue;
-            }
-        }
-
-        if is_secret_key(&lower)
-            && tokens
-                .get(index + 1)
-                .is_some_and(|next| *next == "=" || *next == ":")
-            && tokens.get(index + 2).is_some()
-        {
-            let scheme = tokens[index + 2].to_ascii_lowercase();
-            if matches!(scheme.as_str(), "bearer" | "basic" | "token")
-                && tokens.get(index + 3).is_some()
-            {
-                words.push(format!("{word}{}<redacted>", tokens[index + 1]));
-                index += 4;
-            } else {
-                words.push(format!("{word}{}<redacted>", tokens[index + 1]));
-                index += 3;
-            }
-            continue;
-        }
-
-        if is_secret_key(&lower) && tokens.get(index + 1).is_some() {
-            if matches!(
-                tokens[index + 1].to_ascii_lowercase().as_str(),
-                "bearer" | "basic" | "token"
-            ) && tokens.get(index + 2).is_some()
-            {
-                words.push(format!("{word} {} <redacted>", tokens[index + 1]));
-                index += 3;
-            } else {
-                words.push(format!("{word} <redacted>"));
-                index += 2;
-            }
-            continue;
-        }
-
-        if looks_like_secret(&lower) {
-            words.push("<redacted>".to_string());
-        } else {
-            words.push((*word).to_string());
-        }
-        index += 1;
+    while index < tokens.len() {
+        let redaction = redact_audit_reason_token(&tokens, index);
+        words.push(redaction.value);
+        index += redaction.consumed;
     }
 
     words.join(" ")
+}
+
+struct AuditReasonRedaction {
+    value: String,
+    consumed: usize,
+}
+
+fn redact_audit_reason_token(tokens: &[&str], index: usize) -> AuditReasonRedaction {
+    let word = tokens[index];
+    let lower = word.to_ascii_lowercase();
+    if is_secret_scheme(&lower) {
+        return redact_secret_scheme(tokens, index);
+    }
+    if let Some(redaction) = redact_inline_secret(tokens, index, word) {
+        return redaction;
+    }
+    if let Some(redaction) = redact_secret_key_sequence(tokens, index, word, &lower) {
+        return redaction;
+    }
+    AuditReasonRedaction {
+        value: if looks_like_secret(&lower) {
+            "<redacted>".to_string()
+        } else {
+            word.to_string()
+        },
+        consumed: 1,
+    }
+}
+
+fn is_secret_scheme(value: &str) -> bool {
+    matches!(value, "bearer" | "basic" | "token")
+}
+
+fn redact_secret_scheme(tokens: &[&str], index: usize) -> AuditReasonRedaction {
+    let has_value = tokens.get(index + 1).is_some();
+    AuditReasonRedaction {
+        value: if has_value {
+            format!("{} <redacted>", tokens[index])
+        } else {
+            tokens[index].to_string()
+        },
+        consumed: if has_value { 2 } else { 1 },
+    }
+}
+
+fn redact_inline_secret(tokens: &[&str], index: usize, word: &str) -> Option<AuditReasonRedaction> {
+    let separator = word.find(['=', ':'])?;
+    let key = word[..separator].to_ascii_lowercase();
+    if !is_secret_key(&key) {
+        return None;
+    }
+    let prefix = &word[..=separator];
+    let missing_inline_value = word.len() == separator + 1;
+    let next_is_scheme = tokens
+        .get(index + 1)
+        .is_some_and(|next| is_secret_scheme(&next.to_ascii_lowercase()));
+    if missing_inline_value && next_is_scheme && tokens.get(index + 2).is_some() {
+        return Some(AuditReasonRedaction {
+            value: format!("{prefix} {} <redacted>", tokens[index + 1]),
+            consumed: 3,
+        });
+    }
+    Some(AuditReasonRedaction {
+        value: format!("{prefix}<redacted>"),
+        consumed: if missing_inline_value && tokens.get(index + 1).is_some() {
+            2
+        } else {
+            1
+        },
+    })
+}
+
+fn redact_secret_key_sequence(
+    tokens: &[&str],
+    index: usize,
+    word: &str,
+    lower: &str,
+) -> Option<AuditReasonRedaction> {
+    if !is_secret_key(lower) {
+        return None;
+    }
+    let next = tokens.get(index + 1)?;
+    if matches!(*next, "=" | ":") && tokens.get(index + 2).is_some() {
+        let has_scheme_value = is_secret_scheme(&tokens[index + 2].to_ascii_lowercase())
+            && tokens.get(index + 3).is_some();
+        return Some(AuditReasonRedaction {
+            value: format!("{word}{next}<redacted>"),
+            consumed: if has_scheme_value { 4 } else { 3 },
+        });
+    }
+    let next_is_scheme = is_secret_scheme(&next.to_ascii_lowercase());
+    Some(AuditReasonRedaction {
+        value: if next_is_scheme && tokens.get(index + 2).is_some() {
+            format!("{word} {next} <redacted>")
+        } else {
+            format!("{word} <redacted>")
+        },
+        consumed: if next_is_scheme && tokens.get(index + 2).is_some() {
+            3
+        } else {
+            2
+        },
+    })
 }
 
 fn is_secret_key(key: &str) -> bool {

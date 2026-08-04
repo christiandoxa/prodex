@@ -156,6 +156,17 @@ pub fn gemini_provider_core_live_session_update(
 fn validate_live_session_update(
     session: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    validate_live_session_fields(session)?;
+    validate_live_model(session)?;
+    validate_live_output_modalities(session)?;
+    validate_live_instructions(session)?;
+    validate_live_tools(session)?;
+    validate_live_audio(session)
+}
+
+fn validate_live_session_fields(
+    session: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
     for field in session.keys() {
         if !matches!(
             field.as_str(),
@@ -174,6 +185,10 @@ fn validate_live_session_update(
             ));
         }
     }
+    Ok(())
+}
+
+fn validate_live_model(session: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
     if let Some(model) = session.get("model")
         && model
             .as_str()
@@ -183,157 +198,194 @@ fn validate_live_session_update(
             "Gemini Live session.update field `model` must name a Gemini model".to_string(),
         );
     }
-    if let Some(modalities) = session.get("output_modalities") {
-        let Some(modalities) = modalities.as_array() else {
-            return Err(
-                "Gemini Live session.update field `output_modalities` must be an array".to_string(),
-            );
-        };
-        if modalities.iter().any(|modality| {
-            modality.as_str().is_none_or(|modality| {
-                !matches!(
-                    modality.trim().to_ascii_uppercase().as_str(),
-                    "AUDIO" | "TEXT"
-                )
-            })
-        }) {
-            return Err(
-                "Gemini Live session.update field `output_modalities[]` must be `audio` or `text`"
-                    .to_string(),
-            );
-        }
-        if modalities.is_empty() {
-            return Err(
-                "Gemini Live session.update field `output_modalities` must not be empty"
-                    .to_string(),
-            );
-        }
+    Ok(())
+}
+
+fn validate_live_output_modalities(
+    session: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let Some(modalities) = session.get("output_modalities") else {
+        return Ok(());
+    };
+    let Some(modalities) = modalities.as_array() else {
+        return Err(
+            "Gemini Live session.update field `output_modalities` must be an array".to_string(),
+        );
+    };
+    if modalities.iter().any(|modality| {
+        modality.as_str().is_none_or(|modality| {
+            !matches!(
+                modality.trim().to_ascii_uppercase().as_str(),
+                "AUDIO" | "TEXT"
+            )
+        })
+    }) {
+        return Err(
+            "Gemini Live session.update field `output_modalities[]` must be `audio` or `text`"
+                .to_string(),
+        );
     }
+    if modalities.is_empty() {
+        return Err(
+            "Gemini Live session.update field `output_modalities` must not be empty".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_live_instructions(
+    session: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
     if let Some(instructions) = session.get("instructions")
         && !instructions.is_string()
     {
         return Err("Gemini Live session.update field `instructions` must be a string".to_string());
     }
-    if let Some(tools) = session.get("tools") {
-        let Some(tools) = tools.as_array() else {
-            return Err("Gemini Live session.update field `tools` must be an array".to_string());
-        };
-        for (index, tool) in tools.iter().enumerate() {
-            let Some(tool) = tool.as_object() else {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}]` must be an object"
-                ));
-            };
-            if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}].type` must be `function`"
-                ));
-            }
-            if tool
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .is_none_or(|name| name.trim().is_empty())
-            {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}].name` must be a non-empty string"
-                ));
-            }
-            let Some(parameters) = tool.get("parameters") else {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}].parameters` is required"
-                ));
-            };
-            if !parameters.is_object() {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}].parameters` must be an object"
-                ));
-            }
-            if let Some(description) = tool.get("description").filter(|value| !value.is_null())
-                && !description.is_string()
-            {
-                return Err(format!(
-                    "Gemini Live session.update field `tools[{index}].description` must be a string"
-                ));
-            }
-        }
+    Ok(())
+}
+
+fn validate_live_tools(session: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let Some(tools) = session.get("tools") else {
+        return Ok(());
+    };
+    let Some(tools) = tools.as_array() else {
+        return Err("Gemini Live session.update field `tools` must be an array".to_string());
+    };
+    for (index, tool) in tools.iter().enumerate() {
+        validate_live_tool(tool, index)?;
     }
-    validate_live_audio(session)
+    Ok(())
+}
+
+fn validate_live_tool(tool: &serde_json::Value, index: usize) -> Result<(), String> {
+    let Some(tool) = tool.as_object() else {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}]` must be an object"
+        ));
+    };
+    if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}].type` must be `function`"
+        ));
+    }
+    if tool
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}].name` must be a non-empty string"
+        ));
+    }
+    let Some(parameters) = tool.get("parameters") else {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}].parameters` is required"
+        ));
+    };
+    if !parameters.is_object() {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}].parameters` must be an object"
+        ));
+    }
+    if let Some(description) = tool.get("description").filter(|value| !value.is_null())
+        && !description.is_string()
+    {
+        return Err(format!(
+            "Gemini Live session.update field `tools[{index}].description` must be a string"
+        ));
+    }
+    Ok(())
 }
 
 fn validate_live_audio(session: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
-    if let Some(audio) = session.get("audio") {
-        let Some(audio) = audio.as_object() else {
-            return Err("Gemini Live session.update field `audio` must be an object".to_string());
-        };
-        for (direction, value) in audio {
-            if !matches!(direction.as_str(), "input" | "output") {
-                return Err(format!(
-                    "Gemini Live session.update field `audio.{direction}` is unsupported"
-                ));
-            }
-            let Some(value) = value.as_object() else {
-                return Err(format!(
-                    "Gemini Live session.update field `audio.{direction}` must be an object"
-                ));
-            };
-            if let Some(field) = value.keys().find(|field| field.as_str() != "format") {
-                return Err(format!(
-                    "Gemini Live session.update field `audio.{direction}.{field}` is unsupported"
-                ));
-            }
-            if value.get("format").is_none() {
-                return Err(format!(
-                    "Gemini Live session.update field `audio.{direction}.format` is required"
-                ));
-            }
-            let format = value.get("format").unwrap();
-            validate_live_audio_format_object(format, &format!("audio.{direction}.format"))?;
-            if super::super::audio::gemini_provider_core_live_audio_config_from_value(format)
-                .is_none()
-            {
-                return Err(format!(
-                    "Gemini Live session.update field `audio.{direction}.format` is invalid"
-                ));
-            }
-        }
-    }
-    for (snake, camel) in [
-        ("input_audio_format", "inputAudioFormat"),
-        ("output_audio_format", "outputAudioFormat"),
+    validate_live_audio_object(session)?;
+    for (snake, camel, direction) in [
+        ("input_audio_format", "inputAudioFormat", "input"),
+        ("output_audio_format", "outputAudioFormat", "output"),
     ] {
-        let direction = if snake.starts_with("input") {
-            "input"
-        } else {
-            "output"
-        };
-        if session
-            .get("audio")
-            .and_then(|audio| audio.get(direction))
-            .is_some()
-            && (session.get(snake).is_some() || session.get(camel).is_some())
-        {
-            return Err(format!(
-                "Gemini Live session.update audio fields for `{direction}` conflict"
-            ));
-        }
-        if let (Some(left), Some(right)) = (session.get(snake), session.get(camel))
-            && left != right
-        {
-            return Err(format!(
-                "Gemini Live session.update fields `{snake}` and `{camel}` conflict"
-            ));
-        }
-        if session.get(snake).is_some() || session.get(camel).is_some() {
-            let value = session.get(snake).or_else(|| session.get(camel)).unwrap();
-            validate_live_audio_format_object(value, snake)?;
-            if super::super::audio::gemini_provider_core_live_audio_config_from_value(value)
-                .is_none()
-            {
-                return Err(format!(
-                    "Gemini Live session.update field `{snake}` is invalid"
-                ));
-            }
-        }
+        validate_live_legacy_audio(session, snake, camel, direction)?;
+    }
+    Ok(())
+}
+
+fn validate_live_audio_object(
+    session: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let Some(audio) = session.get("audio") else {
+        return Ok(());
+    };
+    let Some(audio) = audio.as_object() else {
+        return Err("Gemini Live session.update field `audio` must be an object".to_string());
+    };
+    for (direction, value) in audio {
+        validate_live_audio_direction(direction, value)?;
+    }
+    Ok(())
+}
+
+fn validate_live_audio_direction(direction: &str, value: &serde_json::Value) -> Result<(), String> {
+    if !matches!(direction, "input" | "output") {
+        return Err(format!(
+            "Gemini Live session.update field `audio.{direction}` is unsupported"
+        ));
+    }
+    let Some(value) = value.as_object() else {
+        return Err(format!(
+            "Gemini Live session.update field `audio.{direction}` must be an object"
+        ));
+    };
+    if let Some(field) = value.keys().find(|field| field.as_str() != "format") {
+        return Err(format!(
+            "Gemini Live session.update field `audio.{direction}.{field}` is unsupported"
+        ));
+    }
+    let Some(format) = value.get("format") else {
+        return Err(format!(
+            "Gemini Live session.update field `audio.{direction}.format` is required"
+        ));
+    };
+    validate_live_audio_format_object(format, &format!("audio.{direction}.format"))?;
+    if super::super::audio::gemini_provider_core_live_audio_config_from_value(format).is_none() {
+        return Err(format!(
+            "Gemini Live session.update field `audio.{direction}.format` is invalid"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_live_legacy_audio(
+    session: &serde_json::Map<String, serde_json::Value>,
+    snake: &str,
+    camel: &str,
+    direction: &str,
+) -> Result<(), String> {
+    let snake_value = session.get(snake);
+    let camel_value = session.get(camel);
+    if session
+        .get("audio")
+        .and_then(|audio| audio.get(direction))
+        .is_some()
+        && (snake_value.is_some() || camel_value.is_some())
+    {
+        return Err(format!(
+            "Gemini Live session.update audio fields for `{direction}` conflict"
+        ));
+    }
+    if let (Some(left), Some(right)) = (snake_value, camel_value)
+        && left != right
+    {
+        return Err(format!(
+            "Gemini Live session.update fields `{snake}` and `{camel}` conflict"
+        ));
+    }
+    let Some(value) = snake_value.or(camel_value) else {
+        return Ok(());
+    };
+    validate_live_audio_format_object(value, snake)?;
+    if super::super::audio::gemini_provider_core_live_audio_config_from_value(value).is_none() {
+        return Err(format!(
+            "Gemini Live session.update field `{snake}` is invalid"
+        ));
     }
     Ok(())
 }

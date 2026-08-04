@@ -115,6 +115,8 @@ fn reusable_sqlite_reservation_and_reconciliation_are_exact_and_idempotent() {
         )
         .unwrap();
     assert_eq!(state, (0, 0, 20, 200, 3));
+    drop(connection);
+    drop(repository);
     std::fs::remove_dir_all(root).expect("test root should clean up");
 }
 
@@ -170,5 +172,6 @@ fn reusable_sqlite_exact_replay_reserves_once_concurrently() {
         )
         .unwrap();
     assert_eq!(counts, (1, 1));
+    drop(connection);
     std::fs::remove_dir_all(root).expect("test root should clean up");
 }

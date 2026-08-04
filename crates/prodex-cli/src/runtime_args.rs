@@ -947,7 +947,7 @@ mod tests {
     #[test]
     fn extract_provider_flags_from_codex_args_after_session_id() {
         let mut args = super_args_from(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
             "--provider",
             "deepseek",
             "--model",
@@ -964,14 +964,14 @@ mod tests {
                 .iter()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>(),
-            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+            vec!["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"]
         );
     }
 
     #[test]
     fn extract_provider_equals_syntax_from_codex_args() {
         let mut args = super_args_from(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
             "--provider=gemini",
             "--model=gemini-2.5-pro",
         ]);
@@ -983,14 +983,14 @@ mod tests {
                 .iter()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>(),
-            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+            vec!["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"]
         );
     }
 
     #[test]
     fn extract_provider_kiro_from_codex_args() {
         let mut args = super_args_from(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
             "--provider",
             "kiro",
             "--model",
@@ -1004,7 +1004,7 @@ mod tests {
                 .iter()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>(),
-            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+            vec!["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"]
         );
     }
 
@@ -1083,7 +1083,7 @@ mod tests {
     #[test]
     fn extract_respects_already_set_provider() {
         let mut args = super_args_from(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
             "--provider",
             "deepseek",
         ]);
@@ -1098,7 +1098,7 @@ mod tests {
                 .iter()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>(),
-            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+            vec!["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"]
         );
     }
 

@@ -3,6 +3,13 @@ use prodex_provider_core::ProviderId;
 
 pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), String> {
     validate_sub_agent_flags(args)?;
+    validate_mode_conflicts(args)?;
+    validate_provider_options(args)?;
+    validate_harness_options(args)?;
+    validate_frontend_options(args)
+}
+
+fn validate_mode_conflicts(args: &SuperArgs) -> Result<(), String> {
     if args.auto_rotate && args.no_auto_rotate {
         return Err("--auto-rotate conflicts with --no-auto-rotate".to_string());
     }
@@ -16,6 +23,10 @@ pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), 
     {
         return Err("--no-presidio conflicts with --require-tool presidio".to_string());
     }
+    Ok(())
+}
+
+fn validate_provider_options(args: &SuperArgs) -> Result<(), String> {
     if args.provider.is_some() && args.url.is_some() {
         return Err("--provider conflicts with --url".to_string());
     }
@@ -31,12 +42,20 @@ pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), 
     {
         return Err("context-window options require --provider or --url".to_string());
     }
+    Ok(())
+}
+
+fn validate_harness_options(args: &SuperArgs) -> Result<(), String> {
     if args.harness.is_some() && args.provider.is_none() && args.url.is_none() {
         return Err("--harness requires --provider or --url".to_string());
     }
     if args.harness.is_some() && args.cli.is_some_and(|agent| agent != SuperCliAgent::Codex) {
         return Err("--harness is only supported with the Codex CLI bridge".to_string());
     }
+    Ok(())
+}
+
+fn validate_frontend_options(args: &SuperArgs) -> Result<(), String> {
     if args.presidio && matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
         return Err("--presidio is unsupported for native Kiro or Antigravity".to_string());
     }

@@ -188,6 +188,24 @@ fn runtime_gateway_reconciliation_storage_scope(
     storage_key.storage_scope()
 }
 
+#[derive(PartialEq, Eq)]
+struct RuntimeGatewaySqliteReservationIdentity {
+    reservation_id: String,
+    call_id: String,
+    virtual_key_id: Option<String>,
+    storage_scope: String,
+    reserved_tokens: i64,
+    reserved_cost_micros: i64,
+    created_at_unix_ms: i64,
+    expires_at_unix_ms: i64,
+}
+
+struct RuntimeGatewaySqliteReservationState {
+    identity: RuntimeGatewaySqliteReservationIdentity,
+    committed_at_unix_ms: Option<i64>,
+    released_at_unix_ms: Option<i64>,
+}
+
 fn runtime_gateway_sqlite_reconcile_usage(
     path: &std::path::Path,
     plan: &prodex_storage_sqlite::SqliteUsageReconciliationSqlPlan,
@@ -224,46 +242,37 @@ fn runtime_gateway_sqlite_reconcile_usage(
                AND prodex_reservations.call_id = ?3",
             rusqlite::params![tenant_id, reservation_id, call_id],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
-                ))
+                Ok(RuntimeGatewaySqliteReservationState {
+                    identity: RuntimeGatewaySqliteReservationIdentity {
+                        reservation_id: row.get(0)?,
+                        call_id: row.get(1)?,
+                        virtual_key_id: row.get(2)?,
+                        storage_scope: row.get(3)?,
+                        reserved_tokens: row.get(4)?,
+                        reserved_cost_micros: row.get(5)?,
+                        created_at_unix_ms: row.get(6)?,
+                        expires_at_unix_ms: row.get(7)?,
+                    },
+                    committed_at_unix_ms: row.get(8)?,
+                    released_at_unix_ms: row.get(9)?,
+                })
             },
         )
         .optional()?;
-    let Some((
-        stored_reservation_id,
-        stored_call_id,
-        stored_virtual_key_id,
-        stored_scope,
-        stored_tokens,
-        stored_cost_micros,
-        stored_created_at,
-        stored_expires_at,
-        committed_at,
-        released_at,
-    )) = stored
-    else {
+    let Some(stored) = stored else {
         return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     };
-    if record.tenant_id != plan.tenant_id
-        || stored_reservation_id != reservation_id
-        || stored_call_id != call_id
-        || stored_virtual_key_id != virtual_key_id
-        || stored_scope != storage_scope
-        || stored_tokens != reserved_tokens
-        || stored_cost_micros != reserved_cost_micros
-        || stored_created_at != created_at
-        || stored_expires_at != expires_at
-    {
+    let expected_identity = RuntimeGatewaySqliteReservationIdentity {
+        reservation_id: reservation_id.clone(),
+        call_id: call_id.clone(),
+        virtual_key_id: virtual_key_id.clone(),
+        storage_scope: storage_scope.clone(),
+        reserved_tokens,
+        reserved_cost_micros,
+        created_at_unix_ms: created_at,
+        expires_at_unix_ms: expires_at,
+    };
+    if record.tenant_id != plan.tenant_id || stored.identity != expected_identity {
         return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     }
     let counter: Option<(Option<String>, String)> = tx
@@ -298,72 +307,27 @@ fn runtime_gateway_sqlite_reconcile_usage(
     {
         return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     }
-    let (committed_count, committed_tokens, committed_cost_micros): (
-        i64,
-        Option<i64>,
-        Option<i64>,
-    ) = tx.query_row(
-        "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
-         FROM prodex_usage_ledger
-         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
-           AND event_kind = 'committed'",
-        rusqlite::params![tenant_id, reservation_id, call_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    let committed_usage = runtime_gateway_sqlite_usage_entry(
+        &tx,
+        &tenant_id,
+        &reservation_id,
+        &call_id,
+        "committed",
     )?;
-    let committed_usage = match (committed_count, committed_tokens, committed_cost_micros) {
-        (0, None, None) => None,
-        (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
-        _ => return Err(RuntimeGatewayDurableReconciliationError::Conflict),
-    };
-    let (released_count, released_tokens, released_cost_micros): (i64, Option<i64>, Option<i64>) =
-        tx.query_row(
-            "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
-         FROM prodex_usage_ledger
-         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
-           AND event_kind = 'released'",
-            rusqlite::params![tenant_id, reservation_id, call_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-    let released_usage = match (released_count, released_tokens, released_cost_micros) {
-        (0, None, None) => None,
-        (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
-        _ => return Err(RuntimeGatewayDurableReconciliationError::Conflict),
-    };
-    let reservation_was_released = released_at.is_some();
-    if (!reservation_was_released && released_usage.is_some())
-        || (reservation_was_released && released_usage.is_none())
-    {
-        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
-    }
-    if reservation_was_released
-        && committed_at.is_none()
-        && released_usage != Some((reserved_tokens, reserved_cost_micros))
-    {
-        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
-    }
-    if committed_at.is_some() {
-        if committed_usage != Some((actual_tokens, actual_cost_micros)) {
-            return Err(RuntimeGatewayDurableReconciliationError::Conflict);
-        }
-        let expected_released = record.reserved.saturating_sub(actual);
-        let expected_released = (
-            i64::try_from(expected_released.tokens)
-                .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
-            i64::try_from(expected_released.cost_micros)
-                .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
-        );
-        if (reservation_was_released
-            && released_usage != Some((reserved_tokens, reserved_cost_micros))
-            && released_usage != Some(expected_released))
-            || (!reservation_was_released && expected_released != (0, 0))
-        {
-            return Err(RuntimeGatewayDurableReconciliationError::Conflict);
-        }
+    let released_usage =
+        runtime_gateway_sqlite_usage_entry(&tx, &tenant_id, &reservation_id, &call_id, "released")?;
+    let reservation_was_released = stored.released_at_unix_ms.is_some();
+    if runtime_gateway_validate_reconciliation_replay(
+        record,
+        actual,
+        &stored,
+        committed_usage,
+        released_usage,
+        (reserved_tokens, reserved_cost_micros),
+        (actual_tokens, actual_cost_micros),
+    )? {
         tx.commit()?;
         return Ok(());
-    }
-    if committed_usage.is_some() {
-        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     }
     let updated = i64::try_from(runtime_gateway_unix_epoch_millis())
         .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
@@ -515,6 +479,71 @@ fn runtime_gateway_sqlite_reconcile_usage(
     }
     tx.commit()?;
     Ok(())
+}
+
+fn runtime_gateway_sqlite_usage_entry(
+    tx: &rusqlite::Transaction<'_>,
+    tenant_id: &str,
+    reservation_id: &str,
+    call_id: &str,
+    event_kind: &str,
+) -> Result<Option<(i64, i64)>, RuntimeGatewayDurableReconciliationError> {
+    let (count, tokens, cost_micros): (i64, Option<i64>, Option<i64>) = tx.query_row(
+        "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
+         FROM prodex_usage_ledger
+         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+           AND event_kind = ?4",
+        rusqlite::params![tenant_id, reservation_id, call_id, event_kind],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    match (count, tokens, cost_micros) {
+        (0, None, None) => Ok(None),
+        (1, Some(tokens), Some(cost_micros)) => Ok(Some((tokens, cost_micros))),
+        _ => Err(RuntimeGatewayDurableReconciliationError::Conflict),
+    }
+}
+
+fn runtime_gateway_validate_reconciliation_replay(
+    record: &prodex_domain::ReservationRecord,
+    actual: UsageAmount,
+    state: &RuntimeGatewaySqliteReservationState,
+    committed_usage: Option<(i64, i64)>,
+    released_usage: Option<(i64, i64)>,
+    reserved: (i64, i64),
+    actual_i64: (i64, i64),
+) -> Result<bool, RuntimeGatewayDurableReconciliationError> {
+    let committed_at = state.committed_at_unix_ms;
+    let reservation_was_released = state.released_at_unix_ms.is_some();
+    if reservation_was_released != released_usage.is_some() {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    if reservation_was_released && committed_at.is_none() && released_usage != Some(reserved) {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    if committed_at.is_none() {
+        return committed_usage
+            .is_none()
+            .then_some(false)
+            .ok_or(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    if committed_usage != Some(actual_i64) {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    let expected_released = record.reserved.saturating_sub(actual);
+    let expected_released = (
+        i64::try_from(expected_released.tokens)
+            .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
+        i64::try_from(expected_released.cost_micros)
+            .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
+    );
+    let released_matches = if reservation_was_released {
+        released_usage == Some(reserved) || released_usage == Some(expected_released)
+    } else {
+        expected_released == (0, 0)
+    };
+    released_matches
+        .then_some(true)
+        .ok_or(RuntimeGatewayDurableReconciliationError::Conflict)
 }
 
 pub(super) fn runtime_gateway_billing_ledger_reconcile_response(

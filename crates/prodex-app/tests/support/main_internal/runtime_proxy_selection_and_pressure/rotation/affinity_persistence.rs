@@ -287,6 +287,17 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
         RuntimeRouteKind::Compact,
     )
     .expect("compact lineage verification should succeed");
+    wait_for_runtime_background_queues_idle();
+    let verified_at = Local::now().timestamp();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        for status in runtime.continuation_statuses.turn_state.values_mut() {
+            status.last_verified_at = Some(verified_at);
+        }
+        for status in runtime.continuation_statuses.session_id.values_mut() {
+            status.last_verified_at = Some(verified_at);
+        }
+    }
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
     assert_eq!(
         first_revision, 3,

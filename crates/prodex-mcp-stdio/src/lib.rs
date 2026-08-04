@@ -46,64 +46,80 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
 
 fn read_mcp_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     loop {
-        let mut bytes = Vec::new();
-        let mut first_non_whitespace = None;
-        loop {
-            let (take, next_first_non_whitespace, ended) = {
-                let available = reader.fill_buf()?;
-                if available.is_empty() {
-                    if bytes.is_empty() {
-                        return Ok(None);
-                    }
-                    (0, None, true)
-                } else {
-                    let take = available
-                        .iter()
-                        .position(|byte| *byte == b'\n')
-                        .map(|index| index + 1)
-                        .unwrap_or(available.len());
-                    let next_first_non_whitespace = available[..take]
-                        .iter()
-                        .find(|byte| !byte.is_ascii_whitespace())
-                        .copied();
-                    let first = first_non_whitespace.or(next_first_non_whitespace);
-                    let limit = if first.is_some_and(|byte| !mcp_first_line_looks_like_header(byte))
-                    {
-                        MCP_MESSAGE_MAX_BYTES
-                    } else {
-                        MCP_FIRST_HEADER_LINE_MAX_BYTES
-                    };
-                    if bytes.len().saturating_add(take) > limit {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("MCP first line exceeds safe size limit ({limit} bytes)"),
-                        ));
-                    }
-                    bytes.extend_from_slice(&available[..take]);
-                    let ended = bytes.last() == Some(&b'\n');
-                    reader.consume(take);
-                    (take, next_first_non_whitespace, ended)
-                }
-            };
-            if let Some(byte) = next_first_non_whitespace
-                && first_non_whitespace.is_none()
-            {
-                first_non_whitespace = Some(byte);
-            }
-            if take == 0 {
-                break;
-            }
-            if ended {
-                break;
-            }
-        }
-
-        let line = String::from_utf8(bytes)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let Some(line) = read_mcp_physical_first_line(reader)? else {
+            return Ok(None);
+        };
         if !line.trim().is_empty() {
             return Ok(Some(line));
         }
     }
+}
+
+fn read_mcp_physical_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+    let mut bytes = Vec::new();
+    let mut first_non_whitespace = None;
+    loop {
+        match append_mcp_first_line_chunk(reader, &mut bytes, &mut first_non_whitespace)? {
+            McpFirstLineRead::Eof => return Ok(None),
+            McpFirstLineRead::More => {}
+            McpFirstLineRead::Complete => break,
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+enum McpFirstLineRead {
+    Eof,
+    More,
+    Complete,
+}
+
+fn append_mcp_first_line_chunk<R: BufRead>(
+    reader: &mut R,
+    bytes: &mut Vec<u8>,
+    first_non_whitespace: &mut Option<u8>,
+) -> io::Result<McpFirstLineRead> {
+    let available = reader.fill_buf()?;
+    if available.is_empty() {
+        return Ok(if bytes.is_empty() {
+            McpFirstLineRead::Eof
+        } else {
+            McpFirstLineRead::Complete
+        });
+    }
+    let take = available
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|index| index + 1)
+        .unwrap_or(available.len());
+    let next_first_non_whitespace = available[..take]
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .copied();
+    let first = first_non_whitespace.or(next_first_non_whitespace);
+    let limit = if first.is_some_and(|byte| !mcp_first_line_looks_like_header(byte)) {
+        MCP_MESSAGE_MAX_BYTES
+    } else {
+        MCP_FIRST_HEADER_LINE_MAX_BYTES
+    };
+    if bytes.len().saturating_add(take) > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("MCP first line exceeds safe size limit ({limit} bytes)"),
+        ));
+    }
+    bytes.extend_from_slice(&available[..take]);
+    reader.consume(take);
+    if first_non_whitespace.is_none() {
+        *first_non_whitespace = next_first_non_whitespace;
+    }
+    Ok(if bytes.last() == Some(&b'\n') {
+        McpFirstLineRead::Complete
+    } else {
+        McpFirstLineRead::More
+    })
 }
 
 fn mcp_first_line_looks_like_header(byte: u8) -> bool {

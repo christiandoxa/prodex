@@ -633,6 +633,7 @@ mod tests {
             assert_eq!(sqlite_reservation_state(&path, &command), applied);
         }
 
+        drop(conn);
         std::fs::remove_dir_all(root).expect("test root should clean up");
     }
 

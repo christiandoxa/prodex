@@ -112,16 +112,35 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
     let Some(argument) = args[index].to_str() else {
         return Ok(ScanOutcome::Unknown);
     };
+    if let Some(outcome) = scan_identity_override(args, index) {
+        return outcome;
+    }
+    if let Some(value) = scan_boolean_override(argument) {
+        return Ok(apply(1, value));
+    }
+    if let Some(outcome) = scan_runtime_override(args, index) {
+        return outcome;
+    }
+    if let Some(outcome) = scan_feature_value_override(args, index) {
+        return outcome;
+    }
+    if let Some(value) = scan_feature_boolean_override(argument) {
+        return Ok(apply(1, value));
+    }
+    Ok(ScanOutcome::Unknown)
+}
+
+fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<ScanOutcome, String>> {
     if let Some(scanned) = scan_value(args, index, &["--provider"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_super_external_provider,
             SuperOverride::Provider,
             "--provider",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--harness"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             |value| {
                 value
@@ -130,50 +149,66 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
             },
             SuperOverride::Harness,
             "--harness",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--api-key"]) {
-        return parse_required_string(scanned, SuperOverride::ApiKey, "--api-key");
+        return Some(parse_required_string(
+            scanned,
+            SuperOverride::ApiKey,
+            "--api-key",
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--sub-agent-provider"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_sub_agent_provider,
             SuperOverride::SubAgentProvider,
             "--sub-agent-provider",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--sub-agent-model"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_sub_agent_model,
             SuperOverride::SubAgentModel,
             "--sub-agent-model",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--sub-agent-model-reasoning-effort"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_sub_agent_reasoning_effort,
             SuperOverride::SubAgentReasoningEffort,
             "--sub-agent-model-reasoning-effort",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--sub-agent-url"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_sub_agent_url,
             SuperOverride::SubAgentUrl,
             "--sub-agent-url",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--model", "--local-model"]) {
-        return parse_required_string(scanned, SuperOverride::LocalModel, "--model");
+        return Some(parse_required_string(
+            scanned,
+            SuperOverride::LocalModel,
+            "--model",
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--profile"]) {
-        return parse_required_string(scanned, SuperOverride::Profile, "--profile");
+        return Some(parse_required_string(
+            scanned,
+            SuperOverride::Profile,
+            "--profile",
+        ));
     }
-    let boolean = match argument {
+    None
+}
+
+fn scan_boolean_override(argument: &str) -> Option<SuperOverride> {
+    match argument {
         "--no-auto-rotate" => Some(SuperOverride::AutoRotate(false)),
         "--auto-rotate" => Some(SuperOverride::AutoRotate(true)),
         "--auto-redeem" => Some(SuperOverride::AutoRedeem),
@@ -186,29 +221,34 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
         "--no-sub-agent" => Some(SuperOverride::SubAgent(false)),
         "--full-access" => Some(SuperOverride::FullAccess),
         _ => None,
-    };
-    if let Some(value) = boolean {
-        return Ok(apply(1, value));
     }
+}
+
+fn scan_runtime_override(args: &[OsString], index: usize) -> Option<Result<ScanOutcome, String>> {
     if let Some(scanned) = scan_value(args, index, &["--base-url"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_runtime_base_url,
             SuperOverride::BaseUrl,
             "--base-url",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--url"]) {
-        return parse_required(scanned, parse_super_local_url, SuperOverride::Url, "--url");
+        return Some(parse_required(
+            scanned,
+            parse_super_local_url,
+            SuperOverride::Url,
+            "--url",
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--context-window", "--local-context-window"])
     {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<usize>,
             SuperOverride::LocalContextWindow,
             "--context-window",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(
         args,
@@ -218,15 +258,15 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
             "--local-auto-compact-token-limit",
         ],
     ) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<usize>,
             SuperOverride::LocalAutoCompactTokenLimit,
             "--auto-compact-token-limit",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--cli"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             |value| {
                 parse_super_cli_agent(value)
@@ -234,90 +274,97 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
             },
             SuperOverride::Cli,
             "--cli",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--tool"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<OptionalToolId>,
             SuperOverride::Tool,
             "--tool",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--require-tool"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<OptionalToolId>,
             SuperOverride::RequiredTool,
             "--require-tool",
-        );
+        ));
     }
+    None
+}
+
+fn scan_feature_value_override(
+    args: &[OsString],
+    index: usize,
+) -> Option<Result<ScanOutcome, String>> {
     if let Some(scanned) = scan_value(args, index, &["--web-search"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_web_search_mode,
             SuperOverride::WebSearch,
             "--web-search",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--rollout-budget-tokens"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<u64>,
             SuperOverride::RolloutBudgetTokens,
             "--rollout-budget-tokens",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--rollout-budget-reminders"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_rollout_budget_reminders,
             SuperOverride::RolloutBudgetReminders,
             "--rollout-budget-reminders",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--rollout-budget-sampling-weight"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<f64>,
             SuperOverride::RolloutBudgetSamplingWeight,
             "--rollout-budget-sampling-weight",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--rollout-budget-prefill-weight"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<f64>,
             SuperOverride::RolloutBudgetPrefillWeight,
             "--rollout-budget-prefill-weight",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--current-time-reminder-interval"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             str::parse::<u64>,
             SuperOverride::CurrentTimeReminderInterval,
             "--current-time-reminder-interval",
-        );
+        ));
     }
     if let Some(scanned) = scan_value(args, index, &["--current-time-clock-source"]) {
-        return parse_required(
+        return Some(parse_required(
             scanned,
             parse_current_time_clock_source,
             SuperOverride::CurrentTimeClockSource,
             "--current-time-clock-source",
-        );
+        ));
     }
-    let feature_boolean = match argument {
+    None
+}
+
+fn scan_feature_boolean_override(argument: &str) -> Option<SuperOverride> {
+    match argument {
         "--current-time-reminder" => Some(SuperOverride::CurrentTimeReminder),
         "--respect-system-proxy" => Some(SuperOverride::RespectSystemProxy(true)),
         "--no-respect-system-proxy" => Some(SuperOverride::RespectSystemProxy(false)),
         _ => None,
-    };
-    if let Some(value) = feature_boolean {
-        return Ok(apply(1, value));
     }
-    Ok(ScanOutcome::Unknown)
 }
 
 fn scan_value<'a>(args: &'a [OsString], index: usize, names: &[&str]) -> Option<ScannedValue<'a>> {

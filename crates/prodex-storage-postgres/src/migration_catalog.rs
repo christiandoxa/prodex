@@ -1049,6 +1049,9 @@ BEGIN
             NOT VALID;
     END IF;
 END $migration$;
+
+ALTER TABLE prodex_audit_log
+    VALIDATE CONSTRAINT prodex_audit_log_reason_detail_bounded;
 "#,
 };
 

@@ -1,5 +1,6 @@
 use super::super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewritePrefetchChunk,
+    RuntimeLocalRewriteSsePrefetch,
 };
 use super::super::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
@@ -9,7 +10,10 @@ use crate::runtime_proxy::{
     bump_runtime_profile_health_score, commit_runtime_proxy_profile_selection_with_policy,
     note_runtime_profile_transport_failure,
 };
-use crate::{RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY, RuntimeRouteKind};
+use crate::{
+    RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY, RuntimeHeapTrimmedBufferedResponseParts,
+    RuntimeRouteKind,
+};
 use prodex_provider_core::ProviderErrorClass;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -100,53 +104,68 @@ pub(super) fn runtime_local_rewrite_provider_fallback_class(
 ) -> Option<ProviderErrorClass> {
     match &response.response {
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
-            if parts.status < 400 {
-                return None;
-            }
-            let class = runtime_provider_error_class(provider, parts.status, &parts.body);
-            match class {
-                ProviderErrorClass::Quota | ProviderErrorClass::Transient => Some(class),
-                ProviderErrorClass::RateLimit
-                    if std::str::from_utf8(&parts.body).is_ok_and(|body| {
-                        let body = body.to_ascii_lowercase();
-                        body.contains("rate_limit_exceeded")
-                            || body.contains("rate_limit_exceeded_error")
-                    }) =>
-                {
-                    Some(class)
-                }
-                _ => None,
-            }
+            runtime_local_rewrite_buffered_fallback_class(parts, provider)
         }
-        RuntimeLocalRewriteUpstreamResponse::Live(live)
-            if !live.prefix.is_empty()
-                && (live.upstream_eof
-                    || runtime_local_rewrite_sse_prefix_has_complete_event(&live.prefix)) =>
+        RuntimeLocalRewriteUpstreamResponse::Live(live) => {
+            runtime_local_rewrite_live_fallback_class(live, provider)
+        }
+        _ => None,
+    }
+}
+
+fn runtime_local_rewrite_buffered_fallback_class(
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
+    provider: RuntimeProviderBridgeKind,
+) -> Option<ProviderErrorClass> {
+    if parts.status < 400 {
+        return None;
+    }
+    let class = runtime_provider_error_class(provider, parts.status, &parts.body);
+    match class {
+        ProviderErrorClass::Quota | ProviderErrorClass::Transient => Some(class),
+        ProviderErrorClass::RateLimit
+            if std::str::from_utf8(&parts.body).is_ok_and(|body| {
+                let body = body.to_ascii_lowercase();
+                body.contains("rate_limit_exceeded") || body.contains("rate_limit_exceeded_error")
+            }) =>
         {
-            let progress = if live.upstream_eof {
-                runtime_proxy_crate::inspect_runtime_sse_buffer_at_eof(&live.prefix)
-            } else {
-                crate::runtime_proxy::inspect_runtime_sse_buffer(&live.prefix)
-            };
-            match progress {
-                runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked => {
-                    let class = runtime_provider_error_class(provider, live.status, &live.prefix);
-                    if matches!(
-                        class,
-                        ProviderErrorClass::Quota
-                            | ProviderErrorClass::RateLimit
-                            | ProviderErrorClass::Transient
-                    ) {
-                        Some(class)
-                    } else {
-                        Some(ProviderErrorClass::Quota)
-                    }
-                }
-                runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded => {
-                    Some(ProviderErrorClass::Transient)
-                }
-                _ => None,
-            }
+            Some(class)
+        }
+        _ => None,
+    }
+}
+
+fn runtime_local_rewrite_live_fallback_class(
+    live: &RuntimeLocalRewriteLiveResponse,
+    provider: RuntimeProviderBridgeKind,
+) -> Option<ProviderErrorClass> {
+    if live.prefix.is_empty()
+        || (!live.upstream_eof
+            && !runtime_local_rewrite_sse_prefix_has_complete_event(&live.prefix))
+    {
+        return None;
+    }
+    let progress = if live.upstream_eof {
+        runtime_proxy_crate::inspect_runtime_sse_buffer_at_eof(&live.prefix)
+    } else {
+        crate::runtime_proxy::inspect_runtime_sse_buffer(&live.prefix)
+    };
+    match progress {
+        runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked => {
+            let class = runtime_provider_error_class(provider, live.status, &live.prefix);
+            Some(
+                matches!(
+                    class,
+                    ProviderErrorClass::Quota
+                        | ProviderErrorClass::RateLimit
+                        | ProviderErrorClass::Transient
+                )
+                .then_some(class)
+                .unwrap_or(ProviderErrorClass::Quota),
+            )
+        }
+        runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded => {
+            Some(ProviderErrorClass::Transient)
         }
         _ => None,
     }
@@ -180,40 +199,16 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
         if remaining.is_zero() {
             break;
         }
-        match prefetch.recv_timeout(remaining) {
-            Ok(RuntimeLocalRewritePrefetchChunk::Data(chunk)) => {
-                let remaining_bytes = crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len();
-                let inspect_len = chunk.len().min(remaining_bytes);
-                let progress =
-                    runtime_local_rewrite_sse_chunk_progress(&prefix, &chunk[..inspect_len]);
-                let consumed = progress
-                    .as_ref()
-                    .map_or(inspect_len, |(_, consumed)| *consumed);
-                prefix.extend_from_slice(&chunk[..consumed]);
-                if consumed < chunk.len() {
-                    prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
-                        chunk[consumed..].to_vec(),
-                    ));
-                }
-                if progress.is_some() || consumed == remaining_bytes {
-                    break;
-                }
-            }
-            Ok(RuntimeLocalRewritePrefetchChunk::End) => {
-                reached_upstream_end = true;
-                prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::End);
-                break;
-            }
-            Ok(RuntimeLocalRewritePrefetchChunk::Error(kind, message)) => {
-                if prefix.is_empty() {
-                    return Err(anyhow::Error::new(std::io::Error::new(kind, message))
-                        .context("failed to read provider SSE precommit prefix"));
-                }
-                prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Error(kind, message));
-                break;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+        let remaining_bytes = crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len();
+        match runtime_local_rewrite_process_prefetch_chunk(
+            prefetch.recv_timeout(remaining),
+            &mut prefetch,
+            &mut prefix,
+            remaining_bytes,
+        )? {
+            RuntimeProviderPrefetchControl::Continue => {}
+            RuntimeProviderPrefetchControl::Break { upstream_end } => {
+                reached_upstream_end = upstream_end;
                 break;
             }
         }
@@ -222,6 +217,70 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
     live.upstream_eof = reached_upstream_end;
     live.set_sse_continuation(prefetch);
     Ok(())
+}
+
+enum RuntimeProviderPrefetchControl {
+    Continue,
+    Break { upstream_end: bool },
+}
+
+fn runtime_local_rewrite_process_prefetch_chunk(
+    result: Result<RuntimeLocalRewritePrefetchChunk, std::sync::mpsc::RecvTimeoutError>,
+    prefetch: &mut RuntimeLocalRewriteSsePrefetch,
+    prefix: &mut Vec<u8>,
+    remaining_bytes: usize,
+) -> anyhow::Result<RuntimeProviderPrefetchControl> {
+    match result {
+        Ok(RuntimeLocalRewritePrefetchChunk::Data(chunk)) => {
+            runtime_local_rewrite_process_prefetch_data(prefetch, prefix, remaining_bytes, chunk)
+        }
+        Ok(RuntimeLocalRewritePrefetchChunk::End) => {
+            prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::End);
+            Ok(RuntimeProviderPrefetchControl::Break { upstream_end: true })
+        }
+        Ok(RuntimeLocalRewritePrefetchChunk::Error(kind, message)) if prefix.is_empty() => {
+            Err(anyhow::Error::new(std::io::Error::new(kind, message))
+                .context("failed to read provider SSE precommit prefix"))
+        }
+        Ok(RuntimeLocalRewritePrefetchChunk::Error(kind, message)) => {
+            prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Error(kind, message));
+            Ok(RuntimeProviderPrefetchControl::Break {
+                upstream_end: false,
+            })
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Ok(RuntimeProviderPrefetchControl::Break {
+                upstream_end: false,
+            })
+        }
+    }
+}
+
+fn runtime_local_rewrite_process_prefetch_data(
+    prefetch: &mut RuntimeLocalRewriteSsePrefetch,
+    prefix: &mut Vec<u8>,
+    remaining_bytes: usize,
+    chunk: Vec<u8>,
+) -> anyhow::Result<RuntimeProviderPrefetchControl> {
+    let inspect_len = chunk.len().min(remaining_bytes);
+    let progress = runtime_local_rewrite_sse_chunk_progress(prefix, &chunk[..inspect_len]);
+    let consumed = progress
+        .as_ref()
+        .map_or(inspect_len, |(_, consumed)| *consumed);
+    prefix.extend_from_slice(&chunk[..consumed]);
+    if consumed < chunk.len() {
+        prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
+            chunk[consumed..].to_vec(),
+        ));
+    }
+    Ok(if progress.is_some() || consumed == remaining_bytes {
+        RuntimeProviderPrefetchControl::Break {
+            upstream_end: false,
+        }
+    } else {
+        RuntimeProviderPrefetchControl::Continue
+    })
 }
 
 fn runtime_local_rewrite_sse_prefix_has_complete_event(prefix: &[u8]) -> bool {
