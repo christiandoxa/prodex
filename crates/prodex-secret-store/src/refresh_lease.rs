@@ -1303,6 +1303,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         #[cfg(unix)]
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let root = fs::canonicalize(root).unwrap();
         let coordinator = RefreshLeaseCoordinator::new(&root)
             .with_lease_ttl(Duration::from_millis(30))
             .with_wait_timeout(Duration::ZERO);
@@ -1360,6 +1361,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         #[cfg(unix)]
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let root = fs::canonicalize(root).unwrap();
         let coordinator = RefreshLeaseCoordinator::new(&root)
             .with_lease_ttl(Duration::from_millis(3))
             .with_wait_timeout(Duration::ZERO);
