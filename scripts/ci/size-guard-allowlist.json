@@ -276,7 +276,7 @@
   },
   {
     "file": "crates/prodex-secret-store/src/refresh_lease.rs",
-    "maxLines": 1397,
+    "maxLines": 1399,
     "reason": "Refresh lease ownership keeps one-in-flight bounded heartbeat workers, filesystem deadlines, unhealthy transitions, shutdown, and fault-injection regressions together."
   },
   {

@@ -323,16 +323,14 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
     if outbox_exists || has_v13_marker {
         validate_sqlite_siem_outbox_shape(conn, has_v13_marker)?;
         if has_v13_marker {
-            if runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")? {
-                let bounded_reason_detail = sqlite_reason_detail_byte_limit_triggers_present(conn)?;
-                return Ok(if bounded_reason_detail { 15 } else { 14 });
+            if let Some(version) = infer_sqlite_audit_reason_version(conn)? {
+                return Ok(version);
             }
             return Ok(13);
         }
     }
-    if runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")? {
-        let bounded_reason_detail = sqlite_reason_detail_byte_limit_triggers_present(conn)?;
-        return Ok(if bounded_reason_detail { 15 } else { 14 });
+    if let Some(version) = infer_sqlite_audit_reason_version(conn)? {
+        return Ok(version);
     }
     if let Some(version) = infer_legacy_sqlite_version_12_to_6(conn)? {
         return Ok(version);
@@ -344,6 +342,19 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
         conn,
         "prodex_tenants",
     )?))
+}
+
+fn infer_sqlite_audit_reason_version(conn: &Connection) -> Result<Option<i64>> {
+    if !runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")? {
+        return Ok(None);
+    }
+    Ok(Some(
+        if sqlite_reason_detail_byte_limit_triggers_present(conn)? {
+            15
+        } else {
+            14
+        },
+    ))
 }
 
 fn infer_legacy_sqlite_version_12_to_6(conn: &Connection) -> Result<Option<i64>> {
