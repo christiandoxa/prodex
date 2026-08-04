@@ -2,10 +2,20 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.382.0 - 2026-08-04
+
+### Misc
+
+- Close audited production gaps (`92d7bf8`)
+
 ## 0.381.0 - 2026-08-03
 
 ### Misc
 
+- Support legacy glibc releases (`9126093`)
+- Restore Windows open-file deletion (`1a163f1`)
+- Preserve secure Windows sharing (`ceb30ca`)
+- Restore cross-platform atomic writes (`25a5d0b`)
 - Close audited reliability gaps (`710b4bc`)
 
 ## 0.380.0 - 2026-08-03
@@ -117,9 +127,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden usage accounting (`f688973`)
-
-## 0.370.0 - 2026-07-30
-
-### Misc
-
-- Harden cross-platform tooling and CI (`f95887c`)
