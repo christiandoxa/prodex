@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.383.0 - 2026-08-05
+
+### Runtime
+
+- Add sub-agent delegation and harden runtime (`c0c048a`)
+
 ## 0.382.0 - 2026-08-04
 
 ### Misc
@@ -121,9 +127,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete deployment and observability hardening (`f469cea`)
-
-## 0.371.0 - 2026-07-30
-
-### Misc
-
-- Harden usage accounting (`f688973`)
