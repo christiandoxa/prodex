@@ -207,6 +207,7 @@ pub(super) fn wait_for_runtime_background_queues_idle() {
 pub(super) fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now - (RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS + 1),
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Critical,
         five_hour_remaining_percent: 1,
         five_hour_reset_at: now + 300,
@@ -222,6 +223,7 @@ pub(super) fn ready_runtime_usage_snapshot(
 ) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: remaining_percent,
         five_hour_reset_at: now + 18_000,

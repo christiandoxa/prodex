@@ -62,6 +62,7 @@ pub fn runtime_config_publication_postgres_transport() -> Result<ConfigPublicati
             &paths,
             &policy.gateway,
             &policy.secrets,
+            policy.governance.mode == prodex_runtime_policy::RuntimeGovernanceMode::BankEnforce,
         )?;
     Ok(ConfigPublicationPostgresTransport {
         database_url: Zeroizing::new(database_url),

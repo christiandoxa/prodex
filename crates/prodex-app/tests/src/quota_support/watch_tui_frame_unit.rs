@@ -268,3 +268,48 @@
             .any(|(label, value)| label == "Status" && value == "quota failed"));
         assert!(!frame.body.contains("[ Quota main ]"));
     }
+
+    #[test]
+    fn all_quota_watch_tui_narrow_width_accounts_for_wrapped_detail_rows() {
+        let reports = (0..2)
+            .map(|index| {
+                let mut report =
+                    test_openai_quota_report(test_openai_usage_with_windows(20, 10, 1_700_001_800));
+                report.name = format!("profile-{index}");
+                report
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        let wide = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Profile,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 120,
+                max_lines: Some(6),
+            },
+        );
+        let narrow = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Profile,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 48,
+                max_lines: Some(6),
+            },
+        );
+
+        assert_eq!(wide.table.as_ref().expect("wide table").rows.len(), 2);
+        assert_eq!(narrow.table.as_ref().expect("narrow table").rows.len(), 1);
+    }

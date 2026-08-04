@@ -347,6 +347,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
                 five_hour_remaining_percent: 0,
                 five_hour_reset_at: now + 300,
@@ -359,6 +360,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
             "second".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 90,
                 five_hour_reset_at: now + 3_600,

@@ -114,11 +114,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_governance_autho
             .as_ref()
             .expect("SQLite governance repository must be initialized")
             .governance_list_tenant_ids(discovery_limit),
-        RuntimeGatewayStateStore::Postgres { .. } => async_runtime.block_on(
-            postgres_repository
-                .context("authoritative PostgreSQL governance repository is unavailable")?
-                .governance_list_tenant_ids(discovery_limit),
-        ),
+        // PostgreSQL forces tenant RLS, so its runtime role cannot safely enumerate tenants.
+        // `authority_tenants` and tenant-scoped admin tokens are the bounded source of truth.
+        RuntimeGatewayStateStore::Postgres { .. } => Ok(Vec::new()),
         _ => unreachable!(),
     }
     .map_err(|_| anyhow::anyhow!("failed to discover authoritative governance tenants"))?;

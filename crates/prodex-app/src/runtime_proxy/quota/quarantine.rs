@@ -33,6 +33,7 @@ pub(crate) fn mark_runtime_profile_quota_quarantine(
         .entry(profile_name.to_string())
         .or_insert(RuntimeProfileUsageSnapshot {
             checked_at: now,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Unknown,
             five_hour_remaining_percent: 0,
             five_hour_reset_at: i64::MAX,

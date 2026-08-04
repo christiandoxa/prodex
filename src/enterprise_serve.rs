@@ -397,6 +397,7 @@ fn gateway_browser_security(
     }
     Ok(Some(GatewayServerBrowserSecurity {
         expected_origin: origin,
+        // The backend binds a double-submit token to each OIDC browser session.
         expected_csrf_token: None,
     }))
 }

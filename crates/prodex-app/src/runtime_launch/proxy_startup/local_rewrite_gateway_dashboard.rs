@@ -60,5 +60,7 @@ mod tests {
         assert!(!html.contains("innerHTML"));
         assert!(!html.contains("localStorage"));
         assert!(!html.contains("prodex_gateway_route_request"));
+        assert!(html.contains(r#"cookie("prodex_gateway_csrf")"#));
+        assert!(html.contains(r#"h["x-csrf-token"]=csrf"#));
     }
 }

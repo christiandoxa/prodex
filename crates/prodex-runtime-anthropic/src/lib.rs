@@ -251,10 +251,6 @@ pub fn runtime_proxy_responses_model_supports_native_computer_tool(model_id: &st
     model_id.trim().eq_ignore_ascii_case("gpt-5.4")
 }
 
-pub fn runtime_proxy_claude_use_foundry_compat() -> bool {
-    true
-}
-
 pub fn runtime_proxy_claude_alias_picker_value(
     alias: RuntimeProxyClaudeModelAlias,
 ) -> &'static str {
@@ -392,13 +388,7 @@ pub fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> 
 
 pub fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
     runtime_proxy_responses_model_descriptor(target_model)
-        .map(|descriptor| {
-            if runtime_proxy_claude_use_foundry_compat() {
-                descriptor.claude_picker_value()
-            } else {
-                descriptor.id
-            }
-        })
+        .map(|descriptor| descriptor.claude_picker_value())
         .unwrap_or(target_model)
         .to_string()
 }
@@ -436,9 +426,7 @@ pub fn runtime_proxy_claude_custom_model_option_env(
 pub fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Value> {
     runtime_proxy_responses_model_descriptors()
         .iter()
-        .filter(|descriptor| {
-            !(runtime_proxy_claude_use_foundry_compat() && descriptor.claude_alias.is_some())
-        })
+        .filter(|descriptor| descriptor.claude_alias.is_none())
         .map(|descriptor| {
             let supported_effort_levels =
                 runtime_proxy_responses_model_supported_effort_levels(descriptor.id);

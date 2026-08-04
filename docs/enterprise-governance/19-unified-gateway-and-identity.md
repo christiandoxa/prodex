@@ -194,8 +194,9 @@ zone can be used only when its source is authenticated and its staleness and
 precision are documented.
 
 Browser administration additionally requires exact allowed Host and Origin,
-state-changing CSRF protection, secure and HTTP-only cookies, appropriate
-SameSite policy, session rotation after authentication or privilege change,
+state-changing session-bound double-submit CSRF protection, secure and HTTP-only
+state/session cookies, a Secure `SameSite=Strict` script-readable CSRF cookie,
+session rotation after authentication or privilege change,
 `Cache-Control: no-store`, clickjacking/content-type protections, and no token
 material in URLs or browser-readable persistent storage. The existing expose
 controls are useful evidence but must be reviewed as part of this one boundary.

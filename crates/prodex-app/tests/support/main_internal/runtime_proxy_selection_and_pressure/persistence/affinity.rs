@@ -69,6 +69,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
             "second".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 90,
                 five_hour_reset_at: now + 18_000,
@@ -143,6 +144,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: Local::now().timestamp(),
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 80,
                 five_hour_reset_at: Local::now().timestamp() + 300,
@@ -255,6 +257,7 @@ fn fresh_websocket_fallback_rejects_critical_quota_below_floor() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 90,
                     five_hour_reset_at: now + 18_000,
@@ -267,6 +270,7 @@ fn fresh_websocket_fallback_rejects_critical_quota_below_floor() {
                 "second".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Critical,
                     five_hour_remaining_percent: 1,
                     five_hour_reset_at: now + 300,

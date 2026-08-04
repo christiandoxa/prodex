@@ -175,6 +175,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 80,
                     five_hour_reset_at: now + 300,
@@ -187,6 +188,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
                 "second".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 90,
                     five_hour_reset_at: now + 300,

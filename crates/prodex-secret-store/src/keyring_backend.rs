@@ -29,14 +29,6 @@ impl KeyringSecretBackend {
     pub fn service(&self) -> &str {
         &self.service
     }
-
-    pub fn is_supported(&self) -> bool {
-        true
-    }
-
-    pub fn unsupported_reason(&self) -> &'static str {
-        "OS keyring backend is unavailable"
-    }
 }
 
 impl fmt::Debug for KeyringSecretBackend {

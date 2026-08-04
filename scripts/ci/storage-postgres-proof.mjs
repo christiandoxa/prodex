@@ -35,9 +35,11 @@ export function selectProofMode({
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const env = { ...process.env, ...(options.env ?? {}) };
+    for (const name of options.unsetEnv ?? []) delete env[name];
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...process.env, ...(options.env ?? {}) },
+      env,
       stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     });
 
@@ -329,6 +331,16 @@ async function runSelfTest() {
     0,
   );
   assertSelfTest(retryAttempts === 3, "transient image pulls must use the bounded retry budget");
+  const { stdout: unsetRedisValue } = await run(
+    process.execPath,
+    ["-e", "process.stdout.write(process.env.PRODEX_TEST_REDIS_URL ?? 'unset')"],
+    {
+      capture: true,
+      env: { PRODEX_TEST_REDIS_URL: "fixture-redis-url" },
+      unsetEnv: ["PRODEX_TEST_REDIS_URL"],
+    },
+  );
+  assertSelfTest(unsetRedisValue === "unset", "direct Postgres proof must clear inherited Redis test URLs");
 }
 
 export async function main() {
@@ -337,7 +349,9 @@ export async function main() {
     return;
   }
   if (process.env.PRODEX_TEST_POSTGRES_URL) {
-    await run("node", ["scripts/ci/storage-boundary-guard.mjs"]);
+    await run("node", ["scripts/ci/storage-boundary-guard.mjs"], {
+      unsetEnv: ["PRODEX_TEST_REDIS_URL"],
+    });
     return;
   }
   await runWithManagedPostgres();

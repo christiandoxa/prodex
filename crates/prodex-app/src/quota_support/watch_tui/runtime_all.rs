@@ -306,13 +306,16 @@ fn draw_all_quota_watch_tui(context: AllQuotaWatchDrawContext<'_>) -> Result<()>
         size.height,
         quota_watch_snapshot_overview_field_count(&render_snapshot, provider_filter),
     );
-    *scroll_offset = (*scroll_offset).min(quota_watch_tui_max_scroll_offset_for_snapshot(
-        &render_snapshot,
-        detail,
-        provider_filter,
-        sort,
-        max_lines,
-    ));
+    let total_width = usize::from(size.width).saturating_sub(4);
+    *scroll_offset =
+        (*scroll_offset).min(quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
+            &render_snapshot,
+            detail,
+            provider_filter,
+            sort,
+            max_lines,
+            total_width,
+        ));
     let frame = build_all_quota_watch_tui_frame(
         &render_snapshot,
         AllQuotaWatchLayout {
@@ -321,7 +324,7 @@ fn draw_all_quota_watch_tui(context: AllQuotaWatchDrawContext<'_>) -> Result<()>
             sort,
             provider_filter,
             provider_filter_locked,
-            total_width: usize::from(size.width).saturating_sub(4),
+            total_width,
             max_lines,
         },
     );
@@ -435,15 +438,19 @@ fn apply_all_quota_watch_command(
         detail,
         provider_filter_locked,
     } = context;
-    let max_offset = quota_watch_tui_max_scroll_offset_for_snapshot(
+    let terminal_size = tui.terminal.size().ok();
+    let max_offset = quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
         snapshot,
         detail,
         *provider_filter,
         *sort,
         quota_watch_tui_table_lines(
-            tui.terminal.size().map(|size| size.height).unwrap_or(24),
+            terminal_size.map(|size| size.height).unwrap_or(24),
             quota_watch_snapshot_overview_field_count(snapshot, *provider_filter),
         ),
+        terminal_size
+            .map(|size| usize::from(size.width).saturating_sub(4))
+            .unwrap_or(80),
     );
     match apply_quota_watch_command(command, *scroll_offset, max_offset) {
         QuotaWatchCommandOutcome::Continue(next_offset) => {

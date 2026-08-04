@@ -25,6 +25,45 @@ fn quota_watch_table_starts_rows_without_header_padding() {
 }
 
 #[test]
+fn quota_watch_table_compacts_to_the_available_width() {
+    let table = AllQuotaWatchTuiTable {
+        rows: vec![AllQuotaWatchTuiRow {
+            profile: vec!["profile".to_string()],
+            current: vec!["".to_string()],
+            auth: vec!["chatgpt".to_string()],
+            account: vec!["user@example.com".to_string()],
+            plan: vec!["plus".to_string()],
+            status: vec!["Ready".to_string()],
+            remaining: vec!["5h 80% | weekly 90%".to_string()],
+            detail: Vec::new(),
+        }],
+    };
+
+    let narrow = super::watch_tui::quota_watch_table_text_with_width(&table, 48);
+    let narrow_width = narrow.lines[1]
+        .spans
+        .iter()
+        .map(|span| terminal_ui::text_width(span.content.as_ref()))
+        .sum::<usize>();
+    let wide_width = quota_watch_table_text(&table).lines[1]
+        .spans
+        .iter()
+        .map(|span| terminal_ui::text_width(span.content.as_ref()))
+        .sum::<usize>();
+
+    assert_eq!(narrow_width, 48);
+    assert!(
+        narrow.lines[1]
+            .spans
+            .last()
+            .expect("remaining quota column")
+            .content
+            .contains("5h 80%")
+    );
+    assert!(wide_width > narrow_width);
+}
+
+#[test]
 fn all_quota_watch_tui_detail_keeps_profile_column_clean() {
     let mut usage = test_openai_usage_with_windows(20, 10, 1_700_086_400);
     usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {

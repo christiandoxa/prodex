@@ -441,6 +441,7 @@ mod tests {
     fn formats_header_profile_quota_detail() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 42,
             five_hour_reset_at: i64::MAX,
@@ -458,6 +459,7 @@ mod tests {
     fn header_detail_does_not_render_unknown_window_as_exhausted() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Unknown,
             five_hour_remaining_percent: 0,
             five_hour_reset_at: i64::MAX,
@@ -478,6 +480,7 @@ mod tests {
     fn header_detail_omits_reset_year_and_fits_width() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 42,
             five_hour_reset_at: 1_783_523_600,
@@ -502,6 +505,7 @@ mod tests {
     fn header_refresh_interval_uses_quota_detail_algorithm() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 80,
             five_hour_reset_at: i64::MAX,

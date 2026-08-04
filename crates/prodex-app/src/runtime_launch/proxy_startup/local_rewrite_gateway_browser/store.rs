@@ -27,6 +27,8 @@ pub(super) struct RuntimeGatewayBrowserTransaction {
 pub(super) struct RuntimeGatewayBrowserSession {
     pub(super) id_token: String,
     #[serde(default)]
+    pub(super) csrf_digest: [u8; 32],
+    #[serde(default)]
     pub(super) logout_keys: Vec<String>,
     pub(super) expires_at_unix_ms: u64,
 }

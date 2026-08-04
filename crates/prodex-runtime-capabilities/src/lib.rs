@@ -232,11 +232,60 @@ fn runtime_capability_collect_tool_surface_from_responses(
     value: &serde_json::Value,
     flags: &mut BTreeSet<&'static str>,
 ) {
+    if let Some(tools) = value.get("tools").and_then(serde_json::Value::as_array) {
+        for tool in tools {
+            runtime_capability_collect_responses_tool(tool, flags);
+        }
+    }
     if let Some(items) = value.get("input").and_then(serde_json::Value::as_array) {
         for item in items {
             runtime_capability_collect_responses_item(item, flags);
         }
     }
+}
+
+fn runtime_capability_collect_responses_tool(
+    tool: &serde_json::Value,
+    flags: &mut BTreeSet<&'static str>,
+) {
+    let tool_type = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = tool
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match tool_type.as_str() {
+        "function" => runtime_capability_collect_responses_named_tool(&name, flags),
+        "web_search" | "web_search_preview" | "web_fetch" => {
+            flags.insert("web");
+        }
+        "computer" | "computer_use_preview" => {
+            flags.insert("computer");
+        }
+        "shell" | "code_interpreter" => {
+            flags.insert("shell");
+        }
+        _ if tool_type.starts_with("mcp") => {
+            flags.insert("mcp");
+        }
+        _ if !tool_type.is_empty() || !name.is_empty() => {
+            flags.insert("generic_tool");
+        }
+        _ => {}
+    }
+}
+
+fn runtime_capability_collect_responses_named_tool(name: &str, flags: &mut BTreeSet<&'static str>) {
+    flags.insert(match name {
+        "websearch" | "webfetch" => "web",
+        "bash" => "shell",
+        "computer" => "computer",
+        _ => "generic_tool",
+    });
 }
 
 fn runtime_capability_collect_responses_item(
@@ -261,15 +310,9 @@ fn runtime_capability_collect_responses_item(
     if item_type.ends_with("_call_output") {
         flags.insert("tool_result");
     }
-    if item_type != "function_call" {
-        return;
+    if item_type == "function_call" {
+        runtime_capability_collect_responses_named_tool(&name, flags);
     }
-    flags.insert(match name.as_str() {
-        "websearch" | "webfetch" => "web",
-        "bash" => "shell",
-        "computer" => "computer",
-        _ => "generic_tool",
-    });
 }
 
 fn runtime_capability_continuation_label(request: &RuntimeProxyRequest) -> String {
@@ -341,6 +384,14 @@ fn runtime_capability_stream_label(
     value: Option<&serde_json::Value>,
     transport: &str,
 ) -> &'static str {
+    if is_runtime_responses_path(&request.path_and_query)
+        && value
+            .and_then(|value| value.get("stream"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+    {
+        return "unary";
+    }
     let anthropic_streaming = is_runtime_anthropic_messages_path(&request.path_and_query)
         && value
             .and_then(|value| value.get("stream"))
@@ -441,5 +492,27 @@ mod tests {
             runtime_proxy_crate::runtime_request_explicit_session_id(&request).as_deref(),
             Some("legacy-session")
         );
+    }
+
+    #[test]
+    fn responses_stream_false_and_top_level_tools_are_detected() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{
+                "stream": false,
+                "tools": [
+                    {"type": "function", "name": "bash"},
+                    {"type": "web_search_preview"}
+                ]
+            }"#
+            .to_vec(),
+        };
+
+        let surface = runtime_detect_request_compatibility_surface(&request, "request", "http");
+
+        assert_eq!(surface.stream, "unary");
+        assert_eq!(surface.tool_surface, "shell+web");
     }
 }

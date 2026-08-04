@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn runtime_usage_snapshot_persistence_preserves_plan_type_and_reads_legacy_state() {
+    let temp_dir = TestDir::isolated();
+    let now = Local::now().timestamp();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
+        },
+    )]);
+    let mut snapshot = ready_runtime_usage_snapshot(now, 80);
+    snapshot.plan_type = Some("plus".to_string());
+    let snapshots = BTreeMap::from([("main".to_string(), snapshot)]);
+
+    save_runtime_usage_snapshots_for_profiles(&paths, &snapshots, &profiles)
+        .expect("usage snapshot should save");
+    let loaded =
+        load_runtime_usage_snapshots(&paths, &profiles).expect("usage snapshot should reload");
+    assert_eq!(loaded["main"].plan_type.as_deref(), Some("plus"));
+
+    let compacted = compact_runtime_usage_snapshots(loaded.clone(), &profiles, now);
+    assert_eq!(compacted["main"].plan_type.as_deref(), Some("plus"));
+
+    let merged = merge_runtime_usage_snapshots(&BTreeMap::new(), &loaded, &profiles);
+    assert_eq!(merged["main"].plan_type.as_deref(), Some("plus"));
+
+    let legacy = serde_json::json!({
+        "main": {
+            "checked_at": now,
+            "five_hour_status": "Ready",
+            "five_hour_remaining_percent": 80,
+            "five_hour_reset_at": now + 18_000,
+            "weekly_status": "Ready",
+            "weekly_remaining_percent": 80,
+            "weekly_reset_at": now + 604_800
+        }
+    });
+    fs::write(
+        runtime_usage_snapshots_file_path(&paths),
+        serde_json::to_string(&legacy).expect("legacy snapshot should serialize"),
+    )
+    .expect("legacy snapshot should write");
+    let loaded_legacy = load_runtime_usage_snapshots(&paths, &profiles)
+        .expect("legacy snapshot should deserialize");
+    assert_eq!(loaded_legacy["main"].plan_type, None);
+}
+
+#[test]
 fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();

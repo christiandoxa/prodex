@@ -21,6 +21,7 @@ pub(crate) fn gateway_state_store_config(
         policy,
         &resolver,
         env::var_os(PRODEX_GATEWAY_REDIS_URL_ENV).is_some(),
+        false,
     )
 }
 
@@ -29,12 +30,14 @@ pub(crate) fn gateway_state_store_config_with_resolver(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
     environment: &RuntimeGatewayLaunchEnvironment,
+    require_secure_redis: bool,
 ) -> Result<RuntimeGatewayStateStore> {
     gateway_state_store_config_with_redis_presence(
         paths,
         policy,
         resolver,
         environment.secret_env_present(PRODEX_GATEWAY_REDIS_URL_ENV),
+        require_secure_redis,
     )
 }
 
@@ -43,6 +46,7 @@ fn gateway_state_store_config_with_redis_presence(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
     development_redis_present: bool,
+    require_secure_redis: bool,
 ) -> Result<RuntimeGatewayStateStore> {
     let backend = match policy.state.backend.as_deref() {
         Some(value) if gateway_exact_policy_identifier(value) => value,
@@ -94,8 +98,12 @@ fn gateway_state_store_config_with_redis_presence(
                     SecretPurpose::DataPlaneCredential,
                 )?
                 .context("gateway.state.backend=postgres requires a secret source")?;
-            let coordination_redis_url =
-                gateway_coordination_redis_url(policy, resolver, development_redis_present)?;
+            let coordination_redis_url = gateway_coordination_redis_url(
+                policy,
+                resolver,
+                development_redis_present,
+                require_secure_redis,
+            )?;
             let tls = gateway_postgres_tls_config(paths, policy, resolver)?;
             Ok(
                 RuntimeGatewayStateStore::postgres_with_coordination_and_tls(
@@ -128,6 +136,7 @@ fn gateway_state_store_config_with_redis_presence(
                     SecretPurpose::DataPlaneCredential,
                 )?
                 .context("gateway.state.backend=redis requires a secret source")?;
+            validate_gateway_redis_url("gateway.state.backend=redis", &url, require_secure_redis)?;
             Ok(RuntimeGatewayStateStore::redis(
                 env_name.unwrap_or("projected-secret").to_string(),
                 url,
@@ -274,6 +283,7 @@ fn gateway_coordination_redis_url(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
     development_redis_present: bool,
+    require_secure_redis: bool,
 ) -> Result<Option<String>> {
     if policy
         .state
@@ -288,13 +298,29 @@ fn gateway_coordination_redis_url(
         && policy.state.redis_url_env.is_none()
         && development_redis_present)
         .then_some(PRODEX_GATEWAY_REDIS_URL_ENV);
-    resolver.resolve_static(
+    let url = resolver.resolve_static(
         "gateway.state.redis_url",
         policy.state.redis_url_ref.as_ref(),
         policy.state.redis_url_env.as_deref().or(development_env),
         None,
         SecretPurpose::DataPlaneCredential,
-    )
+    )?;
+    if let Some(url) = &url {
+        validate_gateway_redis_url("gateway.state.redis_url", url, require_secure_redis)?;
+    }
+    Ok(url)
+}
+
+fn validate_gateway_redis_url(field: &str, url: &str, require_secure_redis: bool) -> Result<()> {
+    let parsed = redis::parse_redis_url(url)
+        .ok_or_else(|| anyhow::anyhow!("{field} must be a valid Redis URL"))?;
+    redis::Client::open(url).map_err(|_| anyhow::anyhow!("{field} must be a valid Redis URL"))?;
+    if require_secure_redis
+        && (!matches!(parsed.scheme(), "rediss" | "valkeys") || parsed.fragment().is_some())
+    {
+        bail!("{field} must use verified TLS in production or bank governance mode");
+    }
+    Ok(())
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {
@@ -330,5 +356,26 @@ mod deployment_policy_tests {
         assert!(
             gateway_validate_runtime_deployment_policy(&runtime_config(2, false), &policy).is_err()
         );
+    }
+
+    #[test]
+    fn gateway_redis_url_tls_policy_preserves_development_compatibility() {
+        for url in ["redis://example.com/0", "rediss://example.com/0/#insecure"] {
+            validate_gateway_redis_url("gateway.state.redis_url", url, false).unwrap();
+        }
+    }
+
+    #[test]
+    fn gateway_redis_url_tls_policy_rejects_plaintext_and_insecure_production_forms() {
+        for url in ["redis://example.com/0", "rediss://example.com/0/#insecure"] {
+            let error = validate_gateway_redis_url("gateway.state.redis_url", url, true)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("verified TLS"), "{error}");
+        }
+        validate_gateway_redis_url("gateway.state.redis_url", "rediss://example.com/0", true)
+            .unwrap();
+        validate_gateway_redis_url("gateway.state.redis_url", "valkeys://example.com/0", true)
+            .unwrap();
     }
 }

@@ -170,7 +170,3 @@ use prodex_storage_sqlite::{
     plan_sqlite_tenant_lifecycle, plan_sqlite_usage_reconciliation, plan_sqlite_user_lifecycle,
     plan_sqlite_virtual_key_secret_reference,
 };
-
-pub fn assert_app_is_composition_root_only_marker() -> bool {
-    true
-}

@@ -9,6 +9,7 @@ fn usage_snapshot_compaction_prunes_missing_and_expired_profiles() {
         (
             "alpha".to_string(),
             RuntimeProfileUsageSnapshot {
+                plan_type: None,
                 checked_at: 200,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 100,
@@ -21,6 +22,7 @@ fn usage_snapshot_compaction_prunes_missing_and_expired_profiles() {
         (
             "missing".to_string(),
             RuntimeProfileUsageSnapshot {
+                plan_type: None,
                 checked_at: 200,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 100,
@@ -42,6 +44,7 @@ fn usage_snapshot_compaction_prunes_missing_and_expired_profiles() {
 fn usage_snapshot_timestamp_ties_merge_commutatively() {
     let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
     let snapshot = |status, remaining| RuntimeProfileUsageSnapshot {
+        plan_type: None,
         checked_at: 200,
         five_hour_status: status,
         five_hour_remaining_percent: remaining,

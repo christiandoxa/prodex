@@ -4,8 +4,10 @@ use runtime_proxy_crate::path_without_query;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+mod csrf;
 mod store;
 
+use self::csrf::{CSRF_COOKIE, browser_session_csrf_valid};
 pub(super) use self::store::RuntimeGatewayBrowserState;
 use self::store::{
     BROWSER_TRANSACTION_TTL_MS, RuntimeGatewayBrowserSession, RuntimeGatewayBrowserTransaction,
@@ -67,8 +69,7 @@ pub(super) fn runtime_gateway_browser_auth_response(
             runtime_gateway_browser_callback(request, shared, config)
         }
         RuntimeGatewayBrowserRoute::Logout
-            if request.method().eq_ignore_ascii_case("GET")
-                || request.method().eq_ignore_ascii_case("POST") =>
+            if csrf::browser_logout_method_allowed(request.method()) =>
         {
             runtime_gateway_browser_logout(request, shared)
         }
@@ -77,7 +78,7 @@ pub(super) fn runtime_gateway_browser_auth_response(
         {
             runtime_gateway_browser_backchannel_logout(request, shared)
         }
-        _ => Ok(method_not_allowed()),
+        _ => Ok(csrf::browser_method_not_allowed(route)),
     };
     Some(response.unwrap_or_else(|failure| match failure {
         RuntimeGatewayBrowserFailure::Unauthorized => build_runtime_proxy_json_error_response(
@@ -109,6 +110,9 @@ pub(super) fn runtime_gateway_browser_session_auth(
     let session = browser_load_session(shared, session_id).ok().flatten()?;
     if session.expires_at_unix_ms <= now {
         let _ = browser_delete_session_record(shared, session_id, Some(&session));
+        return None;
+    }
+    if !browser_session_csrf_valid(request, &session) {
         return None;
     }
     let verified = match runtime_gateway_verify_oidc_token(&session.id_token, oidc, shared) {
@@ -194,6 +198,7 @@ fn runtime_gateway_browser_login(
             "{STATE_COOKIE}={state}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=300"
         )),
         None,
+        None,
     ))
 }
 
@@ -278,11 +283,13 @@ fn runtime_gateway_browser_callback(
     let _authentication = runtime_gateway_oidc_admin_auth_from_verified(verified, oidc, shared)
         .ok_or(RuntimeGatewayBrowserFailure::Unauthorized)?;
     let session_id = random_token().map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let csrf = random_token().map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
     browser_store_session(
         shared,
         session_id.clone(),
         RuntimeGatewayBrowserSession {
             id_token: id_token.to_string(),
+            csrf_digest: Sha256::digest(csrf.as_bytes()).into(),
             logout_keys,
             expires_at_unix_ms: now.saturating_add(BROWSER_SESSION_TTL_MS),
         },
@@ -296,6 +303,9 @@ fn runtime_gateway_browser_callback(
         Some(format!(
             "{STATE_COOKIE}=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
         )),
+        Some(format!(
+            "{CSRF_COOKIE}={csrf}; Secure; SameSite=Strict; Path=/; Max-Age=28800"
+        )),
     ))
 }
 
@@ -304,13 +314,22 @@ fn runtime_gateway_browser_logout(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> BrowserResult<tiny_http::ResponseBox> {
     if let Some(session_id) = cookie_from_headers(request.headers(), SESSION_COOKIE) {
-        browser_delete_session(shared, session_id)?;
+        let session = browser_load_session(shared, session_id)?;
+        if let Some(session) = session.as_ref()
+            && !csrf::browser_logout_csrf_valid(&request.header_request(), session)
+        {
+            return Err(RuntimeGatewayBrowserFailure::Unauthorized);
+        }
+        browser_delete_session_record(shared, session_id, session.as_ref())?;
     }
     Ok(redirect_response(
         303,
         "/v1/prodex/gateway/auth/login",
         Some(format!(
             "{SESSION_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+        )),
+        Some(format!(
+            "{CSRF_COOKIE}=; Secure; SameSite=Strict; Path=/; Max-Age=0"
         )),
         None,
     ))
@@ -689,6 +708,7 @@ fn redirect_response(
     location: &str,
     cookie: Option<String>,
     second_cookie: Option<String>,
+    third_cookie: Option<String>,
 ) -> tiny_http::ResponseBox {
     let mut headers = vec![
         ("location".to_string(), location.as_bytes().to_vec()),
@@ -700,23 +720,12 @@ fn redirect_response(
         ("x-content-type-options".to_string(), b"nosniff".to_vec()),
         ("referrer-policy".to_string(), b"no-referrer".to_vec()),
     ];
-    for cookie in [cookie, second_cookie].into_iter().flatten() {
+    for cookie in [cookie, second_cookie, third_cookie].into_iter().flatten() {
         headers.push(("set-cookie".to_string(), cookie.into_bytes()));
     }
     build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,
-        body: Vec::new().into(),
-    })
-}
-
-fn method_not_allowed() -> tiny_http::ResponseBox {
-    build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
-        status: 405,
-        headers: vec![
-            ("allow".to_string(), b"GET, POST".to_vec()),
-            ("cache-control".to_string(), b"no-store".to_vec()),
-        ],
         body: Vec::new().into(),
     })
 }
@@ -767,6 +776,7 @@ mod tests {
 
         let session = RuntimeGatewayBrowserSession {
             id_token: "fixture.id.token".to_string(),
+            csrf_digest: [7; 32],
             logout_keys: vec![format!("{LOGOUT_INDEX_KEY_PREFIX}fixture")],
             expires_at_unix_ms: 456,
         };

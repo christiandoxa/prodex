@@ -151,6 +151,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
         "second".to_string(),
         RuntimeProfileUsageSnapshot {
             checked_at: now,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 85,
             five_hour_reset_at: now + 18_000,

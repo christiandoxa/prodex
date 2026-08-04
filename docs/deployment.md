@@ -203,6 +203,12 @@ state. The policy reads its URL through:
 redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
 ```
 
+Production and `bank_enforce` secret resolution requires verified TLS Redis URLs
+using `rediss://` or `valkeys://`. Plaintext `redis://`/`valkey://` and the
+Redis client's `#insecure` TLS form fail startup after the projected secret is
+resolved. The bundled loopback Compose service may use plaintext only in local
+development mode.
+
 The Compose file includes an optional Redis service under the `redis` profile:
 
 ```bash

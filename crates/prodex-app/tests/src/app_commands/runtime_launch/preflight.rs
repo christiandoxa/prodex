@@ -107,6 +107,7 @@ fn runtime_launch_preflight_error_message_redacts_secret_like_chain() {
 fn persisted_weekly_only_snapshot_does_not_block_launch_preflight() {
     let usage = runtime_launch_usage_from_snapshot(&RuntimeProfileUsageSnapshot {
         checked_at: Local::now().timestamp(),
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Unknown,
         five_hour_remaining_percent: 0,
         five_hour_reset_at: i64::MAX,
@@ -158,6 +159,7 @@ fn prepare_runtime_launch_rechecks_persisted_exhausted_quota_snapshot() {
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Unknown,
                 five_hour_remaining_percent: 0,
                 five_hour_reset_at: i64::MAX,
@@ -277,6 +279,7 @@ fn prepare_runtime_launch_auto_selects_ready_snapshot_before_current_network_pre
             "ready".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 72,
                 five_hour_reset_at: now + 18_000,

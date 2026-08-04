@@ -223,13 +223,6 @@ pub fn codex_configured_model_provider_with_profile_v2(
     codex_config_value_with_profile_v2(codex_home, "model_provider", profile_v2_name)
 }
 
-pub fn codex_configured_model_provider_for_args(
-    codex_home: &Path,
-    args: &[OsString],
-) -> CodexConfigResult<Option<String>> {
-    codex_config_value_for_args(codex_home, args, "model_provider")
-}
-
 pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<String> {
     let mut index = 0;
     while index < args.len() {

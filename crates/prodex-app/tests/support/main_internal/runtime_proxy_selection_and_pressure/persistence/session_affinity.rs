@@ -147,6 +147,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 80,
                     five_hour_reset_at: now + 18_000,
@@ -159,6 +160,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
                 "second".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 90,
                     five_hour_reset_at: now + 18_000,
@@ -261,6 +263,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
             "second".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 90,
                 five_hour_reset_at: now + 18_000,
@@ -351,6 +354,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 80,
                     five_hour_reset_at: now + 18_000,
@@ -363,6 +367,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
                 "second".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 90,
                     five_hour_reset_at: now + 18_000,

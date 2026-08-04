@@ -374,7 +374,7 @@ pub(super) fn runtime_launch_usage_from_snapshot(
 ) -> UsageResponse {
     UsageResponse {
         email: None,
-        plan_type: None,
+        plan_type: snapshot.plan_type.clone(),
         rate_limit: Some(WindowPair {
             primary_window: runtime_launch_window_from_snapshot(
                 snapshot.five_hour_status,

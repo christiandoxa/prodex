@@ -91,6 +91,7 @@ pub(crate) fn resolve_config_publication_postgres_transport(
     paths: &AppPaths,
     gateway: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+    bank_enforce: bool,
 ) -> Result<(String, prodex_storage_postgres_runtime::PostgresTlsConfig)> {
     let resolver = GatewaySecretResolver::from_policy(secrets)?;
     match gateway_state_store_config_with_resolver(
@@ -98,6 +99,7 @@ pub(crate) fn resolve_config_publication_postgres_transport(
         gateway,
         &resolver,
         &RuntimeGatewayLaunchEnvironment::default(),
+        resolver.production() || bank_enforce,
     )? {
         RuntimeGatewayStateStore::Postgres { url, tls, .. } => Ok((url, tls)),
         _ => bail!("Postgres config publication requires gateway.state.backend=postgres"),
@@ -324,6 +326,8 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         policy,
         &secret_resolver,
         &runtime_config.gateway.launch,
+        secret_resolver.production()
+            || runtime_config.governance.mode == prodex_config::GovernanceMode::BankEnforce,
     )?;
     gateway_validate_runtime_topology(&state_store, &runtime_config.gateway, policy)?;
 

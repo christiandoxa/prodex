@@ -99,6 +99,26 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         config.state_store.coordination_redis_url(),
         Some("rediss://redis.internal/0")
     );
+    let redis_path = secrets.projected_root.as_ref().unwrap().join("redis-url");
+    for insecure_url in [
+        "redis://redis.internal/0",
+        "rediss://redis.internal/0/#insecure",
+    ] {
+        secret_store::write_private_file_atomic(&redis_path, insecure_url.as_bytes()).unwrap();
+        let error = match resolve_gateway_launch_config_with_secrets(
+            &paths,
+            &state,
+            &gateway_args(),
+            &policy,
+            &secrets,
+        ) {
+            Err(error) => error.to_string(),
+            Ok(_) => panic!("insecure production Redis URL must be rejected"),
+        };
+        assert!(error.contains("verified TLS"), "{error}");
+        assert!(!error.contains(insecure_url), "{error}");
+    }
+    secret_store::write_private_file_atomic(&redis_path, b"rediss://redis.internal/0").unwrap();
     let initial_fingerprint = config.credential_fingerprint;
     let postgres_path = secrets
         .projected_root

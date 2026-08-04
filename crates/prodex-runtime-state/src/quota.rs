@@ -34,6 +34,8 @@ pub struct RuntimeProfileBackoffs {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RuntimeProfileUsageSnapshot<W = RuntimeQuotaWindowStatus> {
     pub checked_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_type: Option<String>,
     pub five_hour_status: W,
     pub five_hour_remaining_percent: i64,
     pub five_hour_reset_at: i64,
@@ -215,6 +217,7 @@ pub fn runtime_profile_usage_snapshot_materially_matches<W: PartialEq>(
     next: &RuntimeProfileUsageSnapshot<W>,
 ) -> bool {
     previous.five_hour_status == next.five_hour_status
+        && previous.plan_type == next.plan_type
         && previous.five_hour_remaining_percent == next.five_hour_remaining_percent
         && previous.five_hour_reset_at == next.five_hour_reset_at
         && previous.weekly_status == next.weekly_status

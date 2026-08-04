@@ -36,6 +36,8 @@ fn cleanup_summary_total_and_merge_count_all_fields() {
     let right = ProdexCleanupSummary {
         stale_login_dirs_removed: 4,
         dead_runtime_broker_registries_removed: 5,
+        scan_failures: 2,
+        delete_failures: 3,
         ..ProdexCleanupSummary::default()
     };
 
@@ -44,6 +46,7 @@ fn cleanup_summary_total_and_merge_count_all_fields() {
     assert_eq!(merged.total_removed(), 12);
     assert_eq!(merged.runtime_logs_removed, 2);
     assert_eq!(merged.stale_login_dirs_removed, 4);
+    assert_eq!(merged.failure_count(), 5);
 }
 
 #[test]
@@ -56,13 +59,54 @@ fn stale_login_cleanup_can_retry_after_delete_failure() {
         .checked_add(Duration::from_secs(2))
         .unwrap();
 
-    assert_eq!(cleanup_stale_login_dirs_at(&paths, now, 1, |_| false), 0);
+    let failed = cleanup_stale_login_dirs_at_with_counts(&paths, now, 1, |_| false);
+    assert_eq!(failed.removed, 0);
+    assert_eq!(failed.delete_failures, 1);
     assert!(stale_login.exists());
     assert_eq!(
         cleanup_stale_login_dirs_at(&paths, now, 1, |path| fs::remove_dir_all(path).is_ok()),
         1
     );
     assert!(!stale_login.exists());
+}
+
+#[test]
+fn cleanup_reports_scan_failures_without_deleting_ambiguous_paths() {
+    let paths = test_paths("cleanup-failure-counts");
+    fs::write(&paths.root, "not a directory").unwrap();
+
+    let root_temp =
+        cleanup_prodex_stale_root_temp_files_at_with_counts(&paths, SystemTime::now(), 1, |_| {
+            false
+        });
+    assert_eq!(root_temp.removed, 0);
+    assert_eq!(root_temp.scan_failures, 1);
+
+    let logs = cleanup_runtime_proxy_logs_in_dir_with_counts(
+        &paths.root,
+        SystemTime::now(),
+        1,
+        1,
+        "prodex-runtime-",
+    );
+    assert_eq!(logs.removed, 0);
+    assert_eq!(logs.scan_failures, 1);
+    assert!(paths.root.exists());
+    fs::remove_file(&paths.root).unwrap();
+}
+
+#[test]
+fn cleanup_counts_delete_failures_and_keeps_directories() {
+    let paths = test_paths("cleanup-delete-failure");
+    fs::create_dir_all(&paths.root).unwrap();
+    let protected = paths.root.join("protected");
+    fs::create_dir(&protected).unwrap();
+
+    let report = cleanup_existing_files_under(&paths.root, [protected.clone()]);
+
+    assert_eq!(report.counts().delete_failures, 1);
+    assert!(protected.is_dir());
+    fs::remove_dir_all(&paths.root).unwrap();
 }
 
 #[test]

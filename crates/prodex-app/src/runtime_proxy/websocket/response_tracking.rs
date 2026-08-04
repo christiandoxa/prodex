@@ -363,7 +363,6 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 profile_name: self.profile_name,
                 reuse_existing_session: self.reuse_existing_session,
                 precommit_hold_promotion_allowed: self.precommit_hold_promotion_allowed,
-                precommit_transport_retry_allowed: self.precommit_transport_retry_allowed,
                 inspected,
                 text,
                 buffered_precommit_text_frames: &mut self.buffered_precommit_text_frames,

@@ -220,6 +220,7 @@ mod tests {
     fn snapshot() -> RuntimeProfileUsageSnapshot {
         RuntimeProfileUsageSnapshot {
             checked_at: 0,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 80,
             five_hour_reset_at: i64::MAX,
