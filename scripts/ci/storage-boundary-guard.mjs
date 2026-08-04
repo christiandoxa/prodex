@@ -7,7 +7,7 @@ import { parseDependencySections } from "./boundary-guard-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/u;
+const EXECUTED_TESTS_PATTERN = /\brunning [1-9][0-9]* tests?\b/u;
 
 const STORAGE_MANIFEST = "crates/prodex-storage/Cargo.toml";
 const STORAGE_SRC_DIR = "crates/prodex-storage/src";
@@ -216,8 +216,8 @@ function assertSelfTest(condition, message) {
   if (!condition) throw new Error(`self-test failed: ${message}`);
 }
 
-function hasZeroTests(output) {
-  return ZERO_TESTS_PATTERN.test(output);
+function hasNoExecutedTests(output) {
+  return !EXECUTED_TESTS_PATTERN.test(output);
 }
 
 function runCommand(command, args, options = {}) {
@@ -251,7 +251,7 @@ function runCommand(command, args, options = {}) {
         reject(new Error(`${command} ${args.join(" ")} exited with code ${code}`));
         return;
       }
-      if (options.failOnZeroTests && hasZeroTests(output)) {
+      if (options.failOnZeroTests && hasNoExecutedTests(output)) {
         reject(new Error(`${command} ${args.join(" ")} matched no tests (cargo reported "running 0 tests")`));
         return;
       }
@@ -345,8 +345,12 @@ topology: evidence.topology
     POSTGRES_PROOF_RUN_OPTIONS.capture && POSTGRES_PROOF_RUN_OPTIONS.failOnZeroTests,
     "every broad Postgres proof command must capture output and reject zero tests",
   );
-  assertSelfTest(hasZeroTests("running 0 tests"), "zero-test output not detected");
-  assertSelfTest(!hasZeroTests("running 1 test"), "matched test output misclassified as zero tests");
+  assertSelfTest(hasNoExecutedTests("running 0 tests"), "zero-test output not detected");
+  assertSelfTest(!hasNoExecutedTests("running 1 test"), "matched test output misclassified as zero tests");
+  assertSelfTest(
+    !hasNoExecutedTests("running 0 tests\nrunning 2 tests"),
+    "empty test binaries must not hide executed integration tests",
+  );
 
   const delayedWriter = "setTimeout(() => process.stdout.write('running 0 tests'), 25);";
   const exitBeforeStream = `const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", ${JSON.stringify(

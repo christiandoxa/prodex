@@ -559,6 +559,37 @@ fn runtime_managed_profile_dir_looks_safe_to_audit(path: &Path) -> bool {
         || path.join(".codex").exists()
 }
 
+fn orphan_managed_profile_dir_name(
+    entry: fs::DirEntry,
+    state: &AppState,
+    oldest_allowed: i64,
+) -> Result<Option<String>, ()> {
+    let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+        return Ok(None);
+    };
+    if state.profiles.contains_key(&name) {
+        return Ok(None);
+    }
+    let path = entry.path();
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(None);
+    }
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(system_time_to_unix_seconds)
+        .ok_or(())?;
+    if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path) {
+        return Ok(None);
+    }
+    Ok(Some(name))
+}
+
 pub fn collect_orphan_managed_profile_dirs_at(
     paths: &AppPaths,
     state: &AppState,
@@ -587,46 +618,14 @@ pub fn collect_orphan_managed_profile_dirs_at_with_counts(
     let mut scan_failures = 0usize;
     let mut names = Vec::new();
     for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => {
-                scan_failures += 1;
-                continue;
-            }
-        };
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let path = entry.path();
-        if state.profiles.contains_key(&name) {
-            continue;
-        }
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(_) => {
-                scan_failures += 1;
-                continue;
-            }
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            continue;
-        }
-        let modified = match metadata
-            .modified()
-            .ok()
-            .and_then(system_time_to_unix_seconds)
+        match entry
+            .map_err(|_| ())
+            .and_then(|entry| orphan_managed_profile_dir_name(entry, state, oldest_allowed))
         {
-            Some(modified) => modified,
-            None => {
-                scan_failures += 1;
-                continue;
-            }
-        };
-        if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path) {
-            continue;
+            Ok(Some(name)) => names.push(name),
+            Ok(None) => {}
+            Err(()) => scan_failures += 1,
         }
-        names.push(name);
     }
     names.sort();
     (names, scan_failures)
