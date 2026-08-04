@@ -416,6 +416,58 @@ pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> P
     counts
 }
 
+fn cleanup_runtime_broker_stale_lease_path(path: &Path, counts: &mut ProdexCleanupCounts) {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(_) => {
+            counts.scan_failures += 1;
+            return;
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return;
+    }
+    let Some(pid) = runtime_broker_lease_pid(file_name) else {
+        return;
+    };
+    if !runtime_process_absence_proven(pid) {
+        return;
+    }
+    match fs::remove_file(path) {
+        Ok(()) => counts.removed += 1,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => counts.delete_failures += 1,
+    }
+}
+
+fn cleanup_runtime_broker_empty_lease_dir(lease_dir: &Path, counts: &mut ProdexCleanupCounts) {
+    let mut remaining = match fs::read_dir(lease_dir) {
+        Ok(remaining) => remaining,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(_) => {
+            counts.scan_failures += 1;
+            return;
+        }
+    };
+    match remaining.next() {
+        Some(Ok(_)) => return,
+        Some(Err(_)) => {
+            counts.scan_failures += 1;
+            return;
+        }
+        None => {}
+    }
+    match fs::remove_dir(lease_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => counts.delete_failures += 1,
+    }
+}
+
 fn cleanup_runtime_broker_stale_leases_in_dir(lease_dir: &Path) -> ProdexCleanupCounts {
     let metadata = match fs::symlink_metadata(lease_dir) {
         Ok(metadata) => metadata,
@@ -453,44 +505,9 @@ fn cleanup_runtime_broker_stale_leases_in_dir(lease_dir: &Path) -> ProdexCleanup
                 continue;
             }
         };
-        let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(_) => {
-                counts.scan_failures += 1;
-                continue;
-            }
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            continue;
-        }
-        let pid = runtime_broker_lease_pid(file_name);
-        if !pid.is_some_and(runtime_process_absence_proven) {
-            continue;
-        }
-        match fs::remove_file(&path) {
-            Ok(()) => counts.removed += 1,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => counts.delete_failures += 1,
-        }
+        cleanup_runtime_broker_stale_lease_path(&entry.path(), &mut counts);
     }
-    match fs::read_dir(lease_dir) {
-        Ok(mut remaining) => match remaining.next() {
-            None => match fs::remove_dir(lease_dir) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(_) => counts.delete_failures += 1,
-            },
-            Some(Ok(_)) => {}
-            Some(Err(_)) => counts.scan_failures += 1,
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(_) => counts.scan_failures += 1,
-    }
+    cleanup_runtime_broker_empty_lease_dir(lease_dir, &mut counts);
     counts
 }
 
