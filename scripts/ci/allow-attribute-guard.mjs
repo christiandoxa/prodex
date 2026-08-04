@@ -8,9 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 0,
   "unused_imports": 3,
-  "clippy::large_enum_variant": 5,
+  "clippy::large_enum_variant": 10,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 32,
+  "clippy::too_many_arguments": 37,
   "clippy::type_complexity": 1,
 });
 
@@ -25,6 +25,12 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeWebsocketConnectResult {",
   "clippy::large_enum_variant|crates/prodex-runtime-anthropic/src/lib.rs|pub enum RuntimeResponsesReply {",
   "clippy::large_enum_variant|crates/prodex-runtime-state/src/background.rs|pub enum RuntimeStateSavePayload<S, Shared> {",
+  // ponytail: keep transport outcomes unboxed on the streaming boundary; revisit if measured stack pressure appears.
+  "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs|enum RuntimeGeminiModelAttempt {",
+  "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send/retry.rs|pub(super) enum RuntimeGeminiStreamAction {",
+  "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_search_fallback.rs|pub(super) enum RuntimeLocalRewritePreparedSendResult {",
+  "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs|pub(super) enum RuntimeLocalRewriteLiveBody {",
+  "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs|pub(super) enum RuntimeLocalRewriteUpstreamResponse {",
   "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(",
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs|pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(",
@@ -50,6 +56,12 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/session.rs|fn runtime_gemini_live_drain_upstream<S>(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs|pub(super) fn remember(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_dispatch.rs|pub(super) fn respond_runtime_local_rewrite_live_response(",
+  // ponytail: provider send inputs stay explicit at the retry boundary; add a request context only if another caller appears.
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs|fn send_runtime_deepseek_passthrough_request(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs|fn send_runtime_deepseek_responses_request(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs|fn assert_sqlite_reconciliation_conflict_unchanged(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/lineage/remember/compact.rs|fn remember_runtime_compact_binding(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|fn runtime_apply_external_http_redaction(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn activate(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn vote(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",

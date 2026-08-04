@@ -208,10 +208,33 @@ fn inspect_runtime_sse_buffer_with_eof(
 ) -> RuntimeSseInspectionProgress {
     let mut line = Vec::new();
     let mut data_lines = Vec::new();
-    let mut response_ids = std::collections::BTreeSet::new();
-    let mut saw_commit_ready_event = false;
-    let mut turn_state = None::<String>;
-    let mut process_event = |event: RuntimeParsedSseEvent| {
+    let mut state = RuntimeSseInspectionState::default();
+    let mut terminal = None;
+    runtime_sse_consume_inspection_buffer(&mut line, &mut data_lines, buffered, |event| {
+        record_runtime_sse_inspection_event(&mut state, &mut terminal, event);
+    });
+    if at_eof && terminal.is_none() {
+        runtime_sse_finish_pending_with_parser(
+            &mut line,
+            &mut data_lines,
+            runtime_sse_inspection_event,
+            &mut |event| {
+                record_runtime_sse_inspection_event(&mut state, &mut terminal, event);
+            },
+        );
+    }
+    terminal.unwrap_or_else(|| state.progress())
+}
+
+#[derive(Default)]
+struct RuntimeSseInspectionState {
+    response_ids: std::collections::BTreeSet<String>,
+    saw_commit_ready_event: bool,
+    turn_state: Option<String>,
+}
+
+impl RuntimeSseInspectionState {
+    fn observe(&mut self, event: RuntimeParsedSseEvent) -> Option<RuntimeSseInspectionProgress> {
         if event.quota_blocked {
             return Some(RuntimeSseInspectionProgress::QuotaBlocked);
         }
@@ -221,51 +244,42 @@ fn inspect_runtime_sse_buffer_with_eof(
         if event.previous_response_not_found {
             return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
         }
-        response_ids.extend(event.response_ids);
+        self.response_ids.extend(event.response_ids);
         if event.turn_state.is_some() {
-            turn_state = event.turn_state;
+            self.turn_state = event.turn_state;
         }
         if !event
             .event_type
             .as_deref()
             .is_some_and(crate::runtime_proxy_precommit_hold_event_kind)
         {
-            saw_commit_ready_event = true;
+            self.saw_commit_ready_event = true;
         }
         None
-    };
-    let mut terminal = None;
-    runtime_sse_consume_inspection_buffer(&mut line, &mut data_lines, buffered, |event| {
-        if terminal.is_none() {
-            terminal = process_event(event);
-        }
-    });
-    if at_eof && terminal.is_none() {
-        runtime_sse_finish_pending_with_parser(
-            &mut line,
-            &mut data_lines,
-            runtime_sse_inspection_event,
-            &mut |event| {
-                if terminal.is_none() {
-                    terminal = process_event(event);
-                }
-            },
-        );
-    }
-    if let Some(progress) = terminal {
-        return progress;
     }
 
-    if saw_commit_ready_event {
-        RuntimeSseInspectionProgress::Commit {
-            response_ids: response_ids.into_iter().collect(),
-            turn_state,
+    fn progress(self) -> RuntimeSseInspectionProgress {
+        if self.saw_commit_ready_event {
+            RuntimeSseInspectionProgress::Commit {
+                response_ids: self.response_ids.into_iter().collect(),
+                turn_state: self.turn_state,
+            }
+        } else {
+            RuntimeSseInspectionProgress::Hold {
+                response_ids: self.response_ids.into_iter().collect(),
+                turn_state: self.turn_state,
+            }
         }
-    } else {
-        RuntimeSseInspectionProgress::Hold {
-            response_ids: response_ids.into_iter().collect(),
-            turn_state,
-        }
+    }
+}
+
+fn record_runtime_sse_inspection_event(
+    state: &mut RuntimeSseInspectionState,
+    terminal: &mut Option<RuntimeSseInspectionProgress>,
+    event: RuntimeParsedSseEvent,
+) {
+    if terminal.is_none() {
+        *terminal = state.observe(event);
     }
 }
 

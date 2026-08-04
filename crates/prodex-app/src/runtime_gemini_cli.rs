@@ -172,101 +172,20 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
             &tool_plan,
             presidio_enabled,
         )?;
-        let mut child = match self.agent {
-            SuperCliAgent::Gemini => {
-                let runtime_proxy =
-                    runtime_proxy.context("Gemini CLI launch requires a local runtime proxy")?;
-                let proxy_base_url = format!("http://{}", runtime_proxy.listen_addr);
-                let mut gemini_auth_env = runtime_super_gemini_cli_oauth_env(&prepared.codex_home)?;
-                let (system_settings, system_defaults) =
-                    runtime_super_gemini_cli_system_settings(&overlay_home)?;
-                gemini_auth_env.extend(
-                    local_proxy_bypass_env()
-                        .into_iter()
-                        .map(|(key, value)| (OsString::from(key), value)),
-                );
-                ChildProcessPlan::new(
-                    gemini_bin(),
-                    if self.sub_agent.is_some() {
-                        overlay_home.clone()
-                    } else {
-                        prepared.codex_home.clone()
-                    },
-                )
-                .with_args(launch_args)
-                .with_extra_env(gemini_auth_env.into_iter().chain([
-                    (
-                        OsString::from("GOOGLE_GENAI_USE_GCA"),
-                        OsString::from("true"),
-                    ),
-                    (
-                        OsString::from("CODE_ASSIST_ENDPOINT"),
-                        OsString::from(proxy_base_url),
-                    ),
-                    (
-                        OsString::from("CODE_ASSIST_API_VERSION"),
-                        OsString::from("v1internal"),
-                    ),
-                    (
-                        OsString::from("GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
-                        system_settings.into_os_string(),
-                    ),
-                    (
-                        OsString::from("GEMINI_CLI_SYSTEM_DEFAULTS_PATH"),
-                        system_defaults.into_os_string(),
-                    ),
-                ]))
-                .with_removed_env(GEMINI_REMOVED_ENV_KEYS)
-            }
-            SuperCliAgent::Copilot => {
-                let runtime_proxy =
-                    runtime_proxy.context("Copilot CLI launch requires a local runtime proxy")?;
-                let model = self
-                    .args
-                    .local_model
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or(SUPER_COPILOT_DEFAULT_MODEL);
-                ChildProcessPlan::new(
-                    copilot_bin(),
-                    if self.sub_agent.is_some() {
-                        overlay_home.clone()
-                    } else {
-                        prepared.codex_home.clone()
-                    },
-                )
-                .with_args(launch_args)
-                .with_extra_env(runtime_super_copilot_cli_env(runtime_proxy, model))
-                .with_removed_env([
-                    "COPILOT_PROVIDER_BEARER_TOKEN",
-                    "COPILOT_PROVIDER_MODEL_ID",
-                    "COPILOT_PROVIDER_WIRE_MODEL",
-                ])
-            }
-            SuperCliAgent::Agy => unreachable!("Antigravity launch returns before overlay setup"),
-            SuperCliAgent::Kiro => {
-                let runtime_proxy = runtime_proxy
-                    .context("native Kiro CLI launch requires a local transport tunnel")?;
-                let proxy_url = runtime_proxy
-                    .kiro_connect_proxy_url()
-                    .context("native Kiro transport tunnel is unavailable")?;
-                ChildProcessPlan::new(
-                    kiro_bin(),
-                    if self.sub_agent.is_some() {
-                        overlay_home.clone()
-                    } else {
-                        prepared.codex_home.clone()
-                    },
-                )
-                .with_args(launch_args)
-                .with_extra_env(runtime_super_kiro_cli_profile_env(
-                    &prepared.codex_home,
-                    proxy_url,
-                )?)
-                .with_removed_env(KIRO_REMOVED_ENV_KEYS)
-            }
-            SuperCliAgent::Codex => bail!("Codex is not a native external CLI launch target"),
+        let child_home = if self.sub_agent.is_some() {
+            &overlay_home
+        } else {
+            &prepared.codex_home
         };
+        let mut child = build_super_native_child(
+            self.agent,
+            &self.args,
+            runtime_proxy,
+            &prepared.codex_home,
+            child_home,
+            &overlay_home,
+            launch_args,
+        )?;
         if matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot) {
             crate::remove_provider_secret_env(&mut child);
         }
@@ -281,6 +200,123 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         apply_sub_agent_recursion_marker(&mut child, self.sub_agent.as_ref());
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
     }
+}
+
+fn build_super_native_child(
+    agent: SuperCliAgent,
+    args: &SuperArgs,
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    codex_home: &Path,
+    child_home: &Path,
+    overlay_home: &Path,
+    launch_args: Vec<OsString>,
+) -> Result<ChildProcessPlan> {
+    match agent {
+        SuperCliAgent::Gemini => build_super_gemini_child(
+            runtime_proxy,
+            codex_home,
+            child_home,
+            overlay_home,
+            launch_args,
+        ),
+        SuperCliAgent::Copilot => {
+            build_super_copilot_child(args, runtime_proxy, child_home, launch_args)
+        }
+        SuperCliAgent::Kiro => {
+            build_super_kiro_child(runtime_proxy, codex_home, child_home, launch_args)
+        }
+        SuperCliAgent::Agy => unreachable!("Antigravity launch returns before overlay setup"),
+        SuperCliAgent::Codex => bail!("Codex is not a native external CLI launch target"),
+    }
+}
+
+fn build_super_gemini_child(
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    codex_home: &Path,
+    child_home: &Path,
+    overlay_home: &Path,
+    launch_args: Vec<OsString>,
+) -> Result<ChildProcessPlan> {
+    let runtime_proxy =
+        runtime_proxy.context("Gemini CLI launch requires a local runtime proxy")?;
+    let proxy_base_url = format!("http://{}", runtime_proxy.listen_addr);
+    let mut gemini_auth_env = runtime_super_gemini_cli_oauth_env(codex_home)?;
+    let (system_settings, system_defaults) =
+        runtime_super_gemini_cli_system_settings(overlay_home)?;
+    gemini_auth_env.extend(
+        local_proxy_bypass_env()
+            .into_iter()
+            .map(|(key, value)| (OsString::from(key), value)),
+    );
+    Ok(
+        ChildProcessPlan::new(gemini_bin(), child_home.to_path_buf())
+            .with_args(launch_args)
+            .with_extra_env(gemini_auth_env.into_iter().chain([
+                (
+                    OsString::from("GOOGLE_GENAI_USE_GCA"),
+                    OsString::from("true"),
+                ),
+                (
+                    OsString::from("CODE_ASSIST_ENDPOINT"),
+                    OsString::from(proxy_base_url),
+                ),
+                (
+                    OsString::from("CODE_ASSIST_API_VERSION"),
+                    OsString::from("v1internal"),
+                ),
+                (
+                    OsString::from("GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
+                    system_settings.into_os_string(),
+                ),
+                (
+                    OsString::from("GEMINI_CLI_SYSTEM_DEFAULTS_PATH"),
+                    system_defaults.into_os_string(),
+                ),
+            ]))
+            .with_removed_env(GEMINI_REMOVED_ENV_KEYS),
+    )
+}
+
+fn build_super_copilot_child(
+    args: &SuperArgs,
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    child_home: &Path,
+    launch_args: Vec<OsString>,
+) -> Result<ChildProcessPlan> {
+    let runtime_proxy =
+        runtime_proxy.context("Copilot CLI launch requires a local runtime proxy")?;
+    let model = args
+        .local_model
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(SUPER_COPILOT_DEFAULT_MODEL);
+    Ok(
+        ChildProcessPlan::new(copilot_bin(), child_home.to_path_buf())
+            .with_args(launch_args)
+            .with_extra_env(runtime_super_copilot_cli_env(runtime_proxy, model))
+            .with_removed_env([
+                "COPILOT_PROVIDER_BEARER_TOKEN",
+                "COPILOT_PROVIDER_MODEL_ID",
+                "COPILOT_PROVIDER_WIRE_MODEL",
+            ]),
+    )
+}
+
+fn build_super_kiro_child(
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    codex_home: &Path,
+    child_home: &Path,
+    launch_args: Vec<OsString>,
+) -> Result<ChildProcessPlan> {
+    let runtime_proxy =
+        runtime_proxy.context("native Kiro CLI launch requires a local transport tunnel")?;
+    let proxy_url = runtime_proxy
+        .kiro_connect_proxy_url()
+        .context("native Kiro transport tunnel is unavailable")?;
+    Ok(ChildProcessPlan::new(kiro_bin(), child_home.to_path_buf())
+        .with_args(launch_args)
+        .with_extra_env(runtime_super_kiro_cli_profile_env(codex_home, proxy_url)?)
+        .with_removed_env(KIRO_REMOVED_ENV_KEYS))
 }
 
 fn runtime_super_copilot_cli_env(
@@ -653,51 +689,8 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
     if args.api_key.is_some() && agent != SuperCliAgent::Copilot {
         return Err(unsupported(concat!("--api", "-key")));
     }
-
-    let feature = &args.codex_features;
-    if feature.web_search.is_some() {
-        return Err(unsupported("--web-search"));
-    }
-    if feature.rollout_budget_tokens.is_some() {
-        return Err(unsupported("--rollout-budget-tokens"));
-    }
-    if !feature.rollout_budget_reminders.is_empty() {
-        return Err(unsupported("--rollout-budget-reminders"));
-    }
-    if feature.rollout_budget_sampling_weight.is_some() {
-        return Err(unsupported("--rollout-budget-sampling-weight"));
-    }
-    if feature.rollout_budget_prefill_weight.is_some() {
-        return Err(unsupported("--rollout-budget-prefill-weight"));
-    }
-    if feature.current_time_reminder {
-        return Err(unsupported("--current-time-reminder"));
-    }
-    if feature.current_time_reminder_interval.is_some() {
-        return Err(unsupported("--current-time-reminder-interval"));
-    }
-    if feature.current_time_clock_source.is_some() {
-        return Err(unsupported("--current-time-clock-source"));
-    }
-    if feature.respect_system_proxy {
-        return Err(unsupported("--respect-system-proxy"));
-    }
-    if feature.no_respect_system_proxy {
-        return Err(unsupported("--no-respect-system-proxy"));
-    }
-
-    for (configured, option) in [
-        (args.sub_agent_provider.is_some(), "--sub-agent-provider"),
-        (args.sub_agent_model.is_some(), "--sub-agent-model"),
-        (
-            args.sub_agent_model_reasoning_effort.is_some(),
-            "--sub-agent-model-reasoning-effort",
-        ),
-        (args.sub_agent_url.is_some(), "--sub-agent-url"),
-    ] {
-        if configured {
-            return Err(unsupported(option));
-        }
+    if let Some(option) = first_unsupported_native_option(args) {
+        return Err(unsupported(option));
     }
     if args.sub_agent {
         return Err(anyhow::anyhow!(
@@ -721,46 +714,82 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
         return Err(unsupported("--presidio"));
     }
 
-    if agent != SuperCliAgent::Agy {
-        return Ok(());
-    }
-    if !args.required_tools.is_empty() {
-        return Err(unsupported("--require-tool"));
-    }
-    if !args.tools.is_empty() {
-        return Err(unsupported("--tool"));
-    }
-    if args.auto_rotate {
-        return Err(unsupported("--auto-rotate"));
-    }
-    if args.auto_redeem {
-        return Err(unsupported("--auto-redeem"));
-    }
-    if args.skip_quota_check {
-        return Err(unsupported("--skip-quota-check"));
-    }
-    if args.base_url.is_some() {
-        return Err(unsupported("--base-url"));
-    }
-    if args.no_proxy {
-        return Err(unsupported("--no-proxy"));
-    }
-    if args.url.is_some() {
-        return Err(unsupported("--url"));
-    }
-    if args.local_context_window.is_some() {
-        return Err(unsupported("--context-window"));
-    }
-    if args.local_auto_compact_token_limit.is_some() {
-        return Err(unsupported("--auto-compact-token-limit"));
-    }
-    if matches!(
-        resolve_super_launch_target(&args.codex_args),
-        prodex_cli::SuperLaunchTarget::Resume { .. }
-    ) {
-        return Err(unsupported("Codex session resume"));
+    if agent == SuperCliAgent::Agy
+        && let Some(option) = first_unsupported_agy_option(args)
+    {
+        return Err(unsupported(option));
     }
     Ok(())
+}
+
+fn first_unsupported_native_option(args: &SuperArgs) -> Option<&'static str> {
+    let feature = &args.codex_features;
+    [
+        (feature.web_search.is_some(), "--web-search"),
+        (
+            feature.rollout_budget_tokens.is_some(),
+            "--rollout-budget-tokens",
+        ),
+        (
+            !feature.rollout_budget_reminders.is_empty(),
+            "--rollout-budget-reminders",
+        ),
+        (
+            feature.rollout_budget_sampling_weight.is_some(),
+            "--rollout-budget-sampling-weight",
+        ),
+        (
+            feature.rollout_budget_prefill_weight.is_some(),
+            "--rollout-budget-prefill-weight",
+        ),
+        (feature.current_time_reminder, "--current-time-reminder"),
+        (
+            feature.current_time_reminder_interval.is_some(),
+            "--current-time-reminder-interval",
+        ),
+        (
+            feature.current_time_clock_source.is_some(),
+            "--current-time-clock-source",
+        ),
+        (feature.respect_system_proxy, "--respect-system-proxy"),
+        (feature.no_respect_system_proxy, "--no-respect-system-proxy"),
+        (args.sub_agent_provider.is_some(), "--sub-agent-provider"),
+        (args.sub_agent_model.is_some(), "--sub-agent-model"),
+        (
+            args.sub_agent_model_reasoning_effort.is_some(),
+            "--sub-agent-model-reasoning-effort",
+        ),
+        (args.sub_agent_url.is_some(), "--sub-agent-url"),
+    ]
+    .into_iter()
+    .find_map(|(configured, option)| configured.then_some(option))
+}
+
+fn first_unsupported_agy_option(args: &SuperArgs) -> Option<&'static str> {
+    [
+        (!args.required_tools.is_empty(), "--require-tool"),
+        (!args.tools.is_empty(), "--tool"),
+        (args.auto_rotate, "--auto-rotate"),
+        (args.auto_redeem, "--auto-redeem"),
+        (args.skip_quota_check, "--skip-quota-check"),
+        (args.base_url.is_some(), "--base-url"),
+        (args.no_proxy, "--no-proxy"),
+        (args.url.is_some(), "--url"),
+        (args.local_context_window.is_some(), "--context-window"),
+        (
+            args.local_auto_compact_token_limit.is_some(),
+            "--auto-compact-token-limit",
+        ),
+        (
+            matches!(
+                resolve_super_launch_target(&args.codex_args),
+                prodex_cli::SuperLaunchTarget::Resume { .. }
+            ),
+            "Codex session resume",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(configured, option)| configured.then_some(option))
 }
 
 fn super_native_cli_dry_run_report(

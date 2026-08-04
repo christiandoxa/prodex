@@ -1,6 +1,4 @@
-use super::super::local_rewrite::{
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
-};
+use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, RuntimeCopilotResponsesSseBindingReader,
 };
@@ -93,164 +91,113 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         }
     }
 
-    if runtime_local_rewrite_is_responses_route(
-        &shared.provider,
-        &captured.path_and_query,
-        RuntimeProviderBridgeKind::DeepSeek,
-    ) && (200..300).contains(&status)
-    {
-        if native_anthropic_messages {
-            respond_runtime_anthropic_messages_rewrite(
+    let responses_provider = ((200..300).contains(&status)
+        && matches!(
+            runtime_provider_route_kind(path_without_query(&captured.path_and_query)),
+            Some(RuntimeProviderRouteKind::Responses)
+        ))
+    .then(|| shared.provider.bridge_kind());
+    match responses_provider {
+        Some(
+            provider_kind @ (RuntimeProviderBridgeKind::DeepSeek
+            | RuntimeProviderBridgeKind::Anthropic),
+        ) => {
+            if native_anthropic_messages {
+                respond_runtime_anthropic_messages_rewrite(
+                    request_id,
+                    request,
+                    response,
+                    RuntimeAnthropicMessagesRewriteContext {
+                        status,
+                        content_type: &content_type,
+                        upstream_headers: upstream_headers.clone(),
+                        shared,
+                        captured,
+                        provider_kind,
+                        pending_request: chat_compatible_request.take().unwrap_or_default(),
+                        binding_recorder: buffered_binding_recorder.take(),
+                        response_governance,
+                    },
+                );
+            } else {
+                respond_runtime_chat_compatible_rewrite(
+                    request_id,
+                    request,
+                    response,
+                    RuntimeChatCompatibleRewriteContext {
+                        status,
+                        content_type: &content_type,
+                        upstream_headers: upstream_headers.clone(),
+                        prefix,
+                        shared,
+                        captured,
+                        provider_kind,
+                        profile_name: None,
+                        binding_recorder: buffered_binding_recorder.take(),
+                        pending_request: chat_compatible_request.take().unwrap_or_default(),
+                        response_governance,
+                    },
+                );
+            }
+            return;
+        }
+        Some(RuntimeProviderBridgeKind::Gemini) => {
+            if gemini_context.is_none() {
+                respond_runtime_chat_compatible_rewrite(
+                    request_id,
+                    request,
+                    response,
+                    RuntimeChatCompatibleRewriteContext {
+                        status,
+                        content_type: &content_type,
+                        upstream_headers: upstream_headers.clone(),
+                        prefix,
+                        shared,
+                        captured,
+                        provider_kind: RuntimeProviderBridgeKind::Gemini,
+                        profile_name: None,
+                        binding_recorder: buffered_binding_recorder.take(),
+                        pending_request: chat_compatible_request.take().unwrap_or_default(),
+                        response_governance,
+                    },
+                );
+            } else {
+                respond_runtime_gemini_rewrite(
+                    request_id,
+                    request,
+                    response,
+                    RuntimeGeminiRewriteContext {
+                        prefix,
+                        status,
+                        content_type: &content_type,
+                        upstream_headers: upstream_headers.clone(),
+                        shared,
+                        captured,
+                        gemini_context,
+                        external_binding_recorder: buffered_binding_recorder.take(),
+                        response_governance,
+                    },
+                );
+            }
+            return;
+        }
+        Some(RuntimeProviderBridgeKind::Copilot) => {
+            respond_runtime_copilot_rewrite(
                 request_id,
                 request,
                 response,
-                RuntimeAnthropicMessagesRewriteContext {
-                    status,
-                    content_type: &content_type,
-                    upstream_headers: upstream_headers.clone(),
-                    shared,
-                    captured,
-                    provider_kind: RuntimeProviderBridgeKind::DeepSeek,
-                    pending_request: chat_compatible_request.take().unwrap_or_default(),
-                    binding_recorder: buffered_binding_recorder.take(),
-                    response_governance,
-                },
+                status,
+                &content_type,
+                text_headers,
+                headers,
+                shared,
+                captured,
+                copilot_context,
+                response_governance,
             );
             return;
         }
-        respond_runtime_chat_compatible_rewrite(
-            request_id,
-            request,
-            response,
-            RuntimeChatCompatibleRewriteContext {
-                status,
-                content_type: &content_type,
-                upstream_headers: upstream_headers.clone(),
-                prefix,
-                shared,
-                captured,
-                provider_kind: RuntimeProviderBridgeKind::DeepSeek,
-                profile_name: None,
-                binding_recorder: buffered_binding_recorder.take(),
-                pending_request: chat_compatible_request.take().unwrap_or_default(),
-                response_governance,
-            },
-        );
-        return;
-    }
-
-    if runtime_local_rewrite_is_responses_route(
-        &shared.provider,
-        &captured.path_and_query,
-        RuntimeProviderBridgeKind::Anthropic,
-    ) && (200..300).contains(&status)
-    {
-        if native_anthropic_messages {
-            respond_runtime_anthropic_messages_rewrite(
-                request_id,
-                request,
-                response,
-                RuntimeAnthropicMessagesRewriteContext {
-                    status,
-                    content_type: &content_type,
-                    upstream_headers: upstream_headers.clone(),
-                    shared,
-                    captured,
-                    provider_kind: RuntimeProviderBridgeKind::Anthropic,
-                    pending_request: chat_compatible_request.take().unwrap_or_default(),
-                    binding_recorder: buffered_binding_recorder.take(),
-                    response_governance,
-                },
-            );
-            return;
-        }
-        respond_runtime_chat_compatible_rewrite(
-            request_id,
-            request,
-            response,
-            RuntimeChatCompatibleRewriteContext {
-                status,
-                content_type: &content_type,
-                upstream_headers: upstream_headers.clone(),
-                prefix,
-                shared,
-                captured,
-                provider_kind: RuntimeProviderBridgeKind::Anthropic,
-                profile_name: None,
-                binding_recorder: buffered_binding_recorder.take(),
-                pending_request: chat_compatible_request.take().unwrap_or_default(),
-                response_governance,
-            },
-        );
-        return;
-    }
-
-    if runtime_local_rewrite_is_responses_route(
-        &shared.provider,
-        &captured.path_and_query,
-        RuntimeProviderBridgeKind::Gemini,
-    ) && (200..300).contains(&status)
-    {
-        if gemini_context.is_none() {
-            respond_runtime_chat_compatible_rewrite(
-                request_id,
-                request,
-                response,
-                RuntimeChatCompatibleRewriteContext {
-                    status,
-                    content_type: &content_type,
-                    upstream_headers: upstream_headers.clone(),
-                    prefix,
-                    shared,
-                    captured,
-                    provider_kind: RuntimeProviderBridgeKind::Gemini,
-                    profile_name: None,
-                    binding_recorder: buffered_binding_recorder.take(),
-                    pending_request: chat_compatible_request.take().unwrap_or_default(),
-                    response_governance,
-                },
-            );
-        } else {
-            respond_runtime_gemini_rewrite(
-                request_id,
-                request,
-                response,
-                RuntimeGeminiRewriteContext {
-                    prefix,
-                    status,
-                    content_type: &content_type,
-                    upstream_headers: upstream_headers.clone(),
-                    shared,
-                    captured,
-                    gemini_context,
-                    external_binding_recorder: buffered_binding_recorder.take(),
-                    response_governance,
-                },
-            );
-        }
-        return;
-    }
-
-    if runtime_local_rewrite_is_responses_route(
-        &shared.provider,
-        &captured.path_and_query,
-        RuntimeProviderBridgeKind::Copilot,
-    ) && (200..300).contains(&status)
-    {
-        respond_runtime_copilot_rewrite(
-            request_id,
-            request,
-            response,
-            status,
-            &content_type,
-            text_headers,
-            headers,
-            shared,
-            captured,
-            copilot_context,
-            response_governance,
-        );
-        return;
+        _ => {}
     }
 
     let is_sse = content_type.contains("text/event-stream");
@@ -276,16 +223,4 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         buffered_binding_recorder,
         response_governance,
     );
-}
-
-fn runtime_local_rewrite_is_responses_route(
-    provider: &RuntimeLocalRewriteProviderOptions,
-    path_and_query: &str,
-    provider_kind: RuntimeProviderBridgeKind,
-) -> bool {
-    provider.bridge_kind() == provider_kind
-        && matches!(
-            runtime_provider_route_kind(path_without_query(path_and_query)),
-            Some(RuntimeProviderRouteKind::Responses)
-        )
 }

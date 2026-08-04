@@ -197,6 +197,9 @@ fn postgres_audit_reason_detail_migration_is_backward_compatible() {
             .sql
             .contains("prodex_audit_log_reason_detail_bounded")
     );
+    assert!(AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION.sql.contains(
+        "ALTER TABLE prodex_audit_log\n    VALIDATE CONSTRAINT prodex_audit_log_reason_detail_bounded;"
+    ));
 }
 
 #[test]

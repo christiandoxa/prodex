@@ -69,14 +69,17 @@ mod tests {
 
     #[test]
     fn keeps_unrelated_same_basename_reference_and_deduplicates_exact_reference() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-localization-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .expect("temp dir should resolve")
+            .join(format!(
+                "prodex-localization-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join("AGENTS.md"),

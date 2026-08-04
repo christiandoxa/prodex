@@ -226,6 +226,15 @@ fn smart_context_validate_replay_scenario(
     concurrent_groups: &mut BTreeMap<String, SmartContextReplayConcurrentGroupUsage>,
     artifact_references: &mut usize,
 ) -> Result<(), String> {
+    smart_context_validate_replay_scenario_shape(scenario, ids)?;
+    smart_context_validate_replay_concurrent_group(scenario, concurrent_groups)?;
+    smart_context_validate_replay_turns(scenario, artifact_references)
+}
+
+fn smart_context_validate_replay_scenario_shape(
+    scenario: &SmartContextReplayScenarioInput,
+    ids: &mut BTreeSet<String>,
+) -> Result<(), String> {
     if scenario.id.trim().is_empty() {
         return Err("Smart Context replay scenario id is empty".to_string());
     }
@@ -265,54 +274,69 @@ fn smart_context_validate_replay_scenario(
             scenario.id
         ));
     }
-    if let Some(group) = scenario.concurrent_group.as_deref() {
-        if group.trim().is_empty() {
-            return Err(format!(
-                "Smart Context replay scenario {} has an empty concurrent group",
-                scenario.id
-            ));
-        }
-        if group.len() > SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES {
-            return Err(format!(
-                "Smart Context replay scenario {} concurrent group exceeds {} bytes",
-                scenario.id, SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES
-            ));
-        }
-        if !concurrent_groups.contains_key(group)
-            && concurrent_groups.len() >= SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
-        {
-            return Err(format!(
-                "Smart Context replay exceeds {} concurrent groups",
-                SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
-            ));
-        }
-        let serialized_bytes = serde_json::to_vec(scenario)
-            .map_err(|error| {
-                format!(
-                    "Smart Context replay scenario {} serialization failed: {error}",
-                    scenario.id
-                )
-            })?
-            .len();
-        let usage = concurrent_groups.entry(group.to_string()).or_default();
-        if usage.scenarios >= SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP {
-            return Err(format!(
-                "Smart Context replay concurrent group {group} exceeds {} scenarios",
-                SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP
-            ));
-        }
-        let next_serialized_bytes = usage.serialized_bytes.saturating_add(serialized_bytes);
-        if next_serialized_bytes > SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP {
-            return Err(format!(
-                "Smart Context replay concurrent group {group} exceeds {} serialized bytes at scenario {} (would use {})",
-                SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP,
-                scenario.id,
-                next_serialized_bytes
-            ));
-        }
-        usage.scenarios += 1;
-        usage.serialized_bytes = next_serialized_bytes;
+    Ok(())
+}
+
+fn smart_context_validate_replay_concurrent_group(
+    scenario: &SmartContextReplayScenarioInput,
+    concurrent_groups: &mut BTreeMap<String, SmartContextReplayConcurrentGroupUsage>,
+) -> Result<(), String> {
+    let Some(group) = scenario.concurrent_group.as_deref() else {
+        return Ok(());
+    };
+    if group.trim().is_empty() {
+        return Err(format!(
+            "Smart Context replay scenario {} has an empty concurrent group",
+            scenario.id
+        ));
     }
+    if group.len() > SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES {
+        return Err(format!(
+            "Smart Context replay scenario {} concurrent group exceeds {} bytes",
+            scenario.id, SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES
+        ));
+    }
+    if !concurrent_groups.contains_key(group)
+        && concurrent_groups.len() >= SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
+    {
+        return Err(format!(
+            "Smart Context replay exceeds {} concurrent groups",
+            SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
+        ));
+    }
+    let serialized_bytes = serde_json::to_vec(scenario)
+        .map_err(|error| {
+            format!(
+                "Smart Context replay scenario {} serialization failed: {error}",
+                scenario.id
+            )
+        })?
+        .len();
+    let usage = concurrent_groups.entry(group.to_string()).or_default();
+    if usage.scenarios >= SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP {
+        return Err(format!(
+            "Smart Context replay concurrent group {group} exceeds {} scenarios",
+            SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP
+        ));
+    }
+    let next_serialized_bytes = usage.serialized_bytes.saturating_add(serialized_bytes);
+    if next_serialized_bytes > SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP {
+        return Err(format!(
+            "Smart Context replay concurrent group {group} exceeds {} serialized bytes at scenario {} (would use {})",
+            SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP,
+            scenario.id,
+            next_serialized_bytes
+        ));
+    }
+    usage.scenarios += 1;
+    usage.serialized_bytes = next_serialized_bytes;
+    Ok(())
+}
+
+fn smart_context_validate_replay_turns(
+    scenario: &SmartContextReplayScenarioInput,
+    artifact_references: &mut usize,
+) -> Result<(), String> {
     for (index, turn) in scenario.turns.iter().enumerate() {
         let references = smart_context_validate_replay_turn(scenario, turn, index)?;
         let next_references = artifact_references.saturating_add(references);

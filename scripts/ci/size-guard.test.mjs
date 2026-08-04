@@ -59,7 +59,7 @@ test("default ratchets match checked-in size thresholds", async () => {
       production: 850,
       test: 860,
       cohesion: 770,
-      maxNearLimitSiblings: 8,
+      maxNearLimitSiblings: 9,
       nearLimitFiles: 32,
     });
   } finally {

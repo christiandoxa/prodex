@@ -334,56 +334,70 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
         let bounded_reason_detail = sqlite_reason_detail_byte_limit_triggers_present(conn)?;
         return Ok(if bounded_reason_detail { 15 } else { 14 });
     }
+    if let Some(version) = infer_legacy_sqlite_version_12_to_6(conn)? {
+        return Ok(version);
+    }
+    if let Some(version) = infer_legacy_sqlite_version_5_to_2(conn)? {
+        return Ok(version);
+    }
+    Ok(i64::from(runtime_gateway_sqlite_table_exists(
+        conn,
+        "prodex_tenants",
+    )?))
+}
+
+fn infer_legacy_sqlite_version_12_to_6(conn: &Connection) -> Result<Option<i64>> {
     if runtime_gateway_sqlite_table_has_column(
         conn,
         "prodex_governance_mutation_idempotency",
         "resulting_active_revision_id",
     )? {
-        return Ok(12);
+        return Ok(Some(12));
     }
     if runtime_gateway_sqlite_table_has_column(
         conn,
         "prodex_governance_revision_artifacts",
         "signature_key_id",
     )? {
-        return Ok(11);
+        return Ok(Some(11));
     }
     if runtime_gateway_sqlite_table_exists(conn, "prodex_audit_legal_holds")? {
-        return Ok(10);
+        return Ok(Some(10));
     }
     if runtime_gateway_sqlite_table_has_column(conn, "prodex_reservations", "storage_scope")? {
-        return Ok(9);
+        return Ok(Some(9));
     }
     if runtime_gateway_sqlite_table_has_column(conn, "prodex_tenants", "session_revocation_epoch")?
     {
-        return Ok(8);
+        return Ok(Some(8));
     }
     if runtime_gateway_sqlite_table_has_column(conn, "prodex_approvals", "termination_reason")? {
-        return Ok(7);
+        return Ok(Some(7));
     }
     if runtime_gateway_sqlite_table_has_column(
         conn,
         "prodex_governance_sessions",
         "provider_descriptor_revision",
     )? {
-        return Ok(6);
+        return Ok(Some(6));
     }
+    Ok(None)
+}
+
+fn infer_legacy_sqlite_version_5_to_2(conn: &Connection) -> Result<Option<i64>> {
     if runtime_gateway_sqlite_index_exists(conn, "prodex_governance_sessions_refresh_idx")? {
-        return Ok(5);
+        return Ok(Some(5));
     }
     if runtime_gateway_sqlite_table_exists(conn, "prodex_governance_mutation_idempotency")? {
-        return Ok(4);
+        return Ok(Some(4));
     }
     if runtime_gateway_sqlite_table_exists(conn, "prodex_pricing_revisions")? {
-        return Ok(3);
+        return Ok(Some(3));
     }
     if runtime_gateway_sqlite_table_exists(conn, "prodex_policy_revisions")? {
-        return Ok(2);
+        return Ok(Some(2));
     }
-    Ok(i64::from(runtime_gateway_sqlite_table_exists(
-        conn,
-        "prodex_tenants",
-    )?))
+    Ok(None)
 }
 
 fn sqlite_reason_detail_byte_limit_triggers_present(conn: &Connection) -> Result<bool> {

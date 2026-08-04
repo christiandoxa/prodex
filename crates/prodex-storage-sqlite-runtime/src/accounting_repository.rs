@@ -12,7 +12,7 @@ use prodex_storage::{
     AtomicReservationCommand, ExpiredReservationRecoveryCommand, TenantStorageKey,
     UsageReconciliationCommand,
 };
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 const MAX_EXPIRED_RESERVATION_BATCH: usize = 256;
 
@@ -115,6 +115,55 @@ impl From<rusqlite::Error> for SqliteAccountingRepositoryError {
 
 pub struct SqliteAccountingRepository {
     connection: Connection,
+}
+
+struct SqliteReconciliationValues {
+    occurred_at: i64,
+    reserved_tokens: i64,
+    reserved_cost_micros: i64,
+    actual_tokens: i64,
+    actual_cost_micros: i64,
+    created_at: i64,
+    expires_at: i64,
+    released_tokens: i64,
+    released_cost_micros: i64,
+    tenant_id: String,
+    reservation_id: String,
+    call_id: String,
+    storage_scope: String,
+    virtual_key_id: Option<String>,
+}
+
+impl SqliteReconciliationValues {
+    fn new(
+        command: UsageReconciliationCommand,
+        occurred_at_unix_ms: u64,
+    ) -> Result<Self, SqliteAccountingRepositoryError> {
+        let released = command.record.reserved.saturating_sub(command.actual);
+        Ok(Self {
+            occurred_at: to_i64(occurred_at_unix_ms)?,
+            reserved_tokens: to_i64(command.record.reserved.tokens)?,
+            reserved_cost_micros: to_i64(command.record.reserved.cost_micros)?,
+            actual_tokens: to_i64(command.actual.tokens)?,
+            actual_cost_micros: to_i64(command.actual.cost_micros)?,
+            created_at: to_i64(command.record.created_at_unix_ms)?,
+            expires_at: to_i64(command.record.expires_at_unix_ms)?,
+            released_tokens: to_i64(released.tokens)?,
+            released_cost_micros: to_i64(released.cost_micros)?,
+            tenant_id: command.record.tenant_id.to_string(),
+            reservation_id: command.record.reservation_id.to_string(),
+            call_id: command.record.call_id.to_string(),
+            storage_scope: command.storage_key.storage_scope(),
+            virtual_key_id: command.storage_key.virtual_key_id.map(|id| id.to_string()),
+        })
+    }
+}
+
+struct SqliteReconciliationState {
+    committed_at: Option<i64>,
+    reservation_was_released: bool,
+    committed_usage: Option<(i64, i64)>,
+    released_usage: Option<(i64, i64)>,
 }
 
 impl SqliteAccountingRepository {
@@ -346,309 +395,16 @@ impl SqliteAccountingRepository {
     ) -> Result<SqliteIdempotentWriteOutcome, SqliteAccountingRepositoryError> {
         prodex_storage_sqlite::plan_sqlite_usage_reconciliation(command.clone())
             .map_err(|_| SqliteAccountingRepositoryError::Planning)?;
-        let occurred_at = to_i64(occurred_at_unix_ms)?;
-        let reserved_tokens = to_i64(command.record.reserved.tokens)?;
-        let reserved_cost_micros = to_i64(command.record.reserved.cost_micros)?;
-        let actual_tokens = to_i64(command.actual.tokens)?;
-        let actual_cost_micros = to_i64(command.actual.cost_micros)?;
-        let created_at = to_i64(command.record.created_at_unix_ms)?;
-        let expires_at = to_i64(command.record.expires_at_unix_ms)?;
-        let released = command.record.reserved.saturating_sub(command.actual);
-        let released_tokens = to_i64(released.tokens)?;
-        let released_cost_micros = to_i64(released.cost_micros)?;
-        let tenant_id = command.record.tenant_id.to_string();
-        let reservation_id = command.record.reservation_id.to_string();
-        let call_id = command.record.call_id.to_string();
-        let storage_scope = command.storage_key.storage_scope();
-        let virtual_key_id = command.storage_key.virtual_key_id.map(|id| id.to_string());
+        let values = SqliteReconciliationValues::new(command, occurred_at_unix_ms)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stored = transaction
-            .query_row(
-                "SELECT reservation_id, call_id, virtual_key_id, storage_scope,
-                        reserved_tokens, reserved_cost_micros, created_at_unix_ms,
-                        expires_at_unix_ms, committed_at_unix_ms, released_at_unix_ms
-                 FROM prodex_reservations
-                 WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
-                params![&tenant_id, &reservation_id, &call_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, i64>(7)?,
-                        row.get::<_, Option<i64>>(8)?,
-                        row.get::<_, Option<i64>>(9)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((
-            stored_reservation_id,
-            stored_call_id,
-            stored_virtual_key_id,
-            stored_scope,
-            stored_tokens,
-            stored_cost_micros,
-            stored_created_at,
-            stored_expires_at,
-            committed_at,
-            released_at,
-        )) = stored
-        else {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        };
-        if stored_reservation_id != reservation_id
-            || stored_call_id != call_id
-            || stored_virtual_key_id != virtual_key_id
-            || stored_scope != storage_scope
-            || stored_tokens != reserved_tokens
-            || stored_cost_micros != reserved_cost_micros
-            || stored_created_at != created_at
-            || stored_expires_at != expires_at
-        {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        let counter: Option<(Option<String>, String)> = transaction
-            .query_row(
-                "SELECT virtual_key_id, storage_scope
-                 FROM prodex_budget_counters
-                 WHERE tenant_id = ?1 AND storage_scope = ?2",
-                params![&tenant_id, &storage_scope],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if counter != Some((virtual_key_id.clone(), storage_scope.clone())) {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        let reserved_ledger: Option<(String, String, i64, i64)> = transaction
-            .query_row(
-                "SELECT reservation_id, call_id, tokens, cost_micros
-                 FROM prodex_usage_ledger
-                 WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
-                   AND event_kind = 'reserved'",
-                params![&tenant_id, &reservation_id, &call_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        if reserved_ledger
-            != Some((
-                reservation_id.clone(),
-                call_id.clone(),
-                reserved_tokens,
-                reserved_cost_micros,
-            ))
-        {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        let (committed_count, committed_tokens, committed_cost_micros): (
-            i64,
-            Option<i64>,
-            Option<i64>,
-        ) = transaction.query_row(
-            "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
-             FROM prodex_usage_ledger
-             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
-               AND event_kind = 'committed'",
-            params![&tenant_id, &reservation_id, &call_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        let committed_usage = match (committed_count, committed_tokens, committed_cost_micros) {
-            (0, None, None) => None,
-            (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
-            _ => return Err(SqliteAccountingRepositoryError::StateConflict),
-        };
-        let (released_count, released_tokens_stored, released_cost_micros_stored): (
-            i64,
-            Option<i64>,
-            Option<i64>,
-        ) = transaction.query_row(
-            "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
-             FROM prodex_usage_ledger
-             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
-               AND event_kind = 'released'",
-            params![&tenant_id, &reservation_id, &call_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        let released_usage = match (
-            released_count,
-            released_tokens_stored,
-            released_cost_micros_stored,
-        ) {
-            (0, None, None) => None,
-            (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
-            _ => return Err(SqliteAccountingRepositoryError::StateConflict),
-        };
-        let reservation_was_released = released_at.is_some();
-        if (!reservation_was_released && released_usage.is_some())
-            || (reservation_was_released && released_usage.is_none())
-        {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        if reservation_was_released
-            && committed_at.is_none()
-            && released_usage != Some((reserved_tokens, reserved_cost_micros))
-        {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        if committed_at.is_some() {
-            if committed_usage != Some((actual_tokens, actual_cost_micros)) {
-                return Err(SqliteAccountingRepositoryError::StateConflict);
-            }
-            let expected_released = (released_tokens, released_cost_micros);
-            if (reservation_was_released
-                && released_usage != Some((reserved_tokens, reserved_cost_micros))
-                && released_usage != Some(expected_released))
-                || (!reservation_was_released && expected_released != (0, 0))
-            {
-                return Err(SqliteAccountingRepositoryError::StateConflict);
-            }
+        let state = load_sqlite_reconciliation_state(&transaction, &values)?;
+        if validate_sqlite_reconciliation_replay(&state, &values)? {
             transaction.commit()?;
             return Ok(SqliteIdempotentWriteOutcome::Replayed);
         }
-        if committed_usage.is_some() {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        let reserved_tokens_to_release = if reservation_was_released {
-            0
-        } else {
-            reserved_tokens
-        };
-        let reserved_cost_to_release = if reservation_was_released {
-            0
-        } else {
-            reserved_cost_micros
-        };
-        let changed = transaction.execute(
-            r#"
-            UPDATE prodex_budget_counters
-            SET reserved_tokens = reserved_tokens - ?4,
-                reserved_cost_micros = reserved_cost_micros - ?5,
-                committed_tokens = committed_tokens + ?6,
-                committed_cost_micros = committed_cost_micros + ?7,
-                updated_at_unix_ms = ?8
-            WHERE tenant_id = ?1
-              AND storage_scope = ?9
-              AND reserved_tokens >= ?4
-              AND reserved_cost_micros >= ?5
-              AND EXISTS (
-                  SELECT 1
-                  FROM prodex_reservations
-                  WHERE tenant_id = ?1
-                    AND reservation_id = ?2
-                    AND call_id = ?3
-                    AND virtual_key_id IS ?10
-                    AND storage_scope = ?9
-                    AND reserved_tokens = ?11
-                    AND reserved_cost_micros = ?12
-                    AND created_at_unix_ms = ?13
-                    AND expires_at_unix_ms = ?14
-                    AND committed_at_unix_ms IS NULL
-              )
-            "#,
-            params![
-                &tenant_id,
-                &reservation_id,
-                &call_id,
-                reserved_tokens_to_release,
-                reserved_cost_to_release,
-                actual_tokens,
-                actual_cost_micros,
-                occurred_at,
-                &storage_scope,
-                &virtual_key_id,
-                reserved_tokens,
-                reserved_cost_micros,
-                created_at,
-                expires_at,
-            ],
-        )?;
-        if changed != 1 {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        let reservation_updated = transaction.execute(
-            r#"
-            UPDATE prodex_reservations
-            SET committed_at_unix_ms = ?8,
-                released_at_unix_ms = CASE
-                    WHEN released_at_unix_ms IS NOT NULL THEN released_at_unix_ms
-                    WHEN ?10 > 0 OR ?11 > 0 THEN ?8
-                    ELSE NULL
-                END
-            WHERE tenant_id = ?1
-              AND reservation_id = ?2
-              AND call_id = ?3
-              AND virtual_key_id IS ?9
-              AND storage_scope = ?12
-              AND reserved_tokens = ?13
-              AND reserved_cost_micros = ?14
-              AND created_at_unix_ms = ?15
-              AND expires_at_unix_ms = ?16
-              AND committed_at_unix_ms IS NULL
-            "#,
-            params![
-                &tenant_id,
-                &reservation_id,
-                &call_id,
-                reserved_tokens_to_release,
-                reserved_cost_to_release,
-                actual_tokens,
-                actual_cost_micros,
-                occurred_at,
-                &virtual_key_id,
-                released_tokens,
-                released_cost_micros,
-                &storage_scope,
-                reserved_tokens,
-                reserved_cost_micros,
-                created_at,
-                expires_at,
-            ],
-        )?;
-        if reservation_updated != 1 {
-            return Err(SqliteAccountingRepositoryError::StateConflict);
-        }
-        transaction.execute(
-            r#"
-            INSERT INTO prodex_usage_ledger (
-                tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
-                tokens, cost_micros, occurred_at_unix_ms
-            ) VALUES (?1, ?2, ?3, ?4, 'committed', ?5, ?6, ?7)
-            "#,
-            params![
-                &tenant_id,
-                RequestId::new().to_string(),
-                &reservation_id,
-                &call_id,
-                actual_tokens,
-                actual_cost_micros,
-                occurred_at,
-            ],
-        )?;
-        if released_tokens > 0 || released_cost_micros > 0 {
-            transaction.execute(
-                r#"
-                INSERT INTO prodex_usage_ledger (
-                    tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
-                    tokens, cost_micros, occurred_at_unix_ms
-                ) VALUES (?1, ?2, ?3, ?4, 'released', ?5, ?6, ?7)
-                "#,
-                params![
-                    &tenant_id,
-                    RequestId::new().to_string(),
-                    &reservation_id,
-                    &call_id,
-                    released_tokens,
-                    released_cost_micros,
-                    occurred_at,
-                ],
-            )?;
-        }
+        apply_sqlite_usage_reconciliation(&transaction, &values, state.reservation_was_released)?;
         transaction.commit()?;
         Ok(SqliteIdempotentWriteOutcome::Applied)
     }
@@ -786,6 +542,363 @@ impl SqliteAccountingRepository {
         transaction.commit()?;
         Ok(SqliteIdempotentWriteOutcome::Applied)
     }
+}
+
+fn load_sqlite_reconciliation_state(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+) -> Result<SqliteReconciliationState, SqliteAccountingRepositoryError> {
+    let (committed_at, released_at) = load_sqlite_reconciliation_reservation(transaction, values)?;
+    validate_sqlite_reconciliation_counter_and_reservation(transaction, values)?;
+    let state = SqliteReconciliationState {
+        committed_at,
+        reservation_was_released: released_at.is_some(),
+        committed_usage: load_single_sqlite_ledger_usage(transaction, values, "committed")?,
+        released_usage: load_single_sqlite_ledger_usage(transaction, values, "released")?,
+    };
+    validate_sqlite_reconciliation_release_state(&state, values)?;
+    Ok(state)
+}
+
+fn load_sqlite_reconciliation_reservation(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+) -> Result<(Option<i64>, Option<i64>), SqliteAccountingRepositoryError> {
+    let stored = transaction
+        .query_row(
+            "SELECT reservation_id, call_id, virtual_key_id, storage_scope,
+                    reserved_tokens, reserved_cost_micros, created_at_unix_ms,
+                    expires_at_unix_ms, committed_at_unix_ms, released_at_unix_ms
+             FROM prodex_reservations
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
+            params![&values.tenant_id, &values.reservation_id, &values.call_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        reservation_id,
+        call_id,
+        virtual_key_id,
+        storage_scope,
+        reserved_tokens,
+        reserved_cost_micros,
+        created_at,
+        expires_at,
+        committed_at,
+        released_at,
+    )) = stored
+    else {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    };
+    if reservation_id != values.reservation_id
+        || call_id != values.call_id
+        || virtual_key_id != values.virtual_key_id
+        || storage_scope != values.storage_scope
+        || reserved_tokens != values.reserved_tokens
+        || reserved_cost_micros != values.reserved_cost_micros
+        || created_at != values.created_at
+        || expires_at != values.expires_at
+    {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok((committed_at, released_at))
+}
+
+fn validate_sqlite_reconciliation_counter_and_reservation(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    let counter: Option<(Option<String>, String)> = transaction
+        .query_row(
+            "SELECT virtual_key_id, storage_scope
+             FROM prodex_budget_counters
+             WHERE tenant_id = ?1 AND storage_scope = ?2",
+            params![&values.tenant_id, &values.storage_scope],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if counter != Some((values.virtual_key_id.clone(), values.storage_scope.clone())) {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    let reserved_ledger: Option<(String, String, i64, i64)> = transaction
+        .query_row(
+            "SELECT reservation_id, call_id, tokens, cost_micros
+             FROM prodex_usage_ledger
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+               AND event_kind = 'reserved'",
+            params![&values.tenant_id, &values.reservation_id, &values.call_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    if reserved_ledger
+        != Some((
+            values.reservation_id.clone(),
+            values.call_id.clone(),
+            values.reserved_tokens,
+            values.reserved_cost_micros,
+        ))
+    {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok(())
+}
+
+fn load_single_sqlite_ledger_usage(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+    event_kind: &str,
+) -> Result<Option<(i64, i64)>, SqliteAccountingRepositoryError> {
+    let (count, tokens, cost_micros): (i64, Option<i64>, Option<i64>) = transaction.query_row(
+        "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
+         FROM prodex_usage_ledger
+         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+           AND event_kind = ?4",
+        params![
+            &values.tenant_id,
+            &values.reservation_id,
+            &values.call_id,
+            event_kind,
+        ],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    match (count, tokens, cost_micros) {
+        (0, None, None) => Ok(None),
+        (1, Some(tokens), Some(cost_micros)) => Ok(Some((tokens, cost_micros))),
+        _ => Err(SqliteAccountingRepositoryError::StateConflict),
+    }
+}
+
+fn validate_sqlite_reconciliation_release_state(
+    state: &SqliteReconciliationState,
+    values: &SqliteReconciliationValues,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    if state.reservation_was_released != state.released_usage.is_some() {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    if state.reservation_was_released
+        && state.committed_at.is_none()
+        && state.released_usage != Some((values.reserved_tokens, values.reserved_cost_micros))
+    {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok(())
+}
+
+fn validate_sqlite_reconciliation_replay(
+    state: &SqliteReconciliationState,
+    values: &SqliteReconciliationValues,
+) -> Result<bool, SqliteAccountingRepositoryError> {
+    if state.committed_at.is_none() {
+        if state.committed_usage.is_some() {
+            return Err(SqliteAccountingRepositoryError::StateConflict);
+        }
+        return Ok(false);
+    }
+    if state.committed_usage != Some((values.actual_tokens, values.actual_cost_micros)) {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    let expected_released = (values.released_tokens, values.released_cost_micros);
+    if (state.reservation_was_released
+        && state.released_usage != Some((values.reserved_tokens, values.reserved_cost_micros))
+        && state.released_usage != Some(expected_released))
+        || (!state.reservation_was_released && expected_released != (0, 0))
+    {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok(true)
+}
+
+fn apply_sqlite_usage_reconciliation(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+    reservation_was_released: bool,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    let reserved_tokens_to_release = if reservation_was_released {
+        0
+    } else {
+        values.reserved_tokens
+    };
+    let reserved_cost_to_release = if reservation_was_released {
+        0
+    } else {
+        values.reserved_cost_micros
+    };
+    update_sqlite_reconciliation_counter(
+        transaction,
+        values,
+        reserved_tokens_to_release,
+        reserved_cost_to_release,
+    )?;
+    update_sqlite_reconciliation_reservation(
+        transaction,
+        values,
+        reserved_tokens_to_release,
+        reserved_cost_to_release,
+    )?;
+    insert_sqlite_reconciliation_ledger(transaction, values)
+}
+
+fn update_sqlite_reconciliation_counter(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+    reserved_tokens_to_release: i64,
+    reserved_cost_to_release: i64,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    let changed = transaction.execute(
+        r#"
+        UPDATE prodex_budget_counters
+        SET reserved_tokens = reserved_tokens - ?4,
+            reserved_cost_micros = reserved_cost_micros - ?5,
+            committed_tokens = committed_tokens + ?6,
+            committed_cost_micros = committed_cost_micros + ?7,
+            updated_at_unix_ms = ?8
+        WHERE tenant_id = ?1
+          AND storage_scope = ?9
+          AND reserved_tokens >= ?4
+          AND reserved_cost_micros >= ?5
+          AND EXISTS (
+              SELECT 1
+              FROM prodex_reservations
+              WHERE tenant_id = ?1
+                AND reservation_id = ?2
+                AND call_id = ?3
+                AND virtual_key_id IS ?10
+                AND storage_scope = ?9
+                AND reserved_tokens = ?11
+                AND reserved_cost_micros = ?12
+                AND created_at_unix_ms = ?13
+                AND expires_at_unix_ms = ?14
+                AND committed_at_unix_ms IS NULL
+          )
+        "#,
+        params![
+            &values.tenant_id,
+            &values.reservation_id,
+            &values.call_id,
+            reserved_tokens_to_release,
+            reserved_cost_to_release,
+            values.actual_tokens,
+            values.actual_cost_micros,
+            values.occurred_at,
+            &values.storage_scope,
+            &values.virtual_key_id,
+            values.reserved_tokens,
+            values.reserved_cost_micros,
+            values.created_at,
+            values.expires_at,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok(())
+}
+
+fn update_sqlite_reconciliation_reservation(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+    reserved_tokens_to_release: i64,
+    reserved_cost_to_release: i64,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    let changed = transaction.execute(
+        r#"
+        UPDATE prodex_reservations
+        SET committed_at_unix_ms = ?8,
+            released_at_unix_ms = CASE
+                WHEN released_at_unix_ms IS NOT NULL THEN released_at_unix_ms
+                WHEN ?10 > 0 OR ?11 > 0 THEN ?8
+                ELSE NULL
+            END
+        WHERE tenant_id = ?1
+          AND reservation_id = ?2
+          AND call_id = ?3
+          AND virtual_key_id IS ?9
+          AND storage_scope = ?12
+          AND reserved_tokens = ?13
+          AND reserved_cost_micros = ?14
+          AND created_at_unix_ms = ?15
+          AND expires_at_unix_ms = ?16
+          AND committed_at_unix_ms IS NULL
+        "#,
+        params![
+            &values.tenant_id,
+            &values.reservation_id,
+            &values.call_id,
+            reserved_tokens_to_release,
+            reserved_cost_to_release,
+            values.actual_tokens,
+            values.actual_cost_micros,
+            values.occurred_at,
+            &values.virtual_key_id,
+            values.released_tokens,
+            values.released_cost_micros,
+            &values.storage_scope,
+            values.reserved_tokens,
+            values.reserved_cost_micros,
+            values.created_at,
+            values.expires_at,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(SqliteAccountingRepositoryError::StateConflict);
+    }
+    Ok(())
+}
+
+fn insert_sqlite_reconciliation_ledger(
+    transaction: &Transaction<'_>,
+    values: &SqliteReconciliationValues,
+) -> Result<(), SqliteAccountingRepositoryError> {
+    transaction.execute(
+        r#"
+        INSERT INTO prodex_usage_ledger (
+            tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
+            tokens, cost_micros, occurred_at_unix_ms
+        ) VALUES (?1, ?2, ?3, ?4, 'committed', ?5, ?6, ?7)
+        "#,
+        params![
+            &values.tenant_id,
+            RequestId::new().to_string(),
+            &values.reservation_id,
+            &values.call_id,
+            values.actual_tokens,
+            values.actual_cost_micros,
+            values.occurred_at,
+        ],
+    )?;
+    if values.released_tokens > 0 || values.released_cost_micros > 0 {
+        transaction.execute(
+            r#"
+            INSERT INTO prodex_usage_ledger (
+                tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
+                tokens, cost_micros, occurred_at_unix_ms
+            ) VALUES (?1, ?2, ?3, ?4, 'released', ?5, ?6, ?7)
+            "#,
+            params![
+                &values.tenant_id,
+                RequestId::new().to_string(),
+                &values.reservation_id,
+                &values.call_id,
+                values.released_tokens,
+                values.released_cost_micros,
+                values.occurred_at,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn replayed_or_conflict(

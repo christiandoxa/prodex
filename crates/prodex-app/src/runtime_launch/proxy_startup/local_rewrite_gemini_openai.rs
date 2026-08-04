@@ -3,7 +3,8 @@ use super::super::chat_compatible_rewrite::{
 };
 use super::super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::super::local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteAsyncResponse,
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
@@ -22,11 +23,11 @@ use super::super::local_rewrite_upstream::{
     runtime_local_rewrite_binding_context, runtime_local_rewrite_raw_binding_identity,
 };
 use super::super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_log_request_conformance,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_log_request_conformance,
     runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
     runtime_provider_request_conformance_result,
 };
-use crate::{RuntimeProxyRequest, runtime_proxy_log};
+use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Result, bail};
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
@@ -145,100 +146,189 @@ fn runtime_gemini_openai_attempts(
                 api_key,
                 model,
             )?;
-            let (status, parts, class) = match send_result {
-                RuntimeLocalRewritePreparedSendResult::Live(response) => {
-                    let Some(binding_identity) = runtime_gemini_openai_binding_identity(
-                        context.shared,
-                        api_key,
-                        context.binding_endpoint,
-                    ) else {
-                        bail!("Gemini accepted binding identity is unavailable");
-                    };
-                    let mut live_response = RuntimeLocalRewriteLiveResponse::new(response);
-                    runtime_local_rewrite_attach_accepted_binding(
-                        context.shared,
-                        &mut live_response,
-                        context.binding,
-                        binding_identity,
-                    );
-                    return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Live(
-                            live_response.with_chat_compatible_request(pending_request),
-                        ),
-                        gemini_context: None,
-                        copilot_context: None,
-                    });
-                }
-                RuntimeLocalRewritePreparedSendResult::Error {
-                    status,
-                    parts,
-                    class,
-                } => (status, parts, class),
-            };
-            if status == 429 && !runtime_gemini_429_is_structured(&parts.body) {
-                return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                    gemini_context: None,
-                    copilot_context: None,
-                });
+            match runtime_gemini_openai_attempt_control(
+                context,
+                api_key_label.as_str(),
+                api_key,
+                model,
+                (api_key_index, model_index),
+                send_result,
+                pending_request,
+            )? {
+                RuntimeGeminiOpenAiAttemptControl::Return(result) => return Ok(*result),
+                RuntimeGeminiOpenAiAttemptControl::NextModel => continue,
+                RuntimeGeminiOpenAiAttemptControl::NextCredential => break,
             }
-            if model_index + 1 < context.model_chain.len()
-                && runtime_gateway_application_provider_retry_precommit(
-                    ProviderRetryCause::NextModel,
-                    class,
-                    model_index,
-                    context.model_chain.len(),
-                )
-            {
-                runtime_proxy_log(
-                    &context.shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "local_rewrite_provider_model_fallback",
-                        [
-                            runtime_proxy_log_field("request", context.request_id.to_string()),
-                            runtime_proxy_log_field("provider", "gemini-openai"),
-                            runtime_proxy_log_field("auth", api_key_label.as_str()),
-                            runtime_proxy_log_field("from_model", model.as_str()),
-                            runtime_proxy_log_field(
-                                "to_model",
-                                context.model_chain[model_index + 1].as_str(),
-                            ),
-                            runtime_proxy_log_field("status", status.to_string()),
-                            runtime_proxy_log_field("class", format!("{class:?}")),
-                        ],
-                    ),
-                );
-                continue;
-            }
-            if runtime_gateway_application_provider_retry_precommit(
-                ProviderRetryCause::RotateCredential,
-                class,
-                api_key_index,
-                context.attempt_count,
-            ) {
-                runtime_proxy_log(
-                    &context.shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "local_rewrite_provider_auth_rotate",
-                        [
-                            runtime_proxy_log_field("request", context.request_id.to_string()),
-                            runtime_proxy_log_field("provider", "gemini-openai"),
-                            runtime_proxy_log_field("auth", api_key_label.as_str()),
-                            runtime_proxy_log_field("status", status.to_string()),
-                            runtime_proxy_log_field("class", format!("{class:?}")),
-                        ],
-                    ),
-                );
-                break;
-            }
-            return Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                gemini_context: None,
-                copilot_context: None,
-            });
         }
     }
     bail!("no Gemini OpenAI-compatible attempts were available")
+}
+
+enum RuntimeGeminiOpenAiAttemptControl {
+    Return(Box<RuntimeLocalRewriteUpstreamResult>),
+    NextModel,
+    NextCredential,
+}
+
+fn runtime_gemini_openai_attempt_control(
+    context: &RuntimeGeminiOpenAiAttemptContext<'_>,
+    api_key_label: &str,
+    api_key: Option<&str>,
+    model: &str,
+    attempt_index: (usize, usize),
+    send_result: RuntimeLocalRewritePreparedSendResult,
+    pending_request: RuntimeDeepSeekPendingRequest,
+) -> Result<RuntimeGeminiOpenAiAttemptControl> {
+    match send_result {
+        RuntimeLocalRewritePreparedSendResult::Live(response) => {
+            Ok(RuntimeGeminiOpenAiAttemptControl::Return(Box::new(
+                runtime_gemini_openai_live_result(context, api_key, response, pending_request)?,
+            )))
+        }
+        RuntimeLocalRewritePreparedSendResult::Error {
+            status,
+            parts,
+            class,
+        } => Ok(runtime_gemini_openai_error_control(
+            context,
+            api_key_label,
+            model,
+            attempt_index,
+            status,
+            (parts, class),
+        )),
+    }
+}
+
+fn runtime_gemini_openai_live_result(
+    context: &RuntimeGeminiOpenAiAttemptContext<'_>,
+    api_key: Option<&str>,
+    response: RuntimeLocalRewriteAsyncResponse,
+    pending_request: RuntimeDeepSeekPendingRequest,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let Some(binding_identity) =
+        runtime_gemini_openai_binding_identity(context.shared, api_key, context.binding_endpoint)
+    else {
+        bail!("Gemini accepted binding identity is unavailable");
+    };
+    let mut live_response = RuntimeLocalRewriteLiveResponse::new(response);
+    runtime_local_rewrite_attach_accepted_binding(
+        context.shared,
+        &mut live_response,
+        context.binding,
+        binding_identity,
+    );
+    Ok(RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Live(
+            live_response.with_chat_compatible_request(pending_request),
+        ),
+        gemini_context: None,
+        copilot_context: None,
+    })
+}
+
+fn runtime_gemini_openai_error_control(
+    context: &RuntimeGeminiOpenAiAttemptContext<'_>,
+    api_key_label: &str,
+    model: &str,
+    attempt_index: (usize, usize),
+    status: u16,
+    error: (
+        RuntimeHeapTrimmedBufferedResponseParts,
+        RuntimeProviderErrorClass,
+    ),
+) -> RuntimeGeminiOpenAiAttemptControl {
+    let (api_key_index, model_index) = attempt_index;
+    let (parts, class) = error;
+    if status == 429 && !runtime_gemini_429_is_structured(&parts.body) {
+        return RuntimeGeminiOpenAiAttemptControl::Return(Box::new(
+            runtime_gemini_openai_buffered(parts),
+        ));
+    }
+    if model_index + 1 < context.model_chain.len()
+        && runtime_gateway_application_provider_retry_precommit(
+            ProviderRetryCause::NextModel,
+            class,
+            model_index,
+            context.model_chain.len(),
+        )
+    {
+        runtime_gemini_openai_log_model_fallback(
+            context,
+            api_key_label,
+            model,
+            model_index,
+            status,
+            class,
+        );
+        return RuntimeGeminiOpenAiAttemptControl::NextModel;
+    }
+    if runtime_gateway_application_provider_retry_precommit(
+        ProviderRetryCause::RotateCredential,
+        class,
+        api_key_index,
+        context.attempt_count,
+    ) {
+        runtime_gemini_openai_log_auth_rotate(context, api_key_label, status, class);
+        return RuntimeGeminiOpenAiAttemptControl::NextCredential;
+    }
+    RuntimeGeminiOpenAiAttemptControl::Return(Box::new(runtime_gemini_openai_buffered(parts)))
+}
+
+fn runtime_gemini_openai_buffered(
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> RuntimeLocalRewriteUpstreamResult {
+    RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+        gemini_context: None,
+        copilot_context: None,
+    }
+}
+
+fn runtime_gemini_openai_log_model_fallback(
+    context: &RuntimeGeminiOpenAiAttemptContext<'_>,
+    api_key_label: &str,
+    model: &str,
+    model_index: usize,
+    status: u16,
+    class: RuntimeProviderErrorClass,
+) {
+    runtime_proxy_log(
+        &context.shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_model_fallback",
+            [
+                runtime_proxy_log_field("request", context.request_id.to_string()),
+                runtime_proxy_log_field("provider", "gemini-openai"),
+                runtime_proxy_log_field("auth", api_key_label),
+                runtime_proxy_log_field("from_model", model),
+                runtime_proxy_log_field("to_model", context.model_chain[model_index + 1].as_str()),
+                runtime_proxy_log_field("status", status.to_string()),
+                runtime_proxy_log_field("class", format!("{class:?}")),
+            ],
+        ),
+    );
+}
+
+fn runtime_gemini_openai_log_auth_rotate(
+    context: &RuntimeGeminiOpenAiAttemptContext<'_>,
+    api_key_label: &str,
+    status: u16,
+    class: RuntimeProviderErrorClass,
+) {
+    runtime_proxy_log(
+        &context.shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_auth_rotate",
+            [
+                runtime_proxy_log_field("request", context.request_id.to_string()),
+                runtime_proxy_log_field("provider", "gemini-openai"),
+                runtime_proxy_log_field("auth", api_key_label),
+                runtime_proxy_log_field("status", status.to_string()),
+                runtime_proxy_log_field("class", format!("{class:?}")),
+            ],
+        ),
+    );
 }
 
 fn send_gemini_openai_model_request(

@@ -17,78 +17,88 @@ pub(crate) fn gemini_validate_openai_tools(value: &Value) -> Result<(), String> 
         );
     };
     for (index, tool) in tools.iter().enumerate() {
-        let Some(object) = tool.as_object() else {
-            return Err(format!(
-                "invalid_tool_declaration: Gemini request field `tools[{index}]` must be an object"
-            ));
-        };
-        let is_function = object
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|tool_type| tool_type == "function")
-            || object.contains_key("function");
-        if !is_function {
-            if gemini_is_supported_builtin_tool(tool) {
-                continue;
-            }
+        gemini_validate_openai_tool(tool, index)?;
+    }
+    Ok(())
+}
 
-            let translated = crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
-                &json!({"tools": [tool]}),
-            )
-            .ok_or_else(|| {
-                let field = if object.contains_key("type") {
-                    format!("tools[{index}].type")
-                } else {
-                    format!("tools[{index}]")
-                };
-                format!(
-                    "invalid_tool_declaration: Gemini request field `{field}` is not a supported tool declaration"
-                )
-            })?;
-            gemini_validate_openai_tools(&Value::Array(translated)).map_err(|reason| {
-                format!(
-                    "invalid_tool_declaration: Gemini request field `tools[{index}]` translates to an invalid declaration: {reason}"
-                )
-            })?;
-            continue;
-        }
-        let (function, field) = match object.get("function") {
-            Some(function) => (
-                function.as_object().ok_or_else(|| {
-                    format!(
-                        "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
-                    )
-                })?,
-                format!("tools[{index}].function"),
-            ),
-            None => (object, format!("tools[{index}]")),
+fn gemini_validate_openai_tool(tool: &Value, index: usize) -> Result<(), String> {
+    let Some(object) = tool.as_object() else {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `tools[{index}]` must be an object"
+        ));
+    };
+    let is_function = object
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|tool_type| tool_type == "function")
+        || object.contains_key("function");
+    if is_function {
+        return gemini_validate_function_tool(object, index);
+    }
+    if gemini_is_supported_builtin_tool(tool) {
+        return Ok(());
+    }
+    let translated = crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
+        &json!({"tools": [tool]}),
+    )
+    .ok_or_else(|| {
+        let field = if object.contains_key("type") {
+            format!("tools[{index}].type")
+        } else {
+            format!("tools[{index}]")
         };
-        if function
-            .get("name")
-            .and_then(Value::as_str)
-            .is_none_or(|name| name.trim().is_empty())
-        {
-            return Err(format!(
-                "invalid_tool_declaration: Gemini request field `{field}.name` must be a non-empty string"
-            ));
-        }
-        let Some(parameters) = function.get("parameters") else {
-            return Err(format!(
-                "invalid_tool_declaration: Gemini request field `{field}.parameters` is required"
-            ));
-        };
-        if !parameters.is_object() {
-            return Err(format!(
-                "invalid_tool_declaration: Gemini request field `{field}.parameters` must be an object"
-            ));
-        }
-        if let Some(description) = function.get("description").filter(|value| !value.is_null())
-            && !description.is_string()
-        {
-            return Err(format!(
-                "invalid_tool_declaration: Gemini request field `{field}.description` must be a string"
-            ));
-        }
+        format!(
+            "invalid_tool_declaration: Gemini request field `{field}` is not a supported tool declaration"
+        )
+    })?;
+    gemini_validate_openai_tools(&Value::Array(translated)).map_err(|reason| {
+        format!(
+            "invalid_tool_declaration: Gemini request field `tools[{index}]` translates to an invalid declaration: {reason}"
+        )
+    })
+}
+
+fn gemini_validate_function_tool(
+    object: &serde_json::Map<String, Value>,
+    index: usize,
+) -> Result<(), String> {
+    let (function, field) = match object.get("function") {
+        Some(function) => (
+            function.as_object().ok_or_else(|| {
+                format!(
+                    "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
+                )
+            })?,
+            format!("tools[{index}].function"),
+        ),
+        None => (object, format!("tools[{index}]")),
+    };
+    if function
+        .get("name")
+        .and_then(Value::as_str)
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `{field}.name` must be a non-empty string"
+        ));
+    }
+    let Some(parameters) = function.get("parameters") else {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `{field}.parameters` is required"
+        ));
+    };
+    if !parameters.is_object() {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `{field}.parameters` must be an object"
+        ));
+    }
+    if let Some(description) = function.get("description").filter(|value| !value.is_null())
+        && !description.is_string()
+    {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `{field}.description` must be a string"
+        ));
     }
     Ok(())
 }

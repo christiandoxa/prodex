@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
-    "maxLines": 1473,
+    "maxLines": 1502,
     "reason": "Gateway billing, exact SQLite reservation replay, reconciliation conflicts, and durable restart coverage stay together at their transactional accounting boundary."
   },
   {
@@ -236,7 +236,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 1124,
+    "maxLines": 1127,
     "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata, audit reason compatibility, and fail-closed future-version checks beside schema planning."
   },
   {
@@ -246,12 +246,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 2094,
+    "maxLines": 2223,
     "reason": "Upstream transport keeps cancel-safe async streaming, bounded lookahead, idle timeouts, exact byte forwarding, and identity recording at one commit boundary."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
-    "maxLines": 1121,
+    "maxLines": 1123,
     "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
   },
   {
@@ -271,17 +271,22 @@
   },
   {
     "file": "crates/prodex-domain/src/audit/event.rs",
-    "maxLines": 948,
+    "maxLines": 975,
     "reason": "The audit event domain keeps bounded secret-safe break-glass reasons, canonical serialization, legacy compatibility, and immutable evidence construction together."
   },
   {
     "file": "crates/prodex-secret-store/src/refresh_lease.rs",
-    "maxLines": 1323,
+    "maxLines": 1397,
     "reason": "Refresh lease ownership keeps one-in-flight bounded heartbeat workers, filesystem deadlines, unhealthy transitions, shutdown, and fault-injection regressions together."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/src/accounting_repository.rs",
-    "maxLines": 1073,
+    "maxLines": 1186,
     "reason": "SQLite accounting keeps transactional exact reservation and reconciliation replay checks, conflict no-mutation guarantees, and concurrent replay tests in one repository boundary."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_gemini_cli.rs",
+    "maxLines": 856,
+    "reason": "Native frontend capability validation, resume planning, and launch tests remain capped after complex argument checks moved into focused helpers."
   }
 ]

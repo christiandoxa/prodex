@@ -305,85 +305,127 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() || prefix.len() >= crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
-            live.prefix = prefix;
-            live.set_sse_continuation(prefetch);
-            return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
+            return Ok(runtime_local_rewrite_finish_native_prefetch(
+                live,
+                prefetch,
+                prefix,
+                false,
+                RuntimeLocalRewriteNativeFirstEvent::Commit,
+            ));
         }
         match prefetch.recv_timeout(remaining) {
             Ok(RuntimeLocalRewritePrefetchChunk::Data(chunk)) => {
-                let inspect_len = chunk
-                    .len()
-                    .min(crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len());
-                let mut appended_until = 0;
-                for (index, byte) in chunk[..inspect_len].iter().enumerate() {
-                    let mut event = None;
-                    runtime_proxy_crate::runtime_sse_consume_chunk(
-                        &mut line,
-                        &mut data_lines,
-                        std::slice::from_ref(byte),
-                        |parsed| event = Some(parsed),
-                    );
-                    let Some(event) = event else {
-                        continue;
-                    };
-                    prefix.extend_from_slice(&chunk[appended_until..=index]);
-                    appended_until = index + 1;
-                    let event_body = &prefix[event_start..];
-                    if event.event_type.as_deref() == Some("ping") {
-                        event_start = prefix.len();
-                        continue;
-                    }
-                    if let Some(class) =
-                        runtime_local_rewrite_native_first_event_error_class(provider, event_body)
-                    {
-                        if appended_until < chunk.len() {
-                            prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
-                                chunk[appended_until..].to_vec(),
-                            ));
-                        }
-                        live.prefix = prefix;
-                        live.set_sse_continuation(prefetch);
-                        return Ok(RuntimeLocalRewriteNativeFirstEvent::Retry(class));
-                    }
-                    if appended_until < chunk.len() {
-                        prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
-                            chunk[appended_until..].to_vec(),
-                        ));
-                    }
-                    live.prefix = prefix;
-                    live.set_sse_continuation(prefetch);
-                    return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
-                }
-                prefix.extend_from_slice(&chunk[appended_until..inspect_len]);
-                if inspect_len < chunk.len() {
-                    prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
-                        chunk[inspect_len..].to_vec(),
+                if let Some(decision) = runtime_local_rewrite_inspect_native_chunk(
+                    &mut prefetch,
+                    provider,
+                    &mut prefix,
+                    &mut line,
+                    &mut data_lines,
+                    &mut event_start,
+                    chunk,
+                ) {
+                    return Ok(runtime_local_rewrite_finish_native_prefetch(
+                        live, prefetch, prefix, false, decision,
                     ));
                 }
             }
             Ok(RuntimeLocalRewritePrefetchChunk::End) => {
                 prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::End);
-                live.prefix = prefix;
-                live.upstream_eof = true;
-                live.set_sse_continuation(prefetch);
-                return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
+                return Ok(runtime_local_rewrite_finish_native_prefetch(
+                    live,
+                    prefetch,
+                    prefix,
+                    true,
+                    RuntimeLocalRewriteNativeFirstEvent::Commit,
+                ));
             }
             Ok(RuntimeLocalRewritePrefetchChunk::Error(kind, message)) => {
                 prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Error(kind, message));
-                live.prefix = prefix;
-                live.set_sse_continuation(prefetch);
-                return Ok(RuntimeLocalRewriteNativeFirstEvent::Retry(
-                    ProviderErrorClass::Transient,
+                return Ok(runtime_local_rewrite_finish_native_prefetch(
+                    live,
+                    prefetch,
+                    prefix,
+                    false,
+                    RuntimeLocalRewriteNativeFirstEvent::Retry(ProviderErrorClass::Transient),
                 ));
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
             | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                live.prefix = prefix;
-                live.set_sse_continuation(prefetch);
-                return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
+                return Ok(runtime_local_rewrite_finish_native_prefetch(
+                    live,
+                    prefetch,
+                    prefix,
+                    false,
+                    RuntimeLocalRewriteNativeFirstEvent::Commit,
+                ));
             }
         }
     }
+}
+
+fn runtime_local_rewrite_inspect_native_chunk(
+    prefetch: &mut RuntimeLocalRewriteSsePrefetch,
+    provider: RuntimeProviderBridgeKind,
+    prefix: &mut Vec<u8>,
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    event_start: &mut usize,
+    chunk: Vec<u8>,
+) -> Option<RuntimeLocalRewriteNativeFirstEvent> {
+    let inspect_len = chunk
+        .len()
+        .min(crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len());
+    let mut appended_until = 0;
+    for (index, byte) in chunk[..inspect_len].iter().enumerate() {
+        let mut event = None;
+        runtime_proxy_crate::runtime_sse_consume_chunk(
+            line,
+            data_lines,
+            std::slice::from_ref(byte),
+            |parsed| event = Some(parsed),
+        );
+        let Some(event) = event else {
+            continue;
+        };
+        prefix.extend_from_slice(&chunk[appended_until..=index]);
+        appended_until = index + 1;
+        let event_body = &prefix[*event_start..];
+        if event.event_type.as_deref() == Some("ping") {
+            *event_start = prefix.len();
+            continue;
+        }
+        let decision = runtime_local_rewrite_native_first_event_error_class(provider, event_body)
+            .map(RuntimeLocalRewriteNativeFirstEvent::Retry)
+            .unwrap_or(RuntimeLocalRewriteNativeFirstEvent::Commit);
+        if appended_until < chunk.len() {
+            prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
+                chunk[appended_until..].to_vec(),
+            ));
+        }
+        return Some(decision);
+    }
+    prefix.extend_from_slice(&chunk[appended_until..inspect_len]);
+    if inspect_len < chunk.len() {
+        prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
+            chunk[inspect_len..].to_vec(),
+        ));
+    }
+    None
+}
+
+fn runtime_local_rewrite_finish_native_prefetch(
+    live: &mut RuntimeLocalRewriteLiveResponse,
+    prefetch: RuntimeLocalRewriteSsePrefetch,
+    prefix: Vec<u8>,
+    reached_upstream_end: bool,
+    decision: RuntimeLocalRewriteNativeFirstEvent,
+) -> RuntimeLocalRewriteNativeFirstEvent {
+    live.prefix = prefix;
+    if reached_upstream_end {
+        live.upstream_eof = true;
+    }
+    live.set_sse_continuation(prefetch);
+    decision
 }
 
 fn runtime_local_rewrite_native_first_event_error_class(
@@ -718,250 +760,9 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             send_runtime_copilot_upstream_request(request_id, request, shared, body, auth, endpoint)
         }
         (ProviderId::OpenAi, RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }) => {
-            let upstream_url = runtime_local_rewrite_upstream_url(
-                &shared.upstream_base_url,
-                &shared.mount_path,
-                &request.path_and_query,
-            );
-            let body = if endpoint == ProviderEndpoint::Responses {
-                runtime_local_rewrite_model_selection(
-                    shared,
-                    RuntimeProviderBridgeKind::OpenAiResponses,
-                    request,
-                    &body,
-                    "",
-                )
-                .body
-            } else {
-                body
-            };
-            let turn_state = runtime_proxy_crate::runtime_request_turn_state(request);
-            let session_id = runtime_proxy_crate::runtime_request_session_id(request);
-            let previous_response_id = runtime_local_rewrite_previous_response_id(&body);
-            let bound = runtime_local_rewrite_bound_binding(
-                &shared.runtime_shared.runtime,
-                previous_response_id.as_deref(),
-                turn_state.as_deref(),
-                session_id.as_deref(),
-            )?;
-            let (attempts, hard_binding) = if let Some(bound) = bound.as_ref() {
-                let Some(bound_identity) = bound.binding_identity.as_ref() else {
-                    return Err(anyhow::anyhow!(
-                        "OpenAI continuation binding has no exact key identity"
-                    ));
-                };
-                let attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
-                    .into_iter()
-                    .filter(|(_, api_key)| {
-                        RuntimeProviderBindingIdentity::from_raw_key(
-                            ProviderId::OpenAi,
-                            api_key,
-                            &shared.upstream_base_url,
-                            None,
-                        )
-                        .is_some_and(|identity| identity == *bound_identity)
-                    })
-                    .collect::<Vec<_>>();
-                if attempts.is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "OpenAI continuation binding is unavailable or unauthorized"
-                    ));
-                }
-                (attempts, true)
-            } else if shared.provider_credential.is_some() {
-                (Vec::new(), true)
-            } else {
-                let attempt_limit = shared
-                    .runtime_shared
-                    .runtime_config
-                    .tuning
-                    .precommit_attempt_limit
-                    .max(1);
-                (
-                    runtime_local_rewrite_api_key_attempts(shared, api_keys)
-                        .into_iter()
-                        .take(attempt_limit)
-                        .collect(),
-                    false,
-                )
-            };
-            if !hard_binding && attempts.is_empty() && shared.provider_credential.is_none() {
-                let response = send_runtime_local_rewrite_prepared_request(
-                    request_id,
-                    request,
-                    shared,
-                    &upstream_url,
-                    body,
-                    RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key: None },
-                )?;
-                if response.status().as_u16() >= 400 {
-                    return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                            runtime_local_rewrite_buffered_response_from_response(response)?,
-                        ),
-                        gemini_context: None,
-                        copilot_context: None,
-                    });
-                }
-                return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(
-                        RuntimeLocalRewriteLiveResponse::new(response),
-                    ),
-                    gemini_context: None,
-                    copilot_context: None,
-                });
-            }
-
-            if shared.provider_credential.is_some() {
-                let binding_identity = shared
-                    .provider_credential
-                    .as_ref()
-                    .and_then(|credential| {
-                        runtime_provider_binding_identity_from_secret_ref(
-                            ProviderId::OpenAi,
-                            credential.reference(),
-                            &shared.upstream_base_url,
-                            Some(RUNTIME_LOCAL_REWRITE_PROFILE),
-                        )
-                    })
-                    .or_else(|| {
-                        RuntimeProviderBindingIdentity::from_profile(
-                            ProviderId::OpenAi,
-                            RUNTIME_LOCAL_REWRITE_PROFILE,
-                            &shared.upstream_base_url,
-                        )
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("OpenAI projected binding is unavailable"))?;
-                if bound
-                    .as_ref()
-                    .is_some_and(|binding| binding.profile_name != RUNTIME_LOCAL_REWRITE_PROFILE)
-                {
-                    return Err(anyhow::anyhow!(
-                        "OpenAI continuation binding is unavailable or unauthorized"
-                    ));
-                }
-                if bound
-                    .as_ref()
-                    .and_then(|binding| binding.binding_identity.as_ref())
-                    .is_some_and(|identity| identity != &binding_identity)
-                {
-                    return Err(anyhow::anyhow!(
-                        "OpenAI continuation binding is conflicting"
-                    ));
-                }
-                let response = send_runtime_local_rewrite_prepared_request(
-                    request_id,
-                    request,
-                    shared,
-                    &upstream_url,
-                    body,
-                    RuntimeLocalRewritePreparedAuth::OpenAiProjected,
-                )?;
-                if response.status().as_u16() >= 400 {
-                    return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                            runtime_local_rewrite_buffered_response_from_response(response)?,
-                        ),
-                        gemini_context: None,
-                        copilot_context: None,
-                    });
-                }
-                let mut live = RuntimeLocalRewriteLiveResponse::new(response);
-                live.accepted_binding_recorder = Some(runtime_local_rewrite_binding_recorder(
-                    shared,
-                    binding_identity.clone(),
-                ));
-                live.accepted_binding = Some(RuntimeLocalRewriteAcceptedBinding {
-                    identity: binding_identity,
-                    previous_response_id,
-                    turn_state,
-                    session_id,
-                });
-                return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(live),
-                    gemini_context: None,
-                    copilot_context: None,
-                });
-            }
-
-            let attempt_count = attempts.len();
-            for (attempt_index, (label, api_key)) in attempts.into_iter().enumerate() {
-                let send_result = send_runtime_local_rewrite_prepared_request(
-                    request_id,
-                    request,
-                    shared,
-                    &upstream_url,
-                    body.clone(),
-                    RuntimeLocalRewritePreparedAuth::OpenAiResponses {
-                        api_key: Some(api_key),
-                    },
-                );
-                let response = match send_result {
-                    Ok(response) => response,
-                    Err(_error) if !hard_binding && attempt_index + 1 < attempt_count => {
-                        runtime_proxy_log(
-                            &shared.runtime_shared,
-                            format!(
-                                "openai_api_key_transport_retry request={request_id} attempt={label}"
-                            ),
-                        );
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-                if response.status().as_u16() >= 400 {
-                    let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
-                    let class = runtime_provider_error_class(
-                        RuntimeProviderBridgeKind::OpenAiResponses,
-                        parts.status,
-                        &parts.body,
-                    );
-                    let retryable = parts.status != 429
-                        || runtime_local_rewrite_retryable_429_body(&parts.body);
-                    if !hard_binding
-                        && retryable
-                        && matches!(
-                            class,
-                            ProviderErrorClass::Auth
-                                | ProviderErrorClass::RateLimit
-                                | ProviderErrorClass::Quota
-                                | ProviderErrorClass::Transient
-                        )
-                        && attempt_index + 1 < attempt_count
-                    {
-                        continue;
-                    }
-                    return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                        gemini_context: None,
-                        copilot_context: None,
-                    });
-                }
-                let binding_identity = RuntimeProviderBindingIdentity::from_raw_key(
-                    ProviderId::OpenAi,
-                    api_key,
-                    &shared.upstream_base_url,
-                    None,
-                )
-                .ok_or_else(|| anyhow::anyhow!("OpenAI accepted key identity is unavailable"))?;
-                let mut live = RuntimeLocalRewriteLiveResponse::new(response);
-                live.accepted_binding_recorder = Some(runtime_local_rewrite_binding_recorder(
-                    shared,
-                    binding_identity.clone(),
-                ));
-                live.accepted_binding = Some(RuntimeLocalRewriteAcceptedBinding {
-                    identity: binding_identity,
-                    previous_response_id,
-                    turn_state,
-                    session_id,
-                });
-                return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(live),
-                    gemini_context: None,
-                    copilot_context: None,
-                });
-            }
-            Err(anyhow::anyhow!("OpenAI API-key attempts were exhausted"))
+            send_runtime_openai_upstream_request(
+                request_id, request, shared, body, api_keys, endpoint,
+            )
         }
         (ProviderId::DeepSeek, RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. }) => {
             send_runtime_deepseek_upstream_request(
@@ -991,6 +792,334 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             )
         }
         _ => anyhow::bail!("application provider dispatch does not match configured adapter"),
+    }
+}
+
+fn send_runtime_openai_upstream_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    body: Vec<u8>,
+    api_keys: &[String],
+    endpoint: ProviderEndpoint,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let upstream_url = runtime_local_rewrite_upstream_url(
+        &shared.upstream_base_url,
+        &shared.mount_path,
+        &request.path_and_query,
+    );
+    let body = if endpoint == ProviderEndpoint::Responses {
+        runtime_local_rewrite_model_selection(
+            shared,
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            request,
+            &body,
+            "",
+        )
+        .body
+    } else {
+        body
+    };
+    let binding = RuntimeLocalRewriteBindingContext {
+        previous_response_id: runtime_local_rewrite_previous_response_id(&body),
+        turn_state: runtime_proxy_crate::runtime_request_turn_state(request),
+        session_id: runtime_proxy_crate::runtime_request_session_id(request),
+        bound: None,
+    };
+    let binding = RuntimeLocalRewriteBindingContext {
+        bound: runtime_local_rewrite_bound_binding(
+            &shared.runtime_shared.runtime,
+            binding.previous_response_id.as_deref(),
+            binding.turn_state.as_deref(),
+            binding.session_id.as_deref(),
+        )?,
+        ..binding
+    };
+    let (attempts, hard_binding) =
+        runtime_local_rewrite_openai_attempts(shared, api_keys, binding.bound.as_ref())?;
+    if !hard_binding && attempts.is_empty() && shared.provider_credential.is_none() {
+        return runtime_local_rewrite_send_openai_unkeyed(
+            request_id,
+            request,
+            shared,
+            &upstream_url,
+            body,
+        );
+    }
+    if shared.provider_credential.is_some() {
+        return runtime_local_rewrite_send_openai_projected(
+            request_id,
+            request,
+            shared,
+            &upstream_url,
+            body,
+            &binding,
+        );
+    }
+    runtime_local_rewrite_send_openai_key_attempts(
+        (request_id, request, shared),
+        &upstream_url,
+        body,
+        attempts,
+        hard_binding,
+        &binding,
+    )
+}
+
+fn runtime_local_rewrite_openai_attempts<'a>(
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_keys: &'a [String],
+    bound: Option<&ResponseProfileBinding>,
+) -> Result<(Vec<(String, &'a str)>, bool)> {
+    if let Some(bound) = bound {
+        let Some(bound_identity) = bound.binding_identity.as_ref() else {
+            return Err(anyhow::anyhow!(
+                "OpenAI continuation binding has no exact key identity"
+            ));
+        };
+        let attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
+            .into_iter()
+            .filter(|(_, api_key)| {
+                RuntimeProviderBindingIdentity::from_raw_key(
+                    ProviderId::OpenAi,
+                    api_key,
+                    &shared.upstream_base_url,
+                    None,
+                )
+                .is_some_and(|identity| identity == *bound_identity)
+            })
+            .collect::<Vec<_>>();
+        if attempts.is_empty() {
+            return Err(anyhow::anyhow!(
+                "OpenAI continuation binding is unavailable or unauthorized"
+            ));
+        }
+        return Ok((attempts, true));
+    }
+    if shared.provider_credential.is_some() {
+        return Ok((Vec::new(), true));
+    }
+    let attempt_limit = shared
+        .runtime_shared
+        .runtime_config
+        .tuning
+        .precommit_attempt_limit
+        .max(1);
+    Ok((
+        runtime_local_rewrite_api_key_attempts(shared, api_keys)
+            .into_iter()
+            .take(attempt_limit)
+            .collect(),
+        false,
+    ))
+}
+
+fn runtime_local_rewrite_send_openai_unkeyed(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    upstream_url: &str,
+    body: Vec<u8>,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let response = send_runtime_local_rewrite_prepared_request(
+        request_id,
+        request,
+        shared,
+        upstream_url,
+        body,
+        RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key: None },
+    )?;
+    runtime_local_rewrite_openai_response(response, None, shared, None)
+}
+
+fn runtime_local_rewrite_send_openai_projected(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    upstream_url: &str,
+    body: Vec<u8>,
+    binding: &RuntimeLocalRewriteBindingContext,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let binding_identity = shared
+        .provider_credential
+        .as_ref()
+        .and_then(|credential| {
+            runtime_provider_binding_identity_from_secret_ref(
+                ProviderId::OpenAi,
+                credential.reference(),
+                &shared.upstream_base_url,
+                Some(RUNTIME_LOCAL_REWRITE_PROFILE),
+            )
+        })
+        .or_else(|| {
+            RuntimeProviderBindingIdentity::from_profile(
+                ProviderId::OpenAi,
+                RUNTIME_LOCAL_REWRITE_PROFILE,
+                &shared.upstream_base_url,
+            )
+        })
+        .ok_or_else(|| anyhow::anyhow!("OpenAI projected binding is unavailable"))?;
+    runtime_local_rewrite_validate_openai_projected_binding(binding, &binding_identity)?;
+    let response = send_runtime_local_rewrite_prepared_request(
+        request_id,
+        request,
+        shared,
+        upstream_url,
+        body,
+        RuntimeLocalRewritePreparedAuth::OpenAiProjected,
+    )?;
+    runtime_local_rewrite_openai_response(response, Some(binding_identity), shared, Some(binding))
+}
+
+fn runtime_local_rewrite_validate_openai_projected_binding(
+    binding: &RuntimeLocalRewriteBindingContext,
+    identity: &RuntimeProviderBindingIdentity,
+) -> Result<()> {
+    if binding
+        .bound
+        .as_ref()
+        .is_some_and(|binding| binding.profile_name != RUNTIME_LOCAL_REWRITE_PROFILE)
+    {
+        return Err(anyhow::anyhow!(
+            "OpenAI continuation binding is unavailable or unauthorized"
+        ));
+    }
+    if binding
+        .bound
+        .as_ref()
+        .and_then(|binding| binding.binding_identity.as_ref())
+        .is_some_and(|bound| bound != identity)
+    {
+        return Err(anyhow::anyhow!(
+            "OpenAI continuation binding is conflicting"
+        ));
+    }
+    Ok(())
+}
+
+fn runtime_local_rewrite_send_openai_key_attempts(
+    request_context: (u64, &RuntimeProxyRequest, &RuntimeLocalRewriteProxyShared),
+    upstream_url: &str,
+    body: Vec<u8>,
+    attempts: Vec<(String, &str)>,
+    hard_binding: bool,
+    binding: &RuntimeLocalRewriteBindingContext,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let (request_id, request, shared) = request_context;
+    let attempt_count = attempts.len();
+    for (attempt_index, (label, api_key)) in attempts.into_iter().enumerate() {
+        let send_result = send_runtime_local_rewrite_prepared_request(
+            request_id,
+            request,
+            shared,
+            upstream_url,
+            body.clone(),
+            RuntimeLocalRewritePreparedAuth::OpenAiResponses {
+                api_key: Some(api_key),
+            },
+        );
+        let response = match send_result {
+            Ok(response) => response,
+            Err(_error) if !hard_binding && attempt_index + 1 < attempt_count => {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    format!("openai_api_key_transport_retry request={request_id} attempt={label}"),
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        if response.status().as_u16() >= 400 {
+            let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
+            if runtime_local_rewrite_openai_error_can_retry(
+                &parts,
+                hard_binding,
+                attempt_index,
+                attempt_count,
+            ) {
+                continue;
+            }
+            return Ok(runtime_local_rewrite_buffered_result(parts));
+        }
+        let identity = RuntimeProviderBindingIdentity::from_raw_key(
+            ProviderId::OpenAi,
+            api_key,
+            &shared.upstream_base_url,
+            None,
+        )
+        .ok_or_else(|| anyhow::anyhow!("OpenAI accepted key identity is unavailable"))?;
+        return runtime_local_rewrite_openai_response(
+            response,
+            Some(identity),
+            shared,
+            Some(binding),
+        );
+    }
+    Err(anyhow::anyhow!("OpenAI API-key attempts were exhausted"))
+}
+
+fn runtime_local_rewrite_openai_error_can_retry(
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
+    hard_binding: bool,
+    attempt_index: usize,
+    attempt_count: usize,
+) -> bool {
+    let class = runtime_provider_error_class(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        parts.status,
+        &parts.body,
+    );
+    !hard_binding
+        && (parts.status != 429 || runtime_local_rewrite_retryable_429_body(&parts.body))
+        && matches!(
+            class,
+            ProviderErrorClass::Auth
+                | ProviderErrorClass::RateLimit
+                | ProviderErrorClass::Quota
+                | ProviderErrorClass::Transient
+        )
+        && attempt_index + 1 < attempt_count
+}
+
+fn runtime_local_rewrite_openai_response(
+    response: RuntimeLocalRewriteAsyncResponse,
+    identity: Option<RuntimeProviderBindingIdentity>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    binding: Option<&RuntimeLocalRewriteBindingContext>,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    if response.status().as_u16() >= 400 {
+        return Ok(runtime_local_rewrite_buffered_result(
+            runtime_local_rewrite_buffered_response_from_response(response)?,
+        ));
+    }
+    let mut live = RuntimeLocalRewriteLiveResponse::new(response);
+    if let Some(identity) = identity {
+        live.accepted_binding_recorder = Some(runtime_local_rewrite_binding_recorder(
+            shared,
+            identity.clone(),
+        ));
+        live.accepted_binding = binding.map(|binding| binding.accepted_binding(identity));
+    }
+    Ok(runtime_local_rewrite_live_result(live))
+}
+
+fn runtime_local_rewrite_buffered_result(
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> RuntimeLocalRewriteUpstreamResult {
+    RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+        gemini_context: None,
+        copilot_context: None,
+    }
+}
+
+fn runtime_local_rewrite_live_result(
+    live: RuntimeLocalRewriteLiveResponse,
+) -> RuntimeLocalRewriteUpstreamResult {
+    RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Live(live),
+        gemini_context: None,
+        copilot_context: None,
     }
 }
 

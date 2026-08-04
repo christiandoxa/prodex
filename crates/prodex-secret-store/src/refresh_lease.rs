@@ -741,72 +741,131 @@ fn heartbeat_scheduler(
     let mut next_worker = 0;
 
     loop {
-        match commands.recv_timeout(heartbeat_scheduler_timeout(&active)) {
-            Ok(command) => handle_heartbeat_command(command, &mut active),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                for heartbeat in active.values() {
-                    heartbeat.control.fail(HeartbeatFailure::SchedulerStopped);
-                }
-                break;
-            }
+        if !receive_heartbeat_command(&commands, &mut active) {
+            break;
         }
+        process_active_heartbeats(&mut active, &worker_queues, &mut next_worker);
+    }
+}
 
-        let now = Instant::now();
-        let mut stopped = Vec::new();
-        let mut failed = Vec::new();
-        for (&id, heartbeat) in &mut active {
-            match heartbeat.control.state() {
-                HeartbeatState::StopRequested => {
-                    if heartbeat.in_flight {
-                        if now >= heartbeat.deadline {
-                            failed.push((id, HeartbeatFailure::WriteTimedOut));
-                        }
-                    } else {
-                        stopped.push(id);
-                    }
-                }
-                HeartbeatState::Running => {
-                    if heartbeat.in_flight {
-                        if now >= heartbeat.deadline {
-                            failed.push((id, HeartbeatFailure::WriteTimedOut));
-                        }
-                    } else if heartbeat.next <= now {
-                        let deadline = now + HEARTBEAT_WRITE_DEADLINE;
-                        let job = HeartbeatJob {
-                            id,
-                            lock_file: Arc::clone(&heartbeat.lock_file),
-                            deadline,
-                        };
-                        match send_heartbeat_job(&worker_queues, &mut next_worker, job) {
-                            Ok(()) => {
-                                heartbeat.in_flight = true;
-                                heartbeat.deadline = deadline;
-                            }
-                            Err(HeartbeatFailure::WorkerQueueFull) => {
-                                heartbeat.next = now + HEARTBEAT_SCHEDULER_TICK;
-                            }
-                            Err(failure) => failed.push((id, failure)),
-                        }
-                    }
-                }
-                HeartbeatState::Failed(failure) => failed.push((id, failure)),
-                HeartbeatState::Pending | HeartbeatState::Stopped | HeartbeatState::Cancelled => {
-                    stopped.push(id)
-                }
+fn receive_heartbeat_command(
+    commands: &mpsc::Receiver<HeartbeatCommand>,
+    active: &mut HashMap<u64, ActiveHeartbeat>,
+) -> bool {
+    match commands.recv_timeout(heartbeat_scheduler_timeout(active)) {
+        Ok(command) => handle_heartbeat_command(command, active),
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            for heartbeat in active.values() {
+                heartbeat.control.fail(HeartbeatFailure::SchedulerStopped);
             }
+            return false;
         }
+    }
+    true
+}
 
-        for id in stopped {
-            if let Some(heartbeat) = active.remove(&id) {
-                heartbeat.control.mark_stopped();
-            }
+#[derive(Clone, Copy)]
+enum HeartbeatDisposition {
+    Keep,
+    Stop,
+    Fail(HeartbeatFailure),
+}
+
+fn process_active_heartbeats(
+    active: &mut HashMap<u64, ActiveHeartbeat>,
+    worker_queues: &[mpsc::SyncSender<HeartbeatJob>],
+    next_worker: &mut usize,
+) {
+    let now = Instant::now();
+    let mut stopped = Vec::new();
+    let mut failed = Vec::new();
+    for (&id, heartbeat) in active.iter_mut() {
+        match heartbeat_disposition(id, heartbeat, worker_queues, next_worker, now) {
+            HeartbeatDisposition::Keep => {}
+            HeartbeatDisposition::Stop => stopped.push(id),
+            HeartbeatDisposition::Fail(failure) => failed.push((id, failure)),
         }
-        for (id, failure) in failed {
-            if let Some(heartbeat) = active.remove(&id) {
-                heartbeat.control.fail(failure);
-            }
+    }
+    for id in stopped {
+        if let Some(heartbeat) = active.remove(&id) {
+            heartbeat.control.mark_stopped();
         }
+    }
+    for (id, failure) in failed {
+        if let Some(heartbeat) = active.remove(&id) {
+            heartbeat.control.fail(failure);
+        }
+    }
+}
+
+fn heartbeat_disposition(
+    id: u64,
+    heartbeat: &mut ActiveHeartbeat,
+    worker_queues: &[mpsc::SyncSender<HeartbeatJob>],
+    next_worker: &mut usize,
+    now: Instant,
+) -> HeartbeatDisposition {
+    match heartbeat.control.state() {
+        HeartbeatState::StopRequested => heartbeat_stopping_disposition(heartbeat, now),
+        HeartbeatState::Running => {
+            heartbeat_running_disposition(id, heartbeat, worker_queues, next_worker, now)
+        }
+        HeartbeatState::Failed(failure) => HeartbeatDisposition::Fail(failure),
+        HeartbeatState::Pending | HeartbeatState::Stopped | HeartbeatState::Cancelled => {
+            HeartbeatDisposition::Stop
+        }
+    }
+}
+
+fn heartbeat_stopping_disposition(
+    heartbeat: &ActiveHeartbeat,
+    now: Instant,
+) -> HeartbeatDisposition {
+    if !heartbeat.in_flight {
+        return HeartbeatDisposition::Stop;
+    }
+    if now >= heartbeat.deadline {
+        HeartbeatDisposition::Fail(HeartbeatFailure::WriteTimedOut)
+    } else {
+        HeartbeatDisposition::Keep
+    }
+}
+
+fn heartbeat_running_disposition(
+    id: u64,
+    heartbeat: &mut ActiveHeartbeat,
+    worker_queues: &[mpsc::SyncSender<HeartbeatJob>],
+    next_worker: &mut usize,
+    now: Instant,
+) -> HeartbeatDisposition {
+    if heartbeat.in_flight {
+        return if now >= heartbeat.deadline {
+            HeartbeatDisposition::Fail(HeartbeatFailure::WriteTimedOut)
+        } else {
+            HeartbeatDisposition::Keep
+        };
+    }
+    if heartbeat.next > now {
+        return HeartbeatDisposition::Keep;
+    }
+    let deadline = now + HEARTBEAT_WRITE_DEADLINE;
+    let job = HeartbeatJob {
+        id,
+        lock_file: Arc::clone(&heartbeat.lock_file),
+        deadline,
+    };
+    match send_heartbeat_job(worker_queues, next_worker, job) {
+        Ok(()) => {
+            heartbeat.in_flight = true;
+            heartbeat.deadline = deadline;
+            HeartbeatDisposition::Keep
+        }
+        Err(HeartbeatFailure::WorkerQueueFull) => {
+            heartbeat.next = now + HEARTBEAT_SCHEDULER_TICK;
+            HeartbeatDisposition::Keep
+        }
+        Err(failure) => HeartbeatDisposition::Fail(failure),
     }
 }
 
@@ -835,65 +894,80 @@ fn handle_heartbeat_command(command: HeartbeatCommand, active: &mut HashMap<u64,
             lock_file,
             interval,
             control,
-        } => {
-            if active.len() >= MAX_ACTIVE_HEARTBEATS || active.contains_key(&id) {
-                control.fail(HeartbeatFailure::CapacityExhausted);
-            } else if control.mark_running() {
-                let now = Instant::now();
-                active.insert(
-                    id,
-                    ActiveHeartbeat {
-                        lock_file: Arc::new(lock_file),
-                        interval,
-                        next: now + interval,
-                        deadline: now,
-                        in_flight: false,
-                        control,
-                    },
-                );
-            }
-        }
-        HeartbeatCommand::Remove { id } => {
-            if active
-                .get(&id)
-                .is_some_and(|heartbeat| !heartbeat.in_flight)
-                && let Some(heartbeat) = active.remove(&id)
-            {
-                heartbeat.control.mark_stopped();
-            }
-        }
+        } => add_heartbeat(active, id, lock_file, interval, control),
+        HeartbeatCommand::Remove { id } => remove_heartbeat(active, id),
         HeartbeatCommand::WriteFinished { id, result } => {
-            let mut stop = false;
-            let failure = if let Some(heartbeat) = active.get_mut(&id) {
-                if !heartbeat.in_flight {
-                    return;
-                }
-                heartbeat.in_flight = false;
-                match result {
-                    Err(failure) => Some(failure),
-                    Ok(()) if Instant::now() >= heartbeat.deadline => {
-                        Some(HeartbeatFailure::WriteTimedOut)
-                    }
-                    Ok(()) => {
-                        stop = heartbeat.control.state() == HeartbeatState::StopRequested;
-                        if !stop {
-                            heartbeat.next = Instant::now() + heartbeat.interval;
-                        }
-                        None
-                    }
-                }
-            } else {
-                return;
-            };
-
-            if let Some(failure) = failure {
-                if let Some(heartbeat) = active.remove(&id) {
-                    heartbeat.control.fail(failure);
-                }
-            } else if stop && let Some(heartbeat) = active.remove(&id) {
-                heartbeat.control.mark_stopped();
-            }
+            finish_heartbeat_write(active, id, result)
         }
+    }
+}
+
+fn add_heartbeat(
+    active: &mut HashMap<u64, ActiveHeartbeat>,
+    id: u64,
+    lock_file: File,
+    interval: Duration,
+    control: Arc<HeartbeatControl>,
+) {
+    if active.len() >= MAX_ACTIVE_HEARTBEATS || active.contains_key(&id) {
+        control.fail(HeartbeatFailure::CapacityExhausted);
+        return;
+    }
+    if control.mark_running() {
+        let now = Instant::now();
+        active.insert(
+            id,
+            ActiveHeartbeat {
+                lock_file: Arc::new(lock_file),
+                interval,
+                next: now + interval,
+                deadline: now,
+                in_flight: false,
+                control,
+            },
+        );
+    }
+}
+
+fn remove_heartbeat(active: &mut HashMap<u64, ActiveHeartbeat>, id: u64) {
+    if active.get(&id).is_some_and(|heartbeat| heartbeat.in_flight) {
+        return;
+    }
+    if let Some(heartbeat) = active.remove(&id) {
+        heartbeat.control.mark_stopped();
+    }
+}
+
+fn finish_heartbeat_write(
+    active: &mut HashMap<u64, ActiveHeartbeat>,
+    id: u64,
+    result: Result<(), HeartbeatFailure>,
+) {
+    let Some(heartbeat) = active.get_mut(&id) else {
+        return;
+    };
+    if !heartbeat.in_flight {
+        return;
+    }
+    heartbeat.in_flight = false;
+    let mut stop = false;
+    let failure = match result {
+        Err(failure) => Some(failure),
+        Ok(()) if Instant::now() >= heartbeat.deadline => Some(HeartbeatFailure::WriteTimedOut),
+        Ok(()) => {
+            stop = heartbeat.control.state() == HeartbeatState::StopRequested;
+            if !stop {
+                heartbeat.next = Instant::now() + heartbeat.interval;
+            }
+            None
+        }
+    };
+    if let Some(failure) = failure {
+        if let Some(heartbeat) = active.remove(&id) {
+            heartbeat.control.fail(failure);
+        }
+    } else if stop && let Some(heartbeat) = active.remove(&id) {
+        heartbeat.control.mark_stopped();
     }
 }
 

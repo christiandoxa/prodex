@@ -74,6 +74,16 @@ fn start_presidio_fixture_with_delay(
     (format!("http://{addr}"), handle)
 }
 
+fn start_unavailable_presidio_fixture() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        drop(stream);
+    });
+    (format!("http://{addr}"), handle)
+}
+
 #[test]
 fn runtime_presidio_redact_body_anonymizes_request_payload() {
     let (analyzer_url, analyzer_handle) = start_presidio_fixture(
@@ -713,14 +723,9 @@ fn http_external_inspection_fails_closed_for_governance_and_detector_failures() 
             true,
         ),
     ] {
+        let (analyzer_url, handle) = start_unavailable_presidio_fixture();
         let shared = presidio_test_shared(name, governance);
-        let registration = register_test_presidio(
-            &shared,
-            "http://127.0.0.1:1".to_string(),
-            explicit,
-            1_000,
-            1,
-        );
+        let registration = register_test_presidio(&shared, analyzer_url, explicit, 1_000, 1);
         let original = test_request(name).body;
         let mut request = RuntimeProxyRequest {
             body: original.clone(),
@@ -744,6 +749,7 @@ fn http_external_inspection_fails_closed_for_governance_and_detector_failures() 
             "unsupported",
             "unavailable",
         );
+        handle.join().unwrap();
     }
 }
 
@@ -1010,14 +1016,9 @@ fn websocket_external_failures_and_partial_coverage_fail_closed() {
             true,
         ),
     ] {
+        let (analyzer_url, handle) = start_unavailable_presidio_fixture();
         let shared = presidio_test_shared(name, governance);
-        let registration = register_test_presidio(
-            &shared,
-            "http://127.0.0.1:1".to_string(),
-            explicit,
-            1_000,
-            1,
-        );
+        let registration = register_test_presidio(&shared, analyzer_url, explicit, 1_000, 1);
         let text = test_request(name);
         let body = std::str::from_utf8(&text.body).unwrap();
         let result =
@@ -1038,6 +1039,7 @@ fn websocket_external_failures_and_partial_coverage_fail_closed() {
             "unsupported",
             "unavailable",
         );
+        handle.join().unwrap();
     }
 
     let (analyzer_url, handle) = start_presidio_fixture_with_delay(

@@ -215,125 +215,145 @@ fn runtime_apply_external_http_redaction(
     );
     match redaction {
         Ok(InspectionExecutionOutcome::Redacted(redaction)) => {
-            let presidio_masked = !redaction.source.findings.is_empty();
-            let denied = fail_closed_policy.denies_external_coverage(redaction.source.coverage);
-            runtime_emit_inspection_metric(
-                shared,
-                InspectionStage::External,
-                redaction.source.coverage,
-                &redaction.source.findings,
-                if denied {
-                    InspectionMaskingAction::Denied
-                } else if presidio_masked {
-                    InspectionMaskingAction::Masked
-                } else {
-                    InspectionMaskingAction::None
-                },
-                if denied {
-                    InspectionOutcome::Denied
-                } else {
-                    InspectionOutcome::Allowed
-                },
-                runtime_inspection_duration_micros(external_started),
-            );
-            request.body = redaction.body;
-            if denied {
-                runtime_log_presidio_redaction_error(
-                    request_id,
-                    "http",
-                    true,
-                    "unsupported_coverage",
-                    shared,
-                );
-                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-                return Err(anyhow!("presidio_redaction_failed"));
-            }
-            if presidio_masked {
-                runtime_log_presidio_redaction_applied(
-                    request_id,
-                    "http",
-                    presidio_input_bytes,
-                    request.body.len(),
-                    shared,
-                );
-            }
-            sources.push(redaction.source);
-            runtime_presidio_inspection_plan(
-                std::mem::take(sources),
-                governance.classification_default,
-                detector_revision,
+            runtime_finish_external_http_redaction(
+                (request_id, request),
+                (shared, governance, detector_revision),
+                fail_closed_policy,
+                sources,
+                presidio_input_bytes,
+                external_started,
+                redaction,
             )
         }
         Ok(InspectionExecutionOutcome::Failed(failure)) => {
             request.body = failure.body;
-            let fail_closed = fail_closed_policy.is_closed();
-            let failure_outcome = runtime_inspection_error_outcome(&failure.error);
-            runtime_emit_inspection_metric(
-                shared,
-                InspectionStage::External,
-                InspectionCoverage::Unsupported,
-                &[],
-                if fail_closed {
-                    InspectionMaskingAction::Denied
-                } else {
-                    InspectionMaskingAction::None
-                },
-                failure_outcome,
-                runtime_inspection_duration_micros(external_started),
-            );
-            runtime_log_presidio_redaction_error(
-                request_id,
-                "http",
-                fail_closed,
-                runtime_inspection_failure_type(&failure.error),
-                shared,
-            );
-            if fail_closed {
-                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-                Err(anyhow!("presidio_redaction_failed"))
-            } else {
-                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
-                runtime_presidio_inspection_plan(
-                    std::mem::take(sources),
-                    governance.classification_default,
-                    detector_revision,
-                )
-            }
+            runtime_finish_external_http_failure(
+                (request_id, shared),
+                (governance, detector_revision),
+                fail_closed_policy,
+                sources,
+                external_started,
+                &failure.error,
+            )
         }
         Err(error) => {
             request.body = original_body;
-            let fail_closed = fail_closed_policy.is_closed();
-            runtime_emit_inspection_metric(
-                shared,
-                InspectionStage::External,
-                InspectionCoverage::Unsupported,
-                &[],
-                if fail_closed {
-                    InspectionMaskingAction::Denied
-                } else {
-                    InspectionMaskingAction::None
-                },
-                runtime_inspection_error_outcome(&error),
-                runtime_inspection_duration_micros(external_started),
-            );
-            runtime_log_presidio_redaction_error(
-                request_id,
-                "http",
-                fail_closed,
-                runtime_inspection_failure_type(&error),
-                shared,
-            );
-            if fail_closed {
-                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-                Err(anyhow!("presidio_redaction_failed"))
-            } else {
-                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
-                runtime_presidio_inspection_plan(
-                    std::mem::take(sources),
-                    governance.classification_default,
-                    detector_revision,
-                )
-            }
+            runtime_finish_external_http_failure(
+                (request_id, shared),
+                (governance, detector_revision),
+                fail_closed_policy,
+                sources,
+                external_started,
+                &error,
+            )
         }
     }
+}
+
+fn runtime_finish_external_http_redaction(
+    request: (u64, &mut RuntimeProxyRequest),
+    inspection: (
+        &RuntimeRotationProxyShared,
+        &prodex_config::GovernanceConfig,
+        &DetectorRevisionId,
+    ),
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
+    sources: &mut Vec<ApplicationInspectionSource>,
+    presidio_input_bytes: usize,
+    external_started: Instant,
+    redaction: super::engine::RedactionOutcome,
+) -> Result<ApplicationInspectionPlan> {
+    let (request_id, request) = request;
+    let (shared, governance, detector_revision) = inspection;
+    let presidio_masked = !redaction.source.findings.is_empty();
+    let denied = fail_closed_policy.denies_external_coverage(redaction.source.coverage);
+    runtime_emit_inspection_metric(
+        shared,
+        InspectionStage::External,
+        redaction.source.coverage,
+        &redaction.source.findings,
+        if denied {
+            InspectionMaskingAction::Denied
+        } else if presidio_masked {
+            InspectionMaskingAction::Masked
+        } else {
+            InspectionMaskingAction::None
+        },
+        if denied {
+            InspectionOutcome::Denied
+        } else {
+            InspectionOutcome::Allowed
+        },
+        runtime_inspection_duration_micros(external_started),
+    );
+    request.body = redaction.body;
+    if denied {
+        runtime_log_presidio_redaction_error(
+            request_id,
+            "http",
+            true,
+            "unsupported_coverage",
+            shared,
+        );
+        runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+        return Err(anyhow!("presidio_redaction_failed"));
+    }
+    if presidio_masked {
+        runtime_log_presidio_redaction_applied(
+            request_id,
+            "http",
+            presidio_input_bytes,
+            request.body.len(),
+            shared,
+        );
+    }
+    sources.push(redaction.source);
+    runtime_presidio_inspection_plan(
+        std::mem::take(sources),
+        governance.classification_default,
+        detector_revision,
+    )
+}
+
+fn runtime_finish_external_http_failure(
+    request: (u64, &RuntimeRotationProxyShared),
+    inspection: (&prodex_config::GovernanceConfig, &DetectorRevisionId),
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
+    sources: &mut Vec<ApplicationInspectionSource>,
+    external_started: Instant,
+    error: &anyhow::Error,
+) -> Result<ApplicationInspectionPlan> {
+    let (request_id, shared) = request;
+    let (governance, detector_revision) = inspection;
+    let fail_closed = fail_closed_policy.is_closed();
+    runtime_emit_inspection_metric(
+        shared,
+        InspectionStage::External,
+        InspectionCoverage::Unsupported,
+        &[],
+        if fail_closed {
+            InspectionMaskingAction::Denied
+        } else {
+            InspectionMaskingAction::None
+        },
+        runtime_inspection_error_outcome(error),
+        runtime_inspection_duration_micros(external_started),
+    );
+    runtime_log_presidio_redaction_error(
+        request_id,
+        "http",
+        fail_closed,
+        runtime_inspection_failure_type(error),
+        shared,
+    );
+    if fail_closed {
+        runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+        return Err(anyhow!("presidio_redaction_failed"));
+    }
+    sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
+    runtime_presidio_inspection_plan(
+        std::mem::take(sources),
+        governance.classification_default,
+        detector_revision,
+    )
 }
