@@ -1,5 +1,22 @@
 [
   {
+    "id": "audited-super-runtime-security-feature-0.383.0",
+    "requiredSubjects": [
+      "feat: add sub-agent delegation and harden runtime",
+      "chore: refresh fuzz lockfile",
+      "chore(ci): ratchet Rust size guard",
+      "fix(ci): close cross-platform and quality gaps",
+      "chore(ci): record reviewed 0.383.0 churn"
+    ],
+    "caps": {
+      "maxFiles": 271,
+      "maxBehaviorFiles": 258,
+      "maxLines": 26452,
+      "maxFileLines": 1787
+    },
+    "reason": "Reviewed the complete 0.383.0 feature range covering typed Super sub-agent delegation and resume overlays, effective Presidio fail-closed enforcement, hard provider binding identity, exact SQLite replay, async bounded streaming, provider fidelity, immutable break-glass evidence, persistence durability, bounded resource policies, native frontend validation, cross-platform tests, and quality-gate extraction; verified with focused regressions, the locked full workspace suite, strict Clippy, live PostgreSQL and Redis proof, encrypted backup/restore, an optimized locked build, security and boundary guards, dependency audits, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-production-security-ci-feature-0.382.0",
     "requiredSubjects": [
       "fix: close audited production gaps"
