@@ -16,11 +16,13 @@ mod tool_signatures;
 mod tools;
 
 pub(super) use self::continuation::gemini_continuation_metadata;
-pub(crate) use self::generation_config::gemini_generation_config_from_request;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 pub(super) use self::generation_config::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
+};
+pub(crate) use self::generation_config::{
+    gemini_generation_config_from_request, gemini_validate_candidate_count,
 };
 pub(super) use self::optional_fields::gemini_apply_optional_request_fields;
 pub(super) use self::response_format::gemini_apply_response_format;
@@ -29,7 +31,8 @@ pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(super) use self::tools::gemini_tool_from_openai_tool;
 pub(crate) use self::tools::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
-    gemini_tool_config_from_request,
+    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
+    gemini_validate_openai_tools,
 };
 
 pub(crate) fn gemini_request_body_without_tool(body: &[u8], tool_name: &str) -> Option<Vec<u8>> {

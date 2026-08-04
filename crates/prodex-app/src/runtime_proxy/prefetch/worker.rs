@@ -45,20 +45,24 @@ pub(crate) fn runtime_prefetch_release_queued_bytes(
     bytes: usize,
 ) {
     if bytes > 0 {
-        shared.queued_bytes.fetch_sub(bytes, Ordering::SeqCst);
+        let _ = shared
+            .queued_bytes
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
+                Some(queued.saturating_sub(bytes))
+            });
     }
 }
 
 async fn runtime_prefetch_send_with_wait(
     sender: &SyncSender<RuntimePrefetchChunk>,
     shared: &RuntimePrefetchSharedState,
-    chunk: Vec<u8>,
+    chunk: RuntimePrefetchChunk,
 ) -> RuntimePrefetchSendOutcome {
     let started_at = Instant::now();
     let retry_delay = Duration::from_millis(shared.config.retry_delay_ms);
     let timeout = Duration::from_millis(shared.config.timeout_ms);
     let buffered_limit = shared.config.max_buffered_bytes.max(1);
-    let mut pending = RuntimePrefetchChunk::Data(chunk);
+    let mut pending = chunk;
     let mut retries = 0usize;
     loop {
         let chunk_bytes = match &pending {
@@ -177,9 +181,39 @@ pub(crate) async fn runtime_prefetch_response_chunks(
     request_id: u64,
 ) {
     let mut saw_data = false;
+    let chunk_idle_timeout = Duration::from_millis(shared.config.stream_idle_timeout_ms.max(1));
     loop {
-        match response.chunk().await {
-            Ok(None) => {
+        match tokio::time::timeout(chunk_idle_timeout, response.chunk()).await {
+            Err(_) => {
+                let error = "runtime upstream stream idle timed out".to_string();
+                runtime_prefetch_set_terminal_error(
+                    &shared,
+                    io::ErrorKind::TimedOut,
+                    error.clone(),
+                );
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &runtime_proxy_structured_log_message(
+                        "upstream_stream_idle_timeout",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field(
+                                "timeout_ms",
+                                shared.config.stream_idle_timeout_ms.max(1).to_string(),
+                            ),
+                        ],
+                    ),
+                );
+                let _ = runtime_prefetch_send_with_wait(
+                    &sender,
+                    &shared,
+                    RuntimePrefetchChunk::Error(io::ErrorKind::TimedOut, error),
+                )
+                .await;
+                break;
+            }
+            Ok(Ok(None)) => {
                 runtime_proxy_log_to_path(
                     &log_path,
                     &runtime_proxy_structured_log_message(
@@ -191,10 +225,12 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                         ],
                     ),
                 );
-                let _ = sender.try_send(RuntimePrefetchChunk::End);
+                let _ =
+                    runtime_prefetch_send_with_wait(&sender, &shared, RuntimePrefetchChunk::End)
+                        .await;
                 break;
             }
-            Ok(Some(chunk)) => {
+            Ok(Ok(Some(chunk))) => {
                 if !runtime_prefetch_forward_chunk(
                     chunk,
                     &sender,
@@ -208,7 +244,7 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                     break;
                 }
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 let kind = runtime_reqwest_error_kind(&err);
                 let error = runtime_prefetch_error_log_value(&err.to_string());
                 runtime_prefetch_set_terminal_error(&shared, kind, error.clone());
@@ -224,7 +260,12 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                         ],
                     ),
                 );
-                let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, error));
+                let _ = runtime_prefetch_send_with_wait(
+                    &sender,
+                    &shared,
+                    RuntimePrefetchChunk::Error(kind, error),
+                )
+                .await;
                 break;
             }
         }
@@ -268,14 +309,22 @@ async fn runtime_prefetch_forward_chunk(
                 RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES,
             ),
         );
-        let _ = sender.try_send(RuntimePrefetchChunk::Error(
-            io::ErrorKind::InvalidData,
-            message,
-        ));
+        let _ = runtime_prefetch_send_with_wait(
+            sender,
+            shared,
+            RuntimePrefetchChunk::Error(io::ErrorKind::InvalidData, message),
+        )
+        .await;
         return false;
     }
     let chunk_bytes = chunk.len();
-    match runtime_prefetch_send_with_wait(sender, shared, chunk.to_vec()).await {
+    match runtime_prefetch_send_with_wait(
+        sender,
+        shared,
+        RuntimePrefetchChunk::Data(chunk.to_vec()),
+    )
+    .await
+    {
         RuntimePrefetchSendOutcome::Sent { wait_ms, retries } => {
             if retries > 0 {
                 runtime_proxy_log_to_path(
@@ -311,6 +360,12 @@ async fn runtime_prefetch_forward_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RuntimePrefetchConfig;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn prefetch_error_log_value_redacts_secret_like_material() {
@@ -323,5 +378,83 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("prefetch-token"));
         assert!(!message.contains("prefetch-key"));
+    }
+
+    #[test]
+    fn reqwest_chunk_idle_timeout_uses_configured_stream_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock upstream should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock upstream address should be available");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("mock upstream should accept");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\ndata:\r\n",
+                )
+                .expect("mock upstream should send the first chunk");
+            stream.flush().expect("mock upstream should flush");
+            thread::sleep(Duration::from_millis(80));
+        });
+
+        let log_path = std::env::temp_dir().join(format!(
+            "prodex-prefetch-timeout-{}-{}.log",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should be after unix epoch")
+                .as_nanos()
+        ));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("prefetch test runtime should build");
+        runtime.block_on(async {
+            let response = reqwest::Client::new()
+                .get(format!("http://{address}/v1/responses"))
+                .send()
+                .await
+                .expect("mock upstream response should arrive");
+            let shared = Arc::new(RuntimePrefetchSharedState {
+                config: RuntimePrefetchConfig {
+                    retry_delay_ms: 1,
+                    timeout_ms: 100,
+                    max_buffered_bytes: 1024,
+                    lookahead_timeout_ms: 100,
+                    stream_idle_timeout_ms: 20,
+                },
+                ..RuntimePrefetchSharedState::default()
+            });
+            let (sender, receiver) = mpsc::sync_channel(2);
+            runtime_prefetch_response_chunks(
+                response,
+                sender,
+                Arc::clone(&shared),
+                log_path.clone(),
+                7,
+            )
+            .await;
+
+            assert!(matches!(
+                receiver.recv().expect("first chunk should be queued"),
+                RuntimePrefetchChunk::Data(bytes) if bytes.as_slice() == b"data:"
+            ));
+            assert!(matches!(
+                receiver.recv().expect("timeout should be queued"),
+                RuntimePrefetchChunk::Error(io::ErrorKind::TimedOut, message)
+                    if message == "runtime upstream stream idle timed out"
+            ));
+            assert_eq!(
+                runtime_prefetch_terminal_error(&shared),
+                Some((
+                    io::ErrorKind::TimedOut,
+                    "runtime upstream stream idle timed out".to_string()
+                ))
+            );
+        });
+        server.join().expect("mock upstream should finish");
+        let _ = std::fs::remove_file(log_path);
     }
 }

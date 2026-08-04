@@ -46,21 +46,19 @@ impl RunCommandStrategy {
         };
         let paths = AppPaths::discover()?;
         let state = AppState::load_and_repair(&paths)?;
-        let report = match prodex_session_store::resolve_session_report_by_id_in_store(
+        let report = prodex_session_store::resolve_session_report_by_id_in_store(
             &paths.shared_codex_root,
             &state,
             session_selector,
-        ) {
-            Ok(report) => report,
-            Err(_) => return Ok(None),
-        };
+        )
+        .with_context(|| "failed to resolve goal resume session")?;
         let analysis = analyze_goal_resume_session(Path::new(&report.path))?;
         if !analysis.saw_usage_limit {
             return Ok(None);
         }
-        let Some(thread_id) = analysis.thread_id else {
-            return Ok(None);
-        };
+        let thread_id = analysis
+            .thread_id
+            .context("goal resume session is missing a thread id")?;
         if !shared_goal_needs_resume(&paths.shared_codex_root, &thread_id)? {
             return Ok(None);
         }
@@ -180,40 +178,39 @@ impl GoalUsageLimitMonitor {
         }
     }
 
-    pub(super) fn take_usage_limit_signal(&mut self) -> Option<String> {
-        self.refresh_session_id();
-        let session_id = self.session_id.clone()?;
+    pub(super) fn take_usage_limit_signal(&mut self) -> Result<Option<String>> {
+        self.refresh_session_id()?;
+        let Some(session_id) = self.session_id.clone() else {
+            return Ok(None);
+        };
         if self.connection.is_none() {
-            self.connection = rusqlite::Connection::open_with_flags(
-                &self.db_path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )
-            .ok();
+            self.connection = Some(
+                rusqlite::Connection::open_with_flags(
+                    &self.db_path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+                .with_context(|| format!("failed to open {}", self.db_path.display()))?,
+            );
         }
-        let status = match self
+        let status = self
             .connection
-            .as_ref()?
+            .as_ref()
+            .context("goal usage monitor connection is unavailable")?
             .query_row(
                 "SELECT status, updated_at_ms FROM thread_goals WHERE thread_id = ? ORDER BY updated_at_ms DESC LIMIT 1",
                 [&session_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()
-        {
-            Ok(status) => status,
-            Err(_) => {
-                self.connection = None;
-                return None;
-            }
-        };
+            .with_context(|| format!("failed to read goal status from {}", self.db_path.display()))?;
         let normalized = status
             .as_ref()
             .map(|(status, _)| status.trim().to_ascii_lowercase());
         if normalized.as_deref() == Some("active") {
             self.armed = true;
             self.usage_limit_pending = false;
-            return None;
+            return Ok(None);
         }
         let current_attempt_hit_limit = status
             .as_ref()
@@ -228,25 +225,30 @@ impl GoalUsageLimitMonitor {
         }
         if self.usage_limit_pending && Instant::now() >= self.next_retry_at {
             self.next_retry_at = Instant::now() + GOAL_USAGE_LIMIT_RETRY_INTERVAL;
-            return Some(session_id);
+            return Ok(Some(session_id));
         }
-        None
+        Ok(None)
     }
 
-    fn refresh_session_id(&mut self) {
-        let Ok(raw) = fs::read_to_string(&self.marker_path) else {
-            return;
+    fn refresh_session_id(&mut self) -> Result<()> {
+        let raw = match fs::read_to_string(&self.marker_path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", self.marker_path.display()));
+            }
         };
         let session_id = raw.trim();
-        if uuid::Uuid::parse_str(session_id).is_err()
-            || self.session_id.as_deref() == Some(session_id)
-        {
-            return;
+        uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
+        if self.session_id.as_deref() == Some(session_id) {
+            return Ok(());
         }
         self.session_id = Some(session_id.to_string());
         self.armed = false;
         self.usage_limit_pending = false;
         self.next_retry_at = Instant::now();
+        Ok(())
     }
 
     fn prepare_for_resume(&mut self) {
@@ -274,12 +276,12 @@ impl Drop for GoalUsageLimitMonitor {
 pub(super) fn prepare_goal_usage_limit_monitor(
     codex_args: &[OsString],
     disabled: bool,
-) -> Option<GoalUsageLimitMonitor> {
+) -> Result<Option<GoalUsageLimitMonitor>> {
     if disabled {
-        return None;
+        return Ok(None);
     }
-    let paths = AppPaths::discover().ok()?;
-    let state = AppState::load_and_repair(&paths).ok()?;
+    let paths = AppPaths::discover()?;
+    let state = AppState::load_and_repair(&paths)?;
     let rotatable_profile_count = state
         .profiles
         .values()
@@ -292,28 +294,49 @@ pub(super) fn prepare_goal_usage_limit_monitor(
         })
         .count();
     if rotatable_profile_count < 2 {
-        return None;
+        return Ok(None);
     }
-    let session_id =
-        prodex_runtime_launch::codex_resume_session_id(codex_args).and_then(|selector| {
+    let db_path = paths.shared_codex_root.join("goals_1.sqlite");
+    if !goal_database_is_file(&db_path)? {
+        return Ok(None);
+    }
+    let connection = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("failed to open {}", db_path.display()))?;
+    if !goal_database_has_thread_goals(&connection)? {
+        return Ok(None);
+    }
+    let session_id = prodex_runtime_launch::codex_resume_session_id(codex_args)
+        .map(|selector| {
             prodex_session_store::resolve_session_report_by_id_in_store(
                 &paths.shared_codex_root,
                 &state,
                 selector,
             )
-            .ok()
+            .with_context(|| "failed to resolve goal resume session")
             .map(|report| report.id)
-        });
+        })
+        .transpose()?;
     let marker_dir = runtime_goal_monitor_dir(&paths);
-    fs::create_dir_all(&marker_dir).ok()?;
+    fs::create_dir_all(&marker_dir)
+        .with_context(|| format!("failed to create {}", marker_dir.display()))?;
     let sequence = RUNTIME_GOAL_MONITOR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let marker_path = marker_dir.join(format!("session-{}-{sequence}.id", std::process::id()));
-    let _ = fs::remove_file(&marker_path);
-    Some(GoalUsageLimitMonitor::new(
-        paths.shared_codex_root.join("goals_1.sqlite"),
+    match fs::remove_file(&marker_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to clear {}", marker_path.display()));
+        }
+    }
+    Ok(Some(GoalUsageLimitMonitor::new(
+        db_path,
         marker_path,
         session_id,
-    ))
+    )))
 }
 
 pub(super) fn runtime_goal_monitor_dir(paths: &AppPaths) -> PathBuf {
@@ -324,20 +347,28 @@ fn codex_notify_is_configured(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
     codex_args: &[OsString],
-) -> bool {
+) -> Result<bool> {
     if codex_cli_config_override_exact_value(codex_args, "notify").is_some() {
-        return true;
+        return Ok(true);
     }
-    let config_has_notify = |path: &Path| {
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok())
-            .is_some_and(|value| value.get("notify").is_some())
+    let config_has_notify = |path: &Path| -> Result<bool> {
+        let raw = match fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()));
+            }
+        };
+        let value = toml::from_str::<toml::Value>(&raw)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(value.get("notify").is_some())
     };
-    profile_v2_name
+    Ok(profile_v2_name
         .and_then(|name| codex_profile_v2_config_path(codex_home, name))
-        .is_some_and(|path| config_has_notify(&path))
-        || config_has_notify(&codex_home.join("config.toml"))
+        .map(|path| config_has_notify(&path))
+        .transpose()?
+        .unwrap_or(false)
+        || config_has_notify(&codex_home.join("config.toml"))?)
 }
 
 pub(super) fn add_runtime_goal_session_tracking(
@@ -345,10 +376,8 @@ pub(super) fn add_runtime_goal_session_tracking(
     profile_v2_name: Option<&str>,
     codex_args: &mut Vec<OsString>,
     marker_path: &Path,
-) {
-    let Ok(current_exe) = env::current_exe() else {
-        return;
-    };
+) -> Result<()> {
+    let current_exe = env::current_exe().context("failed to resolve current executable")?;
     let command_argv = [
         current_exe.to_string_lossy().into_owned(),
         RUNTIME_GOAL_SESSION_NOTIFY_COMMAND.to_string(),
@@ -375,9 +404,9 @@ pub(super) fn add_runtime_goal_session_tracking(
         ]);
     }
 
-    if !codex_notify_is_configured(codex_home, profile_v2_name, codex_args)
-        && let Ok(command) = serde_json::to_string(&command_argv)
-    {
+    if !codex_notify_is_configured(codex_home, profile_v2_name, codex_args)? {
+        let command = serde_json::to_string(&command_argv)
+            .context("failed to serialize goal session hook")?;
         injected.extend([
             OsString::from("-c"),
             OsString::from(format!("notify={command}")),
@@ -385,6 +414,7 @@ pub(super) fn add_runtime_goal_session_tracking(
     }
 
     codex_args.splice(0..0, injected);
+    Ok(())
 }
 
 fn runtime_goal_session_hook_command(argv: &[String]) -> String {
@@ -475,20 +505,19 @@ pub(super) fn codex_args_include_goal_resume(codex_args: &[OsString]) -> bool {
 }
 
 pub(super) fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessionAnalysis> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(GoalResumeSessionAnalysis::default());
-        }
-        Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
-    };
+    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut analysis = GoalResumeSessionAnalysis::default();
     let mut tail = VecDeque::with_capacity(200);
-    for line in BufReader::new(file).lines() {
+    for (line_number, line) in BufReader::new(file).lines().enumerate() {
         let line = line.with_context(|| format!("failed to read {}", path.display()))?;
-        if analysis.thread_id.is_none()
-            && let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
-        {
+        let value = serde_json::from_str::<serde_json::Value>(&line).with_context(|| {
+            format!(
+                "failed to parse {} line {}",
+                path.display(),
+                line_number + 1
+            )
+        })?;
+        if analysis.thread_id.is_none() {
             analysis.thread_id = prodex_session_store::first_string_value(
                 &value,
                 &[&["payload", "thread_id"], &["thread_id"], &["threadId"]],
@@ -507,7 +536,7 @@ pub(super) fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessi
 
 pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str) -> Result<bool> {
     let db_path = shared_codex_root.join("goals_1.sqlite");
-    if !db_path.is_file() {
+    if !goal_database_is_file(&db_path)? {
         return Ok(false);
     }
     let conn = rusqlite::Connection::open_with_flags(
@@ -515,14 +544,7 @@ pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .with_context(|| format!("failed to open {}", db_path.display()))?;
-    let has_thread_goals = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
-            [],
-            |_| Ok(()),
-        )
-        .is_ok();
-    if !has_thread_goals {
+    if !goal_database_has_thread_goals(&conn)? {
         return Ok(false);
     }
     let status = conn
@@ -536,4 +558,58 @@ pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str
         let normalized = status.trim().to_ascii_lowercase();
         !matches!(normalized.as_str(), "complete" | "completed")
     }))
+}
+
+fn goal_database_is_file(path: &Path) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn goal_database_has_thread_goals(conn: &rusqlite::Connection) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goal_resume_read_parse_and_validation_errors_are_propagated() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-goal-resume-errors-{}-{}",
+            std::process::id(),
+            RUNTIME_GOAL_MONITOR_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let missing = analyze_goal_resume_session(&root.join("missing.jsonl")).unwrap_err();
+        assert!(missing.to_string().contains("failed to read"));
+
+        let session_path = root.join("session.jsonl");
+        fs::write(&session_path, "not-json\n").unwrap();
+        let parse_error = analyze_goal_resume_session(&session_path).unwrap_err();
+        assert!(parse_error.to_string().contains("failed to parse"));
+
+        let marker_path = root.join("session.id");
+        fs::write(&marker_path, "not-a-uuid\n").unwrap();
+        let mut monitor = GoalUsageLimitMonitor::new(root.join("goals.sqlite"), marker_path, None);
+        let validation_error = monitor.take_usage_limit_signal().unwrap_err();
+        assert!(
+            validation_error
+                .to_string()
+                .contains("invalid runtime goal session id")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

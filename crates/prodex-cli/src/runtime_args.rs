@@ -172,7 +172,7 @@ pub struct RuntimeToolArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 #[command(group(
     ArgGroup::new("provider_or_url")
         .args(["provider", "url"])
@@ -212,6 +212,44 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
+    /// Enable Codex sub-agent support for this Super launch.
+    #[arg(long, conflicts_with = "no_sub_agent")]
+    pub sub_agent: bool,
+    /// Disable Codex sub-agent support for this Super launch.
+    #[arg(long, conflicts_with = "sub_agent")]
+    pub no_sub_agent: bool,
+    /// Provider used by sub-agents. Detail flags require explicit sub-agent.
+    #[arg(
+        long,
+        value_name = "PROVIDER",
+        value_parser = crate::parse_sub_agent_provider,
+        requires = "sub_agent"
+    )]
+    pub sub_agent_provider: Option<ProviderId>,
+    /// Model used by sub-agents. Any nonempty model id is accepted.
+    #[arg(
+        long,
+        value_name = "MODEL",
+        value_parser = crate::parse_sub_agent_model,
+        requires = "sub_agent"
+    )]
+    pub sub_agent_model: Option<String>,
+    /// Reasoning effort used by the sub-agent model.
+    #[arg(
+        long,
+        value_name = "EFFORT",
+        value_parser = crate::parse_sub_agent_reasoning_effort,
+        requires = "sub_agent"
+    )]
+    pub sub_agent_model_reasoning_effort: Option<crate::SubAgentReasoningEffort>,
+    /// Local HTTP(S) endpoint used by sub-agents.
+    #[arg(
+        long,
+        value_name = "URL",
+        value_parser = crate::parse_sub_agent_url,
+        requires = "sub_agent"
+    )]
+    pub sub_agent_url: Option<String>,
     /// Add an optional tool to the default Super tool set.
     #[arg(long = "tool", value_name = "TOOL")]
     pub tools: Vec<OptionalToolId>,
@@ -279,6 +317,18 @@ impl fmt::Debug for SuperArgs {
             .field("no_proxy", &self.no_proxy)
             .field("presidio", &self.presidio)
             .field("no_presidio", &self.no_presidio)
+            .field("sub_agent", &self.sub_agent)
+            .field("no_sub_agent", &self.no_sub_agent)
+            .field("sub_agent_provider", &self.sub_agent_provider)
+            .field(
+                "sub_agent_model_configured",
+                &self.sub_agent_model.is_some(),
+            )
+            .field(
+                "sub_agent_model_reasoning_effort",
+                &self.sub_agent_model_reasoning_effort,
+            )
+            .field("sub_agent_url_configured", &self.sub_agent_url.is_some())
             .field("tools", &self.tools)
             .field("required_tools", &self.required_tools)
             .field("url_configured", &self.url.is_some())
@@ -503,10 +553,23 @@ impl SuperArgs {
     /// The first positional arg can look like a session ID when `trailing_var_arg=true`
     /// leaves Super flags unseen by clap. Extract the small set of Super-only flags that
     /// users commonly place after a session id so they do not leak into `codex resume`.
+    pub fn extract_super_overrides_from_codex_args(&mut self) -> std::result::Result<(), String> {
+        super_tail_extract::extract_super_overrides_from_codex_args(self)
+    }
+
+    pub fn extract_super_overrides_from_codex_args_for_native_preflight(
+        &mut self,
+    ) -> std::result::Result<(), String> {
+        super_tail_extract::extract_super_overrides_from_codex_args_without_sub_agent_validation(
+            self,
+        )
+    }
+
+    /// Backward-compatible name retained for callers compiled against the provider-only helper.
     pub fn extract_provider_overrides_from_codex_args(
         &mut self,
     ) -> std::result::Result<(), String> {
-        super_tail_extract::extract_provider_overrides_from_codex_args(self)
+        self.extract_super_overrides_from_codex_args()
     }
 
     pub fn validate_urls(&self) -> std::result::Result<(), String> {
@@ -517,7 +580,36 @@ impl SuperArgs {
         if let Some(url) = self.url.as_deref() {
             parse_super_local_url(url)?;
         }
+        if let Some(url) = self.sub_agent_url.as_deref() {
+            crate::parse_sub_agent_url(url)?;
+        }
         Ok(())
+    }
+
+    pub fn sub_agent_preference(&self) -> crate::SubAgentPreference {
+        if self.sub_agent {
+            crate::SubAgentPreference::Enabled(self.sub_agent_config())
+        } else if self.no_sub_agent {
+            crate::SubAgentPreference::Disabled
+        } else {
+            crate::SubAgentPreference::Unspecified
+        }
+    }
+
+    pub fn sub_agent_config(&self) -> crate::SubAgentConfig {
+        let provider = self
+            .sub_agent_provider
+            .unwrap_or(crate::SUPER_SUB_AGENT_DEFAULT_PROVIDER);
+        crate::SubAgentConfig {
+            provider,
+            model: self.sub_agent_model.clone(),
+            model_reasoning_effort: self.sub_agent_model_reasoning_effort,
+            url: self.sub_agent_url.clone().or_else(|| {
+                (provider == prodex_provider_core::ProviderId::Local)
+                    .then(|| self.url.clone())
+                    .flatten()
+            }),
+        }
     }
 }
 
@@ -781,7 +873,7 @@ fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {
     Ok(url.to_string())
 }
 
-fn parse_credential_free_http_url(
+pub(crate) fn parse_credential_free_http_url(
     url: &str,
     option: &str,
 ) -> std::result::Result<url::Url, String> {
@@ -836,6 +928,12 @@ mod tests {
             no_proxy: false,
             presidio: false,
             no_presidio: false,
+            sub_agent: false,
+            no_sub_agent: false,
+            sub_agent_provider: None,
+            sub_agent_model: None,
+            sub_agent_model_reasoning_effort: None,
+            sub_agent_url: None,
             tools: Vec::new(),
             required_tools: Vec::new(),
             url: None,

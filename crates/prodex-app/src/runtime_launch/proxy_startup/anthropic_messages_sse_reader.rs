@@ -398,6 +398,14 @@ mod tests {
         output
     }
 
+    fn data_values(output: &str) -> Vec<Value> {
+        output
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str(data).ok())
+            .collect()
+    }
+
     #[test]
     fn native_anthropic_stream_tolerates_ping_and_translates_text() {
         let output = render(concat!(
@@ -439,6 +447,42 @@ mod tests {
         assert!(output.contains("call_test"), "{output}");
         assert!(output.contains("response.output_item.done"), "{output}");
         assert!(output.contains("/tmp/test"), "{output}");
+    }
+
+    #[test]
+    fn native_anthropic_stream_emits_each_tool_input_fragment_once() {
+        let output = render(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_tool_fragments\",\"model\":\"claude-sonnet-4-6\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_fragments\",\"name\":\"read_file\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"text\\\":\\\"é\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"}\"}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+
+        let deltas = data_values(&output)
+            .into_iter()
+            .filter(|value| value["type"] == "response.function_call_arguments.delta")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            deltas
+                .iter()
+                .map(|value| (
+                    value["call_id"].as_str().unwrap(),
+                    value["output_index"].as_u64().unwrap(),
+                    value["delta"].as_str().unwrap(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("call_fragments", 2, "{"),
+                ("call_fragments", 2, "\"text\":\"é"),
+                ("call_fragments", 2, "\"}")
+            ]
+        );
+        assert!(
+            output.contains("\"arguments\":\"{\\\"text\\\":\\\"é\\\"}\""),
+            "{output}"
+        );
     }
 
     #[test]

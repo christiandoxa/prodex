@@ -9,8 +9,12 @@ pub(crate) fn remember_runtime_compact_lineage(
     turn_state: Option<&str>,
     verified_route: RuntimeRouteKind,
 ) -> Result<()> {
-    let session_id = session_id.map(str::trim).filter(|value| !value.is_empty());
-    let turn_state = turn_state.map(str::trim).filter(|value| !value.is_empty());
+    let session_id = session_id
+        .map(str::trim)
+        .filter(|value| prodex_runtime_state::RuntimeHardBindingIdentity::session(value).is_some());
+    let turn_state = turn_state.map(str::trim).filter(|value| {
+        prodex_runtime_state::RuntimeHardBindingIdentity::turn_state(value).is_some()
+    });
     if session_id.is_none() && turn_state.is_none() {
         return Ok(());
     }
@@ -21,6 +25,7 @@ pub(crate) fn remember_runtime_compact_lineage(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let runtime_state = &mut *runtime;
     let bound_at = Local::now().timestamp();
+    let binding_identity = runtime_profile_binding_identity(runtime_state, profile_name);
     let mut changed = false;
 
     if let Some(session_id) = session_id {
@@ -31,6 +36,7 @@ pub(crate) fn remember_runtime_compact_lineage(
             key,
             profile_name,
             bound_at,
+            binding_identity.as_ref(),
             verified_route,
             RuntimeContinuationBindingKind::SessionId,
         ) || changed;
@@ -44,6 +50,7 @@ pub(crate) fn remember_runtime_compact_lineage(
             key,
             profile_name,
             bound_at,
+            binding_identity.as_ref(),
             verified_route,
             RuntimeContinuationBindingKind::TurnState,
         ) || changed;
@@ -70,39 +77,20 @@ pub(crate) fn remember_runtime_compact_lineage(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn remember_runtime_compact_binding(
     bindings: &mut std::collections::BTreeMap<String, ResponseProfileBinding>,
     statuses: &mut RuntimeContinuationStatuses,
     key: String,
     profile_name: &str,
     bound_at: i64,
+    binding_identity: Option<&prodex_provider_spi::RuntimeProviderBindingIdentity>,
     verified_route: RuntimeRouteKind,
     binding_kind: RuntimeContinuationBindingKind,
 ) -> bool {
-    let should_refresh_binding = match bindings.get_mut(&key) {
-        Some(binding) if binding.profile_name == profile_name => {
-            if binding.bound_at < bound_at {
-                binding.bound_at = bound_at;
-            }
-            false
-        }
-        Some(binding) => {
-            binding.profile_name = profile_name.to_string();
-            binding.bound_at = bound_at;
-            true
-        }
-        None => {
-            bindings.insert(
-                key.clone(),
-                ResponseProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at,
-                },
-            );
-            true
-        }
-    };
-    let mut changed = should_refresh_binding;
+    let (binding_changed, should_refresh_binding) =
+        remember_hard_binding(bindings, &key, profile_name, bound_at, binding_identity);
+    let mut changed = binding_changed;
     if should_refresh_binding
         || runtime_continuation_status_should_refresh_verified(
             statuses,

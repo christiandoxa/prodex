@@ -23,6 +23,7 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
         BTreeMap::from([(
             "resp_123".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -43,6 +44,167 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
     .expect("selection should succeed");
 
     assert_eq!(selected.as_deref(), Some("main"));
+}
+
+#[test]
+fn response_selection_fails_closed_for_unavailable_bound_previous_response() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(
+        &temp_dir,
+        BTreeMap::from([(
+            "resp-missing".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "missing".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    );
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            discover_previous_response_owner: true,
+            previous_response_id: Some("resp-missing"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("selection should succeed without an executable owner");
+
+    assert_eq!(selected, None);
+}
+
+#[test]
+fn response_selection_fails_closed_for_conflicting_supplied_affinity_keys() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            pinned_profile: Some("main"),
+            turn_state_profile: Some("second"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("selection should succeed without an executable owner");
+
+    assert_eq!(selected, None);
+}
+
+#[test]
+fn response_selection_fails_closed_for_known_auth_failed_bound_owner() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(
+        &temp_dir,
+        BTreeMap::from([(
+            "resp-auth-failed".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    );
+    let now = Local::now().timestamp();
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_health
+        .insert(
+            runtime_profile_auth_failure_key("main"),
+            RuntimeProfileHealth {
+                score: 1,
+                updated_at: now,
+            },
+        );
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            discover_previous_response_owner: true,
+            previous_response_id: Some("resp-auth-failed"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("selection should succeed without an executable owner");
+
+    assert_eq!(selected, None);
+}
+
+#[test]
+fn exact_binding_checks_only_the_requested_continuation_owner() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let current_identity = {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime_profile_binding_identity(&runtime, "main").expect("main identity should resolve")
+    };
+    let stale_identity = prodex_provider_core::RuntimeProviderBindingIdentity::from_profile(
+        prodex_provider_core::ProviderId::OpenAi,
+        "main",
+        "https://stale.example.com/v1",
+    )
+    .expect("stale endpoint identity should resolve");
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime.state.response_profile_bindings.extend([
+            (
+                "resp-current".to_string(),
+                ResponseProfileBinding {
+                    binding_identity: Some(current_identity),
+                    profile_name: "main".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            ),
+            (
+                "resp-stale".to_string(),
+                ResponseProfileBinding {
+                    binding_identity: Some(stale_identity),
+                    profile_name: "main".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            ),
+        ]);
+    }
+
+    let current = runtime_response_bound_profile(
+        &shared,
+        "resp-current",
+        RuntimeRouteKind::Responses,
+    )
+    .unwrap();
+    assert_eq!(current.as_deref(), Some("main"));
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            pinned_profile: current.as_deref(),
+            previous_response_id: Some("resp-current"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .unwrap();
+    assert_eq!(selected.as_deref(), Some("main"));
+
+    assert_eq!(
+        runtime_response_bound_profile(&shared, "resp-stale", RuntimeRouteKind::Responses)
+            .unwrap()
+            .as_deref(),
+        Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE)
+    );
 }
 
 #[test]
@@ -338,7 +500,8 @@ fn hard_affinity_selection_matrix_ignores_local_penalties() {
     let bound_response = BTreeMap::from([(
         "resp_123".to_string(),
         ResponseProfileBinding {
-            profile_name: "main".to_string(),
+            binding_identity: None,
+                profile_name: "main".to_string(),
             bound_at: now,
         },
     )]);

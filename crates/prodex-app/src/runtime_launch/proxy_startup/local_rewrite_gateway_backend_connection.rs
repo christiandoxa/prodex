@@ -257,6 +257,7 @@ pub(super) fn runtime_gateway_sqlite_open(path: &Path) -> Result<Connection> {
     }
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))?;
+    conn.pragma_update(None, "foreign_keys", true)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let _ = conn.pragma_update(None, "journal_mode", "WAL");
     let schema_key = runtime_gateway_schema_key("sqlite", &path.display().to_string());
@@ -291,8 +292,10 @@ fn runtime_gateway_sqlite_open_for_migration(path: &Path) -> Result<Connection> 
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    Connection::open(path)
-        .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))
+    let conn = Connection::open(path)
+        .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    Ok(conn)
 }
 
 pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(
@@ -680,3 +683,129 @@ where
 #[cfg(test)]
 #[path = "local_rewrite_gateway_backend_connection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod scoped_connection_tests {
+    use super::*;
+    use prodex_domain::{CallId, RequestId, TenantId};
+
+    #[test]
+    fn every_sqlite_app_connection_enables_foreign_keys_and_rejects_orphans() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-sqlite-foreign-keys-{}",
+            RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        let path = root.join("state.sqlite");
+
+        let migration_conn = runtime_gateway_sqlite_open_for_migration(&path)
+            .expect("migration connection should open");
+        let migration_foreign_keys: i64 = migration_conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("migration foreign key pragma should load");
+        assert_eq!(migration_foreign_keys, 1);
+        drop(migration_conn);
+
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path)
+            .expect("sqlite schema fixture should be created");
+
+        let conn = runtime_gateway_sqlite_open(&path).expect("sqlite database should open");
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign key pragma should load");
+        assert_eq!(foreign_keys, 1);
+
+        let restricted_tenant = TenantId::new().to_string();
+        conn.execute(
+            "INSERT INTO prodex_tenants
+             (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms)
+             VALUES (?1, 'restricted', 1, 1)",
+            rusqlite::params![restricted_tenant],
+        )
+        .expect("parent tenant should insert");
+        conn.execute(
+            "INSERT INTO prodex_budget_counters
+             (tenant_id, storage_scope, reserved_tokens, reserved_cost_micros,
+              committed_tokens, committed_cost_micros, updated_at_unix_ms)
+             VALUES (?1, 'tenant-default', 1, 1, 0, 0, 1)",
+            rusqlite::params![restricted_tenant],
+        )
+        .expect("dependent row should insert");
+        let on_delete: String = conn
+            .query_row(
+                "SELECT on_delete
+                 FROM pragma_foreign_key_list('prodex_budget_counters')
+                 WHERE \"from\" = 'tenant_id'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("tenant foreign key should exist");
+        assert_eq!(on_delete, "NO ACTION");
+        assert!(
+            conn.execute(
+                "DELETE FROM prodex_tenants WHERE tenant_id = ?1",
+                rusqlite::params![restricted_tenant],
+            )
+            .is_err()
+        );
+        let restricted_children: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM prodex_budget_counters WHERE tenant_id = ?1",
+                rusqlite::params![restricted_tenant],
+                |row| row.get(0),
+            )
+            .expect("dependent row count should load");
+        assert_eq!(restricted_children, 1);
+
+        let orphan_tenant = TenantId::new().to_string();
+        let orphan_reservation = RequestId::new().to_string();
+        let orphan_call = CallId::new().to_string();
+        assert!(conn
+            .execute(
+                "INSERT INTO prodex_budget_counters (tenant_id, storage_scope, reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros, updated_at_unix_ms) VALUES (?1, 'tenant-default', 1, 1, 0, 0, 1)",
+                rusqlite::params![orphan_tenant],
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "INSERT INTO prodex_reservations (tenant_id, reservation_id, call_id, storage_scope, idempotency_key, reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms) VALUES (?1, ?2, ?3, 'tenant-default', 'orphan', 1, 1, 1, 2)",
+                rusqlite::params![orphan_tenant, orphan_reservation, orphan_call],
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "INSERT INTO prodex_usage_ledger (tenant_id, ledger_event_id, reservation_id, call_id, event_kind, tokens, cost_micros, occurred_at_unix_ms) VALUES (?1, ?2, ?3, ?4, 'reserved', 1, 1, 1)",
+                rusqlite::params![
+                    orphan_tenant,
+                    RequestId::new().to_string(),
+                    orphan_reservation,
+                    orphan_call,
+                ],
+            )
+            .is_err());
+        drop(conn);
+
+        let reopened = runtime_gateway_sqlite_open(&path).expect("sqlite database should reopen");
+        let reopened_foreign_keys: i64 = reopened
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("reopened foreign key pragma should load");
+        assert_eq!(reopened_foreign_keys, 1);
+        for table in [
+            "prodex_budget_counters",
+            "prodex_reservations",
+            "prodex_usage_ledger",
+        ] {
+            let count: i64 = reopened
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE tenant_id = ?1"),
+                    rusqlite::params![orphan_tenant],
+                    |row| row.get(0),
+                )
+                .expect("orphan count should load");
+            assert_eq!(count, 0, "orphan row should not persist in {table}");
+        }
+
+        drop(reopened);
+        std::fs::remove_dir_all(root).expect("test root should clean up");
+    }
+}

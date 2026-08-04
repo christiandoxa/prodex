@@ -72,6 +72,7 @@ impl RuntimeProxyLineageCleanupBenchCase {
         response_profile_bindings.insert(
             target_response_id.clone(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: profile_name.clone(),
                 bound_at: now,
             },
@@ -82,6 +83,7 @@ impl RuntimeProxyLineageCleanupBenchCase {
             turn_state_bindings.insert(
                 turn_state.clone(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: profile_name.clone(),
                     bound_at: now,
                 },
@@ -89,6 +91,7 @@ impl RuntimeProxyLineageCleanupBenchCase {
             response_profile_bindings.insert(
                 runtime_response_turn_state_lineage_key(&target_response_id, &turn_state),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: profile_name.clone(),
                     bound_at: now,
                 },
@@ -98,6 +101,7 @@ impl RuntimeProxyLineageCleanupBenchCase {
                 response_profile_bindings.insert(
                     survivor_response_id.clone(),
                     ResponseProfileBinding {
+                        binding_identity: None,
                         profile_name: profile_name.clone(),
                         bound_at: now,
                     },
@@ -105,6 +109,7 @@ impl RuntimeProxyLineageCleanupBenchCase {
                 response_profile_bindings.insert(
                     runtime_response_turn_state_lineage_key(&survivor_response_id, &turn_state),
                     ResponseProfileBinding {
+                        binding_identity: None,
                         profile_name: profile_name.clone(),
                         bound_at: now,
                     },

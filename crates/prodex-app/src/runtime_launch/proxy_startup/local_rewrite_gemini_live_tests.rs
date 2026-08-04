@@ -82,6 +82,95 @@ fn gemini_live_translates_codex_session_audio_and_text() {
 }
 
 #[test]
+fn gemini_live_session_update_acknowledges_applied_options_and_rejects_atomically() {
+    let mut state = RuntimeGeminiLiveState::new(20);
+    let setup = state
+        .translate_client_message(
+            &serde_json::json!({
+                "type": "session.update",
+                "session": {
+                    "instructions": "Be brief.",
+                    "input_audio_format": "g711_ulaw",
+                    "output_modalities": ["audio"],
+                    "tools": [{
+                        "type": "function",
+                        "name": "lookup",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let acknowledged = state
+        .translate_server_message(&serde_json::json!({"setupComplete": {}}).to_string())
+        .unwrap();
+
+    assert_eq!(
+        setup.upstream_messages[0]["setup"]["model"],
+        "models/gemini-3.1-flash-live-preview"
+    );
+    assert_eq!(acknowledged.events[0]["type"], "session.updated");
+    assert_eq!(
+        acknowledged.events[0]["session"]["instructions"],
+        "Be brief."
+    );
+    assert_eq!(
+        acknowledged.events[0]["session"]["tools"][0]["name"],
+        "lookup"
+    );
+
+    let rejected = state.translate_client_message(
+        &serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "instructions": "would not apply",
+                "temperature": 0.2
+            }
+        })
+        .to_string(),
+    );
+    let error = match rejected {
+        Ok(_) => panic!("mixed unsupported session.update must reject"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("temperature"));
+
+    let audio = state
+        .translate_client_message(
+            &serde_json::json!({
+                "type": "input_audio_buffer.append",
+                "audio": "AAAA"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        audio.upstream_messages[0]["realtime_input"]["audio"]["mime_type"],
+        "audio/pcm;rate=8000"
+    );
+}
+
+#[test]
+fn gemini_live_session_update_rejects_missing_tool_parameters_schema() {
+    let mut state = RuntimeGeminiLiveState::new(21);
+    let error = match state.translate_client_message(
+        &serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "tools": [{"type": "function", "name": "lookup"}]
+            }
+        })
+        .to_string(),
+    ) {
+        Ok(_) => panic!("missing Live function parameters must reject"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("tools[0].parameters"));
+}
+
+#[test]
 fn gemini_live_transcodes_g711_input_audio_to_pcm() {
     let mut state = RuntimeGeminiLiveState::new(8);
     state

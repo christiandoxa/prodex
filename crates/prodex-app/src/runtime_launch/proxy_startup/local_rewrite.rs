@@ -77,7 +77,8 @@ pub(crate) use super::local_rewrite_options::{
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 pub(super) use super::local_rewrite_upstream::{
-    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteContinuationReader, RuntimeLocalRewriteLiveResponse,
+    RuntimeLocalRewriteSsePrefetch, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
 };
 use super::provider_bridge::runtime_provider_label;
@@ -112,6 +113,7 @@ use runtime_proxy_crate::{
     RuntimeProxyRequest, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -132,6 +134,79 @@ pub(super) const RUNTIME_GATEWAY_SCIM_USER_SCHEMA: &str =
     "urn:ietf:params:scim:schemas:core:2.0:User";
 pub(super) const RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA: &str =
     "urn:prodex:params:scim:schemas:gateway:2.0:User";
+
+pub(super) struct RuntimeLocalRewriteAsyncResponse {
+    pub(super) response: Option<reqwest::Response>,
+    status: reqwest::StatusCode,
+    headers: reqwest::header::HeaderMap,
+    pub(super) async_runtime: Arc<tokio::runtime::Runtime>,
+    pub(super) stream_idle_timeout_ms: u64,
+    pub(super) pending: Vec<u8>,
+    pub(super) reader: Option<RuntimeLocalRewriteContinuationReader>,
+}
+
+impl RuntimeLocalRewriteAsyncResponse {
+    pub(super) fn new(
+        response: reqwest::Response,
+        async_runtime: Arc<tokio::runtime::Runtime>,
+        stream_idle_timeout_ms: u64,
+    ) -> Self {
+        let status = response.status();
+        let headers = response.headers().clone();
+        Self {
+            response: Some(response),
+            status,
+            headers,
+            async_runtime,
+            stream_idle_timeout_ms,
+            pending: Vec::new(),
+            reader: None,
+        }
+    }
+
+    pub(super) fn status(&self) -> reqwest::StatusCode {
+        self.status
+    }
+
+    pub(super) fn headers(&self) -> &reqwest::header::HeaderMap {
+        &self.headers
+    }
+
+    pub(super) fn into_reader(mut self) -> Box<dyn Read + Send> {
+        if let Some(reader) = self.reader.take() {
+            return Box::new(reader);
+        }
+        Box::new(RuntimeLocalRewriteSsePrefetch::spawn(self, None).into_reader())
+    }
+}
+
+impl Read for RuntimeLocalRewriteAsyncResponse {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.reader.is_none() {
+            let response = self.response.take().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "runtime upstream stream reader was already handed off",
+                )
+            })?;
+            let prefetch = RuntimeLocalRewriteSsePrefetch::spawn_parts(
+                response,
+                Arc::clone(&self.async_runtime),
+                self.stream_idle_timeout_ms,
+                std::mem::take(&mut self.pending),
+                None,
+            );
+            self.reader = Some(prefetch.into_reader());
+        }
+        self.reader
+            .as_mut()
+            .expect("runtime local rewrite stream reader should be present")
+            .read(buffer)
+    }
+}
 
 #[derive(Clone)]
 pub(super) enum RuntimeGovernanceAuthority {
@@ -554,7 +629,8 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         ),
     );
     let gemini_oauth_pool = runtime_gemini_oauth_pool_from_provider(&provider);
-    let copilot_oauth_pool = runtime_copilot_oauth_pool_from_provider(&provider);
+    let copilot_oauth_pool =
+        runtime_copilot_oauth_pool_from_provider(&provider, Arc::clone(&runtime_shared.runtime));
     if matches!(
         &provider,
         RuntimeLocalRewriteProviderOptions::Copilot { .. }
@@ -600,8 +676,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         governance_refresh_requested: Arc::new(AtomicBool::new(false)),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
-        // ponytail: bounded blocking lookahead; use async response streaming if saturated
-        // upstream reads must remain fully inspectable instead of passing through.
+        // ponytail: one bounded async pump per inspectable SSE response; saturation passes through.
         provider_sse_prefetch_slots: Arc::new(tokio::sync::Semaphore::new(
             active_request_limit.max(1),
         )),

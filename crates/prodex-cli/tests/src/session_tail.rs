@@ -1,5 +1,7 @@
 use super::*;
 
+const SESSION_ID: &str = "019ef8ae-c7cc-75c3-8575-a8d247ad291b";
+
 #[test]
 fn s_session_tail_profile_and_no_auto_rotate_are_prodex_flags() {
     let command = parse_cli_command_from([
@@ -117,6 +119,63 @@ fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
 }
 
 #[test]
+fn s_session_tail_codex_feature_flags_are_extracted_after_target() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--web-search=live",
+        "--rollout-budget-tokens",
+        "100000",
+        "--rollout-budget-reminders=75000,50000",
+        "--rollout-budget-sampling-weight",
+        "1.5",
+        "--rollout-budget-prefill-weight=0.25",
+        "--current-time-reminder",
+        "--current-time-reminder-interval=2",
+        "--current-time-clock-source",
+        "external",
+        "--respect-system-proxy",
+    ])
+    .expect("s session feature tail should parse");
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert_eq!(
+        args.codex_features.web_search,
+        Some(CodexWebSearchMode::Live)
+    );
+    assert_eq!(args.codex_features.rollout_budget_tokens, Some(100_000));
+    assert_eq!(
+        args.codex_features.rollout_budget_reminders,
+        vec![75_000, 50_000]
+    );
+    assert_eq!(
+        args.codex_features.rollout_budget_sampling_weight,
+        Some(1.5)
+    );
+    assert_eq!(
+        args.codex_features.rollout_budget_prefill_weight,
+        Some(0.25)
+    );
+    assert!(args.codex_features.current_time_reminder);
+    assert_eq!(args.codex_features.current_time_reminder_interval, Some(2));
+    assert_eq!(
+        args.codex_features.current_time_clock_source,
+        Some(CodexCurrentTimeClockSource::External)
+    );
+    assert!(args.codex_features.respect_system_proxy);
+    assert!(!args.codex_features.no_respect_system_proxy);
+    assert_eq!(
+        args.codex_args,
+        os_args(&["019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[test]
 fn s_session_tail_harness_is_extracted_and_never_forwarded_to_codex() {
     let command = parse_cli_command_from([
         "prodex",
@@ -165,7 +224,7 @@ fn s_provider_alias_accepts_harness_after_alias_position() {
 }
 
 #[test]
-fn s_session_tail_invalid_non_url_values_stay_for_codex_to_reject() {
+fn s_session_tail_invalid_typed_values_fail_before_codex_launch() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
@@ -180,21 +239,12 @@ fn s_session_tail_invalid_non_url_values_stay_for_codex_to_reject() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args().unwrap();
-    assert_eq!(args.provider, None);
-    assert_eq!(args.url, None);
-    assert_eq!(args.local_context_window, None);
-    assert_eq!(args.cli, None);
-    assert_eq!(
-        args.codex_args,
-        os_args(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
-            "--provider",
-            "unknown",
-            "--local-context-window",
-            "many",
-            "--cli=unknown",
-        ])
+    let error = args
+        .extract_provider_overrides_from_codex_args()
+        .expect_err("invalid typed Super values must not leak to Codex");
+    assert!(
+        error.contains("unknown provider") || error.contains("invalid"),
+        "{error}"
     );
 }
 
@@ -301,7 +351,7 @@ fn s_session_tail_extracts_native_copilot_cli() {
 }
 
 #[test]
-fn s_session_tail_missing_and_invalid_values_keep_exact_forward_order() {
+fn s_session_tail_missing_and_invalid_values_fail_closed() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
@@ -321,36 +371,23 @@ fn s_session_tail_missing_and_invalid_values_keep_exact_forward_order() {
         panic!("expected super command");
     };
 
-    args.extract_provider_overrides_from_codex_args().unwrap();
-
-    assert_eq!(
-        args.codex_args,
-        os_args(&[
-            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
-            "--unknown-before",
-            "value",
-            "--provider",
-            "unknown",
-            "--context-window=many",
-            "--auto-compact-token-limit",
-            "many",
-            "--cli=unknown",
-            "--api-key",
-        ])
+    let error = args
+        .extract_provider_overrides_from_codex_args()
+        .expect_err("missing or invalid typed values must fail closed");
+    assert!(
+        error.contains("unknown provider") || error.contains("invalid"),
+        "{error}"
     );
 }
 
 #[test]
-fn s_session_tail_boolean_pairs_use_last_value() {
+fn s_session_tail_presidio_conflicts_are_rejected_after_target() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
         "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
-        "--auto-rotate",
-        "--no-auto-rotate",
         "--presidio",
         "--no-presidio",
-        "--presidio",
     ])
     .unwrap();
     let Commands::Super(mut args) = command else {
@@ -359,13 +396,125 @@ fn s_session_tail_boolean_pairs_use_last_value() {
 
     args.extract_provider_overrides_from_codex_args().unwrap();
 
-    assert!(!args.auto_rotate);
-    assert!(args.no_auto_rotate);
     assert!(args.presidio);
-    assert!(!args.no_presidio);
+    assert!(args.no_presidio);
+    let error = args.validate_urls().unwrap_err();
+    assert!(
+        error.contains("--presidio conflicts with --no-presidio"),
+        "{error}"
+    );
     assert_eq!(
         args.codex_args,
         os_args(&["019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[test]
+fn s_explicit_resume_presidio_conflicts_are_rejected_after_target() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--presidio",
+        "resume",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--no-presidio",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert!(args.presidio);
+    assert!(args.no_presidio);
+    let error = args.validate_urls().unwrap_err();
+    assert!(
+        error.contains("--presidio conflicts with --no-presidio"),
+        "{error}"
+    );
+    assert_eq!(
+        args.codex_args,
+        os_args(&["resume", "019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[test]
+fn s_session_tail_boolean_pairs_keep_last_value_for_non_conflicting_flags() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--auto-rotate",
+        "--no-auto-rotate",
+        "--auto-rotate",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert!(args.auto_rotate);
+    assert!(!args.no_auto_rotate);
+}
+
+#[test]
+fn s_session_tail_extracts_flags_before_and_after_bare_and_explicit_resume() {
+    for (argv, expected_codex_args) in [
+        (
+            vec!["prodex", "s", "--no-auto-rotate", SESSION_ID, "--dry-run"],
+            vec![SESSION_ID],
+        ),
+        (
+            vec![
+                "prodex",
+                "s",
+                "--no-auto-rotate",
+                "resume",
+                SESSION_ID,
+                "--dry-run",
+            ],
+            vec!["resume", SESSION_ID],
+        ),
+    ] {
+        let Commands::Super(mut args) =
+            parse_cli_command_from(argv).expect("resume tail should parse")
+        else {
+            panic!("expected super command");
+        };
+        args.extract_provider_overrides_from_codex_args()
+            .expect("Super flags should be extracted");
+        assert!(args.no_auto_rotate);
+        assert!(args.dry_run);
+        assert_eq!(args.codex_args, os_args(&expected_codex_args));
+    }
+}
+
+#[test]
+fn s_session_tail_keeps_literal_boundary_and_following_flags_for_codex() {
+    let Commands::Super(mut args) = parse_cli_command_from([
+        "prodex",
+        "s",
+        SESSION_ID,
+        "--",
+        "--dry-run",
+        "--provider",
+        "gemini",
+    ])
+    .expect("literal boundary should parse") else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args()
+        .expect("literal boundary should stop Super extraction");
+
+    assert!(!args.dry_run);
+    assert_eq!(args.provider, None);
+    assert_eq!(
+        args.codex_args,
+        os_args(&[SESSION_ID, "--", "--dry-run", "--provider", "gemini"])
     );
 }
 

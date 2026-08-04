@@ -15,11 +15,11 @@ pub use self::audio::{
 };
 
 pub use self::messages::{
-    gemini_provider_core_live_audio_stream_end_message,
+    GeminiProviderCoreLiveSessionUpdate, gemini_provider_core_live_audio_stream_end_message,
     gemini_provider_core_live_client_content_message,
     gemini_provider_core_live_function_declaration,
-    gemini_provider_core_live_realtime_audio_message, gemini_provider_core_live_setup_message,
-    gemini_provider_core_live_tool_response_message,
+    gemini_provider_core_live_realtime_audio_message, gemini_provider_core_live_session_update,
+    gemini_provider_core_live_setup_message, gemini_provider_core_live_tool_response_message,
 };
 
 pub use self::events::{
@@ -39,6 +39,7 @@ pub use self::events::{
     gemini_provider_core_live_response_cancelled_event,
     gemini_provider_core_live_response_created_event,
     gemini_provider_core_live_response_done_event, gemini_provider_core_live_session_updated_event,
+    gemini_provider_core_live_session_updated_event_with_options,
     gemini_provider_core_live_unsupported_event_error,
 };
 

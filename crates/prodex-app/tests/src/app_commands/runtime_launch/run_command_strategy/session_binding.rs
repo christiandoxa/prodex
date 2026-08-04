@@ -4,11 +4,16 @@ use super::*;
 fn codex_delete_cleanup_prunes_session_and_compact_bindings() {
     let root = temp_dir("delete-prune-bindings");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        root.join("shared-codex-home").to_str().unwrap(),
+    );
     let paths = AppPaths::discover().unwrap();
     let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
     let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
     let now = chrono::Local::now().timestamp();
     let binding = ResponseProfileBinding {
+        binding_identity: None,
         profile_name: "main".to_string(),
         bound_at: now,
     };

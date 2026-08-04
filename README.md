@@ -19,6 +19,7 @@ Use multiple Codex accounts and supported provider backends from one command lin
 - [Daily command: `prodex s`](#daily-command-prodex-s)
 - [Commands](#commands)
 - [Modes](#modes)
+- [Sub-agents](docs/sub-agents.md)
 - [Harness modes](#harness-modes)
 - [Profiles](#profiles)
 - [Local model support](#local-model-support)
@@ -99,7 +100,7 @@ curl http://127.0.0.1:4000/v1/responses \
 <details>
 <summary>Gateway capabilities (advanced)</summary>
 
-The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, local PII redaction, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, inspect provider adapter contracts at `/v1/prodex/gateway/providers` or offline with `prodex gateway providers --json`, inspect active observability and guardrail configuration at `/v1/prodex/gateway/observability` and `/v1/prodex/gateway/guardrails`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, SCIM users can carry tenant/team/project/user/budget scopes for SSO/OIDC fallback, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix plus tenant/team/project/user/budget scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `npm run catalog:providers`. The generated provider matrix lives in [docs/provider-capabilities.md](./docs/provider-capabilities.md).
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, local PII redaction, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, inspect provider adapter contracts at `/v1/prodex/gateway/providers` or offline with `prodex gateway providers --json`, inspect active observability and guardrail configuration at `/v1/prodex/gateway/observability` and `/v1/prodex/gateway/guardrails`, fetch the checked-in gateway OpenAPI document at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; the document describes the gateway's documented routes, not complete upstream OpenAPI or provider semantics, and `/v1/a2a` is separate from local `prodex super --sub-agent` execution. Policy/env-backed keys remain read-only, SCIM users can carry tenant/team/project/user/budget scopes for SSO/OIDC fallback, admin-managed key and SCIM user mutations emit `prodex audit` events, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix plus tenant/team/project/user/budget scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `npm run catalog:providers`. The generated provider matrix lives in [docs/provider-capabilities.md](./docs/provider-capabilities.md).
 
 The gateway can enforce optional model-aware request constraints under `[gateway.request_constraints]`; compatibility defaults leave enforcement disabled and oversized output requests unchanged. Admin/viewer principals can use the dashboard Route Workbench or `POST /v1/prodex/gateway/routes/explain` to inspect the same bounded planner trace without sending upstream traffic or mutating quota, billing, affinity, circuit, admission, or persisted runtime state. Explain payloads and prompt content are not logged or stored.
 
@@ -129,7 +130,7 @@ Runtime proxy design contract:
 - Quota, budget, transport, and local pressure signals must stay classified separately.
 - Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
 - Upstream HTTP/WebSocket connection reuse should be preserved where it does not change Codex semantics.
-- Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.
+- Secrets remain profile-isolated and redacted in diagnostics. Prodex-owned mutations emit local audit events; immutable compliance retention, break-glass evidence, SIEM durability, and disaster recovery remain deployment/governance responsibilities. Local audit events and Super/sub-agent overlays do not prove those deployment controls.
 
 </details>
 
@@ -182,7 +183,7 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman is externally installed and validated; Smart Context is built into Prodex. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
+Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -412,7 +413,7 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 - RTK shell-output guidance.
 - Codebase Memory MCP when installed.
 - Playwright MCP when Node.js 18+ and `npx` are available.
-- Smart Context Autopilot.
+- Smart Context Autopilot on Codex/provider-bridge paths.
 - optional Presidio redaction.
 
 ```bash
@@ -437,11 +438,86 @@ Interactive Super launches render a terminal Presidio opt-in screen. Pass `--pre
 
 `prodex s expose` starts a loopback-only browser terminal with a one-time session URL. Add `--tunnel` to explicitly publish the remote shell through a Cloudflare quick tunnel; the local listener remains bound to loopback.
 
-Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
+On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 </details>
+
+## Sub-agents
+
+`prodex super` has a typed sub-agent launch path for fresh and resumed Codex
+targets. The generated child is a fresh `prodex s` process in an isolated
+temporary overlay:
+
+```bash
+prodex s --sub-agent --no-presidio
+prodex s --presidio --sub-agent --sub-agent-provider kiro \
+  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max
+prodex s --sub-agent --sub-agent-provider local \
+  --sub-agent-url http://127.0.0.1:11434/v1 \
+  --sub-agent-model example-local-model --no-presidio
+prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9 --presidio --sub-agent \
+  --sub-agent-provider kiro --sub-agent-model gpt-5.6-luna \
+  --sub-agent-model-reasoning-effort max
+```
+
+`--sub-agent` enables the preference; `--no-sub-agent` disables it. Provider,
+optional model and reasoning effort, credential-free local URLs, exact child
+argument order, explicit Presidio inheritance, the recursion marker, and
+`--` handling around a UUID are documented in [Sub-agents](docs/sub-agents.md).
+OpenAI children use the `prodex s` default, local children use `--url`, and
+external providers use `--provider`. Unset model and effort options are
+omitted rather than copied from the parent. Explicit `--sub-agent` skips the
+provider/model/effort wizard and uses OpenAI or selected-provider defaults.
+
+The parent resolves Presidio once and renders either `--presidio` or
+`--no-presidio` into every child command. Non-TTY launches do not prompt.
+Unspecified interactive launches ask in this order: Presidio, sub-agent opt-in,
+provider, model, effort, and local URL. Enter or Escape skips sub-agent opt-in.
+The generated child places any `-c model_reasoning_effort=...` before `exec`,
+quotes every argument individually, and uses no JSON-style quoting.
+`--dry-run` prints a redacted child plan without starting Codex or resolving
+launch credentials. Native `--cli` front ends reject `--sub-agent` before
+profile-lifecycle recovery or child setup. Overlay setup is private and
+idempotent, references `SUB_AGENTS.md` once, and keeps normal shared Codex
+session surfaces available without forwarding the parent UUID.
+
+The canonical sub-agent providers are `openai`, `anthropic`, `copilot`,
+`deepseek`, `gemini`, `kiro`, and `local`. These public examples request
+Kiro's `gpt-5.6-luna` at `max`, and a local OpenAI-compatible endpoint:
+
+```bash
+prodex s --sub-agent --sub-agent-provider kiro \
+  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max \
+  exec "review one bounded task"
+prodex s --sub-agent --sub-agent-provider local \
+  --sub-agent-url http://127.0.0.1:11434/v1 \
+  --sub-agent-model example-local-model exec "review one bounded task"
+```
+
+Model IDs are optional nonempty custom inputs, and reasoning effort accepts the
+documented ecosystem values; when omitted both are left to the selected
+provider and are not copied from the parent. A provider may reject an
+unsupported model or effort. Local URL validation rejects
+credentials, query strings, and fragments but does not authenticate, prove
+loopback/trust, or verify endpoint compatibility; the interactive URL is only
+a prompt prefill, while explicit and non-TTY local launches still require a
+URL.
+
+Flags before or after a bare UUID or explicit `resume UUID` are extracted and
+never leak to Codex; simultaneous `--presidio`/`--no-presidio` or
+`--sub-agent`/`--no-sub-agent` remains a validation error. Parent UUIDs are
+never inherited. Generated instructions cap direct fan-out at four children;
+that is guidance, not a runtime scheduler. The MVP uses a local subprocess
+and temporary `CODEX_HOME` overlay; a future renderer seam can map the same
+typed child configuration to another transport, while `/v1/a2a` remains a
+separate future remote extension point.
+
+Super's existing Presidio, non-TTY, dry-run, temporary-overlay, native-CLI, and
+provider-adapter boundaries continue to apply. The `/v1/a2a` gateway route is a
+separate HTTP surface, not the local-process implementation target.
 
 ## Commands
 
@@ -686,7 +762,8 @@ either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 
-Super also enables Smart Context Autopilot in the runtime proxy.
+Super also enables Smart Context Autopilot on the Codex/provider-bridge path;
+native opaque CLIs are not automatically rewritten.
 
 <details>
 <summary>Provider launch examples and bridge behavior (advanced)</summary>
@@ -1118,6 +1195,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
 - [docs/deployment.md](./docs/deployment.md) — Docker Compose scaffold for the standalone gateway
 - [docs/harness-modes.md](./docs/harness-modes.md) — Harness Mode semantics, evaluated policies, scope, and diagnostics
+- [docs/sub-agents.md](./docs/sub-agents.md) — Super sub-agent CLI, child command, and isolation contract
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance
 
 ## Support

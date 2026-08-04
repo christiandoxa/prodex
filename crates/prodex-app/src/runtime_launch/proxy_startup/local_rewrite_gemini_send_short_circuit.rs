@@ -8,12 +8,19 @@ use super::super::super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
+use super::super::super::local_rewrite_copilot::RuntimeCopilotResponsesSseBindingReader;
+use super::super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, runtime_local_rewrite_binding_recorder,
+    runtime_local_rewrite_remember_accepted_binding,
+};
 use super::super::local_rewrite_gemini_oauth_pool::{
     RuntimeGeminiSelectedAuth, runtime_gemini_binding_recorder,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, runtime_proxy_log};
 use anyhow::{Context, Result};
-use prodex_provider_core::gemini_provider_core_exact_output_sse_stream;
+use prodex_provider_core::{
+    RuntimeProviderBindingIdentity, gemini_provider_core_exact_output_sse_stream,
+};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
 
@@ -23,6 +30,8 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
     conversations: &RuntimeDeepSeekConversationStore,
     selected: &RuntimeGeminiSelectedAuth,
     translated: &RuntimeGeminiTranslatedRequest,
+    binding: &RuntimeLocalRewriteBindingContext,
+    binding_identity: &RuntimeProviderBindingIdentity,
 ) -> Result<Option<RuntimeLocalRewriteUpstreamResult>> {
     if !translated.stream {
         return Ok(None);
@@ -53,6 +62,22 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
     reader
         .read_to_string(&mut body)
         .context("failed to build Gemini exact-output SSE response")?;
+    runtime_local_rewrite_remember_accepted_binding(
+        shared,
+        binding_identity,
+        binding.previous_response_id.as_deref(),
+        binding.turn_state.as_deref(),
+        binding.session_id.as_deref(),
+    )?;
+    let recorder = runtime_local_rewrite_binding_recorder(shared, binding_identity.clone());
+    let mut binding_reader = RuntimeCopilotResponsesSseBindingReader::new(
+        std::io::Cursor::new(body.as_bytes()),
+        Some(recorder),
+    );
+    let mut ignored = Vec::new();
+    binding_reader
+        .read_to_end(&mut ignored)
+        .context("failed to record Gemini exact-output response binding")?;
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(

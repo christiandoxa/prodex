@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Read, Result as IoResult};
 use std::sync::Arc;
 
 pub(super) type RuntimeCopilotBindingRecorder = Arc<dyn Fn(String) + Send + Sync>;
+pub(super) type RuntimeCopilotBindingAcceptance = Arc<dyn Fn() + Send + Sync>;
 
 pub(super) fn runtime_copilot_remember_bindings_from_responses_body(
     recorder: Option<&RuntimeCopilotBindingRecorder>,
@@ -122,4 +123,49 @@ impl<R: Read> Read for RuntimeCopilotResponsesSseBindingReader<R> {
 
 fn runtime_copilot_response_id_from_value(value: &serde_json::Value) -> Option<String> {
     prodex_provider_core::copilot_provider_core_response_id_from_value(value)
+        .or_else(|| {
+            value
+                .get("responseId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            value
+                .get("message")
+                .and_then(|message| message.get("id"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .map(|response_id| response_id.trim().to_string())
+        .filter(|response_id| !response_id.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn binding_recorder_reads_native_provider_response_shapes() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&seen);
+        let recorder: RuntimeCopilotBindingRecorder = Arc::new(move |response_id| {
+            captured.lock().unwrap().push(response_id);
+        });
+        for body in [
+            br#"{"responseId":"gemini-response"}"#.as_slice(),
+            br#"{"message":{"id":"anthropic-message"}}"#.as_slice(),
+            br#"{"id":"kiro-response"}"#.as_slice(),
+        ] {
+            runtime_copilot_remember_bindings_from_responses_body(Some(&recorder), body);
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                "gemini-response".to_string(),
+                "anthropic-message".to_string(),
+                "kiro-response".to_string(),
+            ]
+        );
+    }
 }

@@ -299,6 +299,75 @@ fn smart_context_http_and_websocket_prepare_match_for_same_payload_class() {
 }
 
 #[test]
+fn smart_context_static_change_and_removal_update_http_and_websocket_state() {
+    let first = serde_json::json!({
+        "model": "gpt-4o",
+        "instructions": "Keep the initial static rule.",
+        "input": [{"role": "user", "content": "hello"}]
+    });
+    let changed = serde_json::json!({
+        "model": "gpt-4o",
+        "instructions": "Use the changed static rule.",
+        "input": [{"role": "user", "content": "hello"}]
+    });
+    let removed = serde_json::json!({
+        "model": "gpt-4o",
+        "input": [{"role": "user", "content": "hello"}]
+    });
+    let http_shared = smart_context_test_shared("prepare-http-static-change");
+    let websocket_shared = smart_context_test_shared("prepare-ws-static-change");
+    register_runtime_smart_context_proxy_state(&http_shared, true, Some(32_000), None);
+    register_runtime_smart_context_proxy_state(&websocket_shared, true, Some(32_000), None);
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let mut http_states = Vec::new();
+    let mut websocket_states = Vec::new();
+    for (offset, value) in [first, changed, removed].into_iter().enumerate() {
+        let body = value.to_string();
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: body.as_bytes().to_vec(),
+        };
+        let http = prepare_runtime_smart_context_http_body(
+            150 + offset as u64,
+            &request,
+            &http_shared,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("HTTP static-context prepare should succeed");
+        let websocket = prepare_runtime_smart_context_websocket_text(
+            150 + offset as u64,
+            &body,
+            &handshake_request,
+            &websocket_shared,
+            "main",
+        )
+        .expect("WebSocket static-context prepare should succeed");
+
+        assert_eq!(http.as_ref(), request.body.as_slice());
+        assert_eq!(websocket.as_ref(), body);
+        http_states.push(smart_context_test_state_snapshot(&http_shared));
+        websocket_states.push(smart_context_test_state_snapshot(&websocket_shared));
+    }
+
+    assert_ne!(http_states[0], http_states[1]);
+    assert_ne!(http_states[1], http_states[2]);
+    assert_ne!(websocket_states[0], websocket_states[1]);
+    assert_ne!(websocket_states[1], websocket_states[2]);
+    assert!(read_runtime_proxy_test_log(&http_shared.log_path).contains("static_context_changed"));
+    assert!(
+        read_runtime_proxy_test_log(&websocket_shared.log_path).contains("static_context_changed")
+    );
+}
+
+#[test]
 fn smart_context_large_websocket_payload_returns_original_bytes() {
     let shared = smart_context_test_shared("large-websocket-minify");
     register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);
@@ -559,7 +628,7 @@ fn smart_context_prepare_missing_rehydrate_ref_fails_before_upstream() {
 }
 
 #[test]
-fn smart_context_prepare_changed_static_context_stays_exact_without_learning() {
+fn smart_context_prepare_changed_static_context_stays_exact_and_updates_fingerprint() {
     let shared = smart_context_test_shared("rewrite-affinity-static-changed");
     register_runtime_smart_context_proxy_state(&shared, true, None, None);
     smart_context_observe_minimal_budget(&shared);
@@ -580,17 +649,17 @@ fn smart_context_prepare_changed_static_context_stays_exact_without_learning() {
         }]
     }));
 
-    let before = smart_context_test_state_snapshot(&shared);
     let first_prepared =
         prepare_runtime_smart_context_http_body(46, &first, &shared, RuntimeRouteKind::Responses)
             .expect("smart context prepare");
+    let after_first = smart_context_test_state_snapshot(&shared);
     let prepared =
         prepare_runtime_smart_context_http_body(47, &changed, &shared, RuntimeRouteKind::Responses)
             .expect("smart context prepare");
 
     assert_eq!(first_prepared.as_ref(), first.body.as_slice());
     assert_eq!(prepared.as_ref(), changed.body.as_slice());
-    assert_eq!(smart_context_test_state_snapshot(&shared), before);
+    assert_ne!(smart_context_test_state_snapshot(&shared), after_first);
     let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
     assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
     assert_eq!(
@@ -604,9 +673,53 @@ fn smart_context_prepare_changed_static_context_stays_exact_without_learning() {
             .contains("error: static changed path src/lib.rs:9:1")
     );
     let log = read_runtime_proxy_test_log(&shared.log_path);
-    assert!(log.contains("decision=pass_through"));
-    assert!(log.contains("reason=no_duplicate_candidate"));
-    assert!(!log.contains("static_context_changed"));
+    assert!(log.contains("decision=require_exact"));
+    assert!(log.contains("static_context_changed"));
+}
+
+#[test]
+fn smart_context_prepare_static_fingerprint_change_forces_exact_and_updates_state() {
+    let shared = smart_context_test_shared("rewrite-static-fingerprint-change");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = std::iter::once("error: static fingerprint path src/lib.rs:9:1".to_string())
+        .chain((0..520).map(|index| format!("line {index}: repeated output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": "Keep the stable static prefix.",
+        "input": [
+            {"type": "function_call_output", "call_id": "call_first_1", "output": output},
+            {"type": "function_call_output", "call_id": "call_first_2", "output": output}
+        ]
+    }));
+    let changed = smart_context_test_request(serde_json::json!({
+        "instructions": "Use the changed static prefix.",
+        "input": [
+            {"type": "function_call_output", "call_id": "call_changed_1", "output": output},
+            {"type": "function_call_output", "call_id": "call_changed_2", "output": output}
+        ]
+    }));
+
+    let first_prepared =
+        prepare_runtime_smart_context_http_body(148, &first, &shared, RuntimeRouteKind::Responses)
+            .expect("smart context prepare");
+    assert!(matches!(first_prepared, Cow::Owned(_)));
+    let before_changed = smart_context_test_state_snapshot(&shared);
+
+    let changed_prepared = prepare_runtime_smart_context_http_body(
+        149,
+        &changed,
+        &shared,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("smart context prepare");
+
+    assert!(matches!(changed_prepared, Cow::Borrowed(_)));
+    assert_eq!(changed_prepared.as_ref(), changed.body.as_slice());
+    assert_ne!(smart_context_test_state_snapshot(&shared), before_changed);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(log.contains("policy_reasons=static_context_changed"));
 }
 
 #[test]

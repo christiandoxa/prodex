@@ -12,6 +12,14 @@ pub const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 pub const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
+pub const RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
+
+pub fn runtime_anthropic_first_event_retry_allowed(
+    attempted_retries: u8,
+    first_event_committed: bool,
+) -> bool {
+    !first_event_committed && attempted_retries < RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT
+}
 
 mod input;
 mod models;

@@ -34,19 +34,6 @@ pub(super) fn gemini_provider_core_google_quota_message_from_value(
     None
 }
 
-pub(in crate::gemini_bridge::errors) fn gemini_provider_core_plain_text_has_terminal_quota(
-    body: &[u8],
-) -> bool {
-    let Ok(text) = std::str::from_utf8(body) else {
-        return false;
-    };
-    let lower = text.to_ascii_lowercase();
-    lower.contains("quota")
-        && (lower.contains("exhausted")
-            || lower.contains("exceeded")
-            || lower.contains("insufficient"))
-}
-
 fn gemini_provider_core_google_quota_code(code: &str) -> bool {
     matches!(
         code.trim().to_ascii_lowercase().as_str(),

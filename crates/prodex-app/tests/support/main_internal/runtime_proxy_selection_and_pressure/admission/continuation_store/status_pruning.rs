@@ -44,7 +44,8 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: stale_bound_at,
                 },
             )]),
@@ -75,7 +76,8 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: stale_bound_at,
                 },
             )]),

@@ -59,8 +59,8 @@ pub(super) fn append_audit_outbox_tx(
             "INSERT INTO prodex_audit_log (
                 tenant_id, audit_event_id, previous_digest, event_digest,
                 occurred_at_unix_ms, principal_id, action, resource_kind,
-                resource_id, outcome, reason_code
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                resource_id, outcome, reason_code, reason_detail
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 tenant_id,
                 envelope.event.id.to_string(),
@@ -76,6 +76,11 @@ pub(super) fn append_audit_outbox_tx(
                 envelope.event.resource.id,
                 envelope.event.outcome.as_str(),
                 envelope.event.reason_code,
+                envelope
+                    .event
+                    .reason_detail
+                    .as_ref()
+                    .map(|value| value.as_str()),
             ],
         )
         .map_err(database_error)?;

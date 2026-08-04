@@ -9,7 +9,9 @@ use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoutingError,
     GovernedRoutingRequest, GovernedRoutingSignals, GovernedRoutingWeights,
     MAX_GOVERNED_HARD_FILTER_REASONS, MAX_GOVERNED_PROVIDER_REGIONS,
-    MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS, plan_governed_provider_route,
+    MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS,
+    RuntimeProviderBindingIdentity, plan_governed_provider_route,
+    runtime_provider_binding_identity_from_secret_ref,
 };
 
 fn selector(value: &str) -> PolicySelector {
@@ -436,7 +438,7 @@ fn governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallbacks(
 }
 
 #[test]
-fn governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score() {
+fn governed_routing_exposes_only_the_eligible_continuation_affinity_route() {
     let tenant = TenantContext {
         tenant_id: TenantId::new(),
     };
@@ -472,8 +474,15 @@ fn governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score() {
     .unwrap();
 
     assert_eq!(plan.primary.provider, ProviderId::Anthropic);
-    assert_eq!(plan.fallbacks[0].provider, ProviderId::OpenAi);
-    assert!(plan.primary.score < plan.fallbacks[0].score);
+    assert!(plan.fallbacks.is_empty());
+    assert!(plan.primary.score < 10_000);
+    let identity = plan
+        .primary
+        .runtime_provider_binding_identity("https://api.example.com/v1", Some("profile-main"))
+        .expect("governed route identity should be executable");
+    assert_eq!(identity.provider(), ProviderId::Anthropic);
+    assert!(identity.endpoint_identity().starts_with("sha256:"));
+    assert!(identity.profile().is_some());
 }
 
 #[test]
@@ -551,11 +560,11 @@ fn governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation() {
     .unwrap();
 
     assert_eq!(plan.primary.provider, ProviderId::Anthropic);
-    assert_eq!(plan.fallbacks[0].provider, ProviderId::OpenAi);
+    assert!(plan.fallbacks.is_empty());
 }
 
 #[test]
-fn governed_routing_does_not_preserve_affinity_after_revocation() {
+fn governed_routing_rejects_when_the_bound_affinity_route_is_revoked() {
     let tenant = TenantContext {
         tenant_id: TenantId::new(),
     };
@@ -568,7 +577,7 @@ fn governed_routing_does_not_preserve_affinity_after_revocation() {
         providers: vec![revoked, descriptor(tenant, ProviderId::OpenAi)],
     };
 
-    let plan = plan_governed_provider_route(&GovernedRoutingRequest {
+    let error = plan_governed_provider_route(&GovernedRoutingRequest {
         tenant,
         classification: DataClassification::Internal,
         required_capabilities: &capabilities,
@@ -579,18 +588,56 @@ fn governed_routing_does_not_preserve_affinity_after_revocation() {
         affinity_provider: Some(ProviderId::Anthropic),
         max_fallbacks: 1,
     })
-    .unwrap();
+    .expect_err("a revoked hard-affinity route must not fall through to another provider");
 
-    assert_eq!(plan.primary.provider, ProviderId::OpenAi);
-    assert!(plan.fallbacks.is_empty());
-    assert_eq!(
-        plan.candidate_evaluations
-            .iter()
-            .find(|candidate| candidate.provider == ProviderId::Anthropic)
-            .unwrap()
-            .rejection_reasons(),
-        [GovernedHardFilterReason::ProviderRevoked]
-    );
+    assert_eq!(error, GovernedRoutingError::NoEligibleProvider);
+}
+
+#[test]
+fn governed_routing_rejects_when_the_bound_identity_is_unavailable_or_unauthorized() {
+    let tenant = TenantContext {
+        tenant_id: TenantId::new(),
+    };
+    let capabilities = CapabilitySet::new(vec![ModelCapability::ResponsesApi]);
+    let policy = decision(PolicyEffect::Allow, Vec::new());
+    let mut unavailable = descriptor(tenant, ProviderId::Anthropic);
+    unavailable.credential_available = false;
+    let error = plan_governed_provider_route(&GovernedRoutingRequest {
+        tenant,
+        classification: DataClassification::Internal,
+        required_capabilities: &capabilities,
+        policy: &policy,
+        registry: &GovernedProviderRegistry {
+            revision: 26,
+            providers: vec![unavailable, descriptor(tenant, ProviderId::OpenAi)],
+        },
+        score_revision: 1,
+        weights: GovernedRoutingWeights::default(),
+        affinity_provider: Some(ProviderId::Anthropic),
+        max_fallbacks: 1,
+    })
+    .expect_err("an unavailable bound identity must not fall through");
+    assert_eq!(error, GovernedRoutingError::NoEligibleProvider);
+
+    let error = plan_governed_provider_route(&GovernedRoutingRequest {
+        tenant,
+        classification: DataClassification::Internal,
+        required_capabilities: &capabilities,
+        policy: &strict_policy(),
+        registry: &GovernedProviderRegistry {
+            revision: 27,
+            providers: vec![
+                descriptor(tenant, ProviderId::Anthropic),
+                descriptor(tenant, ProviderId::OpenAi),
+            ],
+        },
+        score_revision: 1,
+        weights: GovernedRoutingWeights::default(),
+        affinity_provider: Some(ProviderId::Anthropic),
+        max_fallbacks: 1,
+    })
+    .expect_err("an unauthorized bound identity must not fall through");
+    assert_eq!(error, GovernedRoutingError::NoEligibleProvider);
 }
 
 #[test]
@@ -1038,4 +1085,70 @@ fn governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_re
     assert!(!plan_debug.contains("private/provider-credential-token"));
     assert!(!plan_debug.contains("9000"));
     assert!(plan_debug.contains("routing.score.health"));
+}
+
+#[test]
+fn runtime_provider_binding_identity_round_trips_without_secret_material_in_debug() {
+    let identity = runtime_provider_binding_identity_from_secret_ref(
+        ProviderId::OpenAi,
+        &SecretRef::new("vault", "providers/openai/account-public", Some("v3")),
+        "https://api.example.com/v1",
+        Some("profile-main"),
+    )
+    .expect("public provider binding identity should validate");
+
+    assert_eq!(identity.provider(), ProviderId::OpenAi);
+    assert!(identity.credential_identity().starts_with("sha256:"));
+    assert!(identity.endpoint_identity().starts_with("sha256:"));
+    assert!(identity.profile().is_some());
+    let debug = format!("{identity:?}");
+    assert!(!debug.contains("providers/openai/account-public"));
+    assert!(!debug.contains("profile-main"));
+    assert!(
+        runtime_provider_binding_identity_from_secret_ref(
+            ProviderId::OpenAi,
+            &SecretRef::new("vault", "not well formed", None::<String>),
+            "https://api.example.com/v1",
+            None,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn runtime_provider_binding_identity_is_key_and_endpoint_specific() {
+    let first = RuntimeProviderBindingIdentity::from_raw_key(
+        ProviderId::OpenAi,
+        "sk-test-first",
+        "https://api.example.com/v1",
+        Some("api-key-1"),
+    )
+    .unwrap();
+    let second_key = RuntimeProviderBindingIdentity::from_raw_key(
+        ProviderId::OpenAi,
+        "sk-test-second",
+        "https://api.example.com/v1",
+        Some("api-key-2"),
+    )
+    .unwrap();
+    let second_endpoint = RuntimeProviderBindingIdentity::from_raw_key(
+        ProviderId::OpenAi,
+        "sk-test-first",
+        "https://other.example.com/v1",
+        Some("api-key-1"),
+    )
+    .unwrap();
+
+    assert_ne!(first, second_key);
+    assert_ne!(first, second_endpoint);
+    assert!(!format!("{first:?}").contains("sk-test-first"));
+    assert!(
+        RuntimeProviderBindingIdentity::from_raw_key(
+            ProviderId::OpenAi,
+            "sk-test-first",
+            "https://api.example.com/v1?key=secret",
+            None,
+        )
+        .is_none()
+    );
 }

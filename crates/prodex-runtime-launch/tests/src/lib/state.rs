@@ -53,6 +53,7 @@ fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
             (
                 "resp-main".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: 1_000,
                 },
@@ -60,6 +61,7 @@ fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
             (
                 "resp-second".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 2_000,
                 },
@@ -69,6 +71,7 @@ fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
             (
                 "session-main".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: 1_000,
                 },
@@ -76,6 +79,7 @@ fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
             (
                 "session-second".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 2_000,
                 },

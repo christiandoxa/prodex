@@ -1202,6 +1202,7 @@ fn gemini_provider_core_applies_gemini3_tool_declaration_overrides() {
             "auto",
             |declarations| declarations.retain(|declaration| declaration["name"] == "read_file"),
         )
+        .unwrap()
         .unwrap();
     assert_eq!(
         tools[0]["functionDeclarations"].as_array().unwrap().len(),
@@ -1219,6 +1220,7 @@ fn gemini_provider_core_applies_gemini3_tool_declaration_overrides() {
             "auto",
             |_| {},
         )
+        .unwrap()
         .unwrap();
     assert_eq!(all_tools.as_array().unwrap().len(), 2);
 }
@@ -1652,7 +1654,7 @@ fn gemini_provider_core_detects_google_quota_and_retry_delay() {
     assert!(!gemini_provider_core_should_rotate_after_quota_response(
         429, true, true, false, 0, 2
     ));
-    assert!(gemini_provider_core_should_rotate_after_quota_response(
+    assert!(!gemini_provider_core_should_rotate_after_quota_response(
         429, true, true, true, 0, 2
     ));
     assert!(!gemini_provider_core_should_rotate_after_quota_response(
@@ -1682,11 +1684,23 @@ fn gemini_provider_core_normalizes_gemini_errors_to_openai_shape() {
     assert_eq!(value["error"]["code"], "insufficient_quota");
     assert_eq!(value["error"]["message"], "Quota exhausted.");
 
-    let normalized = gemini_provider_core_normalized_error_body(429, b"try later").unwrap();
+    for generic in [
+        b"try later".as_slice(),
+        br#"{"error":{"code":"429","message":"try later"}}"#,
+        b"<html>too many requests</html>".as_slice(),
+    ] {
+        assert_eq!(
+            gemini_provider_core_normalized_error_body(429, generic),
+            None,
+            "generic 429 bodies must remain pass-through"
+        );
+    }
+
+    let explicit = br#"{"error":{"code":"rate_limit_exceeded","message":"retry later"}}"#;
+    let normalized = gemini_provider_core_normalized_error_body(429, explicit).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
     assert_eq!(value["error"]["type"], "rate_limit_error");
     assert_eq!(value["error"]["code"], "rate_limit_exceeded");
-    assert_eq!(value["error"]["message"], "try later");
 }
 
 #[test]
@@ -1985,6 +1999,121 @@ fn gemini_provider_core_maps_live_messages() {
         gemini_provider_core_live_transcript_delta("hello", "hello world"),
         " world"
     );
+}
+
+#[test]
+fn gemini_live_session_update_is_atomic_and_acknowledges_only_applied_options() {
+    let session = serde_json::json!({
+        "instructions": "Be brief.",
+        "output_modalities": ["audio"],
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "parameters": {"type": "object"}
+        }]
+    });
+    let update = super::gemini_provider_core_live_session_update(
+        session.as_object().unwrap(),
+        "gemini-default",
+        None,
+    )
+    .unwrap();
+    let acknowledged = super::gemini_provider_core_live_session_updated_event_with_options(
+        &update.applied_session,
+    );
+
+    assert_eq!(
+        update.setup["setup"]["generation_config"]["response_modalities"][0],
+        "AUDIO"
+    );
+    assert_eq!(acknowledged["session"]["instructions"], "Be brief.");
+    assert!(acknowledged["session"].get("unsupported").is_none());
+    assert_eq!(acknowledged["session"]["tools"][0]["name"], "lookup");
+
+    let rejected = serde_json::json!({
+        "instructions": "would not apply",
+        "temperature": 0.2,
+    });
+    let error = super::gemini_provider_core_live_session_update(
+        rejected.as_object().unwrap(),
+        "gemini-default",
+        None,
+    )
+    .expect_err("unsupported session fields must reject atomically");
+    assert!(error.contains("temperature"), "{error}");
+}
+
+#[test]
+fn gemini_live_session_update_rejects_malformed_tools_with_a_path() {
+    let session = serde_json::json!({
+        "tools": [{"type": "function", "parameters": {"type": "object"}}]
+    });
+    let error = super::gemini_provider_core_live_session_update(
+        session.as_object().unwrap(),
+        "gemini-default",
+        None,
+    )
+    .expect_err("malformed Live tools must not be filtered out");
+
+    assert!(error.contains("tools[0].name"), "{error}");
+
+    let session = serde_json::json!({
+        "tools": [{"type": "function", "name": "lookup"}]
+    });
+    let error = super::gemini_provider_core_live_session_update(
+        session.as_object().unwrap(),
+        "gemini-default",
+        None,
+    )
+    .expect_err("Live tools without a parameters schema must be rejected");
+
+    assert!(error.contains("tools[0].parameters"), "{error}");
+}
+
+#[test]
+fn gemini_checked_request_bridge_rejects_malformed_tools_with_a_path() {
+    let request = serde_json::json!({
+        "tools": [{"type": "function", "function": {"parameters": {}}}]
+    });
+    let error = super::gemini_provider_core_tools_from_requests_checked(
+        &request,
+        &request,
+        "gemini-2.5-pro",
+        |_| {},
+    )
+    .expect_err("checked Gemini tool bridge must reject malformed tools");
+
+    assert!(error.contains("tools[0].function.name"), "{error}");
+
+    let mixed = serde_json::json!({
+        "tools": [
+            {"type": "web_search"},
+            {"type": "unknown_fixture_tool"}
+        ]
+    });
+    let error = super::gemini_provider_core_tools_from_requests_checked(
+        &mixed,
+        &mixed,
+        "gemini-2.5-pro",
+        |_| {},
+    )
+    .expect_err("an unsupported declaration must reject the complete tool list");
+    assert!(error.contains("tools[1].type"), "{error}");
+
+    let wrong_type = serde_json::json!({"tools": [{"type": 7}]});
+    let error = super::gemini_provider_core_validate_request_tools(&wrong_type)
+        .expect_err("a non-string tool type must reject before translation");
+    assert!(error.contains("tools[0].type"), "{error}");
+}
+
+#[test]
+fn gemini_checked_request_bridge_rejects_invalid_candidate_count() {
+    let error = super::gemini_provider_core_validate_candidate_count(
+        &serde_json::json!({"candidateCount": 2}),
+    )
+    .expect_err("checked Gemini request bridge must reject candidateCount > 1");
+
+    assert!(error.contains("candidateCount"), "{error}");
 }
 
 #[test]

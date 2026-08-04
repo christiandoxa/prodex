@@ -165,8 +165,15 @@ pub(crate) fn runtime_smart_context_rehydrate_for_benchmark(
     mut value: serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
 ) -> usize {
+    let available_tokens = 1_000_000;
     let mut stats = RuntimeSmartContextTransformStats::default();
-    runtime_smart_context_rehydrate_value(&mut value, store, &mut stats);
+    runtime_smart_context_rehydrate_value_with_budget(
+        &mut value,
+        store,
+        available_tokens,
+        runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
+        &mut stats,
+    );
     serde_json::to_vec(&value).map_or(0, |body| body.len())
 }
 
@@ -261,7 +268,9 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         ) {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
         }
-        if let Some(reason) = runtime_smart_context_body_fallback_reason(request, transport) {
+        if let Some(reason) =
+            runtime_smart_context_body_fallback_reason(request, transport, shared, profile_name)
+        {
             runtime_smart_context_log_prepare_fallback(
                 request_id,
                 shared,
@@ -336,9 +345,12 @@ fn runtime_smart_context_rollout_fallback_reason(
 fn runtime_smart_context_body_fallback_reason(
     request: &RuntimeProxyRequest,
     transport: RuntimeSmartContextTransport,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: Option<&str>,
 ) -> Option<&'static str> {
     if request.body.len() < SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES
         && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
+        && !runtime_smart_context_static_context_tracking_required(request, shared, profile_name)
     {
         return Some("below_minimum_body");
     }
@@ -359,6 +371,27 @@ fn runtime_smart_context_body_fallback_reason(
     } else {
         "body_too_large"
     })
+}
+
+fn runtime_smart_context_static_context_tracking_required(
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: Option<&str>,
+) -> bool {
+    if serde_json::from_slice::<serde_json::Value>(&request.body)
+        .is_ok_and(|value| !runtime_smart_context_static_context_items(&value).is_empty())
+    {
+        return true;
+    }
+    let Some(scope) = runtime_smart_context_scope_id(shared, profile_name) else {
+        return false;
+    };
+    runtime_smart_context_proxy_state_snapshot_for_scope(shared, &scope).is_some_and(
+        |(_, state)| {
+            state.artifacts.static_context_prompt_cache_hash().is_some()
+                || !state.artifacts.static_context_fingerprints().is_empty()
+        },
+    )
 }
 
 type RuntimeSmartContextPrepareTaskResult<'a> = std::result::Result<

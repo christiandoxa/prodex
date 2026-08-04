@@ -31,6 +31,9 @@ enum RuntimeGatewayApplicationProviderDispatchKind<'a> {
 
 impl RuntimeGatewayApplicationProviderDispatch<'_> {
     pub(in crate::runtime_launch::proxy_startup) fn provider(&self) -> ProviderId {
+        if let Some(execution) = self.execution.as_ref() {
+            return execution.provider.bridge_kind().provider_id();
+        }
         if let Some(provider) = self.provider_override {
             return provider;
         }

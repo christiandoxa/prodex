@@ -14,6 +14,13 @@ impl SuperArgs {
             Some(true)
         } else if self.no_presidio {
             Some(false)
+        } else if self
+            .tools
+            .iter()
+            .chain(&self.required_tools)
+            .any(|tool| *tool == OptionalToolId::Presidio)
+        {
+            Some(true)
         } else {
             None
         }
@@ -24,6 +31,9 @@ impl SuperArgs {
     }
 
     pub fn into_runtime_tool_args_with_presidio(self, presidio: bool) -> RuntimeToolArgs {
+        let no_presidio = self.no_presidio;
+        let required_presidio = self.required_tools.contains(&OptionalToolId::Presidio);
+        let presidio = required_presidio || (presidio && !no_presidio);
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let external_upstream_base_url = self.provider.map(|provider| {
             self.base_url
@@ -77,12 +87,15 @@ impl SuperArgs {
         codex_args.extend(self.codex_args);
         let mut tools = OptionalToolSet::super_defaults();
         for tool in self.tools {
-            tools.insert(tool);
+            if !(no_presidio && tool == OptionalToolId::Presidio) {
+                tools.insert(tool);
+            }
         }
         if presidio {
             tools.insert(OptionalToolId::Presidio);
         }
-        for tool in &self.required_tools {
+        let required_tools = self.required_tools;
+        for tool in &required_tools {
             tools.insert(*tool);
         }
         RuntimeToolArgs {
@@ -102,7 +115,7 @@ impl SuperArgs {
             smart_context: true,
             super_mode: true,
             tools: tools.iter().collect(),
-            required_tools: self.required_tools,
+            required_tools,
             presidio,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,

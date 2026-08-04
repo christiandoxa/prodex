@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const SMART_CONTEXT_REPLAY_CORPUS_SCHEMA_VERSION: u32 = 2;
 pub const SMART_CONTEXT_REPLAY_REPORT_SCHEMA_VERSION: u32 = 3;
+pub const SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS: usize = 64;
+pub const SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP: usize = 64;
+pub const SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES: usize = 128;
+pub const SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP: usize = 2 * 1024 * 1024;
+pub const SMART_CONTEXT_REPLAY_MAX_TOTAL_SERIALIZED_BYTES: usize = 8 * 1024 * 1024;
+pub const SMART_CONTEXT_REPLAY_MAX_ARTIFACT_REFERENCES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,7 +43,7 @@ pub enum SmartContextReplayExpectedOutcome {
     MissingArtifactFailure,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmartContextReplayTurnInput {
     pub request: serde_json::Value,
@@ -48,7 +54,7 @@ pub struct SmartContextReplayTurnInput {
     pub expected_outcome: SmartContextReplayExpectedOutcome,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmartContextReplayScenarioInput {
     pub id: String,
@@ -69,7 +75,7 @@ pub struct SmartContextReplayScenarioInput {
     pub turns: Vec<SmartContextReplayTurnInput>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmartContextReplayCorpus {
     pub schema_version: u32,
@@ -155,6 +161,12 @@ pub struct SmartContextReplayReport {
 pub fn smart_context_parse_replay_corpus_json(
     text: &str,
 ) -> Result<SmartContextReplayCorpus, String> {
+    if text.len() > SMART_CONTEXT_REPLAY_MAX_TOTAL_SERIALIZED_BYTES {
+        return Err(format!(
+            "Smart Context replay corpus exceeds {} input bytes before parsing",
+            SMART_CONTEXT_REPLAY_MAX_TOTAL_SERIALIZED_BYTES
+        ));
+    }
     let corpus = serde_json::from_str::<SmartContextReplayCorpus>(text)
         .map_err(|error| error.to_string())?;
     smart_context_validate_replay_corpus(&corpus)?;
@@ -171,12 +183,30 @@ fn smart_context_validate_replay_corpus(corpus: &SmartContextReplayCorpus) -> Re
     if corpus.scenarios.is_empty() {
         return Err("Smart Context replay corpus has no scenarios".to_string());
     }
-    let mut ids = BTreeSet::new();
-    let mut concurrent_groups = std::collections::BTreeMap::<String, usize>::new();
-    for scenario in &corpus.scenarios {
-        smart_context_validate_replay_scenario(scenario, &mut ids, &mut concurrent_groups)?;
+    let serialized_bytes = serde_json::to_vec(corpus)
+        .map_err(|error| format!("Smart Context replay corpus serialization failed: {error}"))?
+        .len();
+    if serialized_bytes > SMART_CONTEXT_REPLAY_MAX_TOTAL_SERIALIZED_BYTES {
+        return Err(format!(
+            "Smart Context replay corpus exceeds {} total serialized bytes before execution (would use {})",
+            SMART_CONTEXT_REPLAY_MAX_TOTAL_SERIALIZED_BYTES, serialized_bytes
+        ));
     }
-    if let Some((group, _)) = concurrent_groups.iter().find(|(_, count)| **count < 2) {
+    let mut ids = BTreeSet::new();
+    let mut concurrent_groups = BTreeMap::<String, SmartContextReplayConcurrentGroupUsage>::new();
+    let mut artifact_references = 0;
+    for scenario in &corpus.scenarios {
+        smart_context_validate_replay_scenario(
+            scenario,
+            &mut ids,
+            &mut concurrent_groups,
+            &mut artifact_references,
+        )?;
+    }
+    if let Some((group, _)) = concurrent_groups
+        .iter()
+        .find(|(_, usage)| usage.scenarios < 2)
+    {
         return Err(format!(
             "Smart Context replay concurrent group {group} needs at least two scenarios"
         ));
@@ -184,10 +214,17 @@ fn smart_context_validate_replay_corpus(corpus: &SmartContextReplayCorpus) -> Re
     Ok(())
 }
 
+#[derive(Default)]
+struct SmartContextReplayConcurrentGroupUsage {
+    scenarios: usize,
+    serialized_bytes: usize,
+}
+
 fn smart_context_validate_replay_scenario(
     scenario: &SmartContextReplayScenarioInput,
     ids: &mut BTreeSet<String>,
-    concurrent_groups: &mut std::collections::BTreeMap<String, usize>,
+    concurrent_groups: &mut BTreeMap<String, SmartContextReplayConcurrentGroupUsage>,
+    artifact_references: &mut usize,
 ) -> Result<(), String> {
     if scenario.id.trim().is_empty() {
         return Err("Smart Context replay scenario id is empty".to_string());
@@ -235,10 +272,60 @@ fn smart_context_validate_replay_scenario(
                 scenario.id
             ));
         }
-        *concurrent_groups.entry(group.to_string()).or_default() += 1;
+        if group.len() > SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES {
+            return Err(format!(
+                "Smart Context replay scenario {} concurrent group exceeds {} bytes",
+                scenario.id, SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUP_NAME_BYTES
+            ));
+        }
+        if !concurrent_groups.contains_key(group)
+            && concurrent_groups.len() >= SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
+        {
+            return Err(format!(
+                "Smart Context replay exceeds {} concurrent groups",
+                SMART_CONTEXT_REPLAY_MAX_CONCURRENT_GROUPS
+            ));
+        }
+        let serialized_bytes = serde_json::to_vec(scenario)
+            .map_err(|error| {
+                format!(
+                    "Smart Context replay scenario {} serialization failed: {error}",
+                    scenario.id
+                )
+            })?
+            .len();
+        let usage = concurrent_groups.entry(group.to_string()).or_default();
+        if usage.scenarios >= SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP {
+            return Err(format!(
+                "Smart Context replay concurrent group {group} exceeds {} scenarios",
+                SMART_CONTEXT_REPLAY_MAX_SCENARIOS_PER_CONCURRENT_GROUP
+            ));
+        }
+        let next_serialized_bytes = usage.serialized_bytes.saturating_add(serialized_bytes);
+        if next_serialized_bytes > SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP {
+            return Err(format!(
+                "Smart Context replay concurrent group {group} exceeds {} serialized bytes at scenario {} (would use {})",
+                SMART_CONTEXT_REPLAY_MAX_SERIALIZED_BYTES_PER_CONCURRENT_GROUP,
+                scenario.id,
+                next_serialized_bytes
+            ));
+        }
+        usage.scenarios += 1;
+        usage.serialized_bytes = next_serialized_bytes;
     }
     for (index, turn) in scenario.turns.iter().enumerate() {
-        smart_context_validate_replay_turn(scenario, turn, index)?;
+        let references = smart_context_validate_replay_turn(scenario, turn, index)?;
+        let next_references = artifact_references.saturating_add(references);
+        if next_references > SMART_CONTEXT_REPLAY_MAX_ARTIFACT_REFERENCES {
+            return Err(format!(
+                "Smart Context replay scenario {} turn {} exceeds {} artifact/reference count (would use {})",
+                scenario.id,
+                index + 1,
+                SMART_CONTEXT_REPLAY_MAX_ARTIFACT_REFERENCES,
+                next_references
+            ));
+        }
+        *artifact_references = next_references;
     }
     Ok(())
 }
@@ -247,7 +334,7 @@ fn smart_context_validate_replay_turn(
     scenario: &SmartContextReplayScenarioInput,
     turn: &SmartContextReplayTurnInput,
     index: usize,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     if !turn.request.is_object() {
         return Err(format!(
             "Smart Context replay scenario {} turn {} request must be a JSON object",
@@ -278,5 +365,124 @@ fn smart_context_validate_replay_turn(
             index + 1
         ));
     }
-    Ok(())
+    Ok(smart_context_replay_artifact_reference_count(&turn.request))
+}
+
+fn smart_context_replay_artifact_reference_count(value: &serde_json::Value) -> usize {
+    let mut values = vec![value];
+    let mut texts = Vec::new();
+    while let Some(value) = values.pop() {
+        match value {
+            serde_json::Value::Array(items) => values.extend(items.iter()),
+            serde_json::Value::Object(object) => values.extend(object.values()),
+            serde_json::Value::String(text) => texts.push(text.as_str()),
+            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            }
+        }
+    }
+    let aliases = texts
+        .iter()
+        .flat_map(|text| smart_context_replay_artifact_tokens(text))
+        .filter_map(smart_context_replay_artifact_alias)
+        .collect::<BTreeSet<_>>();
+    let mut count = 0usize;
+    for text in texts {
+        count = count.saturating_add(
+            smart_context_replay_artifact_tokens(text)
+                .filter(|token| {
+                    smart_context_replay_is_artifact_reference(token)
+                        || smart_context_replay_is_artifact_alias_reference(token, &aliases)
+                })
+                .count(),
+        );
+    }
+    count
+}
+
+fn smart_context_replay_artifact_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|character: char| character.is_whitespace() || matches!(character, ')' | ']' | '}'))
+        .map(|token| {
+            token.trim_matches(|character: char| {
+                matches!(
+                    character,
+                    '"' | '\''
+                        | '`'
+                        | ':'
+                        | ';'
+                        | '.'
+                        | ','
+                        | '!'
+                        | '?'
+                        | '('
+                        | '['
+                        | '{'
+                        | '<'
+                        | ')'
+                        | ']'
+                        | '}'
+                        | '>'
+                )
+            })
+        })
+        .filter(|token| !token.is_empty())
+}
+
+fn smart_context_replay_artifact_alias(token: &str) -> Option<&str> {
+    let (alias, reference) = token.split_once('=')?;
+    let digits = alias.strip_prefix('@')?;
+    if digits.is_empty()
+        || !digits.chars().all(|character| character.is_ascii_digit())
+        || !smart_context_replay_is_artifact_reference(reference)
+    {
+        return None;
+    }
+    Some(alias)
+}
+
+fn smart_context_replay_is_artifact_alias_reference(token: &str, aliases: &BTreeSet<&str>) -> bool {
+    if token.contains('=') {
+        return false;
+    }
+    let rest = token.strip_prefix('@').unwrap_or_default();
+    let digit_len = rest
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .count();
+    digit_len > 0 && aliases.contains(&token[..1 + digit_len])
+}
+
+fn smart_context_replay_is_artifact_reference(token: &str) -> bool {
+    let token = smart_context_replay_artifact_tokens(token)
+        .next()
+        .unwrap_or_default();
+    let (expected_hex_digits, payload) = if let Some(payload) = token.strip_prefix("psc2:") {
+        (64, payload)
+    } else if let Some(payload) = token.strip_prefix("sc2:") {
+        (64, payload)
+    } else if let Some(payload) = token.strip_prefix("psc:") {
+        (16, payload.strip_prefix("sc:").unwrap_or(payload))
+    } else if let Some(payload) = token.strip_prefix("sc:") {
+        (16, payload)
+    } else if let Some(payload) = token.strip_prefix("prodex-artifact:") {
+        if let Some(payload) = payload.strip_prefix("sc2:") {
+            (64, payload)
+        } else if let Some(payload) = payload.strip_prefix("sc:") {
+            (16, payload)
+        } else {
+            return false;
+        }
+    } else {
+        return false;
+    };
+    let mut characters = payload.chars();
+    if (0..expected_hex_digits).any(|_| {
+        !characters
+            .next()
+            .is_some_and(|character| character.is_ascii_hexdigit())
+    }) {
+        return false;
+    }
+    !characters
+        .next()
+        .is_some_and(|character| character.is_ascii_hexdigit())
 }

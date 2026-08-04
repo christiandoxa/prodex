@@ -31,7 +31,7 @@ pub(crate) fn load_runtime_usage_snapshots(
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<BTreeMap<String, RuntimeProfileUsageSnapshot>> {
     let path = runtime_usage_snapshots_file_path(paths);
-    if !path.exists() {
+    if !path.exists() && !runtime_usage_snapshots_last_good_file_path(paths).exists() {
         return Ok(BTreeMap::new());
     }
     let loaded = read_versioned_json_file_with_backup::<

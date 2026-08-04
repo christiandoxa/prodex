@@ -138,6 +138,10 @@ pub(super) fn gemini_provider_core_google_rate_limit_code(code: &str) -> bool {
 pub(super) fn gemini_provider_core_google_terminal_quota_code(code: &str) -> bool {
     matches!(
         code.trim().to_ascii_lowercase().as_str(),
-        "quota_exhausted" | "insufficient_g1_credits_balance" | "insufficient_quota"
+        "quota_exhausted"
+            | "quota_exceeded"
+            | "resource_exhausted"
+            | "insufficient_g1_credits_balance"
+            | "insufficient_quota"
     )
 }

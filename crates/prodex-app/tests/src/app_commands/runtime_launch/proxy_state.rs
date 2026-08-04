@@ -28,6 +28,7 @@ fn runtime_proxy_endpoint_state_honors_no_auto_rotate() {
             (
                 "resp-main".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: 1,
                 },
@@ -35,6 +36,7 @@ fn runtime_proxy_endpoint_state_honors_no_auto_rotate() {
             (
                 "resp-second".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 2,
                 },

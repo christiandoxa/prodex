@@ -245,7 +245,14 @@ fn runtime_gateway_guardrail_preflight(
         return Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body));
     }
     let mut prefix = vec![0; RESPONSE_INSPECTION_PREFLIGHT_BYTES];
-    let read = body.read(&mut prefix)?;
+    let mut read = 0;
+    while read < prefix.len() {
+        let next = body.read(&mut prefix[read..])?;
+        if next == 0 {
+            break;
+        }
+        read += next;
+    }
     prefix.truncate(read);
     let precommit_reason = if inspector.inspect(&prefix) {
         Some("blocked_output_keyword")

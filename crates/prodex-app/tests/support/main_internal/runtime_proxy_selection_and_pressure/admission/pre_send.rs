@@ -239,7 +239,8 @@ fn noncompact_bound_session_success_does_not_promote_profile() {
     {
         let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
         let binding = ResponseProfileBinding {
-            profile_name: "main".to_string(),
+            binding_identity: None,
+                profile_name: "main".to_string(),
             bound_at: Local::now().timestamp(),
         };
         runtime
@@ -536,6 +537,7 @@ fn scripted_responses_overload_keeps_hard_affinity_owner() {
         runtime.state.response_profile_bindings.insert(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },

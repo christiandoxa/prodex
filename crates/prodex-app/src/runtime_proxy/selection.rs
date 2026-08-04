@@ -11,11 +11,7 @@ mod policy;
 mod previous_response;
 mod trace;
 
-use self::policy::{
-    RuntimeAffinitySelectionKind, RuntimeSoftAffinityPolicyInput,
-    runtime_affinity_selection_profile, runtime_soft_affinity_allowed,
-    runtime_soft_affinity_rejection_reason,
-};
+use self::policy::{RuntimeAffinitySelectionKind, runtime_affinity_selection_profile};
 pub(crate) use self::policy::{
     RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
     runtime_candidate_has_hard_affinity, runtime_quota_blocked_affinity_is_releasable,
@@ -36,8 +32,11 @@ pub(crate) use self::policy::{
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 
-pub(crate) use self::affinity::runtime_previous_response_affinity_is_trusted;
 use self::affinity::{RuntimeAffinitySelectionDecision, runtime_affinity_selection_decision};
+pub(crate) use self::affinity::{
+    runtime_previous_response_affinity_is_trusted,
+    runtime_previous_response_hard_binding_is_unusable,
+};
 pub(crate) use self::catalog::*;
 #[cfg(test)]
 pub(crate) use self::current::runtime_proxy_optimistic_current_candidate_for_route;

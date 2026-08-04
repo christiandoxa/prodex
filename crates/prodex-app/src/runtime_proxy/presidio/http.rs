@@ -2,8 +2,8 @@
 
 use super::super::await_runtime_proxy_async_task;
 use super::engine::{
-    InspectionExecutionOutcome, runtime_local_inspection_fail_closed,
-    runtime_local_inspection_required, runtime_presidio_redact_body,
+    InspectionExecutionOutcome, RuntimePresidioFailClosedPolicy, runtime_local_inspection_required,
+    runtime_presidio_redact_body,
 };
 use super::findings::{
     runtime_local_inspection_source, runtime_presidio_inspection_plan,
@@ -14,8 +14,8 @@ use super::registry::{RuntimePresidioRedactionState, runtime_presidio_redaction_
 use super::telemetry::{
     runtime_emit_inspection_denied_metric, runtime_emit_inspection_metric,
     runtime_inspection_duration_micros, runtime_inspection_error_outcome,
-    runtime_log_local_masking_applied, runtime_log_presidio_redaction_applied,
-    runtime_log_presidio_redaction_error,
+    runtime_inspection_failure_type, runtime_log_local_masking_applied,
+    runtime_log_presidio_redaction_applied, runtime_log_presidio_redaction_error,
 };
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
@@ -60,10 +60,19 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
     detector_revision: &DetectorRevisionId,
 ) -> Result<ApplicationInspectionPlan> {
     let state = runtime_presidio_redaction_for_log_path(&shared.log_path);
+    let tenant_detector_enabled = tenant_detector_patterns.has_for_tenant(tenant_id);
+    let fail_closed_policy = RuntimePresidioFailClosedPolicy::derive(
+        governance.inspection,
+        governance.mode,
+        legacy_local_enabled,
+        tenant_detector_enabled,
+        state.as_ref().map(|state| state.config.fail_closed),
+    );
     if !runtime_local_inspection_required(
         governance.inspection,
+        governance.mode,
         legacy_local_enabled,
-        state.is_some() || tenant_detector_patterns.has_for_tenant(tenant_id),
+        state.is_some() || tenant_detector_enabled,
     ) {
         return runtime_presidio_inspection_plan(
             Vec::new(),
@@ -72,20 +81,13 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
         );
     }
 
-    let local_fail_closed = runtime_local_inspection_fail_closed(
-        governance.inspection,
-        legacy_local_enabled,
-        tenant_detector_patterns.has_for_tenant(tenant_id),
-        state.as_ref().map(|state| state.config.fail_closed),
-    );
     let mut sources = runtime_apply_local_http_inspection(
         request_id,
         request,
         shared,
         tenant_detector_patterns,
         tenant_id,
-        local_fail_closed,
-        state.is_some(),
+        fail_closed_policy,
     )?;
     let Some(state) = state else {
         return runtime_presidio_inspection_plan(
@@ -108,6 +110,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
         shared,
         governance,
         detector_revision,
+        fail_closed_policy,
         &mut sources,
         state,
     )
@@ -119,8 +122,7 @@ fn runtime_apply_local_http_inspection(
     shared: &RuntimeRotationProxyShared,
     tenant_detector_patterns: &RuntimeTenantDetectorPatterns,
     tenant_id: Option<TenantId>,
-    local_fail_closed: bool,
-    redaction_state_present: bool,
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
 ) -> Result<Vec<ApplicationInspectionSource>> {
     let original_bytes = request.body.len();
     let local_started = Instant::now();
@@ -166,7 +168,7 @@ fn runtime_apply_local_http_inspection(
                 InspectionStage::Local,
                 InspectionCoverage::Unsupported,
                 &[],
-                if local_fail_closed {
+                if fail_closed_policy.is_closed() {
                     InspectionMaskingAction::Denied
                 } else {
                     InspectionMaskingAction::None
@@ -174,10 +176,14 @@ fn runtime_apply_local_http_inspection(
                 runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            if redaction_state_present {
-                runtime_log_presidio_redaction_error(request_id, "http", local_fail_closed, shared);
-            }
-            if local_fail_closed {
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "http",
+                fail_closed_policy.is_closed(),
+                runtime_inspection_failure_type(&failure.error),
+                shared,
+            );
+            if fail_closed_policy.is_closed() {
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 return Err(failure.error);
             }
@@ -188,16 +194,19 @@ fn runtime_apply_local_http_inspection(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_apply_external_http_redaction(
     request_id: u64,
     request: &mut RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     governance: &prodex_config::GovernanceConfig,
     detector_revision: &DetectorRevisionId,
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
     sources: &mut Vec<ApplicationInspectionSource>,
     state: std::sync::Arc<RuntimePresidioRedactionState>,
 ) -> Result<ApplicationInspectionPlan> {
     let presidio_input_bytes = request.body.len();
+    let original_body = request.body.clone();
     let external_started = Instant::now();
     let redaction = await_runtime_proxy_async_task(
         shared,
@@ -207,20 +216,38 @@ fn runtime_apply_external_http_redaction(
     match redaction {
         Ok(InspectionExecutionOutcome::Redacted(redaction)) => {
             let presidio_masked = !redaction.source.findings.is_empty();
+            let denied = fail_closed_policy.denies_external_coverage(redaction.source.coverage);
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::External,
                 redaction.source.coverage,
                 &redaction.source.findings,
-                if presidio_masked {
+                if denied {
+                    InspectionMaskingAction::Denied
+                } else if presidio_masked {
                     InspectionMaskingAction::Masked
                 } else {
                     InspectionMaskingAction::None
                 },
-                InspectionOutcome::Allowed,
+                if denied {
+                    InspectionOutcome::Denied
+                } else {
+                    InspectionOutcome::Allowed
+                },
                 runtime_inspection_duration_micros(external_started),
             );
             request.body = redaction.body;
+            if denied {
+                runtime_log_presidio_redaction_error(
+                    request_id,
+                    "http",
+                    true,
+                    "unsupported_coverage",
+                    shared,
+                );
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                return Err(anyhow!("presidio_redaction_failed"));
+            }
             if presidio_masked {
                 runtime_log_presidio_redaction_applied(
                     request_id,
@@ -239,7 +266,7 @@ fn runtime_apply_external_http_redaction(
         }
         Ok(InspectionExecutionOutcome::Failed(failure)) => {
             request.body = failure.body;
-            let fail_closed = state.config.fail_closed;
+            let fail_closed = fail_closed_policy.is_closed();
             let failure_outcome = runtime_inspection_error_outcome(&failure.error);
             runtime_emit_inspection_metric(
                 shared,
@@ -254,7 +281,13 @@ fn runtime_apply_external_http_redaction(
                 failure_outcome,
                 runtime_inspection_duration_micros(external_started),
             );
-            runtime_log_presidio_redaction_error(request_id, "http", fail_closed, shared);
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "http",
+                fail_closed,
+                runtime_inspection_failure_type(&failure.error),
+                shared,
+            );
             if fail_closed {
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 Err(anyhow!("presidio_redaction_failed"))
@@ -267,18 +300,40 @@ fn runtime_apply_external_http_redaction(
                 )
             }
         }
-        Err(_) => {
+        Err(error) => {
+            request.body = original_body;
+            let fail_closed = fail_closed_policy.is_closed();
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::External,
                 InspectionCoverage::Unsupported,
                 &[],
-                InspectionMaskingAction::Denied,
-                InspectionOutcome::Error,
+                if fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                runtime_inspection_error_outcome(&error),
                 runtime_inspection_duration_micros(external_started),
             );
-            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-            Err(anyhow!("presidio_redaction_failed"))
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "http",
+                fail_closed,
+                runtime_inspection_failure_type(&error),
+                shared,
+            );
+            if fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                Err(anyhow!("presidio_redaction_failed"))
+            } else {
+                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
+                runtime_presidio_inspection_plan(
+                    std::mem::take(sources),
+                    governance.classification_default,
+                    detector_revision,
+                )
+            }
         }
     }
 }

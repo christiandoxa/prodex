@@ -1,8 +1,10 @@
 use self::dispatch::respond_runtime_local_rewrite_live_response;
 use super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult, runtime_gateway_guardrail_webhook_block,
+    RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    runtime_gateway_guardrail_webhook_block,
 };
+use super::local_rewrite_copilot::RuntimeCopilotResponsesSseBindingReader;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response_guardrails::{
     RuntimeGatewayGuardrailStreamPlan, runtime_gateway_guardrail_stream_body,
@@ -12,6 +14,7 @@ use super::local_rewrite_response_spend::{
     emit_runtime_gateway_policy_interrupted_response_spend_event_for_body,
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
+use super::local_rewrite_upstream::runtime_local_rewrite_remember_accepted_binding;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
     RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_json_error_response,
@@ -21,6 +24,8 @@ use crate::{
 use anyhow::Result;
 use prodex_domain::CallId;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
+use std::io;
+use std::time::Duration;
 
 #[path = "local_rewrite_response_dispatch.rs"]
 mod dispatch;
@@ -62,7 +67,7 @@ fn runtime_local_rewrite_invalid_response(
 }
 
 pub(super) fn runtime_local_rewrite_buffered_response_from_response(
-    response: reqwest::blocking::Response,
+    response: RuntimeLocalRewriteAsyncResponse,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
@@ -71,7 +76,47 @@ pub(super) fn runtime_local_rewrite_buffered_response_from_response(
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_bytes())),
     );
-    runtime_local_rewrite_buffered_response_parts(status, headers, response)
+    let RuntimeLocalRewriteAsyncResponse {
+        response,
+        async_runtime,
+        stream_idle_timeout_ms,
+        ..
+    } = response;
+    let mut response = response
+        .ok_or_else(|| anyhow::anyhow!("runtime upstream response body was already handed off"))?;
+    let body = async_runtime.block_on(async move {
+        let mut body = Vec::new();
+        let timeout = Duration::from_millis(stream_idle_timeout_ms.max(1));
+        loop {
+            let next = tokio::time::timeout(timeout, response.chunk())
+                .await
+                .map_err(|_| {
+                    anyhow::Error::new(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "runtime upstream stream idle timed out",
+                    ))
+                })??;
+            let Some(chunk) = next else {
+                break;
+            };
+            if chunk.len() > RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES.saturating_sub(body.len()) {
+                return Err(anyhow::Error::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "buffered response exceeded safe size limit ({})",
+                        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
+                    ),
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    })?;
+    Ok(RuntimeHeapTrimmedBufferedResponseParts {
+        status,
+        headers,
+        body: body.into(),
+    })
 }
 
 fn runtime_gateway_audit_response_blocked(
@@ -448,7 +493,22 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         copilot_context,
     } = response;
     match response {
-        RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) => {
+        RuntimeLocalRewriteUpstreamResponse::Streaming(mut streaming_response) => {
+            if let Some(binding) = streaming_response.accepted_binding.as_ref() {
+                let _ = runtime_local_rewrite_remember_accepted_binding(
+                    shared,
+                    &binding.identity,
+                    binding.previous_response_id.as_deref(),
+                    binding.turn_state.as_deref(),
+                    binding.session_id.as_deref(),
+                );
+            }
+            if let Some(recorder) = streaming_response.accepted_binding_recorder.take() {
+                streaming_response.body = Box::new(RuntimeCopilotResponsesSseBindingReader::new(
+                    streaming_response.body,
+                    Some(recorder),
+                ));
+            }
             let mut headers = streaming_response.headers;
             runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
             let streaming = RuntimeStreamingResponse {
@@ -537,6 +597,7 @@ pub(super) fn runtime_local_rewrite_buffered_response_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::thread;
     use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
@@ -552,10 +613,22 @@ mod tests {
                     + 1
             ]));
         });
-        let response =
-            reqwest::blocking::get(format!("http://{addr}/")).expect("response should arrive");
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("test runtime should build"),
+        );
+        let response = runtime
+            .block_on(reqwest::Client::new().get(format!("http://{addr}/")).send())
+            .expect("response should arrive");
+        let response = RuntimeLocalRewriteAsyncResponse::new(
+            response,
+            Arc::clone(&runtime),
+            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
+        );
 
-        let error = match runtime_local_rewrite_buffered_response_parts(200, Vec::new(), response) {
+        let error = match runtime_local_rewrite_buffered_response_from_response(response) {
             Ok(_) => panic!("oversized local provider response should fail"),
             Err(error) => error,
         };

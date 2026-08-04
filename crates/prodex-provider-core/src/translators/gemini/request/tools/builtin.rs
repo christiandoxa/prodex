@@ -19,6 +19,13 @@ pub(crate) fn gemini_builtin_tools_from_request(tools: &[Value]) -> Vec<Value> {
     translated
 }
 
+pub(crate) fn gemini_is_supported_builtin_tool(tool: &Value) -> bool {
+    gemini_is_computer_use_tool(tool)
+        || gemini_is_code_execution_tool(tool)
+        || gemini_is_web_search_tool(tool)
+        || gemini_is_url_context_tool(tool)
+}
+
 fn gemini_computer_use_tool(tools: &[Value]) -> Option<Value> {
     let tool = tools
         .iter()

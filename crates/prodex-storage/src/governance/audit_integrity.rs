@@ -1,7 +1,8 @@
 use super::*;
 use prodex_domain::{
-    AuditAction, AuditDigest, AuditEvent, AuditOutcome, AuditReasonCode, AuditResource,
-    AuditResourceId, AuditTimestamp, compute_audit_chain_digest,
+    AuditAction, AuditDigest, AuditEvent, AuditOutcome, AuditReasonCode, AuditReasonDetail,
+    AuditResource, AuditResourceId, AuditTimestamp, compute_audit_chain_digest,
+    normalize_audit_reason_detail,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub struct GovernanceAuditExportRecord {
     pub resource_id: Option<String>,
     pub outcome: String,
     pub reason_code: Option<String>,
+    pub reason_detail: Option<String>,
     pub previous_digest: Option<String>,
     pub event_digest: String,
 }
@@ -145,6 +147,15 @@ fn audit_record_digest_is_valid(tenant_id: TenantId, record: &GovernanceAuditExp
         if let Some(reason_code) = record.reason_code.as_ref() {
             AuditReasonCode::new(reason_code.clone()).ok()?;
         }
+        let reason_detail = match record.reason_detail.as_deref() {
+            None => None,
+            Some(reason_detail) => {
+                if normalize_audit_reason_detail(reason_detail).as_deref() != Some(reason_detail) {
+                    return None;
+                }
+                Some(AuditReasonDetail::new(reason_detail).ok()?)
+            }
+        };
         let previous_digest = record
             .previous_digest
             .clone()
@@ -162,6 +173,7 @@ fn audit_record_digest_is_valid(tenant_id: TenantId, record: &GovernanceAuditExp
                 resource,
                 outcome,
                 reason_code: record.reason_code.clone(),
+                reason_detail,
             },
             previous_digest,
             stored_digest,
@@ -187,6 +199,10 @@ impl fmt::Debug for GovernanceAuditExportRecord {
             )
             .field("outcome", &self.outcome)
             .field("reason_code", &self.reason_code)
+            .field(
+                "reason_detail",
+                &self.reason_detail.as_ref().map(|_| "<redacted>"),
+            )
             .field(
                 "previous_digest",
                 &self.previous_digest.as_ref().map(|_| "<redacted>"),

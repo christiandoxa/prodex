@@ -97,6 +97,7 @@ impl RuntimeProxyBackendFaultStep {
             content_type: "application/json",
             body: serde_json::json!({
                 "error": {
+                    "code": "workspace_member_credits_depleted",
                     "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
                 }
             })

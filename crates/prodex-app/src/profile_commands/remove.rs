@@ -33,17 +33,37 @@ pub(crate) fn persist_pruned_profile_runtime_sidecars(
     paths: &AppPaths,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<()> {
+    if profiles.is_empty() {
+        save_runtime_continuations_for_profiles(
+            paths,
+            &crate::RuntimeContinuationStore::default(),
+            profiles,
+        )?;
+        for path in [
+            runtime_continuation_journal_file_path(paths),
+            runtime_continuation_journal_last_good_file_path(paths),
+        ] {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        return Ok(());
+    }
     let continuations_exist = runtime_continuations_file_path(paths).exists()
         || runtime_continuations_last_good_file_path(paths).exists();
     if continuations_exist {
-        let continuations = load_runtime_continuations_with_recovery(paths, profiles)?.value;
+        let mut continuations = load_runtime_continuations_with_recovery(paths, profiles)?.value;
+        rewrite_unavailable_profile_bindings(&mut continuations, profiles);
         save_runtime_continuations_for_profiles(paths, &continuations, profiles)?;
     }
 
     let journal_exists = runtime_continuation_journal_file_path(paths).exists()
         || runtime_continuation_journal_last_good_file_path(paths).exists();
     if journal_exists {
-        let journal = load_runtime_continuation_journal_with_recovery(paths, profiles)?.value;
+        let mut journal = load_runtime_continuation_journal_with_recovery(paths, profiles)?.value;
+        rewrite_unavailable_profile_bindings(&mut journal.continuations, profiles);
         save_runtime_continuation_journal_for_profiles(
             paths,
             &journal.continuations,
@@ -53,6 +73,29 @@ pub(crate) fn persist_pruned_profile_runtime_sidecars(
     }
 
     Ok(())
+}
+
+fn rewrite_unavailable_profile_bindings(
+    continuations: &mut crate::RuntimeContinuationStore,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) {
+    for bindings in [
+        &mut continuations.response_profile_bindings,
+        &mut continuations.session_profile_bindings,
+        &mut continuations.turn_state_bindings,
+        &mut continuations.session_id_bindings,
+    ] {
+        for binding in bindings.values_mut() {
+            if !profiles.contains_key(&binding.profile_name)
+                && binding.profile_name
+                    != prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+            {
+                binding.profile_name =
+                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string();
+                binding.binding_identity = None;
+            }
+        }
+    }
 }
 
 pub(crate) fn finalize_recovered_profile_removals(

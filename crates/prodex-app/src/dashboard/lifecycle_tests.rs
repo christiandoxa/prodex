@@ -93,6 +93,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
         response_profile_bindings: BTreeMap::from([(
             "response-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: 1,
             },
@@ -100,6 +101,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
         session_profile_bindings: BTreeMap::from([(
             "session-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: 1,
             },
@@ -113,6 +115,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
             response_profile_bindings: BTreeMap::from([(
                 "response-1".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 1,
                 },
@@ -120,6 +123,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
             session_profile_bindings: BTreeMap::from([(
                 "session-1".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 1,
                 },
@@ -127,6 +131,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
             turn_state_bindings: BTreeMap::from([(
                 "turn-1".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 1,
                 },
@@ -134,6 +139,7 @@ fn dashboard_profile_removal_prunes_state_and_runtime_continuations() {
             session_id_bindings: BTreeMap::from([(
                 "session-id-1".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 1,
                 },
@@ -205,6 +211,7 @@ fn dashboard_mutation_finalizes_recovered_profile_removal() {
             response_profile_bindings: BTreeMap::from([(
                 "response-1".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "second".to_string(),
                     bound_at: 1,
                 },

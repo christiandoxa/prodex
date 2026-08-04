@@ -43,13 +43,44 @@ pub(crate) fn command_is_native_dry_run(command: &Commands) -> bool {
         command,
         Commands::Super(args)
             if (args.dry_run || prodex_dry_run_requested(&args.codex_args))
-                && args
+                && (args
                     .cli
                     .is_some_and(|agent| agent != SuperCliAgent::Codex)
+                    || super_tail_requests_native_cli(&args.codex_args))
     )
 }
 
+fn super_tail_requests_native_cli(args: &[std::ffi::OsString]) -> bool {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(value) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        if value == "--" {
+            return false;
+        }
+        let cli = value.strip_prefix("--cli=").or_else(|| {
+            if value == "--cli" {
+                args.get(index + 1).and_then(|value| value.to_str())
+            } else {
+                None
+            }
+        });
+        if cli.is_some_and(|cli| matches!(cli, "gemini" | "copilot" | "kiro" | "agy")) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
+    if !command_is_native_dry_run(&command)
+        && let Commands::Super(args) = &command
+    {
+        crate::runtime_gemini_cli::validate_super_native_cli_preflight(args)?;
+    }
     if !command_is_native_dry_run(&command)
         && !matches!(
             &command,
@@ -149,6 +180,7 @@ fn execute_tool_launch(args: RuntimeToolArgs) -> Result<()> {
 fn execute_super(mut args: SuperArgs) -> Result<()> {
     args.extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
+    crate::runtime_gemini_cli::validate_super_native_cli_capability_args(&args)?;
     args.validate_urls().map_err(anyhow::Error::msg)?;
     if args.codex_args.first().is_some_and(|arg| arg == "gui") {
         args.codex_args.remove(0);
@@ -158,13 +190,18 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
         return handle_super_gui(args);
     }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
-        if matches!(args.cli, Some(agent) if agent != SuperCliAgent::Codex) {
-            return crate::runtime_gemini_cli::handle_super_native_cli_dry_run(args);
-        }
         let use_presidio = args.presidio_preference().unwrap_or(false);
-        return handle_runtime_tools_dry_run(
-            args.into_runtime_tool_args_with_presidio(use_presidio),
-        );
+        let mut sub_agent = resolve_super_sub_agent(&args, false)?;
+        if let Some(sub_agent) = sub_agent.as_mut() {
+            sub_agent.presidio_enabled = use_presidio;
+        }
+        if matches!(args.cli, Some(agent) if agent != SuperCliAgent::Codex) {
+            return crate::runtime_gemini_cli::handle_super_native_cli_dry_run(
+                args,
+                sub_agent.as_ref(),
+            );
+        }
+        return handle_super_runtime_tools_dry_run(args, use_presidio, sub_agent.as_ref());
     }
     handle_super(args)
 }
@@ -181,8 +218,18 @@ mod tests {
             .expect("native dry-run should parse");
         let codex = parse_cli_command_from(["prodex", "super", "--dry-run"])
             .expect("Codex dry-run should parse");
+        let native_tail = parse_cli_command_from([
+            "prodex",
+            "super",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            "--cli",
+            "gemini",
+            "--dry-run",
+        ])
+        .expect("native tail dry-run should parse");
 
         assert!(command_is_native_dry_run(&native));
+        assert!(command_is_native_dry_run(&native_tail));
         assert!(!command_should_show_update_notice(&native));
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&native));
         assert!(!command_is_native_dry_run(&codex));

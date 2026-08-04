@@ -21,7 +21,8 @@ pub(super) fn insert_continuation_binding(
     bound_at: i64,
 ) {
     let binding = ResponseProfileBinding {
-        profile_name: "main".to_string(),
+        binding_identity: None,
+                profile_name: "main".to_string(),
         bound_at,
     };
     match kind {

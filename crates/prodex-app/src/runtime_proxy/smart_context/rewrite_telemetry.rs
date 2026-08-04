@@ -355,6 +355,18 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
                 ),
                 runtime_proxy_log_field("rehydrated_refs", stats.rehydrated_refs.to_string()),
                 runtime_proxy_log_field(
+                    "rehydration_planned",
+                    stats.rehydration_planned.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "rehydration_performed",
+                    stats.rehydration_performed.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "rehydration_deferred",
+                    stats.rehydration_deferred.to_string(),
+                ),
+                runtime_proxy_log_field(
                     "rehydration_token_cost",
                     stats.rehydration_token_cost.to_string(),
                 ),

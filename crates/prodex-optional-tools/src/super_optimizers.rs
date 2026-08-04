@@ -154,6 +154,7 @@ fn configure_selected_optimizer_codex_home(
     presidio_enabled: bool,
 ) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
+    ensure_sub_agents_reference(codex_home)?;
     let resolved_path = |id| {
         activations
             .iter()
@@ -189,6 +190,14 @@ fn configure_selected_optimizer_codex_home(
     configure_super_mcp_servers(codex_home, codebase_memory_command, npx_command)?;
     if let Some(activation) = ponytail {
         ponytail::install_ponytail_plugin(codex_home, &activation.tool)?;
+    }
+    Ok(())
+}
+
+fn ensure_sub_agents_reference(codex_home: &Path) -> Result<()> {
+    let reference_path = codex_home.join("SUB_AGENTS.md");
+    if reference_path.is_file() {
+        ensure_agents_reference(codex_home, &reference_path)?;
     }
     Ok(())
 }

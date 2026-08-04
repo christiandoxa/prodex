@@ -47,6 +47,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         response_profile_bindings: BTreeMap::from([(
             "resp-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 11,
             },
@@ -54,6 +55,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         session_profile_bindings: BTreeMap::from([(
             "sess-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 12,
             },
@@ -65,6 +67,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         response_profile_bindings: BTreeMap::from([(
             "resp-2".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 13,
             },
@@ -72,6 +75,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         session_profile_bindings: BTreeMap::from([(
             "sess-2".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 14,
             },
@@ -79,6 +83,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         turn_state_bindings: BTreeMap::from([(
             "turn-2".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 15,
             },
@@ -86,6 +91,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         session_id_bindings: BTreeMap::from([(
             "sid-2".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "primary".to_string(),
                 bound_at: 16,
             },

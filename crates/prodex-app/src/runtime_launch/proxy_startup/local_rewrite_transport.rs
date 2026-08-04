@@ -1,6 +1,6 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite::{RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
@@ -18,6 +18,7 @@ use runtime_proxy_crate::{
     local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
 };
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -103,7 +104,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     upstream_url: &str,
     body: Vec<u8>,
     auth: RuntimeLocalRewritePreparedAuth<'_>,
-) -> Result<reqwest::blocking::Response> {
+) -> Result<RuntimeLocalRewriteAsyncResponse> {
     let provider_kind = auth.bridge_kind();
     let body_bytes = body.len();
     let model = runtime_provider_model_from_body(&body);
@@ -114,7 +115,10 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         )
     })?;
     let request_body_for_spend = body.clone();
-    let mut upstream_request = shared.client.request(method, upstream_url);
+    let mut upstream_request = shared
+        .runtime_shared
+        .async_client
+        .request(method, upstream_url);
     upstream_request =
         runtime_local_rewrite_apply_prepared_auth(upstream_request, request, shared, &body, auth)?;
     if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
@@ -136,9 +140,10 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         ),
     );
     let started_at = Instant::now();
-    let response = upstream_request
-        .body(body)
-        .send()
+    let response = shared
+        .runtime_shared
+        .async_runtime
+        .block_on(async move { upstream_request.body(body).send().await })
         .map_err(reqwest::Error::without_url)
         .with_context(|| {
             format!(
@@ -146,6 +151,15 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 runtime_local_rewrite_log_url(upstream_url)
             )
         })?;
+    let response = RuntimeLocalRewriteAsyncResponse::new(
+        response,
+        Arc::clone(&shared.runtime_shared.async_runtime),
+        shared
+            .runtime_shared
+            .runtime_config
+            .tuning
+            .stream_idle_timeout_ms,
+    );
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -213,12 +227,12 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
 }
 
 fn runtime_local_rewrite_apply_prepared_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
     auth: RuntimeLocalRewritePreparedAuth<'_>,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     match auth {
         RuntimeLocalRewritePreparedAuth::Anthropic {
             auth,
@@ -270,8 +284,8 @@ fn runtime_local_rewrite_apply_prepared_auth(
 }
 
 fn runtime_local_rewrite_provider_headers(
-    request: reqwest::blocking::RequestBuilder,
-) -> reqwest::blocking::RequestBuilder {
+    request: reqwest::RequestBuilder,
+) -> reqwest::RequestBuilder {
     request
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -282,12 +296,12 @@ fn runtime_local_rewrite_provider_headers(
 }
 
 fn runtime_local_rewrite_apply_anthropic_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeAnthropicAuth,
     native_messages: bool,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     if native_messages {
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
@@ -313,12 +327,12 @@ fn runtime_local_rewrite_apply_anthropic_auth(
 }
 
 fn runtime_local_rewrite_apply_copilot_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
     api_key: Option<&str>,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request)
         .header("copilot-integration-id", "copilot-developer-cli")
         .header("openai-intent", "conversation-panel")
@@ -340,11 +354,11 @@ fn runtime_local_rewrite_apply_copilot_auth(
 }
 
 fn runtime_local_rewrite_apply_openai_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
-) -> reqwest::blocking::RequestBuilder {
+) -> reqwest::RequestBuilder {
     let replacing_openai_auth = api_key.is_some()
         || request.headers.iter().any(|(name, value)| {
             name.eq_ignore_ascii_case("authorization")
@@ -359,22 +373,22 @@ fn runtime_local_rewrite_apply_openai_auth(
 }
 
 fn runtime_local_rewrite_apply_openai_projected_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let upstream_request =
         runtime_local_rewrite_copy_openai_headers(request, upstream_request, true);
     runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)
 }
 
 fn runtime_local_rewrite_apply_deepseek_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
     native_messages: bool,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     if native_messages {
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
@@ -394,11 +408,11 @@ fn runtime_local_rewrite_apply_deepseek_auth(
 }
 
 fn runtime_local_rewrite_apply_gemini_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeGeminiAuth,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     match auth {
         RuntimeGeminiAuth::ApiKey { api_key } => {
@@ -422,11 +436,11 @@ fn runtime_local_rewrite_apply_gemini_auth(
 }
 
 fn runtime_local_rewrite_apply_gemini_openai_auth(
-    upstream_request: reqwest::blocking::RequestBuilder,
+    upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     upstream_request = match api_key {
         Some(api_key) => upstream_request.bearer_auth(api_key),
@@ -439,10 +453,10 @@ fn runtime_local_rewrite_apply_gemini_openai_auth(
 }
 
 fn runtime_local_rewrite_apply_direct_anthropic_auth(
-    request: reqwest::blocking::RequestBuilder,
+    request: reqwest::RequestBuilder,
     auth: &RuntimeAnthropicAuth,
     native_messages: bool,
-) -> Option<reqwest::blocking::RequestBuilder> {
+) -> Option<reqwest::RequestBuilder> {
     match auth {
         RuntimeAnthropicAuth::ApiKey { api_key } if native_messages => {
             Some(request.header("x-api-key", api_key))
@@ -467,7 +481,7 @@ mod anthropic_native_transport_tests {
             api_key: "fixture-anthropic-key".to_string(),
         };
         let request = runtime_local_rewrite_apply_direct_anthropic_auth(
-            reqwest::blocking::Client::new()
+            reqwest::Client::new()
                 .post("https://api.anthropic.com/v1/messages")
                 .header("anthropic-version", ANTHROPIC_API_VERSION),
             &auth,
@@ -495,7 +509,7 @@ mod anthropic_native_transport_tests {
             access_token: "fixture-oauth-token".to_string(),
         };
         let request = runtime_local_rewrite_apply_direct_anthropic_auth(
-            reqwest::blocking::Client::new()
+            reqwest::Client::new()
                 .post("https://api.anthropic.com/v1/messages")
                 .header("anthropic-version", ANTHROPIC_API_VERSION),
             &auth,
@@ -520,9 +534,9 @@ mod anthropic_native_transport_tests {
 
 fn runtime_local_rewrite_copy_openai_headers(
     request: &RuntimeProxyRequest,
-    mut upstream_request: reqwest::blocking::RequestBuilder,
+    mut upstream_request: reqwest::RequestBuilder,
     replacing_openai_auth: bool,
-) -> reqwest::blocking::RequestBuilder {
+) -> reqwest::RequestBuilder {
     let connection_headers = runtime_proxy_crate::runtime_connection_header_tokens(
         request
             .headers
@@ -639,9 +653,9 @@ fn runtime_local_rewrite_header<'a>(
 }
 
 fn runtime_local_rewrite_trace_context_headers(
-    mut upstream_request: reqwest::blocking::RequestBuilder,
+    mut upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
-) -> reqwest::blocking::RequestBuilder {
+) -> reqwest::RequestBuilder {
     for header_name in ["traceparent", "tracestate", "baggage"] {
         if let Some(header_value) = runtime_local_rewrite_header(request, header_name) {
             upstream_request = upstream_request.header(header_name, header_value);

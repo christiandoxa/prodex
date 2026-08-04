@@ -49,7 +49,8 @@ pub(super) fn governance_audit_export_record(
         resource_id: row.get(5),
         outcome: row.get(6),
         reason_code: row.get(7),
-        previous_digest: row.get(8),
-        event_digest: row.get(9),
+        reason_detail: row.get(8),
+        previous_digest: row.get(9),
+        event_digest: row.get(10),
     })
 }

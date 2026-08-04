@@ -10,6 +10,7 @@ mod profile;
 mod runtime_args;
 mod runtime_features;
 mod session_context;
+mod sub_agent;
 pub(crate) mod super_provider_limits;
 
 pub use cleanup::*;
@@ -21,6 +22,7 @@ pub use profile::*;
 pub use runtime_args::*;
 pub use runtime_features::*;
 pub use session_context::*;
+pub use sub_agent::*;
 pub use super_provider_limits::{
     SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
     super_copilot_prompt_token_limit_for_model,
@@ -269,7 +271,8 @@ where
     } else {
         raw_args
     };
-    let mut command = Cli::try_parse_from(parse_args)?.command;
+    let mut command = Cli::try_parse_from(parse_args.clone())?.command;
+    restore_super_literal_boundary(&parse_args, &mut command);
     match &mut command {
         Commands::Caveman(args)
         | Commands::Rtk(args)
@@ -278,6 +281,37 @@ where
         _ => {}
     }
     Ok(command)
+}
+
+fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
+    if !matches!(
+        args.get(1).and_then(|arg| arg.to_str()),
+        Some("super" | "s")
+    ) {
+        return;
+    }
+    let Some(boundary_index) = args
+        .iter()
+        .enumerate()
+        .skip(2)
+        .find_map(|(index, arg)| (arg == "--").then_some(index))
+    else {
+        return;
+    };
+    let Commands::Super(super_args) = command else {
+        return;
+    };
+    if super_args.codex_args.contains(&OsString::from("--")) {
+        return;
+    }
+
+    let suffix = &args[(boundary_index + 1)..];
+    let insertion_index = super_args.codex_args.len().saturating_sub(suffix.len());
+    if super_args.codex_args[insertion_index..] == *suffix {
+        super_args
+            .codex_args
+            .insert(insertion_index, OsString::from("--"));
+    }
 }
 
 fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {

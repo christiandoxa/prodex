@@ -118,16 +118,22 @@ fn migration_checksum(name: &str, sql: &str) -> String {
 
 fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
     let ledger_exists = runtime_gateway_sqlite_table_exists(conn, MIGRATIONS_TABLE)?;
-    if ledger_exists
-        && sqlite_observed_version(conn)?
-            .is_some_and(|version| version > i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0))
+    let observed_version = if ledger_exists {
+        sqlite_observed_version(conn)?
+    } else {
+        None
+    };
+    if observed_version.is_some_and(|version| version > i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0))
     {
         bail!("gateway sqlite enterprise schema is newer than supported");
     }
-    let legacy_version = if ledger_exists {
-        0
-    } else {
+    let legacy_version = if !ledger_exists
+        || (observed_version.is_none()
+            && runtime_gateway_sqlite_table_exists(conn, "prodex_tenants")?)
+    {
         infer_legacy_sqlite_version(conn)?
+    } else {
+        0
     };
     conn.execute_batch(SQLITE_MIGRATIONS_TABLE_SQL)
         .context("failed to ensure gateway sqlite enterprise migrations table")?;
@@ -189,13 +195,17 @@ fn apply_sqlite_migration_plan(
         if has_later_version {
             bail!("gateway sqlite enterprise migration ledger contains a version gap");
         }
+        let reason_detail_already_present = migration.name == "014_audit_reason_detail"
+            && runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(migration.sql).with_context(|| {
-            format!(
-                "failed to apply gateway sqlite enterprise migration {}",
-                migration.name
-            )
-        })?;
+        if !reason_detail_already_present {
+            tx.execute_batch(migration.sql).with_context(|| {
+                format!(
+                    "failed to apply gateway sqlite enterprise migration {}",
+                    migration.name
+                )
+            })?;
+        }
         tx.execute(
             "INSERT INTO prodex_enterprise_schema_migrations
              (version, name, checksum, applied_at_epoch)
@@ -210,16 +220,23 @@ fn apply_sqlite_migration_plan(
 
 pub(super) fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
     let ledger_exists = runtime_gateway_postgres_table_exists(client, MIGRATIONS_TABLE)?;
-    if ledger_exists
-        && postgres_observed_version(client)?
-            .is_some_and(|version| version > i64::from(REQUIRED_POSTGRES_SCHEMA_VERSION.0))
+    let observed_version = if ledger_exists {
+        postgres_observed_version(client)?
+    } else {
+        None
+    };
+    if observed_version
+        .is_some_and(|version| version > i64::from(REQUIRED_POSTGRES_SCHEMA_VERSION.0))
     {
         bail!("gateway postgres enterprise schema is newer than supported");
     }
-    let legacy_version = if ledger_exists {
-        0
-    } else {
+    let legacy_version = if !ledger_exists
+        || (observed_version.is_none()
+            && runtime_gateway_postgres_table_exists(client, "prodex_tenants")?)
+    {
         infer_legacy_postgres_version(client)?
+    } else {
+        0
     };
     client
         .batch_execute(POSTGRES_MIGRATIONS_TABLE_SQL)
@@ -306,8 +323,16 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
     if outbox_exists || has_v13_marker {
         validate_sqlite_siem_outbox_shape(conn, has_v13_marker)?;
         if has_v13_marker {
+            if runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")? {
+                let bounded_reason_detail = sqlite_reason_detail_byte_limit_triggers_present(conn)?;
+                return Ok(if bounded_reason_detail { 15 } else { 14 });
+            }
             return Ok(13);
         }
+    }
+    if runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")? {
+        let bounded_reason_detail = sqlite_reason_detail_byte_limit_triggers_present(conn)?;
+        return Ok(if bounded_reason_detail { 15 } else { 14 });
     }
     if runtime_gateway_sqlite_table_has_column(
         conn,
@@ -359,6 +384,23 @@ fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
         conn,
         "prodex_tenants",
     )?))
+}
+
+fn sqlite_reason_detail_byte_limit_triggers_present(conn: &Connection) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'prodex_audit_reason_detail_byte_limit_insert'
+        ) AND EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'prodex_audit_reason_detail_byte_limit_update'
+        )",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
 }
 
 pub(super) fn infer_legacy_postgres_version(client: &mut PostgresClient) -> Result<i64> {

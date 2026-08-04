@@ -149,6 +149,7 @@ fn run_strategy_skips_goal_resume_relaunch_when_goal_is_complete() {
             session_profile_bindings: BTreeMap::from([(
                 session_id.to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: now,
                 },
@@ -266,6 +267,7 @@ fn run_strategy_relaunch_after_child_exit_appends_goal_resume_and_releases_bindi
             session_profile_bindings: BTreeMap::from([(
                 session_id.to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: now,
                 },

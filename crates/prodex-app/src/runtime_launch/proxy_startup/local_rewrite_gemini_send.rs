@@ -5,6 +5,7 @@ use super::super::gemini_rewrite::{
     runtime_gemini_project_id, runtime_gemini_request_upstream_url,
 };
 use super::super::local_rewrite::{
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteAsyncResponse,
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
@@ -15,6 +16,10 @@ use super::super::local_rewrite_search_fallback::runtime_local_rewrite_remember_
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
 };
+use super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, runtime_local_rewrite_attach_accepted_binding,
+    runtime_local_rewrite_binding_context, runtime_local_rewrite_raw_binding_identity,
+};
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
     runtime_provider_error_cooldown_ms, runtime_provider_log_request_conformance,
@@ -23,7 +28,8 @@ use super::super::provider_bridge::{
 };
 use super::super::{
     local_rewrite_gemini_quota::{
-        runtime_gemini_buffered_parts_are_quota_blocked, runtime_gemini_normalized_error_parts,
+        runtime_gemini_429_is_structured, runtime_gemini_buffered_parts_are_quota_blocked,
+        runtime_gemini_normalized_error_parts,
     },
     local_rewrite_gemini_thought_signatures::runtime_gemini_harden_translated_thoughts as harden_thoughts,
 };
@@ -38,7 +44,7 @@ mod retry;
 use super::{
     local_rewrite_gemini_oauth_pool::{
         RuntimeGeminiRequestContext, RuntimeGeminiSelectedAuth, runtime_gemini_auth_attempts,
-        runtime_gemini_binding_recorder,
+        runtime_gemini_binding_recorder, runtime_gemini_model_cache_endpoint,
     },
     local_rewrite_gemini_precommit::{
         RuntimeGeminiPrecommitPeek, runtime_gemini_peek_stream_for_retry,
@@ -64,7 +70,7 @@ use local_rewrite_gemini_send_short_circuit::{
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
     GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS as RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
-    ProviderEndpoint,
+    ProviderEndpoint, ProviderId, RuntimeProviderBindingIdentity,
     gemini_provider_core_body_has_terminal_quota as runtime_gemini_body_has_terminal_quota,
     gemini_provider_core_invalid_stream_retry_delay_ms as runtime_gemini_invalid_stream_retry_delay_ms,
     gemini_provider_core_request_body,
@@ -97,6 +103,7 @@ struct RuntimeGeminiAttemptContext<'a> {
     thinking_budget_tokens: Option<u64>,
     attempt_index: usize,
     attempt_count: usize,
+    binding: &'a RuntimeLocalRewriteBindingContext,
 }
 
 struct RuntimeGeminiModelAttemptContext<'a, 'context> {
@@ -147,6 +154,15 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     endpoint: ProviderEndpoint,
     stream_mode: ProviderStreamMode,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    if let Some(reason) = super::runtime_gemini_request_validation_error(&body) {
+        return Ok(RuntimeLocalRewriteUpstreamResult {
+            response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                crate::build_runtime_proxy_json_error_parts(400, "invalid_request_error", &reason),
+            ),
+            gemini_context: None,
+            copilot_context: None,
+        });
+    }
     let responses_route = endpoint == ProviderEndpoint::Responses;
     let application_streaming = stream_mode == ProviderStreamMode::Streaming;
     if let Some(result) = runtime_gemini_responses_route_result(
@@ -159,6 +175,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     ) {
         return result;
     }
+    let binding = runtime_local_rewrite_binding_context(shared, request)?;
     let conversations = shared.gemini_conversations_for_request(request);
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let model_scope = shared
@@ -166,7 +183,20 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
         .as_ref()
         .and_then(|pool| pool.model_scope_for_request(request, &body))
         .or_else(|| responses_route.then(|| format!("request:{request_id}")));
-    let attempts = runtime_gemini_auth_attempts(auth, shared, &body, model_scope.as_deref())?;
+    let mut attempts = runtime_gemini_auth_attempts(auth, shared, &body, model_scope.as_deref())?;
+    attempts.retain(|selected| {
+        let endpoint =
+            runtime_gemini_model_cache_endpoint(&selected.auth, &shared.upstream_base_url);
+        runtime_gemini_binding_identity(shared, selected, &endpoint)
+            .as_ref()
+            .is_some_and(|identity| binding.candidate_allowed(Some(identity)))
+    });
+    if attempts.is_empty() {
+        if binding.bound.is_some() {
+            bail!("Gemini continuation binding is unavailable or unauthorized");
+        }
+        bail!("no Gemini auth attempts were available");
+    }
     let common_model_selection = runtime_local_rewrite_model_selection(
         shared,
         RuntimeProviderBridgeKind::Gemini,
@@ -217,6 +247,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
             thinking_budget_tokens,
             attempt_index,
             attempt_count,
+            binding: &binding,
         };
         if let Some(result) = runtime_gemini_attempt_selected_auth(&context, selected)? {
             return Ok(result);
@@ -224,6 +255,30 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     }
 
     bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_binding_identity(
+    shared: &RuntimeLocalRewriteProxyShared,
+    selected: &RuntimeGeminiSelectedAuth,
+    endpoint: &str,
+) -> Option<RuntimeProviderBindingIdentity> {
+    let (credential, profile) = match &selected.auth {
+        RuntimeGeminiAuth::ApiKey { api_key } => {
+            (Some(api_key.as_str()), Some(selected.profile_name.as_str()))
+        }
+        RuntimeGeminiAuth::OAuth { access_token, .. } => (
+            Some(access_token.as_str()),
+            Some(selected.profile_name.as_str()),
+        ),
+        RuntimeGeminiAuth::Projected => (None, Some(RUNTIME_LOCAL_REWRITE_PROFILE)),
+    };
+    runtime_local_rewrite_raw_binding_identity(
+        shared,
+        ProviderId::Gemini,
+        credential,
+        endpoint,
+        profile,
+    )
 }
 
 fn runtime_gemini_attempt_selected_auth(
@@ -246,12 +301,22 @@ fn runtime_gemini_attempt_selected_auth(
         };
         let mut translated =
             runtime_gemini_translate_attempt(context, &model_body, &selected, model)?;
+        let Some(binding_identity) =
+            runtime_gemini_binding_identity(context.shared, &selected, &model_cache_endpoint)
+        else {
+            bail!("Gemini accepted binding identity is unavailable");
+        };
+        if !context.binding.candidate_allowed(Some(&binding_identity)) {
+            bail!("Gemini continuation binding changed before commit");
+        }
         if let Some(result) = runtime_gemini_exact_output_short_circuit(
             context.request_id,
             context.shared,
             context.conversations,
             &selected,
             &translated,
+            context.binding,
+            &binding_identity,
         )? {
             return Ok(Some(result));
         }
@@ -280,6 +345,14 @@ fn runtime_gemini_attempt_selected_auth(
                 response,
                 stream_prefix,
             } => {
+                let mut live_response =
+                    RuntimeLocalRewriteLiveResponse::with_prefix(response, stream_prefix);
+                runtime_local_rewrite_attach_accepted_binding(
+                    context.shared,
+                    &mut live_response,
+                    context.binding,
+                    binding_identity,
+                );
                 let binding_recorder = context.shared.gemini_oauth_pool.as_ref().map(|pool| {
                     runtime_gemini_binding_recorder(
                         pool,
@@ -311,9 +384,7 @@ fn runtime_gemini_attempt_selected_auth(
                         binding_recorder,
                     });
                 return Ok(Some(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(
-                        RuntimeLocalRewriteLiveResponse::with_prefix(response, stream_prefix),
-                    ),
+                    response: RuntimeLocalRewriteUpstreamResponse::Live(live_response),
                     gemini_context,
                     copilot_context: None,
                 }));
@@ -387,12 +458,13 @@ fn runtime_gemini_translate_attempt(
     Ok(translated)
 }
 
+#[allow(clippy::large_enum_variant)]
 enum RuntimeGeminiModelAttempt {
     RetryAuth,
     RetryModel,
     Buffered(RuntimeHeapTrimmedBufferedResponseParts),
     Live {
-        response: reqwest::blocking::Response,
+        response: RuntimeLocalRewriteAsyncResponse,
         stream_prefix: Vec<u8>,
     },
 }

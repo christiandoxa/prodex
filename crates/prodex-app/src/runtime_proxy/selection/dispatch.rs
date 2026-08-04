@@ -5,7 +5,7 @@ use super::{
     RuntimeResponseCandidateSelection, RuntimeRotationProxyShared,
     next_runtime_previous_response_candidate_with_trace,
     next_runtime_response_candidate_for_route_with_prompt_cache_key,
-    runtime_affinity_selection_decision,
+    runtime_affinity_selection_decision, runtime_previous_response_hard_binding_is_unusable,
     runtime_proxy_optimistic_current_candidate_for_route_with_selection,
     runtime_selection_trace_builder, runtime_selection_trace_log,
 };
@@ -91,6 +91,13 @@ fn select_runtime_response_candidate_for_route_inner(
     }
 
     if selection.discover_previous_response_owner {
+        if runtime_previous_response_hard_binding_is_unusable(
+            shared,
+            selection.previous_response_id,
+        )? {
+            *affinity_exhausted = true;
+            return Ok(None);
+        }
         return next_runtime_previous_response_candidate_with_trace(
             shared,
             selection.excluded_profiles,

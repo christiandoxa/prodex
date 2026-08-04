@@ -19,6 +19,7 @@ not retained here; Git history is the record for obsolete material.
 | [Provider capabilities](provider-capabilities.md) | Generated provider capability matrix |
 | [Provider conformance](provider-conformance.md) | Adapter contract |
 | [Harness modes](harness-modes.md) | Model-facing request policy |
+| [Super sub-agents](sub-agents.md) | Staged CLI contract, session boundaries, and local-process design |
 
 ## Security, Operations, and Release
 
@@ -53,7 +54,9 @@ The maintained enterprise contract is split by responsibility:
 
 ## Generated Evidence
 
-These files are regenerated; CI checks the Smart Context replay report for drift:
+These files are regenerated; CI checks the checked-in Smart Context replay
+fixtures for drift. They do not prove native CLI behavior or complete provider
+semantic fidelity:
 
 - [Smart Context replay report](generated/smart-context-replay-report.md) via
   `npm run docs:smart-context-evidence`;
@@ -63,4 +66,8 @@ These files are regenerated; CI checks the Smart Context replay report for drift
   `npm run docs:provider-capabilities`.
 
 Broken local links, duplicate canonical numeric prefixes, and Smart Context replay
-drift are CI failures.
+fixture drift are CI failures. The checked-in OpenAPI document describes the
+gateway's documented routes, not complete upstream route or semantic coverage.
+Enterprise audit, break-glass evidence, immutability, backup/DR, and OpenAPI
+documents describe their own deployment or gateway boundaries; they are not
+automatically inherited by local audit logs, Super, or sub-agent processes.

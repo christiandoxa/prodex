@@ -5,7 +5,8 @@ use std::collections::HashMap;
 mod setup;
 
 pub use self::setup::{
-    gemini_provider_core_live_function_declaration, gemini_provider_core_live_setup_message,
+    GeminiProviderCoreLiveSessionUpdate, gemini_provider_core_live_function_declaration,
+    gemini_provider_core_live_session_update, gemini_provider_core_live_setup_message,
 };
 
 pub fn gemini_provider_core_live_client_content_message(

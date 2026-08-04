@@ -1,3 +1,4 @@
+use super::super::local_rewrite::RuntimeLocalRewriteAsyncResponse;
 use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_internal_instruction_corpus;
 pub(super) use prodex_provider_core::{
@@ -11,17 +12,17 @@ const RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT: usize = 64 * 1024;
 
 pub(super) enum RuntimeGeminiPrecommitPeek {
     Committed {
-        response: reqwest::blocking::Response,
+        response: RuntimeLocalRewriteAsyncResponse,
         prefix: Vec<u8>,
     },
     RetryableInvalid {
-        response: reqwest::blocking::Response,
+        response: RuntimeLocalRewriteAsyncResponse,
         prefix: Vec<u8>,
         reason: String,
     },
 }
 
-pub(super) fn runtime_gemini_response_is_sse(response: &reqwest::blocking::Response) -> bool {
+pub(super) fn runtime_gemini_response_is_sse(response: &RuntimeLocalRewriteAsyncResponse) -> bool {
     response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -30,7 +31,7 @@ pub(super) fn runtime_gemini_response_is_sse(response: &reqwest::blocking::Respo
 }
 
 pub(super) fn runtime_gemini_peek_stream_for_retry(
-    mut response: reqwest::blocking::Response,
+    mut response: RuntimeLocalRewriteAsyncResponse,
     conversation_messages: &[serde_json::Value],
 ) -> Result<RuntimeGeminiPrecommitPeek> {
     let mut prefix = Vec::new();
@@ -81,7 +82,7 @@ pub(super) fn runtime_gemini_peek_stream_for_retry(
 }
 
 fn runtime_gemini_precommit_eof_decision(
-    response: reqwest::blocking::Response,
+    response: RuntimeLocalRewriteAsyncResponse,
     prefix: Vec<u8>,
     line: Vec<u8>,
     mut data_lines: Vec<String>,

@@ -22,11 +22,13 @@ pub use copilot::{
     copilot_provider_core_response_id_from_value,
 };
 pub use deepseek::{
-    DeepSeekProviderCoreStreamChatToolCall, DeepSeekProviderCoreStreamChoiceDelta,
-    DeepSeekProviderCoreStreamChoiceMetadata, DeepSeekProviderCoreStreamChunkMetadata,
-    DeepSeekProviderCoreStreamToolCallDelta, DeepSeekTranslator,
-    deepseek_provider_core_chat_stream_error,
+    DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT, DeepSeekProviderCoreStreamChatToolCall,
+    DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
+    DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
+    DeepSeekTranslator, deepseek_provider_core_chat_stream_error,
+    deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_function_call_arguments_delta_event,
+    deepseek_provider_core_incremental_tool_argument_delta,
     deepseek_provider_core_output_item_added_event, deepseek_provider_core_output_item_done_event,
     deepseek_provider_core_output_text_delta_event,
     deepseek_provider_core_response_completed_event, deepseek_provider_core_response_created_event,
@@ -110,6 +112,7 @@ pub(crate) use gemini::{
     gemini_runtime_responses_value_from_generate_value_with_fallback_ids,
     gemini_text_from_special_part, gemini_web_search_call_from_grounding,
 };
+pub(crate) use gemini::{gemini_validate_candidate_count, gemini_validate_openai_tools};
 pub use kiro::{
     KiroProviderCoreRequestError, KiroTranslator, kiro_provider_core_acp_assistant_output_message,
     kiro_provider_core_acp_chat_assistant_message, kiro_provider_core_acp_chat_tool_call_item,

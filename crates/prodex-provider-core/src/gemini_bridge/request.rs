@@ -11,11 +11,13 @@ pub use self::exact_output::{
 pub use self::native_project::gemini_provider_core_native_request_body_with_project;
 pub use self::simple::gemini_provider_core_simple_request;
 pub use self::tools::{
-    gemini_provider_core_builtin_tools_from_request,
-    gemini_provider_core_function_declaration_from_openai_tool,
-    gemini_provider_core_function_tools_from_chat, gemini_provider_core_request_body_without_tool,
-    gemini_provider_core_sanitize_function_schema, gemini_provider_core_tool_config_from_request,
-    gemini_provider_core_tools_from_requests, gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_function_tools_from_chat,
+    gemini_provider_core_function_tools_from_chat_checked,
+    gemini_provider_core_request_body_without_tool, gemini_provider_core_sanitize_function_schema,
+    gemini_provider_core_tool_config_from_request, gemini_provider_core_tools_from_requests,
+    gemini_provider_core_tools_from_requests_checked,
+    gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_validate_request_tools,
 };
 
 use crate::translators::{gemini_contents_from_request, gemini_generation_config_from_request};
@@ -112,6 +114,12 @@ pub fn gemini_provider_core_generation_config_from_request(
     thinking_budget_tokens: Option<u64>,
 ) -> serde_json::Value {
     gemini_generation_config_from_request(original, chat, model, thinking_budget_tokens)
+}
+
+pub fn gemini_provider_core_validate_candidate_count(
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    crate::translators::gemini_validate_candidate_count(value)
 }
 
 pub fn gemini_provider_core_generate_content_request_map(

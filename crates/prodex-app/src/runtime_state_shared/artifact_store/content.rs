@@ -8,6 +8,8 @@ use super::super::{RuntimeSmartContextArtifactChunkIndex, RuntimeSmartContextArt
 use super::RuntimeSmartContextArtifactStore;
 #[cfg(test)]
 use super::RuntimeSmartContextStaticFingerprintMetadata;
+#[cfg(not(test))]
+use super::types::RuntimeSmartContextStaticFingerprintMetadata;
 
 impl RuntimeSmartContextArtifactStore {
     #[cfg(test)]
@@ -15,7 +17,6 @@ impl RuntimeSmartContextArtifactStore {
         self.artifacts.len()
     }
 
-    #[cfg(test)]
     pub(crate) fn set_static_context_fingerprints(
         &mut self,
         prompt_cache_hash: Option<String>,
@@ -37,7 +38,6 @@ impl RuntimeSmartContextArtifactStore {
             .collect();
     }
 
-    #[cfg(test)]
     pub(crate) fn static_context_fingerprints(
         &self,
     ) -> Vec<runtime_proxy_crate::SmartContextFingerprint> {
@@ -52,7 +52,6 @@ impl RuntimeSmartContextArtifactStore {
             .collect()
     }
 
-    #[cfg(test)]
     pub(crate) fn static_context_prompt_cache_hash(&self) -> Option<&str> {
         self.static_context_prompt_cache_hash.as_deref()
     }

@@ -60,7 +60,7 @@ pub use self::leaks::{
 pub use self::live::{
     GEMINI_PROVIDER_CORE_LIVE_AUDIO_RATE, GeminiProviderCoreLiveAudioConfig,
     GeminiProviderCoreLiveAudioFormat, GeminiProviderCoreLiveAudioPayload,
-    gemini_provider_core_live_audio_config_from_value,
+    GeminiProviderCoreLiveSessionUpdate, gemini_provider_core_live_audio_config_from_value,
     gemini_provider_core_live_audio_rate_from_mime,
     gemini_provider_core_live_audio_stream_end_message,
     gemini_provider_core_live_binary_frame_error, gemini_provider_core_live_client_content_message,
@@ -85,10 +85,11 @@ pub use self::live::{
     gemini_provider_core_live_response_cancelled_event,
     gemini_provider_core_live_response_created_event,
     gemini_provider_core_live_response_done_event, gemini_provider_core_live_server_turn_complete,
-    gemini_provider_core_live_session_audio_config,
-    gemini_provider_core_live_session_updated_event, gemini_provider_core_live_setup_message,
-    gemini_provider_core_live_tool_response_message, gemini_provider_core_live_transcript_delta,
-    gemini_provider_core_live_transcription_text,
+    gemini_provider_core_live_session_audio_config, gemini_provider_core_live_session_update,
+    gemini_provider_core_live_session_updated_event,
+    gemini_provider_core_live_session_updated_event_with_options,
+    gemini_provider_core_live_setup_message, gemini_provider_core_live_tool_response_message,
+    gemini_provider_core_live_transcript_delta, gemini_provider_core_live_transcription_text,
     gemini_provider_core_live_unsupported_event_error,
 };
 pub use self::media::{
@@ -105,10 +106,9 @@ pub use self::precommit::{
     gemini_provider_core_precommit_decision_for_data_lines,
 };
 pub use self::request::{
-    gemini_provider_core_builtin_tools_from_request,
     gemini_provider_core_exact_output_generate_chunk, gemini_provider_core_exact_output_sse_stream,
-    gemini_provider_core_function_declaration_from_openai_tool,
     gemini_provider_core_function_tools_from_chat,
+    gemini_provider_core_function_tools_from_chat_checked,
     gemini_provider_core_generate_content_body_value,
     gemini_provider_core_generate_content_request,
     gemini_provider_core_generate_content_request_map,
@@ -116,7 +116,9 @@ pub use self::request::{
     gemini_provider_core_native_request_body_with_project, gemini_provider_core_request_body,
     gemini_provider_core_request_body_without_tool, gemini_provider_core_sanitize_function_schema,
     gemini_provider_core_simple_request, gemini_provider_core_tool_config_from_request,
-    gemini_provider_core_tools_from_requests, gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_tools_from_requests, gemini_provider_core_tools_from_requests_checked,
+    gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_validate_candidate_count, gemini_provider_core_validate_request_tools,
 };
 pub use self::response::{
     gemini_provider_core_buffered_responses_value,

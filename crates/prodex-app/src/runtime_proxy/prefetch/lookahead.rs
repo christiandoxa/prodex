@@ -17,6 +17,7 @@ async fn inspect_runtime_sse_lookahead(
     let deadline =
         Instant::now() + Duration::from_millis(prefetch.shared.config.lookahead_timeout_ms);
     let mut buffered = Vec::new();
+    let mut upstream_eof = false;
 
     while buffered.len() < RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
         let now = Instant::now();
@@ -33,7 +34,10 @@ async fn inspect_runtime_sse_lookahead(
                     return Ok(inspection);
                 }
             }
-            Ok(RuntimePrefetchChunk::End) => break,
+            Ok(RuntimePrefetchChunk::End) => {
+                upstream_eof = true;
+                break;
+            }
             Ok(RuntimePrefetchChunk::Error(kind, message)) => {
                 if buffered.is_empty() {
                     runtime_proxy_log_to_path(
@@ -66,20 +70,29 @@ async fn inspect_runtime_sse_lookahead(
                         buffered.len()
                     ),
                 );
+                if buffered.is_empty() {
+                    return Err(anyhow::Error::new(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "runtime SSE prefetch channel disconnected before EOF",
+                    ))
+                    .context("failed to inspect runtime auto-rotate SSE stream"));
+                }
                 break;
             }
         }
     }
 
-    runtime_sse_lookahead_finish(buffered, log_path, request_id)
+    runtime_sse_lookahead_finish(buffered, log_path, request_id, upstream_eof)
 }
 
 fn runtime_sse_lookahead_finish(
     buffered: Vec<u8>,
     log_path: &Path,
     request_id: u64,
+    upstream_eof: bool,
 ) -> Result<RuntimeSseInspection> {
-    match inspect_runtime_sse_buffer(&buffered) {
+    let progress = runtime_sse_lookahead_boundary_progress(&buffered, upstream_eof);
+    match progress {
         RuntimeSseInspectionProgress::Commit {
             response_ids,
             turn_state,
@@ -111,6 +124,17 @@ fn runtime_sse_lookahead_finish(
         RuntimeSseInspectionProgress::PreviousResponseNotFound => {
             Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered))
         }
+    }
+}
+
+fn runtime_sse_lookahead_boundary_progress(
+    buffered: &[u8],
+    upstream_eof: bool,
+) -> RuntimeSseInspectionProgress {
+    if upstream_eof {
+        runtime_proxy_crate::inspect_runtime_sse_buffer_at_eof(buffered)
+    } else {
+        inspect_runtime_sse_buffer(buffered)
     }
 }
 
@@ -181,4 +205,29 @@ pub(crate) async fn inspect_runtime_sse_lookahead_async(
 ) -> Result<(RuntimeSseInspection, RuntimePrefetchStream)> {
     let inspection = inspect_runtime_sse_lookahead(&mut prefetch, &log_path, request_id).await?;
     Ok((inspection, prefetch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_sse_lookahead_boundary_progress;
+    use crate::runtime_proxy::RuntimeSseInspectionProgress;
+
+    const PARTIAL_QUOTA_EVENT: &[u8] =
+        br#"data: {"type":"response.failed","response":{"error":{"code":"insufficient_quota"}}}"#;
+
+    #[test]
+    fn timeout_or_budget_boundary_does_not_finalize_partial_sse_event() {
+        assert!(matches!(
+            runtime_sse_lookahead_boundary_progress(PARTIAL_QUOTA_EVENT, false),
+            RuntimeSseInspectionProgress::Hold { .. }
+        ));
+    }
+
+    #[test]
+    fn true_upstream_eof_finalizes_partial_sse_event() {
+        assert!(matches!(
+            runtime_sse_lookahead_boundary_progress(PARTIAL_QUOTA_EVENT, true),
+            RuntimeSseInspectionProgress::QuotaBlocked
+        ));
+    }
 }

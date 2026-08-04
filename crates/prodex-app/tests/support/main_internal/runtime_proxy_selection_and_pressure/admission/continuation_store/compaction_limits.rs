@@ -20,6 +20,7 @@ fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
         response_profile_bindings.insert(
             format!("resp-{index:06}"),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - (RESPONSE_PROFILE_BINDING_LIMIT + 1) as i64 + index as i64,
             },
@@ -99,6 +100,7 @@ fn runtime_continuation_store_compaction_prunes_response_statuses_to_limit() {
         response_profile_bindings.insert(
             response_id.clone(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 1_000 + index as i64,
             },
@@ -135,7 +137,8 @@ fn runtime_continuation_store_compaction_prunes_response_statuses_to_limit() {
     response_profile_bindings.insert(
         "resp-hot".to_string(),
         ResponseProfileBinding {
-            profile_name: "main".to_string(),
+            binding_identity: None,
+                profile_name: "main".to_string(),
             bound_at: now - 2_000,
         },
     );
@@ -188,21 +191,24 @@ fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_c
                 (
                     "resp-hot".to_string(),
                     ResponseProfileBinding {
-                        profile_name: "main".to_string(),
+                        binding_identity: None,
+                profile_name: "main".to_string(),
                         bound_at: now - 3,
                     },
                 ),
                 (
                     "resp-cold-1".to_string(),
                     ResponseProfileBinding {
-                        profile_name: "main".to_string(),
+                        binding_identity: None,
+                profile_name: "main".to_string(),
                         bound_at: now - 2,
                     },
                 ),
                 (
                     "resp-cold-2".to_string(),
                     ResponseProfileBinding {
-                        profile_name: "main".to_string(),
+                        binding_identity: None,
+                profile_name: "main".to_string(),
                         bound_at: now - 1,
                     },
                 ),

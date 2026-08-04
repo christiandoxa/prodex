@@ -83,6 +83,96 @@ fn sqlite_enterprise_migrator_bootstraps_legacy_current_schema() {
 }
 
 #[test]
+fn sqlite_enterprise_migrator_recovers_preapplied_reason_detail_column() {
+    let root = temp_dir("preapplied-reason-detail");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.sqlite");
+    let conn = Connection::open(&path).unwrap();
+    let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator).unwrap();
+    for migration in plan.migrations.iter().take(13) {
+        conn.execute_batch(migration.sql).unwrap();
+    }
+    conn.execute_batch("ALTER TABLE prodex_audit_log ADD COLUMN reason_detail TEXT;")
+        .unwrap();
+    drop(conn);
+
+    assert_eq!(
+        runtime_gateway_sqlite_migrate_enterprise_state(&path).unwrap(),
+        1
+    );
+    let conn = Connection::open(&path).unwrap();
+    let max_version: i64 = conn
+        .query_row(
+            "SELECT MAX(version) FROM prodex_enterprise_schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(max_version, i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0));
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sqlite_enterprise_migrator_replays_partial_reason_detail_triggers() {
+    let root = temp_dir("partial-reason-detail-triggers");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.sqlite");
+    let conn = Connection::open(&path).unwrap();
+    let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator).unwrap();
+    for migration in plan.migrations.iter().take(14) {
+        conn.execute_batch(migration.sql).unwrap();
+    }
+    conn.execute_batch(
+        "CREATE TRIGGER prodex_audit_reason_detail_byte_limit_insert
+         BEFORE INSERT ON prodex_audit_log
+         WHEN NEW.reason_detail IS NOT NULL
+           AND length(CAST(NEW.reason_detail AS BLOB)) > 512
+         BEGIN
+             SELECT RAISE(ABORT, 'reason_detail exceeds 512 bytes');
+         END;",
+    )
+    .unwrap();
+    drop(conn);
+
+    assert_eq!(
+        runtime_gateway_sqlite_migrate_enterprise_state(&path).unwrap(),
+        1
+    );
+    let conn = Connection::open(&path).unwrap();
+    let update_trigger: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name = 'prodex_audit_reason_detail_byte_limit_update'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(update_trigger, 1);
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sqlite_enterprise_migrator_recovers_empty_ledger_for_existing_schema() {
+    let root = temp_dir("empty-ledger");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.sqlite");
+    runtime_gateway_sqlite_migrate_enterprise_state(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("DELETE FROM prodex_enterprise_schema_migrations", [])
+        .unwrap();
+    drop(conn);
+
+    assert_eq!(
+        runtime_gateway_sqlite_migrate_enterprise_state(&path).unwrap(),
+        0
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn sqlite_enterprise_migrator_rejects_partial_siem_outbox_leasing_shape() {
     let root = temp_dir("partial-siem-leasing");
     std::fs::create_dir_all(&root).unwrap();

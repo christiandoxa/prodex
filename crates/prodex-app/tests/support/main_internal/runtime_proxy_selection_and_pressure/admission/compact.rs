@@ -312,7 +312,8 @@ fn compact_final_failure_logs_quota_terminal_reason() {
             session_id_bindings: BTreeMap::from([(
                 "sess-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
                 },
             )]),
@@ -407,7 +408,8 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
             session_id_bindings: BTreeMap::from([(
                 "sess-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
                 },
             )]),

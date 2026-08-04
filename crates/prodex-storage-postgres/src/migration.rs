@@ -19,7 +19,7 @@ pub struct PostgresMigration {
     pub sql: &'static str,
 }
 
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(18);
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(20);
 
 pub const CONFIG_PUBLICATION_TRANSPORT_MIGRATION: PostgresMigration = PostgresMigration {
     version: PostgresMigrationVersion(14),

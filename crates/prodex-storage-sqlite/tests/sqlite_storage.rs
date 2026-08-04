@@ -18,15 +18,16 @@ use prodex_storage::{
     UserLifecycleKind, VirtualKeySecretReferenceCommand, VirtualKeySecretReferenceKind,
 };
 use prodex_storage_sqlite::{
-    INITIAL_LOCAL_ACCOUNTING_MIGRATION, REQUIRED_SQLITE_SCHEMA_VERSION,
-    SQLITE_APPEND_AUDIT_STATEMENT, SQLITE_ATOMIC_RESERVATION_STATEMENT,
-    SQLITE_COMPLETE_IDEMPOTENCY_RECORD_STATEMENT, SQLITE_DELETE_USER_LIFECYCLE_STATEMENT,
-    SQLITE_GRANT_ROLE_BINDING_STATEMENT, SQLITE_INSERT_IDEMPOTENCY_PENDING_STATEMENT,
-    SQLITE_LOOKUP_IDEMPOTENCY_RECORD_STATEMENT, SQLITE_MIGRATIONS,
-    SQLITE_PURGE_AUDIT_RETENTION_STATEMENT, SQLITE_QUERY_AUDIT_EXPORT_DESC_STATEMENT,
-    SQLITE_QUERY_BILLING_LEDGER_DESC_STATEMENT, SQLITE_RECONCILE_USAGE_STATEMENT,
-    SQLITE_RECOVER_EXPIRED_RESERVATION_STATEMENT, SQLITE_REVOKE_ROLE_BINDING_STATEMENT,
-    SQLITE_UPSERT_BUDGET_POLICY_STATEMENT, SQLITE_UPSERT_PROVIDER_CREDENTIAL_REFERENCE_STATEMENT,
+    INITIAL_LOCAL_ACCOUNTING_MIGRATION, LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION,
+    REQUIRED_SQLITE_SCHEMA_VERSION, SQLITE_APPEND_AUDIT_STATEMENT,
+    SQLITE_ATOMIC_RESERVATION_STATEMENT, SQLITE_COMPLETE_IDEMPOTENCY_RECORD_STATEMENT,
+    SQLITE_DELETE_USER_LIFECYCLE_STATEMENT, SQLITE_GRANT_ROLE_BINDING_STATEMENT,
+    SQLITE_INSERT_IDEMPOTENCY_PENDING_STATEMENT, SQLITE_LOOKUP_IDEMPOTENCY_RECORD_STATEMENT,
+    SQLITE_MIGRATIONS, SQLITE_PURGE_AUDIT_RETENTION_STATEMENT,
+    SQLITE_QUERY_AUDIT_EXPORT_DESC_STATEMENT, SQLITE_QUERY_BILLING_LEDGER_DESC_STATEMENT,
+    SQLITE_RECONCILE_USAGE_STATEMENT, SQLITE_RECOVER_EXPIRED_RESERVATION_STATEMENT,
+    SQLITE_REVOKE_ROLE_BINDING_STATEMENT, SQLITE_UPSERT_BUDGET_POLICY_STATEMENT,
+    SQLITE_UPSERT_PROVIDER_CREDENTIAL_REFERENCE_STATEMENT,
     SQLITE_UPSERT_SERVICE_IDENTITY_STATEMENT, SQLITE_UPSERT_TENANT_LIFECYCLE_STATEMENT,
     SQLITE_UPSERT_USER_LIFECYCLE_STATEMENT, SQLITE_UPSERT_VIRTUAL_KEY_SECRET_REFERENCE_STATEMENT,
     SqliteBackendOpenMode, SqliteMigrationVersion, SqliteRuntimeMode, SqliteStorageErrorStatus,
@@ -41,7 +42,14 @@ use prodex_storage_sqlite::{
     plan_sqlite_usage_reconciliation, plan_sqlite_user_lifecycle,
     plan_sqlite_virtual_key_secret_reference, statement_contains_ddl,
 };
+use rusqlite::OptionalExtension;
 use std::sync::{Arc, Barrier};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SqliteReservationWriteOutcome {
+    Applied,
+    Replayed,
+}
 
 fn command(tenant_id: TenantId) -> AtomicReservationCommand {
     let call_id = CallId::new();
@@ -66,12 +74,14 @@ fn create_sqlite_schema(path: &std::path::Path) {
     let conn = rusqlite::Connection::open(path).expect("sqlite database should open");
     conn.execute_batch(INITIAL_LOCAL_ACCOUNTING_MIGRATION.sql)
         .expect("sqlite schema should apply");
+    conn.execute_batch(LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION.sql)
+        .expect("sqlite reservation migration should apply");
 }
 
 fn execute_sqlite_atomic_reservation(
     path: &std::path::Path,
     command: &AtomicReservationCommand,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<SqliteReservationWriteOutcome> {
     let plan = plan_sqlite_atomic_reservation(command.clone())
         .expect("sqlite reservation plan should build");
     let mut conn = rusqlite::Connection::open(path).expect("sqlite database should open");
@@ -79,11 +89,7 @@ fn execute_sqlite_atomic_reservation(
     let _ = conn.pragma_update(None, "journal_mode", "WAL");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let tenant_id = plan.tenant_id.to_string();
-    let storage_scope = command
-        .storage_key
-        .virtual_key_id
-        .map(|id| format!("virtual_key:{id}"))
-        .unwrap_or_else(|| "tenant-default".to_string());
+    let storage_scope = command.storage_key.storage_scope();
     let virtual_key_id = command.storage_key.virtual_key_id.map(|id| id.to_string());
     let reserved = command.request.estimate;
     let updated = command.created_at_unix_ms;
@@ -91,91 +97,200 @@ fn execute_sqlite_atomic_reservation(
     let reservation_id = command.request.reservation_id.to_string();
     let call_id = command.request.call_id.to_string();
     let ledger_event_id = prodex_domain::RequestId::new().to_string();
+    let mut statements = SQLITE_ATOMIC_RESERVATION_STATEMENT
+        .sql
+        .split(';')
+        .filter(|statement| !statement.trim().is_empty());
     let changed = tx.execute(
-        r#"
-INSERT INTO prodex_budget_counters (
-    tenant_id,
-    storage_scope,
-    virtual_key_id,
-    reserved_tokens,
-    reserved_cost_micros,
-    committed_tokens,
-    committed_cost_micros,
-    updated_at_unix_ms
-) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)
-ON CONFLICT(tenant_id, storage_scope) DO UPDATE SET
-    reserved_tokens = reserved_tokens + excluded.reserved_tokens,
-    reserved_cost_micros = reserved_cost_micros + excluded.reserved_cost_micros,
-    updated_at_unix_ms = excluded.updated_at_unix_ms
-WHERE prodex_budget_counters.tenant_id = excluded.tenant_id
-  AND prodex_budget_counters.reserved_tokens + prodex_budget_counters.committed_tokens + excluded.reserved_tokens <= ?7
-  AND prodex_budget_counters.reserved_cost_micros + prodex_budget_counters.committed_cost_micros + excluded.reserved_cost_micros <= ?8
-"#,
+        statements.next().expect("reservation counter statement"),
         rusqlite::params![
-            tenant_id,
-            storage_scope,
-            virtual_key_id,
+            tenant_id.as_str(),
+            storage_scope.as_str(),
+            virtual_key_id.as_deref(),
             reserved.tokens as i64,
             reserved.cost_micros as i64,
             updated as i64,
             command.limit.max.tokens as i64,
             command.limit.max.cost_micros as i64,
+            reservation_id.as_str(),
+            call_id.as_str(),
+            command.idempotency_key.as_str(),
         ],
     )?;
     if changed == 0 {
+        let stored = tx
+            .query_row(
+                "SELECT storage_scope, reservation_id, call_id, virtual_key_id,
+                        idempotency_key, reserved_tokens, reserved_cost_micros,
+                        created_at_unix_ms, expires_at_unix_ms
+                 FROM prodex_reservations
+                 WHERE tenant_id = ?1
+                   AND (
+                       reservation_id = ?2
+                       OR call_id = ?3
+                       OR idempotency_key = ?4
+                   )",
+                rusqlite::params![
+                    tenant_id,
+                    reservation_id,
+                    call_id,
+                    command.idempotency_key.as_str(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if stored.is_some_and(|stored| {
+            stored.0 == storage_scope
+                && stored.1 == reservation_id
+                && stored.2 == call_id
+                && stored.3 == virtual_key_id
+                && stored.4 == command.idempotency_key.as_str()
+                && stored.5 == reserved.tokens as i64
+                && stored.6 == reserved.cost_micros as i64
+                && stored.7 == updated as i64
+                && stored.8 == expires_at as i64
+        }) {
+            tx.commit()?;
+            return Ok(SqliteReservationWriteOutcome::Replayed);
+        }
         return Err(rusqlite::Error::StatementChangedRows(0));
     }
-    tx.execute(
-        r#"
-INSERT OR IGNORE INTO prodex_reservations (
-    tenant_id,
-    reservation_id,
-    call_id,
-    virtual_key_id,
-    idempotency_key,
-    reserved_tokens,
-    reserved_cost_micros,
-    created_at_unix_ms,
-    expires_at_unix_ms
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-"#,
-        rusqlite::params![
-            plan.tenant_id.to_string(),
-            reservation_id,
-            call_id,
-            command.storage_key.virtual_key_id.map(|id| id.to_string()),
-            command.idempotency_key.as_str(),
-            reserved.tokens as i64,
-            reserved.cost_micros as i64,
-            updated as i64,
-            expires_at as i64,
-        ],
-    )?;
-    tx.execute(
-        r#"
-INSERT OR IGNORE INTO prodex_usage_ledger (
-    tenant_id,
-    ledger_event_id,
-    reservation_id,
-    call_id,
-    event_kind,
-    tokens,
-    cost_micros,
-    occurred_at_unix_ms
-) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7)
-"#,
-        rusqlite::params![
-            plan.tenant_id.to_string(),
-            ledger_event_id,
-            reservation_id,
-            call_id,
-            reserved.tokens as i64,
-            reserved.cost_micros as i64,
-            updated as i64,
-        ],
-    )?;
+    for (index, statement) in statements.enumerate() {
+        let params = if index == 0 {
+            rusqlite::params![
+                tenant_id.as_str(),
+                storage_scope.as_str(),
+                virtual_key_id.as_deref(),
+                reserved.tokens as i64,
+                reserved.cost_micros as i64,
+                updated as i64,
+                command.limit.max.tokens as i64,
+                command.limit.max.cost_micros as i64,
+                reservation_id.as_str(),
+                call_id.as_str(),
+                command.idempotency_key.as_str(),
+                expires_at as i64,
+            ]
+        } else {
+            rusqlite::params![
+                tenant_id.as_str(),
+                storage_scope.as_str(),
+                virtual_key_id.as_deref(),
+                reserved.tokens as i64,
+                reserved.cost_micros as i64,
+                updated as i64,
+                command.limit.max.tokens as i64,
+                command.limit.max.cost_micros as i64,
+                reservation_id.as_str(),
+                call_id.as_str(),
+                command.idempotency_key.as_str(),
+                expires_at as i64,
+                ledger_event_id.as_str(),
+            ]
+        };
+        tx.execute(statement, params)?;
+    }
     tx.commit()?;
-    Ok(())
+    Ok(SqliteReservationWriteOutcome::Applied)
+}
+
+fn execute_sqlite_reconciliation(
+    path: &std::path::Path,
+    command: &UsageReconciliationCommand,
+    occurred_at_unix_ms: u64,
+) -> rusqlite::Result<()> {
+    let plan = plan_sqlite_usage_reconciliation(command.clone())
+        .expect("sqlite reconciliation plan should build");
+    let mut connection = rusqlite::Connection::open(path).expect("sqlite database should open");
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let tenant_id = plan.tenant_id.to_string();
+    let reservation_id = command.record.reservation_id.to_string();
+    let call_id = command.record.call_id.to_string();
+    let storage_scope = command.storage_key.storage_scope();
+    let reserved = command.record.reserved;
+    let actual = command.actual;
+    let released = reserved.saturating_sub(actual);
+    let updated = occurred_at_unix_ms as i64;
+    let committed_ledger_event_id = prodex_domain::RequestId::new().to_string();
+    let released_ledger_event_id = prodex_domain::RequestId::new().to_string();
+    let mut statements = SQLITE_RECONCILE_USAGE_STATEMENT
+        .sql
+        .split(';')
+        .filter(|statement| !statement.trim().is_empty());
+
+    for (index, statement) in std::iter::once(statements.next().expect("counter statement"))
+        .chain(statements)
+        .enumerate()
+    {
+        let params = match index {
+            0 => rusqlite::params![
+                tenant_id.as_str(),
+                reservation_id.as_str(),
+                call_id.as_str(),
+                reserved.tokens as i64,
+                reserved.cost_micros as i64,
+                actual.tokens as i64,
+                actual.cost_micros as i64,
+                updated,
+                storage_scope.as_str(),
+                0_i64,
+                0_i64,
+                0_i64,
+                0_i64,
+                command.storage_key.virtual_key_id.map(|id| id.to_string()),
+                command.record.created_at_unix_ms as i64,
+                command.record.expires_at_unix_ms as i64,
+            ],
+            1 => rusqlite::params![
+                tenant_id.as_str(),
+                reservation_id.as_str(),
+                call_id.as_str(),
+                reserved.tokens as i64,
+                reserved.cost_micros as i64,
+                actual.tokens as i64,
+                actual.cost_micros as i64,
+                updated,
+                storage_scope.as_str(),
+                released.tokens as i64,
+                released.cost_micros as i64,
+                "unused-committed-id",
+                "unused-released-id",
+                command.storage_key.virtual_key_id.map(|id| id.to_string()),
+                command.record.created_at_unix_ms as i64,
+                command.record.expires_at_unix_ms as i64,
+            ],
+            _ => rusqlite::params![
+                tenant_id.as_str(),
+                reservation_id.as_str(),
+                call_id.as_str(),
+                reserved.tokens as i64,
+                reserved.cost_micros as i64,
+                actual.tokens as i64,
+                actual.cost_micros as i64,
+                updated,
+                storage_scope.as_str(),
+                released.tokens as i64,
+                released.cost_micros as i64,
+                committed_ledger_event_id.as_str(),
+                released_ledger_event_id.as_str(),
+            ],
+        };
+        transaction.execute(statement, params)?;
+    }
+    transaction.commit()
 }
 
 #[test]
@@ -594,6 +709,18 @@ fn sqlite_reservation_plan_uses_immediate_transaction_and_dml_only() {
             .sql
             .contains("INSERT OR IGNORE INTO prodex_usage_ledger")
     );
+    assert!(
+        SQLITE_ATOMIC_RESERVATION_STATEMENT
+            .sql
+            .contains("existing.call_id = ?10")
+    );
+    assert!(
+        SQLITE_ATOMIC_RESERVATION_STATEMENT
+            .sql
+            .matches("WHERE changes() = 1")
+            .count()
+            >= 2
+    );
 }
 
 #[test]
@@ -708,6 +835,86 @@ fn sqlite_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope()
     assert_eq!(reserved_tokens, 22);
     assert_eq!(reserved_cost_micros, 42);
 
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sqlite_atomic_reservation_replays_exactly_without_mutating_conflicts() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-storage-sqlite-reserve-replay-{}",
+        prodex_domain::RequestId::new()
+    ));
+    std::fs::create_dir_all(&root).expect("test root should be created");
+    let path = root.join("state.sqlite");
+    create_sqlite_schema(&path);
+    let tenant_id = TenantId::new();
+    rusqlite::Connection::open(&path)
+        .expect("sqlite database should open")
+        .execute(
+            "INSERT INTO prodex_tenants
+             (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms)
+             VALUES (?1, 'tenant', 1, 1)",
+            [tenant_id.to_string()],
+        )
+        .expect("tenant row should insert");
+
+    let original = command(tenant_id);
+    assert_eq!(
+        execute_sqlite_atomic_reservation(&path, &original).unwrap(),
+        SqliteReservationWriteOutcome::Applied
+    );
+    let before: (i64, i64, i64, i64) = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT
+                 (SELECT reserved_tokens FROM prodex_budget_counters),
+                 (SELECT reserved_cost_micros FROM prodex_budget_counters),
+                 (SELECT COUNT(*) FROM prodex_reservations),
+                 (SELECT COUNT(*) FROM prodex_usage_ledger)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+
+    assert_eq!(
+        execute_sqlite_atomic_reservation(&path, &original).unwrap(),
+        SqliteReservationWriteOutcome::Replayed
+    );
+
+    let mut idempotency_conflict = original.clone();
+    idempotency_conflict.request.call_id = CallId::new();
+    idempotency_conflict.request.reservation_id = ReservationId::new();
+    idempotency_conflict.request.estimate = UsageAmount::new(26, 260);
+    assert!(matches!(
+        execute_sqlite_atomic_reservation(&path, &idempotency_conflict),
+        Err(rusqlite::Error::StatementChangedRows(0))
+    ));
+
+    let mut call_conflict = original.clone();
+    call_conflict.request.reservation_id = ReservationId::new();
+    call_conflict.idempotency_key = IdempotencyKey::from_call_reservation(
+        original.request.call_id,
+        call_conflict.request.reservation_id,
+    );
+    call_conflict.request.estimate = UsageAmount::new(27, 270);
+    assert!(matches!(
+        execute_sqlite_atomic_reservation(&path, &call_conflict),
+        Err(rusqlite::Error::StatementChangedRows(0))
+    ));
+
+    let after: (i64, i64, i64, i64) = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT
+                 (SELECT reserved_tokens FROM prodex_budget_counters),
+                 (SELECT reserved_cost_micros FROM prodex_budget_counters),
+                 (SELECT COUNT(*) FROM prodex_reservations),
+                 (SELECT COUNT(*) FROM prodex_usage_ledger)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(after, before);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1443,6 +1650,151 @@ fn sqlite_idempotency_record_lookup_rejects_cross_tenant_storage_key() {
 }
 
 #[test]
+fn sqlite_usage_reconciliation_replays_without_mutating_conflicts() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-storage-sqlite-reconcile-replay-{}",
+        prodex_domain::RequestId::new()
+    ));
+    std::fs::create_dir_all(&root).expect("test root should be created");
+    let path = root.join("state.sqlite");
+    create_sqlite_schema(&path);
+    let tenant_id = TenantId::new();
+    let command = reconciliation_command(
+        tenant_id,
+        UsageAmount::new(100, 1_000),
+        UsageAmount::new(40, 400),
+    );
+    let storage_scope = command.storage_key.storage_scope();
+    let virtual_key_id = command.storage_key.virtual_key_id.map(|id| id.to_string());
+    let connection = rusqlite::Connection::open(&path).expect("sqlite database should open");
+    connection
+        .execute(
+            "INSERT INTO prodex_tenants
+             (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms)
+             VALUES (?1, 'tenant', 1, 1)",
+            [tenant_id.to_string()],
+        )
+        .expect("tenant row should insert");
+    connection
+        .execute(
+            "INSERT INTO prodex_budget_counters
+             (tenant_id, storage_scope, virtual_key_id, reserved_tokens,
+              reserved_cost_micros, committed_tokens, committed_cost_micros,
+              updated_at_unix_ms)
+             VALUES (?1, ?2, ?3, 100, 1000, 0, 0, 1000)",
+            rusqlite::params![tenant_id.to_string(), storage_scope, virtual_key_id],
+        )
+        .expect("counter row should insert");
+    connection
+        .execute(
+            "INSERT INTO prodex_reservations
+             (tenant_id, reservation_id, call_id, virtual_key_id, storage_scope,
+              idempotency_key, reserved_tokens, reserved_cost_micros,
+              created_at_unix_ms, expires_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'reconcile-1', 100, 1000, 1000, 61000)",
+            rusqlite::params![
+                tenant_id.to_string(),
+                command.record.reservation_id.to_string(),
+                command.record.call_id.to_string(),
+                virtual_key_id,
+                storage_scope,
+            ],
+        )
+        .expect("reservation row should insert");
+    drop(connection);
+
+    let mut mismatched_record = command.clone();
+    mismatched_record.record.reserved = UsageAmount::new(99, 999);
+    execute_sqlite_reconciliation(&path, &mismatched_record, 2_000)
+        .expect("mismatched replay should be harmless at the SQL layer");
+    let unchanged: (i64, i64, i64, i64) = rusqlite::Connection::open(&path)
+        .expect("sqlite database should reopen")
+        .query_row(
+            "SELECT reserved_tokens, reserved_cost_micros,
+                    committed_tokens, committed_cost_micros
+             FROM prodex_budget_counters",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("counter state should load");
+    assert_eq!(unchanged, (100, 1000, 0, 0));
+
+    for mismatch in [
+        {
+            let mut mismatch = command.clone();
+            mismatch.storage_key = TenantStorageKey::virtual_key(tenant_id, VirtualKeyId::new());
+            mismatch
+        },
+        {
+            let mut mismatch = command.clone();
+            mismatch.record.created_at_unix_ms += 1;
+            mismatch
+        },
+        {
+            let mut mismatch = command.clone();
+            mismatch.record.expires_at_unix_ms += 1;
+            mismatch
+        },
+    ] {
+        execute_sqlite_reconciliation(&path, &mismatch, 2_100)
+            .expect("exact reservation mismatch should be harmless at the SQL layer");
+        assert_eq!(
+            rusqlite::Connection::open(&path)
+                .expect("sqlite database should reopen")
+                .query_row(
+                    "SELECT reserved_tokens, reserved_cost_micros,
+                            committed_tokens, committed_cost_micros
+                     FROM prodex_budget_counters",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("counter state should load"),
+            (100, 1000, 0, 0)
+        );
+    }
+
+    execute_sqlite_reconciliation(&path, &command, 2_000).expect("reconciliation should apply");
+    let read_state = || {
+        rusqlite::Connection::open(&path)
+            .expect("sqlite database should reopen")
+            .query_row(
+                "SELECT
+                     (SELECT reserved_tokens FROM prodex_budget_counters),
+                     (SELECT reserved_cost_micros FROM prodex_budget_counters),
+                     (SELECT committed_tokens FROM prodex_budget_counters),
+                     (SELECT committed_cost_micros FROM prodex_budget_counters),
+                     (SELECT committed_at_unix_ms FROM prodex_reservations),
+                     (SELECT released_at_unix_ms FROM prodex_reservations),
+                     (SELECT COUNT(*) FROM prodex_usage_ledger)",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )
+    };
+    let applied = read_state().expect("applied state should load");
+    assert_eq!(applied, (0, 0, 40, 400, Some(2_000), Some(2_000), 2));
+
+    execute_sqlite_reconciliation(&path, &command, 3_000).expect("replay should be harmless");
+    assert_eq!(read_state().expect("replayed state should load"), applied);
+
+    let mut conflict = command.clone();
+    conflict.actual = UsageAmount::new(41, 400);
+    execute_sqlite_reconciliation(&path, &conflict, 4_000)
+        .expect("conflicting replay should be harmless at the SQL layer");
+    assert_eq!(read_state().expect("conflicted state should load"), applied);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn sqlite_usage_reconciliation_plan_uses_immediate_transaction_and_dml_only() {
     let tenant_id = TenantId::new();
     let plan = plan_sqlite_usage_reconciliation(reconciliation_command(
@@ -1498,6 +1850,12 @@ fn sqlite_usage_reconciliation_plan_omits_release_ledger_when_actual_equals_rese
     .unwrap();
 
     assert_eq!(plan.ledger_event_count, 1);
+    assert!(
+        SQLITE_RECONCILE_USAGE_STATEMENT
+            .sql
+            .contains("released_at_unix_ms")
+    );
+    assert!(SQLITE_RECONCILE_USAGE_STATEMENT.sql.contains("UNION ALL"));
 }
 
 #[test]

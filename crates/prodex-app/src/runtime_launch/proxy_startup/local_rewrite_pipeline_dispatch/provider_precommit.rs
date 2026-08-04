@@ -84,12 +84,11 @@ pub(super) fn runtime_local_rewrite_record_provider_metric(
     );
 }
 
-fn runtime_local_rewrite_provider_result_class(
+pub(super) fn runtime_local_rewrite_provider_result_class(
     status: u16,
 ) -> prodex_observability::ProviderResultClass {
     match status {
         200..=399 => prodex_observability::ProviderResultClass::Success,
-        429 => prodex_observability::ProviderResultClass::RateLimited,
         503 => prodex_observability::ProviderResultClass::Overloaded,
         _ => prodex_observability::ProviderResultClass::ProviderError,
     }
@@ -119,8 +118,17 @@ pub(super) fn runtime_local_rewrite_provider_fallback_class(
                 _ => None,
             }
         }
-        RuntimeLocalRewriteUpstreamResponse::Live(live) if !live.prefix.is_empty() => {
-            match crate::runtime_proxy::inspect_runtime_sse_buffer(&live.prefix) {
+        RuntimeLocalRewriteUpstreamResponse::Live(live)
+            if !live.prefix.is_empty()
+                && (live.upstream_eof
+                    || runtime_local_rewrite_sse_prefix_has_complete_event(&live.prefix)) =>
+        {
+            let progress = if live.upstream_eof {
+                runtime_proxy_crate::inspect_runtime_sse_buffer_at_eof(&live.prefix)
+            } else {
+                crate::runtime_proxy::inspect_runtime_sse_buffer(&live.prefix)
+            };
+            match progress {
                 runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked => {
                     let class = runtime_provider_error_class(provider, live.status, &live.prefix);
                     if matches!(
@@ -149,8 +157,8 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
     provider: RuntimeProviderBridgeKind,
     responses_route: bool,
     sse_lookahead_timeout_ms: u64,
-    stream_idle_timeout_ms: u64,
-    async_runtime: &Arc<tokio::runtime::Runtime>,
+    _stream_idle_timeout_ms: u64,
+    _async_runtime: &Arc<tokio::runtime::Runtime>,
     prefetch_slots: &Arc<tokio::sync::Semaphore>,
 ) -> anyhow::Result<()> {
     let RuntimeLocalRewriteUpstreamResponse::Live(live) = &mut response.response else {
@@ -163,31 +171,39 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
     let Ok(slot) = Arc::clone(prefetch_slots).try_acquire_owned() else {
         return Ok(());
     };
-    let mut prefetch = live.take_sse_prefetch(async_runtime, stream_idle_timeout_ms, slot)?;
+    let mut prefetch = live.take_sse_prefetch(Some(slot))?;
     let deadline = Instant::now() + Duration::from_millis(sse_lookahead_timeout_ms);
     let mut prefix = Vec::new();
+    let mut reached_upstream_end = false;
     while prefix.len() < crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
         match prefetch.recv_timeout(remaining) {
-            Ok(RuntimeLocalRewritePrefetchChunk::Data(mut chunk)) => {
+            Ok(RuntimeLocalRewritePrefetchChunk::Data(chunk)) => {
                 let remaining_bytes = crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len();
-                if chunk.len() > remaining_bytes {
+                let inspect_len = chunk.len().min(remaining_bytes);
+                let progress =
+                    runtime_local_rewrite_sse_chunk_progress(&prefix, &chunk[..inspect_len]);
+                let consumed = progress
+                    .as_ref()
+                    .map_or(inspect_len, |(_, consumed)| *consumed);
+                prefix.extend_from_slice(&chunk[..consumed]);
+                if consumed < chunk.len() {
                     prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::Data(
-                        chunk.split_off(remaining_bytes),
+                        chunk[consumed..].to_vec(),
                     ));
                 }
-                prefix.extend_from_slice(&chunk);
-                if !matches!(
-                    crate::runtime_proxy::inspect_runtime_sse_buffer(&prefix),
-                    runtime_proxy_crate::RuntimeSseInspectionProgress::Hold { .. }
-                ) {
+                if progress.is_some() || consumed == remaining_bytes {
                     break;
                 }
             }
-            Ok(RuntimeLocalRewritePrefetchChunk::End) => break,
+            Ok(RuntimeLocalRewritePrefetchChunk::End) => {
+                reached_upstream_end = true;
+                prefetch.push_backlog(RuntimeLocalRewritePrefetchChunk::End);
+                break;
+            }
             Ok(RuntimeLocalRewritePrefetchChunk::Error(kind, message)) => {
                 if prefix.is_empty() {
                     return Err(anyhow::Error::new(std::io::Error::new(kind, message))
@@ -197,12 +213,20 @@ pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
                 break;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                break;
+            }
         }
     }
     live.prefix = prefix;
+    live.upstream_eof = reached_upstream_end;
     live.set_sse_continuation(prefetch);
     Ok(())
+}
+
+fn runtime_local_rewrite_sse_prefix_has_complete_event(prefix: &[u8]) -> bool {
+    prefix.windows(2).any(|window| window == b"\n\n")
+        || prefix.windows(4).any(|window| window == b"\r\n\r\n")
 }
 
 fn runtime_local_rewrite_should_prefetch_provider_response(
@@ -225,4 +249,50 @@ fn runtime_local_rewrite_should_prefetch_provider_response(
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
         && live.prefix.is_empty()
+}
+
+fn runtime_local_rewrite_sse_event_progress(
+    event: runtime_proxy_crate::RuntimeParsedSseEvent,
+) -> Option<runtime_proxy_crate::RuntimeSseInspectionProgress> {
+    if event.quota_blocked {
+        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked);
+    }
+    if event.overloaded {
+        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded);
+    }
+    if event.previous_response_not_found {
+        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::PreviousResponseNotFound);
+    }
+    (!event
+        .event_type
+        .as_deref()
+        .is_some_and(runtime_proxy_crate::runtime_proxy_precommit_hold_event_kind))
+    .then_some(runtime_proxy_crate::RuntimeSseInspectionProgress::Commit {
+        response_ids: event.response_ids,
+        turn_state: event.turn_state,
+    })
+}
+
+fn runtime_local_rewrite_sse_chunk_progress(
+    prefix: &[u8],
+    chunk: &[u8],
+) -> Option<(runtime_proxy_crate::RuntimeSseInspectionProgress, usize)> {
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    runtime_proxy_crate::runtime_sse_consume_chunk(&mut line, &mut data_lines, prefix, |_| {});
+    for (index, byte) in chunk.iter().enumerate() {
+        let mut progress = None;
+        runtime_proxy_crate::runtime_sse_consume_chunk(
+            &mut line,
+            &mut data_lines,
+            std::slice::from_ref(byte),
+            |event| {
+                progress = runtime_local_rewrite_sse_event_progress(event);
+            },
+        );
+        if let Some(progress) = progress {
+            return Some((progress, index + 1));
+        }
+    }
+    None
 }

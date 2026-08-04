@@ -113,6 +113,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
             },
@@ -120,6 +121,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
             },
@@ -280,6 +282,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         response_profile_bindings: BTreeMap::from([(
             "resp-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
             },
@@ -287,6 +290,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         session_profile_bindings: BTreeMap::from([(
             "sess-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
             },
@@ -445,6 +449,7 @@ fn runtime_state_selected_snapshot_preserves_unselected_sections() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
             },
@@ -452,6 +457,7 @@ fn runtime_state_selected_snapshot_preserves_unselected_sections() {
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
             },
@@ -681,6 +687,7 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
         response_profile_bindings: BTreeMap::from([(
             "resp-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },

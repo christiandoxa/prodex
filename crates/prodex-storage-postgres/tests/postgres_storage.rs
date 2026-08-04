@@ -819,6 +819,7 @@ fn append_only_audit_plan_uses_rls_tenant_context_and_no_ddl() {
             .sql
             .contains("ON CONFLICT (tenant_id, audit_event_id) DO NOTHING")
     );
+    assert!(APPEND_AUDIT_STATEMENT.sql.contains("reason_detail"));
     assert!(APPEND_AUDIT_STATEMENT.sql.contains("RETURNING tenant_id"));
 }
 
@@ -899,6 +900,11 @@ fn audit_export_query_plan_uses_tenant_context_select_and_no_ddl() {
         QUERY_AUDIT_EXPORT_DESC_STATEMENT
             .sql
             .contains("ORDER BY occurred_at_unix_ms DESC")
+    );
+    assert!(
+        QUERY_AUDIT_EXPORT_DESC_STATEMENT
+            .sql
+            .contains("reason_detail")
     );
 }
 

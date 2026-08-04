@@ -830,7 +830,7 @@ impl PostgresRepository {
             .query(
                 "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
                         resource_kind, resource_id, outcome, reason_code,
-                        previous_digest, event_digest
+                        reason_detail, previous_digest, event_digest
                  FROM prodex_audit_log WHERE tenant_id = $1",
                 &[&tenant_id.as_uuid()],
             )
@@ -886,7 +886,7 @@ impl PostgresRepository {
             .query(
                 "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
                         resource_kind, resource_id, outcome, reason_code,
-                        previous_digest, event_digest
+                        reason_detail, previous_digest, event_digest
                  FROM prodex_audit_log WHERE tenant_id = $1
                  ORDER BY occurred_at_unix_ms DESC, audit_event_id DESC LIMIT $2",
                 &[&tenant_id.as_uuid(), &i64::from(limit)],

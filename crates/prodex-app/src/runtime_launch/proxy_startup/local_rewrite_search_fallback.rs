@@ -1,4 +1,4 @@
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite::{RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_scope;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_transport::{
@@ -16,8 +16,9 @@ use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtim
 use anyhow::Result;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
+#[allow(clippy::large_enum_variant)]
 pub(super) enum RuntimeLocalRewritePreparedSendResult {
-    Live(reqwest::blocking::Response),
+    Live(RuntimeLocalRewriteAsyncResponse),
     Error {
         status: u16,
         parts: RuntimeHeapTrimmedBufferedResponseParts,

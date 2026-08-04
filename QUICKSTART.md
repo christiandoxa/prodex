@@ -134,6 +134,43 @@ prodex caveman
 prodex claude caveman
 ```
 
+Super sub-agents accept fresh and resumed Codex targets:
+
+```bash
+prodex s --sub-agent --no-presidio
+prodex s --presidio --sub-agent --sub-agent-provider kiro \
+  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max
+prodex s --sub-agent --sub-agent-provider local \
+  --sub-agent-url http://127.0.0.1:11434/v1 --sub-agent-model example-local-model \
+  --no-presidio
+prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9 --presidio --sub-agent \
+  --sub-agent-provider kiro --sub-agent-model gpt-5.6-luna \
+  --sub-agent-model-reasoning-effort max
+```
+
+The child uses `prodex s --no-sub-agent`, an explicit inherited Presidio choice,
+the selected provider/optional model, then optional `-c model_reasoning_effort=<value>`,
+then `exec <shell-safe-task>` in that order. OpenAI omits the provider flag;
+local uses `--url`; external providers use `--provider`. Parent UUIDs are never
+forwarded to children. Explicit `--sub-agent` skips the provider/model/effort
+wizard and uses provider defaults. See
+[Sub-agents](docs/sub-agents.md) for flags before/after a UUID, `--` handling,
+the recursion marker, all 17 generated `SUB_AGENTS.md` rules, TTY/non-TTY and
+dry-run behavior, native frontend rejection, bounded prompts, and overlay
+session access. The canonical providers are `openai`, `anthropic`, `copilot`,
+`deepseek`, `gemini`, `kiro`, and `local`; the public Kiro example requests
+`gpt-5.6-luna`/`max`, but the provider decides whether that model and effort
+are supported. Custom model IDs and documented reasoning-effort values are
+optional and are omitted when unset rather than copied from the parent. The interactive local URL
+prompt is prefilled with `http://127.0.0.1:11434/v1`; explicit and non-TTY
+local launches still require a URL. URL validation rejects credentials,
+queries, and fragments but does not prove endpoint trust or compatibility.
+Interactive order is Presidio, sub-agent opt-in, provider, model, effort, then
+local URL; non-TTY defaults disable both prompts. Native frontends reject the
+bridge. Parent UUIDs are not inherited, and local subprocess/A2A extension
+details are in the guide.
+
 ## 6. Select another provider
 
 Examples:
@@ -150,7 +187,8 @@ DEEPSEEK_API_KEY=example-key prodex s deepseek
 prodex s --url http://127.0.0.1:8131 --model local-model
 ```
 
-Provider routes and feature support differ. Check the generated
+Provider routes and feature support differ; adapter labels do not guarantee
+complete native-provider fidelity. Check the generated
 [provider matrix](docs/provider-capabilities.md) and local-model notes in
 [LOCAL.md](LOCAL.md).
 
@@ -174,7 +212,8 @@ prodex audit --tail 20
 ```
 
 Use `log_path` from the JSON output to inspect the active runtime log. Runtime
-notices are never printed over the Codex TUI.
+notices are never printed over the Codex TUI. `prodex audit` exposes local
+events; it is not immutable compliance retention or a disaster-recovery plan.
 
 If Prodex returns `409 stale_continuation`, resume with the original profile or
 start a new prompt. Prodex refuses an ambiguous cross-profile replay.
@@ -199,6 +238,7 @@ prodex claude --help
 - [README](README.md): product overview and safe defaults.
 - [Optional Tools](docs/optional-tools.md): exact external-tool contract.
 - [Smart Context](docs/smart-context.md): exact/shadow semantics and evidence.
+- [Sub-agents](docs/sub-agents.md): Super sub-agent command, rules, and execution boundaries.
 - [Runtime Policy](docs/runtime-policy.md): configuration and environment keys.
 - [Testing](docs/testing.md): contributor and operator checks.
 - [Documentation Index](docs/README.md): canonical document lifecycle.

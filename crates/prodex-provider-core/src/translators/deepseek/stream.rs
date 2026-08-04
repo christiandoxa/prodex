@@ -157,6 +157,22 @@ pub fn deepseek_provider_core_stream_tool_call_delta(
     }
 }
 
+pub fn deepseek_provider_core_incremental_tool_argument_delta(
+    _previous: &str,
+    incoming: &str,
+) -> Option<String> {
+    (!incoming.is_empty()).then(|| incoming.to_string())
+}
+
+pub const DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
+
+pub fn deepseek_provider_core_first_event_retry_allowed(
+    attempted_retries: u8,
+    first_event_committed: bool,
+) -> bool {
+    !first_event_committed && attempted_retries < DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT
+}
+
 pub fn deepseek_provider_core_stream_fallback_tool_call_id(
     provider_label: &str,
     request_id: u64,

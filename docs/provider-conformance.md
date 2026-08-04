@@ -57,6 +57,9 @@ Silent parameter dropping is not a valid conformance result.
 The generated matrix in [provider-capabilities.md](provider-capabilities.md)
 records endpoint status and request/response/stream fixture counts. A provider
 with upstream limitations must include an explicit non-lossless fixture.
+The matrix and fixtures prove the declared adapter cases and loss states only;
+they do not prove complete upstream provider semantic fidelity or native CLI
+behavior.
 
 Minimum coverage for a provider is:
 

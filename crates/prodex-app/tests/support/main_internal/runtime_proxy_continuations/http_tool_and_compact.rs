@@ -296,6 +296,7 @@ fn runtime_proxy_http_compact_response_turn_state_binds_followup_profile() {
         session_profile_bindings: BTreeMap::from([(
             runtime_compact_session_lineage_key("sess-compact-unary"),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -371,8 +372,10 @@ fn runtime_proxy_http_compact_response_turn_state_binds_followup_profile() {
     );
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| log.contains("compact_committed_owner")
-            && log.contains("compact_followup_profile=Some((\"second\", \"turn_state\"))"),
+        |log| {
+            log.contains("compact_committed_owner")
+                && log.contains("candidate=second pinned=None turn_state_profile=Some(\"second\")")
+        },
         2_000,
         5_000,
         20,
@@ -383,8 +386,102 @@ fn runtime_proxy_http_compact_response_turn_state_binds_followup_profile() {
         "compact unary response should record turn-state lineage: {log}"
     );
     assert!(
-        log.contains("compact_followup_profile=Some((\"second\", \"turn_state\"))"),
+        log.contains("candidate=second pinned=None turn_state_profile=Some(\"second\")"),
         "follow-up selection should use compact turn-state lineage: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_conflicting_response_and_turn_state_bindings_fail_before_upstream() {
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-conflict".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            turn_state_bindings: BTreeMap::from([(
+                "turn-conflict".to_string(),
+                ResponseProfileBinding {
+                    binding_identity: None,
+                profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save turn-state binding");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = reqwest::blocking::Client::new()
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-codex-turn-state", "turn-conflict")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-conflict",
+                "model": "gpt-5",
+                "input": [],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("conflicting request should receive a local response");
+
+    assert!(!response.status().is_success());
+    assert!(
+        backend.responses_accounts().is_empty(),
+        "conflicting hard-affinity keys must stop before upstream"
     );
 }
 
@@ -424,6 +521,7 @@ fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -536,6 +634,7 @@ fn runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_witho
         response_profile_bindings: BTreeMap::from([(
             "resp-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -659,6 +758,7 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
         session_profile_bindings: BTreeMap::from([(
             "sess-compact-v2".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -821,6 +921,7 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
         session_profile_bindings: BTreeMap::from([(
             runtime_compact_session_lineage_key("sess-compact"),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -840,7 +941,8 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
             turn_state_bindings: BTreeMap::from([(
                 "turn-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             )]),

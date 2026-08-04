@@ -12,8 +12,9 @@ use prodex_provider_spi::{
     ProviderRoute, ProviderRouteCapabilityCandidate, ProviderRouteError, ProviderRouteErrorStatus,
     ProviderStreamMode, evaluate_provider_retry, negotiate_provider_route_capability,
     plan_provider_capability_negotiation_error_response, plan_provider_circuit_breaker,
-    plan_provider_circuit_breaker_event, plan_provider_invocation_error_response,
-    plan_provider_retry, plan_provider_retry_decision_response, plan_provider_route_error_response,
+    plan_provider_circuit_breaker_event, plan_provider_first_event_retry,
+    plan_provider_invocation_error_response, plan_provider_retry,
+    plan_provider_retry_decision_response, plan_provider_route_error_response,
     validate_provider_invocation,
 };
 
@@ -312,6 +313,50 @@ fn provider_retry_plan_is_bounded_to_precommit_attempts() {
     );
     assert_eq!(committed.decision, ProviderRetryDecision::DeniedCommitted);
     assert_eq!(committed.remaining_precommit_retries, 1);
+}
+
+#[test]
+fn provider_first_event_retry_is_single_and_precommit_only() {
+    let allowed = plan_provider_first_event_retry(
+        ProviderRetryCause::NextProvider,
+        ProviderErrorClass::Transient,
+        0,
+        false,
+    );
+    assert_eq!(allowed.stage, ProviderRetryStage::BeforeFirstByte);
+    assert_eq!(allowed.decision, ProviderRetryDecision::Allowed);
+    assert_eq!(allowed.remaining_precommit_retries, 1);
+
+    let generic_429 = plan_provider_first_event_retry(
+        ProviderRetryCause::NextProvider,
+        ProviderErrorClass::Other,
+        0,
+        false,
+    );
+    assert_eq!(
+        generic_429.decision,
+        ProviderRetryDecision::DeniedNotRetryable
+    );
+
+    let exhausted = plan_provider_first_event_retry(
+        ProviderRetryCause::NextProvider,
+        ProviderErrorClass::Transient,
+        1,
+        false,
+    );
+    assert_eq!(
+        exhausted.decision,
+        ProviderRetryDecision::DeniedBudgetExhausted
+    );
+
+    let committed = plan_provider_first_event_retry(
+        ProviderRetryCause::NextProvider,
+        ProviderErrorClass::Transient,
+        0,
+        true,
+    );
+    assert_eq!(committed.stage, ProviderRetryStage::AfterFirstByte);
+    assert_eq!(committed.decision, ProviderRetryDecision::DeniedCommitted);
 }
 
 #[test]

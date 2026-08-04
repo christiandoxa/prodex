@@ -161,19 +161,16 @@ mod tests {
 
     #[test]
     fn prefetch_lookahead_commits_response_ids_and_turn_state() {
-        let (inspection, prefetch) = block_on_lookahead(
-            vec![RuntimePrefetchChunk::Data(
-                concat!(
-                    ": keep-alive\r\n",
-                    "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
-                    "\r\n"
-                )
-                .as_bytes()
-                .to_vec(),
-            )],
-            "commit",
+        let expected = concat!(
+            ": keep-alive\r\n",
+            "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
+            "\r\n"
         )
-        .expect("lookahead should inspect");
+        .as_bytes()
+        .to_vec();
+        let (inspection, prefetch) =
+            block_on_lookahead(vec![RuntimePrefetchChunk::Data(expected.clone())], "commit")
+                .expect("lookahead should inspect");
 
         match inspection {
             RuntimeSseInspection::Commit {
@@ -181,13 +178,36 @@ mod tests {
                 response_ids,
                 turn_state,
             } => {
-                assert!(String::from_utf8_lossy(&prelude).contains("response.completed"));
+                assert_eq!(prelude, expected);
                 assert_eq!(response_ids, vec!["resp-1".to_string()]);
                 assert_eq!(turn_state.as_deref(), Some("ts-1"));
             }
             other => panic!("expected commit, got {other:?}"),
         }
         assert_eq!(prefetch.shared.queued_bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn prefetch_lookahead_commits_on_first_output_event() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp-first\",\"delta\":\"hi\"}\r\n\r\n".to_vec(),
+            )],
+            "first-output-event",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit {
+                prelude,
+                response_ids,
+                ..
+            } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("response.output_text.delta"));
+                assert_eq!(response_ids, vec!["resp-first".to_string()]);
+            }
+            other => panic!("expected first output event to commit, got {other:?}"),
+        }
     }
 
     #[test]
@@ -254,9 +274,12 @@ mod tests {
     #[test]
     fn prefetch_lookahead_detects_previous_response_not_found_before_commit() {
         let (inspection, _prefetch) = block_on_lookahead(
-            vec![RuntimePrefetchChunk::Data(
-                b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}".to_vec(),
-            )],
+            vec![
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}".to_vec(),
+                ),
+                RuntimePrefetchChunk::End,
+            ],
             "previous-response-not-found",
         )
         .expect("lookahead should inspect");
@@ -289,11 +312,10 @@ mod tests {
 
     #[test]
     fn prefetch_lookahead_timeout_with_partial_hold_commits_buffered_prelude() {
+        let expected =
+            b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-partial\"}";
         let (inspection, _prefetch) = block_on_lookahead(
-            vec![RuntimePrefetchChunk::Data(
-                b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-partial\"}"
-                    .to_vec(),
-            )],
+            vec![RuntimePrefetchChunk::Data(expected.to_vec())],
             "partial-timeout",
         )
         .expect("lookahead should inspect");
@@ -304,8 +326,8 @@ mod tests {
                 response_ids,
                 turn_state,
             } => {
-                assert!(String::from_utf8_lossy(&prelude).contains("resp-partial"));
-                assert_eq!(response_ids, vec!["resp-partial".to_string()]);
+                assert_eq!(prelude, expected);
+                assert!(response_ids.is_empty());
                 assert_eq!(turn_state, None);
             }
             other => panic!("expected commit after hold timeout, got {other:?}"),
@@ -333,12 +355,11 @@ mod tests {
 
     #[test]
     fn prefetch_lookahead_error_after_prelude_preserves_error_backlog() {
+        let expected =
+            b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-before-error\"}";
         let (inspection, prefetch) = block_on_lookahead(
             vec![
-                RuntimePrefetchChunk::Data(
-                    b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-before-error\"}"
-                        .to_vec(),
-                ),
+                RuntimePrefetchChunk::Data(expected.to_vec()),
                 RuntimePrefetchChunk::Error(
                     io::ErrorKind::ConnectionReset,
                     "connection reset".to_string(),
@@ -354,8 +375,8 @@ mod tests {
                 response_ids,
                 turn_state,
             } => {
-                assert!(String::from_utf8_lossy(&prelude).contains("resp-before-error"));
-                assert_eq!(response_ids, vec!["resp-before-error".to_string()]);
+                assert_eq!(prelude, expected);
+                assert!(response_ids.is_empty());
                 assert_eq!(turn_state, None);
             }
             other => panic!("expected partial commit, got {other:?}"),

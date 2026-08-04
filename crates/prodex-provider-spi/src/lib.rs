@@ -14,8 +14,9 @@ pub use governed_routing::{
     GovernedRoutingWeights, GovernedScoreBreakdown, GovernedScoreComponent,
     GovernedScoreComponentKind, MAX_GOVERNED_HARD_FILTER_REASONS, MAX_GOVERNED_PROVIDER_REGIONS,
     MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS, ROUTING_SCORE_SCALE,
-    plan_governed_provider_route,
+    plan_governed_provider_route, runtime_provider_binding_identity_from_secret_ref,
 };
+pub use prodex_provider_core::RuntimeProviderBindingIdentity;
 
 use std::error::Error;
 use std::fmt;
@@ -290,6 +291,8 @@ pub enum ProviderRetryDecisionStatus {
     ServiceUnavailable,
 }
 
+pub const PROVIDER_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderRetryDecisionResponsePlan {
     pub status: ProviderRetryDecisionStatus,
@@ -385,6 +388,25 @@ pub fn plan_provider_retry(
         attempted_precommit_retries,
         remaining_precommit_retries,
     }
+}
+
+pub fn plan_provider_first_event_retry(
+    cause: ProviderRetryCause,
+    error_class: ProviderErrorClass,
+    attempted_retries: u8,
+    first_event_committed: bool,
+) -> ProviderRetryPlan {
+    plan_provider_retry(
+        ProviderRetryPolicy::bounded(PROVIDER_FIRST_EVENT_RETRY_LIMIT),
+        if first_event_committed {
+            ProviderRetryStage::AfterFirstByte
+        } else {
+            ProviderRetryStage::BeforeFirstByte
+        },
+        cause,
+        error_class,
+        attempted_retries,
+    )
 }
 
 fn provider_retry_cause_is_eligible(

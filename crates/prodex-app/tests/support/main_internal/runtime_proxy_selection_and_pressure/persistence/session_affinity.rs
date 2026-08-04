@@ -78,7 +78,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
 }
 
 #[test]
-fn affinity_candidate_skips_persisted_exhausted_session_owner() {
+fn affinity_candidate_keeps_persisted_exhausted_session_owner() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -120,6 +120,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         session_profile_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -136,6 +137,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         session_id_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -190,12 +192,12 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("second".to_string())
+        Some("main".to_string())
     );
 }
 
 #[test]
-fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
+fn responses_session_affinity_keeps_bound_profile_without_usable_quota_data() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -237,6 +239,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         session_profile_bindings: BTreeMap::from([(
             "sess-unknown".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -253,6 +256,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         session_id_bindings: BTreeMap::from([(
             "sess-unknown".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -292,7 +296,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("second".to_string())
+        Some("main".to_string())
     );
 }
 

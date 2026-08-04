@@ -2,8 +2,8 @@
 
 use super::super::await_runtime_proxy_async_task;
 use super::engine::{
-    InspectionExecutionOutcome, runtime_local_inspection_fail_closed,
-    runtime_local_inspection_required, runtime_presidio_redact_body,
+    InspectionExecutionOutcome, RuntimePresidioFailClosedPolicy, runtime_local_inspection_required,
+    runtime_presidio_redact_body,
 };
 use super::findings::{
     runtime_local_inspection_source, runtime_presidio_inspection_plan,
@@ -14,8 +14,8 @@ use super::registry::{RuntimePresidioRedactionState, runtime_presidio_redaction_
 use super::telemetry::{
     runtime_emit_inspection_denied_metric, runtime_emit_inspection_metric,
     runtime_inspection_duration_micros, runtime_inspection_error_outcome,
-    runtime_log_presidio_redaction_applied, runtime_log_presidio_redaction_error,
-    runtime_presidio_log_websocket_inspection,
+    runtime_inspection_failure_type, runtime_log_presidio_redaction_applied,
+    runtime_log_presidio_redaction_error, runtime_presidio_log_websocket_inspection,
 };
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use anyhow::{Context, Result, anyhow};
@@ -65,10 +65,19 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
     detector_revision: &DetectorRevisionId,
 ) -> Result<RuntimePresidioWebSocketInspection<'a>> {
     let state = runtime_presidio_redaction_for_log_path(&shared.log_path);
+    let tenant_detector_enabled = tenant_detector_patterns.has_for_tenant(tenant_id);
+    let fail_closed_policy = RuntimePresidioFailClosedPolicy::derive(
+        governance.inspection,
+        governance.mode,
+        legacy_local_enabled,
+        tenant_detector_enabled,
+        state.as_ref().map(|state| state.config.fail_closed),
+    );
     if !runtime_local_inspection_required(
         governance.inspection,
+        governance.mode,
         legacy_local_enabled,
-        state.is_some() || tenant_detector_patterns.has_for_tenant(tenant_id),
+        state.is_some() || tenant_detector_enabled,
     ) {
         let result = RuntimePresidioWebSocketInspection {
             text: Cow::Borrowed(text),
@@ -82,20 +91,13 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
         return Ok(result);
     }
 
-    let local_fail_closed = runtime_local_inspection_fail_closed(
-        governance.inspection,
-        legacy_local_enabled,
-        tenant_detector_patterns.has_for_tenant(tenant_id),
-        state.as_ref().map(|state| state.config.fail_closed),
-    );
     let (body, sources) = runtime_apply_local_websocket_inspection(
         request_id,
         text,
         shared,
         tenant_detector_patterns,
         tenant_id,
-        local_fail_closed,
-        state.is_some(),
+        fail_closed_policy,
     )?;
     let Some(state) = state else {
         return runtime_local_websocket_inspection(
@@ -117,6 +119,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
         RuntimeExternalWebSocketRedactionContext {
             governance,
             detector_revision,
+            fail_closed_policy,
             state,
         },
     )
@@ -128,8 +131,7 @@ fn runtime_apply_local_websocket_inspection(
     shared: &RuntimeRotationProxyShared,
     tenant_detector_patterns: &RuntimeTenantDetectorPatterns,
     tenant_id: Option<TenantId>,
-    local_fail_closed: bool,
-    redaction_state_present: bool,
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
 ) -> Result<(Vec<u8>, Vec<ApplicationInspectionSource>)> {
     let local_started = Instant::now();
     match runtime_local_inspect_and_mask_for_tenant(
@@ -161,7 +163,7 @@ fn runtime_apply_local_websocket_inspection(
                 InspectionStage::Local,
                 InspectionCoverage::Unsupported,
                 &[],
-                if local_fail_closed {
+                if fail_closed_policy.is_closed() {
                     InspectionMaskingAction::Denied
                 } else {
                     InspectionMaskingAction::None
@@ -169,15 +171,14 @@ fn runtime_apply_local_websocket_inspection(
                 runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            if redaction_state_present {
-                runtime_log_presidio_redaction_error(
-                    request_id,
-                    "websocket",
-                    local_fail_closed,
-                    shared,
-                );
-            }
-            if local_fail_closed {
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "websocket",
+                fail_closed_policy.is_closed(),
+                runtime_inspection_failure_type(&failure.error),
+                shared,
+            );
+            if fail_closed_policy.is_closed() {
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 return Err(failure.error);
             }
@@ -192,6 +193,7 @@ fn runtime_apply_local_websocket_inspection(
 struct RuntimeExternalWebSocketRedactionContext<'a> {
     governance: &'a prodex_config::GovernanceConfig,
     detector_revision: &'a DetectorRevisionId,
+    fail_closed_policy: RuntimePresidioFailClosedPolicy,
     state: std::sync::Arc<RuntimePresidioRedactionState>,
 }
 
@@ -206,9 +208,11 @@ fn runtime_apply_external_websocket_redaction<'a>(
     let RuntimeExternalWebSocketRedactionContext {
         governance,
         detector_revision,
+        fail_closed_policy,
         state,
     } = context;
     let external_started = Instant::now();
+    let fallback_body = body.clone();
     let redaction = await_runtime_proxy_async_task(
         shared,
         "presidio_redact_websocket_text",
@@ -216,30 +220,50 @@ fn runtime_apply_external_websocket_redaction<'a>(
     );
     match redaction {
         Ok(InspectionExecutionOutcome::Redacted(redaction)) => {
+            let redacted_bytes = redaction.body.len();
+            let source = redaction.source;
+            let denied = fail_closed_policy.denies_external_coverage(source.coverage);
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::External,
-                redaction.source.coverage,
-                &redaction.source.findings,
-                if redaction.source.findings.is_empty() {
+                source.coverage,
+                &source.findings,
+                if denied {
+                    InspectionMaskingAction::Denied
+                } else if source.findings.is_empty() {
                     InspectionMaskingAction::None
                 } else {
                     InspectionMaskingAction::Masked
                 },
-                InspectionOutcome::Allowed,
+                if denied {
+                    InspectionOutcome::Denied
+                } else {
+                    InspectionOutcome::Allowed
+                },
                 runtime_inspection_duration_micros(external_started),
             );
-            if !redaction.source.findings.is_empty() {
+            body = redaction.body;
+            if denied {
+                runtime_log_presidio_redaction_error(
+                    request_id,
+                    "websocket",
+                    true,
+                    "unsupported_coverage",
+                    shared,
+                );
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                return Err(anyhow!("presidio_redaction_failed"));
+            }
+            if !source.findings.is_empty() {
                 runtime_log_presidio_redaction_applied(
                     request_id,
                     "websocket",
                     text.len(),
-                    redaction.body.len(),
+                    redacted_bytes,
                     shared,
                 );
             }
-            body = redaction.body;
-            sources.push(redaction.source);
+            sources.push(source);
             runtime_local_websocket_inspection(
                 request_id,
                 text,
@@ -252,7 +276,7 @@ fn runtime_apply_external_websocket_redaction<'a>(
         }
         Ok(InspectionExecutionOutcome::Failed(failure)) => {
             body = failure.body;
-            let fail_closed = state.config.fail_closed;
+            let fail_closed = fail_closed_policy.is_closed();
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::External,
@@ -266,7 +290,13 @@ fn runtime_apply_external_websocket_redaction<'a>(
                 runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(external_started),
             );
-            runtime_log_presidio_redaction_error(request_id, "websocket", fail_closed, shared);
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "websocket",
+                fail_closed,
+                runtime_inspection_failure_type(&failure.error),
+                shared,
+            );
             if fail_closed {
                 runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 Err(anyhow!("presidio_redaction_failed"))
@@ -283,18 +313,44 @@ fn runtime_apply_external_websocket_redaction<'a>(
                 )
             }
         }
-        Err(_) => {
+        Err(error) => {
+            body = fallback_body;
+            let fail_closed = fail_closed_policy.is_closed();
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::External,
                 InspectionCoverage::Unsupported,
                 &[],
-                InspectionMaskingAction::Denied,
-                InspectionOutcome::Error,
+                if fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                runtime_inspection_error_outcome(&error),
                 runtime_inspection_duration_micros(external_started),
             );
-            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-            Err(anyhow!("presidio_redaction_failed"))
+            runtime_log_presidio_redaction_error(
+                request_id,
+                "websocket",
+                fail_closed,
+                runtime_inspection_failure_type(&error),
+                shared,
+            );
+            if fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                Err(anyhow!("presidio_redaction_failed"))
+            } else {
+                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
+                runtime_local_websocket_inspection(
+                    request_id,
+                    text,
+                    body,
+                    sources,
+                    shared,
+                    governance.classification_default,
+                    detector_revision,
+                )
+            }
         }
     }
 }

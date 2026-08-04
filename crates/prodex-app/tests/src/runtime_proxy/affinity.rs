@@ -101,6 +101,7 @@ fn runtime_proxy_affinity_bind_session(
         .insert(
             session_id.to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: profile_name.to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -120,6 +121,7 @@ fn runtime_proxy_affinity_bind_compact_turn_state(
         .insert(
             runtime_compact_turn_state_lineage_key(turn_state),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: profile_name.to_string(),
                 bound_at: Local::now().timestamp(),
             },

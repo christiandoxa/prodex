@@ -209,6 +209,7 @@ fn runtime_gemini_generate_request_body_with_local_file_access_and_config(
         )),
     );
     if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model, config)
+        .map_err(anyhow::Error::msg)?
     {
         request.insert("tools".to_string(), tools);
     }

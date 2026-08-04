@@ -19,10 +19,12 @@ mod supported_params;
 mod tooling;
 use self::response::deepseek_stream_event_from_chat_value;
 pub use self::stream::{
-    DeepSeekProviderCoreStreamChatToolCall, DeepSeekProviderCoreStreamChoiceDelta,
-    DeepSeekProviderCoreStreamChoiceMetadata, DeepSeekProviderCoreStreamChunkMetadata,
-    DeepSeekProviderCoreStreamToolCallDelta, deepseek_provider_core_chat_stream_error,
+    DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT, DeepSeekProviderCoreStreamChatToolCall,
+    DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
+    DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
+    deepseek_provider_core_chat_stream_error, deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_function_call_arguments_delta_event,
+    deepseek_provider_core_incremental_tool_argument_delta,
     deepseek_provider_core_output_item_added_event, deepseek_provider_core_output_item_done_event,
     deepseek_provider_core_output_text_delta_event,
     deepseek_provider_core_response_completed_event, deepseek_provider_core_response_created_event,
@@ -239,6 +241,41 @@ mod tests {
             })),
             DeepSeekProviderCoreStreamToolCallDelta::default()
         );
+    }
+
+    #[test]
+    fn deepseek_provider_core_preserves_each_tool_argument_fragment() {
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("", "{\"cmd\":"),
+            Some("{\"cmd\":".to_string())
+        );
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("{\"cmd\":", "\"ls\"}"),
+            Some("\"ls\"}".to_string())
+        );
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("{\"cmd\":", "{\"cmd\":"),
+            Some("{\"cmd\":".to_string())
+        );
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("{\"cmd\":", "\\"),
+            Some("\\".to_string())
+        );
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("", "é"),
+            Some("é".to_string())
+        );
+        assert_eq!(
+            deepseek_provider_core_incremental_tool_argument_delta("{\"cmd\":", ""),
+            None
+        );
+    }
+
+    #[test]
+    fn deepseek_provider_core_first_event_retry_is_bounded_and_precommit_only() {
+        assert!(deepseek_provider_core_first_event_retry_allowed(0, false));
+        assert!(!deepseek_provider_core_first_event_retry_allowed(1, false));
+        assert!(!deepseek_provider_core_first_event_retry_allowed(0, true));
     }
 
     #[test]

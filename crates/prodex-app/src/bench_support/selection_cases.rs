@@ -315,6 +315,7 @@ impl RuntimeProxyCompactSessionSelectionBenchCase {
         }
 
         let binding = ResponseProfileBinding {
+            binding_identity: None,
             profile_name: session_profile,
             bound_at: now,
         };
@@ -412,6 +413,7 @@ impl RuntimeProxyWebsocketStaleReuseBenchCase {
         response_profile_bindings.insert(
             previous_response_id.clone(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: owner_profile,
                 bound_at: now,
             },

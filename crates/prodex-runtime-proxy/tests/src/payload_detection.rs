@@ -407,6 +407,86 @@ fn runtime_sse_helpers_preserve_events_across_split_boundaries() {
 }
 
 #[test]
+fn runtime_sse_inspection_waits_for_complete_event_across_every_split() {
+    let cases = [
+        (
+            "insufficient_quota",
+            "data: {\"error\":{\"code\":\"insufficient_quota\"}}\r\n\r\n",
+            RuntimeSseInspectionProgress::QuotaBlocked,
+        ),
+        (
+            "rate_limit_exceeded",
+            "data: {\"error\":{\"code\":\"rate_limit_exceeded\"}}\n\n",
+            RuntimeSseInspectionProgress::QuotaBlocked,
+        ),
+        (
+            "server_is_overloaded",
+            "data: {\"error\":{\"code\":\"server_is_overloaded\"}}\n\n",
+            RuntimeSseInspectionProgress::Overloaded,
+        ),
+        (
+            "previous_response_not_found",
+            "data: {\"error\":{\"code\":\"previous_response_not_found\"}}\n\n",
+            RuntimeSseInspectionProgress::PreviousResponseNotFound,
+        ),
+        (
+            "response.created-response-id-turn-state",
+            "event: response.created\r\ndata: { \"type\": \"response.created\", \"response\": { \"id\": \"resp-created-é\", \"headers\": [[\"x-codex-turn-state\", \"turn-created\"]] } }\r\n\r\n",
+            RuntimeSseInspectionProgress::Hold {
+                response_ids: vec!["resp-created-é".to_string()],
+                turn_state: Some("turn-created".to_string()),
+            },
+        ),
+        (
+            "escaped-json-string",
+            "data: {\"type\":\"response.completed\",\"response_id\":\"resp-\\\"quoted\\\"\"}\n\n",
+            RuntimeSseInspectionProgress::Commit {
+                response_ids: vec!["resp-\"quoted\"".to_string()],
+                turn_state: None,
+            },
+        ),
+    ];
+
+    for (name, body, expected) in cases {
+        let bytes = body.as_bytes();
+        for split in 0..bytes.len() {
+            assert!(
+                matches!(
+                    inspect_runtime_sse_buffer(&bytes[..split]),
+                    RuntimeSseInspectionProgress::Hold { .. }
+                ),
+                "{name} became terminal before its event separator at split {split}"
+            );
+        }
+        assert_eq!(inspect_runtime_sse_buffer(bytes), expected, "{name}");
+    }
+}
+
+#[test]
+fn runtime_sse_inspection_holds_partial_data_and_response_created_events() {
+    for partial in [
+        b"data:".as_slice(),
+        b"data:\n".as_slice(),
+        b"data: {\"type\":\"response.created\",\"response_id\":\"resp-created\"}\n".as_slice(),
+    ] {
+        assert!(matches!(
+            inspect_runtime_sse_buffer(partial),
+            RuntimeSseInspectionProgress::Hold { .. }
+        ));
+    }
+
+    assert_eq!(
+        inspect_runtime_sse_buffer(
+            b"data: {\"type\":\"response.created\",\"response_id\":\"resp-created\",\"turn_state\":\"turn-created\"}\n\n"
+        ),
+        RuntimeSseInspectionProgress::Hold {
+            response_ids: vec!["resp-created".to_string()],
+            turn_state: Some("turn-created".to_string()),
+        }
+    );
+}
+
+#[test]
 fn runtime_sse_helpers_drop_invalid_utf8_event_and_recover_next_event() {
     let body = &b"data: {\"type\":\"response.created\",\"response_id\":\"resp-\xff\"}\n\n\
 data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
@@ -495,6 +575,9 @@ fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429
 
     for code in [
         "insufficient_quota",
+        "quota_exhausted",
+        "quota_exceeded",
+        "resource_exhausted",
         "rate_limit_exceeded",
         "usage_not_included",
         "usage_limit_reached",
@@ -519,10 +602,7 @@ fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429
         extract_runtime_proxy_quota_message(
             br#"{"error":{"message":"Your workspace is out of credits. Ask your workspace owner to refill in order to continue."}}"#
         ),
-        Some(
-            "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
-                .to_string()
-        )
+        None
     );
 }
 
@@ -603,30 +683,33 @@ fn invalid_utf8_bodies_do_not_trigger_lossy_retry_classification() {
 }
 
 #[test]
-fn inspect_sse_buffer_handles_comments_crlf_and_partial_tail() {
-    let progress = inspect_runtime_sse_buffer(
-            concat!(
-                ": keep-alive\r\n",
-                "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
-                "\r\n",
-                "data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-2\"}"
-            )
-            .as_bytes(),
-        );
+fn inspect_sse_buffer_keeps_partial_tail_until_eof() {
+    let body = concat!(
+        ": keep-alive\r\n",
+        "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
+        "\r\n",
+        "data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-2\"}"
+    );
+    let progress = inspect_runtime_sse_buffer(body.as_bytes());
 
     match progress {
         RuntimeSseInspectionProgress::Commit {
             response_ids,
             turn_state,
         } => {
-            assert_eq!(
-                response_ids,
-                vec!["resp-1".to_string(), "resp-2".to_string()]
-            );
+            assert_eq!(response_ids, vec!["resp-1".to_string()]);
             assert_eq!(turn_state.as_deref(), Some("ts-1"));
         }
         other => panic!("expected commit progress, got {other:?}"),
     }
+
+    assert_eq!(
+        inspect_runtime_sse_buffer_at_eof(body.as_bytes()),
+        RuntimeSseInspectionProgress::Commit {
+            response_ids: vec!["resp-1".to_string(), "resp-2".to_string()],
+            turn_state: Some("ts-1".to_string()),
+        }
+    );
 }
 
 #[test]
@@ -645,9 +728,9 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
 
 #[test]
 fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
-    let progress = inspect_runtime_sse_buffer(
-            b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}",
-        );
+    let progress = inspect_runtime_sse_buffer_at_eof(
+        b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}",
+    );
 
     assert!(matches!(
         progress,
@@ -657,9 +740,9 @@ fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
 
 #[test]
 fn inspect_sse_buffer_detects_usage_not_included_before_commit() {
-    let progress = inspect_runtime_sse_buffer(
-            b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"usage_not_included\",\"message\":\"Your workspace is out of credits.\"}}}",
-        );
+    let progress = inspect_runtime_sse_buffer_at_eof(
+        b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"usage_not_included\",\"message\":\"Your workspace is out of credits.\"}}}",
+    );
 
     assert!(matches!(
         progress,
@@ -669,11 +752,42 @@ fn inspect_sse_buffer_detects_usage_not_included_before_commit() {
 
 #[test]
 fn inspect_sse_buffer_detects_overload_before_commit() {
-    let progress = inspect_runtime_sse_buffer(
+    let progress = inspect_runtime_sse_buffer_at_eof(
         b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Server is overloaded\"}}}",
     );
 
     assert!(matches!(progress, RuntimeSseInspectionProgress::Overloaded));
+}
+
+#[test]
+fn inspect_sse_buffer_does_not_turn_a_prefix_budget_into_eof() {
+    let body = b"data: {\"type\":\"response.completed\",\"response_id\":\"resp-prefix\"}\n";
+
+    assert_eq!(
+        inspect_runtime_sse_buffer(body),
+        RuntimeSseInspectionProgress::Hold {
+            response_ids: Vec::new(),
+            turn_state: None,
+        }
+    );
+    assert_eq!(
+        inspect_runtime_sse_buffer_at_eof(body),
+        RuntimeSseInspectionProgress::Commit {
+            response_ids: vec!["resp-prefix".to_string()],
+            turn_state: None,
+        }
+    );
+}
+
+#[test]
+fn runtime_sse_helpers_preserve_utf8_across_every_split_point() {
+    let body = "data: {\"type\":\"response.completed\",\"response_id\":\"resp-é\"}\r\n\r\n";
+    let bytes = body.as_bytes();
+    for split in 0..=bytes.len() {
+        let events = collect_runtime_sse_events(&[&bytes[..split], &bytes[split..]]);
+        assert_eq!(events.len(), 1, "unexpected event count at split {split}");
+        assert_eq!(events[0].response_ids, vec!["resp-é".to_string()]);
+    }
 }
 
 #[test]

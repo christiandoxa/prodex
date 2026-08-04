@@ -209,8 +209,8 @@ jobs:
             \( -name 'prodex-runtime-*.log' -o -name 'prodex-runtime-latest.path' \) \
             | sort > "${artifact_dir}/runtime-log-files.txt" || true
 
-          cargo run --locked -q --all-features -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
-          cargo run --locked -q --all-features -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
+          cargo run --locked -q --all-features --bin prodex -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
+          cargo run --locked -q --all-features --bin prodex -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
 
           echo "Full test suite failed. Recent cargo output:"
           cat "${artifact_dir}/cargo-test-tail.txt"

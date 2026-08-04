@@ -240,8 +240,9 @@ INSERT OR IGNORE INTO prodex_audit_log (
     resource_kind,
     resource_id,
     outcome,
-    reason_code
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);
+    reason_code,
+    reason_detail
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);
 "#,
 };
 
@@ -268,7 +269,8 @@ SELECT
     resource_kind,
     resource_id,
     outcome,
-    reason_code
+    reason_code,
+    reason_detail
 FROM prodex_audit_log
 WHERE tenant_id = ?1
   AND (?2 IS NULL OR occurred_at_unix_ms >= ?2)
@@ -292,7 +294,8 @@ SELECT
     resource_kind,
     resource_id,
     outcome,
-    reason_code
+    reason_code,
+    reason_detail
 FROM prodex_audit_log
 WHERE tenant_id = ?1
   AND (?2 IS NULL OR occurred_at_unix_ms >= ?2)
@@ -568,7 +571,17 @@ INSERT INTO prodex_budget_counters (
     committed_tokens,
     committed_cost_micros,
     updated_at_unix_ms
-) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)
+) SELECT ?1, ?2, ?3, ?4, ?5, 0, 0, ?6
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM prodex_reservations existing
+    WHERE existing.tenant_id = ?1
+      AND (
+          existing.reservation_id = ?9
+          OR existing.call_id = ?10
+          OR existing.idempotency_key = ?11
+      )
+)
 ON CONFLICT(tenant_id, storage_scope) DO UPDATE SET
     reserved_tokens = reserved_tokens + excluded.reserved_tokens,
     reserved_cost_micros = reserved_cost_micros + excluded.reserved_cost_micros,
@@ -588,61 +601,9 @@ INSERT OR IGNORE INTO prodex_reservations (
     reserved_cost_micros,
     created_at_unix_ms,
     expires_at_unix_ms
-) VALUES (?1, ?9, ?10, ?3, ?2, ?11, ?4, ?5, ?6, ?12);
-
-INSERT OR IGNORE INTO prodex_usage_ledger (
-    tenant_id,
-    ledger_event_id,
-    reservation_id,
-    call_id,
-    event_kind,
-    tokens,
-    cost_micros,
-    occurred_at_unix_ms
-) VALUES (?1, ?13, ?9, ?10, 'reserved', ?4, ?5, ?6);
-"#,
-};
-
-pub const SQLITE_RECONCILE_USAGE_STATEMENT: SqliteStatement = SqliteStatement {
-    name: "reconcile_usage_locally",
-    sql: r#"
-UPDATE prodex_budget_counters
-SET reserved_tokens = reserved_tokens - ?4,
-    reserved_cost_micros = reserved_cost_micros - ?5,
-    committed_tokens = committed_tokens + ?6,
-    committed_cost_micros = committed_cost_micros + ?7,
-    updated_at_unix_ms = ?8
-WHERE tenant_id = ?1
-  AND storage_scope = ?9
-  AND reserved_tokens >= ?4
-  AND reserved_cost_micros >= ?5
-  AND EXISTS (
-      SELECT 1
-      FROM prodex_reservations
-      WHERE tenant_id = ?1
-        AND reservation_id = ?2
-        AND call_id = ?3
-        AND committed_at_unix_ms IS NULL
-  );
-
-UPDATE prodex_reservations
-SET committed_at_unix_ms = ?8,
-    released_at_unix_ms = CASE WHEN ?10 > 0 OR ?11 > 0 THEN ?8 ELSE released_at_unix_ms END
-WHERE tenant_id = ?1
-  AND reservation_id = ?2
-  AND call_id = ?3
-  AND committed_at_unix_ms IS NULL;
-
-INSERT OR IGNORE INTO prodex_usage_ledger (
-    tenant_id,
-    ledger_event_id,
-    reservation_id,
-    call_id,
-    event_kind,
-    tokens,
-    cost_micros,
-    occurred_at_unix_ms
-) VALUES (?1, ?12, ?2, ?3, 'committed', ?6, ?7, ?8);
+)
+SELECT ?1, ?9, ?10, ?3, ?2, ?11, ?4, ?5, ?6, ?12
+WHERE changes() = 1;
 
 INSERT OR IGNORE INTO prodex_usage_ledger (
     tenant_id,
@@ -654,8 +615,106 @@ INSERT OR IGNORE INTO prodex_usage_ledger (
     cost_micros,
     occurred_at_unix_ms
 )
+SELECT ?1, ?13, ?9, ?10, 'reserved', ?4, ?5, ?6
+WHERE changes() = 1;
+"#,
+};
+
+pub const SQLITE_RECONCILE_USAGE_STATEMENT: SqliteStatement = SqliteStatement {
+    name: "reconcile_usage_locally",
+    sql: r#"
+UPDATE prodex_budget_counters
+SET reserved_tokens = reserved_tokens - CASE
+        WHEN (
+            SELECT released_at_unix_ms
+            FROM prodex_reservations
+            WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+        ) IS NULL THEN ?4 ELSE 0 END,
+    reserved_cost_micros = reserved_cost_micros - CASE
+        WHEN (
+            SELECT released_at_unix_ms
+            FROM prodex_reservations
+            WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+        ) IS NULL THEN ?5 ELSE 0 END,
+    committed_tokens = committed_tokens + ?6,
+    committed_cost_micros = committed_cost_micros + ?7,
+    updated_at_unix_ms = ?8
+WHERE tenant_id = ?1
+  AND storage_scope = ?9
+  AND reserved_tokens >= CASE
+      WHEN (
+          SELECT released_at_unix_ms
+          FROM prodex_reservations
+          WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+      ) IS NULL THEN ?4 ELSE 0 END
+  AND reserved_cost_micros >= CASE
+      WHEN (
+          SELECT released_at_unix_ms
+          FROM prodex_reservations
+          WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+      ) IS NULL THEN ?5 ELSE 0 END
+  AND EXISTS (
+      SELECT 1
+      FROM prodex_reservations
+      WHERE tenant_id = ?1
+        AND reservation_id = ?2
+        AND call_id = ?3
+        AND virtual_key_id IS ?14
+        AND storage_scope = ?9
+        AND reserved_tokens = ?4
+        AND reserved_cost_micros = ?5
+        AND created_at_unix_ms = ?15
+        AND expires_at_unix_ms = ?16
+        AND committed_at_unix_ms IS NULL
+  );
+
+UPDATE prodex_reservations
+SET committed_at_unix_ms = ?8,
+    released_at_unix_ms = CASE WHEN ?10 > 0 OR ?11 > 0 THEN ?8 ELSE released_at_unix_ms END
+WHERE tenant_id = ?1
+  AND reservation_id = ?2
+  AND call_id = ?3
+  AND virtual_key_id IS ?14
+  AND storage_scope = ?9
+  AND reserved_tokens = ?4
+  AND reserved_cost_micros = ?5
+  AND created_at_unix_ms = ?15
+  AND expires_at_unix_ms = ?16
+  AND committed_at_unix_ms IS NULL
+  AND changes() = 1;
+
+INSERT OR IGNORE INTO prodex_usage_ledger (
+    tenant_id,
+    ledger_event_id,
+    reservation_id,
+    call_id,
+    event_kind,
+    tokens,
+    cost_micros,
+    occurred_at_unix_ms
+)
+SELECT ?1, ?12, ?2, ?3, 'committed', ?6, ?7, ?8
+WHERE changes() = 1
+UNION ALL
 SELECT ?1, ?13, ?2, ?3, 'released', ?10, ?11, ?8
-WHERE ?10 > 0 OR ?11 > 0;
+WHERE changes() = 1
+  AND (?10 > 0 OR ?11 > 0)
+  AND EXISTS (
+      SELECT 1
+      FROM prodex_reservations
+      WHERE tenant_id = ?1
+        AND reservation_id = ?2
+        AND call_id = ?3
+        AND committed_at_unix_ms = ?8
+        AND released_at_unix_ms = ?8
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM prodex_usage_ledger
+      WHERE tenant_id = ?1
+        AND reservation_id = ?2
+        AND event_kind = 'released'
+  );
 "#,
 };
 
@@ -676,6 +735,8 @@ WHERE tenant_id = ?1
       WHERE tenant_id = ?1
         AND reservation_id = ?2
         AND call_id = ?3
+        AND reserved_tokens = ?5
+        AND reserved_cost_micros = ?6
         AND committed_at_unix_ms IS NULL
         AND released_at_unix_ms IS NULL
         AND expires_at_unix_ms <= ?4
@@ -686,6 +747,8 @@ SET released_at_unix_ms = ?4
 WHERE tenant_id = ?1
   AND reservation_id = ?2
   AND call_id = ?3
+  AND reserved_tokens = ?5
+  AND reserved_cost_micros = ?6
   AND committed_at_unix_ms IS NULL
   AND released_at_unix_ms IS NULL
   AND expires_at_unix_ms <= ?4

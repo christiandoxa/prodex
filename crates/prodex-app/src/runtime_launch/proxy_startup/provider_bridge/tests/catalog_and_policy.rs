@@ -330,10 +330,25 @@ fn provider_route_kind_normalizes_bridge_surface_paths() {
 
 #[test]
 fn provider_error_rules_do_not_treat_generic_429_as_quota() {
-    assert_eq!(
-        runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 429, b"too many requests"),
-        RuntimeProviderErrorClass::RateLimit
-    );
+    for provider in [
+        RuntimeProviderBridgeKind::Anthropic,
+        RuntimeProviderBridgeKind::Copilot,
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        RuntimeProviderBridgeKind::DeepSeek,
+        RuntimeProviderBridgeKind::Gemini,
+        RuntimeProviderBridgeKind::Kiro,
+    ] {
+        assert_eq!(
+            runtime_provider_error_class(provider, 429, b"too many requests"),
+            RuntimeProviderErrorClass::Other,
+            "plain 429 must pass through for {provider:?}"
+        );
+        assert_eq!(
+            runtime_provider_error_cooldown_ms(provider, 429, b"too many requests"),
+            0,
+            "plain 429 must not cool down {provider:?}"
+        );
+    }
     let body = serde_json::to_vec(&serde_json::json!({
         "error": {
             "status": "RESOURCE_EXHAUSTED",

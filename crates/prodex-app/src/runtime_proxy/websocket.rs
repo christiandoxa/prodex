@@ -224,26 +224,11 @@ fn build_runtime_proxy_websocket_request(
     let mut request = upstream_url
         .into_client_request()
         .with_context(|| format!("failed to build runtime websocket request for {log_url}"))?;
-    for (name, value) in runtime_forward_request_headers(
-        handshake_request
-            .headers
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str())),
-    ) {
-        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
-            continue;
-        }
-        if name.eq_ignore_ascii_case("cookie") {
-            continue;
-        }
-        let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
-            continue;
-        };
-        let Ok(header_value) = WsHeaderValue::from_str(value) else {
-            continue;
-        };
-        request.headers_mut().insert(header_name, header_value);
-    }
+    append_runtime_proxy_websocket_forwarded_headers(
+        &mut request,
+        handshake_request,
+        turn_state_override,
+    );
     if let Some(turn_state) = turn_state_override {
         request.headers_mut().insert(
             WsHeaderName::from_static("x-codex-turn-state"),
@@ -275,6 +260,33 @@ fn build_runtime_proxy_websocket_request(
         );
     }
     Ok(request)
+}
+
+fn append_runtime_proxy_websocket_forwarded_headers(
+    request: &mut tungstenite::http::Request<()>,
+    handshake_request: &RuntimeProxyRequest,
+    turn_state_override: Option<&str>,
+) {
+    for (name, value) in runtime_forward_request_headers(
+        handshake_request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ) {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
+        let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = WsHeaderValue::from_str(value) else {
+            continue;
+        };
+        request.headers_mut().append(header_name, header_value);
+    }
 }
 
 fn handle_runtime_proxy_websocket_connect_attempt(
@@ -555,5 +567,46 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("websocket-token"));
         assert!(!message.contains("websocket-key"));
+    }
+
+    #[test]
+    fn websocket_forwarding_appends_metadata_and_filters_replacements_and_hops() {
+        let handshake_request = RuntimeProxyRequest {
+            method: "GET".to_string(),
+            path_and_query: "/v1/realtime".to_string(),
+            headers: vec![
+                (
+                    "x-codex-turn-metadata".to_string(),
+                    "metadata-one".to_string(),
+                ),
+                (
+                    "x-codex-turn-metadata".to_string(),
+                    "metadata-two".to_string(),
+                ),
+                ("user-agent".to_string(), "fixture-client".to_string()),
+                ("cookie".to_string(), "caller=session".to_string()),
+                ("authorization".to_string(), "Bearer caller".to_string()),
+                ("connection".to_string(), "keep-alive".to_string()),
+            ],
+            body: Vec::new(),
+        };
+        let mut request = "wss://example.com/v1/realtime"
+            .into_client_request()
+            .expect("websocket request should build");
+
+        append_runtime_proxy_websocket_forwarded_headers(&mut request, &handshake_request, None);
+
+        let metadata = request
+            .headers()
+            .get_all("x-codex-turn-metadata")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(metadata, ["metadata-one", "metadata-two"]);
+        assert_eq!(request.headers()["user-agent"], "fixture-client");
+        assert!(!request.headers().contains_key("cookie"));
+        assert!(!request.headers().contains_key("authorization"));
+        assert_eq!(request.headers().get_all("connection").iter().count(), 1);
+        assert_eq!(request.headers()["connection"], "Upgrade");
     }
 }

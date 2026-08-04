@@ -217,6 +217,7 @@ fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
         runtime.state.response_profile_bindings.insert(
             "resp-owned".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -283,6 +284,7 @@ fn compact_lane_limit_does_not_override_owned_turn_state_lineage() {
         .insert(
             runtime_compact_turn_state_lineage_key("turn-owned"),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -338,6 +340,7 @@ fn websocket_lane_limit_does_not_override_owned_turn_state_affinity() {
         .insert(
             "turn-owned".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -479,6 +482,7 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
         runtime.state.response_profile_bindings.insert(
             "resp-owned".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },

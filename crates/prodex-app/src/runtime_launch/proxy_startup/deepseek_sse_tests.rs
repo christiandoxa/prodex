@@ -7,6 +7,30 @@ fn conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
 }
 
+fn sse_values(output: &str) -> Vec<serde_json::Value> {
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|data| serde_json::from_str(data).ok())
+        .collect()
+}
+
+struct OneByteReader {
+    bytes: Vec<u8>,
+    offset: usize,
+}
+
+impl Read for OneByteReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() || self.offset == self.bytes.len() {
+            return Ok(0);
+        }
+        buffer[0] = self.bytes[self.offset];
+        self.offset += 1;
+        Ok(1)
+    }
+}
+
 #[test]
 fn deepseek_sse_state_debug_output_redacts_stream_payloads() {
     let conversations = conversation_store();
@@ -288,6 +312,103 @@ fn deepseek_sse_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
 }
 
 #[test]
+fn deepseek_sse_reader_emits_each_interleaved_tool_fragment_once() {
+    let fragments = [
+        (0, Some("call_a"), Some("emit"), "{"),
+        (1, Some("call_b"), Some("second"), "{"),
+        (0, None, None, "\"text\""),
+        (1, None, None, "\"value\""),
+        (0, None, None, ":"),
+        (1, None, None, ":"),
+        (0, None, None, "\""),
+        (0, None, None, "é"),
+        (0, None, None, "é"),
+        (1, None, None, "1"),
+        (0, None, None, "\"}"),
+        (1, None, None, "}"),
+    ];
+    let mut stream = String::new();
+    for (index, call_id, name, arguments) in fragments {
+        let mut tool_call = serde_json::json!({
+            "index": index,
+            "function": {"arguments": arguments},
+        });
+        if let Some(call_id) = call_id {
+            tool_call["id"] = serde_json::Value::String(call_id.to_string());
+        }
+        if let Some(name) = name {
+            tool_call["function"]["name"] = serde_json::Value::String(name.to_string());
+        }
+        stream.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "id": "chatcmpl_fragments",
+                "choices": [{"delta": {"tool_calls": [tool_call]}}],
+            })
+        ));
+    }
+    stream.push_str(
+        "data: {\"id\":\"chatcmpl_fragments\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    );
+    stream.push_str("data: [DONE]\n\n");
+
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        OneByteReader {
+            bytes: stream.into_bytes(),
+            offset: 0,
+        },
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let values = sse_values(&output);
+    let deltas = values
+        .iter()
+        .filter(|value| value["type"] == "response.function_call_arguments.delta")
+        .collect::<Vec<_>>();
+    let observed = deltas
+        .iter()
+        .map(|value| {
+            (
+                value["call_id"].as_str().unwrap(),
+                value["output_index"].as_u64().unwrap(),
+                value["delta"].as_str().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed,
+        vec![
+            ("call_a", 0, "{"),
+            ("call_b", 1, "{"),
+            ("call_a", 0, "\"text\""),
+            ("call_b", 1, "\"value\""),
+            ("call_a", 0, ":"),
+            ("call_b", 1, ":"),
+            ("call_a", 0, "\""),
+            ("call_a", 0, "é"),
+            ("call_a", 0, "é"),
+            ("call_b", 1, "1"),
+            ("call_a", 0, "\"}"),
+            ("call_b", 1, "}"),
+        ]
+    );
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.function_call_arguments.delta")
+            .count(),
+        fragments.len()
+    );
+    assert!(output.contains("\"arguments\":\"{\\\"text\\\":\\\"éé\\\"}\""));
+    assert!(output.contains("\"arguments\":\"{\\\"value\\\":1}\""));
+}
+
+#[test]
 fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
     let conversations = conversation_store();
     let stream = concat!(
@@ -308,7 +429,8 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
 
-    assert!(output.contains(r#""delta":"{\"cmd\":\"rtk cargo test -q login\"}""#));
+    assert!(output.contains(r#""delta":"{\"cmd\":""#));
+    assert!(output.contains(r#""delta":"\"cargo test -q login\"}""#));
     assert!(output.contains(r#""arguments":"{\"cmd\":\"rtk cargo test -q login\"}""#));
     let messages = conversations
         .history("chatcmpl_3")

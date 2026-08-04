@@ -36,9 +36,9 @@ pub(super) fn runtime_smart_context_collect_rehydratable_artifact_refs(
     value: &serde_json::Value,
 ) -> Vec<RuntimeSmartContextArtifactReference> {
     let aliases = runtime_smart_context_collect_artifact_aliases(value);
-    let mut refs = BTreeSet::<RuntimeSmartContextArtifactReference>::new();
+    let mut refs = Vec::<RuntimeSmartContextArtifactReference>::new();
     runtime_smart_context_collect_rehydratable_artifact_refs_from_value(value, &aliases, &mut refs);
-    refs.into_iter().collect()
+    refs
 }
 
 pub(super) fn runtime_smart_context_collect_artifact_refs(
@@ -53,7 +53,7 @@ pub(super) fn runtime_smart_context_collect_artifact_refs(
 fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
     value: &serde_json::Value,
     aliases: &BTreeMap<String, String>,
-    refs: &mut BTreeSet<RuntimeSmartContextArtifactReference>,
+    refs: &mut Vec<RuntimeSmartContextArtifactReference>,
 ) {
     if runtime_smart_context_value_is_static_context_item(value) {
         return;
@@ -80,16 +80,18 @@ fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
     runtime_smart_context_collect_artifact_refs_from_value(value, aliases, refs);
 }
 
-fn runtime_smart_context_collect_artifact_refs_from_value(
+fn runtime_smart_context_collect_artifact_refs_from_value<
+    R: Extend<RuntimeSmartContextArtifactReference>,
+>(
     value: &serde_json::Value,
     aliases: &BTreeMap<String, String>,
-    refs: &mut BTreeSet<RuntimeSmartContextArtifactReference>,
+    refs: &mut R,
 ) {
     if let Some(text) = value.as_str() {
         if runtime_smart_context_may_contain_artifact_ref(text) {
             for reference in runtime_smart_context_artifact_ref_occurrences_from_text(text, aliases)
             {
-                refs.insert(reference);
+                refs.extend([reference]);
             }
         }
         return;

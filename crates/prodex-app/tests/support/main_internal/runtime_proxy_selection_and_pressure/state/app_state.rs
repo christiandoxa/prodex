@@ -37,6 +37,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
         response_profile_bindings: BTreeMap::from([(
             "resp-existing".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
             },
@@ -44,6 +45,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
         session_profile_bindings: BTreeMap::from([(
             "sess-existing".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
             },
@@ -126,14 +128,16 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
             (
                 "resp-fresh".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "resp-stale".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: stale_response_binding,
                 },
             ),
@@ -142,14 +146,16 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
             (
                 "sess-fresh".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "sess-stale".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: stale_session_binding,
                 },
             ),
@@ -240,6 +246,7 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
         response_profile_bindings.insert(
             format!("resp-{index:06}-{}", "x".repeat(64)),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now + index as i64,
             },

@@ -186,8 +186,9 @@ INSERT INTO prodex_audit_log (
     resource_kind,
     resource_id,
     outcome,
-    reason_code
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    reason_code,
+    reason_detail
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (tenant_id, audit_event_id) DO NOTHING
 RETURNING tenant_id
 "#,
@@ -217,7 +218,8 @@ SELECT
     resource_kind,
     resource_id,
     outcome,
-    reason_code
+    reason_code,
+    reason_detail
 FROM prodex_audit_log
 WHERE tenant_id = $1
   AND ($2::BIGINT IS NULL OR occurred_at_unix_ms >= $2)
@@ -241,7 +243,8 @@ SELECT
     resource_kind,
     resource_id,
     outcome,
-    reason_code
+    reason_code,
+    reason_detail
 FROM prodex_audit_log
 WHERE tenant_id = $1
   AND ($2::BIGINT IS NULL OR occurred_at_unix_ms >= $2)

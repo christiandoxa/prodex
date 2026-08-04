@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod adapter;
+mod binding_identity;
 mod bridge;
 mod catalog;
 mod chat_tools_bridge;
@@ -24,6 +25,7 @@ mod translators;
 mod usage;
 
 pub use adapter::{StaticProviderAdapter, provider_adapter};
+pub use binding_identity::RuntimeProviderBindingIdentity;
 pub use bridge::{
     provider_core_chat_compatible_created_at, provider_core_chat_compatible_responses_usage,
     provider_core_chat_compatible_responses_value_from_chat_value,
@@ -118,14 +120,14 @@ pub use gemini_bridge::{
     GEMINI_PROVIDER_CORE_LIVE_AUDIO_RATE, GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX,
     GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS, GeminiProviderCoreLiveAudioConfig,
     GeminiProviderCoreLiveAudioFormat, GeminiProviderCoreLiveAudioPayload,
-    GeminiProviderCorePrecommitDecision, GeminiProviderCorePrecommitProbe,
-    gemini_provider_core_append_media_parts_to_last_user_content,
+    GeminiProviderCoreLiveSessionUpdate, GeminiProviderCorePrecommitDecision,
+    GeminiProviderCorePrecommitProbe, gemini_provider_core_append_media_parts_to_last_user_content,
     gemini_provider_core_apply_gemini3_tool_declaration_overrides,
     gemini_provider_core_blocked_tool_call_item, gemini_provider_core_body_has_terminal_quota,
     gemini_provider_core_bool_str, gemini_provider_core_bool_value,
     gemini_provider_core_buffered_responses_value,
     gemini_provider_core_buffered_responses_value_with_fallback_ids,
-    gemini_provider_core_builtin_tools_from_request, gemini_provider_core_chat_assistant_messages,
+    gemini_provider_core_chat_assistant_messages,
     gemini_provider_core_chat_assistant_tool_call_item, gemini_provider_core_chat_message_text,
     gemini_provider_core_citation_text, gemini_provider_core_collect_input_texts,
     gemini_provider_core_collect_media_parts, gemini_provider_core_collect_path_values,
@@ -139,10 +141,10 @@ pub use gemini_bridge::{
     gemini_provider_core_finish_reason_retryable_invalid,
     gemini_provider_core_forced_command_output, gemini_provider_core_function_call_part,
     gemini_provider_core_function_call_part_from_tool_call,
-    gemini_provider_core_function_declaration_from_openai_tool,
     gemini_provider_core_function_response_content_part,
     gemini_provider_core_function_response_from_tool_message,
     gemini_provider_core_function_response_part, gemini_provider_core_function_tools_from_chat,
+    gemini_provider_core_function_tools_from_chat_checked,
     gemini_provider_core_gemini3_tool_description,
     gemini_provider_core_generate_content_body_value,
     gemini_provider_core_generate_content_request,
@@ -180,10 +182,11 @@ pub use gemini_bridge::{
     gemini_provider_core_live_response_cancelled_event,
     gemini_provider_core_live_response_created_event,
     gemini_provider_core_live_response_done_event, gemini_provider_core_live_server_turn_complete,
-    gemini_provider_core_live_session_audio_config,
-    gemini_provider_core_live_session_updated_event, gemini_provider_core_live_setup_message,
-    gemini_provider_core_live_tool_response_message, gemini_provider_core_live_transcript_delta,
-    gemini_provider_core_live_transcription_text,
+    gemini_provider_core_live_session_audio_config, gemini_provider_core_live_session_update,
+    gemini_provider_core_live_session_updated_event,
+    gemini_provider_core_live_session_updated_event_with_options,
+    gemini_provider_core_live_setup_message, gemini_provider_core_live_tool_response_message,
+    gemini_provider_core_live_transcript_delta, gemini_provider_core_live_transcription_text,
     gemini_provider_core_live_unsupported_event_error, gemini_provider_core_local_compact_summary,
     gemini_provider_core_local_context_text_part,
     gemini_provider_core_mask_tool_response_for_history,
@@ -228,9 +231,10 @@ pub use gemini_bridge::{
     gemini_provider_core_tool_config_from_request, gemini_provider_core_tool_intent_without_call,
     gemini_provider_core_tool_is_mutating, gemini_provider_core_tool_output_call_ids_from_request,
     gemini_provider_core_tool_output_preview, gemini_provider_core_tool_response_output_string,
-    gemini_provider_core_tools_from_requests, gemini_provider_core_truncate_to_bytes,
-    gemini_provider_core_unsupported_tool_fallback_body,
-    gemini_provider_core_unverified_success_claim, gemini_provider_core_visible_text_from_part,
+    gemini_provider_core_tools_from_requests, gemini_provider_core_tools_from_requests_checked,
+    gemini_provider_core_truncate_to_bytes, gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_unverified_success_claim, gemini_provider_core_validate_candidate_count,
+    gemini_provider_core_validate_request_tools, gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding,
 };
 pub use harness::{
@@ -265,16 +269,18 @@ pub use translator::{
     ProviderUnsupportedReason, TransformOutcome, TransformStatus,
 };
 pub use translators::{
-    DeepSeekProviderCoreStreamChatToolCall, DeepSeekProviderCoreStreamChoiceDelta,
-    DeepSeekProviderCoreStreamChoiceMetadata, DeepSeekProviderCoreStreamChunkMetadata,
-    DeepSeekProviderCoreStreamToolCallDelta, GeminiProviderCoreStreamChunkMetadata,
-    GeminiProviderCoreStreamFunctionCallDelta, GeminiProviderCoreStreamToolCall,
-    KiroProviderCoreRequestError, anthropic_messages_translator,
+    DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT, DeepSeekProviderCoreStreamChatToolCall,
+    DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
+    DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
+    GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
+    GeminiProviderCoreStreamToolCall, KiroProviderCoreRequestError, anthropic_messages_translator,
     copilot_provider_core_request_body_with_canonical_model,
     copilot_provider_core_request_body_without_encrypted_content,
     copilot_provider_core_request_has_agent_input, copilot_provider_core_request_has_vision_input,
     copilot_provider_core_response_id_from_value, deepseek_provider_core_chat_stream_error,
+    deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_function_call_arguments_delta_event,
+    deepseek_provider_core_incremental_tool_argument_delta,
     deepseek_provider_core_output_item_added_event, deepseek_provider_core_output_item_done_event,
     deepseek_provider_core_output_text_delta_event,
     deepseek_provider_core_response_completed_event, deepseek_provider_core_response_created_event,

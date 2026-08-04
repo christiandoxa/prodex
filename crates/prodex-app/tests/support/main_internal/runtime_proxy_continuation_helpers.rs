@@ -155,7 +155,8 @@ pub(super) fn start_runtime_continuation_fixture(
                 (
                     (*response_id).to_string(),
                     ResponseProfileBinding {
-                        profile_name: (*profile_name).to_string(),
+                        binding_identity: None,
+                profile_name: (*profile_name).to_string(),
                         bound_at: now,
                     },
                 )
@@ -167,7 +168,8 @@ pub(super) fn start_runtime_continuation_fixture(
                 (
                     session_key,
                     ResponseProfileBinding {
-                        profile_name: profile_name.to_string(),
+                        binding_identity: None,
+                profile_name: profile_name.to_string(),
                         bound_at: now,
                     },
                 )

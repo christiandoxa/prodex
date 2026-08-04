@@ -27,6 +27,12 @@ struct RuntimePreviousResponseDiscovery {
     disk_fallback_entries: Vec<RuntimePreviousResponseDiskFallbackEntry>,
 }
 
+enum RuntimeBoundPreviousResponseOwner<'a> {
+    Unbound,
+    Usable(&'a str),
+    Unusable,
+}
+
 #[derive(Clone, Copy)]
 struct RuntimePreviousResponseDiscoveryContext<'a> {
     runtime: &'a RuntimeRotationState,
@@ -52,15 +58,19 @@ pub(super) fn discover_runtime_previous_response_candidate(
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        if let Some(owner) = bound_previous_response_owner(
+        match bound_previous_response_owner(
             &runtime,
             excluded_profiles,
             previous_response_id,
             route_kind,
             now,
         ) {
-            record_runtime_previous_response_selection(trace, owner, 0, None, true);
-            return Ok(Some(owner.to_string()));
+            RuntimeBoundPreviousResponseOwner::Usable(owner) => {
+                record_runtime_previous_response_selection(trace, owner, 0, None, true);
+                return Ok(Some(owner.to_string()));
+            }
+            RuntimeBoundPreviousResponseOwner::Unusable => return Ok(None),
+            RuntimeBoundPreviousResponseOwner::Unbound => {}
         }
         let discovered = discover_cached_previous_response_candidate(
             RuntimePreviousResponseDiscoveryContext {
@@ -87,24 +97,66 @@ fn bound_previous_response_owner<'a>(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
     now: i64,
-) -> Option<&'a str> {
-    let response_id = previous_response_id?;
-    let owner = runtime
-        .state
-        .response_profile_bindings
-        .get(response_id)?
-        .profile_name
-        .as_str();
-    (!excluded_profiles.contains(owner)
-        && runtime.state.profiles.contains_key(owner)
-        && !runtime_previous_response_negative_cache_active(
+) -> RuntimeBoundPreviousResponseOwner<'a> {
+    let Some(response_id) = previous_response_id else {
+        return RuntimeBoundPreviousResponseOwner::Unbound;
+    };
+    let Some(identity) = prodex_runtime_state::RuntimeHardBindingIdentity::response(response_id)
+    else {
+        return RuntimeBoundPreviousResponseOwner::Unusable;
+    };
+    let owner = prodex_runtime_store::runtime_hard_binding_owner(
+        &identity,
+        &runtime.state.response_profile_bindings,
+        &runtime.turn_state_bindings,
+        &runtime.session_id_bindings,
+        &runtime.state.session_profile_bindings,
+        &runtime.state.profiles,
+    );
+    let prodex_runtime_state::RuntimeHardBindingOwner::Owned(owner) = owner else {
+        return match owner {
+            prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {
+                RuntimeBoundPreviousResponseOwner::Unbound
+            }
+            prodex_runtime_state::RuntimeHardBindingOwner::Conflict
+            | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+                RuntimeBoundPreviousResponseOwner::Unusable
+            }
+            prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => unreachable!(),
+        };
+    };
+    if excluded_profiles.contains(&owner)
+        || runtime_profile_auth_failure_active_with_auth_cache(
+            &runtime.profile_health,
+            &runtime.profile_usage_auth,
+            &owner,
+            now,
+        )
+        || runtime_previous_response_negative_cache_active(
             &runtime.profile_health,
             response_id,
-            owner,
+            &owner,
             route_kind,
             now,
-        ))
-    .then_some(owner)
+        )
+    {
+        return RuntimeBoundPreviousResponseOwner::Unusable;
+    }
+    let Some(binding) = runtime
+        .state
+        .response_profile_bindings
+        .get(response_id)
+        .filter(|binding| binding.profile_name == owner)
+    else {
+        return RuntimeBoundPreviousResponseOwner::Unusable;
+    };
+    if let Some(binding_identity) = binding.binding_identity.as_ref()
+        && runtime_profile_binding_identity(runtime, &owner)
+            .is_none_or(|current_identity| current_identity != *binding_identity)
+    {
+        return RuntimeBoundPreviousResponseOwner::Unusable;
+    }
+    RuntimeBoundPreviousResponseOwner::Usable(binding.profile_name.as_str())
 }
 
 fn discover_cached_previous_response_candidate(

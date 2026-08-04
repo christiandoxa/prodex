@@ -82,6 +82,11 @@ pub(super) async fn append_audit_outbox_tx(
                 &envelope.event.resource.id,
                 &envelope.event.outcome.as_str(),
                 &envelope.event.reason_code,
+                &envelope
+                    .event
+                    .reason_detail
+                    .as_ref()
+                    .map(|value| value.as_str()),
                 &plan.outbox_event_id.as_uuid(),
                 &event_envelope,
             ],

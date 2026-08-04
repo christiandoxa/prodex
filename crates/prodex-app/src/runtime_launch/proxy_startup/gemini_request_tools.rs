@@ -9,7 +9,7 @@ pub(super) fn runtime_gemini_tools_from_requests(
     chat: &serde_json::Value,
     model: &str,
     config: &RuntimeGeminiConfig,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>, String> {
     let policy = RuntimeGeminiPolicyCompat::from_request_and_files(original, config);
     let mut chat = chat.clone();
     if let Some(mut tools) =

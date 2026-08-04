@@ -157,3 +157,19 @@ pub(crate) fn save_runtime_continuation_journal_for_profiles(
     }
     Ok(())
 }
+
+pub(crate) fn replace_runtime_continuation_journal_for_profiles(
+    paths: &AppPaths,
+    journal: &RuntimeContinuationJournal,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<()> {
+    let journal = RuntimeContinuationJournal {
+        saved_at: journal.saved_at,
+        continuations: compact_runtime_continuation_store(journal.continuations.clone(), profiles),
+    };
+    save_versioned_json_file_with_fence(
+        &runtime_continuation_journal_file_path(paths),
+        &runtime_continuation_journal_last_good_file_path(paths),
+        &journal,
+    )
+}

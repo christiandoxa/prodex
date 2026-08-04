@@ -728,6 +728,9 @@ fn runtime_gateway_virtual_key_durable_reservation(
                                 RuntimeGatewayDurableReservationError::Rejected(_) => {
                                     "gateway_reservation_rejected"
                                 }
+                                RuntimeGatewayDurableReservationError::Conflict => {
+                                    "gateway_reservation_conflict"
+                                }
                                 RuntimeGatewayDurableReservationError::Failed => {
                                     "gateway_reservation_storage_failed"
                                 }
@@ -739,7 +742,8 @@ fn runtime_gateway_virtual_key_durable_reservation(
             );
             Err(match error {
                 RuntimeGatewayDurableReservationError::Rejected(rejection) => rejection.into(),
-                RuntimeGatewayDurableReservationError::Failed => {
+                RuntimeGatewayDurableReservationError::Conflict
+                | RuntimeGatewayDurableReservationError::Failed => {
                     runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
                         .into()
                 }

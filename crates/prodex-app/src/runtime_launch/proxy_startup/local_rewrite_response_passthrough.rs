@@ -1,4 +1,7 @@
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_copilot::{
+    RuntimeCopilotBindingRecorder, runtime_copilot_remember_bindings_from_responses_body,
+};
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::RuntimeGatewayResponseGovernance;
@@ -23,6 +26,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
     captured: &RuntimeProxyRequest,
     profile_name: String,
     stream: bool,
+    binding_recorder: Option<RuntimeCopilotBindingRecorder>,
     response_governance: RuntimeGatewayResponseGovernance,
 ) {
     if stream {
@@ -52,6 +56,10 @@ pub(super) fn respond_runtime_passthrough_rewrite(
     let response_started_at = Instant::now();
     let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
         .map(|parts| {
+            runtime_copilot_remember_bindings_from_responses_body(
+                binding_recorder.as_ref(),
+                &parts.body,
+            );
             emit_runtime_gateway_response_spend_event_for_body(
                 request_id,
                 captured,

@@ -203,6 +203,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
         response_profile_bindings: BTreeMap::from([(
             "resp-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -210,6 +211,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
         session_profile_bindings: BTreeMap::from([(
             "session-1".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -240,14 +242,16 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
             (
                 "turn-1".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 compact_turn_state_key.clone(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
@@ -256,14 +260,16 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
             (
                 "session-1".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 compact_session_key.clone(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),

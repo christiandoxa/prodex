@@ -78,7 +78,7 @@ pub(crate) fn load_live_quota_watch_runtime_usage_cache(
     now: i64,
 ) -> Option<LiveQuotaWatchRuntimeUsageCache> {
     let path = quota_watch_runtime_usage_cache_path(paths);
-    if !path.exists() {
+    if !path.exists() && !last_good_file_path(&path).exists() {
         return None;
     }
     let cache = read_versioned_json_file_with_backup::<QuotaWatchRuntimeUsageCache>(
