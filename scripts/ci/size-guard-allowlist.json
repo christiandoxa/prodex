@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 868,
+    "maxLines": 864,
     "reason": "Core runtime preparation still owns provider selection, harness resolution, proxy startup, and session entry planning; direct runtime dispatch removed the redundant forwarding layer and ratcheted this cap to the remaining core."
   },
   {
@@ -11,13 +11,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
-    "maxLines": 854,
-    "reason": "Gateway billing and durable reconciliation stay together at their atomic accounting boundary; the exact cap includes poisoned-state recovery and SQLite durable restart coverage."
+    "maxLines": 1473,
+    "reason": "Gateway billing, exact SQLite reservation replay, reconciliation conflicts, and durable restart coverage stay together at their transactional accounting boundary."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1005,
-    "reason": "Kiro ACP process lifecycle, bounded idle handling, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after blocking stderr handling was removed and pure protocol shaping moved to provider-core."
+    "maxLines": 1055,
+    "reason": "Kiro ACP process lifecycle, bounded idle handling, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped with first-event retry regression coverage."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
@@ -41,8 +41,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1070,
-    "reason": "Runtime launch run-command strategy regression coverage includes terminal keyboard reset planning and remains capped after live goal recovery cases moved to their focused module."
+    "maxLines": 1072,
+    "reason": "Runtime launch run-command strategy regression coverage includes terminal keyboard reset and native frontend capability planning after live goal recovery cases moved to their focused module."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal_body/app_server_broker.rs",
@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
-    "maxLines": 924,
-    "reason": "HTTP continuation, tool-output, and compact regression coverage remains capped while compact-specific fixtures are split by route."
+    "maxLines": 1026,
+    "reason": "HTTP continuation, tool-output, compact session affinity, and hard binding identity regressions remain capped in the shared route harness."
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/export.rs",
@@ -71,8 +71,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1068,
-    "reason": "Provider-aware runtime and gateway argument parsing remains capped after typed optional-tool selection and Super launch conversion moved to a focused module."
+    "maxLines": 1166,
+    "reason": "Provider-aware runtime, gateway, Super sub-agent, and resume argument parsing remains capped after typed resolution moved to focused modules."
   },
   {
     "file": "crates/prodex-quota/tests/src/render.rs",
@@ -86,8 +86,8 @@
   },
   {
     "file": "crates/prodex-provider-core/src/gemini_bridge/tests.rs",
-    "maxLines": 2137,
-    "reason": "Gemini bridge request, response, streaming, exact rejected-tool fallback, multimodal, usage, and error conformance regressions remain colocated until split by fixture family."
+    "maxLines": 2266,
+    "reason": "Gemini bridge request, response, streaming, candidate-count, malformed-tool, Live update, multimodal, usage, and error conformance regressions remain colocated by protocol boundary."
   },
   {
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
@@ -141,13 +141,13 @@
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1671,
-    "reason": "PostgreSQL storage characterization includes current/future schema rejection, concurrent reservation proof, and actual usage above reservation; capped while migration, tenant isolation, and accounting tests are split."
+    "maxLines": 1677,
+    "reason": "PostgreSQL storage characterization includes current/future schema rejection, concurrent reservation proof, audit reason compatibility, and actual usage above reservation."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
-    "maxLines": 1619,
-    "reason": "SQLite storage characterization includes current/future schema rejection and actual usage above reservation; capped while migration, tenant isolation, and accounting tests are split."
+    "maxLines": 1977,
+    "reason": "SQLite storage characterization includes foreign-key enforcement, migration compatibility, exact replay conflicts, audit reason storage, and actual usage above reservation."
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
@@ -181,8 +181,8 @@
   },
   {
     "file": "crates/prodex-provider-spi/tests/governed_routing.rs",
-    "maxLines": 1041,
-    "reason": "Governed routing security coverage keeps hard filters, runtime health/quota/load signals, deterministic score, eligible fallback, affinity, revocation, and bounds in one matrix."
+    "maxLines": 1154,
+    "reason": "Governed routing security coverage keeps hard filters, exact binding identity, conflict rejection, runtime health/quota/load signals, revocation, and bounded fresh fallback in one matrix."
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
@@ -236,7 +236,52 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 1091,
-    "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata and fail-closed future-version checks beside schema planning; migrations 17 and 18 keep their SQL in versioned sidecars while their ordered metadata remains explicit."
+    "maxLines": 1124,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata, audit reason compatibility, and fail-closed future-version checks beside schema planning."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs",
+    "maxLines": 1236,
+    "reason": "Provider dispatch keeps bounded pre-commit selection, hard-affinity identity enforcement, and accepted-response ownership at one retry boundary."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+    "maxLines": 2094,
+    "reason": "Upstream transport keeps cancel-safe async streaming, bounded lookahead, idle timeouts, exact byte forwarding, and identity recording at one commit boundary."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
+    "maxLines": 1121,
+    "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_tools.rs",
+    "maxLines": 881,
+    "reason": "Runtime tool orchestration keeps temporary overlay lifecycle, native capability checks, and launch ownership together while sub-agent rendering lives in a focused child module."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+    "maxLines": 954,
+    "reason": "Typed sub-agent resolution, bounded interactive choices, shell-safe child rendering, recursion protection, and deterministic overlay instructions form one launch-policy boundary."
+  },
+  {
+    "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
+    "maxLines": 878,
+    "reason": "Smart Context preparation regressions cover budget tiers, deterministic rehydration, static-context fingerprints, aliases, line ranges, and HTTP/WebSocket parity."
+  },
+  {
+    "file": "crates/prodex-domain/src/audit/event.rs",
+    "maxLines": 948,
+    "reason": "The audit event domain keeps bounded secret-safe break-glass reasons, canonical serialization, legacy compatibility, and immutable evidence construction together."
+  },
+  {
+    "file": "crates/prodex-secret-store/src/refresh_lease.rs",
+    "maxLines": 1323,
+    "reason": "Refresh lease ownership keeps one-in-flight bounded heartbeat workers, filesystem deadlines, unhealthy transitions, shutdown, and fault-injection regressions together."
+  },
+  {
+    "file": "crates/prodex-storage-sqlite-runtime/src/accounting_repository.rs",
+    "maxLines": 1073,
+    "reason": "SQLite accounting keeps transactional exact reservation and reconciliation replay checks, conflict no-mutation guarantees, and concurrent replay tests in one repository boundary."
   }
 ]
