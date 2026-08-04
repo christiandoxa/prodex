@@ -32,6 +32,37 @@ pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
     }
 }
 
+pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), String> {
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    let snake = object
+        .get("candidate_count")
+        .filter(|value| !value.is_null());
+    let camel = object
+        .get("candidateCount")
+        .filter(|value| !value.is_null());
+    if let (Some(snake), Some(camel)) = (snake, camel)
+        && snake != camel
+    {
+        return Err(
+            "invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict"
+                .to_string(),
+        );
+    }
+    for (field, candidate_count) in [("candidate_count", snake), ("candidateCount", camel)] {
+        let Some(candidate_count) = candidate_count else {
+            continue;
+        };
+        if candidate_count.as_u64() != Some(1) {
+            return Err(format!(
+                "invalid_candidate_count: Gemini request field `{field}` must be omitted, null, or 1"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn gemini_generation_config_from_request(
     original: &Value,
     chat: &Value,
@@ -78,8 +109,6 @@ pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
     for (from, to) in [
         ("top_k", "topK"),
         ("topK", "topK"),
-        ("candidate_count", "candidateCount"),
-        ("candidateCount", "candidateCount"),
         ("seed", "seed"),
         ("presence_penalty", "presencePenalty"),
         ("presencePenalty", "presencePenalty"),
@@ -103,6 +132,13 @@ pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
         if let Some(value) = obj.get(from).filter(|value| !value.is_null()) {
             generation_config.insert(to.to_string(), value.clone());
         }
+    }
+    if let Some(value) = obj
+        .get("candidateCount")
+        .or_else(|| obj.get("candidate_count"))
+        .filter(|value| !value.is_null() && value.as_u64() == Some(1))
+    {
+        generation_config.insert("candidateCount".to_string(), value.clone());
     }
 }
 

@@ -33,7 +33,7 @@ pub(crate) fn load_runtime_profile_scores(
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<BTreeMap<String, RuntimeProfileHealth>> {
     let path = runtime_scores_file_path(paths);
-    if !path.exists() {
+    if !path.exists() && !runtime_scores_last_good_file_path(paths).exists() {
         return Ok(BTreeMap::new());
     }
     let loaded = read_versioned_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(

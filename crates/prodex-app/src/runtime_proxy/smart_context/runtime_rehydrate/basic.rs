@@ -39,8 +39,9 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_auto_rehydr
         if store.contains(&reference.id) {
             available_ids.insert(reference.id.clone());
         }
-        let token_cost =
-            runtime_smart_context_rehydrate_ref_token_cost(&reference, store).unwrap_or(0);
+        let token_cost = runtime_smart_context_rehydrate_ref_token_cost(&reference, store)
+            .unwrap_or(0)
+            .max(1);
         refs_by_id
             .entry(reference.id)
             .and_modify(|cost| *cost = cost.saturating_add(token_cost))
@@ -73,18 +74,31 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_r
         .ok()
 }
 
+pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_value_with_budget(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    available_tokens: usize,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    let plan = runtime_smart_context_auto_rehydrate_plan(value, store, available_tokens, tier);
+    runtime_smart_context_rehydrate_value_with_plan(value, store, &plan, stats);
+}
+
+#[cfg(test)]
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_value(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
-    let plan = runtime_smart_context_auto_rehydrate_plan(
+    let available_tokens = 1_000_000;
+    runtime_smart_context_rehydrate_value_with_budget(
         value,
         store,
-        usize::MAX,
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact,
+        available_tokens,
+        runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
+        stats,
     );
-    runtime_smart_context_rehydrate_value_with_plan(value, store, &plan, stats);
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_value_with_plan(
@@ -93,6 +107,22 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_v
     plan: &runtime_proxy_crate::SmartContextRehydratePlan,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
+    let planned = plan
+        .actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                runtime_proxy_crate::SmartContextRehydrateAction::Rehydrate { .. }
+            )
+        })
+        .count();
+    let deferred = plan.actions.len().saturating_sub(planned);
+    stats.rehydration_planned = stats.rehydration_planned.saturating_add(planned);
+    stats.rehydration_deferred = stats.rehydration_deferred.saturating_add(deferred);
+    stats.rehydration_token_cost = stats
+        .rehydration_token_cost
+        .saturating_add(plan.used_tokens);
     let aliases = runtime_smart_context_collect_artifact_aliases(value);
     let rehydrate_ids = plan
         .actions
@@ -176,7 +206,8 @@ fn runtime_smart_context_rehydrate_text(
             continue;
         };
         next = replacement;
-        stats.rehydrated_refs += 1;
+        stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(1);
+        stats.rehydration_performed = stats.rehydration_performed.saturating_add(1);
         if stop {
             break;
         }

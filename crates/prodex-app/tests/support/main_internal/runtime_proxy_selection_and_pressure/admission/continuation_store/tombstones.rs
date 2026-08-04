@@ -40,7 +40,8 @@ fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now - 1,
                 },
             )]),
@@ -219,7 +220,8 @@ fn runtime_dead_continuation_tombstone_overrides_same_second_verified_status() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             )]),
@@ -283,7 +285,8 @@ fn runtime_newer_binding_overrides_older_dead_tombstone() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             )]),

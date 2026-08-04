@@ -3112,6 +3112,8 @@ dependencies = [
  "base64",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "url",
 ]
 
 [[package]]
@@ -3320,6 +3322,7 @@ dependencies = [
 name = "prodex-runtime-state"
 version = "0.382.0"
 dependencies = [
+ "prodex-provider-core",
  "serde",
 ]
 
@@ -3395,6 +3398,7 @@ dependencies = [
 name = "prodex-state"
 version = "0.382.0"
 dependencies = [
+ "prodex-provider-core",
  "serde",
  "serde_json",
 ]

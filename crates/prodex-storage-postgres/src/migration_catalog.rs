@@ -1021,6 +1021,37 @@ pub const VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION: PostgresMigration = PostgresM
     sql: include_str!("migrations/018_validate_constraints.sql"),
 };
 
+pub const AUDIT_REASON_DETAIL_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(19),
+    phase: PostgresMigrationPhase::Expand,
+    name: "019_audit_reason_detail",
+    sql: r#"
+ALTER TABLE prodex_audit_log
+    ADD COLUMN IF NOT EXISTS reason_detail TEXT;
+"#,
+};
+
+pub const AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(20),
+    phase: PostgresMigrationPhase::Expand,
+    name: "020_audit_reason_detail_byte_limit",
+    sql: r#"
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prodex_audit_log'::regclass
+          AND conname = 'prodex_audit_log_reason_detail_bounded'
+    ) THEN
+        ALTER TABLE prodex_audit_log
+            ADD CONSTRAINT prodex_audit_log_reason_detail_bounded
+            CHECK (reason_detail IS NULL OR octet_length(reason_detail) <= 512)
+            NOT VALID;
+    END IF;
+END $migration$;
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -1040,6 +1071,8 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     GOVERNANCE_REVOCATION_MIGRATION,
     GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION,
     VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION,
+    AUDIT_REASON_DETAIL_MIGRATION,
+    AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION,
 ];
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

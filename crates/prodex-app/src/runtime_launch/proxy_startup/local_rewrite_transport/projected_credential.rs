@@ -72,8 +72,8 @@ fn expose_secret_material<T>(
 
 pub(super) fn runtime_local_rewrite_apply_projected_bearer(
     shared: &RuntimeLocalRewriteProxyShared,
-    request: reqwest::blocking::RequestBuilder,
-) -> Result<reqwest::blocking::RequestBuilder> {
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::RequestBuilder> {
     runtime_local_rewrite_with_projected_provider_secret(
         shared.provider_credential.as_ref(),
         |secret| Ok(request.bearer_auth(secret)),
@@ -82,9 +82,9 @@ pub(super) fn runtime_local_rewrite_apply_projected_bearer(
 
 pub(super) fn runtime_local_rewrite_apply_projected_header(
     shared: &RuntimeLocalRewriteProxyShared,
-    request: reqwest::blocking::RequestBuilder,
+    request: reqwest::RequestBuilder,
     header: &'static str,
-) -> Result<reqwest::blocking::RequestBuilder> {
+) -> Result<reqwest::RequestBuilder> {
     runtime_local_rewrite_with_projected_provider_secret(
         shared.provider_credential.as_ref(),
         |secret| Ok(request.header(header, secret)),

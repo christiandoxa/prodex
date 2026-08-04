@@ -1,10 +1,14 @@
 use super::super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
 };
-use super::super::local_rewrite_copilot::RuntimeCopilotRequestContext;
+use super::super::local_rewrite_copilot::{
+    RuntimeCopilotRequestContext, RuntimeCopilotResponsesSseBindingReader,
+};
 use super::super::local_rewrite_gemini::RuntimeGeminiRequestContext;
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_upstream::RuntimeLocalRewriteLiveResponse;
+use super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteLiveResponse, runtime_local_rewrite_remember_accepted_binding,
+};
 use super::local_rewrite_response_anthropic_messages::{
     RuntimeAnthropicMessagesRewriteContext, respond_runtime_anthropic_messages_rewrite,
 };
@@ -40,6 +44,9 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         body,
         native_anthropic_messages,
         mut chat_compatible_request,
+        accepted_binding_recorder,
+        accepted_binding,
+        ..
     } = live_response;
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
         upstream_headers
@@ -56,9 +63,35 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let response = body
+    let mut response = body
         .expect("live response body should be present before dispatch")
         .into_reader();
+    if let Some(binding_acceptance) = copilot_context
+        .as_ref()
+        .and_then(|context| context.binding_acceptance.as_ref())
+    {
+        binding_acceptance();
+    }
+    if let Some(binding) = accepted_binding.as_ref() {
+        let _ = runtime_local_rewrite_remember_accepted_binding(
+            shared,
+            &binding.identity,
+            binding.previous_response_id.as_deref(),
+            binding.turn_state.as_deref(),
+            binding.session_id.as_deref(),
+        );
+    }
+    let mut buffered_binding_recorder = None;
+    if let Some(binding_recorder) = accepted_binding_recorder {
+        if content_type.contains("text/event-stream") {
+            response = Box::new(RuntimeCopilotResponsesSseBindingReader::new(
+                response,
+                Some(binding_recorder),
+            ));
+        } else {
+            buffered_binding_recorder = Some(binding_recorder);
+        }
+    }
 
     if runtime_local_rewrite_is_responses_route(
         &shared.provider,
@@ -79,6 +112,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::DeepSeek,
                     pending_request: chat_compatible_request.take().unwrap_or_default(),
+                    binding_recorder: buffered_binding_recorder.take(),
                     response_governance,
                 },
             );
@@ -97,7 +131,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 captured,
                 provider_kind: RuntimeProviderBridgeKind::DeepSeek,
                 profile_name: None,
-                binding_recorder: None,
+                binding_recorder: buffered_binding_recorder.take(),
                 pending_request: chat_compatible_request.take().unwrap_or_default(),
                 response_governance,
             },
@@ -124,6 +158,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::Anthropic,
                     pending_request: chat_compatible_request.take().unwrap_or_default(),
+                    binding_recorder: buffered_binding_recorder.take(),
                     response_governance,
                 },
             );
@@ -142,7 +177,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 captured,
                 provider_kind: RuntimeProviderBridgeKind::Anthropic,
                 profile_name: None,
-                binding_recorder: None,
+                binding_recorder: buffered_binding_recorder.take(),
                 pending_request: chat_compatible_request.take().unwrap_or_default(),
                 response_governance,
             },
@@ -170,7 +205,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::Gemini,
                     profile_name: None,
-                    binding_recorder: None,
+                    binding_recorder: buffered_binding_recorder.take(),
                     pending_request: chat_compatible_request.take().unwrap_or_default(),
                     response_governance,
                 },
@@ -188,6 +223,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     shared,
                     captured,
                     gemini_context,
+                    external_binding_recorder: buffered_binding_recorder.take(),
                     response_governance,
                 },
             );
@@ -237,6 +273,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             })
             .unwrap_or_else(|| "local".to_string()),
         is_sse,
+        buffered_binding_recorder,
         response_governance,
     );
 }

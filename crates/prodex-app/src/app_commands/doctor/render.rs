@@ -4,10 +4,10 @@ use crossterm::terminal;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use redaction::redaction_redact_secret_like_text;
 use terminal_ui::{
-    print_blank_line, print_panel, print_stdout_line, text_width, tui_border_style,
+    fit_cell, print_blank_line, print_panel, print_stdout_line, text_width, tui_border_style,
     tui_connected_header_block, tui_primary_style, tui_secondary_style, tui_title_style,
 };
 
@@ -41,13 +41,19 @@ pub(super) fn print_doctor_output(
         .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
-        let body = Paragraph::new(doctor_tui_text(panels, suggestion_lines))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(tui_border_style()),
-            )
-            .wrap(Wrap { trim: false });
+        let body_width = usize::from(chunks[1].width.saturating_sub(2));
+        let body_rows = usize::from(chunks[1].height.saturating_sub(1));
+        let body = Paragraph::new(doctor_tui_text_for_viewport(
+            panels,
+            suggestion_lines,
+            body_width,
+            body_rows,
+        ))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(tui_border_style()),
+        );
         frame.render_widget(body, chunks[1]);
     })?;
     let _ = terminal.show_cursor();
@@ -67,40 +73,90 @@ fn doctor_tui_height(panels: &[DoctorPanel], suggestion_lines: &[String]) -> u16
 }
 
 fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<'static> {
+    doctor_tui_text_for_viewport(panels, suggestion_lines, usize::MAX, usize::MAX)
+}
+
+fn doctor_tui_text_for_viewport(
+    panels: &[DoctorPanel],
+    suggestion_lines: &[String],
+    width: usize,
+    max_rows: usize,
+) -> Text<'static> {
     let mut lines = Vec::new();
     for panel in panels {
-        lines.push(Line::styled(panel.title.clone(), tui_title_style()));
+        lines.push((
+            Line::styled(fit_cell(&panel.title, width), tui_title_style()),
+            false,
+        ));
         let label_width = panel
             .fields
             .iter()
             .map(|(label, _)| text_width(label))
             .max()
             .unwrap_or(0)
-            .min(24);
+            .min(24)
+            .min(width.saturating_div(2));
         for (label, value) in &panel.fields {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!(
-                        "{label}{} ",
-                        " ".repeat(label_width.saturating_sub(text_width(label)))
+            let color = doctor_value_color(label, value);
+            let rendered_label = fit_cell(
+                &format!(
+                    "{label}{} ",
+                    " ".repeat(label_width.saturating_sub(text_width(label)))
+                ),
+                label_width.saturating_add(1).min(width),
+            );
+            let value_width = width.saturating_sub(text_width(&rendered_label));
+            lines.push((
+                Line::from(vec![
+                    Span::styled(
+                        rendered_label,
+                        tui_secondary_style().add_modifier(Modifier::BOLD),
                     ),
-                    tui_secondary_style().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    value.clone(),
-                    Style::default().fg(doctor_value_color(label, value)),
-                ),
-            ]));
+                    Span::styled(fit_cell(value, value_width), Style::default().fg(color)),
+                ]),
+                color == Color::Red,
+            ));
         }
     }
     if !suggestion_lines.is_empty() {
-        lines.push(Line::raw(""));
-        lines.push(Line::styled("Policy Suggestions", tui_title_style()));
+        lines.push((Line::raw(""), false));
+        lines.push((
+            Line::styled(fit_cell("Policy Suggestions", width), tui_title_style()),
+            false,
+        ));
         for line in suggestion_lines {
-            lines.push(Line::styled(line.clone(), tui_primary_style()));
+            lines.push((
+                Line::styled(fit_cell(line, width), tui_primary_style()),
+                false,
+            ));
         }
     }
-    Text::from(lines)
+    if lines.len() > max_rows {
+        if max_rows == 0 {
+            return Text::default();
+        }
+        let visible_rows = max_rows.saturating_sub(1);
+        let hidden = lines.len().saturating_sub(visible_rows);
+        let hidden_critical = lines
+            .iter()
+            .skip(visible_rows)
+            .find(|(_, critical)| *critical)
+            .map(|(line, _)| line.clone());
+        lines.truncate(visible_rows);
+        if let Some(critical) = hidden_critical
+            && let Some(last) = lines.last_mut()
+        {
+            last.0 = critical;
+        }
+        lines.push((
+            Line::styled(
+                fit_cell(&format!("… {hidden} row(s) hidden"), width),
+                tui_secondary_style(),
+            ),
+            false,
+        ));
+    }
+    Text::from(lines.into_iter().map(|(line, _)| line).collect::<Vec<_>>())
 }
 
 fn doctor_value_color(label: &str, value: &str) -> Color {
@@ -132,7 +188,8 @@ pub(super) fn doctor_quota_error_summary(err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Color, DoctorPanel, doctor_quota_error_summary, doctor_tui_text, doctor_value_color,
+        Color, DoctorPanel, doctor_quota_error_summary, doctor_tui_text,
+        doctor_tui_text_for_viewport, doctor_value_color,
     };
 
     #[test]
@@ -187,5 +244,34 @@ mod tests {
         assert!(summary.contains("api_key=<redacted>"));
         assert!(!summary.contains("fixture-token-123"));
         assert!(!summary.contains("sk-fixture-123"));
+    }
+
+    #[test]
+    fn doctor_tui_layout_fits_short_terminals_and_retains_an_error() {
+        let panels = vec![DoctorPanel {
+            title: "Doctor".to_string(),
+            fields: (0..12)
+                .map(|index| {
+                    (
+                        format!("Status {index}"),
+                        if index == 11 {
+                            "critical error".to_string()
+                        } else {
+                            "ready with a deliberately long diagnostic value".to_string()
+                        },
+                    )
+                })
+                .collect(),
+        }];
+
+        for (width, height) in [(40_usize, 8_usize), (60, 10), (80, 12)] {
+            let body_rows = height.saturating_sub(4);
+            let text = doctor_tui_text_for_viewport(&panels, &[], width - 2, body_rows);
+            assert!(text.lines.len() <= body_rows);
+            assert!(text.lines.iter().all(|line| line.width() <= width - 2));
+            let rendered = format!("{text:?}");
+            assert!(rendered.contains("critical error"));
+            assert!(rendered.contains("hidden"));
+        }
     }
 }

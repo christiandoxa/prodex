@@ -145,7 +145,7 @@ fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
 }
 
 #[test]
-fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
+fn response_selection_keeps_pinned_affinity_when_quota_blocks_precommit() {
     let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
 
@@ -162,7 +162,7 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
     )
     .expect("selection should succeed");
 
-    assert_eq!(selected.as_deref(), Some("second"));
+    assert_eq!(selected.as_deref(), Some("main"));
 }
 
 #[test]

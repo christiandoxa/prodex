@@ -13,13 +13,20 @@ pub use self::quota_retry::{
 };
 
 use self::quota_retry::{
-    gemini_provider_core_plain_text_has_terminal_quota, gemini_provider_core_value_has_rate_limit,
-    gemini_provider_core_value_has_terminal_quota,
+    gemini_provider_core_value_has_rate_limit, gemini_provider_core_value_has_terminal_quota,
 };
 
 pub fn gemini_provider_core_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<u8>> {
     if status < 400 {
         return None;
+    }
+    if status == 429 {
+        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+        if !gemini_provider_core_value_has_terminal_quota(&value)
+            && !gemini_provider_core_value_has_rate_limit(&value)
+        {
+            return None;
+        }
     }
     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
         let error = value.get("error").unwrap_or(&value);
@@ -93,11 +100,10 @@ fn gemini_provider_core_openai_error_kind(
 ) -> (&'static str, &'static str) {
     if gemini_provider_core_body_has_terminal_quota(body)
         || gemini_provider_core_value_has_terminal_quota(value)
-        || gemini_provider_core_plain_text_has_terminal_quota(body)
     {
         return ("insufficient_quota", "insufficient_quota");
     }
-    if status == 429 || gemini_provider_core_value_has_rate_limit(value) {
+    if gemini_provider_core_value_has_rate_limit(value) {
         return ("rate_limit_error", "rate_limit_exceeded");
     }
     match status {

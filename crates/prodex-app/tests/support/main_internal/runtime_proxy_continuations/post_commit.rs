@@ -100,6 +100,7 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
         response_profile_bindings: BTreeMap::from([(
             "resp-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -120,7 +121,8 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
             turn_state_bindings: BTreeMap::from([(
                 "turn-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             )]),
@@ -272,6 +274,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
         response_profile_bindings: BTreeMap::from([(
             "resp-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -458,6 +461,7 @@ fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() 
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },

@@ -1,8 +1,10 @@
 //! Copilot provider auth state, profile catalog, and OAuth pool construction.
 
 use super::super::local_rewrite::RuntimeLocalRewriteProviderOptions;
-use super::super::local_rewrite_copilot_bindings::RuntimeCopilotBindingRecorder;
-use std::collections::{BTreeMap, BTreeSet};
+use super::super::local_rewrite_copilot_bindings::{
+    RuntimeCopilotBindingAcceptance, RuntimeCopilotBindingRecorder,
+};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -39,12 +41,12 @@ impl fmt::Debug for RuntimeCopilotProfileAuth {
 #[derive(Clone)]
 pub(in crate::runtime_launch::proxy_startup) struct RuntimeCopilotOAuthPool {
     pub(super) state: Arc<Mutex<RuntimeCopilotOAuthPoolState>>,
+    pub(super) runtime: Arc<Mutex<crate::RuntimeRotationState>>,
 }
 
 pub(super) struct RuntimeCopilotOAuthPoolState {
     pub(super) profiles: Vec<RuntimeCopilotProfileAuth>,
     pub(super) next_index: usize,
-    pub(super) response_profile_bindings: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for RuntimeCopilotOAuthPoolState {
@@ -52,10 +54,6 @@ impl fmt::Debug for RuntimeCopilotOAuthPoolState {
         f.debug_struct("RuntimeCopilotOAuthPoolState")
             .field("profiles", &redacted_len(self.profiles.len()))
             .field("next_index", &"<redacted>")
-            .field(
-                "response_profile_bindings",
-                &redacted_len(self.response_profile_bindings.len()),
-            )
             .finish()
     }
 }
@@ -78,6 +76,8 @@ pub(in crate::runtime_launch::proxy_startup) struct RuntimeCopilotRequestContext
     pub(in crate::runtime_launch::proxy_startup) profile_name: String,
     pub(in crate::runtime_launch::proxy_startup) binding_recorder:
         Option<RuntimeCopilotBindingRecorder>,
+    pub(in crate::runtime_launch::proxy_startup) binding_acceptance:
+        Option<RuntimeCopilotBindingAcceptance>,
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_model_catalog_from_provider(
@@ -108,18 +108,42 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_model_catalog_fr
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_oauth_pool_from_provider(
     provider: &RuntimeLocalRewriteProviderOptions,
+    runtime: Arc<Mutex<crate::RuntimeRotationState>>,
 ) -> Option<RuntimeCopilotOAuthPool> {
-    let RuntimeLocalRewriteProviderOptions::Copilot {
-        auth: RuntimeCopilotProviderAuth::Profiles { profiles },
-    } = provider
-    else {
+    let RuntimeLocalRewriteProviderOptions::Copilot { auth } = provider else {
         return None;
+    };
+    let profiles = match auth {
+        RuntimeCopilotProviderAuth::ApiKeys { api_keys } => {
+            runtime_copilot_api_key_profiles(api_keys)
+        }
+        RuntimeCopilotProviderAuth::Profiles { profiles } => profiles.clone(),
+        RuntimeCopilotProviderAuth::Projected => return None,
     };
     Some(RuntimeCopilotOAuthPool {
         state: Arc::new(Mutex::new(RuntimeCopilotOAuthPoolState {
-            profiles: profiles.clone(),
+            profiles,
             next_index: 0,
-            response_profile_bindings: BTreeMap::new(),
         })),
+        runtime,
     })
+}
+
+pub(super) fn runtime_copilot_api_key_profiles(
+    api_keys: &[String],
+) -> Vec<RuntimeCopilotProfileAuth> {
+    api_keys
+        .iter()
+        .enumerate()
+        .map(|(index, api_key)| RuntimeCopilotProfileAuth {
+            profile_name: if api_keys.len() == 1 {
+                "api-key".to_string()
+            } else {
+                format!("api-key-{}", index + 1)
+            },
+            api_key: api_key.clone(),
+            api_url: String::new(),
+            model_catalog: Vec::new(),
+        })
+        .collect()
 }

@@ -104,6 +104,32 @@ fn cookie_jar_merges_caller_cookie_without_duplicate_name() {
 }
 
 #[test]
+fn cookie_jar_preserves_multiple_caller_cookie_fields_without_comma_joining() {
+    let jar = RuntimeProxyCookieJar::new();
+    capture(
+        &jar,
+        "alpha",
+        "chatgpt.com",
+        "/backend-api/responses",
+        &["relayed=three; Path=/"],
+    );
+
+    let header = merged(
+        &jar,
+        "alpha",
+        "https://chatgpt.com/backend-api/responses",
+        &[
+            ("Cookie".to_string(), "first=one".to_string()),
+            ("cookie".to_string(), "second=two".to_string()),
+        ],
+    )
+    .expect("caller and relayed cookies should be merged");
+
+    assert_eq!(header, "first=one; second=two; relayed=three");
+    assert!(!header.contains(','));
+}
+
+#[test]
 fn cookie_jar_deletes_expired_cookie() {
     let jar = RuntimeProxyCookieJar::new();
     capture(

@@ -91,6 +91,7 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
             session_profile_bindings: BTreeMap::from([(
                 session_id.to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: now,
                 },
@@ -158,7 +159,7 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     )
     .unwrap();
     let mut notify_args = Vec::new();
-    add_runtime_goal_session_tracking(&main_home, None, &mut notify_args, &marker_path);
+    add_runtime_goal_session_tracking(&main_home, None, &mut notify_args, &marker_path).unwrap();
     assert_eq!(notify_args.first(), Some(&OsString::from("-c")));
     assert!(notify_args.iter().any(|arg| {
         let arg = arg.to_string_lossy();
@@ -178,14 +179,14 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         [session_id],
     )
     .unwrap();
-    assert!(!fresh_strategy.child_exit_requested());
+    assert!(!fresh_strategy.child_exit_requested().unwrap());
     conn.execute(
         "UPDATE thread_goals SET status = 'usage_limited', updated_at_ms = 3 WHERE thread_id = ?1",
         [session_id],
     )
     .unwrap();
-    assert!(fresh_strategy.child_exit_requested());
-    assert!(!fresh_strategy.child_exit_requested());
+    assert!(fresh_strategy.child_exit_requested().unwrap());
+    assert!(!fresh_strategy.child_exit_requested().unwrap());
     assert_eq!(
         fresh_strategy.pending_goal_resume_plan,
         Some(GoalResumeRelaunchPlan {
@@ -236,7 +237,7 @@ fn runtime_goal_session_tracking_uses_session_start_before_first_completed_turn(
     );
 
     let mut args = Vec::new();
-    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path);
+    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path).unwrap();
     assert!(args.iter().any(|arg| {
         let arg = arg.to_string_lossy();
         arg.starts_with("hooks.SessionStart=") && arg.contains(RUNTIME_GOAL_SESSION_NOTIFY_COMMAND)
@@ -262,7 +263,7 @@ fn runtime_goal_session_tracking_preserves_explicit_session_start_hooks() {
     let user_hook = "hooks.SessionStart=[{hooks=[{type=\"command\",command=\"user-hook\"}]}]";
     let mut args = vec![OsString::from("-c"), OsString::from(user_hook)];
 
-    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path);
+    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path).unwrap();
 
     assert_eq!(
         args.iter()

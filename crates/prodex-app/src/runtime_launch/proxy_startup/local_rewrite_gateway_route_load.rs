@@ -98,7 +98,7 @@ impl RuntimeGatewayRouteLoadGuard {
     pub(super) fn mark_status(&mut self, status: u16) {
         self.success = if status < 400 {
             Some(true)
-        } else if status == 408 || status == 429 || status >= 500 {
+        } else if status == 408 || status >= 500 {
             Some(false)
         } else {
             None
@@ -165,4 +165,51 @@ fn runtime_gateway_route_minute_epoch() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() / 60)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeGatewayAdaptiveQualityStore, RuntimeGatewayRouteLoadGuard};
+    use runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn generic_429_does_not_penalize_route_health_but_5xx_does() {
+        let load = Arc::new(Mutex::new(BTreeMap::new()));
+        let adaptive_quality = Arc::new(Mutex::new(RuntimeGatewayAdaptiveQualityStore::default()));
+        let config = RuntimeGatewayAdaptiveRoutingConfig {
+            enabled: true,
+            ..Default::default()
+        };
+
+        {
+            let mut guard = RuntimeGatewayRouteLoadGuard::enter(
+                Arc::clone(&load),
+                "gpt-5",
+                b"{}",
+                Arc::clone(&adaptive_quality),
+                config,
+            );
+            guard.mark_status(429);
+        }
+        assert!(adaptive_quality.lock().unwrap().snapshot().is_empty());
+
+        {
+            let mut guard = RuntimeGatewayRouteLoadGuard::enter(
+                load,
+                "gpt-5",
+                b"{}",
+                Arc::clone(&adaptive_quality),
+                config,
+            );
+            guard.mark_status(500);
+        }
+        let snapshot = adaptive_quality.lock().unwrap().snapshot();
+        let window = snapshot
+            .get("gpt-5")
+            .expect("5xx should record route health");
+        assert_eq!(window.samples, 1);
+        assert_eq!(window.errors, 1);
+    }
 }

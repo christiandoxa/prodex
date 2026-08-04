@@ -21,6 +21,7 @@ fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() 
         response_profile_bindings: BTreeMap::from([(
             "resp-missing".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -126,6 +127,7 @@ fn runtime_proxy_http_message_followup_previous_response_does_not_fresh_fallback
         response_profile_bindings: BTreeMap::from([(
             "resp-missing".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },

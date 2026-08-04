@@ -162,7 +162,8 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
                 session_profile_bindings: BTreeMap::from([(
                     "sess-main".to_string(),
                     ResponseProfileBinding {
-                        profile_name: "main".to_string(),
+                        binding_identity: None,
+                profile_name: "main".to_string(),
                         bound_at: Local::now().timestamp(),
                     },
                 )]),

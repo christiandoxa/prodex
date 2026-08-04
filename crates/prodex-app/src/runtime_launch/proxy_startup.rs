@@ -333,16 +333,15 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         || runtime_continuations_last_good_file_path(paths).exists();
     let continuation_migration_needed = !continuation_sidecar_present
         && (restored_continuations != RuntimeContinuationStore::default());
-    let restored_session_id_bindings = merge_profile_bindings(
+    let restored_session_id_bindings = prodex_runtime_store::merge_runtime_hard_profile_bindings(
         &restored_continuations.session_profile_bindings,
         &runtime_external_session_id_bindings(&restored_continuations.session_id_bindings),
-        &restored_state.profiles,
     );
-    let restored_runtime_session_id_bindings = merge_profile_bindings(
-        &restored_continuations.session_id_bindings,
-        &restored_continuations.session_profile_bindings,
-        &restored_state.profiles,
-    );
+    let restored_runtime_session_id_bindings =
+        prodex_runtime_store::merge_runtime_hard_profile_bindings(
+            &restored_continuations.session_id_bindings,
+            &restored_continuations.session_profile_bindings,
+        );
     restored_state.response_profile_bindings =
         restored_continuations.response_profile_bindings.clone();
     restored_state.session_profile_bindings = restored_session_id_bindings.clone();

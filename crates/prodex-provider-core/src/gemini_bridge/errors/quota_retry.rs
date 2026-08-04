@@ -3,7 +3,6 @@
 mod body;
 mod retry_delay;
 
-pub(super) use self::body::gemini_provider_core_plain_text_has_terminal_quota;
 pub use self::retry_delay::{
     GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
     gemini_provider_core_invalid_stream_retry_delay_ms, gemini_provider_core_retry_delay_ms,
@@ -39,13 +38,13 @@ pub fn gemini_provider_core_should_rotate_after_quota_response(
     status: u16,
     quota_blocked: bool,
     hard_affinity: bool,
-    quota_fallback_allowed: bool,
+    _quota_fallback_allowed: bool,
     attempt_index: usize,
     attempt_count: usize,
 ) -> bool {
     quota_blocked
         && gemini_provider_core_response_retryable_quota(status)
-        && (!hard_affinity || quota_fallback_allowed)
+        && !hard_affinity
         && attempt_index + 1 < attempt_count
 }
 

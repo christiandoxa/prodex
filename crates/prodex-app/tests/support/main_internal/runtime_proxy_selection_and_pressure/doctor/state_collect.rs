@@ -327,6 +327,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         response_profile_bindings: BTreeMap::from([(
             "state-resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: binding_bound_at,
             },
@@ -334,6 +335,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         session_profile_bindings: BTreeMap::from([(
             "state-session-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: binding_bound_at,
             },
@@ -405,28 +407,32 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
             response_profile_bindings: BTreeMap::from([(
                 "runtime-resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: binding_bound_at,
                 },
             )]),
             session_profile_bindings: BTreeMap::from([(
                 "runtime-session-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: binding_bound_at,
                 },
             )]),
             turn_state_bindings: BTreeMap::from([(
                 "runtime-turn-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: binding_bound_at,
                 },
             )]),
             session_id_bindings: BTreeMap::from([(
                 "runtime-session-id-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: binding_bound_at,
                 },
             )]),
@@ -443,7 +449,8 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: journal_saved_at,
                 },
             )]),

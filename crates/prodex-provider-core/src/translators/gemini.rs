@@ -6,6 +6,7 @@ pub use self::request::gemini_provider_core_model_uses_thinking_level;
 pub(crate) use self::request::gemini_request_body_without_tool;
 pub(crate) use self::request::gemini_tool_config_from_request;
 pub(crate) use self::request::sanitize_function_schema as gemini_sanitize_function_schema;
+pub(crate) use self::request::{gemini_validate_candidate_count, gemini_validate_openai_tools};
 pub(crate) use self::request_contents::gemini_contents_from_request;
 pub(crate) use self::request_contents::{
     gemini_contextual_user_instruction_text, gemini_is_contextual_user_fragment,

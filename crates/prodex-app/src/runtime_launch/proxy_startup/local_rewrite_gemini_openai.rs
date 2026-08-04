@@ -3,11 +3,12 @@ use super::super::chat_compatible_rewrite::{
 };
 use super::super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::super::local_rewrite::{
-    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
 use super::super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
+use super::super::local_rewrite_gemini_quota::runtime_gemini_429_is_structured;
 use super::super::local_rewrite_search_fallback::{
     RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
@@ -15,6 +16,10 @@ use super::super::local_rewrite_search_fallback::{
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_gemini_openai_compatible_upstream_url,
     runtime_local_rewrite_api_key_attempts,
+};
+use super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, runtime_local_rewrite_attach_accepted_binding,
+    runtime_local_rewrite_binding_context, runtime_local_rewrite_raw_binding_identity,
 };
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_request_conformance,
@@ -24,6 +29,7 @@ use super::super::provider_bridge::{
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Result, bail};
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
+use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
 use prodex_provider_spi::ProviderRetryCause;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
@@ -34,7 +40,9 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
     body: Vec<u8>,
     api_keys: &[String],
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let api_key_attempts = if shared.provider_credential.is_some() {
+    let binding = runtime_local_rewrite_binding_context(shared, request)?;
+    let binding_endpoint = shared.upstream_base_url.clone();
+    let mut api_key_attempts = if shared.provider_credential.is_some() {
         vec![("projected".to_string(), None)]
     } else {
         runtime_local_rewrite_api_key_attempts(shared, api_keys)
@@ -42,7 +50,15 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             .map(|(label, api_key)| (label, Some(api_key)))
             .collect()
     };
+    api_key_attempts.retain(|(_, api_key)| {
+        runtime_gemini_openai_binding_identity(shared, *api_key, &binding_endpoint)
+            .as_ref()
+            .is_some_and(|identity| binding.candidate_allowed(Some(identity)))
+    });
     if api_key_attempts.is_empty() {
+        if binding.bound.is_some() {
+            bail!("Gemini continuation binding is unavailable or unauthorized");
+        }
         bail!("Gemini API-key pool is empty");
     }
     let attempt_count = api_key_attempts.len();
@@ -81,8 +97,24 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             model_chain: &model_chain,
             upstream_url: &upstream_url,
             attempt_count,
+            binding: &binding,
+            binding_endpoint: &binding_endpoint,
         },
         api_key_attempts,
+    )
+}
+
+fn runtime_gemini_openai_binding_identity(
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_key: Option<&str>,
+    endpoint: &str,
+) -> Option<RuntimeProviderBindingIdentity> {
+    runtime_local_rewrite_raw_binding_identity(
+        shared,
+        ProviderId::Gemini,
+        api_key,
+        endpoint,
+        api_key.is_none().then_some(RUNTIME_LOCAL_REWRITE_PROFILE),
     )
 }
 
@@ -95,6 +127,8 @@ struct RuntimeGeminiOpenAiAttemptContext<'a> {
     model_chain: &'a [String],
     upstream_url: &'a str,
     attempt_count: usize,
+    binding: &'a RuntimeLocalRewriteBindingContext,
+    binding_endpoint: &'a str,
 }
 
 fn runtime_gemini_openai_attempts(
@@ -113,10 +147,23 @@ fn runtime_gemini_openai_attempts(
             )?;
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    let Some(binding_identity) = runtime_gemini_openai_binding_identity(
+                        context.shared,
+                        api_key,
+                        context.binding_endpoint,
+                    ) else {
+                        bail!("Gemini accepted binding identity is unavailable");
+                    };
+                    let mut live_response = RuntimeLocalRewriteLiveResponse::new(response);
+                    runtime_local_rewrite_attach_accepted_binding(
+                        context.shared,
+                        &mut live_response,
+                        context.binding,
+                        binding_identity,
+                    );
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Live(
-                            RuntimeLocalRewriteLiveResponse::new(response)
-                                .with_chat_compatible_request(pending_request),
+                            live_response.with_chat_compatible_request(pending_request),
                         ),
                         gemini_context: None,
                         copilot_context: None,
@@ -128,6 +175,13 @@ fn runtime_gemini_openai_attempts(
                     class,
                 } => (status, parts, class),
             };
+            if status == 429 && !runtime_gemini_429_is_structured(&parts.body) {
+                return Ok(RuntimeLocalRewriteUpstreamResult {
+                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                    gemini_context: None,
+                    copilot_context: None,
+                });
+            }
             if model_index + 1 < context.model_chain.len()
                 && runtime_gateway_application_provider_retry_precommit(
                     ProviderRetryCause::NextModel,

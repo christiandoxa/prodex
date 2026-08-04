@@ -520,7 +520,7 @@ fn gemini_request_translation_preserves_advanced_generation_config() {
         "model": "gemini-2.5-pro",
         "input": "Return JSON",
         "top_k": 32,
-        "candidate_count": 2,
+        "candidate_count": 1,
         "seed": 7,
         "presence_penalty": 0.2,
         "frequency_penalty": 0.3,
@@ -551,7 +551,7 @@ fn gemini_request_translation_preserves_advanced_generation_config() {
     let config = &value["generationConfig"];
 
     assert_eq!(config["topK"], 32);
-    assert_eq!(config["candidateCount"], 2);
+    assert_eq!(config["candidateCount"], 1);
     assert_eq!(config["seed"], 7);
     assert_eq!(config["presencePenalty"], 0.2);
     assert_eq!(config["frequencyPenalty"], 0.3);
@@ -649,6 +649,43 @@ fn gemini_request_translation_maps_tool_search_to_function_declaration() {
     assert_eq!(
         value["tools"][0]["functionDeclarations"][0]["parameters"]["required"][0],
         "query"
+    );
+}
+
+#[test]
+fn gemini_runtime_builder_rejects_mixed_valid_and_invalid_tools_without_partial_output() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Use a tool",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "parameters": {"type": "object"}
+                }
+            },
+            {
+                "type": "function",
+                "function": {"name": "missing_schema"}
+            }
+        ]
+    });
+
+    let error = match runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    ) {
+        Ok(_) => panic!("one malformed declaration must reject the complete runtime request"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.to_string().contains("tools[1].function.parameters"),
+        "{error}"
     );
 }
 

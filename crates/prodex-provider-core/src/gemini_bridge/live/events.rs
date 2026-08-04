@@ -70,6 +70,26 @@ pub fn gemini_provider_core_live_session_updated_event() -> serde_json::Value {
     })
 }
 
+pub fn gemini_provider_core_live_session_updated_event_with_options(
+    applied_session: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut session = serde_json::Map::from_iter([
+        (
+            "id".to_string(),
+            serde_json::Value::String("sess_gemini_live".to_string()),
+        ),
+        (
+            "type".to_string(),
+            serde_json::Value::String("realtime".to_string()),
+        ),
+    ]);
+    session.extend(applied_session.clone());
+    serde_json::json!({
+        "type": "session.updated",
+        "session": session,
+    })
+}
+
 pub fn gemini_provider_core_live_function_call_done_event(
     call_id: &str,
     name: &str,

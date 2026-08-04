@@ -119,7 +119,7 @@ impl RunCommandStrategy {
             resolve_codex_delete_session_id(&codex_args)?
         };
         let goal_usage_limit_monitor =
-            prepare_goal_usage_limit_monitor(&codex_args, dry_run || args.no_auto_rotate);
+            prepare_goal_usage_limit_monitor(&codex_args, dry_run || args.no_auto_rotate)?;
         Ok(Self {
             args,
             codex_args,
@@ -186,7 +186,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
                 self.profile_v2_name.as_deref(),
                 &mut codex_args,
                 &monitor.marker_path,
-            );
+            )?;
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = if self.command_server {
@@ -201,23 +201,19 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         Ok(RuntimeLaunchPlan::new(child))
     }
 
-    fn child_exit_requested(&mut self) -> bool {
-        let Some(session_id) = self
-            .goal_usage_limit_monitor
-            .as_mut()
-            .and_then(GoalUsageLimitMonitor::take_usage_limit_signal)
-        else {
-            return false;
+    fn child_exit_requested(&mut self) -> Result<bool> {
+        let session_id = match self.goal_usage_limit_monitor.as_mut() {
+            Some(monitor) => monitor.take_usage_limit_signal()?,
+            None => return Ok(false),
         };
-        let Some(plan) = self
-            .plan_live_goal_resume_relaunch(&session_id)
-            .ok()
-            .flatten()
-        else {
-            return false;
+        let Some(session_id) = session_id else {
+            return Ok(false);
+        };
+        let Some(plan) = self.plan_live_goal_resume_relaunch(&session_id)? else {
+            return Ok(false);
         };
         self.pending_goal_resume_plan = Some(plan);
-        true
+        Ok(true)
     }
 
     fn monitors_child_exit(&self) -> bool {

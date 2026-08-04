@@ -18,6 +18,7 @@ fn merge_runtime_continuation_store_keeps_compact_session_release_tombstone() {
         session_id_bindings: BTreeMap::from([(
             key.clone(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },

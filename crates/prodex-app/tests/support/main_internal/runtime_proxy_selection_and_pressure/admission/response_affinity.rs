@@ -49,6 +49,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: stale_touch,
             },
@@ -119,7 +120,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
 }
 
 #[test]
-fn response_affinity_skips_recent_negative_cache_for_same_route() {
+fn response_affinity_ignores_recent_negative_cache_for_same_route() {
     let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
@@ -146,6 +147,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -208,11 +210,11 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
 
     let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
         .expect("response binding lookup should succeed");
-    assert_eq!(owner, None);
+    assert_eq!(owner.as_deref(), Some("main"));
 }
 
 #[test]
-fn response_affinity_skips_dead_continuation_status() {
+fn response_affinity_ignores_dead_continuation_status_for_owner() {
     let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
@@ -239,6 +241,7 @@ fn response_affinity_skips_dead_continuation_status() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },
@@ -307,7 +310,7 @@ fn response_affinity_skips_dead_continuation_status() {
 
     let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
         .expect("response binding lookup should succeed");
-    assert_eq!(owner, None);
+    assert_eq!(owner.as_deref(), Some("main"));
 }
 
 #[test]
@@ -339,6 +342,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: stale_at,
             },
@@ -422,7 +426,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
 }
 
 #[test]
-fn session_affinity_skips_stale_verified_continuation_status() {
+fn session_affinity_ignores_stale_verified_continuation_status_for_owner() {
     let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
@@ -451,6 +455,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: stale_at,
             },
@@ -491,7 +496,8 @@ fn session_affinity_skips_stale_verified_continuation_status() {
             session_id_bindings: BTreeMap::from([(
                 "sess-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: stale_at,
                 },
             )]),
@@ -524,7 +530,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
 
     let owner =
         runtime_session_bound_profile(&shared, "sess-main").expect("session lookup should succeed");
-    assert_eq!(owner, None);
+    assert_eq!(owner.as_deref(), Some("main"));
     assert_eq!(
         shared
             .runtime

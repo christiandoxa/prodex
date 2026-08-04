@@ -193,6 +193,11 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     } else {
         RuntimeContinuationBindingKind::TurnState
     };
+    let binding_present = if session_binding {
+        runtime.session_id_bindings.contains_key(key)
+    } else {
+        runtime.turn_state_bindings.contains_key(key)
+    };
     if runtime_compact_lineage_status_is_unusable(
         shared,
         runtime,
@@ -200,7 +205,8 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
         status_kind,
         session_binding,
         now,
-    ) {
+    ) && !binding_present
+    {
         return None;
     }
     let (profile_name, dead_shadowed_by_binding) = {
@@ -209,9 +215,21 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
         } else {
             &runtime.turn_state_bindings
         };
-        let binding = bindings
-            .get(key)
-            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
+        let binding = bindings.get(key);
+        if binding.is_some_and(|binding| {
+            binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+                || !runtime.state.profiles.contains_key(&binding.profile_name)
+                || runtime_profile_auth_failure_active_with_auth_cache(
+                    &runtime.profile_health,
+                    &runtime.profile_usage_auth,
+                    &binding.profile_name,
+                    now,
+                )
+        }) {
+            return Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string());
+        }
+        let binding =
+            binding.filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
         (
             binding.map(|binding| binding.profile_name.clone()),
             runtime_dead_continuation_status_shadowed_by_live_binding(
@@ -349,6 +367,21 @@ fn runtime_compact_followup_bound_profile_raw(
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<Option<(String, &'static str)>> {
+    match runtime_request_hard_binding_owner(shared, None, turn_state, session_id)? {
+        prodex_runtime_state::RuntimeHardBindingOwner::Conflict
+        | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+            return Ok(Some((
+                prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string(),
+                if turn_state.is_some() {
+                    "turn_state"
+                } else {
+                    "session_id"
+                },
+            )));
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound
+        | prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => {}
+    }
     let mut runtime = shared
         .runtime
         .lock()

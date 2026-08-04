@@ -65,6 +65,18 @@ fn runtime_candidate_affinity_to_proxy(
 }
 
 pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_>) -> bool {
+    if [
+        affinity.strict_affinity_profile,
+        affinity.pinned_profile,
+        affinity.turn_state_profile,
+        affinity.session_profile,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|profile_name| profile_name == affinity.candidate_name)
+    {
+        return true;
+    }
     runtime_proxy_crate::runtime_candidate_has_hard_affinity(runtime_candidate_affinity_to_proxy(
         affinity,
     ))
@@ -75,6 +87,18 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     _request_requires_previous_response_affinity: bool,
     fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
+    if [
+        affinity.strict_affinity_profile,
+        affinity.pinned_profile,
+        affinity.turn_state_profile,
+        affinity.session_profile,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|profile_name| profile_name == affinity.candidate_name)
+    {
+        return false;
+    }
     runtime_proxy_crate::runtime_quota_blocked_affinity_is_releasable(
         runtime_candidate_affinity_to_proxy(affinity),
         fresh_fallback_shape,
@@ -146,44 +170,4 @@ pub(super) fn runtime_affinity_selection_profile<'a>(
         RuntimeAffinitySelectionKind::TurnState => selection.turn_state_profile,
         RuntimeAffinitySelectionKind::Session => selection.session_profile,
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(super) struct RuntimeSoftAffinityPolicyInput {
-    pub(super) affinity_kind: RuntimeAffinitySelectionKind,
-    pub(super) route_kind: RuntimeRouteKind,
-    pub(super) quota_summary: RuntimeQuotaSummary,
-    pub(super) quota_source: Option<RuntimeQuotaSource>,
-    pub(super) current_profile_matches_candidate: bool,
-    pub(super) has_route_eligible_quota_fallback: bool,
-}
-
-fn runtime_soft_affinity_input_to_proxy(
-    input: RuntimeSoftAffinityPolicyInput,
-) -> runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
-    runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
-        affinity_kind: input.affinity_kind,
-        route_kind: input.route_kind,
-        quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
-            input.quota_summary,
-        ),
-        quota_source: prodex_runtime_quota::runtime_quota_source_option_to_proxy(
-            input.quota_source,
-        ),
-        current_profile_matches_candidate: input.current_profile_matches_candidate,
-        has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
-        responses_critical_floor_percent: runtime_proxy_responses_quota_critical_floor_percent(),
-    }
-}
-
-pub(super) fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> bool {
-    runtime_proxy_crate::runtime_soft_affinity_allowed(runtime_soft_affinity_input_to_proxy(input))
-}
-
-pub(super) fn runtime_soft_affinity_rejection_reason(
-    input: RuntimeSoftAffinityPolicyInput,
-) -> &'static str {
-    runtime_proxy_crate::runtime_soft_affinity_rejection_reason(
-        runtime_soft_affinity_input_to_proxy(input),
-    )
 }

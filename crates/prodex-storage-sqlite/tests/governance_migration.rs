@@ -1,5 +1,6 @@
 use prodex_storage_sqlite::{
     INITIAL_LOCAL_ACCOUNTING_MIGRATION, LOCAL_APPROVAL_TERMINATION_REASON_MIGRATION,
+    LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION, LOCAL_AUDIT_REASON_DETAIL_MIGRATION,
     LOCAL_ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION, LOCAL_ENTERPRISE_GOVERNANCE_MIGRATION,
     LOCAL_GOVERNANCE_LIFECYCLE_MIGRATION, LOCAL_GOVERNANCE_SESSION_INDEX_MIGRATION,
     LOCAL_GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION, LOCAL_SIEM_OUTBOX_LEASING_MIGRATION,
@@ -47,6 +48,74 @@ fn sqlite_governance_migration_is_content_minimized_and_executable() {
     ] {
         assert!(!sql.contains(forbidden), "migration contains {forbidden}");
     }
+}
+
+#[test]
+fn sqlite_foreign_keys_reject_orphans_and_restrict_parent_deletes() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+    connection
+        .execute_batch(INITIAL_LOCAL_ACCOUNTING_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute_batch(LOCAL_ENTERPRISE_GOVERNANCE_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_tenants VALUES ('tenant-a', 'A', 1, 1)",
+            [],
+        )
+        .unwrap();
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO prodex_budget_counters
+             (tenant_id, storage_scope, reserved_tokens, reserved_cost_micros,
+              committed_tokens, committed_cost_micros, updated_at_unix_ms)
+             VALUES ('missing-parent', 'tenant-default', 1, 1, 0, 0, 1)",
+                [],
+            )
+            .is_err()
+    );
+    connection
+        .execute(
+            "INSERT INTO prodex_budget_counters
+             (tenant_id, storage_scope, reserved_tokens, reserved_cost_micros,
+              committed_tokens, committed_cost_micros, updated_at_unix_ms)
+             VALUES ('tenant-a', 'tenant-default', 1, 1, 0, 0, 1)",
+            [],
+        )
+        .unwrap();
+    let on_delete: String = connection
+        .query_row(
+            "SELECT on_delete
+             FROM pragma_foreign_key_list('prodex_budget_counters')
+             WHERE \"from\" = 'tenant_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(on_delete, "NO ACTION");
+    assert!(
+        connection
+            .execute(
+                "DELETE FROM prodex_tenants WHERE tenant_id = 'tenant-a'",
+                []
+            )
+            .is_err()
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM prodex_budget_counters WHERE tenant_id = 'tenant-a'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -128,6 +197,85 @@ fn sqlite_siem_outbox_leasing_migration_preserves_existing_rows() {
             "claim_expires_at_unix_ms",
         ]
     );
+}
+
+#[test]
+fn sqlite_audit_reason_detail_migration_preserves_legacy_rows() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(INITIAL_LOCAL_ACCOUNTING_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_tenants VALUES ('tenant-a', 'A', 1, 1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_audit_log (
+                 tenant_id, audit_event_id, previous_digest, event_digest,
+                 occurred_at_unix_ms, principal_id, action, resource_kind,
+                 resource_id, outcome, reason_code
+             ) VALUES ('tenant-a', 'audit-a', NULL, 'digest-a', 2, 'principal-a',
+                       'control_plane.read', 'audit_log', NULL, 'success', NULL)",
+            [],
+        )
+        .unwrap();
+
+    connection
+        .execute_batch(LOCAL_AUDIT_REASON_DETAIL_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute_batch(LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute_batch(LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION.sql)
+        .expect("byte-limit migration should be idempotent");
+    let legacy: Option<String> = connection
+        .query_row(
+            "SELECT reason_detail FROM prodex_audit_log
+             WHERE tenant_id = 'tenant-a' AND audit_event_id = 'audit-a'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy, None);
+
+    connection
+        .execute(
+            "UPDATE prodex_audit_log SET reason_detail = 'incident response'
+             WHERE tenant_id = 'tenant-a' AND audit_event_id = 'audit-a'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT reason_detail FROM prodex_audit_log
+                 WHERE tenant_id = 'tenant-a' AND audit_event_id = 'audit-a'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "incident response"
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE prodex_audit_log SET reason_detail = ?1
+             WHERE tenant_id = 'tenant-a' AND audit_event_id = 'audit-a'",
+                [format!("{}x", "é".repeat(256))],
+            )
+            .is_err()
+    );
+    connection
+        .execute(
+            "UPDATE prodex_audit_log SET reason_detail = ?1
+             WHERE tenant_id = 'tenant-a' AND audit_event_id = 'audit-a'",
+            ["é".repeat(256)],
+        )
+        .unwrap();
 }
 
 #[test]

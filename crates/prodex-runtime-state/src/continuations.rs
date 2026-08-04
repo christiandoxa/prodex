@@ -1,3 +1,4 @@
+use prodex_provider_core::RuntimeProviderBindingIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -5,6 +6,8 @@ use std::collections::BTreeMap;
 pub struct RuntimeProfileBinding {
     pub profile_name: String,
     pub bound_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_identity: Option<RuntimeProviderBindingIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

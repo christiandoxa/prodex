@@ -136,6 +136,7 @@ fn session_reports_attach_profile_bindings() {
         session_profile_bindings: BTreeMap::from([(
             "bound".to_string(),
             prodex_state::ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: 1,
             },
@@ -193,6 +194,7 @@ fn session_reports_filter_by_profile_and_query() {
             (
                 "alpha-session".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "main".to_string(),
                     bound_at: 1,
                 },
@@ -200,6 +202,7 @@ fn session_reports_filter_by_profile_and_query() {
             (
                 "beta-session".to_string(),
                 prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "alt".to_string(),
                     bound_at: 1,
                 },

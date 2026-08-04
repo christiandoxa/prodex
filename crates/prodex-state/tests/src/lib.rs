@@ -1,4 +1,5 @@
 use super::*;
+use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
 
 #[test]
 fn app_state_schema_migrates_legacy_and_rejects_future_versions() {
@@ -15,6 +16,32 @@ fn app_state_schema_migrates_legacy_and_rejects_future_versions() {
     assert!(serde_json::from_str::<AppState>(&future).is_err());
 }
 
+#[test]
+fn response_profile_binding_reads_legacy_and_round_trips_secret_free_identity() {
+    let legacy: ResponseProfileBinding =
+        serde_json::from_str(r#"{"profile_name":"main","bound_at":7}"#).unwrap();
+    assert!(legacy.binding_identity.is_none());
+
+    let identity = RuntimeProviderBindingIdentity::from_raw_key(
+        ProviderId::OpenAi,
+        "sk-test-state",
+        "https://api.example.com/v1",
+        Some("main"),
+    )
+    .unwrap();
+    let binding = ResponseProfileBinding {
+        profile_name: "main".to_string(),
+        bound_at: 8,
+        binding_identity: Some(identity.clone()),
+    };
+    let encoded = serde_json::to_string(&binding).unwrap();
+    assert!(!encoded.contains("sk-test-state"));
+    assert_eq!(
+        serde_json::from_str::<ResponseProfileBinding>(&encoded).unwrap(),
+        binding
+    );
+}
+
 fn profile(name: &str) -> (String, ProfileEntry) {
     (
         name.to_string(),
@@ -29,6 +56,7 @@ fn profile(name: &str) -> (String, ProfileEntry) {
 
 fn binding(profile_name: &str, bound_at: i64) -> ResponseProfileBinding {
     ResponseProfileBinding {
+        binding_identity: None,
         profile_name: profile_name.to_string(),
         bound_at,
     }
@@ -95,7 +123,7 @@ fn provider_capabilities_define_route_policy_and_quota_shape() {
 }
 
 #[test]
-fn merge_profile_bindings_prefers_newer_known_profile_binding() {
+fn merge_profile_bindings_preserves_conflicting_profile_owners() {
     let profiles = BTreeMap::from([profile("p1"), profile("p2")]);
     let existing = BTreeMap::from([
         ("same".to_string(), binding("p1", 10)),
@@ -108,9 +136,48 @@ fn merge_profile_bindings_prefers_newer_known_profile_binding() {
 
     let merged = merge_profile_bindings(&existing, &incoming, &profiles);
 
-    assert_eq!(merged.get("same"), Some(&binding("p2", 30)));
+    assert_eq!(
+        merged
+            .get("same")
+            .map(|binding| binding.profile_name.as_str()),
+        Some(HARD_BINDING_CONFLICT_PROFILE)
+    );
     assert_eq!(merged.get("old_only"), Some(&binding("p1", 20)));
     assert!(!merged.contains_key("stale"));
+}
+
+#[test]
+fn exact_external_bindings_survive_state_merge_without_a_local_profile_entry() {
+    let identity = RuntimeProviderBindingIdentity::from_raw_key(
+        ProviderId::Copilot,
+        "copilot-test-key",
+        "https://api.example.com/v1",
+        Some("oauth-profile"),
+    )
+    .unwrap();
+    let binding = ResponseProfileBinding {
+        profile_name: "oauth-profile".to_string(),
+        bound_at: 10,
+        binding_identity: Some(identity),
+    };
+    let bindings = BTreeMap::from([("response".to_string(), binding.clone())]);
+    let profiles = BTreeMap::new();
+
+    let merged = merge_profile_bindings(&BTreeMap::new(), &bindings, &profiles);
+    assert_eq!(merged.get("response"), Some(&binding));
+
+    let compacted = compact_app_state_with_policy(
+        AppState {
+            response_profile_bindings: bindings,
+            ..AppState::default()
+        },
+        20,
+        AppStateCompactionPolicy::default(),
+    );
+    assert_eq!(
+        compacted.response_profile_bindings.get("response"),
+        Some(&binding)
+    );
 }
 
 #[test]

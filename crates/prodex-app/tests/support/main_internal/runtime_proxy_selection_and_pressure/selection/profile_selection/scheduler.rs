@@ -316,6 +316,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },

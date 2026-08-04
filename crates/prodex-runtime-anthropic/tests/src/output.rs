@@ -24,6 +24,13 @@ fn test_messages_request() -> RuntimeAnthropicMessagesRequest {
 }
 
 #[test]
+fn anthropic_first_event_retry_is_bounded_and_precommit_only() {
+    assert!(runtime_anthropic_first_event_retry_allowed(0, false));
+    assert!(!runtime_anthropic_first_event_retry_allowed(1, false));
+    assert!(!runtime_anthropic_first_event_retry_allowed(0, true));
+}
+
+#[test]
 fn server_tool_followup_translation_passes_upstream_errors_without_followup() {
     let observed = Cell::new(false);
     let result =

@@ -51,6 +51,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         turn_state_bindings: BTreeMap::from([(
             "turn-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -159,6 +160,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         turn_state_bindings: BTreeMap::from([(
             "turn-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },

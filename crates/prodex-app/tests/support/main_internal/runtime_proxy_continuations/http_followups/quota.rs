@@ -34,6 +34,7 @@ fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fre
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },

@@ -23,6 +23,7 @@ use super::local_rewrite_gateway_sql_ledger::{
     runtime_gateway_postgres_ledger_load, runtime_gateway_postgres_ledger_reconcile_response,
     runtime_gateway_sqlite_ledger_load, runtime_gateway_sqlite_ledger_reconcile_response,
 };
+#[cfg(test)]
 use super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_u64_to_i64;
 use super::local_rewrite_gateway_util::{
     runtime_gateway_generate_virtual_key_token, runtime_gateway_unix_epoch_millis,
@@ -34,6 +35,44 @@ use prodex_domain::{RequestId, UsageAmount};
 use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+#[derive(Debug)]
+pub(super) enum RuntimeGatewayDurableReconciliationError {
+    Conflict,
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for RuntimeGatewayDurableReconciliationError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl From<rusqlite::Error> for RuntimeGatewayDurableReconciliationError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Failed(anyhow::Error::from(error))
+    }
+}
+
+impl std::fmt::Display for RuntimeGatewayDurableReconciliationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict => f.write_str(
+                "durable reservation was not found or state conflicts with reconciliation",
+            ),
+            Self::Failed(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeGatewayDurableReconciliationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Conflict => None,
+            Self::Failed(error) => Some(error.as_ref()),
+        }
+    }
+}
 
 pub(super) fn runtime_gateway_billing_ledger_load(
     state_store: &RuntimeGatewayStateStore,
@@ -154,46 +193,180 @@ fn runtime_gateway_sqlite_reconcile_usage(
     plan: &prodex_storage_sqlite::SqliteUsageReconciliationSqlPlan,
     record: &prodex_domain::ReservationRecord,
     actual: UsageAmount,
-) -> anyhow::Result<()> {
+) -> Result<(), RuntimeGatewayDurableReconciliationError> {
     let mut conn = runtime_gateway_sqlite_open(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let tenant_id = plan.tenant_id.to_string();
     let reservation_id = record.reservation_id.to_string();
     let call_id = record.call_id.to_string();
     let storage_scope = runtime_gateway_reconciliation_storage_scope(plan.storage_key);
-    let reserved_tokens = runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens);
-    let reserved_cost_micros = runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros);
+    let virtual_key_id = plan.storage_key.virtual_key_id.map(|id| id.to_string());
+    let reserved_tokens = i64::try_from(record.reserved.tokens)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let reserved_cost_micros = i64::try_from(record.reserved.cost_micros)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let created_at = i64::try_from(record.created_at_unix_ms)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let expires_at = i64::try_from(record.expires_at_unix_ms)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let actual_tokens = i64::try_from(actual.tokens)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let actual_cost_micros = i64::try_from(actual.cost_micros)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
     let stored = tx
         .query_row(
-            "SELECT storage_scope, reserved_tokens, reserved_cost_micros, committed_at_unix_ms, released_at_unix_ms FROM prodex_reservations WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
+            "SELECT reservation_id, call_id, virtual_key_id, storage_scope,
+                    reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms,
+                    committed_at_unix_ms, released_at_unix_ms
+             FROM prodex_reservations
+             WHERE prodex_reservations.tenant_id = ?1
+               AND prodex_reservations.reservation_id = ?2
+               AND prodex_reservations.call_id = ?3",
             rusqlite::params![tenant_id, reservation_id, call_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
                 ))
             },
         )
         .optional()?;
-    let Some((stored_scope, stored_tokens, stored_cost_micros, committed_at, released_at)) = stored
+    let Some((
+        stored_reservation_id,
+        stored_call_id,
+        stored_virtual_key_id,
+        stored_scope,
+        stored_tokens,
+        stored_cost_micros,
+        stored_created_at,
+        stored_expires_at,
+        committed_at,
+        released_at,
+    )) = stored
     else {
-        anyhow::bail!("durable reservation was not found");
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     };
-    if stored_scope != storage_scope
+    if record.tenant_id != plan.tenant_id
+        || stored_reservation_id != reservation_id
+        || stored_call_id != call_id
+        || stored_virtual_key_id != virtual_key_id
+        || stored_scope != storage_scope
         || stored_tokens != reserved_tokens
         || stored_cost_micros != reserved_cost_micros
+        || stored_created_at != created_at
+        || stored_expires_at != expires_at
     {
-        anyhow::bail!("durable reservation state conflicts with reconciliation");
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    let counter: Option<(Option<String>, String)> = tx
+        .query_row(
+            "SELECT virtual_key_id, storage_scope
+             FROM prodex_budget_counters
+             WHERE tenant_id = ?1 AND storage_scope = ?2",
+            rusqlite::params![tenant_id, storage_scope],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if counter != Some((virtual_key_id.clone(), storage_scope.clone())) {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    let reserved_ledger: Option<(String, String, i64, i64)> = tx
+        .query_row(
+            "SELECT reservation_id, call_id, tokens, cost_micros
+             FROM prodex_usage_ledger
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+               AND event_kind = 'reserved'",
+            rusqlite::params![tenant_id, reservation_id, call_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    if reserved_ledger
+        != Some((
+            reservation_id.clone(),
+            call_id.clone(),
+            reserved_tokens,
+            reserved_cost_micros,
+        ))
+    {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    let (committed_count, committed_tokens, committed_cost_micros): (
+        i64,
+        Option<i64>,
+        Option<i64>,
+    ) = tx.query_row(
+        "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
+         FROM prodex_usage_ledger
+         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+           AND event_kind = 'committed'",
+        rusqlite::params![tenant_id, reservation_id, call_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let committed_usage = match (committed_count, committed_tokens, committed_cost_micros) {
+        (0, None, None) => None,
+        (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
+        _ => return Err(RuntimeGatewayDurableReconciliationError::Conflict),
+    };
+    let (released_count, released_tokens, released_cost_micros): (i64, Option<i64>, Option<i64>) =
+        tx.query_row(
+            "SELECT COUNT(*), MIN(tokens), MIN(cost_micros)
+         FROM prodex_usage_ledger
+         WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+           AND event_kind = 'released'",
+            rusqlite::params![tenant_id, reservation_id, call_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    let released_usage = match (released_count, released_tokens, released_cost_micros) {
+        (0, None, None) => None,
+        (1, Some(tokens), Some(cost_micros)) => Some((tokens, cost_micros)),
+        _ => return Err(RuntimeGatewayDurableReconciliationError::Conflict),
+    };
+    let reservation_was_released = released_at.is_some();
+    if (!reservation_was_released && released_usage.is_some())
+        || (reservation_was_released && released_usage.is_none())
+    {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    if reservation_was_released
+        && committed_at.is_none()
+        && released_usage != Some((reserved_tokens, reserved_cost_micros))
+    {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     }
     if committed_at.is_some() {
+        if committed_usage != Some((actual_tokens, actual_cost_micros)) {
+            return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+        }
+        let expected_released = record.reserved.saturating_sub(actual);
+        let expected_released = (
+            i64::try_from(expected_released.tokens)
+                .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
+            i64::try_from(expected_released.cost_micros)
+                .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?,
+        );
+        if (reservation_was_released
+            && released_usage != Some((reserved_tokens, reserved_cost_micros))
+            && released_usage != Some(expected_released))
+            || (!reservation_was_released && expected_released != (0, 0))
+        {
+            return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+        }
         tx.commit()?;
         return Ok(());
     }
-    let updated = runtime_gateway_unix_epoch_millis();
-    let reservation_was_released = released_at.is_some();
+    if committed_usage.is_some() {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
+    let updated = i64::try_from(runtime_gateway_unix_epoch_millis())
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
     let reserved_tokens_to_release = if reservation_was_released {
         0
     } else {
@@ -211,6 +384,10 @@ fn runtime_gateway_sqlite_reconcile_usage(
     };
     let released_tokens = released.tokens;
     let released_cost_micros = released.cost_micros;
+    let released_tokens_i64 = i64::try_from(released_tokens)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
+    let released_cost_micros_i64 = i64::try_from(released_cost_micros)
+        .map_err(|_| RuntimeGatewayDurableReconciliationError::Conflict)?;
     let changed = tx.execute(
         r#"
         UPDATE prodex_budget_counters
@@ -238,16 +415,16 @@ fn runtime_gateway_sqlite_reconcile_usage(
             call_id,
             reserved_tokens_to_release,
             reserved_cost_to_release,
-            runtime_gateway_sqlite_u64_to_i64(actual.tokens),
-            runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
-            runtime_gateway_sqlite_u64_to_i64(updated),
+            actual_tokens,
+            actual_cost_micros,
+            updated,
             storage_scope,
         ],
     )?;
     if changed == 0 {
-        anyhow::bail!("durable usage reconciliation was not applied");
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
     }
-    tx.execute(
+    let reservation_updated = tx.execute(
         r#"
         UPDATE prodex_reservations
         SET committed_at_unix_ms = ?8,
@@ -267,17 +444,20 @@ fn runtime_gateway_sqlite_reconcile_usage(
             call_id,
             reserved_tokens,
             reserved_cost_micros,
-            runtime_gateway_sqlite_u64_to_i64(actual.tokens),
-            runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
-            runtime_gateway_sqlite_u64_to_i64(updated),
+            actual_tokens,
+            actual_cost_micros,
+            updated,
             storage_scope,
-            runtime_gateway_sqlite_u64_to_i64(released_tokens),
-            runtime_gateway_sqlite_u64_to_i64(released_cost_micros),
+            released_tokens_i64,
+            released_cost_micros_i64,
         ],
     )?;
+    if reservation_updated != 1 {
+        return Err(RuntimeGatewayDurableReconciliationError::Conflict);
+    }
     tx.execute(
         r#"
-        INSERT OR IGNORE INTO prodex_usage_ledger (
+        INSERT INTO prodex_usage_ledger (
             tenant_id,
             ledger_event_id,
             reservation_id,
@@ -294,19 +474,19 @@ fn runtime_gateway_sqlite_reconcile_usage(
             call_id,
             reserved_tokens,
             reserved_cost_micros,
-            runtime_gateway_sqlite_u64_to_i64(actual.tokens),
-            runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
-            runtime_gateway_sqlite_u64_to_i64(updated),
+            actual_tokens,
+            actual_cost_micros,
+            updated,
             storage_scope,
-            runtime_gateway_sqlite_u64_to_i64(released_tokens),
-            runtime_gateway_sqlite_u64_to_i64(released_cost_micros),
+            released_tokens_i64,
+            released_cost_micros_i64,
             RequestId::new().to_string(),
         ],
     )?;
     if released_tokens > 0 || released_cost_micros > 0 {
         tx.execute(
             r#"
-            INSERT OR IGNORE INTO prodex_usage_ledger (
+            INSERT INTO prodex_usage_ledger (
                 tenant_id,
                 ledger_event_id,
                 reservation_id,
@@ -323,12 +503,12 @@ fn runtime_gateway_sqlite_reconcile_usage(
                 call_id,
                 reserved_tokens,
                 reserved_cost_micros,
-                runtime_gateway_sqlite_u64_to_i64(actual.tokens),
-                runtime_gateway_sqlite_u64_to_i64(actual.cost_micros),
-                runtime_gateway_sqlite_u64_to_i64(updated),
+                actual_tokens,
+                actual_cost_micros,
+                updated,
                 storage_scope,
-                runtime_gateway_sqlite_u64_to_i64(released_tokens),
-                runtime_gateway_sqlite_u64_to_i64(released_cost_micros),
+                released_tokens_i64,
+                released_cost_micros_i64,
                 RequestId::new().to_string(),
             ],
         )?;
@@ -385,11 +565,70 @@ mod tests {
     use super::super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
     use super::*;
     use prodex_domain::{
-        BudgetSnapshot, IdempotencyKey, ReservationRecord, ReservationRequest, TenantId,
+        BudgetSnapshot, CallId, IdempotencyKey, ReservationRecord, ReservationRequest, TenantId,
         VirtualKeyId,
     };
     use std::collections::BTreeMap;
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
+
+    type SqliteReconciliationState = ((i64, i64, i64, i64), (i64, i64, i64), i64);
+
+    fn sqlite_reconciliation_state(
+        path: &Path,
+        tenant_id: TenantId,
+        storage_key: prodex_storage::TenantStorageKey,
+        reservation_id: prodex_domain::ReservationId,
+    ) -> SqliteReconciliationState {
+        let conn = runtime_gateway_sqlite_open(path).expect("sqlite database should open");
+        let counters = conn
+            .query_row(
+                "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
+                rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("budget counters should load");
+        let committed = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(tokens), 0), COALESCE(SUM(cost_micros), 0) FROM prodex_usage_ledger WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'committed'",
+                rusqlite::params![tenant_id.to_string(), reservation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("committed ledger should load");
+        let released = conn
+            .query_row(
+                "SELECT COUNT(*) FROM prodex_usage_ledger WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'released'",
+                rusqlite::params![tenant_id.to_string(), reservation_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("released ledger should load");
+        (counters, committed, released)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assert_sqlite_reconciliation_conflict_unchanged(
+        path: &Path,
+        plan: &prodex_storage_sqlite::SqliteUsageReconciliationSqlPlan,
+        record: &ReservationRecord,
+        actual: UsageAmount,
+        expected: SqliteReconciliationState,
+        tenant_id: TenantId,
+        storage_key: prodex_storage::TenantStorageKey,
+        reservation_id: prodex_domain::ReservationId,
+        label: &str,
+    ) {
+        let error = runtime_gateway_sqlite_reconcile_usage(path, plan, record, actual)
+            .expect_err("reconciliation mismatch must fail");
+        assert!(
+            matches!(&error, &RuntimeGatewayDurableReconciliationError::Conflict),
+            "{label} mismatch should be a typed conflict: {error}"
+        );
+        assert_eq!(
+            sqlite_reconciliation_state(path, tenant_id, storage_key, reservation_id),
+            expected,
+            "{label} mismatch must not mutate counters or ledger"
+        );
+    }
 
     #[test]
     fn durable_reservation_state_lookup_recovers_poisoned_mutex() {
@@ -583,6 +822,10 @@ mod tests {
 
         let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &record, actual)
             .expect_err("missing durable reservation must not reconcile successfully");
+        assert!(matches!(
+            &error,
+            &RuntimeGatewayDurableReconciliationError::Conflict
+        ));
         assert!(
             error
                 .to_string()
@@ -669,11 +912,234 @@ mod tests {
             ],
         )
         .expect("reservation row should insert");
+        conn.execute(
+            "INSERT INTO prodex_usage_ledger
+             (tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
+              tokens, cost_micros, occurred_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7)",
+            rusqlite::params![
+                tenant_id.to_string(),
+                RequestId::new().to_string(),
+                record.reservation_id.to_string(),
+                record.call_id.to_string(),
+                runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
+                runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+                record.created_at_unix_ms as i64,
+            ],
+        )
+        .expect("reserved ledger row should insert");
 
         runtime_gateway_sqlite_reconcile_usage(&path, &plan, &record, actual)
             .expect("first reconcile should apply");
+        let applied_state =
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, record.reservation_id);
         runtime_gateway_sqlite_reconcile_usage(&path, &plan, &record, actual)
             .expect("second reconcile should be a no-op");
+        assert_eq!(
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, record.reservation_id),
+            applied_state
+        );
+        let replay_state = applied_state;
+        let mut virtual_key_mismatch = storage_key;
+        virtual_key_mismatch.virtual_key_id = Some(VirtualKeyId::new());
+        let virtual_key_plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
+            prodex_storage::UsageReconciliationCommand {
+                storage_key: virtual_key_mismatch,
+                snapshot: BudgetSnapshot {
+                    reserved: record.reserved,
+                    committed: UsageAmount::ZERO,
+                },
+                record,
+                actual,
+                reason: prodex_domain::ReservationReconciliationReason::Completed,
+            },
+        )
+        .expect("virtual key mismatch plan should be valid");
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &virtual_key_plan,
+            &record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "virtual key",
+        );
+
+        let scope_mismatch = prodex_storage::TenantStorageKey::budget_group(
+            tenant_id,
+            storage_key.virtual_key_id.expect("virtual key"),
+            prodex_storage::BudgetStorageScope::from_digest([8; 32]),
+        );
+        let scope_plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
+            prodex_storage::UsageReconciliationCommand {
+                storage_key: scope_mismatch,
+                snapshot: BudgetSnapshot {
+                    reserved: record.reserved,
+                    committed: UsageAmount::ZERO,
+                },
+                record,
+                actual,
+                reason: prodex_domain::ReservationReconciliationReason::Completed,
+            },
+        )
+        .expect("storage scope mismatch plan should be valid");
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &scope_plan,
+            &record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "storage scope",
+        );
+
+        let mut tenant_record = record;
+        tenant_record.tenant_id = TenantId::new();
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &tenant_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "tenant",
+        );
+
+        let mut call_record = record;
+        call_record.call_id = CallId::new();
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &call_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "call",
+        );
+
+        let mut reservation_record = record;
+        reservation_record.reservation_id = prodex_domain::ReservationId::new();
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &reservation_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "reservation",
+        );
+
+        let mut amount_record = record;
+        amount_record.reserved = UsageAmount::new(21, 41);
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &amount_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "reserved amount",
+        );
+
+        let mut created_at_record = record;
+        created_at_record.created_at_unix_ms += 1;
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &created_at_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "created at",
+        );
+
+        let mut expires_at_record = record;
+        expires_at_record.expires_at_unix_ms += 1;
+        assert_sqlite_reconciliation_conflict_unchanged(
+            &path,
+            &plan,
+            &expires_at_record,
+            actual,
+            replay_state,
+            tenant_id,
+            storage_key,
+            record.reservation_id,
+            "expires at",
+        );
+
+        let counters_before_conflict: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
+                rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("budget counters should load before conflict");
+        let ledger_before_conflict: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), tokens, cost_micros FROM prodex_usage_ledger WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'committed'",
+                rusqlite::params![tenant_id.to_string(), record.reservation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("committed ledger should load before conflict");
+        for (label, mismatch_actual) in [
+            ("actual tokens", UsageAmount::new(27, 49)),
+            ("actual cost", UsageAmount::new(28, 48)),
+        ] {
+            let mismatch_plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
+                prodex_storage::UsageReconciliationCommand {
+                    storage_key,
+                    snapshot: BudgetSnapshot {
+                        reserved: record.reserved,
+                        committed: UsageAmount::ZERO,
+                    },
+                    record,
+                    actual: mismatch_actual,
+                    reason: prodex_domain::ReservationReconciliationReason::Completed,
+                },
+            )
+            .expect("mismatched replay plan should be valid");
+            let error = runtime_gateway_sqlite_reconcile_usage(
+                &path,
+                &mismatch_plan,
+                &record,
+                mismatch_actual,
+            )
+            .expect_err("different committed usage must be a typed conflict");
+            assert!(
+                matches!(&error, &RuntimeGatewayDurableReconciliationError::Conflict),
+                "{label} mismatch should be a typed conflict: {error}"
+            );
+        }
+        let counters_after_conflict: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
+                rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("budget counters should load after conflict");
+        let ledger_after_conflict: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), tokens, cost_micros FROM prodex_usage_ledger WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'committed'",
+                rusqlite::params![tenant_id.to_string(), record.reservation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("committed ledger should load after conflict");
+        assert_eq!(counters_after_conflict, counters_before_conflict);
+        assert_eq!(ledger_after_conflict, ledger_before_conflict);
 
         let (reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros): (
             i64,
@@ -708,6 +1174,29 @@ mod tests {
             .expect("released ledger rows should load");
         assert_eq!(committed_rows, 1);
         assert_eq!(released_rows, 0);
+
+        conn.execute(
+            "UPDATE prodex_usage_ledger SET call_id = ?1
+             WHERE tenant_id = ?2 AND reservation_id = ?3 AND event_kind = 'committed'",
+            rusqlite::params![
+                CallId::new().to_string(),
+                tenant_id.to_string(),
+                record.reservation_id.to_string(),
+            ],
+        )
+        .expect("test ledger tamper should apply");
+        let tampered_state =
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, record.reservation_id);
+        let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &record, actual)
+            .expect_err("committed ledger call mismatch must conflict");
+        assert!(matches!(
+            error,
+            RuntimeGatewayDurableReconciliationError::Conflict
+        ));
+        assert_eq!(
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, record.reservation_id),
+            tampered_state
+        );
 
         drop(conn);
         std::fs::remove_dir_all(root).expect("test root should clean up");
@@ -783,6 +1272,22 @@ mod tests {
                 ],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO prodex_usage_ledger
+                 (tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
+                  tokens, cost_micros, occurred_at_unix_ms)
+                 VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7)",
+                rusqlite::params![
+                    tenant_id.to_string(),
+                    RequestId::new().to_string(),
+                    record.reservation_id.to_string(),
+                    record.call_id.to_string(),
+                    runtime_gateway_sqlite_u64_to_i64(record.reserved.tokens),
+                    runtime_gateway_sqlite_u64_to_i64(record.reserved.cost_micros),
+                    record.created_at_unix_ms as i64,
+                ],
+            )
+            .unwrap();
         }
         drop(conn);
 
@@ -806,8 +1311,8 @@ mod tests {
                 "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, committed_cost_micros FROM prodex_budget_counters WHERE tenant_id = ?1 AND storage_scope = ?2",
                 rusqlite::params![tenant_id.to_string(), runtime_gateway_reconciliation_storage_scope(storage_key)],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
+        )
+        .unwrap();
         assert_eq!(counters_after_recovery, (13, 17, 0, 0));
         drop(conn);
 
@@ -825,10 +1330,124 @@ mod tests {
             },
         )
         .unwrap();
+        let conn = runtime_gateway_sqlite_open(&path).unwrap();
+        conn.execute(
+            "UPDATE prodex_usage_ledger SET cost_micros = 41
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'released'",
+            rusqlite::params![tenant_id.to_string(), expired.reservation_id.to_string()],
+        )
+        .expect("test ledger tamper should apply");
+        let tampered_state =
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id);
+        let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
+            .expect_err("partial pre-commit release must conflict");
+        assert!(matches!(
+            error,
+            RuntimeGatewayDurableReconciliationError::Conflict
+        ));
+        assert_eq!(
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id),
+            tampered_state
+        );
+        conn.execute(
+            "UPDATE prodex_usage_ledger SET cost_micros = 42
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'released'",
+            rusqlite::params![tenant_id.to_string(), expired.reservation_id.to_string()],
+        )
+        .expect("test ledger repair should apply");
+        drop(conn);
         runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
             .expect("late reconciliation should apply");
+
+        let conn = runtime_gateway_sqlite_open(&path).unwrap();
+        conn.execute(
+            "UPDATE prodex_usage_ledger SET cost_micros = 41
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'released'",
+            rusqlite::params![tenant_id.to_string(), expired.reservation_id.to_string()],
+        )
+        .expect("test ledger tamper should apply");
+        let tampered_state =
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id);
+        let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
+            .expect_err("released ledger amount mismatch must conflict");
+        assert!(matches!(
+            error,
+            RuntimeGatewayDurableReconciliationError::Conflict
+        ));
+        assert_eq!(
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id),
+            tampered_state
+        );
+        conn.execute(
+            "UPDATE prodex_usage_ledger SET cost_micros = 42
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND event_kind = 'released'",
+            rusqlite::params![tenant_id.to_string(), expired.reservation_id.to_string()],
+        )
+        .expect("test ledger repair should apply");
+        drop(conn);
         runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
             .expect("late reconciliation replay should be idempotent");
+
+        let conn = runtime_gateway_sqlite_open(&path).unwrap();
+        conn.execute(
+            "UPDATE prodex_reservations SET released_at_unix_ms = NULL
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
+            rusqlite::params![
+                tenant_id.to_string(),
+                expired.reservation_id.to_string(),
+                expired.call_id.to_string(),
+            ],
+        )
+        .expect("test release marker tamper should apply");
+        conn.execute(
+            "DELETE FROM prodex_usage_ledger
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3
+               AND event_kind = 'released'",
+            rusqlite::params![
+                tenant_id.to_string(),
+                expired.reservation_id.to_string(),
+                expired.call_id.to_string(),
+            ],
+        )
+        .expect("test release ledger tamper should apply");
+        let tampered_state =
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id);
+        let error = runtime_gateway_sqlite_reconcile_usage(&path, &plan, &expired, actual)
+            .expect_err("missing release state must conflict");
+        assert!(matches!(
+            error,
+            RuntimeGatewayDurableReconciliationError::Conflict
+        ));
+        assert_eq!(
+            sqlite_reconciliation_state(&path, tenant_id, storage_key, expired.reservation_id),
+            tampered_state
+        );
+        conn.execute(
+            "UPDATE prodex_reservations SET released_at_unix_ms = 300
+             WHERE tenant_id = ?1 AND reservation_id = ?2 AND call_id = ?3",
+            rusqlite::params![
+                tenant_id.to_string(),
+                expired.reservation_id.to_string(),
+                expired.call_id.to_string(),
+            ],
+        )
+        .expect("test release marker repair should apply");
+        conn.execute(
+            "INSERT INTO prodex_usage_ledger
+             (tenant_id, ledger_event_id, reservation_id, call_id, event_kind,
+              tokens, cost_micros, occurred_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4, 'released', ?5, ?6, 300)",
+            rusqlite::params![
+                tenant_id.to_string(),
+                RequestId::new().to_string(),
+                expired.reservation_id.to_string(),
+                expired.call_id.to_string(),
+                runtime_gateway_sqlite_u64_to_i64(expired.reserved.tokens),
+                runtime_gateway_sqlite_u64_to_i64(expired.reserved.cost_micros),
+            ],
+        )
+        .expect("test release ledger repair should apply");
+        drop(conn);
 
         let conn = runtime_gateway_sqlite_open(&path).expect("sqlite database should reopen");
         let counters: (i64, i64, i64, i64) = conn

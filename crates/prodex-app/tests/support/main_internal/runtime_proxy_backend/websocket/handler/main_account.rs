@@ -46,6 +46,7 @@ pub(super) fn handle_main_account(
                     "type": "response.failed",
                     "status": 429,
                     "error": {
+                        "code": "server_is_overloaded",
                         "message": "Selected model is at capacity. Please try a different model."
                     }
                 })
@@ -72,6 +73,7 @@ pub(super) fn handle_main_account(
             "type": "response.failed",
             "status": 429,
             "error": {
+                "code": "server_is_overloaded",
                 "message": "Selected model is at capacity. Please try a different model."
             }
         })

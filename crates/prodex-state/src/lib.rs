@@ -1,3 +1,4 @@
+use prodex_provider_core::RuntimeProviderBindingIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,6 +10,8 @@ mod app_state;
 pub use app_state::{APP_STATE_SCHEMA_VERSION, AppState};
 
 pub const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
+pub const APP_STATE_RESPONSE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 16_384 };
+pub const HARD_BINDING_CONFLICT_PROFILE: &str = "__prodex_hard_binding_conflict__";
 pub const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 pub const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
@@ -218,6 +221,8 @@ fn optional_trimmed_eq(left: Option<&str>, right: Option<&str>) -> bool {
 pub struct ResponseProfileBinding {
     pub profile_name: String,
     pub bound_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_identity: Option<RuntimeProviderBindingIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -477,18 +482,73 @@ pub fn merge_profile_bindings(
     incoming: &BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> BTreeMap<String, ResponseProfileBinding> {
-    let mut merged = existing.clone();
-    for (response_id, binding) in incoming {
-        let should_replace = merged.get(response_id).is_none_or(|current| {
-            binding.bound_at > current.bound_at
-                || (binding.bound_at == current.bound_at
-                    && binding.profile_name > current.profile_name)
-        });
-        if should_replace {
-            merged.insert(response_id.clone(), binding.clone());
+    merge_hard_profile_bindings(existing, incoming, profiles)
+}
+
+pub fn is_hard_binding_conflict_profile(profile_name: &str) -> bool {
+    profile_name == HARD_BINDING_CONFLICT_PROFILE
+}
+
+pub fn merge_response_profile_binding(
+    left: &ResponseProfileBinding,
+    right: &ResponseProfileBinding,
+) -> ResponseProfileBinding {
+    let bound_at = left.bound_at.max(right.bound_at);
+    if is_hard_binding_conflict_profile(&left.profile_name)
+        || is_hard_binding_conflict_profile(&right.profile_name)
+        || left.profile_name != right.profile_name
+        || matches!(
+            (&left.binding_identity, &right.binding_identity),
+            (Some(left), Some(right)) if left != right
+        )
+    {
+        return ResponseProfileBinding {
+            profile_name: HARD_BINDING_CONFLICT_PROFILE.to_string(),
+            bound_at,
+            binding_identity: None,
+        };
+    }
+
+    match (&left.binding_identity, &right.binding_identity) {
+        (Some(_), None) => ResponseProfileBinding {
+            bound_at,
+            ..left.clone()
+        },
+        (None, Some(_)) => ResponseProfileBinding {
+            bound_at,
+            ..right.clone()
+        },
+        _ if right.bound_at > left.bound_at => right.clone(),
+        _ => left.clone(),
+    }
+}
+
+/// Merge hard-owner bindings without selecting one side of a conflicting write.
+pub fn merge_hard_profile_bindings(
+    existing: &BTreeMap<String, ResponseProfileBinding>,
+    incoming: &BTreeMap<String, ResponseProfileBinding>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> BTreeMap<String, ResponseProfileBinding> {
+    let mut merged = BTreeMap::new();
+    let keys = existing
+        .keys()
+        .chain(incoming.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for key in keys {
+        let binding = match (existing.get(&key), incoming.get(&key)) {
+            (Some(left), Some(right)) => merge_response_profile_binding(left, right),
+            (Some(binding), None) | (None, Some(binding)) => binding.clone(),
+            (None, None) => continue,
+        };
+        if is_hard_binding_conflict_profile(&binding.profile_name)
+            || profiles.contains_key(&binding.profile_name)
+            || binding.binding_identity.is_some()
+        {
+            merged.insert(key, binding);
         }
     }
-    merged.retain(|_, binding| profiles.contains_key(&binding.profile_name));
     merged
 }
 
@@ -582,11 +642,17 @@ pub fn prune_profile_bindings(
     let excess = bindings.len() - max_entries;
     let mut oldest = bindings
         .iter()
-        .map(|(response_id, binding)| (response_id.clone(), binding.bound_at))
+        .map(|(response_id, binding)| {
+            (
+                response_id.clone(),
+                is_hard_binding_conflict_profile(&binding.profile_name),
+                binding.bound_at,
+            )
+        })
         .collect::<Vec<_>>();
-    oldest.sort_by_key(|(_, bound_at)| *bound_at);
+    oldest.sort_by_key(|(_, conflict, bound_at)| (*conflict, *bound_at));
 
-    for (response_id, _) in oldest.into_iter().take(excess) {
+    for (response_id, _, _) in oldest.into_iter().take(excess) {
         bindings.remove(&response_id);
     }
 }
@@ -600,7 +666,9 @@ pub fn prune_profile_bindings_for_housekeeping(
 ) {
     let oldest_allowed = now.saturating_sub(retention_seconds);
     bindings.retain(|_, binding| {
-        profiles.contains_key(&binding.profile_name) && binding.bound_at >= oldest_allowed
+        is_hard_binding_conflict_profile(&binding.profile_name)
+            || (binding.binding_identity.is_some() && binding.bound_at >= oldest_allowed)
+            || (profiles.contains_key(&binding.profile_name) && binding.bound_at >= oldest_allowed)
     });
     prune_profile_bindings(bindings, max_entries);
 }
@@ -609,7 +677,11 @@ pub fn prune_profile_bindings_for_housekeeping_without_retention(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) {
-    bindings.retain(|_, binding| profiles.contains_key(&binding.profile_name));
+    bindings.retain(|_, binding| {
+        is_hard_binding_conflict_profile(&binding.profile_name)
+            || binding.binding_identity.is_some()
+            || profiles.contains_key(&binding.profile_name)
+    });
 }
 
 pub fn compact_app_state(state: AppState, now: i64) -> AppState {
@@ -633,6 +705,10 @@ pub fn compact_app_state_with_policy(
     prune_profile_bindings_for_housekeeping_without_retention(
         &mut state.response_profile_bindings,
         &state.profiles,
+    );
+    prune_profile_bindings(
+        &mut state.response_profile_bindings,
+        APP_STATE_RESPONSE_PROFILE_BINDING_LIMIT,
     );
     prune_profile_bindings_for_housekeeping(
         &mut state.session_profile_bindings,
@@ -670,12 +746,12 @@ pub fn merge_app_state_for_save_with_policy(
             &desired.last_run_selected_at,
             &profiles,
         ),
-        response_profile_bindings: merge_profile_bindings(
+        response_profile_bindings: merge_hard_profile_bindings(
             &existing.response_profile_bindings,
             &desired.response_profile_bindings,
             &profiles,
         ),
-        session_profile_bindings: merge_profile_bindings(
+        session_profile_bindings: merge_hard_profile_bindings(
             &existing.session_profile_bindings,
             &desired.session_profile_bindings,
             &profiles,
@@ -714,12 +790,12 @@ pub fn merge_runtime_state_snapshot_with_policy(
             &snapshot.last_run_selected_at,
             &profiles,
         ),
-        response_profile_bindings: merge_profile_bindings(
+        response_profile_bindings: merge_hard_profile_bindings(
             &existing.response_profile_bindings,
             &snapshot.response_profile_bindings,
             &profiles,
         ),
-        session_profile_bindings: merge_profile_bindings(
+        session_profile_bindings: merge_hard_profile_bindings(
             &existing.session_profile_bindings,
             &snapshot.session_profile_bindings,
             &profiles,

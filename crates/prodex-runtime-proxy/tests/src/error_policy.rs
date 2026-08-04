@@ -127,9 +127,17 @@ fn codex_content_policy_errors_pass_through_without_quota_rotation() {
 fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_statuses() {
     for (code, message) in [
         ("insufficient_quota", "Quota exhausted"),
+        ("quota_exhausted", "Quota exhausted"),
+        ("quota_exceeded", "Quota exceeded"),
+        ("resource_exhausted", "Resource exhausted"),
         (" rate_limit_exceeded ", "Rate limit exceeded"),
+        ("usage_limit_reached", "Usage limit reached"),
         ("USAGE_LIMIT_REACHED", "Usage limit reached"),
         ("usage_not_included", "Workspace credits exhausted"),
+        (
+            "workspace_member_credits_depleted",
+            "Workspace credits exhausted",
+        ),
     ] {
         for shape in 0u8..9 {
             let body = json_body(explicit_quota_payload(code, message, shape));
@@ -137,6 +145,12 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
             for status in [403, 429] {
                 let precommit =
                     runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
+                if status == 429 && shape % 5 == 2 {
+                    assert_eq!(precommit.class, RuntimeHttpErrorClass::Other);
+                    assert_eq!(precommit.action, RuntimeHttpErrorAction::PassThrough);
+                    assert_eq!(precommit.rule, None);
+                    continue;
+                }
                 assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota);
                 assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
                 assert_eq!(precommit.rule, Some("explicit_quota"));
@@ -183,14 +197,14 @@ fn deactivated_workspace_rotates_only_before_commit_for_profile_statuses() {
 }
 
 #[test]
-fn workspace_credit_message_rotates_only_before_commit_for_explicit_quota_statuses() {
+fn workspace_credit_message_does_not_make_a_generic_429_rotatable() {
     let body = json_body(serde_json::json!({
         "error": {
             "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
         }
     }));
 
-    for status in [402, 403, 429] {
+    for status in [402, 403] {
         let precommit = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
         assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{status}");
         assert_eq!(
@@ -214,6 +228,16 @@ fn workspace_credit_message_rotates_only_before_commit_for_explicit_quota_status
             "{status}"
         );
     }
+
+    for phase in [
+        RuntimeHttpErrorPhase::PreCommit,
+        RuntimeHttpErrorPhase::Committed,
+    ] {
+        let policy = runtime_http_error_policy(429, &body, phase);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
+        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
+        assert_eq!(policy.rule, None);
+    }
 }
 
 #[test]
@@ -231,7 +255,7 @@ fn generic_429_passes_through_without_explicit_quota_code() {
 
 #[test]
 fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code() {
-    let bodies: [(&str, &[u8]); 7] = [
+    let bodies: [(&str, &[u8]); 10] = [
         ("empty", b"" as &[u8]),
         ("plain_too_many_requests", b"Too Many Requests" as &[u8]),
         (
@@ -253,6 +277,15 @@ fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code()
         (
             "json_nested_generic_429",
             br#"{"items":[{"error":{"status":429,"message":"Too Many Requests"}}]}"# as &[u8],
+        ),
+        ("plain_code_shaped_text", b"rate_limit_exceeded" as &[u8]),
+        (
+            "json_error_string",
+            br#"{"error":"rate_limit_exceeded"}"# as &[u8],
+        ),
+        (
+            "json_message_code_shaped_text",
+            br#"{"error":{"message":"insufficient_quota"}}"# as &[u8],
         ),
     ];
 
@@ -360,6 +393,61 @@ fn explicit_quota_codes_rotate_only_before_commit() {
             RuntimeHttpErrorAction::PassThrough,
             "{code}"
         );
+    }
+}
+
+#[test]
+fn structured_sse_429_code_rotates_but_message_only_passes_through() {
+    let structured = br#"event: response.failed
+data: {"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Rate limit exceeded"}}}
+
+"#;
+    let precommit = runtime_http_error_policy(429, structured, RuntimeHttpErrorPhase::PreCommit);
+    assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota);
+    assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
+    assert_eq!(precommit.message.as_deref(), Some("Rate limit exceeded"));
+
+    let message_only = br#"event: response.failed
+data: {"type":"response.failed","response":{"error":{"message":"The usage limit has been reached"}}}
+
+"#;
+    let passthrough =
+        runtime_http_error_policy(429, message_only, RuntimeHttpErrorPhase::PreCommit);
+    assert_eq!(passthrough.class, RuntimeHttpErrorClass::Other);
+    assert_eq!(passthrough.action, RuntimeHttpErrorAction::PassThrough);
+}
+
+#[test]
+fn streaming_retry_requires_a_structured_explicit_code() {
+    for body in [
+        b"rate_limit_exceeded".as_slice(),
+        b"server is overloaded".as_slice(),
+        br#"{"error":{"message":"rate_limit_exceeded"}}"#,
+        br#"{"error":{"reason":"server is overloaded; try again"}}"#,
+    ] {
+        let policy = runtime_stream_error_policy(body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
+        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
+    }
+
+    for (code, expected_class, expected_action) in [
+        (
+            "rate_limit_exceeded",
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "server_is_overloaded",
+            RuntimeHttpErrorClass::Overload,
+            RuntimeHttpErrorAction::RetryProfile,
+        ),
+    ] {
+        let body = json_body(serde_json::json!({
+            "error": { "code": code, "message": "retryable provider failure" }
+        }));
+        let policy = runtime_stream_error_policy(&body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(policy.class, expected_class, "{code}");
+        assert_eq!(policy.action, expected_action, "{code}");
     }
 }
 

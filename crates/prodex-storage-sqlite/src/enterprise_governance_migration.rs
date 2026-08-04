@@ -566,3 +566,35 @@ BEGIN
 END;
 "#,
 };
+
+pub const LOCAL_AUDIT_REASON_DETAIL_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(14),
+    phase: SqliteMigrationPhase::Expand,
+    name: "014_audit_reason_detail",
+    sql: r#"
+ALTER TABLE prodex_audit_log ADD COLUMN reason_detail TEXT;
+"#,
+};
+
+pub const LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(15),
+    phase: SqliteMigrationPhase::Expand,
+    name: "015_audit_reason_detail_byte_limit",
+    sql: r#"
+CREATE TRIGGER IF NOT EXISTS prodex_audit_reason_detail_byte_limit_insert
+BEFORE INSERT ON prodex_audit_log
+WHEN NEW.reason_detail IS NOT NULL
+ AND length(CAST(NEW.reason_detail AS BLOB)) > 512
+BEGIN
+    SELECT RAISE(ABORT, 'audit reason detail exceeds 512 bytes');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prodex_audit_reason_detail_byte_limit_update
+BEFORE UPDATE OF reason_detail ON prodex_audit_log
+WHEN NEW.reason_detail IS NOT NULL
+ AND length(CAST(NEW.reason_detail AS BLOB)) > 512
+BEGIN
+    SELECT RAISE(ABORT, 'audit reason detail exceeds 512 bytes');
+END;
+"#,
+};

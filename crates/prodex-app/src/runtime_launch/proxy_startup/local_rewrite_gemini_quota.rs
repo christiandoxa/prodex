@@ -10,10 +10,17 @@ use prodex_provider_core::{
 };
 use runtime_proxy_crate::extract_runtime_proxy_quota_message;
 
+pub(super) fn runtime_gemini_429_is_structured(body: &[u8]) -> bool {
+    gemini_provider_core_normalized_error_body(429, body).is_some()
+}
+
 pub(super) fn runtime_gemini_buffered_parts_are_quota_blocked(
     status: u16,
     parts: &RuntimeHeapTrimmedBufferedResponseParts,
 ) -> bool {
+    if status == 429 && !runtime_gemini_429_is_structured(&parts.body) {
+        return false;
+    }
     gemini_provider_core_response_retryable_quota(status)
         && (extract_runtime_proxy_quota_message(&parts.body).is_some()
             || gemini_provider_core_google_quota_message(&parts.body).is_some())
@@ -25,6 +32,9 @@ pub(super) fn runtime_gemini_normalized_error_parts(
     status: u16,
     mut parts: RuntimeHeapTrimmedBufferedResponseParts,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
+    if status == 429 {
+        return parts;
+    }
     let Some(body) = gemini_provider_core_normalized_error_body(status, &parts.body) else {
         return parts;
     };
@@ -174,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn gemini_structured_terminal_quota_error_normalizes_to_openai_shape() {
+    fn gemini_structured_terminal_quota_error_passes_through_unchanged() {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {
                 "code": 429,
@@ -186,23 +196,21 @@ mod tests {
             }
         }))
         .unwrap();
+        let headers = vec![("content-type".to_string(), b"application/json".to_vec())];
         let parts = RuntimeHeapTrimmedBufferedResponseParts {
             status: 429,
-            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
-            body: body.into(),
+            headers: headers.clone(),
+            body: body.clone().into(),
         };
 
         let normalized = runtime_gemini_normalized_error_parts(429, parts);
-        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
-
-        assert_eq!(value["error"]["type"], "insufficient_quota");
-        assert_eq!(value["error"]["code"], "insufficient_quota");
-        assert_eq!(value["error"]["message"], "Quota exhausted.");
-        assert!(value["error"]["gemini_error"].is_object());
+        assert_eq!(normalized.status, 429);
+        assert_eq!(normalized.headers, headers);
+        assert_eq!(normalized.body.as_slice(), body.as_slice());
     }
 
     #[test]
-    fn gemini_structured_rate_limit_error_normalizes_to_openai_shape() {
+    fn gemini_structured_rate_limit_error_passes_through_unchanged() {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {
                 "code": 429,
@@ -214,49 +222,57 @@ mod tests {
             }
         }))
         .unwrap();
+        let headers = vec![("content-type".to_string(), b"application/json".to_vec())];
         let parts = RuntimeHeapTrimmedBufferedResponseParts {
             status: 429,
-            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
-            body: body.into(),
+            headers: headers.clone(),
+            body: body.clone().into(),
         };
 
         let normalized = runtime_gemini_normalized_error_parts(429, parts);
-        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
-
-        assert_eq!(value["error"]["type"], "rate_limit_error");
-        assert_eq!(value["error"]["code"], "rate_limit_exceeded");
+        assert_eq!(normalized.status, 429);
+        assert_eq!(normalized.headers, headers);
+        assert_eq!(normalized.body.as_slice(), body.as_slice());
     }
 
     #[test]
-    fn gemini_plain_text_rate_limit_error_normalizes_to_openai_shape() {
+    fn gemini_plain_text_rate_limit_error_passes_through_unchanged() {
         let original = b"try later".to_vec();
+        let headers = vec![
+            ("content-type".to_string(), b"text/plain".to_vec()),
+            ("retry-after".to_string(), b"30".to_vec()),
+        ];
         let parts = RuntimeHeapTrimmedBufferedResponseParts {
             status: 429,
-            headers: vec![("content-type".to_string(), b"text/plain".to_vec())],
+            headers: headers.clone(),
             body: original.clone().into(),
         };
 
         let normalized = runtime_gemini_normalized_error_parts(429, parts);
-        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
-
-        assert_eq!(value["error"]["type"], "rate_limit_error");
-        assert_eq!(value["error"]["code"], "rate_limit_exceeded");
-        assert_eq!(value["error"]["message"], "try later");
-        assert_eq!(value["error"]["gemini_error"]["status"], 429);
+        assert_eq!(normalized.status, 429);
+        assert_eq!(normalized.headers, headers);
+        assert_eq!(normalized.body.as_slice(), original.as_slice());
+        assert!(!runtime_gemini_429_is_structured(&original));
+        assert!(!runtime_gemini_buffered_parts_are_quota_blocked(
+            429,
+            &normalized
+        ));
     }
 
     #[test]
-    fn gemini_plain_text_quota_error_normalizes_as_insufficient_quota() {
+    fn gemini_plain_text_quota_error_passes_through_unchanged() {
+        let original = b"Quota exhausted for this account".to_vec();
+        let headers = vec![("content-type".to_string(), b"text/plain".to_vec())];
         let parts = RuntimeHeapTrimmedBufferedResponseParts {
             status: 429,
-            headers: vec![("content-type".to_string(), b"text/plain".to_vec())],
-            body: b"Quota exhausted for this account".to_vec().into(),
+            headers: headers.clone(),
+            body: original.clone().into(),
         };
 
         let normalized = runtime_gemini_normalized_error_parts(429, parts);
-        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
-
-        assert_eq!(value["error"]["type"], "insufficient_quota");
-        assert_eq!(value["error"]["code"], "insufficient_quota");
+        assert_eq!(normalized.status, 429);
+        assert_eq!(normalized.headers, headers);
+        assert_eq!(normalized.body.as_slice(), original.as_slice());
+        assert!(!runtime_gemini_429_is_structured(&original));
     }
 }

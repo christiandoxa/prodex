@@ -13,6 +13,7 @@ mod runtime_features;
 mod session_tail;
 mod shortcuts;
 mod status;
+mod sub_agent;
 mod super_tools;
 fn parse_super_as_runtime_tools(args: &[&str]) -> RuntimeToolArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");

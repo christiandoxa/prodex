@@ -17,7 +17,13 @@ pub(super) fn runtime_smart_context_transform_body(
     let mut outcome = RuntimeSmartContextTransformOutcome::default();
     let budget_allows_rewrite =
         input.budget.policy.mode != runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough;
-    runtime_smart_context_rehydrate_value(value, &state.artifacts, &mut outcome.stats);
+    runtime_smart_context_rehydrate_value_with_budget(
+        value,
+        &state.artifacts,
+        input.budget.available_tokens,
+        input.budget.tier,
+        &mut outcome.stats,
+    );
     if budget_allows_rewrite {
         runtime_smart_context_dedupe_input_text_within_request(value, &mut outcome.stats);
         runtime_smart_context_append_inline_reference_protocol(value, &outcome.stats);

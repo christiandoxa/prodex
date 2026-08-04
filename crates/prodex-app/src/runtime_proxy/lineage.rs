@@ -10,7 +10,8 @@ pub(crate) use helpers::{
     schedule_runtime_binding_touch_save,
 };
 pub(crate) use lookup::{
-    runtime_response_bound_profile, runtime_session_bound_profile, runtime_turn_state_bound_profile,
+    runtime_request_hard_binding_owner, runtime_response_bound_profile,
+    runtime_session_bound_profile, runtime_turn_state_bound_profile,
 };
 pub(crate) use release::{
     clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,
@@ -20,7 +21,8 @@ pub(crate) use release::{
 #[cfg(test)]
 pub(crate) use remember::remember_runtime_response_ids;
 pub(crate) use remember::{
-    remember_runtime_compact_lineage, remember_runtime_response_ids_with_turn_state,
-    remember_runtime_session_id, remember_runtime_successful_previous_response_owner,
-    remember_runtime_turn_state,
+    remember_runtime_compact_lineage, remember_runtime_external_binding_identity,
+    remember_runtime_response_ids_with_turn_state, remember_runtime_session_id,
+    remember_runtime_successful_previous_response_owner, remember_runtime_turn_state,
+    runtime_profile_binding_identity,
 };

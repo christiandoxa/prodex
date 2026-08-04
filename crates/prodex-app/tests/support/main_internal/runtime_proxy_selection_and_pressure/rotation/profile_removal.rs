@@ -104,6 +104,7 @@ fn remove_active_profile_selects_next_profile() {
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -111,6 +112,7 @@ fn remove_active_profile_selects_next_profile() {
         session_profile_bindings: BTreeMap::from([(
             "sess-second".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "second".to_string(),
                 bound_at: now,
             },
@@ -365,14 +367,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "resp-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),
@@ -381,14 +385,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "sess-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "sess-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),
@@ -419,14 +425,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "resp-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),
@@ -435,14 +443,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "sess-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "sess-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),
@@ -451,14 +461,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "turn-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "turn-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),
@@ -467,14 +479,16 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
             (
                 "sid-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
             (
                 "sid-second".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    binding_identity: None,
+                profile_name: "second".to_string(),
                     bound_at: now,
                 },
             ),

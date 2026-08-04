@@ -34,8 +34,8 @@ WITH audit_insert AS (
     INSERT INTO prodex_audit_log (
         tenant_id, audit_event_id, previous_digest, event_digest,
         occurred_at_unix_ms, principal_id, action, resource_kind,
-        resource_id, outcome, reason_code
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        resource_id, outcome, reason_code, reason_detail
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     RETURNING tenant_id, audit_event_id, occurred_at_unix_ms
 )
 INSERT INTO prodex_siem_outbox (
@@ -43,7 +43,7 @@ INSERT INTO prodex_siem_outbox (
     attempt_count, next_attempt_at_unix_ms, created_at_unix_ms,
     delivered_at_unix_ms
 )
-SELECT tenant_id, $12, audit_event_id, $13, 0,
+SELECT tenant_id, $13, audit_event_id, $14, 0,
        occurred_at_unix_ms, occurred_at_unix_ms, NULL
 FROM audit_insert
 RETURNING event_id

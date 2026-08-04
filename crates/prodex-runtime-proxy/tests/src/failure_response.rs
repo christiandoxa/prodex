@@ -80,6 +80,22 @@ fn leaves_non_previous_response_failure_parts_unchanged() {
 }
 
 #[test]
+fn preserves_429_even_when_body_mentions_previous_response_not_found() {
+    let original = RuntimeBufferedResponseParts {
+        status: 429,
+        headers: vec![("x-provider".to_string(), b"example".to_vec())],
+        body: br#"{"error":{"code":"previous_response_not_found"}}"#
+            .to_vec()
+            .into(),
+    };
+
+    assert_eq!(
+        runtime_proxy_translate_previous_response_http_parts(original.clone()),
+        original
+    );
+}
+
+#[test]
 fn websocket_previous_response_detection_matches_text_and_binary() {
     let text =
         RuntimeWebsocketErrorPayload::Text("previous_response_not_found: missing".to_string());

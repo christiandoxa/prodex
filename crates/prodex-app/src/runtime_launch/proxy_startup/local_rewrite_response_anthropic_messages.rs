@@ -4,6 +4,9 @@ use super::super::deepseek_rewrite::{
     runtime_deepseek_store_conversation,
 };
 use super::super::local_rewrite::{RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared};
+use super::super::local_rewrite_copilot::{
+    RuntimeCopilotBindingRecorder, runtime_copilot_remember_bindings_from_responses_body,
+};
 use super::super::local_rewrite_rate_limits::{
     append_binary_rate_limit_headers, append_text_rate_limit_headers,
     runtime_provider_codex_rate_limit_headers,
@@ -38,6 +41,7 @@ pub(super) struct RuntimeAnthropicMessagesRewriteContext<'a> {
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) provider_kind: RuntimeProviderBridgeKind,
     pub(super) pending_request: RuntimeDeepSeekPendingRequest,
+    pub(super) binding_recorder: Option<RuntimeCopilotBindingRecorder>,
     pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
@@ -55,6 +59,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         captured,
         provider_kind,
         pending_request: pending,
+        binding_recorder,
         response_governance,
     } = context;
     let conversations = shared.deepseek_conversations_for_request(captured);
@@ -140,6 +145,10 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
 
     let response = translated
         .map(|parts| {
+            runtime_copilot_remember_bindings_from_responses_body(
+                binding_recorder.as_ref(),
+                &parts.body,
+            );
             emit_runtime_gateway_response_spend_event_for_body(
                 request_id,
                 captured,

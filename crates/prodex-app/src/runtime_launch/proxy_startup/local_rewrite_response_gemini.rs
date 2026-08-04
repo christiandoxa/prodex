@@ -3,6 +3,9 @@ use super::super::gemini_rewrite::{
 };
 use super::super::gemini_sse::{RuntimeGeminiGenerateSseReader, RuntimeGeminiSseReaderConfig};
 use super::super::local_rewrite::{RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared};
+use super::super::local_rewrite_copilot::{
+    RuntimeCopilotBindingRecorder, runtime_copilot_remember_bindings_from_responses_body,
+};
 use super::super::local_rewrite_gemini::{
     RuntimeGeminiRequestContext, runtime_gemini_remember_bindings_from_responses_body,
 };
@@ -34,6 +37,7 @@ pub(super) struct RuntimeGeminiRewriteContext<'a> {
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
+    pub(super) external_binding_recorder: Option<RuntimeCopilotBindingRecorder>,
     pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
@@ -51,6 +55,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
         shared,
         captured,
         gemini_context,
+        external_binding_recorder,
         response_governance,
     } = context;
     let conversations = shared.gemini_conversations_for_request(captured);
@@ -152,6 +157,10 @@ pub(super) fn respond_runtime_gemini_rewrite(
         },
     )
     .map(|mut parts| {
+        runtime_copilot_remember_bindings_from_responses_body(
+            external_binding_recorder.as_ref(),
+            &parts.body,
+        );
         runtime_gemini_remember_bindings_from_responses_body(
             binding_recorder.as_ref(),
             &parts.body,

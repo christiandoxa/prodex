@@ -34,6 +34,15 @@ struct DoctorContext<'a> {
 
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
+    if doctor_install_only(&args) {
+        return print_doctor_output(
+            &[DoctorPanel {
+                title: "Install Checks".to_string(),
+                fields: collect_install_check_rows(&paths),
+            }],
+            &[],
+        );
+    }
     let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths);
     let runtime_config_error = runtime_config
         .as_ref()
@@ -80,6 +89,88 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         return Ok(());
     }
     render_human_doctor(context)
+}
+
+fn doctor_install_only(args: &DoctorArgs) -> bool {
+    args.install
+        && !args.quota
+        && !args.runtime
+        && !args.repair_import_auth_journals
+        && args.bundle.is_none()
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod install_only_tests {
+    use super::*;
+    use crate::test_support::TestEnvVarGuard;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn install_only_skips_stateful_doctor_startup() {
+        let args = DoctorArgs {
+            quota: false,
+            runtime: false,
+            install: true,
+            repair_import_auth_journals: false,
+            tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
+            suggest_policy: false,
+            json: false,
+            bundle: None,
+            redacted: false,
+        };
+
+        assert!(doctor_install_only(&args));
+    }
+
+    #[test]
+    fn install_only_does_not_create_home_state() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-doctor-install-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ));
+        let (_home, _userprofile) = TestEnvVarGuard::set_home(&root);
+        let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let _shared_home = TestEnvVarGuard::set(
+            "PRODEX_SHARED_CODEX_HOME",
+            &root.join("shared-codex").to_string_lossy(),
+        );
+        let missing_bin = root.join("missing-command");
+        let _codex_bin = TestEnvVarGuard::set("PRODEX_CODEX_BIN", missing_bin.to_str().unwrap());
+        let _claude_bin = TestEnvVarGuard::set("PRODEX_CLAUDE_BIN", missing_bin.to_str().unwrap());
+        let _gemini_bin = TestEnvVarGuard::set("PRODEX_GEMINI_BIN", missing_bin.to_str().unwrap());
+        let _copilot_bin =
+            TestEnvVarGuard::set("PRODEX_COPILOT_BIN", missing_bin.to_str().unwrap());
+        let _kiro_bin = TestEnvVarGuard::set("PRODEX_KIRO_BIN", missing_bin.to_str().unwrap());
+        let _agy_bin = TestEnvVarGuard::set("PRODEX_AGY_BIN", missing_bin.to_str().unwrap());
+        let _path = TestEnvVarGuard::set("PATH", "");
+        let _optimizers = TestEnvVarGuard::set(
+            prodex_optional_tools::PRODEX_OPTIMIZERS_HOME_ENV,
+            &root.join("optimizers").to_string_lossy(),
+        );
+
+        handle_doctor(DoctorArgs {
+            quota: false,
+            runtime: false,
+            install: true,
+            repair_import_auth_journals: false,
+            tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
+            suggest_policy: false,
+            json: false,
+            bundle: None,
+            redacted: false,
+        })
+        .expect("install checks should succeed");
+
+        assert!(
+            !root.exists(),
+            "install checks must not initialize home state"
+        );
+    }
 }
 
 fn handle_doctor_bundle(context: &DoctorContext<'_>) -> Result<bool> {

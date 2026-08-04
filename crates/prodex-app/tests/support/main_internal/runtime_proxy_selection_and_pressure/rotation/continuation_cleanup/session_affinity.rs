@@ -8,7 +8,8 @@ fn goal_resume_release_prunes_only_the_target_session_affinity() {
     let other = "019f6465-aeb1-7da2-897e-a8f6728678ff";
     let compact_target = runtime_compact_session_lineage_key(target);
     let binding = |profile_name: &str| ResponseProfileBinding {
-        profile_name: profile_name.to_string(),
+        binding_identity: None,
+                profile_name: profile_name.to_string(),
         bound_at: 10,
     };
     {

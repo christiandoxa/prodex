@@ -1,6 +1,6 @@
 mod body;
 
-use self::body::provider_error_tokens;
+use self::body::provider_error_codes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderErrorClass {
@@ -48,8 +48,7 @@ pub fn classify_provider_error(
     if matches!(
         normalized_code.as_str(),
         "rate_limit_exceeded" | "rate_limit_exceeded_error"
-    ) || status == Some(429)
-    {
+    ) {
         return ProviderErrorClassification {
             class: ProviderErrorClass::RateLimit,
             cooldown_ms: 60_000,
@@ -82,9 +81,22 @@ pub fn classify_provider_error_body(
     mut classify: impl FnMut(Option<u16>, Option<&str>, Option<&str>) -> ProviderErrorClassification,
 ) -> ProviderErrorClassification {
     let text = std::str::from_utf8(body).ok();
-    let mut best = classify(Some(status), None, text);
-    for token in provider_error_tokens(body) {
-        let candidate = classify(Some(status), Some(&token), Some(&token));
+    let mut best = if status == 429 {
+        ProviderErrorClassification {
+            class: ProviderErrorClass::Other,
+            cooldown_ms: 0,
+        }
+    } else {
+        classify(Some(status), None, text)
+    };
+    for token in provider_error_codes(body) {
+        // A bare 429 is deliberately omitted here: retry eligibility must come
+        // from the structured provider code, never the status or message alone.
+        let candidate = classify(
+            (status != 429).then_some(status),
+            Some(&token),
+            (status != 429).then_some(token.as_str()),
+        );
         if provider_error_classification_rank(candidate.class)
             < provider_error_classification_rank(best.class)
         {
@@ -230,6 +242,39 @@ mod tests {
 
         assert_eq!(classified.class, ProviderErrorClass::Quota);
         assert_eq!(classified.cooldown_ms, 300_000);
+    }
+
+    #[test]
+    fn generic_429_is_not_rotatable_without_a_structured_code() {
+        for body in [
+            b"too many requests".as_slice(),
+            b"rate_limit_exceeded".as_slice(),
+            b"server is overloaded".as_slice(),
+            br#"{"error":{"message":"rate_limit_exceeded"}}"#,
+            br#"{"error":{"message":"server is overloaded"}}"#,
+            br#"{"error":{"code":"429"}}"#,
+            br#"{"error":{"reason":"server is overloaded; try again"}}"#,
+            br#"{"error":"rate_limit_exceeded"}"#,
+            br#"{"error":"insufficient_quota"}"#,
+            b"<html>rate limit exceeded</html>".as_slice(),
+        ] {
+            let classified = classify_provider_error_body(429, body, classify_provider_error);
+
+            assert_eq!(classified.class, ProviderErrorClass::Other, "{body:?}");
+            assert_eq!(classified.cooldown_ms, 0, "{body:?}");
+        }
+    }
+
+    #[test]
+    fn structured_rate_limit_code_still_classifies_a_429_as_rotatable() {
+        let classified = classify_provider_error_body(
+            429,
+            br#"{"error":{"code":"rate_limit_exceeded"}}"#,
+            classify_provider_error,
+        );
+
+        assert_eq!(classified.class, ProviderErrorClass::RateLimit);
+        assert_eq!(classified.cooldown_ms, 60_000);
     }
 
     #[test]

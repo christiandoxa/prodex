@@ -37,6 +37,7 @@ fn rotates_profiles_after_current_profile() {
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },

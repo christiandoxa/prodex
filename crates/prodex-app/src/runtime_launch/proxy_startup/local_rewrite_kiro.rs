@@ -14,10 +14,16 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
+use super::local_rewrite_copilot::runtime_copilot_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_compact::{
     runtime_gemini_compact_response_parts, runtime_gemini_local_compact_response_parts,
 };
 use super::local_rewrite_upstream::RuntimeLocalRewriteStreamingResponse;
+use super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, runtime_local_rewrite_binding_context,
+    runtime_local_rewrite_binding_recorder, runtime_local_rewrite_raw_binding_identity,
+    runtime_local_rewrite_remember_accepted_binding,
+};
 use super::provider_bridge::runtime_provider_stream_function_call_arguments_delta_event;
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
 use super::provider_sse_events::{
@@ -44,7 +50,7 @@ use anyhow::{Context, Result};
 #[cfg(test)]
 use prodex_provider_core::kiro_provider_core_responses_items_from_chat_message as runtime_kiro_responses_items_from_chat_message;
 use prodex_provider_core::{
-    ProviderEndpoint,
+    ProviderEndpoint, ProviderId, RuntimeProviderBindingIdentity,
     kiro_provider_core_chat_completion_finish_reason as runtime_kiro_chat_completion_finish_reason,
     kiro_provider_core_chat_completion_value_from_response as runtime_kiro_chat_completion_value_from_response,
     kiro_provider_core_prompt_from_chat_messages as runtime_kiro_prompt_from_messages,
@@ -124,6 +130,18 @@ pub(super) fn send_runtime_kiro_upstream_request(
     endpoint: ProviderEndpoint,
     stream_mode: ProviderStreamMode,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let binding = runtime_local_rewrite_binding_context(shared, request)?;
+    let binding_identity = runtime_local_rewrite_raw_binding_identity(
+        shared,
+        ProviderId::Kiro,
+        None,
+        &shared.upstream_base_url,
+        Some(auth.profile_name.as_str()),
+    )
+    .ok_or_else(|| anyhow::anyhow!("Kiro binding identity is unavailable"))?;
+    if !binding.candidate_allowed(Some(&binding_identity)) {
+        anyhow::bail!("Kiro continuation binding is unavailable or unauthorized");
+    }
     let path = path_without_query(&request.path_and_query);
     let chat_completions_route = endpoint == ProviderEndpoint::ChatCompletions;
     let messages_route = endpoint == ProviderEndpoint::Messages;
@@ -166,6 +184,8 @@ pub(super) fn send_runtime_kiro_upstream_request(
         chat_completions_route,
         shared,
         conversations,
+        binding,
+        binding_identity,
     };
     if stream_mode == Streaming {
         return runtime_kiro_streaming_upstream_result(context, anthropic_request);
@@ -251,6 +271,8 @@ struct RuntimeKiroRequestContext<'a> {
     chat_completions_route: bool,
     shared: &'a RuntimeLocalRewriteProxyShared,
     conversations: RuntimeDeepSeekConversationStore,
+    binding: RuntimeLocalRewriteBindingContext,
+    binding_identity: RuntimeProviderBindingIdentity,
 }
 
 fn runtime_kiro_streaming_upstream_result(
@@ -260,6 +282,8 @@ fn runtime_kiro_streaming_upstream_result(
     let request_id = context.request_id;
     let profile_name = context.auth.profile_name.clone();
     let shared = context.shared;
+    let binding = context.binding.clone();
+    let binding_identity = context.binding_identity.clone();
     let response =
         RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
             status: 200,
@@ -269,6 +293,11 @@ fn runtime_kiro_streaming_upstream_result(
             )],
             body: Box::new(runtime_kiro_streaming_reader(context)?),
             profile_name,
+            accepted_binding_recorder: Some(runtime_local_rewrite_binding_recorder(
+                shared,
+                binding_identity.clone(),
+            )),
+            accepted_binding: Some(binding.accepted_binding(binding_identity)),
         });
     let response = match anthropic_request.as_ref() {
         Some(anthropic_request) => runtime_kiro_anthropic_streaming_local_response(
@@ -299,7 +328,9 @@ fn runtime_kiro_buffered_upstream_result(
         requested_effort,
         chat_completions_route,
         conversations,
-        ..
+        shared,
+        binding,
+        binding_identity,
     } = context;
     let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
     (|| {
@@ -334,8 +365,8 @@ fn runtime_kiro_buffered_upstream_result(
             requested_model.as_deref(),
             None,
         );
-        if response.get("status").and_then(Value::as_str) != Some("failed")
-            && let Some(response_id) = response.get("id").and_then(Value::as_str)
+        let response_succeeded = response.get("status").and_then(Value::as_str) != Some("failed");
+        if response_succeeded && let Some(response_id) = response.get("id").and_then(Value::as_str)
         {
             runtime_deepseek_store_conversation(
                 &conversations,
@@ -369,6 +400,20 @@ fn runtime_kiro_buffered_upstream_result(
         } else {
             response
         };
+        if response_succeeded {
+            runtime_local_rewrite_remember_accepted_binding(
+                shared,
+                &binding_identity,
+                binding.previous_response_id.as_deref(),
+                binding.turn_state.as_deref(),
+                binding.session_id.as_deref(),
+            )?;
+            if let RuntimeLocalRewriteUpstreamResponse::Buffered(parts) = &response {
+                let recorder =
+                    runtime_local_rewrite_binding_recorder(shared, binding_identity.clone());
+                runtime_copilot_remember_bindings_from_responses_body(Some(&recorder), &parts.body);
+            }
+        }
         Ok(RuntimeLocalRewriteUpstreamResult {
             response,
             gemini_context: None,
@@ -475,6 +520,8 @@ fn runtime_kiro_anthropic_streaming_local_response(
             ),
         ));
     };
+    let accepted_binding_recorder = streaming.accepted_binding_recorder;
+    let accepted_binding = streaming.accepted_binding;
     let translated = translate_runtime_responses_reply_to_anthropic(
         RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
             status: streaming.status,
@@ -500,6 +547,8 @@ fn runtime_kiro_anthropic_streaming_local_response(
                 headers: streaming.headers,
                 body: streaming.body,
                 profile_name: streaming.profile_name,
+                accepted_binding_recorder,
+                accepted_binding,
             })
         }
     })
@@ -518,6 +567,7 @@ fn runtime_kiro_streaming_reader(
         chat_completions_route,
         shared,
         conversations,
+        ..
     } = context;
     let (data_dir, secret) = prepare_kiro_cli_data_dir(&auth.codex_home)?;
     let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);

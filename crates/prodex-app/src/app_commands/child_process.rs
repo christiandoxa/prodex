@@ -75,7 +75,7 @@ pub(crate) fn run_child_plan(
 pub(crate) fn run_child_plan_with_monitor(
     plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    monitor: &mut dyn FnMut() -> bool,
+    monitor: &mut dyn FnMut() -> Result<bool>,
 ) -> Result<ExitStatus> {
     run_child_plan_inner(plan, runtime_proxy, Some(monitor))
 }
@@ -83,7 +83,7 @@ pub(crate) fn run_child_plan_with_monitor(
 fn run_child_plan_inner(
     plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    mut monitor: Option<&mut dyn FnMut() -> bool>,
+    mut monitor: Option<&mut dyn FnMut() -> Result<bool>>,
 ) -> Result<ExitStatus> {
     cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
     let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
@@ -112,7 +112,7 @@ fn run_child_plan_inner(
     };
     let status = match monitor.as_mut() {
         Some(monitor) => wait_for_monitored_child(&mut child, monitor),
-        None => child.wait(),
+        None => child.wait().map_err(anyhow::Error::from),
     }
     .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
@@ -127,14 +127,21 @@ fn reset_terminal_keyboard_enhancement_best_effort(plan: &ChildProcessPlan) {
 
 fn wait_for_monitored_child(
     child: &mut Child,
-    monitor: &mut dyn FnMut() -> bool,
-) -> io::Result<ExitStatus> {
+    monitor: &mut dyn FnMut() -> Result<bool>,
+) -> Result<ExitStatus> {
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status);
         }
-        if monitor() {
-            return wait_for_child_termination(child);
+        let should_stop = match monitor() {
+            Ok(should_stop) => should_stop,
+            Err(error) => {
+                let _ = wait_for_child_termination(child);
+                return Err(error);
+            }
+        };
+        if should_stop {
+            return Ok(wait_for_child_termination(child)?);
         }
         thread::sleep(Duration::from_millis(200));
     }

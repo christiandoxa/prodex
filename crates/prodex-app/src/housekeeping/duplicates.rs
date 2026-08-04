@@ -2,10 +2,10 @@ use super::{
     AppState, AppStateIoExt, ProdexCleanupSummary, ProfileIdentity, RuntimeContinuationJournal,
     RuntimeContinuationStore, fetch_profile_identity,
     load_runtime_continuation_journal_with_recovery, load_runtime_continuations_with_recovery,
-    map_parallel, read_profile_identity_from_auth, runtime_continuation_journal_file_path,
+    map_parallel, read_profile_identity_from_auth,
+    replace_runtime_continuation_journal_for_profiles, runtime_continuation_journal_file_path,
     runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
-    runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
-    save_runtime_continuations_for_profiles,
+    runtime_continuations_last_good_file_path, save_runtime_continuations_for_profiles,
 };
 use anyhow::{Context, Result};
 use prodex_core::{AppPaths, path_is_strictly_under_root, same_path};
@@ -170,12 +170,7 @@ pub(super) fn cleanup_duplicate_profiles(
         save_runtime_continuations_for_profiles(paths, continuations, &state.profiles)?;
     }
     if let Some(journal) = continuation_journal.as_ref() {
-        save_runtime_continuation_journal_for_profiles(
-            paths,
-            &journal.continuations,
-            &state.profiles,
-            journal.saved_at,
-        )?;
+        replace_runtime_continuation_journal_for_profiles(paths, journal, &state.profiles)?;
     }
 
     let removed_names = removed_names.into_iter().collect::<Vec<_>>();

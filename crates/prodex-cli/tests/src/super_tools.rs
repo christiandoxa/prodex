@@ -176,6 +176,66 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
 }
 
 #[test]
+fn explicit_presidio_tool_is_inherited_unless_no_presidio_wins() {
+    let command =
+        parse_cli_command_from(["prodex", "super", "--tool", "presidio", "exec", "hello"])
+            .expect("explicit Presidio tool should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command");
+    };
+    assert_eq!(args.presidio_preference(), Some(true));
+
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--tool",
+        "presidio",
+        "--no-presidio",
+        "exec",
+        "hello",
+    ])
+    .expect("explicit disable should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command");
+    };
+    assert_eq!(args.presidio_preference(), Some(false));
+    let runtime_args = args.into_runtime_tool_args_with_presidio(false);
+    assert!(!runtime_args.presidio);
+    assert!(
+        !runtime_args
+            .selected_tool_set()
+            .contains(prodex_optional_tools::OptionalToolId::Presidio)
+    );
+}
+
+#[test]
+fn no_presidio_cannot_suppress_required_presidio() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--no-presidio",
+        "--require-tool",
+        "presidio",
+        "exec",
+    ])
+    .expect("conflicting tool selection should parse before validation");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command");
+    };
+    let error = args
+        .validate_urls()
+        .expect_err("required Presidio must not be silently ignored");
+    assert!(error.contains("--require-tool presidio"), "{error}");
+    let runtime_args = args.into_runtime_tool_args_with_presidio(false);
+    assert!(runtime_args.presidio);
+    assert!(
+        runtime_args
+            .required_tools
+            .contains(&prodex_optional_tools::OptionalToolId::Presidio)
+    );
+}
+
+#[test]
 fn super_leading_tool_words_are_passed_through_to_codex() {
     let args =
         parse_super_as_runtime_tools(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);

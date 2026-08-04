@@ -1,7 +1,8 @@
 use postgres::NoTls;
 use postgres::fallible_iterator::FallibleIterator;
 use prodex_storage_postgres::{
-    APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION,
+    APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION,
+    AUDIT_REASON_DETAIL_MIGRATION, ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION,
     ENTERPRISE_GOVERNANCE_MIGRATION, GOVERNANCE_INVALIDATION_OUTBOX_MIGRATION,
     GOVERNANCE_LIFECYCLE_MIGRATION, GOVERNANCE_REVOCATION_MIGRATION,
     GOVERNANCE_SESSION_INDEX_MIGRATION, GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
@@ -24,14 +25,13 @@ fn postgres_validation_migration_is_append_only_and_complete() {
     let migration = VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION;
     assert_eq!(migration.version, PostgresMigrationVersion(18));
     assert_eq!(migration.phase, PostgresMigrationPhase::Validate);
-    assert_eq!(migration.version, REQUIRED_POSTGRES_SCHEMA_VERSION);
-    assert_eq!(POSTGRES_MIGRATIONS.last(), Some(&migration));
+    assert_eq!(POSTGRES_MIGRATIONS.get(17), Some(&migration));
     assert_eq!(
         POSTGRES_MIGRATIONS
             .iter()
             .map(|migration| migration.version.0)
             .collect::<Vec<_>>(),
-        (1_u32..=18).collect::<Vec<_>>()
+        (1_u32..=REQUIRED_POSTGRES_SCHEMA_VERSION.0).collect::<Vec<_>>()
     );
     assert!(!migration.sql.contains("NOT VALID"));
     let sql = migration.sql.replace("\r\n", "\n");
@@ -158,6 +158,45 @@ fn postgres_validation_migration_is_append_only_and_complete() {
             "missing validation for {table}.{constraint}"
         );
     }
+}
+
+#[test]
+fn postgres_audit_reason_detail_migration_is_backward_compatible() {
+    assert_eq!(
+        AUDIT_REASON_DETAIL_MIGRATION.version,
+        PostgresMigrationVersion(19)
+    );
+    assert_eq!(
+        AUDIT_REASON_DETAIL_MIGRATION.phase,
+        PostgresMigrationPhase::Expand
+    );
+    assert_eq!(
+        AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION.version,
+        PostgresMigrationVersion(20)
+    );
+    assert_eq!(
+        AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION.version,
+        REQUIRED_POSTGRES_SCHEMA_VERSION
+    );
+    assert_eq!(
+        POSTGRES_MIGRATIONS.last(),
+        Some(&AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION)
+    );
+    assert!(
+        AUDIT_REASON_DETAIL_MIGRATION
+            .sql
+            .contains("ADD COLUMN IF NOT EXISTS reason_detail TEXT")
+    );
+    assert!(
+        AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION
+            .sql
+            .contains("octet_length(reason_detail) <= 512")
+    );
+    assert!(
+        AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION
+            .sql
+            .contains("prodex_audit_log_reason_detail_bounded")
+    );
 }
 
 #[test]

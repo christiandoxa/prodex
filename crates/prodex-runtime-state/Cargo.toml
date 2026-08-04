@@ -11,6 +11,7 @@ name = "prodex_runtime_state"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_provider_core = { workspace = true }
 serde = { workspace = true }
 
 [lints]

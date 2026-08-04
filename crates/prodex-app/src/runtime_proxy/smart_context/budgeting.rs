@@ -106,11 +106,10 @@ pub(super) fn runtime_smart_context_budget_for_parsed(
         telemetry_decision,
         available_context_tokens,
     );
-    let available_tokens = policy
-        .max_rehydrate_tokens
-        .min(usize::MAX as u64)
-        .try_into()
-        .unwrap_or(usize::MAX);
+    let available_tokens = usize::try_from(policy.max_rehydrate_tokens)
+        .ok()
+        .filter(|tokens| tokens.checked_add(1).is_some())
+        .unwrap_or_default();
     RuntimeSmartContextBudget {
         tier: policy.tier,
         policy,

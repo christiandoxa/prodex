@@ -27,4 +27,11 @@ fn config_publication_migration_is_durable_bounded_and_replica_scoped() {
             .sql
             .contains("PRIMARY KEY (replica_id, event_id)")
     );
+    assert_eq!(
+        CONFIG_PUBLICATION_TRANSPORT_MIGRATION
+            .sql
+            .matches("ON DELETE CASCADE")
+            .count(),
+        2
+    );
 }

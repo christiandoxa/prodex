@@ -1,11 +1,11 @@
-use super::anthropic_rewrite::RuntimeAnthropicProviderAuth;
+use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::chat_compatible_rewrite::{
     RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
 };
 use super::deepseek_rewrite::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingRequest};
 use super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult,
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_selection;
@@ -20,7 +20,12 @@ use super::local_rewrite_transport::{
     runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
     send_runtime_local_rewrite_prepared_request,
 };
-use super::local_rewrite_upstream::RuntimeLocalRewriteLiveResponse;
+use super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, RuntimeLocalRewriteLiveResponse,
+    RuntimeLocalRewriteNativeFirstEvent, runtime_local_rewrite_attach_accepted_binding,
+    runtime_local_rewrite_binding_context, runtime_local_rewrite_precommit_native_first_event,
+    runtime_local_rewrite_raw_binding_identity,
+};
 use super::provider_bridge::{
     RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind, RuntimeProviderErrorClass,
     runtime_harness_log_provider_policy, runtime_provider_error_class, runtime_provider_label,
@@ -34,11 +39,13 @@ use prodex_provider_core::{
     provider_core_lossless_body, translate_openai_chat_request_to_anthropic_messages,
 };
 use prodex_provider_spi::ProviderRetryCause;
+use runtime_anthropic_crate::runtime_anthropic_first_event_retry_allowed;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::json;
 
 struct AnthropicDispatchPlan {
     auth_attempts: Vec<RuntimeLocalRewriteSelectedAnthropicAuth>,
+    binding: RuntimeLocalRewriteBindingContext,
     route: AnthropicDispatchRoute,
 }
 
@@ -58,6 +65,7 @@ struct AnthropicSendContext<'a> {
     request_id: u64,
     request: &'a RuntimeProxyRequest,
     shared: &'a RuntimeLocalRewriteProxyShared,
+    binding: &'a RuntimeLocalRewriteBindingContext,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,8 +126,12 @@ enum AnthropicAttemptOutcome {
     },
     TerminalBuffered(RuntimeHeapTrimmedBufferedResponseParts),
     SuccessfulLive {
-        response: reqwest::blocking::Response,
-        native_messages: bool,
+        response: RuntimeLocalRewriteLiveResponse,
+        pending_request: RuntimeDeepSeekPendingRequest,
+    },
+    NativeFirstEvent {
+        response: RuntimeLocalRewriteLiveResponse,
+        class: RuntimeProviderErrorClass,
         pending_request: RuntimeDeepSeekPendingRequest,
     },
     InternalFailure(anyhow::Error),
@@ -141,15 +153,26 @@ pub(super) fn send_runtime_anthropic_upstream_request(
     endpoint: ProviderEndpoint,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let plan = AnthropicDispatchPlan::new(request, shared, body, auth, endpoint)?;
-    match plan.route {
-        AnthropicDispatchRoute::Responses(responses) => {
-            send_responses_attempts(request_id, request, shared, plan.auth_attempts, responses)
-        }
+    let AnthropicDispatchPlan {
+        auth_attempts,
+        binding,
+        route,
+    } = plan;
+    match route {
+        AnthropicDispatchRoute::Responses(responses) => send_responses_attempts(
+            request_id,
+            request,
+            shared,
+            auth_attempts,
+            &binding,
+            responses,
+        ),
         AnthropicDispatchRoute::Passthrough { upstream_url, body } => send_passthrough_attempts(
             request_id,
             request,
             shared,
-            plan.auth_attempts,
+            auth_attempts,
+            &binding,
             upstream_url,
             body,
         ),
@@ -164,8 +187,17 @@ impl AnthropicDispatchPlan {
         auth: &RuntimeAnthropicProviderAuth,
         endpoint: ProviderEndpoint,
     ) -> Result<Self> {
-        let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
+        let binding = runtime_local_rewrite_binding_context(shared, request)?;
+        let mut auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
+        auth_attempts.retain(|selected| {
+            runtime_anthropic_binding_identity(selected, shared)
+                .as_ref()
+                .is_some_and(|identity| binding.candidate_allowed(Some(identity)))
+        });
         if auth_attempts.is_empty() {
+            if binding.bound.is_some() {
+                anyhow::bail!("Anthropic continuation binding is unavailable or unauthorized");
+            }
             anyhow::bail!("Anthropic provider has no auth configured");
         }
         let route = if endpoint == ProviderEndpoint::Responses {
@@ -205,9 +237,30 @@ impl AnthropicDispatchPlan {
         };
         Ok(Self {
             auth_attempts,
+            binding,
             route,
         })
     }
+}
+
+fn runtime_anthropic_binding_identity(
+    selected: &RuntimeLocalRewriteSelectedAnthropicAuth,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Option<prodex_provider_core::RuntimeProviderBindingIdentity> {
+    let (credential, profile) = match &selected.auth {
+        RuntimeAnthropicAuth::ApiKey { api_key } => (Some(api_key.as_str()), None),
+        RuntimeAnthropicAuth::OAuth { access_token } => {
+            (Some(access_token.as_str()), Some(selected.label.as_str()))
+        }
+        RuntimeAnthropicAuth::Projected => (None, Some(RUNTIME_LOCAL_REWRITE_PROFILE)),
+    };
+    runtime_local_rewrite_raw_binding_identity(
+        shared,
+        ProviderId::Anthropic,
+        credential,
+        &shared.upstream_base_url,
+        profile,
+    )
 }
 
 fn send_responses_attempts(
@@ -215,6 +268,7 @@ fn send_responses_attempts(
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth_attempts: Vec<RuntimeLocalRewriteSelectedAnthropicAuth>,
+    binding: &RuntimeLocalRewriteBindingContext,
     plan: AnthropicResponsesPlan,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let AnthropicResponsesPlan {
@@ -230,7 +284,9 @@ fn send_responses_attempts(
         request_id,
         request,
         shared,
+        binding,
     };
+    let mut first_event_retries = 0;
     while let Some(attempt) = cursor.current() {
         let selected_auth = &auth_attempts[attempt.auth_index];
         let model = &model_chain[attempt.model_index];
@@ -273,9 +329,52 @@ fn send_responses_attempts(
             AnthropicAttemptOutcome::TerminalBuffered(parts) => return Ok(buffered(parts)),
             AnthropicAttemptOutcome::SuccessfulLive {
                 response,
-                native_messages,
                 pending_request,
-            } => return Ok(live(response, native_messages, pending_request)),
+            } => return Ok(live_response(response, pending_request)),
+            AnthropicAttemptOutcome::NativeFirstEvent {
+                response,
+                class,
+                pending_request,
+            } => {
+                let can_retry =
+                    runtime_anthropic_first_event_retry_allowed(first_event_retries, false);
+                if can_retry
+                    && attempt.model_index + 1 < model_chain.len()
+                    && runtime_gateway_application_provider_retry_precommit(
+                        ProviderRetryCause::NextModel,
+                        class,
+                        attempt.model_index,
+                        model_chain.len(),
+                    )
+                {
+                    log_model_fallback(
+                        request_id,
+                        shared,
+                        selected_auth.label.as_str(),
+                        model,
+                        &model_chain[attempt.model_index + 1],
+                        200,
+                        class,
+                    );
+                    first_event_retries += 1;
+                    cursor.next_model();
+                    continue;
+                }
+                if can_retry
+                    && runtime_gateway_application_provider_retry_precommit(
+                        ProviderRetryCause::RotateCredential,
+                        class,
+                        attempt.auth_index,
+                        auth_count,
+                    )
+                {
+                    log_auth_rotation(request_id, shared, selected_auth.label.as_str(), 200, class);
+                    first_event_retries += 1;
+                    cursor.next_credential();
+                    continue;
+                }
+                return Ok(live_response(response, pending_request));
+            }
             AnthropicAttemptOutcome::InternalFailure(error) => return Err(error),
         }
     }
@@ -397,9 +496,49 @@ fn send_anthropic_attempt(
     );
     match send_result {
         Ok(RuntimeLocalRewritePreparedSendResult::Live(response)) => {
+            let Some(binding_identity) =
+                runtime_anthropic_binding_identity(selected_auth, context.shared)
+            else {
+                return AnthropicAttemptOutcome::InternalFailure(anyhow::anyhow!(
+                    "Anthropic accepted binding identity is unavailable"
+                ));
+            };
+            let mut live_response = if native_messages {
+                RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
+            } else {
+                RuntimeLocalRewriteLiveResponse::new(response)
+            };
+            runtime_local_rewrite_attach_accepted_binding(
+                context.shared,
+                &mut live_response,
+                context.binding,
+                binding_identity,
+            );
+            if native_messages {
+                match runtime_local_rewrite_precommit_native_first_event(
+                    &mut live_response,
+                    RuntimeProviderBridgeKind::Anthropic,
+                    context
+                        .shared
+                        .runtime_shared
+                        .runtime_config
+                        .tuning
+                        .sse_lookahead_timeout_ms,
+                    &context.shared.provider_sse_prefetch_slots,
+                ) {
+                    Ok(RuntimeLocalRewriteNativeFirstEvent::Retry(class)) => {
+                        return AnthropicAttemptOutcome::NativeFirstEvent {
+                            response: live_response,
+                            class,
+                            pending_request,
+                        };
+                    }
+                    Ok(RuntimeLocalRewriteNativeFirstEvent::Commit) => {}
+                    Err(error) => return AnthropicAttemptOutcome::InternalFailure(error),
+                }
+            }
             AnthropicAttemptOutcome::SuccessfulLive {
-                response,
-                native_messages,
+                response: live_response,
                 pending_request,
             }
         }
@@ -463,6 +602,7 @@ fn send_passthrough_attempts(
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth_attempts: Vec<RuntimeLocalRewriteSelectedAnthropicAuth>,
+    binding: &RuntimeLocalRewriteBindingContext,
     upstream_url: String,
     body: Vec<u8>,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
@@ -481,9 +621,19 @@ fn send_passthrough_attempts(
         )?;
         let status = response.status().as_u16();
         if status < 400 {
-            return Ok(live(
-                response,
-                false,
+            let Some(binding_identity) = runtime_anthropic_binding_identity(selected_auth, shared)
+            else {
+                anyhow::bail!("Anthropic accepted binding identity is unavailable");
+            };
+            let mut accepted_response = RuntimeLocalRewriteLiveResponse::new(response);
+            runtime_local_rewrite_attach_accepted_binding(
+                shared,
+                &mut accepted_response,
+                binding,
+                binding_identity,
+            );
+            return Ok(live_response(
+                accepted_response,
                 RuntimeDeepSeekPendingRequest::default(),
             ));
         }
@@ -533,19 +683,14 @@ fn buffered(parts: RuntimeHeapTrimmedBufferedResponseParts) -> RuntimeLocalRewri
     }
 }
 
-fn live(
-    response: reqwest::blocking::Response,
-    native_messages: bool,
+fn live_response(
+    response: RuntimeLocalRewriteLiveResponse,
     pending_request: RuntimeDeepSeekPendingRequest,
 ) -> RuntimeLocalRewriteUpstreamResult {
-    let live_response = if native_messages {
-        RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
-    } else {
-        RuntimeLocalRewriteLiveResponse::new(response)
-    }
-    .with_chat_compatible_request(pending_request);
     RuntimeLocalRewriteUpstreamResult {
-        response: RuntimeLocalRewriteUpstreamResponse::Live(live_response),
+        response: RuntimeLocalRewriteUpstreamResponse::Live(
+            response.with_chat_compatible_request(pending_request),
+        ),
         gemini_context: None,
         copilot_context: None,
     }

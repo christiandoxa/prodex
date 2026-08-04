@@ -1,8 +1,7 @@
 use super::{
     RuntimeTokenUsage, extract_runtime_proxy_previous_response_message_from_value,
     extract_runtime_response_ids_from_value, extract_runtime_token_usage_from_value,
-    extract_runtime_turn_state_from_value, push_runtime_response_id,
-    runtime_response_event_type_from_value,
+    extract_runtime_turn_state_from_value, runtime_response_event_type_from_value,
 };
 use crate::{
     RuntimeHttpErrorAction, RuntimeHttpErrorPhase, runtime_stream_error_policy_from_value,
@@ -152,10 +151,26 @@ pub fn runtime_sse_finish_pending<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
+    runtime_sse_finish_pending_with_parser(
+        line,
+        data_lines,
+        parse_runtime_sse_event,
+        &mut on_event,
+    );
+}
+
+fn runtime_sse_finish_pending_with_parser<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    parse_event: RuntimeSseEventParser,
+    on_event: &mut F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
     if !line.is_empty() {
-        runtime_sse_finish_line(line, data_lines, parse_runtime_sse_event, &mut on_event);
+        runtime_sse_finish_line(line, data_lines, parse_event, on_event);
     }
-    runtime_sse_emit_event(data_lines, parse_runtime_sse_event, &mut on_event);
+    runtime_sse_emit_event(data_lines, parse_event, on_event);
 }
 
 fn runtime_sse_consume_inspection_buffer<F>(
@@ -177,18 +192,20 @@ fn runtime_sse_consume_inspection_buffer<F>(
             );
         }
     }
-    if !line.is_empty() {
-        runtime_sse_finish_line(
-            line,
-            data_lines,
-            runtime_sse_inspection_event,
-            &mut on_event,
-        );
-    }
-    runtime_sse_emit_event(data_lines, runtime_sse_inspection_event, &mut on_event);
 }
 
 pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgress {
+    inspect_runtime_sse_buffer_with_eof(buffered, false)
+}
+
+pub fn inspect_runtime_sse_buffer_at_eof(buffered: &[u8]) -> RuntimeSseInspectionProgress {
+    inspect_runtime_sse_buffer_with_eof(buffered, true)
+}
+
+fn inspect_runtime_sse_buffer_with_eof(
+    buffered: &[u8],
+    at_eof: bool,
+) -> RuntimeSseInspectionProgress {
     let mut line = Vec::new();
     let mut data_lines = Vec::new();
     let mut response_ids = std::collections::BTreeSet::new();
@@ -223,6 +240,18 @@ pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgre
             terminal = process_event(event);
         }
     });
+    if at_eof && terminal.is_none() {
+        runtime_sse_finish_pending_with_parser(
+            &mut line,
+            &mut data_lines,
+            runtime_sse_inspection_event,
+            &mut |event| {
+                if terminal.is_none() {
+                    terminal = process_event(event);
+                }
+            },
+        );
+    }
     if let Some(progress) = terminal {
         return progress;
     }
@@ -241,61 +270,7 @@ pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgre
 }
 
 fn runtime_sse_inspection_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
-    if data_lines.len() != 1 {
-        return parse_runtime_sse_event(data_lines);
-    }
-
-    let payload = data_lines[0].trim_start_matches('\u{feff}');
-    if runtime_sse_payload_needs_full_inspection(payload) {
-        return parse_runtime_sse_event(data_lines);
-    }
-
-    let mut response_ids = Vec::new();
-    if let Some(response_id) = runtime_json_string_field(payload, "\"response_id\":\"") {
-        response_ids.push(response_id);
-    }
-    if let Some(response_id) = runtime_json_nested_response_id(payload) {
-        push_runtime_response_id(&mut response_ids, Some(&response_id));
-    }
-
-    RuntimeParsedSseEvent {
-        quota_blocked: false,
-        overloaded: false,
-        previous_response_not_found: false,
-        response_ids,
-        event_type: runtime_json_string_field(payload, "\"type\":\""),
-        turn_state: runtime_json_string_field(payload, "\"turn_state\":\"")
-            .or_else(|| runtime_json_string_field(payload, "\"x-codex-turn-state\":\"")),
-        token_usage: None,
-    }
-}
-
-fn runtime_sse_payload_needs_full_inspection(payload: &str) -> bool {
-    payload.contains("\"error\"")
-        || payload.contains("insufficient_quota")
-        || payload.contains("rate_limit_exceeded")
-        || payload.contains("usage_limit_reached")
-        || payload.contains("usage_not_included")
-        || payload.contains("workspace_member_credits_depleted")
-        || payload.contains("server_is_overloaded")
-        || payload.contains("slow_down")
-        || payload.contains("previous_response_not_found")
-        || payload.contains("\"usage\"")
-        || payload.contains("x-codex-turn-state")
-        || payload.contains("\\\"")
-        || payload.contains("\\u")
-}
-
-fn runtime_json_nested_response_id(payload: &str) -> Option<String> {
-    let response_index = payload.find("\"response\"")?;
-    runtime_json_string_field(&payload[response_index..], "\"id\":\"")
-}
-
-fn runtime_json_string_field(payload: &str, pattern: &str) -> Option<String> {
-    let start = payload.find(pattern)? + pattern.len();
-    let rest = &payload[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    parse_runtime_sse_event(data_lines)
 }
 
 pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {

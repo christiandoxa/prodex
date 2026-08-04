@@ -9,6 +9,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use crate::runtime_take_fault_injection_budget;
 use crate::{
     JsonFileLock, LAST_GOOD_FILE_SUFFIX, RecoveredVersionedLoad, STATE_SAVE_SEQUENCE,
     StateFileLock, VersionedJson, runtime_take_fault_injection,
@@ -18,6 +20,16 @@ use crate::{AppPaths, AppState, RecoveredLoad};
 
 static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
 pub(crate) const RUNTIME_STORE_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+#[cfg(test)]
+const TEST_RUNTIME_STORE_WRITE_FAULT_ENV: &str =
+    "PRODEX_RUNTIME_FAULT_RUNTIME_STORE_WRITE_ERROR_ONCE";
+#[cfg(test)]
+const TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV: &str =
+    "PRODEX_RUNTIME_FAULT_RUNTIME_STORE_PRIMARY_RENAME_ERROR_ONCE";
+#[cfg(test)]
+const TEST_RUNTIME_STORE_SIDECAR_RENAME_FAULT_ENV: &str =
+    "PRODEX_RUNTIME_FAULT_RUNTIME_STORE_SIDECAR_RENAME_ERROR_ONCE";
 
 pub(crate) fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
     fs::create_dir_all(&paths.root)
@@ -123,34 +135,19 @@ pub(crate) fn runtime_sidecar_generation_from_content(content: &str) -> Result<u
 }
 
 pub(crate) fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Path) -> Result<u64> {
-    match read_json_file_to_string(path) {
-        Ok(content) => runtime_sidecar_generation_from_content(&content).or_else(|primary_err| {
-            match read_json_file_to_string(backup_path) {
-                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
-                    .with_context(|| {
-                        format!(
-                            "failed to parse {} after primary load error: {primary_err:#}",
-                            backup_path.display()
-                        )
-                    }),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
-                Err(err) => {
-                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
-                }
-            }
-        }),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            match read_json_file_to_string(backup_path) {
-                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
-                    .with_context(|| format!("failed to parse {}", backup_path.display())),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
-                Err(err) => {
-                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
-                }
-            }
-        }
-        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    let primary_exists = path
+        .try_exists()
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    let backup_exists = backup_path
+        .try_exists()
+        .with_context(|| format!("failed to inspect {}", backup_path.display()))?;
+    if !primary_exists && !backup_exists {
+        return Ok(0);
     }
+    let loaded = read_json_file_with_backup_impl(path, backup_path, |content| {
+        runtime_sidecar_generation_from_content(content)
+    })?;
+    Ok(loaded.value)
 }
 
 pub(crate) fn parse_versioned_json_or_raw<T>(content: &str) -> Result<(T, u64)>
@@ -163,6 +160,41 @@ where
     }
 }
 
+fn read_json_file_with_backup_impl<T>(
+    path: &Path,
+    backup_path: &Path,
+    parse: impl Fn(&str) -> Result<T>,
+) -> Result<RecoveredLoad<T>> {
+    let primary = read_json_file_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))
+        .and_then(|content| {
+            parse(&content).with_context(|| format!("failed to parse {}", path.display()))
+        });
+    match primary {
+        Ok(value) => Ok(RecoveredLoad {
+            value,
+            recovered_from_backup: false,
+        }),
+        Err(primary_err) => {
+            let backup_content = read_json_file_to_string(backup_path)
+                .with_context(|| format!("failed to read {}", backup_path.display()))?;
+            let value = parse(&backup_content).with_context(|| {
+                format!(
+                    "failed to parse {} after primary load error: {primary_err:#}",
+                    backup_path.display()
+                )
+            })?;
+
+            // Keep valid backup usable if best-effort primary repair hits a filesystem fault.
+            let _ = write_private_file_atomic(path, backup_content.as_bytes());
+            Ok(RecoveredLoad {
+                value,
+                recovered_from_backup: true,
+            })
+        }
+    }
+}
+
 pub(crate) fn read_versioned_json_file_with_backup<T>(
     path: &Path,
     backup_path: &Path,
@@ -170,34 +202,15 @@ pub(crate) fn read_versioned_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let primary = read_json_file_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()));
-    match primary.and_then(|content| {
-        parse_versioned_json_or_raw::<T>(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }) {
-        Ok((value, generation)) => Ok(RecoveredVersionedLoad {
-            value,
-            generation,
-            recovered_from_backup: false,
-        }),
-        Err(primary_err) => {
-            let backup_content = read_json_file_to_string(backup_path)
-                .with_context(|| format!("failed to read {}", backup_path.display()))?;
-            let (value, generation) = parse_versioned_json_or_raw::<T>(&backup_content)
-                .with_context(|| {
-                    format!(
-                        "failed to parse {} after primary load error: {primary_err:#}",
-                        backup_path.display()
-                    )
-                })?;
-            Ok(RecoveredVersionedLoad {
-                value,
-                generation,
-                recovered_from_backup: true,
-            })
-        }
-    }
+    let loaded = read_json_file_with_backup_impl(path, backup_path, |content| {
+        parse_versioned_json_or_raw::<T>(content)
+    })?;
+    let (value, generation) = loaded.value;
+    Ok(RecoveredVersionedLoad {
+        value,
+        generation,
+        recovered_from_backup: loaded.recovered_from_backup,
+    })
 }
 
 pub(crate) fn write_versioned_json_file_with_backup<T>(
@@ -294,6 +307,12 @@ fn write_json_file_atomic_private(path: &Path, json: &str) -> Result<()> {
 }
 
 pub(crate) fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(test)]
+    if let Err(error) = maybe_inject_runtime_store_write_failure() {
+        return Err(error)
+            .with_context(|| format!("failed to atomically write {}", path.display()));
+    }
+
     let temp_file = unique_state_temp_file_path(path);
     let result = (|| -> io::Result<()> {
         let mut file = open_private_file(&temp_file)?;
@@ -311,6 +330,9 @@ pub(crate) fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<()>
 
 #[cfg(windows)]
 pub(crate) fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    maybe_inject_runtime_store_rename_failure(to)?;
+
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -343,7 +365,37 @@ pub(crate) fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
 
 #[cfg(not(windows))]
 pub(crate) fn replace_file_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    maybe_inject_runtime_store_rename_failure(to)?;
+
     fs::rename(from, to)
+}
+
+#[cfg(test)]
+fn maybe_inject_runtime_store_write_failure() -> Result<()> {
+    if runtime_take_fault_injection(TEST_RUNTIME_STORE_WRITE_FAULT_ENV) {
+        bail!("injected runtime-store atomic write failure");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn maybe_inject_runtime_store_rename_failure(path: &Path) -> io::Result<()> {
+    let is_sidecar = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains(LAST_GOOD_FILE_SUFFIX));
+    let env_key = if is_sidecar {
+        TEST_RUNTIME_STORE_SIDECAR_RENAME_FAULT_ENV
+    } else {
+        TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV
+    };
+    if runtime_take_fault_injection(env_key) {
+        return Err(io::Error::other(
+            "injected runtime-store atomic rename failure",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -382,31 +434,9 @@ pub(crate) fn load_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let primary = read_json_file_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()));
-    match primary.and_then(|content| {
-        serde_json::from_str::<T>(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }) {
-        Ok(value) => Ok(RecoveredLoad {
-            value,
-            recovered_from_backup: false,
-        }),
-        Err(primary_err) => {
-            let backup_content = read_json_file_to_string(backup_path)
-                .with_context(|| format!("failed to read {}", backup_path.display()))?;
-            let value = serde_json::from_str::<T>(&backup_content).with_context(|| {
-                format!(
-                    "failed to parse {} after primary load error: {primary_err:#}",
-                    backup_path.display()
-                )
-            })?;
-            Ok(RecoveredLoad {
-                value,
-                recovered_from_backup: true,
-            })
-        }
-    }
+    read_json_file_with_backup_impl(path, backup_path, |content| {
+        Ok(serde_json::from_str::<T>(content)?)
+    })
 }
 
 pub(crate) fn read_json_file_to_string(path: &Path) -> io::Result<String> {
@@ -518,6 +548,7 @@ pub(crate) fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestEnvVarGuard;
 
     fn temp_root(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -531,6 +562,211 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("test root should be created");
         root
+    }
+
+    #[test]
+    fn last_good_recovery_repairs_missing_or_corrupt_primary() {
+        for (name, primary) in [("missing", None), ("corrupt", Some("{broken"))] {
+            let root = temp_root(name);
+            let path = root.join("state.json");
+            let backup_path = root.join("state.last-good.json");
+            let backup = r#"{"source":"last-good"}"#;
+            fs::write(&backup_path, backup).expect("backup should be writable");
+            if let Some(primary) = primary {
+                fs::write(&path, primary).expect("primary should be writable");
+            }
+
+            let loaded = load_json_file_with_backup::<serde_json::Value>(&path, &backup_path)
+                .expect("valid backup should recover primary");
+
+            assert!(loaded.recovered_from_backup);
+            assert_eq!(loaded.value["source"], "last-good");
+            assert_eq!(fs::read_to_string(&path).unwrap(), backup);
+            assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn sidecar_generation_recovery_repairs_corrupt_primary() {
+        let root = temp_root("generation-recovery");
+        let path = root.join("runtime.json");
+        let backup_path = root.join("runtime.json.last-good");
+        let backup = r#"{"generation":7,"value":{"source":"last-good"}}"#;
+        fs::write(&path, "{broken").expect("primary should be writable");
+        fs::write(&backup_path, backup).expect("backup should be writable");
+
+        assert_eq!(
+            runtime_sidecar_generation_from_disk(&path, &backup_path).unwrap(),
+            7
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), backup);
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn reset_runtime_store_fault_budget(env_key: &'static str) {
+        let _env_lock = TestEnvVarGuard::lock();
+        let _ = runtime_take_fault_injection_budget(env_key, 0);
+    }
+
+    fn assert_last_good_recovery_keeps_backup_on_fault(
+        env_key: &'static str,
+        primary: Option<&str>,
+    ) {
+        reset_runtime_store_fault_budget(env_key);
+        let root = temp_root("recovery-fault");
+        let path = root.join("state.json");
+        let backup_path = root.join("state.last-good.json");
+        let backup = r#"{"source":"last-good"}"#;
+        if let Some(primary) = primary {
+            fs::write(&path, primary).expect("primary should be writable");
+        }
+        fs::write(&backup_path, backup).expect("backup should be writable");
+
+        let loaded = {
+            let _fault = TestEnvVarGuard::set(env_key, "1");
+            load_json_file_with_backup::<serde_json::Value>(&path, &backup_path)
+                .expect("valid backup should remain usable")
+        };
+
+        assert!(loaded.recovered_from_backup);
+        assert_eq!(loaded.value["source"], "last-good");
+        match primary {
+            Some(primary) => assert_eq!(fs::read_to_string(&path).unwrap(), primary),
+            None => assert!(!path.exists()),
+        }
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
+        reset_runtime_store_fault_budget(env_key);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn last_good_recovery_keeps_backup_when_primary_write_fails() {
+        assert_last_good_recovery_keeps_backup_on_fault(
+            TEST_RUNTIME_STORE_WRITE_FAULT_ENV,
+            Some("{broken"),
+        );
+    }
+
+    #[test]
+    fn last_good_recovery_keeps_backup_when_primary_rename_fails() {
+        assert_last_good_recovery_keeps_backup_on_fault(
+            TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV,
+            Some("{broken"),
+        );
+    }
+
+    #[test]
+    fn last_good_recovery_keeps_backup_when_primary_is_missing_and_repair_fails() {
+        for env_key in [
+            TEST_RUNTIME_STORE_WRITE_FAULT_ENV,
+            TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV,
+        ] {
+            assert_last_good_recovery_keeps_backup_on_fault(env_key, None);
+        }
+    }
+
+    #[test]
+    fn sidecar_migration_keeps_last_good_when_missing_primary_repair_fails() {
+        for env_key in [
+            TEST_RUNTIME_STORE_WRITE_FAULT_ENV,
+            TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV,
+        ] {
+            reset_runtime_store_fault_budget(env_key);
+            let root = temp_root("generation-recovery-fault");
+            let path = root.join("runtime.json");
+            let backup_path = root.join("runtime.json.last-good");
+            let backup = r#"{"generation":7,"value":{"source":"last-good"}}"#;
+            fs::write(&backup_path, backup).expect("backup should be writable");
+            let generation = {
+                let _fault = TestEnvVarGuard::set(env_key, "1");
+                runtime_sidecar_generation_from_disk(&path, &backup_path)
+                    .expect("valid last-good generation should remain usable")
+            };
+
+            assert_eq!(generation, 7);
+            assert!(!path.exists());
+            assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
+            reset_runtime_store_fault_budget(env_key);
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn write_json_file_with_backup_keeps_backup_when_primary_write_fails() {
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_WRITE_FAULT_ENV);
+        let root = temp_root("primary-write-fault");
+        let path = root.join("state.json");
+        let backup_path = root.join("state.last-good.json");
+        let backup = r#"{"source":"last-good"}"#;
+        fs::write(&backup_path, backup).expect("backup should be writable");
+        let err = {
+            let _fault = TestEnvVarGuard::set(TEST_RUNTIME_STORE_WRITE_FAULT_ENV, "1");
+            write_json_file_with_backup(&path, &backup_path, r#"{"source":"new"}"#, |content| {
+                let _: serde_json::Value = serde_json::from_str(content)?;
+                Ok(())
+            })
+            .expect_err("injected primary write should fail")
+        };
+
+        assert!(err.to_string().contains("atomically write"));
+        assert!(!path.exists());
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_WRITE_FAULT_ENV);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn write_json_file_with_backup_keeps_backup_when_primary_rename_fails() {
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV);
+        let root = temp_root("primary-rename-fault");
+        let path = root.join("state.json");
+        let backup_path = root.join("state.last-good.json");
+        let old = r#"{"source":"old"}"#;
+        let new = r#"{"source":"new"}"#;
+        fs::write(&path, old).expect("primary should be writable");
+        fs::write(&backup_path, old).expect("backup should be writable");
+        let err = {
+            let _fault = TestEnvVarGuard::set(TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV, "1");
+            write_json_file_with_backup(&path, &backup_path, new, |content| {
+                let _: serde_json::Value = serde_json::from_str(content)?;
+                Ok(())
+            })
+            .expect_err("injected primary rename should fail")
+        };
+
+        assert!(err.to_string().contains("atomically write"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), old);
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), old);
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_PRIMARY_RENAME_FAULT_ENV);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn write_json_file_with_backup_updates_backup_only_after_primary_is_durable() {
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_SIDECAR_RENAME_FAULT_ENV);
+        let root = temp_root("sidecar-rename-fault");
+        let path = root.join("state.json");
+        let backup_path = root.join("state.last-good.json");
+        let old = r#"{"source":"old"}"#;
+        let new = r#"{"source":"new"}"#;
+        fs::write(&path, old).expect("primary should be writable");
+        fs::write(&backup_path, old).expect("backup should be writable");
+        let err = {
+            let _fault = TestEnvVarGuard::set(TEST_RUNTIME_STORE_SIDECAR_RENAME_FAULT_ENV, "1");
+            write_json_file_with_backup(&path, &backup_path, new, |content| {
+                let _: serde_json::Value = serde_json::from_str(content)?;
+                Ok(())
+            })
+            .expect_err("injected sidecar rename should fail")
+        };
+
+        assert!(err.to_string().contains("refresh"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), new);
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), old);
+        reset_runtime_store_fault_budget(TEST_RUNTIME_STORE_SIDECAR_RENAME_FAULT_ENV);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

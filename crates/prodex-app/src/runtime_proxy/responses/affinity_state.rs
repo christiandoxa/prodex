@@ -69,7 +69,21 @@ impl RuntimeResponsesAffinityState {
                 session_profile: &mut self.route_affinity.session_profile,
                 pinned_profile: &mut self.route_affinity.pinned_profile,
             },
-        )
+        )?;
+        if matches!(
+            runtime_request_hard_binding_owner(
+                input.shared,
+                input.previous_response_id,
+                input.request_turn_state,
+                input.request_session_id,
+            )?,
+            prodex_runtime_state::RuntimeHardBindingOwner::Conflict
+                | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_)
+        ) {
+            self.route_affinity.pinned_profile =
+                Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string());
+        }
+        Ok(())
     }
 
     pub(super) fn compact_followup_profile(&self) -> Option<(&str, &'static str)> {
@@ -126,6 +140,11 @@ impl RuntimeResponsesAffinityState {
     }
 
     pub(super) fn wait_affinity_owner(&self) -> Option<&str> {
+        if self.pinned_profile()
+            == Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE)
+        {
+            return None;
+        }
         runtime_wait_affinity_owner(
             self.compact_followup_profile_name(),
             self.pinned_profile(),
@@ -142,6 +161,13 @@ impl RuntimeResponsesAffinityState {
         saw_inflight_saturation: bool,
         saw_upstream_failure: bool,
     ) -> bool {
+        if self.compact_followup_profile_name().is_some()
+            || self.pinned_profile().is_some()
+            || self.turn_state_profile().is_some()
+            || self.session_profile().is_some()
+        {
+            return false;
+        }
         runtime_proxy_allows_direct_current_profile_fallback(
             previous_response_id,
             self.pinned_profile(),

@@ -32,19 +32,72 @@ pub(crate) fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) 
     localize_text_file(&agents_path)?;
     let reference = format!("@{}", reference_path.display());
     let contents = read_text_file_limited(&agents_path)?.unwrap_or_default();
-    if contents.lines().any(|line| line.trim() == reference) {
-        return Ok(());
+    let mut lines = Vec::new();
+    let mut reference_seen = false;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        let is_reference = trimmed == reference;
+        if is_reference {
+            reference_seen = true;
+        } else {
+            lines.push(line);
+        }
     }
-    let updated = if contents.trim().is_empty() {
+    let cleaned = lines.join("\n");
+    let updated = if cleaned.trim().is_empty() {
         format!("{reference}\n")
     } else {
-        format!("{}\n\n{reference}\n", contents.trim_end())
+        format!("{}\n\n{reference}\n", cleaned.trim_end())
     };
-    write_text_file(&agents_path, &updated)
+    if reference_seen && updated == contents {
+        Ok(())
+    } else {
+        write_text_file(&agents_path, &updated)
+    }
 }
 
 fn read_optional_link_target_contents(path: &Path) -> Result<String> {
     read_canonical_text_file_limited(path)
         .map(|contents| contents.unwrap_or_default())
         .with_context(|| format!("failed to read {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_agents_reference;
+    use std::fs;
+
+    #[test]
+    fn keeps_unrelated_same_basename_reference_and_deduplicates_exact_reference() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-localization-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("AGENTS.md"),
+            "@/home/test-user/unrelated/SUB_AGENTS.md\n",
+        )
+        .unwrap();
+        let reference = root.join("SUB_AGENTS.md");
+        ensure_agents_reference(&root, &reference).unwrap();
+
+        let agents = fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        let expected = format!("@{}", reference.display());
+        assert_eq!(
+            agents
+                .lines()
+                .filter(|line| line.trim() == expected)
+                .count(),
+            1
+        );
+        assert!(agents.contains("@/home/test-user/unrelated/SUB_AGENTS.md"));
+        ensure_agents_reference(&root, &reference).unwrap();
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), agents);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

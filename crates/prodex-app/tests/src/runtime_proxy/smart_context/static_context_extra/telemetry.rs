@@ -1,8 +1,7 @@
 #[test]
 fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     let shared = smart_context_test_shared("rewrite-telemetry");
-    register_runtime_smart_context_proxy_state(
-        &shared, true, None, None);
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
     let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
         shared: &shared,
         body: br#"{"input":"test"}"#,
@@ -108,6 +107,9 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     assert!(log_text.contains("transformed_segment_categories=-"));
     assert!(log_text.contains("segment_rollback_count=0"));
     assert!(log_text.contains("full_request_fallback_count=0"));
+    assert!(log_text.contains("rehydration_planned=0"));
+    assert!(log_text.contains("rehydration_performed=0"));
+    assert!(log_text.contains("rehydration_deferred=0"));
     assert!(log_text.contains("rehydration_token_cost=0"));
     assert!(log_text.contains("artifact_hash_failures=0"));
 }
@@ -118,7 +120,7 @@ fn smart_context_rewrite_telemetry_samples_preserve_quality_outcomes() {
         body_bytes_after: 3_000,
         tokens_before: 2_000,
         tokens_after: 750,
-                token_count_source: runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
+        token_count_source: runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
         rewrite_kind: "rewritten".to_string(),
         status: "ok_saved".to_string(),
         fallback_reason: None,
@@ -182,9 +184,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
 #[test]
 fn smart_context_auto_rehydrate_plan_defers_over_budget_refs() {
     let mut store = RuntimeSmartContextArtifactStore::default();
-    let artifact = store
-        .insert_text(&"large artifact ".repeat(400))
-        .unwrap();
+    let artifact = store.insert_text(&"large artifact ".repeat(400)).unwrap();
     let mut value = serde_json::json!({
         "input": [{"type": "message", "content": format!("need prodex-artifact:{}", artifact.id)}]
     });
@@ -203,6 +203,10 @@ fn smart_context_auto_rehydrate_plan_defers_over_budget_refs() {
         Some(runtime_proxy_crate::SmartContextRehydrateAction::Defer { .. })
     ));
     assert_eq!(stats.rehydrated_refs, 0);
+    assert_eq!(stats.rehydration_planned, 0);
+    assert_eq!(stats.rehydration_performed, 0);
+    assert_eq!(stats.rehydration_deferred, 1);
+    assert_eq!(stats.rehydration_token_cost, 0);
     assert!(
         value["input"][0]["content"]
             .as_str()

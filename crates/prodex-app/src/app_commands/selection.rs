@@ -197,20 +197,42 @@ where
         return inputs.into_iter().map(func).collect();
     }
 
+    let input_count = inputs.len();
+    let worker_count = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 8)
+        .min(inputs.len());
+    let chunk_size = inputs.len().div_ceil(worker_count);
+    let mut chunks = (0..worker_count)
+        .map(|_| Vec::new())
+        .collect::<Vec<Vec<I>>>();
+    for (index, input) in inputs.into_iter().enumerate() {
+        chunks[index / chunk_size].push(input);
+    }
+    chunks.retain(|chunk| !chunk.is_empty());
+
     thread::scope(|scope| {
         let func = &func;
-        let mut handles = Vec::with_capacity(inputs.len());
-        for input in inputs {
-            handles.push(scope.spawn(move || func(input)));
-        }
-
-        handles
+        let handles = chunks
             .into_iter()
-            .map(|handle| match handle.join() {
-                Ok(output) => output,
-                Err(payload) => std::panic::resume_unwind(payload),
-            })
-            .collect()
+            .map(|chunk| scope.spawn(move || chunk.into_iter().map(func).collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+
+        let mut output = Vec::with_capacity(input_count);
+        let mut panic = None;
+        for handle in handles {
+            match handle.join() {
+                Ok(mut chunk) => output.append(&mut chunk),
+                Err(payload) => {
+                    panic.get_or_insert(payload);
+                }
+            }
+        }
+        if let Some(payload) = panic {
+            std::panic::resume_unwind(payload);
+        }
+        output
     })
 }
 
@@ -258,5 +280,51 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("fixture-token-123"));
         assert!(!message.contains("sk-fixture-123"));
+    }
+
+    #[test]
+    fn map_parallel_preserves_order_and_propagates_worker_panics() {
+        let output = map_parallel((0..32).collect(), |value| value * 2);
+        assert_eq!(output, (0..32).map(|value| value * 2).collect::<Vec<_>>());
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            map_parallel(vec![0, 1, 2, 3], |value| {
+                assert_ne!(value, 2);
+                value
+            });
+        }));
+        assert!(panic.is_err());
+    }
+
+    #[test]
+    fn map_parallel_bounds_concurrency_for_large_inputs() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let input_count = 128;
+        let configured_workers = thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(4)
+            .clamp(2, 8)
+            .min(input_count);
+        let chunk_size = input_count.div_ceil(configured_workers);
+        let actual_workers = input_count.div_ceil(chunk_size);
+        let barrier = Arc::new(Barrier::new(actual_workers));
+        let active = AtomicUsize::new(0);
+        let maximum = AtomicUsize::new(0);
+
+        let output = map_parallel((0..input_count).collect(), |value| {
+            if value % chunk_size == 0 {
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                maximum.fetch_max(now, Ordering::SeqCst);
+                barrier.wait();
+                active.fetch_sub(1, Ordering::SeqCst);
+            }
+            value
+        });
+
+        assert_eq!(output, (0..input_count).collect::<Vec<_>>());
+        assert_eq!(maximum.load(Ordering::SeqCst), actual_workers);
+        assert!(maximum.load(Ordering::SeqCst) <= 8);
     }
 }

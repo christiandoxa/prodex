@@ -22,7 +22,8 @@ pub(crate) use runtime_proxy_crate::runtime_proxy_precommit_budget_exhausted;
 pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
     parts: RuntimeHeapTrimmedBufferedResponseParts,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
-    if extract_runtime_proxy_previous_response_message(&parts.body).is_some() {
+    if parts.status != 429 && extract_runtime_proxy_previous_response_message(&parts.body).is_some()
+    {
         RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
             runtime_proxy_crate::runtime_proxy_stale_continuation_http_parts(),
         )

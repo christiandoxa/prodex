@@ -29,7 +29,8 @@ pub fn runtime_proxy_stale_continuation_http_parts() -> RuntimeBufferedResponseP
 pub fn runtime_proxy_translate_previous_response_http_parts(
     parts: RuntimeBufferedResponseParts,
 ) -> RuntimeBufferedResponseParts {
-    if extract_runtime_proxy_previous_response_message(&parts.body).is_some() {
+    if parts.status != 429 && extract_runtime_proxy_previous_response_message(&parts.body).is_some()
+    {
         runtime_proxy_stale_continuation_http_parts()
     } else {
         parts

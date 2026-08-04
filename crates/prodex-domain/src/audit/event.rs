@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::fmt;
+use std::{fmt, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 
@@ -270,6 +270,8 @@ pub struct AuditEvent {
     pub resource: AuditResource,
     pub outcome: AuditOutcome,
     pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_detail: Option<AuditReasonDetail>,
 }
 
 impl fmt::Debug for AuditEvent {
@@ -285,6 +287,10 @@ impl fmt::Debug for AuditEvent {
             .field(
                 "reason_code",
                 &self.reason_code.as_deref().map(|_| "<redacted>"),
+            )
+            .field(
+                "reason_detail",
+                &self.reason_detail.as_deref().map(|_| "<redacted>"),
             )
             .finish()
     }
@@ -398,9 +404,92 @@ impl fmt::Display for AuditReasonCodeError {
 
 impl Error for AuditReasonCodeError {}
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct AuditReasonDetail(String);
+
+impl AuditReasonDetail {
+    pub fn new(value: impl AsRef<str>) -> Result<Self, AuditReasonDetailError> {
+        Ok(Self(sanitize_audit_reason_detail(value.as_ref())?))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for AuditReasonDetail {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Deref for AuditReasonDetail {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl fmt::Debug for AuditReasonDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("AuditReasonDetail")
+            .field(&"<redacted>")
+            .finish()
+    }
+}
+
+impl Serialize for AuditReasonDetail {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AuditReasonDetail {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuditReasonDetailError {
+    Empty,
+    TooLong { length: usize },
+}
+
+impl fmt::Debug for AuditReasonDetailError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("Empty"),
+            Self::TooLong { .. } => f
+                .debug_struct("TooLong")
+                .field("length", &"<redacted>")
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Display for AuditReasonDetailError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("audit reason detail is invalid")
+    }
+}
+
+impl Error for AuditReasonDetailError {}
+
 impl AuditEvent {
     pub const MIN_UNIX_MS: u64 = 1_000;
     pub const MAX_UNIX_MS: u64 = 4_102_444_800_000;
+    pub const MAX_REASON_DETAIL_BYTES: usize = 512;
+    #[deprecated(note = "use MAX_REASON_DETAIL_BYTES")]
+    pub const MAX_REASON_DETAIL_CHARS: usize = Self::MAX_REASON_DETAIL_BYTES;
 
     pub fn new(
         occurred_at_unix_ms: u64,
@@ -426,6 +515,7 @@ impl AuditEvent {
             reason_code: reason_code
                 .map(Into::into)
                 .filter(|reason_code| validate_audit_reason_code(reason_code).is_ok()),
+            reason_detail: None,
         }
     }
 
@@ -469,9 +559,164 @@ impl AuditEvent {
         )
     }
 
+    pub fn with_reason_detail(mut self, reason_detail: Option<AuditReasonDetail>) -> Self {
+        self.reason_detail = reason_detail;
+        self
+    }
+
     pub fn immutable_key(&self) -> AuditEventId {
         self.id
     }
+}
+
+/// Normalizes audit reason detail without retaining control characters or common secret values.
+pub fn normalize_audit_reason_detail(value: &str) -> Option<String> {
+    sanitize_audit_reason_detail(value).ok()
+}
+
+fn sanitize_audit_reason_detail(value: &str) -> Result<String, AuditReasonDetailError> {
+    let control_safe = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let normalized = control_safe
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return Err(AuditReasonDetailError::Empty);
+    }
+
+    let redacted = redact_audit_reason_detail(&normalized);
+    if redacted.len() > AuditEvent::MAX_REASON_DETAIL_BYTES {
+        return Err(AuditReasonDetailError::TooLong {
+            length: redacted.len(),
+        });
+    }
+    Ok(redacted)
+}
+
+fn redact_audit_reason_detail(value: &str) -> String {
+    let mut words = Vec::new();
+    let tokens = value.split(' ').collect::<Vec<_>>();
+    let mut index = 0;
+
+    while let Some(word) = tokens.get(index) {
+        let lower = word.to_ascii_lowercase();
+        if matches!(lower.as_str(), "bearer" | "basic" | "token") {
+            words.push((*word).to_string());
+            if tokens.get(index + 1).is_some() {
+                words.push("<redacted>".to_string());
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+
+        if let Some(separator) = word.find(['=', ':']) {
+            let key = word[..separator].to_ascii_lowercase();
+            if is_secret_key(&key) {
+                let prefix = &word[..=separator];
+                if word.len() == separator + 1
+                    && tokens.get(index + 1).is_some_and(|next| {
+                        matches!(
+                            next.to_ascii_lowercase().as_str(),
+                            "bearer" | "basic" | "token"
+                        )
+                    })
+                    && tokens.get(index + 2).is_some()
+                {
+                    words.push(format!("{prefix} {} <redacted>", tokens[index + 1]));
+                    index += 3;
+                } else {
+                    words.push(format!("{prefix}<redacted>"));
+                    if word.len() == separator + 1 && tokens.get(index + 1).is_some() {
+                        index += 2;
+                    } else {
+                        index += 1;
+                    }
+                }
+                continue;
+            }
+        }
+
+        if is_secret_key(&lower)
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| *next == "=" || *next == ":")
+            && tokens.get(index + 2).is_some()
+        {
+            let scheme = tokens[index + 2].to_ascii_lowercase();
+            if matches!(scheme.as_str(), "bearer" | "basic" | "token")
+                && tokens.get(index + 3).is_some()
+            {
+                words.push(format!("{word}{}<redacted>", tokens[index + 1]));
+                index += 4;
+            } else {
+                words.push(format!("{word}{}<redacted>", tokens[index + 1]));
+                index += 3;
+            }
+            continue;
+        }
+
+        if is_secret_key(&lower) && tokens.get(index + 1).is_some() {
+            if matches!(
+                tokens[index + 1].to_ascii_lowercase().as_str(),
+                "bearer" | "basic" | "token"
+            ) && tokens.get(index + 2).is_some()
+            {
+                words.push(format!("{word} {} <redacted>", tokens[index + 1]));
+                index += 3;
+            } else {
+                words.push(format!("{word} <redacted>"));
+                index += 2;
+            }
+            continue;
+        }
+
+        if looks_like_secret(&lower) {
+            words.push("<redacted>".to_string());
+        } else {
+            words.push((*word).to_string());
+        }
+        index += 1;
+    }
+
+    words.join(" ")
+}
+
+fn is_secret_key(key: &str) -> bool {
+    key.contains("password")
+        || key.contains("secret")
+        || key.contains("token")
+        || key.contains("apikey")
+        || key.contains("api_key")
+        || key.contains("api-key")
+        || key.contains("authorization")
+        || key.contains("credential")
+        || key.contains("cookie")
+}
+
+fn looks_like_secret(value: &str) -> bool {
+    value.starts_with("sk-proj-")
+        || value.starts_with("sk-ant-")
+        || value.starts_with("sk-live-")
+        || value.starts_with("sk_test_")
+        || value.starts_with("sk_live_")
+        || value.starts_with("sk-")
+        || value.starts_with("sk_")
+        || value.starts_with("ghp_")
+        || value.starts_with("gho_")
+        || value.starts_with("github_pat_")
+        || value.starts_with("xoxb-")
+        || value.starts_with("xoxp-")
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

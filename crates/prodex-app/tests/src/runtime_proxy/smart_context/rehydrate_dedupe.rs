@@ -19,6 +19,10 @@ fn smart_context_rehydrates_short_artifact_refs_and_line_ranges() {
 
     assert_eq!(value["input"][0]["content"], "need line two\nline three");
     assert_eq!(stats.rehydrated_refs, 1);
+    assert_eq!(stats.rehydration_planned, 1);
+    assert_eq!(stats.rehydration_performed, 1);
+    assert_eq!(stats.rehydration_deferred, 0);
+    assert!(stats.rehydration_token_cost > 0);
 }
 
 #[test]
@@ -126,4 +130,76 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
             .contains("prodex-context-ref v=1")
     );
     assert_eq!(stats.duplicate_texts, 1);
+}
+
+#[test]
+fn smart_context_auto_rehydrate_zero_budget_does_not_expand_even_empty_text() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text("").unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let plan = runtime_smart_context_auto_rehydrate_plan(
+        &value,
+        &store,
+        0,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact,
+    );
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value_with_plan(&mut value, &store, &plan, &mut stats);
+
+    assert!(matches!(
+        plan.actions.first(),
+        Some(runtime_proxy_crate::SmartContextRehydrateAction::Defer {
+            reason: runtime_proxy_crate::SmartContextRehydrateDeferReason::TokenBudgetExceeded,
+            ..
+        })
+    ));
+    assert_eq!(plan.used_tokens, 0);
+    assert_eq!(stats.rehydration_planned, 0);
+    assert_eq!(stats.rehydration_performed, 0);
+    assert_eq!(stats.rehydration_deferred, 1);
+    assert_eq!(stats.rehydration_token_cost, 0);
+    assert_eq!(
+        value["input"][0]["content"],
+        format!("prodex-artifact:{}", artifact.id)
+    );
+}
+
+#[test]
+fn smart_context_auto_rehydrate_plan_is_deterministic_and_within_budget() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let first = store.insert_text(&"first ".repeat(80)).unwrap();
+    let second = store.insert_text(&"second ".repeat(160)).unwrap();
+    let value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!(
+                "prodex-artifact:{} prodex-artifact:{} prodex-artifact:{}",
+                first.id, second.id, first.id
+            )
+        }]
+    });
+    let references = runtime_smart_context_collect_rehydratable_artifact_refs(&value);
+    let budget = runtime_smart_context_rehydrate_ref_token_cost(&references[0], &store).unwrap();
+
+    let first_plan = runtime_smart_context_auto_rehydrate_plan(
+        &value,
+        &store,
+        budget,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed,
+    );
+    let second_plan = runtime_smart_context_auto_rehydrate_plan(
+        &value,
+        &store,
+        budget,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed,
+    );
+
+    assert_eq!(first_plan, second_plan);
+    assert!(first_plan.used_tokens <= budget);
 }

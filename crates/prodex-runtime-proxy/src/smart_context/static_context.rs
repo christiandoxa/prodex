@@ -1,7 +1,12 @@
 use super::*;
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 const SMART_CONTEXT_STATIC_CONTEXT_SECTION_MIN_BYTES: usize = 512;
+pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS: usize = 128;
+pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES: usize = 256 * 1024;
+const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES: usize = 256;
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
     "prodex static context unchanged ";
@@ -114,7 +119,17 @@ pub struct SmartContextStableStaticContextItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextStaticContextPromptCacheFingerprint {
     pub content_hash: String,
-    pub items: Vec<SmartContextStableStaticContextItem>,
+    pub items: Vec<SmartContextStaticContextItemFingerprint>,
+    pub item_count: usize,
+    pub byte_len: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStaticContextItemFingerprint {
+    pub id_hash: String,
+    pub content_hash: String,
+    pub byte_len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,13 +220,150 @@ pub fn smart_context_stabilize_static_context_items(
 pub fn smart_context_static_context_prompt_cache_fingerprint(
     items: impl IntoIterator<Item = SmartContextStaticContextItem>,
 ) -> SmartContextStaticContextPromptCacheFingerprint {
-    let items = smart_context_stabilize_static_context_items(items);
-    let payload = smart_context_static_context_prompt_cache_payload(&items);
+    let (items, item_count, byte_len, truncated, overflow_hash) =
+        smart_context_stabilize_static_context_items_bounded(items);
+    let mut payload = smart_context_static_context_prompt_cache_payload(&items);
+    if truncated {
+        payload.push_str("psc static fingerprint truncated ");
+        payload.push_str(&item_count.to_string());
+        payload.push(' ');
+        payload.push_str(&byte_len.to_string());
+        payload.push(' ');
+        payload.push_str(&overflow_hash);
+        payload.push('\n');
+    }
 
     SmartContextStaticContextPromptCacheFingerprint {
         content_hash: smart_context_hash_text(&payload).replacen("sc2:", "scpc2:", 1),
-        items,
+        items: items
+            .iter()
+            .map(|item| SmartContextStaticContextItemFingerprint {
+                id_hash: smart_context_hash_text(&item.id),
+                content_hash: item.content_hash.clone(),
+                byte_len: item.byte_len,
+            })
+            .collect(),
+        item_count,
+        byte_len,
+        truncated,
     }
+}
+
+fn smart_context_stabilize_static_context_items_bounded(
+    items: impl IntoIterator<Item = SmartContextStaticContextItem>,
+) -> (
+    Vec<SmartContextStableStaticContextItem>,
+    usize,
+    usize,
+    bool,
+    String,
+) {
+    let mut stable = Vec::new();
+    let mut item_count = 0usize;
+    let mut byte_len = 0usize;
+    let mut truncated = false;
+    let mut overflow_digest = [0u8; 32];
+
+    for item in items {
+        let id = smart_context_bounded_static_context_id(&item.id);
+        let canonical_text = smart_context_bounded_static_context_text(&item.text);
+        if id.is_empty() && canonical_text.is_empty() {
+            continue;
+        }
+        item_count = item_count.saturating_add(1);
+        byte_len = byte_len.saturating_add(canonical_text.len());
+        let candidate = SmartContextStableStaticContextItem {
+            id,
+            byte_len: canonical_text.len(),
+            content_hash: smart_context_hash_text(&canonical_text),
+            canonical_text,
+        };
+        if stable.len() < SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS {
+            stable.push(candidate);
+            continue;
+        }
+
+        truncated = true;
+        let largest_index = stable
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| smart_context_static_context_item_order(left, right))
+            .map(|(index, _)| index)
+            .expect("a full bounded fingerprint set is non-empty");
+        if smart_context_static_context_item_order(&candidate, &stable[largest_index]).is_lt() {
+            let overflow = std::mem::replace(&mut stable[largest_index], candidate);
+            smart_context_add_static_context_overflow_digest(&mut overflow_digest, &overflow);
+        } else {
+            smart_context_add_static_context_overflow_digest(&mut overflow_digest, &candidate);
+        }
+    }
+
+    stable.sort_by(smart_context_static_context_item_order);
+    (
+        stable,
+        item_count,
+        byte_len,
+        truncated,
+        smart_context_hex_digest(overflow_digest),
+    )
+}
+
+fn smart_context_add_static_context_overflow_digest(
+    aggregate: &mut [u8; 32],
+    item: &SmartContextStableStaticContextItem,
+) {
+    let mut item_hasher = Sha256::new();
+    item_hasher.update(item.id.as_bytes());
+    item_hasher.update([0]);
+    item_hasher.update(item.content_hash.as_bytes());
+    item_hasher.update([0]);
+    item_hasher.update(item.byte_len.to_le_bytes());
+    for (slot, byte) in aggregate
+        .iter_mut()
+        .zip(item_hasher.finalize().iter().copied())
+    {
+        *slot = slot.wrapping_add(byte);
+    }
+}
+
+fn smart_context_bounded_static_context_id(id: &str) -> String {
+    let trimmed = id.trim();
+    if trimmed.len() <= SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES {
+        return trimmed.replace('\\', "/");
+    }
+    let mut end = SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES;
+    while !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}<id-hash={}>",
+        trimmed[..end].replace('\\', "/"),
+        smart_context_hash_text(id)
+    )
+}
+
+fn smart_context_bounded_static_context_text(text: &str) -> String {
+    if text.len() <= SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES {
+        return smart_context_stabilize_static_context_text(text);
+    }
+    let mut end = SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let prefix = smart_context_stabilize_static_context_text(&text[..end]);
+    format!(
+        "{prefix}\npsc static fingerprint item truncated bytes={} hash={}",
+        text.len(),
+        smart_context_hash_text(text)
+    )
+}
+
+fn smart_context_hex_digest(digest: [u8; 32]) -> String {
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
 }
 
 pub fn smart_context_static_heading_section_body<'a>(

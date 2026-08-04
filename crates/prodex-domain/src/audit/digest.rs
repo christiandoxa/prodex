@@ -28,6 +28,10 @@ pub fn compute_audit_chain_digest(
     }
     frame(&mut hasher, event.outcome.as_str().as_bytes());
     frame_optional(&mut hasher, event.reason_code.as_deref());
+    // Keep the absent-detail encoding unchanged so legacy audit digests remain valid.
+    if let Some(reason_detail) = event.reason_detail.as_deref() {
+        frame(&mut hasher, reason_detail.as_bytes());
+    }
 
     AuditDigest::new(format!("sha256:{}", hex_lower(&hasher.finalize())))
         .expect("canonical SHA-256 audit digest is valid")

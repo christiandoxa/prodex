@@ -11,8 +11,7 @@ use prodex_runtime_state::{
 };
 use prodex_state::{
     AppState, AppStateCompactionPolicy, ProfileEntry, ResponseProfileBinding,
-    merge_profile_bindings, prune_profile_bindings,
-    prune_profile_bindings_for_housekeeping_without_retention,
+    is_hard_binding_conflict_profile, prune_profile_bindings,
 };
 use std::collections::BTreeMap;
 
@@ -23,7 +22,13 @@ mod selected_snapshot;
 mod smart_context_store;
 
 pub use continuations::*;
-pub use prodex_runtime_state::{RuntimeProfileBackoffs, RuntimeProfileHealth, RuntimeRouteKind};
+pub use prodex_runtime_state::{
+    RUNTIME_HARD_BINDING_COMPONENT_MAX_BYTES, RUNTIME_HARD_BINDING_CONFLICT_PROFILE,
+    RUNTIME_HARD_BINDING_KEY_MAX_BYTES, RuntimeHardBindingIdentity, RuntimeHardBindingOwner,
+    RuntimeHardBindingResolution, RuntimeProfileBackoffs, RuntimeProfileHealth,
+    RuntimeProviderBindingIdentity, RuntimeRouteKind, runtime_identity_component_is_valid,
+    runtime_lineage_key_is_bounded,
+};
 pub use profile_backoff::*;
 pub use runtime_state::*;
 pub use selected_snapshot::*;

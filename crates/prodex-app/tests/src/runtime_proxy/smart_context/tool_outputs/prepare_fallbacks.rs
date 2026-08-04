@@ -251,7 +251,8 @@ fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown(
 
     assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
     let log = read_runtime_proxy_test_log(&shared.log_path);
-    assert!(log.contains("reason=no_duplicate_candidate"));
+    assert!(log.contains("decision="));
+    assert!(!log.contains("reason=no_duplicate_candidate"));
     assert!(!log.contains("smart_context_panic"));
     assert!(!log.contains("smart_context_disabled"));
     assert!(!log.contains("reason=panic_cooldown"));

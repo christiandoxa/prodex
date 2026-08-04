@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_websocket_fallback() {
+fn affinity_candidate_keeps_bound_current_session_owner_without_quota_data() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -43,6 +43,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
         session_profile_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -59,6 +60,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
         session_id_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -98,7 +100,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("second".to_string())
+        Some("main".to_string())
     );
 }
 

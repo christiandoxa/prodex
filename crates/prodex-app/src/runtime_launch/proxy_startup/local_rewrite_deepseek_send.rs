@@ -3,7 +3,7 @@ use super::super::deepseek_rewrite::{
     runtime_deepseek_chat_request_body_with_options,
 };
 use super::super::local_rewrite::{
-    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
@@ -18,6 +18,12 @@ use super::super::local_rewrite_transport::{
     runtime_deepseek_upstream_url, runtime_local_rewrite_api_key_attempts,
     send_runtime_local_rewrite_prepared_request,
 };
+use super::super::local_rewrite_upstream::{
+    RuntimeLocalRewriteBindingContext, RuntimeLocalRewriteLiveResponse,
+    RuntimeLocalRewriteNativeFirstEvent, runtime_local_rewrite_attach_accepted_binding,
+    runtime_local_rewrite_binding_context, runtime_local_rewrite_precommit_native_first_event,
+    runtime_local_rewrite_raw_binding_identity,
+};
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
     runtime_provider_label, runtime_provider_log_request_conformance,
@@ -27,7 +33,8 @@ use super::super::provider_bridge::{
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
 use prodex_provider_core::{
-    ProviderEndpoint, ProviderTransformInput,
+    ProviderEndpoint, ProviderId, ProviderTransformInput, RuntimeProviderBindingIdentity,
+    deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_request_body as core_deepseek_provider_core_request_body,
     deepseek_provider_core_simple_request, provider_core_rewritten_body,
     translate_openai_chat_request_to_anthropic_messages,
@@ -43,7 +50,9 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
     api_keys: &[String],
     endpoint: ProviderEndpoint,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let api_key_attempts = if shared.provider_credential.is_some() {
+    let binding = runtime_local_rewrite_binding_context(shared, request)?;
+    let binding_endpoint = runtime_deepseek_binding_endpoint(shared, endpoint);
+    let mut api_key_attempts = if shared.provider_credential.is_some() {
         vec![("projected".to_string(), None)]
     } else {
         runtime_local_rewrite_api_key_attempts(shared, api_keys)
@@ -51,7 +60,15 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
             .map(|(label, api_key)| (label, Some(api_key)))
             .collect()
     };
+    api_key_attempts.retain(|(_, api_key)| {
+        runtime_deepseek_binding_identity(shared, *api_key, &binding_endpoint)
+            .as_ref()
+            .is_some_and(|identity| binding.candidate_allowed(Some(identity)))
+    });
     if api_key_attempts.is_empty() {
+        if binding.bound.is_some() {
+            anyhow::bail!("DeepSeek continuation binding is unavailable or unauthorized");
+        }
         anyhow::bail!("DeepSeek provider has no API keys configured");
     }
     let api_key_attempt_count = api_key_attempts.len();
@@ -63,6 +80,8 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
             body,
             api_key_attempts,
             api_key_attempt_count,
+            binding,
+            binding_endpoint,
         )
     } else {
         send_runtime_deepseek_passthrough_request(
@@ -72,8 +91,38 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
             body,
             api_key_attempts,
             api_key_attempt_count,
+            binding,
+            binding_endpoint,
         )
     }
+}
+
+fn runtime_deepseek_binding_endpoint(
+    shared: &RuntimeLocalRewriteProxyShared,
+    endpoint: ProviderEndpoint,
+) -> String {
+    match shared.provider.as_ref() {
+        super::super::local_rewrite_options::RuntimeLocalRewriteProviderOptions::DeepSeek {
+            strict_tools: true,
+            beta_base_url,
+            ..
+        } if endpoint == ProviderEndpoint::Responses => beta_base_url.clone(),
+        _ => shared.upstream_base_url.clone(),
+    }
+}
+
+fn runtime_deepseek_binding_identity(
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_key: Option<&str>,
+    endpoint: &str,
+) -> Option<RuntimeProviderBindingIdentity> {
+    runtime_local_rewrite_raw_binding_identity(
+        shared,
+        ProviderId::DeepSeek,
+        api_key,
+        endpoint,
+        api_key.is_none().then_some(RUNTIME_LOCAL_REWRITE_PROFILE),
+    )
 }
 
 struct RuntimeDeepSeekResponseAttemptContext<'a> {
@@ -88,8 +137,11 @@ struct RuntimeDeepSeekResponseAttemptContext<'a> {
     api_key_attempt_count: usize,
     strict_tools: bool,
     web_search_mode: super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode,
+    binding: &'a RuntimeLocalRewriteBindingContext,
+    binding_endpoint: &'a str,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn send_runtime_deepseek_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -97,6 +149,8 @@ fn send_runtime_deepseek_responses_request(
     body: Vec<u8>,
     api_key_attempts: Vec<(String, Option<&str>)>,
     api_key_attempt_count: usize,
+    binding: RuntimeLocalRewriteBindingContext,
+    binding_endpoint: String,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let model_selection = runtime_local_rewrite_model_selection(
         shared,
@@ -147,6 +201,8 @@ fn send_runtime_deepseek_responses_request(
         api_key_attempt_count,
         strict_tools,
         web_search_mode,
+        binding: &binding,
+        binding_endpoint: &binding_endpoint,
     };
     runtime_deepseek_response_attempts(&context, api_key_attempts)
 }
@@ -155,6 +211,7 @@ fn runtime_deepseek_response_attempts(
     context: &RuntimeDeepSeekResponseAttemptContext<'_>,
     api_key_attempts: Vec<(String, Option<&str>)>,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let mut first_event_retries = 0;
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in context.model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(context.base_body, model);
@@ -170,16 +227,57 @@ fn runtime_deepseek_response_attempts(
                 api_key,
                 prepared,
             )? {
-                RuntimeDeepSeekModelAttempt::Live {
+                RuntimeDeepSeekModelAttempt::Live { response, pending } => {
+                    return Ok(runtime_deepseek_live_result(response, pending));
+                }
+                RuntimeDeepSeekModelAttempt::NativeFirstEvent {
                     response,
-                    native_messages,
                     pending,
+                    class,
                 } => {
-                    return Ok(runtime_deepseek_live_result(
-                        response,
-                        native_messages,
-                        pending,
-                    ));
+                    let can_retry = deepseek_provider_core_first_event_retry_allowed(
+                        first_event_retries,
+                        false,
+                    );
+                    if can_retry
+                        && model_index + 1 < context.model_chain.len()
+                        && runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::NextModel,
+                            class,
+                            model_index,
+                            context.model_chain.len(),
+                        )
+                    {
+                        runtime_deepseek_log_model_fallback(
+                            context,
+                            &api_key_label,
+                            model,
+                            &context.model_chain[model_index + 1],
+                            200,
+                            class,
+                        );
+                        first_event_retries += 1;
+                        continue;
+                    }
+                    if can_retry
+                        && runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::RotateCredential,
+                            class,
+                            api_key_index,
+                            context.api_key_attempt_count,
+                        )
+                    {
+                        runtime_deepseek_log_auth_rotate(
+                            context.shared,
+                            context.request_id,
+                            &api_key_label,
+                            200,
+                            class,
+                        );
+                        first_event_retries += 1;
+                        break;
+                    }
+                    return Ok(runtime_deepseek_live_result(response, pending));
                 }
                 RuntimeDeepSeekModelAttempt::Error {
                     status,
@@ -195,26 +293,13 @@ fn runtime_deepseek_response_attempts(
                     context.model_chain.len(),
                 )
             {
-                runtime_proxy_log(
-                    &context.shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "local_rewrite_provider_model_fallback",
-                        [
-                            runtime_proxy_log_field("request", context.request_id.to_string()),
-                            runtime_proxy_log_field(
-                                "provider",
-                                runtime_provider_label(RuntimeProviderBridgeKind::DeepSeek),
-                            ),
-                            runtime_proxy_log_field("auth", api_key_label.as_str()),
-                            runtime_proxy_log_field("from_model", model.as_str()),
-                            runtime_proxy_log_field(
-                                "to_model",
-                                context.model_chain[model_index + 1].as_str(),
-                            ),
-                            runtime_proxy_log_field("status", status.to_string()),
-                            runtime_proxy_log_field("class", format!("{class:?}")),
-                        ],
-                    ),
+                runtime_deepseek_log_model_fallback(
+                    context,
+                    &api_key_label,
+                    model,
+                    &context.model_chain[model_index + 1],
+                    status,
+                    class,
                 );
                 continue;
             }
@@ -250,9 +335,13 @@ struct RuntimeDeepSeekPreparedModelRequest {
 
 enum RuntimeDeepSeekModelAttempt {
     Live {
-        response: reqwest::blocking::Response,
-        native_messages: bool,
+        response: RuntimeLocalRewriteLiveResponse,
         pending: RuntimeDeepSeekPendingRequest,
+    },
+    NativeFirstEvent {
+        response: RuntimeLocalRewriteLiveResponse,
+        pending: RuntimeDeepSeekPendingRequest,
+        class: RuntimeProviderErrorClass,
     },
     Error {
         status: u16,
@@ -334,8 +423,11 @@ fn runtime_deepseek_send_model_attempt(
     api_key: Option<&str>,
     prepared: RuntimeDeepSeekPreparedModelRequest,
 ) -> Result<RuntimeDeepSeekModelAttempt> {
-    let native_messages = prepared.native_messages;
-    let pending = prepared.pending;
+    let RuntimeDeepSeekPreparedModelRequest {
+        body,
+        native_messages,
+        pending,
+    } = prepared;
     let send_result = send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
         RuntimeLocalRewriteSearchFallbackRequest {
             request_id: context.request_id,
@@ -346,7 +438,7 @@ fn runtime_deepseek_send_model_attempt(
             } else {
                 context.chat_upstream_url
             },
-            body: prepared.body,
+            body,
             provider_kind: RuntimeProviderBridgeKind::DeepSeek,
             auth_label: api_key_label,
             model,
@@ -358,10 +450,57 @@ fn runtime_deepseek_send_model_attempt(
     )?;
     Ok(match send_result {
         RuntimeLocalRewritePreparedSendResult::Live(response) => {
-            RuntimeDeepSeekModelAttempt::Live {
-                response,
-                native_messages,
-                pending,
+            let mut live_response = if native_messages {
+                RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
+            } else {
+                RuntimeLocalRewriteLiveResponse::new(response)
+            };
+            let Some(binding_identity) = runtime_deepseek_binding_identity(
+                context.shared,
+                api_key,
+                context.binding_endpoint,
+            ) else {
+                return Err(anyhow::anyhow!(
+                    "DeepSeek accepted binding identity is unavailable"
+                ));
+            };
+            runtime_local_rewrite_attach_accepted_binding(
+                context.shared,
+                &mut live_response,
+                context.binding,
+                binding_identity,
+            );
+            if native_messages {
+                match runtime_local_rewrite_precommit_native_first_event(
+                    &mut live_response,
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    context
+                        .shared
+                        .runtime_shared
+                        .runtime_config
+                        .tuning
+                        .sse_lookahead_timeout_ms,
+                    &context.shared.provider_sse_prefetch_slots,
+                )? {
+                    RuntimeLocalRewriteNativeFirstEvent::Retry(class) => {
+                        RuntimeDeepSeekModelAttempt::NativeFirstEvent {
+                            response: live_response,
+                            pending,
+                            class,
+                        }
+                    }
+                    RuntimeLocalRewriteNativeFirstEvent::Commit => {
+                        RuntimeDeepSeekModelAttempt::Live {
+                            response: live_response,
+                            pending,
+                        }
+                    }
+                }
+            } else {
+                RuntimeDeepSeekModelAttempt::Live {
+                    response: live_response,
+                    pending,
+                }
             }
         }
         RuntimeLocalRewritePreparedSendResult::Error {
@@ -376,6 +515,7 @@ fn runtime_deepseek_send_model_attempt(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn send_runtime_deepseek_passthrough_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -383,6 +523,8 @@ fn send_runtime_deepseek_passthrough_request(
     body: Vec<u8>,
     api_key_attempts: Vec<(String, Option<&str>)>,
     api_key_attempt_count: usize,
+    binding: RuntimeLocalRewriteBindingContext,
+    binding_endpoint: String,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let upstream_url = runtime_deepseek_upstream_url(
         &shared.upstream_base_url,
@@ -420,9 +562,20 @@ fn send_runtime_deepseek_passthrough_request(
             }
             return Ok(runtime_deepseek_buffered_result(parts));
         }
+        let Some(binding_identity) =
+            runtime_deepseek_binding_identity(shared, api_key, &binding_endpoint)
+        else {
+            anyhow::bail!("DeepSeek accepted binding identity is unavailable");
+        };
+        let mut live_response = RuntimeLocalRewriteLiveResponse::new(response);
+        runtime_local_rewrite_attach_accepted_binding(
+            shared,
+            &mut live_response,
+            &binding,
+            binding_identity,
+        );
         return Ok(runtime_deepseek_live_result(
-            response,
-            false,
+            live_response,
             RuntimeDeepSeekPendingRequest::default(),
         ));
     }
@@ -454,6 +607,34 @@ fn runtime_deepseek_log_auth_rotate(
     );
 }
 
+fn runtime_deepseek_log_model_fallback(
+    context: &RuntimeDeepSeekResponseAttemptContext<'_>,
+    api_key_label: &str,
+    from_model: &str,
+    to_model: &str,
+    status: u16,
+    class: RuntimeProviderErrorClass,
+) {
+    runtime_proxy_log(
+        &context.shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_model_fallback",
+            [
+                runtime_proxy_log_field("request", context.request_id.to_string()),
+                runtime_proxy_log_field(
+                    "provider",
+                    runtime_provider_label(RuntimeProviderBridgeKind::DeepSeek),
+                ),
+                runtime_proxy_log_field("auth", api_key_label),
+                runtime_proxy_log_field("from_model", from_model),
+                runtime_proxy_log_field("to_model", to_model),
+                runtime_proxy_log_field("status", status.to_string()),
+                runtime_proxy_log_field("class", format!("{class:?}")),
+            ],
+        ),
+    );
+}
+
 fn runtime_deepseek_buffered_result(
     parts: RuntimeHeapTrimmedBufferedResponseParts,
 ) -> RuntimeLocalRewriteUpstreamResult {
@@ -465,18 +646,13 @@ fn runtime_deepseek_buffered_result(
 }
 
 fn runtime_deepseek_live_result(
-    response: reqwest::blocking::Response,
-    native_messages: bool,
+    response: RuntimeLocalRewriteLiveResponse,
     pending_request: RuntimeDeepSeekPendingRequest,
 ) -> RuntimeLocalRewriteUpstreamResult {
-    let live_response = if native_messages {
-        RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
-    } else {
-        RuntimeLocalRewriteLiveResponse::new(response)
-    }
-    .with_chat_compatible_request(pending_request);
     RuntimeLocalRewriteUpstreamResult {
-        response: RuntimeLocalRewriteUpstreamResponse::Live(live_response),
+        response: RuntimeLocalRewriteUpstreamResponse::Live(
+            response.with_chat_compatible_request(pending_request),
+        ),
         gemini_context: None,
         copilot_context: None,
     }

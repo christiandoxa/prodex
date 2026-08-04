@@ -1,6 +1,7 @@
 use prodex_domain::{
-    AuditAction, AuditDigest, AuditEvent, AuditEventId, AuditOutcome, AuditResource, PrincipalId,
-    TenantId, compute_audit_chain_digest,
+    AuditAction, AuditDigest, AuditEvent, AuditEventId, AuditOutcome, AuditReasonDetail,
+    AuditResource, PrincipalId, TenantId, compute_audit_chain_digest,
+    normalize_audit_reason_detail,
 };
 use uuid::Uuid;
 
@@ -26,7 +27,53 @@ fn fixed_event() -> AuditEvent {
         ),
         outcome: AuditOutcome::Success,
         reason_code: Some("mutation_committed".to_string()),
+        reason_detail: None,
     }
+}
+
+#[test]
+fn audit_reason_detail_is_unicode_safe_redacted_and_backward_compatible() {
+    let detail = normalize_audit_reason_detail(
+        "  incident réponse api_key = top-secret authorization: Bearer other-secret \u{0000} ",
+    )
+    .unwrap();
+    assert_eq!(
+        detail,
+        "incident réponse api_key=<redacted> authorization: Bearer <redacted>"
+    );
+    assert_eq!(
+        normalize_audit_reason_detail("authorization = Bearer arbitrary-secret").as_deref(),
+        Some("authorization=<redacted>")
+    );
+    assert_eq!(
+        normalize_audit_reason_detail("password top-secret").as_deref(),
+        Some("password <redacted>")
+    );
+    assert_eq!(
+        normalize_audit_reason_detail("authorization Bearer arbitrary-secret").as_deref(),
+        Some("authorization Bearer <redacted>")
+    );
+    let typed = AuditReasonDetail::new(detail.clone()).unwrap();
+    assert!(typed.len() <= AuditEvent::MAX_REASON_DETAIL_BYTES);
+    assert!(!format!("{typed:?}").contains("top-secret"));
+    assert!(AuditReasonDetail::new("x".repeat(512)).is_ok());
+    assert!(AuditReasonDetail::new("x".repeat(513)).is_err());
+    assert!(AuditReasonDetail::new("é".repeat(256)).is_ok());
+    assert!(AuditReasonDetail::new(format!("{}x", "é".repeat(256))).is_err());
+
+    let event = fixed_event().with_reason_detail(Some(typed));
+    assert!(!format!("{event:?}").contains("top-secret"));
+    let encoded = serde_json::to_value(&event).unwrap();
+    let round_tripped: AuditEvent = serde_json::from_value(encoded).unwrap();
+    assert_eq!(round_tripped.reason_detail, event.reason_detail);
+
+    let mut legacy = serde_json::to_value(fixed_event()).unwrap();
+    legacy
+        .as_object_mut()
+        .expect("audit event should encode as an object")
+        .remove("reason_detail");
+    let decoded: AuditEvent = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.reason_detail, None);
 }
 
 #[test]
@@ -78,6 +125,9 @@ fn audit_chain_digest_binds_previous_digest_and_every_event_field() {
     variants.push(event);
     let mut event = baseline_event;
     event.reason_code = None;
+    variants.push(event);
+    let mut event = fixed_event();
+    event.reason_detail = Some(AuditReasonDetail::new("break glass incident").unwrap());
     variants.push(event);
 
     for event in variants {

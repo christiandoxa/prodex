@@ -69,6 +69,36 @@ pub(super) fn runtime_inspection_error_outcome(error: &anyhow::Error) -> Inspect
     }
 }
 
+pub(super) fn runtime_inspection_failure_type(error: &anyhow::Error) -> &'static str {
+    if matches!(
+        runtime_inspection_error_outcome(error),
+        InspectionOutcome::Timeout
+    ) {
+        return "timeout";
+    }
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("concurrency_limit_reached") {
+        return "concurrency_exhaustion";
+    }
+    if message.contains("failed to parse presidio")
+        || message.contains("separator count")
+        || message.contains("finding count exceeded")
+    {
+        return "malformed_response";
+    }
+    if let Some(request_error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
+    {
+        return if request_error.status().is_some() {
+            "protocol_failure"
+        } else {
+            "unavailable"
+        };
+    }
+    "execution_failure"
+}
+
 pub(super) fn runtime_inspection_metric_message(metric: &InspectionMetricPlan) -> Result<String> {
     let labels = [
         &metric.stage_label,
@@ -183,6 +213,7 @@ pub(super) fn runtime_log_presidio_redaction_error(
     request_id: u64,
     transport: &'static str,
     fail_closed: bool,
+    failure_type: &'static str,
     shared: &RuntimeRotationProxyShared,
 ) {
     runtime_proxy_log(
@@ -194,6 +225,7 @@ pub(super) fn runtime_log_presidio_redaction_error(
                 runtime_proxy_log_field("transport", transport),
                 runtime_proxy_log_field("fail_mode", if fail_closed { "closed" } else { "open" }),
                 runtime_proxy_log_field("reason", "presidio_redaction_failed"),
+                runtime_proxy_log_field("failure_type", failure_type),
             ],
         ),
     );

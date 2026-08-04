@@ -6,6 +6,7 @@ use super::{
     SuperNativeCliLaunchStrategy, runtime_super_copilot_cli_env,
     runtime_super_gemini_cli_oauth_env, runtime_super_gemini_cli_system_settings_from,
     runtime_super_native_cli_launch_args, super_native_cli_dry_run_report,
+    validate_super_native_cli_preflight,
 };
 #[cfg(unix)]
 use crate::TestEnvVarGuard;
@@ -27,6 +28,12 @@ fn native_cli_super_args() -> SuperArgs {
         no_proxy: false,
         presidio: false,
         no_presidio: false,
+        sub_agent: false,
+        no_sub_agent: false,
+        sub_agent_provider: None,
+        sub_agent_model: None,
+        sub_agent_model_reasoning_effort: None,
+        sub_agent_url: None,
         tools: Vec::new(),
         required_tools: Vec::new(),
         url: None,
@@ -102,6 +109,228 @@ fn native_agy_defaults_to_dangerously_skip_permissions() {
 }
 
 #[test]
+#[cfg(unix)]
+fn native_agy_preflight_rejects_missing_capability() {
+    let missing = std::env::temp_dir().join(format!(
+        "prodex-missing-agy-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _agy = TestEnvVarGuard::set("PRODEX_AGY_BIN", missing.to_str().unwrap());
+    let mut args = native_cli_super_args();
+    args.cli = Some(SuperCliAgent::Agy);
+    args.provider = Some(SuperExternalProvider::Gemini);
+
+    let error = validate_super_native_cli_preflight(&args).unwrap_err();
+
+    assert!(error.to_string().contains("Antigravity CLI capability"));
+}
+
+#[test]
+fn native_sub_agent_is_rejected_during_preflight_before_native_probe() {
+    for (agent, provider) in [
+        (SuperCliAgent::Gemini, Some(SuperExternalProvider::Gemini)),
+        (SuperCliAgent::Copilot, Some(SuperExternalProvider::Copilot)),
+        (SuperCliAgent::Kiro, None),
+        (SuperCliAgent::Agy, Some(SuperExternalProvider::Gemini)),
+    ] {
+        let mut args = native_cli_super_args();
+        args.cli = Some(agent);
+        args.provider = provider;
+        args.sub_agent = true;
+
+        let error = validate_super_native_cli_preflight(&args).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("supported only on the Codex Super bridge"),
+            "{agent:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn native_agy_rejects_codex_tools_presidio_and_resume_options() {
+    let mut cases = Vec::new();
+
+    let mut feature = native_cli_super_args();
+    feature.codex_features.current_time_reminder = true;
+    cases.push((feature, "--current-time-reminder"));
+
+    let mut tool = native_cli_super_args();
+    tool.tools.push(prodex_optional_tools::OptionalToolId::Rtk);
+    cases.push((tool, "--tool"));
+
+    let mut required_tool = native_cli_super_args();
+    required_tool
+        .required_tools
+        .push(prodex_optional_tools::OptionalToolId::Ponytail);
+    cases.push((required_tool, "--require-tool"));
+
+    let mut presidio = native_cli_super_args();
+    presidio.presidio = true;
+    cases.push((presidio, "--presidio"));
+
+    let mut resume = native_cli_super_args();
+    resume.codex_args = vec![OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")];
+    cases.push((resume, "Codex session resume"));
+
+    for (mut args, option) in cases {
+        args.cli = Some(SuperCliAgent::Agy);
+        args.provider = Some(SuperExternalProvider::Gemini);
+        let error = validate_super_native_cli_preflight(&args).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains(option), "{message}");
+        assert!(message.contains("Antigravity (agy)"), "{message}");
+    }
+}
+
+#[test]
+fn native_agy_rejects_sub_agent_detail_extracted_after_positional() {
+    let mut args = native_cli_super_args();
+    args.cli = Some(SuperCliAgent::Agy);
+    args.provider = Some(SuperExternalProvider::Gemini);
+    args.codex_args = vec![
+        OsString::from("prompt"),
+        OsString::from("--sub-agent-model"),
+        OsString::from("custom-model"),
+    ];
+
+    let error = validate_super_native_cli_preflight(&args).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("--sub-agent-model"), "{message}");
+    assert!(message.contains("Antigravity (agy)"), "{message}");
+}
+
+#[test]
+fn native_frontends_reject_codex_features_and_presidio_tool_aliases() {
+    for (agent, provider) in [
+        (SuperCliAgent::Gemini, Some(SuperExternalProvider::Gemini)),
+        (SuperCliAgent::Copilot, Some(SuperExternalProvider::Copilot)),
+        (SuperCliAgent::Kiro, None),
+    ] {
+        let mut feature = native_cli_super_args();
+        feature.cli = Some(agent);
+        feature.provider = provider;
+        feature.codex_features.current_time_reminder = true;
+        let error = validate_super_native_cli_preflight(&feature).unwrap_err();
+        assert!(error.to_string().contains("--current-time-reminder"));
+
+        let mut tool = native_cli_super_args();
+        tool.cli = Some(agent);
+        tool.provider = provider;
+        tool.tools
+            .push(prodex_optional_tools::OptionalToolId::Presidio);
+        let error = validate_super_native_cli_preflight(&tool).unwrap_err();
+        assert!(error.to_string().contains("--tool presidio"));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn native_agy_capability_rejection_precedes_binary_probe_and_overlay_side_effects() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "prodex-agy-capability-preflight-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let binary = root.join("agy");
+    let marker = root.join("spawned.marker");
+    std::fs::write(
+        &binary,
+        "#!/bin/sh\nprintf spawned > \"$PRODEX_AGY_PREFLIGHT_MARKER\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _agy = TestEnvVarGuard::set("PRODEX_AGY_BIN", binary.to_str().unwrap());
+    let _marker = TestEnvVarGuard::set("PRODEX_AGY_PREFLIGHT_MARKER", marker.to_str().unwrap());
+
+    let mut args = native_cli_super_args();
+    args.cli = Some(SuperCliAgent::Agy);
+    args.provider = Some(SuperExternalProvider::Gemini);
+    args.required_tools
+        .push(prodex_optional_tools::OptionalToolId::Rtk);
+
+    let error = validate_super_native_cli_preflight(&args).unwrap_err();
+    assert!(error.to_string().contains("--require-tool"));
+    assert!(
+        !marker.exists(),
+        "unsupported options must fail before probing agy"
+    );
+    assert_eq!(
+        std::fs::read_dir(&root).unwrap().count(),
+        1,
+        "preflight must not create an overlay or install tools"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_tail_sub_agent_is_rejected_before_side_effects() {
+    let mut args = native_cli_super_args();
+    args.provider = Some(SuperExternalProvider::Gemini);
+    args.codex_args = vec![
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("--cli"),
+        OsString::from("gemini"),
+        OsString::from("--sub-agent"),
+    ];
+
+    let error = validate_super_native_cli_preflight(&args).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("supported only on the Codex Super bridge"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_tail_feature_rejection_names_option_and_selected_frontend() {
+    let mut args = native_cli_super_args();
+    args.provider = Some(SuperExternalProvider::Gemini);
+    args.codex_args = vec![
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("--cli=gemini"),
+        OsString::from("--web-search=live"),
+    ];
+
+    let error = validate_super_native_cli_preflight(&args).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("--web-search"), "{message}");
+    assert!(message.contains("Gemini"), "{message}");
+}
+
+#[test]
+fn native_unsupported_harness_and_api_key_name_selected_frontend() {
+    let mut harness = native_cli_super_args();
+    harness.cli = Some(SuperCliAgent::Gemini);
+    harness.provider = Some(SuperExternalProvider::Gemini);
+    harness.harness = Some(prodex_provider_core::HarnessMode::Minimal);
+    let error = validate_super_native_cli_preflight(&harness).unwrap_err();
+    assert!(error.to_string().contains("--harness"));
+    assert!(error.to_string().contains("Gemini"));
+
+    let mut api_key = native_cli_super_args();
+    api_key.cli = Some(SuperCliAgent::Kiro);
+    api_key.api_key = Some("test-key".to_string());
+    let error = validate_super_native_cli_preflight(&api_key).unwrap_err();
+    assert!(error.to_string().contains("--api-key"));
+    assert!(error.to_string().contains("Kiro"));
+}
+
+#[test]
 fn native_copilot_cli_forwards_model_without_google_flags() {
     assert_eq!(
         runtime_super_native_cli_launch_args(
@@ -127,13 +356,17 @@ fn native_cli_dry_run_is_redacted_and_does_not_resolve_credentials() {
     args.local_model = Some("gpt-test".to_string());
     args.codex_args = vec![OsString::from("--prompt"), OsString::from("review")];
 
-    let report = super_native_cli_dry_run_report(&args).unwrap();
+    let report = super_native_cli_dry_run_report(&args, None).unwrap();
 
     assert!(report.contains("Provider: copilot"));
     assert!(report.contains("Model: gpt-test"));
     assert!(report.contains("would use local provider bridge"));
     assert!(report.contains("--prompt"));
     assert!(!report.contains("secret-provider-key"));
+
+    args.local_model = Some("sk-proj-native-secret".to_string());
+    let report = super_native_cli_dry_run_report(&args, None).unwrap();
+    assert!(!report.contains("sk-proj-native-secret"));
 }
 
 #[test]
@@ -183,7 +416,7 @@ fn native_gemini_cli_dry_run_does_not_probe_optional_tools() {
         vec![OsString::from("review")],
     ] {
         args.codex_args = codex_args;
-        super_native_cli_dry_run_report(&args).unwrap();
+        super_native_cli_dry_run_report(&args, None).unwrap();
     }
 
     assert!(!marker.exists(), "dry-run must not execute optional tools");
@@ -407,6 +640,7 @@ fn native_kiro_cli_runtime_request_uses_only_transport_proxy_features() {
         args: native_cli_super_args(),
         presidio_enabled: true,
         agent: SuperCliAgent::Kiro,
+        sub_agent: None,
     };
     let request = strategy.runtime_request();
     assert_eq!(request.external_provider, Some("kiro"));
@@ -422,6 +656,7 @@ fn native_antigravity_cli_runtime_request_skips_proxy_features() {
         args: native_cli_super_args(),
         presidio_enabled: true,
         agent: SuperCliAgent::Agy,
+        sub_agent: None,
     };
     let request = strategy.runtime_request();
     assert_eq!(request.external_provider, Some("antigravity"));
@@ -441,6 +676,7 @@ fn native_copilot_cli_runtime_request_enables_provider_proxy() {
         args,
         presidio_enabled: true,
         agent: SuperCliAgent::Copilot,
+        sub_agent: None,
     };
 
     let request = strategy.runtime_request();
@@ -485,6 +721,7 @@ fn native_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
         args,
         presidio_enabled: false,
         agent: SuperCliAgent::Gemini,
+        sub_agent: None,
     };
     let paths = AppPaths {
         root: root.clone(),

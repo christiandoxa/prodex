@@ -27,7 +27,7 @@ pub(crate) fn load_runtime_profile_backoffs(
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<RuntimeProfileBackoffs> {
     let path = runtime_backoffs_file_path(paths);
-    if !path.exists() {
+    if !path.exists() && !runtime_backoffs_last_good_file_path(paths).exists() {
         return Ok(RuntimeProfileBackoffs::default());
     }
     let loaded = read_versioned_json_file_with_backup::<RuntimeProfileBackoffs>(

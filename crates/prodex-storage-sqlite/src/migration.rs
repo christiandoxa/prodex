@@ -234,8 +234,10 @@ pub const SQLITE_MIGRATIONS: &[SqliteMigration] = &[
     LOCAL_GOVERNANCE_ARTIFACT_AUTHENTICITY_MIGRATION,
     LOCAL_GOVERNANCE_REVOCATION_MIGRATION,
     LOCAL_SIEM_OUTBOX_LEASING_MIGRATION,
+    LOCAL_AUDIT_REASON_DETAIL_MIGRATION,
+    LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION,
 ];
-pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(13);
+pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(15);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqliteRuntimeMode {

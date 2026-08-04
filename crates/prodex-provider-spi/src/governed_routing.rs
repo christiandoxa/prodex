@@ -7,7 +7,7 @@ use prodex_domain::{
     CapabilitySet, DataClassification, GovernanceObligation, PolicyDecision, PolicyEffect,
     PolicyRevisionId, PolicySelector, ProviderTrustTier, SecretRef, TenantContext,
 };
-use prodex_provider_core::ProviderId;
+use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
 
 mod obligation_filters;
 use obligation_filters::append_provider_obligation_rejection_reasons;
@@ -18,6 +18,30 @@ pub const MAX_GOVERNED_ROUTING_FALLBACKS: usize = 8;
 pub const MAX_GOVERNED_PROVIDER_REGIONS: usize = 16;
 pub const MAX_GOVERNED_HARD_FILTER_REASONS: usize = 17;
 pub const GOVERNED_SCORE_COMPONENT_COUNT: usize = 7;
+
+pub fn runtime_provider_binding_identity_from_secret_ref(
+    provider: ProviderId,
+    credential: &SecretRef,
+    endpoint: &str,
+    profile: Option<&str>,
+) -> Option<RuntimeProviderBindingIdentity> {
+    credential.is_well_formed().then(|| {
+        RuntimeProviderBindingIdentity::from_public_credential_identity(
+            provider,
+            &format!(
+                "{}:{}|{}:{}|{}:{}",
+                credential.provider().len(),
+                credential.provider(),
+                credential.name().len(),
+                credential.name(),
+                credential.version().unwrap_or_default().len(),
+                credential.version().unwrap_or_default(),
+            ),
+            endpoint,
+            profile,
+        )
+    })?
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GovernedHardFilterReason {
@@ -341,6 +365,21 @@ pub struct GovernedRoute {
     pub score_breakdown: GovernedScoreBreakdown,
 }
 
+impl GovernedRoute {
+    pub fn runtime_provider_binding_identity(
+        &self,
+        public_endpoint: &str,
+        profile: Option<&str>,
+    ) -> Option<RuntimeProviderBindingIdentity> {
+        runtime_provider_binding_identity_from_secret_ref(
+            self.provider,
+            &self.credential_ref,
+            public_endpoint,
+            profile,
+        )
+    }
+}
+
 impl fmt::Debug for GovernedRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GovernedRoute")
@@ -478,15 +517,27 @@ pub fn plan_governed_provider_route(
         })
     });
 
+    if let Some(affinity_provider) = request.affinity_provider
+        && !routes
+            .iter()
+            .any(|route| route.provider == affinity_provider)
+    {
+        return Err(GovernedRoutingError::NoEligibleProvider);
+    }
+
     let primary = routes
         .first()
         .cloned()
         .ok_or(GovernedRoutingError::NoEligibleProvider)?;
-    let fallbacks = routes
-        .into_iter()
-        .skip(1)
-        .take(request.max_fallbacks)
-        .collect();
+    let fallbacks = if request.affinity_provider.is_some() {
+        Vec::new()
+    } else {
+        routes
+            .into_iter()
+            .skip(1)
+            .take(request.max_fallbacks)
+            .collect()
+    };
     Ok(GovernedRoutingPlan {
         tenant: request.tenant,
         registry_revision: request.registry.revision,

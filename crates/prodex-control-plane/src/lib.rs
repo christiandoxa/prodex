@@ -14,10 +14,11 @@ use prodex_config::{
     plan_config_publication_error_response, validate_config_publication,
 };
 use prodex_domain::{
-    AuditAction, AuditEvent, AuditOutcome, AuditResource, AuthorizationError, CredentialScope,
-    IdempotencyKey, IdempotentOperation, IdempotentOperationError, PolicyRevisionId, Principal,
-    PrincipalKind, ResourceAction, ResourceKind, Role, TenantAccessError, TenantContext, TenantId,
-    TenantScopedResource, authorize_min_role, authorize_tenant_access,
+    AuditAction, AuditEvent, AuditOutcome, AuditReasonDetail, AuditResource, AuthorizationError,
+    CredentialScope, IdempotencyKey, IdempotentOperation, IdempotentOperationError,
+    PolicyRevisionId, Principal, PrincipalKind, ResourceAction, ResourceKind, Role,
+    TenantAccessError, TenantContext, TenantId, TenantScopedResource, authorize_min_role,
+    authorize_tenant_access,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,10 +410,19 @@ impl ControlPlaneAuditWritePlan {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BreakGlassAuthorization {
     pub reason: String,
     pub expires_at_unix_ms: u64,
+}
+
+impl fmt::Debug for BreakGlassAuthorization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BreakGlassAuthorization")
+            .field("reason", &"<redacted>")
+            .field("expires_at_unix_ms", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -517,25 +527,40 @@ pub fn plan_control_plane_authorization_error_response(
 
 pub fn decide_control_plane_action(request: ControlPlaneActionRequest) -> ControlPlaneDecision {
     let result = authorize_control_plane_action(&request, CredentialScope::ControlPlane);
-    decision_from_result(request, result)
+    decision_from_result(request, result, None)
 }
 
 pub fn decide_break_glass_action(
     request: ControlPlaneActionRequest,
     authorization: BreakGlassAuthorization,
 ) -> ControlPlaneDecision {
-    let result = validate_break_glass(&request, &authorization)
-        .and_then(|()| authorize_control_plane_action(&request, CredentialScope::BreakGlass));
-    decision_from_result(request, result)
+    let (result, reason_detail) = match validate_break_glass(&request, &authorization) {
+        Ok(reason_detail) => (
+            authorize_control_plane_action(&request, CredentialScope::BreakGlass),
+            Some(reason_detail),
+        ),
+        Err(error) => (Err(error), None),
+    };
+    decision_from_result(request, result, reason_detail)
 }
 
 fn decision_from_result(
     request: ControlPlaneActionRequest,
     result: Result<(TenantContext, ControlPlaneRequirement), ControlPlaneAuthorizationError>,
+    reason_detail: Option<AuditReasonDetail>,
 ) -> ControlPlaneDecision {
     match result {
         Ok((tenant, requirement)) => {
-            let audit_event = audit_event(&request, tenant, AuditOutcome::Success, None);
+            let reason_code = reason_detail
+                .as_ref()
+                .map(|_| "break_glass_authorized".to_string());
+            let audit_event = audit_event_with_reason_detail(
+                &request,
+                tenant,
+                AuditOutcome::Success,
+                reason_code,
+                reason_detail,
+            );
             ControlPlaneDecision::Authorized(ControlPlaneActionPlan {
                 tenant,
                 operation: request.operation,
@@ -593,7 +618,7 @@ fn authorize_control_plane_action(
 fn validate_break_glass(
     request: &ControlPlaneActionRequest,
     authorization: &BreakGlassAuthorization,
-) -> Result<(), ControlPlaneAuthorizationError> {
+) -> Result<AuditReasonDetail, ControlPlaneAuthorizationError> {
     if request.principal.kind != PrincipalKind::BreakGlass {
         return Err(
             ControlPlaneAuthorizationError::BreakGlassPrincipalKindMismatch {
@@ -604,8 +629,7 @@ fn validate_break_glass(
     if authorization.reason.is_empty() {
         return Err(ControlPlaneAuthorizationError::BreakGlassReasonMissing);
     }
-    if authorization.reason.len() > 512
-        || authorization.reason.chars().all(char::is_whitespace)
+    if authorization.reason.chars().all(char::is_whitespace)
         || authorization.reason.chars().any(char::is_control)
     {
         return Err(ControlPlaneAuthorizationError::BreakGlassReasonMalformed);
@@ -616,7 +640,8 @@ fn validate_break_glass(
             expires_at_unix_ms: authorization.expires_at_unix_ms,
         });
     }
-    Ok(())
+    AuditReasonDetail::new(&authorization.reason)
+        .map_err(|_| ControlPlaneAuthorizationError::BreakGlassReasonMalformed)
 }
 
 fn audit_event(
@@ -624,6 +649,16 @@ fn audit_event(
     tenant: TenantContext,
     outcome: AuditOutcome,
     reason_code: Option<String>,
+) -> AuditEvent {
+    audit_event_with_reason_detail(request, tenant, outcome, reason_code, None)
+}
+
+fn audit_event_with_reason_detail(
+    request: &ControlPlaneActionRequest,
+    tenant: TenantContext,
+    outcome: AuditOutcome,
+    reason_code: Option<String>,
+    reason_detail: Option<AuditReasonDetail>,
 ) -> AuditEvent {
     AuditEvent::new(
         request.occurred_at_unix_ms,
@@ -634,6 +669,7 @@ fn audit_event(
         outcome,
         reason_code,
     )
+    .with_reason_detail(reason_detail)
 }
 
 impl ControlPlaneAuthorizationError {

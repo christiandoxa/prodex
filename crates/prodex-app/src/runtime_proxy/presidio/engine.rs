@@ -42,26 +42,51 @@ pub(super) enum InspectionExecutionOutcome {
     Failed(InspectionExecutionFailure),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RuntimePresidioFailClosedPolicy {
+    Open,
+    Closed,
+}
+
+impl RuntimePresidioFailClosedPolicy {
+    pub(super) const fn derive(
+        rollout: prodex_config::GovernanceRolloutMode,
+        governance_mode: prodex_config::GovernanceMode,
+        legacy_local_enabled: bool,
+        tenant_detector_enabled: bool,
+        explicit_fail_closed: Option<bool>,
+    ) -> Self {
+        if matches!(rollout, prodex_config::GovernanceRolloutMode::Enforce)
+            || governance_mode.is_enforcing()
+            || legacy_local_enabled
+            || tenant_detector_enabled
+            || matches!(explicit_fail_closed, Some(true))
+        {
+            Self::Closed
+        } else {
+            Self::Open
+        }
+    }
+
+    pub(super) const fn is_closed(self) -> bool {
+        matches!(self, Self::Closed)
+    }
+
+    pub(super) const fn denies_external_coverage(self, coverage: InspectionCoverage) -> bool {
+        self.is_closed() && !matches!(coverage, InspectionCoverage::Full)
+    }
+}
+
 pub(super) const fn runtime_local_inspection_required(
     rollout: prodex_config::GovernanceRolloutMode,
+    governance_mode: prodex_config::GovernanceMode,
     legacy_local_enabled: bool,
     configured_detector_enabled: bool,
 ) -> bool {
     !matches!(rollout, prodex_config::GovernanceRolloutMode::Off)
+        || governance_mode.is_enforcing()
         || legacy_local_enabled
         || configured_detector_enabled
-}
-
-pub(super) const fn runtime_local_inspection_fail_closed(
-    rollout: prodex_config::GovernanceRolloutMode,
-    legacy_local_enabled: bool,
-    tenant_detector_enabled: bool,
-    presidio_fail_closed: Option<bool>,
-) -> bool {
-    matches!(rollout, prodex_config::GovernanceRolloutMode::Enforce)
-        || legacy_local_enabled
-        || tenant_detector_enabled
-        || matches!(presidio_fail_closed, Some(true))
 }
 
 pub(super) async fn runtime_presidio_redact_body(

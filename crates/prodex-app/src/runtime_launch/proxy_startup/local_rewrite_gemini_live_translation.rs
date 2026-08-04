@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::{
     GEMINI_PROVIDER_CORE_LIVE_AUDIO_RATE as GEMINI_LIVE_AUDIO_RATE,
-    GeminiProviderCoreLiveAudioConfig as RuntimeGeminiLiveAudioConfig,
     GeminiProviderCoreLiveAudioFormat as RuntimeGeminiLiveAudioFormat,
     GeminiProviderCoreLiveAudioPayload as RuntimeGeminiLiveAudioPayload,
     gemini_provider_core_live_audio_rate_from_mime as runtime_gemini_live_audio_rate_from_mime,
@@ -28,7 +27,8 @@ use prodex_provider_core::{
     gemini_provider_core_live_response_created_event,
     gemini_provider_core_live_response_done_event, gemini_provider_core_live_server_turn_complete,
     gemini_provider_core_live_session_audio_config as runtime_gemini_live_session_audio_config,
-    gemini_provider_core_live_session_updated_event, gemini_provider_core_live_setup_message,
+    gemini_provider_core_live_session_update,
+    gemini_provider_core_live_session_updated_event_with_options,
     gemini_provider_core_live_tool_response_message, gemini_provider_core_live_transcript_delta,
     gemini_provider_core_live_transcription_text,
     gemini_provider_core_live_unsupported_event_error,
@@ -62,6 +62,7 @@ pub(super) struct RuntimeGeminiLiveState {
     output_text: String,
     tool_names_by_call_id: HashMap<String, String>,
     suppress_current_turn: bool,
+    pending_session_update: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl RuntimeGeminiLiveState {
@@ -85,6 +86,7 @@ impl RuntimeGeminiLiveState {
             output_text: String::new(),
             tool_names_by_call_id: HashMap::new(),
             suppress_current_turn: false,
+            pending_session_update: None,
         }
     }
 
@@ -108,35 +110,18 @@ impl RuntimeGeminiLiveState {
                     .get("session")
                     .and_then(serde_json::Value::as_object)
                     .context("Codex realtime session.update is missing session")?;
-                let input_audio = runtime_gemini_live_session_audio_config(session, "input")
-                    .or_else(|| {
-                        runtime_gemini_live_legacy_session_audio_config(
-                            session,
-                            "input_audio_format",
-                            "inputAudioFormat",
-                        )
-                    })
-                    .unwrap_or(RuntimeGeminiLiveAudioConfig {
-                        format: RuntimeGeminiLiveAudioFormat::Pcm16,
-                        rate: GEMINI_LIVE_AUDIO_RATE,
-                    });
-                self.input_audio_format = input_audio.format;
-                self.input_audio_rate = input_audio.rate;
-                if let Some(output_audio) =
-                    runtime_gemini_live_session_audio_config(session, "output").or_else(|| {
-                        runtime_gemini_live_legacy_session_audio_config(
-                            session,
-                            "output_audio_format",
-                            "outputAudioFormat",
-                        )
-                    })
-                {
-                    self.output_audio_rate = output_audio.rate;
+                if let Some(parameters) = session.get("tools") {
+                    runtime_gemini_live_validate_tools(parameters).map_err(anyhow::Error::msg)?;
                 }
-                upstream_messages.push(runtime_gemini_live_setup_message(
+                let update = gemini_provider_core_live_session_update(
                     session,
+                    GEMINI_LIVE_DEFAULT_MODEL,
                     self.configured_model.as_deref(),
-                ));
+                )
+                .map_err(anyhow::Error::msg)?;
+                let setup = update.setup.clone();
+                self.apply_session_update(session, update);
+                upstream_messages.push(setup);
                 wait_for_setup = true;
             }
             "input_audio_buffer.append" => {
@@ -221,7 +206,11 @@ impl RuntimeGeminiLiveState {
             gemini_provider_core_live_field(&value, "setupComplete", "setup_complete").is_some();
         let mut events = Vec::new();
         if setup_complete {
-            events.push(gemini_provider_core_live_session_updated_event());
+            events.push(
+                gemini_provider_core_live_session_updated_event_with_options(
+                    &self.pending_session_update.take().unwrap_or_default(),
+                ),
+            );
         }
         if let Some(error) = value.get("error") {
             events.push(gemini_provider_core_live_error_event(error));
@@ -460,6 +449,37 @@ impl RuntimeGeminiLiveState {
         )
         .map_err(anyhow::Error::msg)
     }
+
+    fn apply_session_update(
+        &mut self,
+        session: &serde_json::Map<String, serde_json::Value>,
+        update: prodex_provider_core::GeminiProviderCoreLiveSessionUpdate,
+    ) {
+        if let Some(input_audio) = runtime_gemini_live_session_audio_config(session, "input")
+            .or_else(|| {
+                runtime_gemini_live_legacy_session_audio_config(
+                    session,
+                    "input_audio_format",
+                    "inputAudioFormat",
+                )
+            })
+        {
+            self.input_audio_format = input_audio.format;
+            self.input_audio_rate = input_audio.rate;
+        }
+        if let Some(output_audio) = runtime_gemini_live_session_audio_config(session, "output")
+            .or_else(|| {
+                runtime_gemini_live_legacy_session_audio_config(
+                    session,
+                    "output_audio_format",
+                    "outputAudioFormat",
+                )
+            })
+        {
+            self.output_audio_rate = output_audio.rate;
+        }
+        self.pending_session_update = Some(update.applied_session);
+    }
 }
 
 fn runtime_gemini_live_response_id() -> String {
@@ -474,9 +494,27 @@ fn runtime_gemini_live_call_id() -> String {
     format!("call_gemini_live_{}", CallId::new())
 }
 
-fn runtime_gemini_live_setup_message(
-    session: &serde_json::Map<String, serde_json::Value>,
-    configured_model: Option<&str>,
-) -> serde_json::Value {
-    gemini_provider_core_live_setup_message(session, GEMINI_LIVE_DEFAULT_MODEL, configured_model)
+fn runtime_gemini_live_validate_tools(value: &serde_json::Value) -> Result<(), String> {
+    let Some(tools) = value.as_array() else {
+        return Err("Gemini Live session.update field `tools` must be an array".to_string());
+    };
+    for (index, tool) in tools.iter().enumerate() {
+        let Some(tool) = tool.as_object() else {
+            continue;
+        };
+        if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
+            continue;
+        }
+        let Some(parameters) = tool.get("parameters") else {
+            return Err(format!(
+                "Gemini Live session.update field `tools[{index}].parameters` is required"
+            ));
+        };
+        if !parameters.is_object() {
+            return Err(format!(
+                "Gemini Live session.update field `tools[{index}].parameters` must be an object"
+            ));
+        }
+    }
+    Ok(())
 }

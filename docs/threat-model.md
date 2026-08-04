@@ -12,6 +12,11 @@ responsibilities. Authorization, governance mutations, storage decisions, and
 runtime policy enforcement cross the typed boundary crates and retain
 characterization coverage.
 
+This document states required controls and test targets. It does not by itself
+prove that a deployment has immutable retention, break-glass evidence, backup
+or disaster-recovery coverage, approved RPO/RTO, or complete native-provider
+fidelity; deployment acceptance remains environment-specific.
+
 ## Assets
 
 - Tenant data and tenant-scoped configuration.

@@ -39,7 +39,7 @@ enum RuntimeHttpErrorSignal {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RuntimeQuotaMatchMode {
+enum RuntimeSignalMatchMode {
     ExplicitCode,
     UsageMessage,
 }
@@ -116,6 +116,18 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
     RuntimePayloadCodeRule {
+        code: "quota_exhausted",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
+        code: "quota_exceeded",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
+        code: "resource_exhausted",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
         code: "rate_limit_exceeded",
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
@@ -156,22 +168,22 @@ impl RuntimeHttpErrorRule {
                 body,
                 RuntimeHttpErrorSignal::ExplicitQuota,
                 if status == 429 {
-                    RuntimeQuotaMatchMode::ExplicitCode
+                    RuntimeSignalMatchMode::ExplicitCode
                 } else {
-                    RuntimeQuotaMatchMode::UsageMessage
+                    RuntimeSignalMatchMode::UsageMessage
                 },
             ),
             RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
                 runtime_error_signal_message_from_body(
                     body,
                     RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-                    RuntimeQuotaMatchMode::ExplicitCode,
+                    RuntimeSignalMatchMode::ExplicitCode,
                 )
             }
             RuntimeHttpErrorSignal::ExplicitOverload => runtime_error_signal_message_from_body(
                 body,
                 RuntimeHttpErrorSignal::ExplicitOverload,
-                RuntimeQuotaMatchMode::ExplicitCode,
+                RuntimeSignalMatchMode::ExplicitCode,
             ),
             RuntimeHttpErrorSignal::TransientStatus => {
                 Some(runtime_transient_http_error_message(status, body))
@@ -258,10 +270,7 @@ pub fn runtime_stream_error_policy(
         return runtime_stream_error_policy_from_value(&value, phase);
     }
 
-    let Some(text) = runtime_utf8_text(body) else {
-        return RuntimeHttpErrorPolicy::pass_through();
-    };
-    runtime_stream_error_policy_from_text(text, phase)
+    RuntimeHttpErrorPolicy::pass_through()
 }
 
 pub fn runtime_stream_error_policy_from_value(
@@ -269,20 +278,11 @@ pub fn runtime_stream_error_policy_from_value(
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
     for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
-        if let Some(message) = runtime_error_signal_message_from_value(value, class) {
-            return runtime_error_policy_match(class, action, rule, message, phase);
-        }
-    }
-
-    RuntimeHttpErrorPolicy::pass_through()
-}
-
-fn runtime_stream_error_policy_from_text(
-    text: &str,
-    phase: RuntimeHttpErrorPhase,
-) -> RuntimeHttpErrorPolicy {
-    for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
-        if let Some(message) = runtime_error_signal_message_from_text(text, class) {
+        if let Some(message) = runtime_error_signal_message_from_value_mode(
+            value,
+            class,
+            RuntimeSignalMatchMode::ExplicitCode,
+        ) {
             return runtime_error_policy_match(class, action, rule, message, phase);
         }
     }
@@ -312,26 +312,34 @@ pub fn runtime_error_signal_message_from_value(
     value: &serde_json::Value,
     signal: RuntimeHttpErrorClass,
 ) -> Option<String> {
+    runtime_error_signal_message_from_value_mode(
+        value,
+        signal,
+        RuntimeSignalMatchMode::UsageMessage,
+    )
+}
+
+fn runtime_error_signal_message_from_value_mode(
+    value: &serde_json::Value,
+    signal: RuntimeHttpErrorClass,
+    mode: RuntimeSignalMatchMode,
+) -> Option<String> {
     match signal {
         RuntimeHttpErrorClass::Quota => runtime_json_find(value, |candidate| {
-            runtime_error_signal_candidate(
-                candidate,
-                RuntimeHttpErrorSignal::ExplicitQuota,
-                RuntimeQuotaMatchMode::UsageMessage,
-            )
+            runtime_error_signal_candidate(candidate, RuntimeHttpErrorSignal::ExplicitQuota, mode)
         }),
         RuntimeHttpErrorClass::ProfileUnavailable => runtime_json_find(value, |candidate| {
             runtime_error_signal_candidate(
                 candidate,
                 RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-                RuntimeQuotaMatchMode::ExplicitCode,
+                mode,
             )
         }),
         RuntimeHttpErrorClass::Overload => runtime_json_find(value, |candidate| {
             runtime_error_signal_candidate(
                 candidate,
                 RuntimeHttpErrorSignal::ExplicitOverload,
-                RuntimeQuotaMatchMode::ExplicitCode,
+                mode,
             )
         }),
         RuntimeHttpErrorClass::TransientServer | RuntimeHttpErrorClass::Other => None,
@@ -397,22 +405,24 @@ pub fn runtime_overload_text_message(message: &str) -> bool {
 fn runtime_error_signal_message_from_body(
     body: &[u8],
     signal: RuntimeHttpErrorSignal,
-    quota_mode: RuntimeQuotaMatchMode,
+    match_mode: RuntimeSignalMatchMode,
 ) -> Option<String> {
     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
         return runtime_json_find(&value, |candidate| {
-            runtime_error_signal_candidate(candidate, signal, quota_mode)
+            runtime_error_signal_candidate(candidate, signal, match_mode)
         });
     }
 
+    if let Some(message) = runtime_error_signal_message_from_sse_body(body, signal, match_mode) {
+        return Some(message);
+    }
+
     runtime_utf8_text(body).and_then(|text| match signal {
-        RuntimeHttpErrorSignal::ExplicitQuota => match quota_mode {
-            RuntimeQuotaMatchMode::ExplicitCode => {
-                (runtime_text_has_payload_code(text, RuntimeHttpErrorSignal::ExplicitQuota)
-                    || runtime_workspace_credit_exhausted_text_message(text))
-                .then(|| text.to_string())
-            }
-            RuntimeQuotaMatchMode::UsageMessage => {
+        RuntimeHttpErrorSignal::ExplicitQuota => match match_mode {
+            // A generic 429 text body is not a structured provider signal,
+            // even when it happens to contain a known code-shaped phrase.
+            RuntimeSignalMatchMode::ExplicitCode => None,
+            RuntimeSignalMatchMode::UsageMessage => {
                 runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
             }
         },
@@ -426,10 +436,32 @@ fn runtime_error_signal_message_from_body(
     })
 }
 
+fn runtime_error_signal_message_from_sse_body(
+    body: &[u8],
+    signal: RuntimeHttpErrorSignal,
+    match_mode: RuntimeSignalMatchMode,
+) -> Option<String> {
+    let text = std::str::from_utf8(body).ok()?;
+    for line in text.lines() {
+        let Some(payload) = line.trim().strip_prefix("data:") else {
+            continue;
+        };
+        let Some(value) = serde_json::from_str::<serde_json::Value>(payload.trim()).ok() else {
+            continue;
+        };
+        if let Some(message) = runtime_json_find(&value, |candidate| {
+            runtime_error_signal_candidate(candidate, signal, match_mode)
+        }) {
+            return Some(message);
+        }
+    }
+    None
+}
+
 fn runtime_error_signal_candidate(
     value: &serde_json::Value,
     signal: RuntimeHttpErrorSignal,
-    quota_mode: RuntimeQuotaMatchMode,
+    match_mode: RuntimeSignalMatchMode,
 ) -> Option<String> {
     match value {
         serde_json::Value::String(_) => None,
@@ -439,25 +471,29 @@ fn runtime_error_signal_candidate(
                 .and_then(serde_json::Value::as_str)
                 .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
                 .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-            let explicit_code = ["code", "type", "status", "reason", "error"]
+            let explicit_code = ["code", "type", "status", "reason"]
                 .into_iter()
                 .filter_map(|key| map.get(key).and_then(serde_json::Value::as_str))
-                .any(|code| runtime_payload_code_matches(code, signal));
+                .any(|code| runtime_payload_code_matches(code, signal))
+                || (signal == RuntimeHttpErrorSignal::ExplicitQuota
+                    && match_mode == RuntimeSignalMatchMode::UsageMessage
+                    && map
+                        .get("error")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|code| runtime_payload_code_matches(code, signal)));
 
             match signal {
+                RuntimeHttpErrorSignal::ExplicitQuota if explicit_code => Some(
+                    message
+                        .unwrap_or("Upstream Codex account quota was exhausted.")
+                        .to_string(),
+                ),
                 RuntimeHttpErrorSignal::ExplicitQuota
-                    if explicit_code
-                        || message.is_some_and(runtime_workspace_credit_exhausted_text_message) =>
-                {
-                    Some(
-                        message
-                            .unwrap_or("Upstream Codex account quota was exhausted.")
-                            .to_string(),
-                    )
-                }
-                RuntimeHttpErrorSignal::ExplicitQuota
-                    if quota_mode == RuntimeQuotaMatchMode::UsageMessage
-                        && message.is_some_and(runtime_usage_limit_text_message) =>
+                    if match_mode == RuntimeSignalMatchMode::UsageMessage
+                        && message.is_some_and(|message| {
+                            runtime_workspace_credit_exhausted_text_message(message)
+                                || runtime_usage_limit_text_message(message)
+                        }) =>
                 {
                     Some(
                         message
@@ -475,9 +511,14 @@ fn runtime_error_signal_candidate(
                         .unwrap_or("Upstream Codex backend is currently overloaded.")
                         .to_string(),
                 ),
-                RuntimeHttpErrorSignal::ExplicitOverload => message
-                    .filter(|message| runtime_overload_text_message(message))
-                    .map(str::to_string),
+                RuntimeHttpErrorSignal::ExplicitOverload
+                    if match_mode == RuntimeSignalMatchMode::UsageMessage =>
+                {
+                    message
+                        .filter(|message| runtime_overload_text_message(message))
+                        .map(str::to_string)
+                }
+                RuntimeHttpErrorSignal::ExplicitOverload => None,
                 RuntimeHttpErrorSignal::ExplicitQuota
                 | RuntimeHttpErrorSignal::ExplicitProfileUnavailable
                 | RuntimeHttpErrorSignal::TransientStatus => None,

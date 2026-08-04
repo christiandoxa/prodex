@@ -102,7 +102,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
 }
 
 #[test]
-fn previous_response_owner_profile_changes_still_persist() {
+fn previous_response_owner_conflict_fails_closed() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -190,13 +190,13 @@ fn previous_response_owner_profile_changes_still_persist() {
 
     let updated_log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(
-        updated_log.contains("binding previous_response_owner profile=second response_id=resp-2"),
-        "owner changes should still be logged and persisted: {updated_log}"
+        !updated_log.contains("binding previous_response_owner profile=second response_id=resp-2"),
+        "conflicting exact owner must not be logged as a replacement: {updated_log}"
     );
     assert_eq!(
         shared.state_save_revision.load(Ordering::SeqCst),
         initial_revision + 1,
-        "owner changes should queue a fresh persistence update: {updated_log}"
+        "the conflict marker should queue a fresh persistence update: {updated_log}"
     );
 
     let runtime = shared
@@ -209,7 +209,14 @@ fn previous_response_owner_profile_changes_still_persist() {
             .response_profile_bindings
             .get("resp-2")
             .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+        Some(prodex_state::HARD_BINDING_CONFLICT_PROFILE)
+    );
+    assert!(
+        runtime
+            .state
+            .response_profile_bindings
+            .get("resp-2")
+            .is_some_and(|binding| binding.binding_identity.is_none())
     );
 }
 

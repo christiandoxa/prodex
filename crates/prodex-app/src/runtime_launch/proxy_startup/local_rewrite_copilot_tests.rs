@@ -6,8 +6,70 @@ use super::super::copilot_instructions::{
 use super::super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
 };
+use super::super::local_rewrite::RuntimeLocalRewriteProviderOptions;
+use super::state::{RuntimeCopilotOAuthPoolState, RuntimeCopilotSelectedAuth};
 use super::*;
+use prodex_state::ResponseProfileBinding;
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
+
+fn copilot_runtime_shared() -> crate::RuntimeRotationProxyShared {
+    let root = std::env::temp_dir().join(format!("prodex-copilot-runtime-{}", std::process::id()));
+    let paths = crate::AppPaths {
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: root.join("shared-codex"),
+        legacy_shared_codex_root: root.join("shared"),
+        root,
+    };
+    crate::RuntimeRotationProxyShared {
+        smart_context_engine: Arc::new(crate::RuntimeSmartContextEngine::default()),
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
+        upstream_no_proxy: false,
+        auto_redeem_enabled: false,
+        compact_client: reqwest::Client::new(),
+        async_client: reqwest::Client::new(),
+        async_runtime: Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        ),
+        runtime: Arc::new(Mutex::new(crate::RuntimeRotationState {
+            paths,
+            state: crate::AppState::default(),
+            upstream_base_url: "https://api.example.test/v1".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: crate::RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+        log_path: std::env::temp_dir()
+            .join(format!("prodex-copilot-runtime-{}.log", std::process::id())),
+        request_sequence: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        state_save_revision: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        active_request_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        active_request_limit: 8,
+        runtime_state_lock_wait_counters:
+            crate::RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
+        lane_admission: crate::RuntimeProxyLaneAdmission::new(crate::RuntimeProxyLaneLimits {
+            responses: 8,
+            compact: 8,
+            websocket: 8,
+            standard: 8,
+        }),
+    }
+}
 
 fn copilot_profile(profile_name: &str) -> RuntimeCopilotProfileAuth {
     RuntimeCopilotProfileAuth {
@@ -19,6 +81,7 @@ fn copilot_profile(profile_name: &str) -> RuntimeCopilotProfileAuth {
 }
 
 fn copilot_pool(profile_names: &[&str]) -> RuntimeCopilotOAuthPool {
+    let shared = copilot_runtime_shared();
     RuntimeCopilotOAuthPool {
         state: Arc::new(Mutex::new(RuntimeCopilotOAuthPoolState {
             profiles: profile_names
@@ -26,13 +89,44 @@ fn copilot_pool(profile_names: &[&str]) -> RuntimeCopilotOAuthPool {
                 .map(|profile_name| copilot_profile(profile_name))
                 .collect(),
             next_index: 0,
-            response_profile_bindings: BTreeMap::new(),
         })),
+        runtime: Arc::clone(&shared.runtime),
     }
+}
+
+fn copilot_pool_with_shared(
+    profile_names: &[&str],
+) -> (crate::RuntimeRotationProxyShared, RuntimeCopilotOAuthPool) {
+    let shared = copilot_runtime_shared();
+    let pool = RuntimeCopilotOAuthPool {
+        state: Arc::new(Mutex::new(RuntimeCopilotOAuthPoolState {
+            profiles: profile_names
+                .iter()
+                .map(|profile_name| copilot_profile(profile_name))
+                .collect(),
+            next_index: 0,
+        })),
+        runtime: Arc::clone(&shared.runtime),
+    };
+    (shared, pool)
 }
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
+}
+
+fn selected_auth(
+    profile_name: &str,
+    api_key: &str,
+    api_url: Option<&str>,
+) -> RuntimeCopilotSelectedAuth {
+    RuntimeCopilotSelectedAuth {
+        profile_name: profile_name.to_string(),
+        api_key: api_key.to_string(),
+        api_url: api_url.map(str::to_string),
+        hard_affinity: false,
+        projected: false,
+    }
 }
 
 #[test]
@@ -61,26 +155,16 @@ fn copilot_profile_pool_debug_output_redacts_sensitive_fields() {
         assert!(!rendered.contains(raw), "{rendered}");
     }
 
-    let mut response_profile_bindings = BTreeMap::new();
-    response_profile_bindings.insert(
-        "response-secret".to_string(),
-        "copilot-profile-secret".to_string(),
-    );
     let state = RuntimeCopilotOAuthPoolState {
         profiles: vec![profile],
         next_index: 7,
-        response_profile_bindings,
     };
     let rendered = format!("{state:?}");
 
     assert!(rendered.contains("RuntimeCopilotOAuthPoolState"));
     assert!(rendered.contains("<redacted>"));
-    assert!(rendered.matches("<redacted:1>").count() >= 2);
-    for raw in [
-        "copilot-profile-secret",
-        "copilot-api-key-secret",
-        "response-secret",
-    ] {
+    assert!(rendered.matches("<redacted:1>").count() >= 1);
+    for raw in ["copilot-profile-secret", "copilot-api-key-secret"] {
         assert!(!rendered.contains(raw), "{rendered}");
     }
 }
@@ -307,11 +391,21 @@ fn copilot_oauth_pool_rotates_fresh_requests() {
 
 #[test]
 fn copilot_oauth_pool_preserves_previous_response_affinity() {
-    let pool = copilot_pool(&["alpha", "beta"]);
-    pool.state
+    let (shared, pool) = copilot_pool_with_shared(&["alpha", "beta"]);
+    shared
+        .runtime
         .lock()
         .unwrap()
-        .remember_response_binding("beta", "resp_1");
+        .state
+        .response_profile_bindings
+        .insert(
+            "resp_1".to_string(),
+            ResponseProfileBinding {
+                profile_name: "beta".to_string(),
+                bound_at: 1,
+                binding_identity: None,
+            },
+        );
     let body = serde_json::to_vec(&serde_json::json!({"previous_response_id": "resp_1"})).unwrap();
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
@@ -323,6 +417,258 @@ fn copilot_oauth_pool_preserves_previous_response_affinity() {
         Some("https://api.beta.githubcopilot.test")
     );
     assert!(attempts[0].hard_affinity);
+}
+
+#[test]
+fn copilot_oauth_affinity_uses_fallback_profile_credentials_exactly() {
+    let (shared, pool) = copilot_pool_with_shared(&[]);
+    let fallback_profiles = vec![copilot_profile("alpha"), copilot_profile("beta")];
+    shared
+        .runtime
+        .lock()
+        .unwrap()
+        .state
+        .response_profile_bindings
+        .insert(
+            "resp_fallback".to_string(),
+            ResponseProfileBinding {
+                profile_name: "beta".to_string(),
+                bound_at: 1,
+                binding_identity: None,
+            },
+        );
+    let body = serde_json::to_vec(&serde_json::json!({
+        "previous_response_id": "resp_fallback"
+    }))
+    .unwrap();
+
+    let attempts = pool.select_attempts(&body, &fallback_profiles).unwrap();
+
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].profile_name, "beta");
+    assert_eq!(attempts[0].api_key, "token-beta");
+    assert_eq!(
+        attempts[0].api_url.as_deref(),
+        Some("https://api.beta.githubcopilot.test")
+    );
+    assert!(attempts[0].hard_affinity);
+}
+
+#[test]
+fn copilot_raw_api_keys_use_bounded_rotating_order() {
+    let provider = RuntimeLocalRewriteProviderOptions::Copilot {
+        auth: RuntimeCopilotProviderAuth::ApiKeys {
+            api_keys: vec!["key-a".to_string(), "key-b".to_string()],
+        },
+    };
+    let (_shared, pool) = copilot_pool_with_shared(&["api-key-1", "api-key-2"]);
+    let pool =
+        runtime_copilot_oauth_pool_from_provider(&provider, Arc::clone(&pool.runtime)).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({"input": "hi"})).unwrap();
+
+    let first = pool
+        .select_attempts_with_identity(&body, &[], None, None, "https://api.example.test")
+        .unwrap();
+    let second = pool
+        .select_attempts_with_identity(&body, &[], None, None, "https://api.example.test")
+        .unwrap();
+
+    assert_eq!(
+        first
+            .iter()
+            .map(|attempt| (attempt.profile_name.as_str(), attempt.api_key.as_str()))
+            .collect::<Vec<_>>(),
+        [("api-key-1", "key-a"), ("api-key-2", "key-b")]
+    );
+    assert_eq!(second[0].profile_name, "api-key-2");
+    assert_eq!(second[1].profile_name, "api-key-1");
+    assert!(first.iter().all(|attempt| !attempt.hard_affinity));
+}
+
+#[test]
+fn copilot_fresh_candidate_does_not_create_a_binding_before_acceptance() {
+    let provider = RuntimeLocalRewriteProviderOptions::Copilot {
+        auth: RuntimeCopilotProviderAuth::ApiKeys {
+            api_keys: vec!["key-a".to_string(), "key-b".to_string()],
+        },
+    };
+    let shared = copilot_runtime_shared();
+    let pool =
+        runtime_copilot_oauth_pool_from_provider(&provider, Arc::clone(&shared.runtime)).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({"input": "hi"})).unwrap();
+
+    let attempts = pool
+        .select_attempts_with_identity(
+            &body,
+            &[],
+            Some("turn-pending"),
+            Some("session-pending"),
+            "https://api.example.test",
+        )
+        .unwrap();
+
+    assert_eq!(attempts.len(), 2);
+    let state = shared.runtime.lock().unwrap();
+    assert!(state.state.response_profile_bindings.is_empty());
+    assert!(state.turn_state_bindings.is_empty());
+    assert!(state.session_id_bindings.is_empty());
+}
+
+#[test]
+fn copilot_accepted_identity_pins_raw_key_and_public_endpoint() {
+    let provider = RuntimeLocalRewriteProviderOptions::Copilot {
+        auth: RuntimeCopilotProviderAuth::ApiKeys {
+            api_keys: vec!["key-a".to_string(), "key-b".to_string()],
+        },
+    };
+    let shared = copilot_runtime_shared();
+    let pool =
+        runtime_copilot_oauth_pool_from_provider(&provider, Arc::clone(&shared.runtime)).unwrap();
+    let recorder = runtime_copilot_binding_recorder(
+        &pool,
+        &shared,
+        selected_auth("api-key-2", "key-b", None),
+        "https://user:secret@api.example.test/v1?token=secret".to_string(),
+        Some("turn-1".to_string()),
+        Some("session-1".to_string()),
+    );
+    recorder("resp-1".to_string());
+    let state = shared.runtime.lock().unwrap();
+    let binding = state.state.response_profile_bindings.get("resp-1").unwrap();
+    let expected = prodex_provider_core::RuntimeProviderBindingIdentity::from_raw_key(
+        prodex_provider_core::ProviderId::Copilot,
+        "key-b",
+        "https://api.example.test/v1",
+        Some("api-key-2"),
+    )
+    .unwrap();
+    assert_eq!(binding.binding_identity.as_ref(), Some(&expected));
+    let encoded = serde_json::to_string(binding).unwrap();
+    assert!(!encoded.contains("api.example.test"));
+    assert!(!encoded.contains("key-b"));
+    drop(state);
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "previous_response_id": "resp-1"
+    }))
+    .unwrap();
+    let attempts = pool
+        .select_attempts_with_identity(
+            &body,
+            &[],
+            Some("turn-1"),
+            Some("session-1"),
+            "https://api.example.test/v1",
+        )
+        .unwrap();
+
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].profile_name, "api-key-2");
+    assert_eq!(attempts[0].api_key, "key-b");
+    assert_eq!(attempts[0].api_url, None);
+    assert!(attempts[0].hard_affinity);
+}
+
+#[test]
+fn copilot_conflicting_identity_keys_fail_closed_before_selection() {
+    let (shared, pool) = copilot_pool_with_shared(&["alpha", "beta"]);
+    pool.remember_accepted_identity(
+        &shared,
+        &selected_auth(
+            "alpha",
+            "token-alpha",
+            Some("https://api.alpha.githubcopilot.test"),
+        ),
+        "https://api.alpha.githubcopilot.test",
+        Some("resp-conflict"),
+        Some("turn-conflict"),
+        None,
+    );
+    pool.remember_accepted_identity(
+        &shared,
+        &selected_auth(
+            "beta",
+            "token-beta",
+            Some("https://api.beta.githubcopilot.test"),
+        ),
+        "https://api.beta.githubcopilot.test",
+        None,
+        Some("turn-conflict"),
+        None,
+    );
+    let body = serde_json::to_vec(&serde_json::json!({
+        "previous_response_id": "resp-conflict"
+    }))
+    .unwrap();
+
+    let error = pool
+        .select_attempts_with_identity(
+            &body,
+            &[],
+            Some("turn-conflict"),
+            None,
+            "https://fallback.example.test",
+        )
+        .err()
+        .expect("conflicting Copilot identity should fail closed");
+    let rendered = error.to_string();
+
+    assert!(rendered.contains("conflicting"));
+    for raw in [
+        "resp-conflict",
+        "turn-conflict",
+        "api.alpha.githubcopilot.test",
+        "api.beta.githubcopilot.test",
+    ] {
+        assert!(!rendered.contains(raw), "{rendered}");
+    }
+}
+
+#[test]
+fn copilot_bound_endpoint_mismatch_fails_closed() {
+    let (shared, pool) = copilot_pool_with_shared(&["alpha"]);
+    pool.remember_accepted_identity(
+        &shared,
+        &selected_auth("alpha", "token-alpha", None),
+        "https://api.other.example.test/v1?credential=secret",
+        Some("resp-endpoint"),
+        None,
+        None,
+    );
+    let body = serde_json::to_vec(&serde_json::json!({
+        "previous_response_id": "resp-endpoint"
+    }))
+    .unwrap();
+
+    assert!(pool
+        .select_attempts_with_identity(
+            &body,
+            &[],
+            None,
+            None,
+            "https://fallback.example.test",
+        )
+        .is_err());
+}
+
+#[test]
+fn copilot_generic_429_is_not_precommit_retryable() {
+    assert!(!runtime_copilot_provider_retry_precommit(
+        ProviderRetryCause::RotateCredential,
+        RuntimeProviderErrorClass::RateLimit,
+        429,
+        b"too many requests",
+        0,
+        2,
+    ));
+    assert!(runtime_copilot_provider_retry_precommit(
+        ProviderRetryCause::RotateCredential,
+        RuntimeProviderErrorClass::RateLimit,
+        429,
+        br#"{"error":{"code":"rate_limit_exceeded"}}"#,
+        0,
+        2,
+    ));
 }
 
 #[test]

@@ -50,6 +50,7 @@ fn bind_session(harness: &RuntimeProxyProfileHarness, session_id: &str, profile_
         .insert(
             session_id.to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: profile_name.to_string(),
                 bound_at: Local::now().timestamp(),
             },

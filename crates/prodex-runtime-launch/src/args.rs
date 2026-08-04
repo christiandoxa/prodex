@@ -192,7 +192,7 @@ fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
     None
 }
 
-pub(crate) fn is_codex_exec_invocation(codex_args: &[OsString]) -> bool {
+pub fn is_codex_exec_invocation(codex_args: &[OsString]) -> bool {
     first_codex_positional_arg_index(codex_args)
         .and_then(|index| codex_args.get(index))
         .and_then(|arg| arg.to_str())

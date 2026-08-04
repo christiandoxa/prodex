@@ -30,6 +30,7 @@ fn previous_response_affinity_test_shared(
         response_profile_bindings: BTreeMap::from([(
             response_id.to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },

@@ -23,6 +23,7 @@ fn runtime_continuations_load_legacy_last_good_backup_when_primary_is_invalid() 
         response_profile_bindings: BTreeMap::from([(
             "resp-legacy".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -76,6 +77,7 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
         response_profile_bindings: BTreeMap::from([(
             "resp-old".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp() - 10,
             },
@@ -96,6 +98,7 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
         response_profile_bindings: BTreeMap::from([(
             "resp-new".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
             },
@@ -113,6 +116,7 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
         response_profile_bindings: BTreeMap::from([(
             "resp-stale".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp() - 20,
             },
@@ -180,6 +184,7 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
         response_profile_bindings: BTreeMap::from([(
             "resp-initial".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },
@@ -193,6 +198,7 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
         response_profile_bindings: BTreeMap::from([(
             "resp-external".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
             },
@@ -213,6 +219,7 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
         response_profile_bindings: BTreeMap::from([(
             "resp-local".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -287,6 +294,7 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
         response_profile_bindings: BTreeMap::from([(
             "resp-stale".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },
@@ -317,6 +325,7 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
         response_profile_bindings: BTreeMap::from([(
             "resp-stale".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
             },
@@ -393,6 +402,7 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
         response_profile_bindings: BTreeMap::from([(
             "resp-initial".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },
@@ -408,7 +418,8 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
             response_profile_bindings: BTreeMap::from([(
                 "resp-external".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "main".to_string(),
+                    binding_identity: None,
+                profile_name: "main".to_string(),
                     bound_at: now - 10,
                 },
             )]),
@@ -426,6 +437,7 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
         response_profile_bindings: BTreeMap::from([(
             "resp-local".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -479,6 +491,7 @@ fn runtime_continuation_journal_save_for_profiles_preserves_bindings_without_sta
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now,
             },
@@ -535,6 +548,7 @@ fn runtime_continuation_journal_retry_does_not_resurrect_released_response_bindi
         response_profile_bindings: BTreeMap::from([(
             "resp-stale".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 30,
             },
@@ -568,6 +582,7 @@ fn runtime_continuation_journal_retry_does_not_resurrect_released_response_bindi
         response_profile_bindings: BTreeMap::from([(
             "resp-stale".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
             },

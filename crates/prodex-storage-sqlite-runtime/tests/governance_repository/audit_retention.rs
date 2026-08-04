@@ -35,6 +35,35 @@ fn retention_purge_can_replace_the_entire_chain_with_an_anchor() {
 }
 
 #[test]
+fn audit_export_preserves_reason_detail() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    let admin = principal(tenant_id);
+    let mut audit = AuditCursor::default();
+    let mut command = audit.next(
+        tenant_id,
+        &admin,
+        "control_plane.provider_credential.rotate",
+    );
+    command.audit.event.reason_detail = Some(
+        prodex_domain::AuditReasonDetail::new("incident\u{2003}response api_key=fixture-secret")
+            .unwrap(),
+    );
+    command.audit.event_digest = prodex_domain::compute_audit_chain_digest(
+        command.audit.previous_digest.as_ref(),
+        &command.audit.event,
+    );
+    repository.append_audit_outbox(command).unwrap();
+
+    let records = repository.governance_export_audit(tenant_id, 10).unwrap();
+    assert_eq!(
+        records[0].reason_detail.as_deref(),
+        Some("incident response api_key=<redacted>")
+    );
+}
+
+#[test]
 fn legal_hold_persists_and_blocks_retention_purge_atomically() {
     let tenant_id = TenantId::new();
     let database = TestDatabase::new(&[tenant_id]);

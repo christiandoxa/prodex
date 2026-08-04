@@ -16,8 +16,8 @@ pub(crate) trait RuntimeLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan>;
-    fn child_exit_requested(&mut self) -> bool {
-        false
+    fn child_exit_requested(&mut self) -> Result<bool> {
+        Ok(false)
     }
     fn monitors_child_exit(&self) -> bool {
         false
@@ -119,7 +119,7 @@ pub(crate) fn runtime_launch_uses_kiro_connect_proxy(request: &RuntimeLaunchRequ
 
 fn run_runtime_launch_execution(
     execution: RuntimeLaunchExecution,
-    child_exit_requested: Option<&mut dyn FnMut() -> bool>,
+    child_exit_requested: Option<&mut dyn FnMut() -> Result<bool>>,
 ) -> Result<RuntimeLaunchCompleted> {
     let RuntimeLaunchExecution {
         plan,
@@ -226,7 +226,7 @@ mod tests {
             },
             Some(&mut || {
                 polls += 1;
-                polls >= 3
+                Ok(polls >= 3)
             }),
         )
         .expect("monitored child should stop");

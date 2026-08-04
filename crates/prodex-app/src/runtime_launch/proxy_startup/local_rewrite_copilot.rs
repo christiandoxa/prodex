@@ -30,9 +30,10 @@ use super::local_rewrite_transport_copilot::{
     runtime_copilot_request_body_with_canonical_model,
     runtime_copilot_request_body_without_encrypted_content,
 };
+use super::local_rewrite_upstream::runtime_local_rewrite_retryable_429_body;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_model_fallback_chain,
-    runtime_provider_request_body_with_model,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_label,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Result, bail};
@@ -49,8 +50,6 @@ struct RuntimeCopilotModelRequestContext<'a> {
     selected: &'a RuntimeCopilotSelectedAuth,
 }
 #[cfg(test)]
-use std::collections::BTreeMap;
-#[cfg(test)]
 use std::sync::{Arc, Mutex};
 
 #[path = "local_rewrite_copilot/auth.rs"]
@@ -58,14 +57,14 @@ mod auth;
 #[path = "local_rewrite_copilot/state.rs"]
 mod state;
 use self::auth::{
-    runtime_copilot_auth_attempts, runtime_copilot_binding_recorder,
-    runtime_copilot_upstream_base_url,
+    runtime_copilot_auth_attempts_for_request, runtime_copilot_binding_recorder,
+    runtime_copilot_public_endpoint, runtime_copilot_upstream_base_url,
 };
+use self::state::RuntimeCopilotSelectedAuth;
 pub(super) use self::state::{
     RuntimeCopilotOAuthPool, RuntimeCopilotRequestContext,
     runtime_copilot_model_catalog_from_provider, runtime_copilot_oauth_pool_from_provider,
 };
-use self::state::{RuntimeCopilotOAuthPoolState, RuntimeCopilotSelectedAuth};
 pub(crate) use self::state::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 
 pub(super) fn send_runtime_copilot_upstream_request(
@@ -92,7 +91,7 @@ pub(super) fn send_runtime_copilot_upstream_request(
         RuntimeProviderBridgeKind::Copilot,
         &model_selection.model,
     );
-    let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
+    let attempts = runtime_copilot_auth_attempts_for_request(auth, shared, &body, request)?;
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
         let upstream_url = runtime_local_rewrite_upstream_url(
@@ -118,7 +117,9 @@ pub(super) fn send_runtime_copilot_upstream_request(
                             RuntimeLocalRewriteLiveResponse::new(response),
                         ),
                         gemini_context: None,
-                        copilot_context: None,
+                        copilot_context: Some(runtime_copilot_request_context(
+                            shared, request, &selected, &body,
+                        )),
                     });
                 }
                 RuntimeLocalRewritePreparedSendResult::Error {
@@ -128,9 +129,11 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 } => (status, parts, class),
             };
             if model_index + 1 < model_chain.len()
-                && runtime_gateway_application_provider_retry_precommit(
+                && runtime_copilot_provider_retry_precommit(
                     ProviderRetryCause::NextModel,
                     class,
+                    status,
+                    &parts.body,
                     model_index,
                     model_chain.len(),
                 )
@@ -159,9 +162,11 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 continue;
             }
             if !selected.hard_affinity
-                && runtime_gateway_application_provider_retry_precommit(
+                && runtime_copilot_provider_retry_precommit(
                     ProviderRetryCause::RotateCredential,
                     class,
+                    status,
+                    &parts.body,
                     attempt_index,
                     attempt_count,
                 )
@@ -197,7 +202,7 @@ fn send_runtime_copilot_responses_request(
     body: Vec<u8>,
     auth: &RuntimeCopilotProviderAuth,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
+    let attempts = runtime_copilot_auth_attempts_for_request(auth, shared, &body, request)?;
     let attempt_count = attempts.len();
     let model_selection = runtime_local_rewrite_model_selection(
         shared,
@@ -236,8 +241,7 @@ fn send_runtime_copilot_responses_request(
                         ),
                         gemini_context: None,
                         copilot_context: Some(runtime_copilot_request_context(
-                            shared,
-                            selected.profile_name.clone(),
+                            shared, request, &selected, &body,
                         )),
                     });
                 }
@@ -248,9 +252,11 @@ fn send_runtime_copilot_responses_request(
                 } => (status, parts, class),
             };
             if model_index + 1 < model_chain.len()
-                && runtime_gateway_application_provider_retry_precommit(
+                && runtime_copilot_provider_retry_precommit(
                     ProviderRetryCause::NextModel,
                     class,
+                    status,
+                    &parts.body,
                     model_index,
                     model_chain.len(),
                 )
@@ -279,9 +285,11 @@ fn send_runtime_copilot_responses_request(
                 continue;
             }
             if !selected.hard_affinity
-                && runtime_gateway_application_provider_retry_precommit(
+                && runtime_copilot_provider_retry_precommit(
                     ProviderRetryCause::RotateCredential,
                     class,
+                    status,
+                    &parts.body,
                     attempt_index,
                     attempt_count,
                 )
@@ -308,6 +316,23 @@ fn send_runtime_copilot_responses_request(
         }
     }
     bail!("no Copilot model attempts were available")
+}
+
+fn runtime_copilot_provider_retry_precommit(
+    cause: ProviderRetryCause,
+    class: RuntimeProviderErrorClass,
+    status: u16,
+    body: &[u8],
+    attempt_index: usize,
+    candidate_count: usize,
+) -> bool {
+    (status != 429 || runtime_local_rewrite_retryable_429_body(body))
+        && runtime_gateway_application_provider_retry_precommit(
+            cause,
+            class,
+            attempt_index,
+            candidate_count,
+        )
 }
 
 fn send_runtime_copilot_model_request(
@@ -373,15 +398,41 @@ fn runtime_copilot_responses_chat_request_body(
 
 fn runtime_copilot_request_context(
     shared: &RuntimeLocalRewriteProxyShared,
-    profile_name: String,
+    request: &RuntimeProxyRequest,
+    selected: &RuntimeCopilotSelectedAuth,
+    body: &[u8],
 ) -> RuntimeCopilotRequestContext {
-    let binding_recorder = shared
-        .copilot_oauth_pool
-        .as_ref()
-        .map(|pool| runtime_copilot_binding_recorder(pool, profile_name.clone()));
+    let profile_name = selected.profile_name.clone();
+    let turn_state = runtime_proxy_crate::runtime_request_turn_state(request);
+    let session_id = runtime_proxy_crate::runtime_request_session_id(request);
+    let response_id =
+        super::local_rewrite_copilot::auth::runtime_copilot_previous_response_id(body);
+    let endpoint = runtime_copilot_public_endpoint(shared, selected);
+    let binding_recorder = shared.copilot_oauth_pool.as_ref().map(|pool| {
+        runtime_copilot_binding_recorder(
+            pool,
+            &shared.runtime_shared,
+            selected.clone(),
+            endpoint.clone(),
+            turn_state.clone(),
+            session_id.clone(),
+        )
+    });
+    let binding_acceptance = shared.copilot_oauth_pool.as_ref().map(|pool| {
+        super::local_rewrite_copilot::auth::runtime_copilot_binding_acceptance(
+            pool,
+            &shared.runtime_shared,
+            selected.clone(),
+            endpoint.clone(),
+            response_id,
+            turn_state.clone(),
+            session_id.clone(),
+        )
+    });
     RuntimeCopilotRequestContext {
         profile_name,
         binding_recorder,
+        binding_acceptance,
     }
 }
 

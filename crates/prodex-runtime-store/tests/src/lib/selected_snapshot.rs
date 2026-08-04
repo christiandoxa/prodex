@@ -21,6 +21,7 @@ fn save_merge_plans_state_and_continuation_sidecar_together() {
     };
     let lineage_key = format!("{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}4:resp:turn");
     let session_binding = ResponseProfileBinding {
+        binding_identity: None,
         profile_name: "alpha".to_string(),
         bound_at: 20,
     };
@@ -29,6 +30,7 @@ fn save_merge_plans_state_and_continuation_sidecar_together() {
             (
                 "resp".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "alpha".to_string(),
                     bound_at: 20,
                 },
@@ -36,6 +38,7 @@ fn save_merge_plans_state_and_continuation_sidecar_together() {
             (
                 lineage_key.clone(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "alpha".to_string(),
                     bound_at: 21,
                 },
@@ -91,6 +94,7 @@ fn selected_snapshot_helper_keeps_only_requested_sections() {
         response_profile_bindings: BTreeMap::from([(
             "resp".to_string(),
             ResponseProfileBinding {
+                binding_identity: None,
                 profile_name: "alpha".to_string(),
                 bound_at: 10,
             },
@@ -200,6 +204,7 @@ fn selected_snapshot_merge_combines_state_and_continuations() {
             response_profile_bindings: BTreeMap::from([(
                 "resp".to_string(),
                 ResponseProfileBinding {
+                    binding_identity: None,
                     profile_name: "alpha".to_string(),
                     bound_at: 20,
                 },

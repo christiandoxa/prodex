@@ -658,7 +658,7 @@ impl GovernanceSqliteRepository {
             .prepare(
                 "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
                         resource_kind, resource_id, outcome, reason_code,
-                        previous_digest, event_digest
+                        reason_detail, previous_digest, event_digest
                  FROM prodex_audit_log WHERE tenant_id = ?1",
             )
             .map_err(database_error)?;
@@ -699,7 +699,7 @@ impl GovernanceSqliteRepository {
             .prepare(
                 "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
                         resource_kind, resource_id, outcome, reason_code,
-                        previous_digest, event_digest
+                        reason_detail, previous_digest, event_digest
                  FROM prodex_audit_log WHERE tenant_id = ?1
                  ORDER BY occurred_at_unix_ms DESC, audit_event_id DESC LIMIT ?2",
             )
@@ -746,7 +746,26 @@ fn governance_audit_export_record(
         resource_id: row.get(5)?,
         outcome: row.get(6)?,
         reason_code: row.get(7)?,
-        previous_digest: row.get(8)?,
-        event_digest: row.get(9)?,
+        reason_detail: row.get(8)?,
+        previous_digest: row.get(9)?,
+        event_digest: row.get(10)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_enables_foreign_keys() {
+        let repository = GovernanceSqliteRepository::from_connection(
+            Connection::open_in_memory().expect("in-memory SQLite connection"),
+        )
+        .expect("SQLite repository configuration");
+        let connection = repository.connection().expect("SQLite connection lock");
+        let enabled: i64 = connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys pragma");
+        assert_eq!(enabled, 1);
+    }
 }
