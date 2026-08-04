@@ -479,13 +479,7 @@ fn runtime_gateway_discover_governance_tenants(
             .governance_list_tenant_ids(
                 (crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS + 1) as u16,
             ),
-        RuntimeGovernanceAuthority::Postgres {
-            repository,
-            runtime,
-            ..
-        } => runtime.block_on(repository.governance_list_tenant_ids(
-            (crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS + 1) as u16,
-        )),
+        RuntimeGovernanceAuthority::Postgres { .. } => authority.tenant_ids(),
     }?;
     authority.merge_tenant_ids(discovered)?;
     authority.tenant_ids()

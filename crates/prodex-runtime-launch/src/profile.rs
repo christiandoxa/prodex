@@ -117,10 +117,3 @@ pub fn dry_run_prodex_overlay_home_placeholder(
             .unwrap_or("profile")
     ))
 }
-
-pub fn dry_run_caveman_home_placeholder(
-    managed_profiles_root: &Path,
-    base_codex_home: &Path,
-) -> PathBuf {
-    dry_run_prodex_overlay_home_placeholder(managed_profiles_root, base_codex_home)
-}

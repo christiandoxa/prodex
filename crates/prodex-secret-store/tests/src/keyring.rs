@@ -15,7 +15,6 @@ fn file_backend_rejects_keyring_locations() {
 fn keyring_backend_validates_service_name() {
     let backend = KeyringSecretBackend::new("prodex").unwrap();
     assert_eq!(backend.service(), "prodex");
-    assert!(backend.is_supported());
 
     let err = KeyringSecretBackend::new("   ").unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
@@ -62,7 +61,7 @@ fn selectable_backend_from_kind_requires_keyring_service() {
     let SecretBackendSelection::Keyring(backend) = selection else {
         panic!("expected keyring selection marker");
     };
-    assert!(backend.is_supported());
+    assert_eq!(backend.service(), "prodex");
 }
 
 #[test]

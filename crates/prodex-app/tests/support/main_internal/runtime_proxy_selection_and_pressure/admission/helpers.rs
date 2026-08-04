@@ -196,6 +196,7 @@ pub(super) fn runtime_usage_snapshot(
     let now = Local::now().timestamp();
     RuntimeProfileUsageSnapshot {
         checked_at: now,
+        plan_type: None,
         five_hour_status: five_hour.status,
         five_hour_remaining_percent: five_hour.remaining_percent,
         five_hour_reset_at: now + five_hour.reset_offset_seconds,

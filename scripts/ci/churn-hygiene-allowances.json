@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-production-security-ci-feature-0.382.0",
+    "requiredSubjects": [
+      "fix: close audited production gaps"
+    ],
+    "caps": {
+      "maxFiles": 82,
+      "maxBehaviorFiles": 76,
+      "maxLines": 3193,
+      "maxFileLines": 335
+    },
+    "reason": "Reviewed the whole-repository 0.382.0 audit covering WebSocket transport transparency, browser and storage security boundaries, forced PostgreSQL tenant isolation, bounded Presidio ownership, quota persistence and terminal layout, cleanup reporting, provider compatibility, and disjoint parallel CI test ownership; verified with focused regressions, the locked full workspace suite, strict Clippy, live Redis proof, an optimized locked build, repository guards, Gitleaks, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-reliability-context-ci-feature-0.381.0",
     "requiredSubjects": [
       "fix: close audited reliability gaps",

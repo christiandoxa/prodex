@@ -17,6 +17,11 @@ const MAX_EPHEMERAL_VALUE_BYTES: usize = 64 * 1_024;
 const MAX_EPHEMERAL_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_EPHEMERAL_SET_MEMBERS: usize = 4_096;
 const MAX_EPHEMERAL_MEMBER_BYTES: usize = 128;
+const MAX_EPHEMERAL_SET_STORAGE_BYTES: usize = 1_024 * 1_024;
+const EPHEMERAL_LIMIT_ERROR: &str = "PRODEX_EPHEMERAL_LIMIT";
+const GET_EPHEMERAL_SCRIPT: &str = "if redis.call('STRLEN', KEYS[1]) > tonumber(ARGV[1]) then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end; return redis.call('GET', KEYS[1])";
+const TAKE_EPHEMERAL_SCRIPT: &str = "if redis.call('STRLEN', KEYS[1]) > tonumber(ARGV[1]) then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end; local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]); end; return value";
+const TAKE_EPHEMERAL_MEMBERS_SCRIPT: &str = "local max_members = tonumber(ARGV[1]); local max_member_bytes = tonumber(ARGV[2]); local max_total_bytes = tonumber(ARGV[3]); local max_storage_bytes = tonumber(ARGV[4]); if redis.call('SCARD', KEYS[1]) > max_members then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end; local stored_bytes = redis.call('MEMORY', 'USAGE', KEYS[1], 'SAMPLES', 0); if stored_bytes and stored_bytes > max_storage_bytes then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end; local values = redis.call('SMEMBERS', KEYS[1]); local total_bytes = 0; for _, member in ipairs(values) do local member_bytes = string.len(member); if member_bytes == 0 or member_bytes > max_member_bytes or not string.match(member, '^[A-Za-z0-9_-]+$') then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end; total_bytes = total_bytes + member_bytes; if total_bytes > max_total_bytes then return redis.error_reply('PRODEX_EPHEMERAL_LIMIT') end end; redis.call('DEL', KEYS[1]); return values";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RedisRuntimeConfig {
@@ -204,23 +209,27 @@ impl RedisRateLimitExecutor {
     pub async fn get_ephemeral(&self, key: &str) -> Result<Option<String>, RedisRuntimeError> {
         validate_ephemeral_key(key)?;
         let mut connection = self.connection.clone();
-        redis::cmd("GET")
+        redis::cmd("EVAL")
+            .arg(GET_EPHEMERAL_SCRIPT)
+            .arg(1)
             .arg(key)
+            .arg(MAX_EPHEMERAL_VALUE_BYTES)
             .query_async(&mut connection)
             .await
-            .map_err(|_| RedisRuntimeError::Command)
+            .map_err(map_ephemeral_read_error)
     }
 
     pub async fn take_ephemeral(&self, key: &str) -> Result<Option<String>, RedisRuntimeError> {
         validate_ephemeral_key(key)?;
         let mut connection = self.connection.clone();
         redis::cmd("EVAL")
-            .arg("local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]); end; return value")
+            .arg(TAKE_EPHEMERAL_SCRIPT)
             .arg(1)
             .arg(key)
+            .arg(MAX_EPHEMERAL_VALUE_BYTES)
             .query_async(&mut connection)
             .await
-            .map_err(|_| RedisRuntimeError::Command)
+            .map_err(map_ephemeral_read_error)
     }
 
     pub async fn delete_ephemeral(&self, key: &str) -> Result<(), RedisRuntimeError> {
@@ -281,13 +290,16 @@ impl RedisRateLimitExecutor {
         validate_ephemeral_key(key)?;
         let mut connection = self.connection.clone();
         let members: Vec<String> = redis::cmd("EVAL")
-            .arg("if redis.call('SCARD', KEYS[1]) > tonumber(ARGV[1]) then return redis.error_reply('ephemeral set limit exceeded') end; local values = redis.call('SMEMBERS', KEYS[1]); redis.call('DEL', KEYS[1]); return values")
+            .arg(TAKE_EPHEMERAL_MEMBERS_SCRIPT)
             .arg(1)
             .arg(key)
             .arg(MAX_EPHEMERAL_SET_MEMBERS)
+            .arg(MAX_EPHEMERAL_MEMBER_BYTES)
+            .arg(MAX_EPHEMERAL_VALUE_BYTES)
+            .arg(MAX_EPHEMERAL_SET_STORAGE_BYTES)
             .query_async(&mut connection)
             .await
-            .map_err(|_| RedisRuntimeError::Command)?;
+            .map_err(map_ephemeral_read_error)?;
         if members.len() > MAX_EPHEMERAL_SET_MEMBERS
             || members
                 .iter()
@@ -359,6 +371,18 @@ fn validate_ephemeral_entry(
         return Err(RedisRuntimeError::Configuration);
     }
     i64::try_from(ttl.as_millis()).map_err(|_| RedisRuntimeError::NumericOverflow)
+}
+
+fn map_ephemeral_read_error(error: redis::RedisError) -> RedisRuntimeError {
+    if error.code() == Some(EPHEMERAL_LIMIT_ERROR)
+        || error
+            .detail()
+            .is_some_and(|detail| detail.contains(EPHEMERAL_LIMIT_ERROR))
+    {
+        RedisRuntimeError::InvalidResponse
+    } else {
+        RedisRuntimeError::Command
+    }
 }
 
 fn validate_ephemeral_key(key: &str) -> Result<(), RedisRuntimeError> {
@@ -507,6 +531,53 @@ mod tests {
                 Err(RedisRuntimeError::Configuration)
             );
         }
+    }
+
+    #[test]
+    fn ephemeral_reads_guard_external_values_before_return_or_delete() {
+        assert!(
+            GET_EPHEMERAL_SCRIPT.find("STRLEN").unwrap()
+                < GET_EPHEMERAL_SCRIPT.find("GET").unwrap()
+        );
+        assert!(
+            TAKE_EPHEMERAL_SCRIPT.find("STRLEN").unwrap()
+                < TAKE_EPHEMERAL_SCRIPT.find("GET").unwrap()
+        );
+        assert!(
+            TAKE_EPHEMERAL_SCRIPT.find("GET").unwrap() < TAKE_EPHEMERAL_SCRIPT.find("DEL").unwrap()
+        );
+        assert!(GET_EPHEMERAL_SCRIPT.contains("ARGV[1]"));
+        assert_eq!(
+            map_ephemeral_read_error(redis::make_extension_error(
+                "ERR".to_string(),
+                Some(EPHEMERAL_LIMIT_ERROR.to_string()),
+            )),
+            RedisRuntimeError::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn ephemeral_member_take_preflights_limits_before_smembers_or_delete() {
+        let memory = TAKE_EPHEMERAL_MEMBERS_SCRIPT.find("MEMORY").unwrap();
+        let smembers = TAKE_EPHEMERAL_MEMBERS_SCRIPT.find("SMEMBERS").unwrap();
+        let delete = TAKE_EPHEMERAL_MEMBERS_SCRIPT.find("DEL").unwrap();
+
+        assert!(memory < smembers);
+        assert!(smembers < delete);
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("'SAMPLES', 0"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("string.len(member)"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("string.match(member"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("total_bytes"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("ARGV[2]"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("ARGV[3]"));
+        assert!(TAKE_EPHEMERAL_MEMBERS_SCRIPT.contains("ARGV[4]"));
+        assert_eq!(
+            map_ephemeral_read_error(redis::make_extension_error(
+                EPHEMERAL_LIMIT_ERROR.to_string(),
+                None,
+            )),
+            RedisRuntimeError::InvalidResponse
+        );
     }
 
     #[test]

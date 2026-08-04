@@ -91,6 +91,14 @@ pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
             summary.dead_runtime_broker_registries_removed.to_string(),
         ),
         (
+            "Scan failures".to_string(),
+            summary.scan_failures.to_string(),
+        ),
+        (
+            "Delete failures".to_string(),
+            summary.delete_failures.to_string(),
+        ),
+        (
             "Total removed".to_string(),
             summary.total_removed().to_string(),
         ),

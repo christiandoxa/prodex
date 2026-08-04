@@ -281,8 +281,16 @@ The target directory must not already exist. Prodex validates the commit metadat
 Presidio English services:
 
 ```bash
-docker run -d --name presidio-analyzer -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
-docker run -d --name presidio-anonymizer -p 5001:3000 ghcr.io/data-privacy-stack/presidio-anonymizer:latest
+docker run -d --name presidio-analyzer \
+  --label com.prodex.presidio.managed=true \
+  --label com.prodex.presidio.service=presidio-analyzer \
+  -p 127.0.0.1:5002:3000 \
+  ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885
+docker run -d --name presidio-anonymizer \
+  --label com.prodex.presidio.managed=true \
+  --label com.prodex.presidio.service=presidio-anonymizer \
+  -p 127.0.0.1:5001:3000 \
+  ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1
 prodex presidio enable --language-mode fixed --languages en
 prodex presidio doctor --json
 ```
@@ -501,7 +509,7 @@ prodex status
 
 `prodex status` opens a btop-inspired live terminal dashboard combining the active/runtime profile, 5-hour and weekly quota/reset/runway, historical token usage and cache efficiency, and aggregate Prodex process CPU, resident memory, disk I/O, and network socket queues. Press `r` to refresh immediately and `q` or `Esc` to exit. `prodex status --once` emits one snapshot for scripts. Resource counters use Linux `/proc`; non-Linux systems show those fields as unavailable while quota and token panels continue working.
 
-The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider.
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider. The table compacts to the current terminal width while preserving status and remaining-quota visibility; its live height keeps the sorted top rows and reports how many profiles are hidden.
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
 
@@ -809,7 +817,13 @@ Enterprise modes additionally require private/on-prem endpoints or exact
 `trusted_hosts` entries. Redirects and environment proxy settings are ignored
 so inspected content cannot leave the approved endpoint boundary.
 
-The standard Microsoft Analyzer image is English-only. Indonesian detection requires an Analyzer with Indonesian models and recognizers. Presidio quality depends on that service configuration.
+With the default loopback URLs, Prodex auto-starts only the pinned, labeled
+containers shown above; set `PRODEX_PRESIDIO_AUTO_START=0` to disable this. It
+refuses to start an existing predictable-name container whose ownership label,
+image digest, or loopback port binding differs; recreate older `latest`-based
+containers explicitly.
+
+The standard Presidio Analyzer image is English-only. Indonesian detection requires an Analyzer with Indonesian models and recognizers. Presidio quality depends on that service configuration.
 
 </details>
 

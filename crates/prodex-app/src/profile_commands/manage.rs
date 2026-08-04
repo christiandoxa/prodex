@@ -67,9 +67,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         state.active_profile.is_some(),
         args.activate,
     );
-    let source_identity = source_home
-        .as_deref()
-        .and_then(|home| fetch_profile_identity(home).ok());
+    let source_identity = read_source_profile_identity(source_home.as_deref())?;
     let source_email = source_identity
         .as_ref()
         .and_then(|identity| identity.email.clone());
@@ -134,6 +132,12 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     prodex_profile_export::cleanup_profile_lifecycle_journal(&lifecycle_path);
 
     Ok(())
+}
+
+fn read_source_profile_identity(
+    source_home: Option<&Path>,
+) -> Result<Option<prodex_profile_identity::ProfileIdentity>> {
+    source_home.map(fetch_profile_identity).transpose()
 }
 
 fn update_duplicate_profile_if_needed(
@@ -654,6 +658,8 @@ fn profile_value_color(label: &str, value: &str) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn profile_tui_text_contains_panel_fields() {
@@ -713,5 +719,30 @@ mod tests {
         let footer = profile_scroll_footer(2, 8);
         assert!(footer.contains("j/k scroll"));
         assert!(footer.contains("line 3/9"));
+    }
+
+    #[test]
+    fn copy_source_identity_read_errors_are_propagated() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-manage-copy-source-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        fs::write(secret_store::auth_json_path(&root), "{").unwrap();
+
+        let error = read_source_profile_identity(Some(&root))
+            .expect_err("copying a source with unreadable identity must fail");
+
+        assert!(format!("{error:#}").contains("failed to read account identity"));
+        let _ = fs::remove_dir_all(root);
     }
 }

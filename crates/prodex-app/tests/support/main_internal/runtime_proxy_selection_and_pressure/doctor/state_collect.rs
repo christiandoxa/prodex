@@ -344,6 +344,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         "main".to_string(),
         RuntimeProfileUsageSnapshot {
             checked_at: Local::now().timestamp(),
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 50,
             five_hour_reset_at: 123,

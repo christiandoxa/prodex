@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  ciGithubMatrix,
   githubMatrix,
   PRODEX_APP_LIB_FILTERS,
   PRODEX_APP_LIB_SHARDS,
@@ -29,15 +30,37 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-affinity").filters.length, 6);
 
   const appMatrix = githubMatrix();
+  const ciMatrix = ciGithubMatrix();
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 13);
+  assert.equal(ciMatrix.include.length, 9);
   assert.equal(fullMatrix.include.length, 14);
   assert.equal(windowsMatrix.include.length, 8);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include[0].suite, "workspace");
+  const ciFilters = ciMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
+  assert.deepEqual(
+    new Set(ciFilters),
+    new Set(PRODEX_APP_LIB_FILTERS.filter((filter) => !filter.startsWith("main_internal_tests::"))),
+  );
+  assert.deepEqual(
+    ciMatrix.include.at(-1).skip_filters.split("\n"),
+    [
+      ...PRODEX_APP_LIB_FILTERS.filter((filter) => !filter.startsWith("main_internal_tests::")),
+      "main_internal_tests::",
+      "profile_commands_internal_tests::",
+    ],
+  );
+  for (const entry of ciMatrix.include) {
+    const skips = entry.skip_filters.split("\n");
+    assert.ok(skips.includes("main_internal_tests::"));
+    assert.ok(skips.includes("profile_commands_internal_tests::"));
+  }
+  const fullFilters = fullMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
+  assert.deepEqual(new Set(fullFilters), new Set(PRODEX_APP_LIB_FILTERS));
   const windowsFilters = windowsMatrix.include
     .flatMap((entry) => entry.filters.split("\n"))
     .filter(Boolean);
@@ -62,7 +85,7 @@ test("shard planner dry-run and matrix output are compile-free", () => {
 
   const matrixRun = runPlanner("--github-matrix");
   assert.equal(matrixRun.status, 0, matrixRun.stderr);
-  assert.deepEqual(JSON.parse(matrixRun.stdout), githubMatrix());
+  assert.deepEqual(JSON.parse(matrixRun.stdout), ciGithubMatrix());
 
   const windowsMatrixRun = runPlanner("--windows-github-matrix");
   assert.equal(windowsMatrixRun.status, 0, windowsMatrixRun.stderr);
@@ -92,6 +115,10 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(workflow, /--test-threads=1/);
   assert.match(workflow, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(workflow, /prodex-app shard matched no tests/);
+  assert.match(workflow, /"\$\{skip_args\[@\]\}"/);
+  assert.match(workflow, /^  profile-commands-internal:/m);
+  assert.match(workflow, /^  main-internal-core:/m);
+  assert.match(workflow, /^  main-internal-runtime-proxy:/m);
   assert.match(fullWorkflow, /full_test_shards:/);
   assert.match(fullWorkflow, /--full-test-matrix/);
   assert.match(fullWorkflow, /fromJSON\(needs\.full_test_shards\.outputs\.matrix\)/);

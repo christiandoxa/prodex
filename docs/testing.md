@@ -17,6 +17,10 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:full-test-shards` validates the shared app-library shard manifest;
   `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
   without compiling or running tests.
+- Push/PR CI runs nine generic `prodex-app` partitions. Dedicated parallel jobs
+  own every `main_internal_tests::` and `profile_commands_internal_tests::`
+  test, so the generic remainder excludes those namespaces instead of rerunning
+  them. Scheduled full-test and Windows matrices retain their canonical coverage.
 - The generated runtime-proxy matrix uses weighted packs and keeps the two
   admission process groups in separate packs; every runtime command remains
   internally serial with `--test-threads=1`.

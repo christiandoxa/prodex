@@ -37,7 +37,8 @@ const $ = (id) => document.getElementById(id);
 let editing = null;
 let editingUser = null;
 function token(){return $("token").value.trim() || sessionStorage.getItem("prodex_gateway_admin_token") || ""}
-function headers(extra={}){const h={...extra};const t=token();if(t)h.authorization=`Bearer ${t}`;return h}
+function cookie(name){return document.cookie.split(";").map(v=>v.trim().split("=")).find(([key])=>key===name)?.[1]||""}
+function headers(extra={}){const h={...extra};const t=token();if(t)h.authorization=`Bearer ${t}`;const csrf=cookie("prodex_gateway_csrf");if(csrf)h["x-csrf-token"]=csrf;return h}
 async function api(path, options={}){const r=await fetch(base+path,{...options,headers:headers(options.headers||{})});const text=await r.text();const body=text && (r.headers.get("content-type")||"").includes("json") ? JSON.parse(text) : text;if(!r.ok)throw new Error((body.error&&body.error.message)||text||r.statusText);return body}
 function money(v){return v==null ? "-" : "$"+Number(v).toFixed(6)}
 function int(v){return v==null ? "-" : String(v)}

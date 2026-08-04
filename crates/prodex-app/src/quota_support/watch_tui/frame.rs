@@ -50,6 +50,7 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                 layout.detail,
                 layout.max_lines,
                 layout.scroll_offset,
+                layout.total_width,
             );
             let start_profile = layout.scroll_offset.min(filtered_reports.len());
             let scroll_range = quota_watch_scroll_range(&RenderedQuotaReportWindow {
@@ -252,7 +253,7 @@ fn render_all_quota_watch_tui_table(
     area: ratatui::layout::Rect,
     table: &AllQuotaWatchTuiTable,
 ) {
-    let text = quota_watch_table_text(table);
+    let text = quota_watch_table_text_with_width(table, area.width.into());
     let widget = Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(widget, area);
 }
@@ -263,19 +264,22 @@ pub(crate) fn quota_watch_overview_height(field_count: usize, max_height: u16) -
         .min(max_height)
 }
 
+#[cfg(test)]
 pub(crate) fn quota_watch_table_text(table: &AllQuotaWatchTuiTable) -> Text<'static> {
-    let mut lines = vec![Line::styled(
-        format!(
-            "{:<24} {:<3} {:<7} {:<24} {:<8} {:<15} {}",
-            "PROFILE", "CUR", "AUTH", "ACCOUNT", "PLAN", "STATUS", "REMAINING"
-        ),
-        quota_watch_title_style(),
-    )];
+    quota_watch_table_text_with_width(table, 120)
+}
+
+pub(crate) fn quota_watch_table_text_with_width(
+    table: &AllQuotaWatchTuiTable,
+    total_width: usize,
+) -> Text<'static> {
+    let columns = quota_watch_table_columns(total_width);
+    let mut lines = vec![quota_watch_table_header_line(columns)];
     for (index, row) in table.rows.iter().enumerate() {
         if index > 0 {
             lines.push(Line::raw(""));
         }
-        lines.push(quota_watch_table_main_line(row));
+        lines.push(quota_watch_table_main_line(row, columns));
         for detail in &row.detail {
             lines.push(Line::styled(detail.clone(), quota_watch_detail_style()));
         }
@@ -283,23 +287,95 @@ pub(crate) fn quota_watch_table_text(table: &AllQuotaWatchTuiTable) -> Text<'sta
     Text::from(lines)
 }
 
-fn quota_watch_table_main_line(row: &AllQuotaWatchTuiRow) -> Line<'static> {
+#[derive(Clone, Copy)]
+struct QuotaWatchColumns {
+    profile: usize,
+    current: usize,
+    auth: usize,
+    account: usize,
+    plan: usize,
+    status: usize,
+    remaining: usize,
+}
+
+fn quota_watch_table_columns(total_width: usize) -> QuotaWatchColumns {
+    let available = total_width.saturating_sub(6);
+    let mut widths = if total_width >= 96 {
+        [24, 3, 7, 24, 8, 15]
+    } else {
+        [16, 3, 6, 16, 6, 11]
+    };
+    let remaining_floor = if total_width >= 64 {
+        18
+    } else if total_width >= 40 {
+        12
+    } else {
+        8
+    }
+    .min(available.saturating_sub(widths.len()).max(1));
+    let fixed_available = available.saturating_sub(remaining_floor);
+    while widths.iter().sum::<usize>() > fixed_available {
+        let Some(index) = (0..widths.len()).max_by_key(|&index| widths[index]) else {
+            break;
+        };
+        if widths[index] == 1 {
+            break;
+        }
+        widths[index] -= 1;
+    }
+    QuotaWatchColumns {
+        profile: widths[0],
+        current: widths[1],
+        auth: widths[2],
+        account: widths[3],
+        plan: widths[4],
+        status: widths[5],
+        remaining: available.saturating_sub(widths.iter().sum()).max(1),
+    }
+}
+
+fn quota_watch_table_header_line(columns: QuotaWatchColumns) -> Line<'static> {
+    Line::styled(
+        format!(
+            "{} {} {} {} {} {} {}",
+            quota_watch_table_cell_text("PROFILE", columns.profile),
+            quota_watch_table_cell_text("CUR", columns.current),
+            quota_watch_table_cell_text("AUTH", columns.auth),
+            quota_watch_table_cell_text("ACCOUNT", columns.account),
+            quota_watch_table_cell_text("PLAN", columns.plan),
+            quota_watch_table_cell_text("STATUS", columns.status),
+            quota_watch_table_cell_text("REMAINING", columns.remaining),
+        ),
+        quota_watch_title_style(),
+    )
+}
+
+fn quota_watch_table_main_line(
+    row: &AllQuotaWatchTuiRow,
+    columns: QuotaWatchColumns,
+) -> Line<'static> {
     let status = quota_watch_first_cell(&row.status);
     let cell = quota_watch_table_cell_text;
     Line::from(vec![
-        Span::raw(cell(quota_watch_first_cell(&row.profile), 24)),
+        Span::raw(cell(quota_watch_first_cell(&row.profile), columns.profile)),
         Span::raw(" "),
-        Span::raw(cell(quota_watch_first_cell(&row.current), 3)),
+        Span::raw(cell(quota_watch_first_cell(&row.current), columns.current)),
         Span::raw(" "),
-        Span::raw(cell(quota_watch_first_cell(&row.auth), 7)),
+        Span::raw(cell(quota_watch_first_cell(&row.auth), columns.auth)),
         Span::raw(" "),
-        Span::raw(cell(quota_watch_first_cell(&row.account), 24)),
+        Span::raw(cell(quota_watch_first_cell(&row.account), columns.account)),
         Span::raw(" "),
-        Span::raw(cell(quota_watch_first_cell(&row.plan), 8)),
+        Span::raw(cell(quota_watch_first_cell(&row.plan), columns.plan)),
         Span::raw(" "),
-        Span::styled(cell(status, 15), quota_watch_status_style(status)),
+        Span::styled(
+            cell(status, columns.status),
+            quota_watch_status_style(status),
+        ),
         Span::raw(" "),
-        Span::raw(quota_watch_first_cell(&row.remaining).to_string()),
+        Span::raw(cell(
+            quota_watch_first_cell(&row.remaining),
+            columns.remaining,
+        )),
     ])
 }
 
@@ -480,6 +556,7 @@ fn quota_watch_visible_profile_count(
     detail: bool,
     max_lines: Option<usize>,
     start_profile: usize,
+    total_width: usize,
 ) -> usize {
     let Some(max_lines) = max_lines else {
         return sorted_indexes.len().saturating_sub(start_profile);
@@ -488,7 +565,7 @@ fn quota_watch_visible_profile_count(
     let mut remaining = max_lines.saturating_sub(1);
     for index in sorted_indexes.iter().copied().skip(start_profile) {
         let row_lines = usize::from(shown_profiles > 0)
-            + quota_watch_tui_row_line_count(&reports[index], detail);
+            + quota_watch_tui_row_line_count(&reports[index], detail, total_width);
         if row_lines > remaining {
             break;
         }
@@ -498,19 +575,41 @@ fn quota_watch_visible_profile_count(
     shown_profiles
 }
 
-fn quota_watch_tui_row_line_count(report: &QuotaReport, detail: bool) -> usize {
-    build_all_quota_watch_tui_row(report, detail)
+fn quota_watch_tui_row_line_count(report: &QuotaReport, detail: bool, total_width: usize) -> usize {
+    let width = total_width.max(1);
+    let detail_lines = build_all_quota_watch_tui_row(report, detail)
         .detail
-        .len()
-        .saturating_add(1)
+        .iter()
+        .map(|line| terminal_ui::text_width(line).saturating_add(width.saturating_sub(1)) / width)
+        .sum::<usize>();
+    detail_lines.saturating_add(1)
 }
 
+#[cfg(test)]
 pub(crate) fn quota_watch_tui_max_scroll_offset_for_snapshot(
     snapshot: &AllQuotaWatchSnapshot,
     detail: bool,
     provider_filter: QuotaProviderFilter,
     sort: QuotaReportSort,
     max_lines: Option<usize>,
+) -> usize {
+    quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
+        snapshot,
+        detail,
+        provider_filter,
+        sort,
+        max_lines,
+        120,
+    )
+}
+
+pub(crate) fn quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
+    max_lines: Option<usize>,
+    total_width: usize,
 ) -> usize {
     let AllQuotaWatchSnapshot::Reports { reports, .. } = snapshot else {
         return 0;
@@ -527,6 +626,7 @@ pub(crate) fn quota_watch_tui_max_scroll_offset_for_snapshot(
             detail,
             max_lines,
             scroll_offset,
+            total_width,
         );
         if scroll_offset.saturating_add(shown_profiles) >= filtered_reports.len() {
             return scroll_offset;

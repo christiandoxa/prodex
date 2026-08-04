@@ -69,14 +69,12 @@ pub fn runtime_proxy_claude_launch_env(
             )),
         ),
     ];
-    if runtime_anthropic_crate::runtime_proxy_claude_use_foundry_compat() {
-        env.push(("CLAUDE_CODE_USE_FOUNDRY", OsString::from("1")));
-        env.push(("ANTHROPIC_FOUNDRY_BASE_URL", OsString::from(base_url)));
-        env.push((
-            "ANTHROPIC_FOUNDRY_API_KEY",
-            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
-        ));
-    }
+    env.push(("CLAUDE_CODE_USE_FOUNDRY", OsString::from("1")));
+    env.push(("ANTHROPIC_FOUNDRY_BASE_URL", OsString::from(base_url)));
+    env.push((
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
+    ));
     env.extend(prodex_runtime_launch::local_proxy_bypass_env());
     env.extend(runtime_anthropic_crate::runtime_proxy_claude_pinned_alias_env());
     env.extend(

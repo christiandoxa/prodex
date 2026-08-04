@@ -64,6 +64,10 @@ const OPTIONAL_POSTGRES_STORAGE_TESTS = Object.freeze({
     "--test-threads=1",
   ],
 });
+const POSTGRES_PROOF_RUN_OPTIONS = Object.freeze({
+  capture: true,
+  failOnZeroTests: true,
+});
 const OPTIONAL_POSTGRES_RUNTIME_TESTS = Object.freeze({
   command: "cargo",
   args: [
@@ -111,6 +115,12 @@ const OPTIONAL_POSTGRES_SIEM_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
+
+function postgresAppTestArgs(redisAvailable) {
+  const args = [...OPTIONAL_POSTGRES_APP_TESTS.args];
+  if (!redisAvailable) args.splice(-1, 0, "--skip", "redis_");
+  return args;
+}
 
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));
@@ -324,7 +334,16 @@ topology: evidence.topology
   assertSelfTest(
     OPTIONAL_POSTGRES_APP_TESTS.args.includes("--skip") &&
       OPTIONAL_POSTGRES_APP_TESTS.args.includes(POSTGRES_SIEM_SCHEMA_TEST),
-    "broad Postgres app proof must retain every non-SIEM ignored test",
+    "broad Postgres app proof must exclude the separate SIEM test",
+  );
+  assertSelfTest(
+    postgresAppTestArgs(false).includes("redis_") &&
+      !postgresAppTestArgs(true).includes("redis_"),
+    "direct Postgres proof must skip Redis-only tests without weakening managed combined proof",
+  );
+  assertSelfTest(
+    POSTGRES_PROOF_RUN_OPTIONS.capture && POSTGRES_PROOF_RUN_OPTIONS.failOnZeroTests,
+    "every broad Postgres proof command must capture output and reject zero tests",
   );
   assertSelfTest(hasZeroTests("running 0 tests"), "zero-test output not detected");
   assertSelfTest(!hasZeroTests("running 1 test"), "matched test output misclassified as zero tests");
@@ -377,22 +396,34 @@ async function main() {
   await runCommand(
     OPTIONAL_POSTGRES_STORAGE_TESTS.command,
     OPTIONAL_POSTGRES_STORAGE_TESTS.args,
-    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+    {
+      ...POSTGRES_PROOF_RUN_OPTIONS,
+      env: { PRODEX_TEST_POSTGRES_URL: postgresUrl },
+    },
   );
   await runCommand(
     OPTIONAL_POSTGRES_RUNTIME_TESTS.command,
     OPTIONAL_POSTGRES_RUNTIME_TESTS.args,
-    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+    {
+      ...POSTGRES_PROOF_RUN_OPTIONS,
+      env: { PRODEX_TEST_POSTGRES_URL: postgresUrl },
+    },
   );
   await runCommand(
     OPTIONAL_POSTGRES_APP_TESTS.command,
-    OPTIONAL_POSTGRES_APP_TESTS.args,
-    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+    postgresAppTestArgs(Boolean(process.env.PRODEX_TEST_REDIS_URL)),
+    {
+      ...POSTGRES_PROOF_RUN_OPTIONS,
+      env: { PRODEX_TEST_POSTGRES_URL: postgresUrl },
+    },
   );
   await runCommand(
     OPTIONAL_POSTGRES_SIEM_TEST.command,
     OPTIONAL_POSTGRES_SIEM_TEST.args,
-    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl }, capture: true, failOnZeroTests: true },
+    {
+      ...POSTGRES_PROOF_RUN_OPTIONS,
+      env: { PRODEX_TEST_POSTGRES_URL: postgresUrl },
+    },
   );
 }
 

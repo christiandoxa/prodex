@@ -226,6 +226,7 @@ fn compact_final_failure_logs_overload_terminal_reason() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Ready,
                     five_hour_remaining_percent: 80,
                     five_hour_reset_at: now + 3600,
@@ -596,6 +597,7 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
                 "main".to_string(),
                 RuntimeProfileUsageSnapshot {
                     checked_at: now,
+                    plan_type: None,
                     five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
                     five_hour_remaining_percent: 0,
                     five_hour_reset_at: now + 300,
@@ -709,6 +711,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
                     "main".to_string(),
                     RuntimeProfileUsageSnapshot {
                         checked_at: now,
+                        plan_type: None,
                         five_hour_status: RuntimeQuotaWindowStatus::Ready,
                         five_hour_remaining_percent: 80,
                         five_hour_reset_at: now + 3600,
@@ -721,6 +724,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
                     "second".to_string(),
                     RuntimeProfileUsageSnapshot {
                         checked_at: now,
+                        plan_type: None,
                         five_hour_status: RuntimeQuotaWindowStatus::Ready,
                         five_hour_remaining_percent: 75,
                         five_hour_reset_at: now + 3600,

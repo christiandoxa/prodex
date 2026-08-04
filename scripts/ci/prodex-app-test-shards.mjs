@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 const SELECTION_PREFIX = "main_internal_tests::runtime_proxy_selection_and_pressure::";
 const LAUNCH_PREFIX = "runtime_launch::proxy_startup::";
 const ADMISSION_PREFIX = `${SELECTION_PREFIX}admission::`;
+const MAIN_INTERNAL_FILTER = "main_internal_tests::";
+const PROFILE_COMMANDS_INTERNAL_FILTER = "profile_commands_internal_tests::";
 
 const TARGETED_SHARDS = Object.freeze([
   {
@@ -116,6 +118,24 @@ export const PRODEX_APP_LIB_SHARDS = Object.freeze([
     skipFilters: PRODEX_APP_LIB_FILTERS,
   },
 ]);
+
+// Dedicated Ubuntu jobs own all main-internal and profile-command-internal tests.
+// Windows and full-test keep the canonical app partition unchanged.
+const CI_TARGETED_SHARDS = Object.freeze(
+  TARGETED_SHARDS.map((shard) => ({
+    ...shard,
+    filters: shard.filters.filter((filter) => !filter.startsWith(MAIN_INTERNAL_FILTER)),
+    skipFilters: [MAIN_INTERNAL_FILTER, PROFILE_COMMANDS_INTERNAL_FILTER],
+  })).filter((shard) => shard.filters.length > 0),
+);
+const CI_REMAINDER_SHARD = Object.freeze({
+  ...PRODEX_APP_LIB_SHARDS.at(-1),
+  skipFilters: [
+    ...PRODEX_APP_LIB_FILTERS.filter((filter) => !filter.startsWith(MAIN_INTERNAL_FILTER)),
+    MAIN_INTERNAL_FILTER,
+    PROFILE_COMMANDS_INTERNAL_FILTER,
+  ],
+});
 
 const WORKSPACE_SHARD = Object.freeze({
   suite: "workspace",
@@ -247,6 +267,12 @@ export function githubMatrix({ includeWorkspace = false } = {}) {
   return { include };
 }
 
+export function ciGithubMatrix() {
+  return {
+    include: [...CI_TARGETED_SHARDS, CI_REMAINDER_SHARD].map(matrixEntry),
+  };
+}
+
 export function windowsGithubMatrix() {
   const grouped = WINDOWS_SHARD_GROUPS.map((group) => ({
     suite: group.suite,
@@ -319,7 +345,7 @@ function printHelp() {
       "Usage: node scripts/ci/prodex-app-test-shards.mjs --check|--dry-run|--github-matrix|--windows-github-matrix|--full-test-matrix",
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
-      "--github-matrix emits the app-only GitHub Actions matrix.",
+      "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
       "--windows-github-matrix emits fewer balanced Windows groups to avoid duplicate compilation.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
@@ -353,8 +379,12 @@ function main() {
     process.stdout.write(`prodex-app-test-shards: ${PRODEX_APP_LIB_SHARDS.length} app shard(s), one cache writer\n`);
     return;
   }
-  if (args.githubMatrix || args.fullTestMatrix) {
-    process.stdout.write(`${JSON.stringify(githubMatrix({ includeWorkspace: args.fullTestMatrix }))}\n`);
+  if (args.githubMatrix) {
+    process.stdout.write(`${JSON.stringify(ciGithubMatrix())}\n`);
+    return;
+  }
+  if (args.fullTestMatrix) {
+    process.stdout.write(`${JSON.stringify(githubMatrix({ includeWorkspace: true }))}\n`);
     return;
   }
   if (args.windowsGithubMatrix) {

@@ -43,6 +43,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: Local::now().timestamp(),
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
                 five_hour_remaining_percent: 0,
                 five_hour_reset_at: Local::now().timestamp() + 300,
@@ -113,6 +114,7 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: Local::now().timestamp(),
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 85,
                 five_hour_reset_at: Local::now().timestamp() + 300,
@@ -347,6 +349,7 @@ fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapsho
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 80,
                 five_hour_reset_at: now + 300,

@@ -227,6 +227,7 @@ fn pressure_helper_checks_each_queue_threshold() {
 fn startup_probe_refresh_filters_stale_profiles_to_warm_limit() {
     let exhausted_hold = RuntimeProfileUsageSnapshot {
         checked_at: 0,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
         five_hour_remaining_percent: 0,
         five_hour_reset_at: 300,
@@ -286,6 +287,7 @@ fn startup_probe_refresh_filters_stale_profiles_to_warm_limit() {
 
     let usable_snapshot = RuntimeProfileUsageSnapshot {
         checked_at: 190,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: 90,
         five_hour_reset_at: 0,
@@ -339,6 +341,7 @@ fn startup_probe_refresh_filters_stale_profiles_to_warm_limit() {
 fn usage_snapshot_persist_requires_material_change_or_stale_touch() {
     let previous = RuntimeProfileUsageSnapshot {
         checked_at: 100,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: 90,
         five_hour_reset_at: 0,
@@ -368,12 +371,21 @@ fn usage_snapshot_persist_requires_material_change_or_stale_touch() {
         110,
         60,
     ));
+    next.weekly_remaining_percent = previous.weekly_remaining_percent;
+    next.plan_type = Some("plus".to_string());
+    assert!(runtime_profile_usage_snapshot_should_persist(
+        Some(&previous),
+        &next,
+        110,
+        60,
+    ));
 }
 
 #[test]
 fn probe_usage_apply_plan_sets_quarantine_and_persist_flags() {
     let previous = RuntimeProfileUsageSnapshot {
         checked_at: 100,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: 90,
         five_hour_reset_at: 0,

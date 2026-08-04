@@ -159,6 +159,7 @@ fn cold_start_probe_block_respects_snapshot_guard() {
     let now = Local::now().timestamp();
     let snapshot = RuntimeProfileUsageSnapshot {
         checked_at: now,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Critical,
         five_hour_remaining_percent: 1,
         five_hour_reset_at: now + 3_600,
@@ -196,6 +197,7 @@ fn cached_source_summary_prefers_live_probe_over_snapshot() {
     let usage = usage_response(96, 20, now);
     let snapshot = RuntimeProfileUsageSnapshot {
         checked_at: now,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: 90,
         five_hour_reset_at: now + 3_600,
@@ -222,6 +224,7 @@ fn cached_source_summary_keeps_active_exhausted_snapshot() {
     let now = 10_000;
     let snapshot = RuntimeProfileUsageSnapshot {
         checked_at: now - 10_000,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
         five_hour_remaining_percent: 0,
         five_hour_reset_at: now + 3_600,
@@ -251,6 +254,7 @@ fn cached_source_summary_ignores_stale_non_hold_snapshot() {
     let now = 10_000;
     let snapshot = RuntimeProfileUsageSnapshot {
         checked_at: now - 10_000,
+        plan_type: None,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
         five_hour_remaining_percent: 90,
         five_hour_reset_at: now + 3_600,
@@ -271,6 +275,19 @@ fn cached_source_summary_ignores_stale_non_hold_snapshot() {
     assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown);
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Unknown);
+}
+
+#[test]
+fn usage_snapshot_round_trip_preserves_plan_type() {
+    let now = Local::now().timestamp();
+    let mut usage = usage_response(20, 30, now);
+    usage.plan_type = Some("plus".to_string());
+
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    assert_eq!(snapshot.plan_type.as_deref(), Some("plus"));
+
+    let restored = usage_from_runtime_usage_snapshot(&snapshot);
+    assert_eq!(restored.plan_type.as_deref(), Some("plus"));
 }
 
 #[test]

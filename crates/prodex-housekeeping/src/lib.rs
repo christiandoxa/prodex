@@ -6,17 +6,24 @@
 
 use prodex_core::{
     AppPaths, login_temp_dir_name_is_owned, owned_root_temp_file_name, root_temp_file_pid,
-    runtime_proxy_log_file_name_is_owned, select_newest_modified_path,
-    select_runtime_log_paths_to_remove, should_remove_stale_root_temp_file,
-    system_time_to_unix_seconds,
+    should_remove_stale_root_temp_file, system_time_to_unix_seconds,
 };
 use prodex_state::AppState;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
+
+mod runtime_logs;
+
+pub use runtime_logs::{
+    cleanup_runtime_proxy_latest_pointer, cleanup_runtime_proxy_latest_pointer_with_counts,
+    cleanup_runtime_proxy_logs_in_dir, cleanup_runtime_proxy_logs_in_dir_with_counts,
+    newest_runtime_proxy_log_in_dir, prodex_runtime_log_paths_in_dir,
+    prodex_runtime_log_paths_in_dir_with_counts,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProdexCleanupSummary {
@@ -30,6 +37,8 @@ pub struct ProdexCleanupSummary {
     pub stale_root_temp_files_removed: usize,
     pub dead_runtime_broker_leases_removed: usize,
     pub dead_runtime_broker_registries_removed: usize,
+    pub scan_failures: usize,
+    pub delete_failures: usize,
 }
 
 impl ProdexCleanupSummary {
@@ -58,8 +67,21 @@ impl ProdexCleanupSummary {
         self.stale_root_temp_files_removed += other.stale_root_temp_files_removed;
         self.dead_runtime_broker_leases_removed += other.dead_runtime_broker_leases_removed;
         self.dead_runtime_broker_registries_removed += other.dead_runtime_broker_registries_removed;
+        self.scan_failures += other.scan_failures;
+        self.delete_failures += other.delete_failures;
         self
     }
+
+    pub fn failure_count(self) -> usize {
+        self.scan_failures + self.delete_failures
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProdexCleanupCounts {
+    pub removed: usize,
+    pub scan_failures: usize,
+    pub delete_failures: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +101,16 @@ pub struct ProdexCleanupReport {
     pub removed: usize,
     pub missing: usize,
     pub failures: Vec<ProdexCleanupFailure>,
+}
+
+impl ProdexCleanupReport {
+    pub fn counts(&self) -> ProdexCleanupCounts {
+        ProdexCleanupCounts {
+            removed: self.removed,
+            scan_failures: 0,
+            delete_failures: self.failures.len(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -451,13 +483,39 @@ pub fn cleanup_prodex_stale_root_temp_files_at(
     retention_seconds: i64,
     pid_alive: impl Fn(u32) -> bool,
 ) -> usize {
-    let Ok(entries) = fs::read_dir(&paths.root) else {
-        return 0;
+    cleanup_prodex_stale_root_temp_files_at_with_counts(paths, now, retention_seconds, pid_alive)
+        .removed
+}
+
+pub fn cleanup_prodex_stale_root_temp_files_at_with_counts(
+    paths: &AppPaths,
+    now: SystemTime,
+    retention_seconds: i64,
+    pid_alive: impl Fn(u32) -> bool,
+) -> ProdexCleanupCounts {
+    let entries = match fs::read_dir(&paths.root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return ProdexCleanupCounts::default();
+        }
+        Err(_) => {
+            return ProdexCleanupCounts {
+                scan_failures: 1,
+                ..ProdexCleanupCounts::default()
+            };
+        }
     };
     let oldest_allowed = system_time_to_unix_seconds(now).unwrap_or_default() - retention_seconds;
-    let mut removed = 0usize;
+    let mut counts = ProdexCleanupCounts::default();
 
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                counts.scan_failures += 1;
+                continue;
+            }
+        };
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -466,21 +524,29 @@ pub fn cleanup_prodex_stale_root_temp_files_at(
             continue;
         }
 
-        let modified = entry
+        let modified = match entry
             .metadata()
+            .and_then(|meta| meta.modified())
             .ok()
-            .and_then(|meta| meta.modified().ok())
             .and_then(system_time_to_unix_seconds)
-            .unwrap_or(i64::MIN);
-        let pid_alive = root_temp_file_pid(name).is_some_and(&pid_alive);
-        if should_remove_stale_root_temp_file(name, modified, oldest_allowed, pid_alive)
-            && remove_file_if_exists(&path)
         {
-            removed += 1;
+            Some(modified) => modified,
+            None => {
+                counts.scan_failures += 1;
+                continue;
+            }
+        };
+        let pid_alive = root_temp_file_pid(name).is_some_and(&pid_alive);
+        if should_remove_stale_root_temp_file(name, modified, oldest_allowed, pid_alive) {
+            match fs::remove_file(&path) {
+                Ok(()) => counts.removed += 1,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => counts.delete_failures += 1,
+            }
         }
     }
 
-    removed
+    counts
 }
 
 fn runtime_managed_profile_dir_looks_safe_to_audit(path: &Path) -> bool {
@@ -499,40 +565,71 @@ pub fn collect_orphan_managed_profile_dirs_at(
     now: SystemTime,
     retention_seconds: i64,
 ) -> Vec<String> {
+    collect_orphan_managed_profile_dirs_at_with_counts(paths, state, now, retention_seconds).0
+}
+
+pub fn collect_orphan_managed_profile_dirs_at_with_counts(
+    paths: &AppPaths,
+    state: &AppState,
+    now: SystemTime,
+    retention_seconds: i64,
+) -> (Vec<String>, usize) {
     let oldest_allowed = if retention_seconds <= 0 {
         i64::MAX
     } else {
         system_time_to_unix_seconds(now).unwrap_or_default() - retention_seconds
     };
-    let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
-        return Vec::new();
+    let entries = match fs::read_dir(&paths.managed_profiles_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return (Vec::new(), 0),
+        Err(_) => return (Vec::new(), 1),
     };
-    let mut names = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = path.file_name()?.to_str()?.to_string();
-            if state.profiles.contains_key(&name) {
-                return None;
+    let mut scan_failures = 0usize;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                scan_failures += 1;
+                continue;
             }
-            let metadata = fs::symlink_metadata(&path).ok()?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return None;
+        };
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let path = entry.path();
+        if state.profiles.contains_key(&name) {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                scan_failures += 1;
+                continue;
             }
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(system_time_to_unix_seconds)
-                .unwrap_or(i64::MIN);
-            if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path)
-            {
-                return None;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let modified = match metadata
+            .modified()
+            .ok()
+            .and_then(system_time_to_unix_seconds)
+        {
+            Some(modified) => modified,
+            None => {
+                scan_failures += 1;
+                continue;
             }
-            Some(name)
-        })
-        .collect::<Vec<_>>();
+        };
+        if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path) {
+            continue;
+        }
+        names.push(name);
+    }
     names.sort();
-    names
+    (names, scan_failures)
 }
 
 pub fn cleanup_orphan_managed_profile_dirs_at(
@@ -542,90 +639,37 @@ pub fn cleanup_orphan_managed_profile_dirs_at(
     retention_seconds: i64,
     remove_dir: impl Fn(&Path) -> bool,
 ) -> usize {
-    let mut removed = 0usize;
-    for name in collect_orphan_managed_profile_dirs_at(paths, state, now, retention_seconds) {
-        if remove_dir(&paths.managed_profiles_root.join(name)) {
-            removed += 1;
-        }
-    }
-    removed
+    cleanup_orphan_managed_profile_dirs_at_with_counts(
+        paths,
+        state,
+        now,
+        retention_seconds,
+        remove_dir,
+    )
+    .removed
 }
 
-pub fn prodex_runtime_log_paths_in_dir(dir: &Path, log_prefix: &str) -> Vec<PathBuf> {
-    let mut paths = fs::read_dir(dir)
-        .ok()
-        .into_iter()
-        .flat_map(|entries| entries.filter_map(|entry| entry.ok().map(|item| item.path())))
-        .filter(|path| runtime_proxy_log_path_is_regular_owned(path, log_prefix))
-        .collect::<Vec<_>>();
-    paths.sort();
-    paths
-}
-
-fn runtime_proxy_log_path_is_regular_owned(path: &Path, log_prefix: &str) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| runtime_proxy_log_file_name_is_owned(name, log_prefix))
-        && fs::symlink_metadata(path)
-            .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
-            .unwrap_or(false)
-}
-
-pub fn cleanup_runtime_proxy_logs_in_dir(
-    dir: &Path,
+pub fn cleanup_orphan_managed_profile_dirs_at_with_counts(
+    paths: &AppPaths,
+    state: &AppState,
     now: SystemTime,
     retention_seconds: i64,
-    retention_count: usize,
-    log_prefix: &str,
-) -> usize {
-    let now_epoch = system_time_to_unix_seconds(now).unwrap_or_default();
-    let oldest_allowed = now_epoch.saturating_sub(retention_seconds);
-    let paths = prodex_runtime_log_paths_in_dir(dir, log_prefix)
-        .into_iter()
-        .map(|path| {
-            let modified = path
-                .metadata()
-                .ok()
-                .and_then(|meta| meta.modified().ok())
-                .and_then(system_time_to_unix_seconds)
-                .unwrap_or(i64::MIN);
-            (path, modified)
-        })
-        .collect::<Vec<_>>();
-    let mut removed = 0usize;
-    for path in select_runtime_log_paths_to_remove(paths, oldest_allowed, retention_count) {
-        if fs::remove_file(path).is_ok() {
-            removed += 1;
+    remove_dir: impl Fn(&Path) -> bool,
+) -> ProdexCleanupCounts {
+    let (names, scan_failures) =
+        collect_orphan_managed_profile_dirs_at_with_counts(paths, state, now, retention_seconds);
+    let mut counts = ProdexCleanupCounts {
+        scan_failures,
+        ..ProdexCleanupCounts::default()
+    };
+    for name in names {
+        if remove_dir(&paths.managed_profiles_root.join(name)) {
+            counts.removed += 1;
+        } else {
+            counts.delete_failures += 1;
         }
     }
-    removed
-}
-
-pub fn newest_runtime_proxy_log_in_dir(dir: &Path, log_prefix: &str) -> Option<PathBuf> {
-    let paths = prodex_runtime_log_paths_in_dir(dir, log_prefix)
-        .into_iter()
-        .filter_map(|path| {
-            let modified = path
-                .metadata()
-                .ok()
-                .and_then(|meta| meta.modified().ok())
-                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_millis());
-            modified.map(|modified| (modified, path))
-        })
-        .collect::<Vec<_>>();
-    select_newest_modified_path(paths)
-}
-
-pub fn cleanup_runtime_proxy_latest_pointer(pointer_path: &Path) -> bool {
-    let should_remove_pointer = fs::read_to_string(pointer_path)
-        .ok()
-        .map(|content| PathBuf::from(content.trim()))
-        .is_some_and(|path| !path.exists());
-    if should_remove_pointer {
-        return fs::remove_file(pointer_path).is_ok();
-    }
-    false
+    counts
 }
 
 pub fn cleanup_stale_login_dirs_at(
@@ -634,12 +678,37 @@ pub fn cleanup_stale_login_dirs_at(
     retention_seconds: i64,
     remove_dir: impl Fn(&Path) -> bool,
 ) -> usize {
-    let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
-        return 0;
+    cleanup_stale_login_dirs_at_with_counts(paths, now, retention_seconds, remove_dir).removed
+}
+
+pub fn cleanup_stale_login_dirs_at_with_counts(
+    paths: &AppPaths,
+    now: SystemTime,
+    retention_seconds: i64,
+    remove_dir: impl Fn(&Path) -> bool,
+) -> ProdexCleanupCounts {
+    let entries = match fs::read_dir(&paths.managed_profiles_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return ProdexCleanupCounts::default();
+        }
+        Err(_) => {
+            return ProdexCleanupCounts {
+                scan_failures: 1,
+                ..ProdexCleanupCounts::default()
+            };
+        }
     };
     let oldest_allowed = system_time_to_unix_seconds(now).unwrap_or_default() - retention_seconds;
-    let mut removed = 0usize;
-    for entry in entries.flatten() {
+    let mut counts = ProdexCleanupCounts::default();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                counts.scan_failures += 1;
+                continue;
+            }
+        };
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -651,13 +720,20 @@ pub fn cleanup_stale_login_dirs_at(
             .metadata()
             .ok()
             .and_then(|meta| meta.modified().ok())
-            .and_then(system_time_to_unix_seconds)
-            .unwrap_or(i64::MIN);
-        if modified < oldest_allowed && remove_dir(&path) {
-            removed += 1;
+            .and_then(system_time_to_unix_seconds);
+        let Some(modified) = modified else {
+            counts.scan_failures += 1;
+            continue;
+        };
+        if modified < oldest_allowed {
+            if remove_dir(&path) {
+                counts.removed += 1;
+            } else {
+                counts.delete_failures += 1;
+            }
         }
     }
-    removed
+    counts
 }
 
 #[cfg(test)]

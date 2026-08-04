@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { parsePositiveInteger, runStep } from "./main-internal-test-runner.mjs";
+import { RUNTIME_CI_BROAD_SHARD_FILTERS } from "./runtime-test-manifest.mjs";
 
 const MAIN_INTERNAL_FILTER = "main_internal_tests::";
-const CORE_TEST_PATTERN = /^main_internal_tests::.*: test$/;
+const MAIN_INTERNAL_TEST_PATTERN = /^main_internal_tests::.*: test$/;
 const DEFAULT_WEIGHT_SECONDS = 1;
 
 // Duration hints come from local timing and recent CI imbalance. Unknown tests are
@@ -83,15 +84,15 @@ function printHelp() {
     [
       "Usage: node scripts/ci/main-internal-core-shard.mjs --shard-index <n> --shard-count <n> [--dry-run]",
       "",
-      "Runs one weighted main_internal_tests:: non-runtime-proxy shard.",
+      "Runs one weighted main_internal_tests:: shard not owned by runtime CI.",
       "",
       "The shard planner uses duration hints for known slow tests and greedily balances total estimated runtime.",
     ].join("\n") + "\n",
   );
 }
 
-function listedCoreTests() {
-  const result = spawnSync("cargo", ["test", "--locked", "-p", "prodex-app", "--lib", MAIN_INTERNAL_FILTER, "--", "--list"], {
+function listedMainInternalTests() {
+  const result = spawnSync("cargo", ["test", "--locked", "-p", "prodex-app", "--lib", "--all-features", MAIN_INTERNAL_FILTER, "--", "--list"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -103,9 +104,12 @@ function listedCoreTests() {
   }
   return result.stdout
     .split(/\r?\n/)
-    .filter((line) => CORE_TEST_PATTERN.test(line))
-    .map((line) => line.replace(/: test$/, ""))
-    .filter((testName) => !testName.includes("runtime_proxy_"));
+    .filter((line) => MAIN_INTERNAL_TEST_PATTERN.test(line))
+    .map((line) => line.replace(/: test$/, ""));
+}
+
+function runtimeWorkflowOwns(testName) {
+  return RUNTIME_CI_BROAD_SHARD_FILTERS.some(({ filter }) => testName.includes(filter));
 }
 
 function testWeightSeconds(testName) {
@@ -176,7 +180,8 @@ async function main() {
     return;
   }
 
-  const testNames = listedCoreTests();
+  const allTestNames = listedMainInternalTests();
+  const testNames = allTestNames.filter((testName) => !runtimeWorkflowOwns(testName));
   if (testNames.length === 0) {
     throw new Error("No main internal core tests found");
   }
@@ -188,7 +193,7 @@ async function main() {
     throw new Error(`No tests selected for main internal core shard ${args.shardIndex}/${args.shardCount}`);
   }
   const selectedSet = new Set(selectedTests);
-  const nonSelectedTests = testNames.filter((testName) => !selectedSet.has(testName));
+  const nonSelectedTests = allTestNames.filter((testName) => !selectedSet.has(testName));
   assertSkipFiltersAreSafe(selectedTests, nonSelectedTests);
 
   for (const shard of shards) {
@@ -209,11 +214,10 @@ async function main() {
       "-p",
       "prodex-app",
       "--lib",
+      "--all-features",
       MAIN_INTERNAL_FILTER,
       "--",
       "--test-threads=1",
-      "--skip",
-      "runtime_proxy_",
       ...skipArgs(nonSelectedTests),
     ],
     failOnZeroTests: true,

@@ -119,6 +119,7 @@ pub(crate) const RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS: u64 =
     if cfg!(test) { 10 } else { 200 };
 pub(crate) const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS: u64 =
     if cfg!(test) { 120 } else { 8_000 };
+pub(crate) const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES: usize = 512 * 1024;
 pub(crate) const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 = 60_000;
 pub(crate) const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 pub(crate) const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;

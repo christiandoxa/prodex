@@ -226,8 +226,8 @@
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",
-    "maxLines": 934,
-    "reason": "Transactional PostgreSQL signed governance revision, bounded tenant discovery, approval, status, and snapshot operations remain capped after retention persistence and shared row/idempotency helpers moved to focused modules."
+    "maxLines": 903,
+    "reason": "Transactional PostgreSQL signed governance revision, approval, status, and snapshot operations remain capped after tenant enumeration was removed and shared row/idempotency helpers moved to focused modules."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",

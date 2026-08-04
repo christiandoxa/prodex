@@ -16,6 +16,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
         "main".to_string(),
         RuntimeProfileUsageSnapshot {
             checked_at: now - 20,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 70,
             five_hour_reset_at: now + 100,
@@ -29,6 +30,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now - 10,
+                plan_type: Some("plus".to_string()),
                 five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
                 five_hour_remaining_percent: 0,
                 five_hour_reset_at: now + 300,
@@ -41,6 +43,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
             "stale".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now - 10,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 100,
                 five_hour_reset_at: now + 300,
@@ -75,6 +78,14 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
             .expect("main snapshot should exist")
             .five_hour_status,
         RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(
+        merged
+            .get("main")
+            .expect("main snapshot should exist")
+            .plan_type
+            .as_deref(),
+        Some("plus")
     );
 }
 

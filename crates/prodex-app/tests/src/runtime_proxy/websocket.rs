@@ -152,6 +152,7 @@ pub(super) fn websocket_test_shared_with_main_profile(
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
+                plan_type: None,
                 five_hour_status: RuntimeQuotaWindowStatus::Ready,
                 five_hour_remaining_percent: 100,
                 five_hour_reset_at: now + 18_000,

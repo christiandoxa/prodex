@@ -41,6 +41,7 @@ fn build_info_quota_aggregate_uses_live_and_snapshot_data() {
         "second".to_string(),
         RuntimeProfileUsageSnapshot {
             checked_at: now,
+            plan_type: None,
             five_hour_status: RuntimeQuotaWindowStatus::Ready,
             five_hour_remaining_percent: 40,
             five_hour_reset_at: now + 1_800,

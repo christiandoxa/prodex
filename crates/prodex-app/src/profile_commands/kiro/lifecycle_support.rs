@@ -80,6 +80,26 @@ fn find_kiro_profile_by_identity(state: &AppState, context: &KiroImportContext) 
     })
 }
 
+fn validate_existing_kiro_import_name(
+    existing_name: &str,
+    requested_name: Option<&str>,
+) -> Result<()> {
+    let Some(requested_name) = requested_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    prodex_profile_identity::validate_profile_name(requested_name)?;
+    if requested_name != existing_name {
+        bail!(
+            "Kiro identity is already imported as profile '{}'",
+            existing_name
+        );
+    }
+    Ok(())
+}
+
 fn resolve_kiro_import_context() -> Result<KiroImportContext> {
     let database_path = discover_kiro_database_path()?;
     let connection = Connection::open_with_flags(
@@ -248,6 +268,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
     let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     let profile_name = if let Some(existing_name) = find_kiro_profile_by_identity(&state, &context)
     {
+        validate_existing_kiro_import_name(&existing_name, args.name.as_deref())?;
         let activate = state.active_profile.is_none() || args.activate;
         let profile = state
             .profiles
@@ -382,6 +403,19 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn kiro_import_rejects_a_different_name_for_an_existing_identity() {
+        let error = validate_existing_kiro_import_name("kiro-main", Some("kiro-alt"))
+            .expect_err("a differing requested name must not be ignored");
+
+        assert!(
+            error
+                .to_string()
+                .contains("already imported as profile 'kiro-main'")
+        );
+        assert!(validate_existing_kiro_import_name("kiro-main", Some("kiro-main")).is_ok());
+    }
 
     #[test]
     fn kiro_lifecycle_recovery_restores_credentials_before_state_consumption() {

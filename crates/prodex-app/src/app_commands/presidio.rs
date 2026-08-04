@@ -3,10 +3,13 @@ use crate::{
     PresidioRedactArgs, print_launch_status,
 };
 use anyhow::{Context, Result, bail};
+use docker::{
+    PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_CONTAINER,
+    PRESIDIO_ANONYMIZER_IMAGE, docker_available, ensure_presidio_container,
+};
 use prodex_presidio::{
-    PresidioAnalyzerResult, PresidioHealth, ProdexPresidioRuntimeFileConfig, presidio_analyze,
-    presidio_anonymize, presidio_http_client, probe_presidio_health, validate_presidio_file_config,
-    validate_presidio_url,
+    PresidioAnalyzerResult, PresidioBlockingClient, PresidioHealth,
+    ProdexPresidioRuntimeFileConfig, validate_presidio_file_config, validate_presidio_url,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 #[cfg(test)]
@@ -18,7 +21,6 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
@@ -27,15 +29,13 @@ use terminal_ui::{
     tui_secondary_style, tui_success_style, tui_title_style,
 };
 
+mod docker;
+
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
 const DEFAULT_PRESIDIO_ANONYMIZER_URL: &str = "http://localhost:5001";
 const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
 const PRESIDIO_AUTO_START_ENV: &str = "PRODEX_PRESIDIO_AUTO_START";
-const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
-const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
-const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:latest";
-const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:latest";
 
 #[derive(Debug, Clone)]
 struct PresidioPanel {
@@ -57,15 +57,15 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
 
 pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
     let config = load_presidio_config(paths)?.unwrap_or_default();
-    let analyzer_url = config.analyzer_url;
-    let anonymizer_url = config.anonymizer_url;
+    let analyzer_url = &config.analyzer_url;
+    let anonymizer_url = &config.anonymizer_url;
     print_launch_status(&format!(
         "Presidio redaction enabled; checking Analyzer={} Anonymizer={} ...",
         analyzer_url, anonymizer_url
     ));
-    let client = presidio_http_client()?;
-    let analyzer = probe_presidio_health(&client, &analyzer_url);
-    let anonymizer = probe_presidio_health(&client, &anonymizer_url);
+    let client = PresidioBlockingClient::from_config(&config)?;
+    let analyzer = client.probe_health(analyzer_url);
+    let anonymizer = client.probe_health(anonymizer_url);
     if analyzer.ok && anonymizer.ok {
         print_launch_status("Presidio services are ready.");
         return Ok(());
@@ -94,26 +94,22 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
 
     if !analyzer.ok {
         print_launch_status("starting Presidio Analyzer Docker container...");
-        ensure_presidio_container(
-            PRESIDIO_ANALYZER_CONTAINER,
-            PRESIDIO_ANALYZER_IMAGE,
-            "5002:3000",
-        )?;
+        ensure_presidio_container(PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, "5002")?;
     }
     if !anonymizer.ok {
         print_launch_status("starting Presidio Anonymizer Docker container...");
         ensure_presidio_container(
             PRESIDIO_ANONYMIZER_CONTAINER,
             PRESIDIO_ANONYMIZER_IMAGE,
-            "5001:3000",
+            "5001",
         )?;
     }
 
     print_launch_status("waiting for Presidio services to become ready...");
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
-        let analyzer = probe_presidio_health(&client, &analyzer_url);
-        let anonymizer = probe_presidio_health(&client, &anonymizer_url);
+        let analyzer = client.probe_health(analyzer_url);
+        let anonymizer = client.probe_health(anonymizer_url);
         if analyzer.ok && anonymizer.ok {
             print_launch_status("Presidio services are ready.");
             return Ok(());
@@ -140,9 +136,9 @@ fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
     validate_presidio_url(&analyzer_url, "analyzer_url")?;
     validate_presidio_url(&anonymizer_url, "anonymizer_url")?;
 
-    let client = presidio_http_client()?;
-    let analyzer = probe_presidio_health(&client, &analyzer_url);
-    let anonymizer = probe_presidio_health(&client, &anonymizer_url);
+    let client = PresidioBlockingClient::from_config(&config)?;
+    let analyzer = client.probe_health(&analyzer_url);
+    let anonymizer = client.probe_health(&anonymizer_url);
 
     let (languages, language_mode) = resolve_languages_and_mode(&config);
 
@@ -387,29 +383,21 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
         language_mode_to_use = language_mode;
     }
     validate_language_config(&languages_to_use, language_mode_to_use)?;
+    let client = PresidioBlockingClient::from_config(&config)?;
 
     let all_analyzer_results = match language_mode_to_use {
-        PresidioLanguageMode::Fixed => presidio_analyze(
-            &presidio_http_client()?,
-            &analyzer_url,
-            &text,
-            &languages_to_use[0],
-        )?,
+        PresidioLanguageMode::Fixed => {
+            client.analyze(&analyzer_url, &text, &languages_to_use[0])?
+        }
         PresidioLanguageMode::Auto => {
             let detected_lang = detect_presidio_language(&text, &languages_to_use)
                 .unwrap_or_else(|| languages_to_use[0].clone());
-            presidio_analyze(
-                &presidio_http_client()?,
-                &analyzer_url,
-                &text,
-                &detected_lang,
-            )?
+            client.analyze(&analyzer_url, &text, &detected_lang)?
         }
         PresidioLanguageMode::Multi => {
             let mut all_results = Vec::new();
             for lang in &languages_to_use {
-                let results =
-                    presidio_analyze(&presidio_http_client()?, &analyzer_url, &text, lang)?;
+                let results = client.analyze(&analyzer_url, &text, lang)?;
                 all_results.extend(results.into_iter().map(|mut r| {
                     r.language = lang.clone();
                     r
@@ -419,12 +407,7 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
         }
     };
 
-    let anonymized = presidio_anonymize(
-        &presidio_http_client()?,
-        &anonymizer_url,
-        &text,
-        all_analyzer_results,
-    )?;
+    let anonymized = client.anonymize(&anonymizer_url, &text, all_analyzer_results)?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&anonymized)?);
@@ -459,54 +442,6 @@ fn presidio_auto_start_disabled() -> bool {
             )
         })
         .unwrap_or(false)
-}
-
-fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn ensure_presidio_container(name: &str, image: &str, port: &str) -> Result<()> {
-    if docker_container_exists(name) {
-        let status = Command::new("docker")
-            .args(["start", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .with_context(|| format!("failed to start Presidio container {name}"))?;
-        if !status.success() {
-            bail!("docker start {name} failed with {status}");
-        }
-        return Ok(());
-    }
-
-    let status = Command::new("docker")
-        .args(["run", "-d", "--name", name, "-p", port, image])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .with_context(|| format!("failed to run Presidio container {name}"))?;
-    if !status.success() {
-        bail!("docker run {name} failed with {status}");
-    }
-    Ok(())
-}
-
-fn docker_container_exists(name: &str) -> bool {
-    Command::new("docker")
-        .args(["container", "inspect", name])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
 }
 
 fn presidio_health_label(health: &PresidioHealth) -> String {

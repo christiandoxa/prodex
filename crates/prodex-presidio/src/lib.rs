@@ -4,10 +4,15 @@ use redaction::redaction_redact_secret_like_text;
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::fs;
-use std::io::Read;
 use std::net::IpAddr;
 use std::path::Path;
-use std::time::Duration;
+
+mod blocking_http;
+
+pub use blocking_http::{
+    PresidioBlockingClient, presidio_analyze, presidio_anonymize, presidio_http_client,
+    probe_presidio_health,
+};
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -265,114 +270,6 @@ fn runtime_presidio_redaction_config_from_file(
     })
 }
 
-pub fn presidio_http_client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(DEFAULT_PRESIDIO_TIMEOUT_MS))
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .context("failed to build Presidio HTTP client")
-}
-
-pub fn presidio_analyze(
-    client: &reqwest::blocking::Client,
-    analyzer_url: &str,
-    text: &str,
-    language: &str,
-) -> Result<Vec<PresidioAnalyzerResult>> {
-    let response = client
-        .post(presidio_endpoint(analyzer_url, "analyze"))
-        .json(&serde_json::json!({
-            "text": text,
-            "language": language,
-        }))
-        .send()
-        .context("failed to call Presidio Analyzer")?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = read_presidio_text_response(response).unwrap_or_default();
-        anyhow::bail!(
-            "Presidio Analyzer returned {status}: {}",
-            presidio_redacted_message(body.trim())
-        );
-    }
-    read_presidio_json_response(response).context("failed to parse Presidio Analyzer response")
-}
-
-pub fn presidio_anonymize(
-    client: &reqwest::blocking::Client,
-    anonymizer_url: &str,
-    text: &str,
-    analyzer_results: Vec<PresidioAnalyzerResult>,
-) -> Result<PresidioAnonymizeResponse> {
-    let response = client
-        .post(presidio_endpoint(anonymizer_url, "anonymize"))
-        .json(&serde_json::json!({
-            "text": text,
-            "analyzer_results": analyzer_results,
-        }))
-        .send()
-        .context("failed to call Presidio Anonymizer")?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = read_presidio_text_response(response).unwrap_or_default();
-        anyhow::bail!(
-            "Presidio Anonymizer returned {status}: {}",
-            presidio_redacted_message(body.trim())
-        );
-    }
-    read_presidio_json_response(response).context("failed to parse Presidio Anonymizer response")
-}
-
-pub fn probe_presidio_health(client: &reqwest::blocking::Client, base_url: &str) -> PresidioHealth {
-    match client.get(presidio_endpoint(base_url, "health")).send() {
-        Ok(response) => {
-            let status = response.status();
-            let message = read_presidio_text_response(response).unwrap_or_default();
-            PresidioHealth {
-                ok: status.is_success(),
-                message: if message.trim().is_empty() {
-                    status.to_string()
-                } else {
-                    format!("{status} {}", presidio_redacted_message(message.trim()))
-                },
-            }
-        }
-        Err(err) => PresidioHealth {
-            ok: false,
-            message: presidio_redacted_message(&err.to_string()),
-        },
-    }
-}
-
-fn read_presidio_json_response<T: serde::de::DeserializeOwned>(
-    response: reqwest::blocking::Response,
-) -> Result<T> {
-    let body = read_presidio_response_body(response)?;
-    serde_json::from_slice(&body).context("invalid Presidio JSON response")
-}
-
-fn read_presidio_text_response(response: reqwest::blocking::Response) -> Result<String> {
-    let body = read_presidio_response_body(response)?;
-    Ok(String::from_utf8_lossy(&body).into_owned())
-}
-
-fn read_presidio_response_body(mut response: reqwest::blocking::Response) -> Result<Vec<u8>> {
-    let mut body = Vec::new();
-    response
-        .by_ref()
-        .take((DEFAULT_PRESIDIO_MAX_RESPONSE_BYTES as u64).saturating_add(1))
-        .read_to_end(&mut body)
-        .context("failed to read Presidio response")?;
-    if body.len() > DEFAULT_PRESIDIO_MAX_RESPONSE_BYTES {
-        anyhow::bail!(
-            "Presidio response exceeded safe size limit ({})",
-            DEFAULT_PRESIDIO_MAX_RESPONSE_BYTES
-        );
-    }
-    Ok(body)
-}
-
 pub fn validate_presidio_url(url: &str, field: &str) -> Result<()> {
     let parsed = reqwest::Url::parse(url).with_context(|| {
         format!(
@@ -462,8 +359,6 @@ fn presidio_redacted_message(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -671,33 +566,5 @@ mod tests {
             assert!(error.contains(field), "{error}");
             let _ = fs::remove_dir_all(root);
         }
-    }
-
-    #[test]
-    fn presidio_client_does_not_follow_redirects_with_inspected_content() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 4096];
-            let _ = stream.read(&mut request).unwrap();
-            stream
-                .write_all(
-                    b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .unwrap();
-        });
-
-        let error = presidio_analyze(
-            &presidio_http_client().unwrap(),
-            &format!("http://{address}"),
-            "synthetic-sensitive-input",
-            "en",
-        )
-        .expect_err("redirects must not receive inspected content")
-        .to_string();
-
-        assert!(error.contains("302"), "{error}");
-        server.join().unwrap();
     }
 }

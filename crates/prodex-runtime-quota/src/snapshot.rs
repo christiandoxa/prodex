@@ -33,6 +33,7 @@ pub fn runtime_usage_snapshot_from_proxy(
 ) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: snapshot.checked_at,
+        plan_type: None,
         five_hour_status: runtime_quota_window_status_from_proxy(snapshot.five_hour_status),
         five_hour_remaining_percent: snapshot.five_hour_remaining_percent,
         five_hour_reset_at: snapshot.five_hour_reset_at,
@@ -45,19 +46,21 @@ pub fn runtime_usage_snapshot_from_proxy(
 pub fn runtime_profile_usage_snapshot_from_usage(
     usage: &UsageResponse,
 ) -> RuntimeProfileUsageSnapshot {
-    runtime_usage_snapshot_from_proxy(
+    let mut snapshot = runtime_usage_snapshot_from_proxy(
         runtime_proxy::runtime_proxy_usage_snapshot_from_observations_at(
             runtime_quota_window_observation(usage, "5h"),
             runtime_quota_window_observation(usage, "weekly"),
             Local::now().timestamp(),
         ),
-    )
+    );
+    snapshot.plan_type = usage.plan_type.clone();
+    snapshot
 }
 
 pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
     UsageResponse {
         email: None,
-        plan_type: None,
+        plan_type: snapshot.plan_type.clone(),
         rate_limit: Some(WindowPair {
             primary_window: Some(UsageWindow {
                 used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),

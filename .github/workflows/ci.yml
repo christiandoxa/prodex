@@ -159,22 +159,22 @@ jobs:
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
+          skip_args=()
+          while IFS= read -r filter; do
+            [[ -z "${filter}" ]] && continue
+            skip_args+=(--skip "${filter}")
+          done <<< "${PRODEX_APP_SKIP_FILTERS}"
           if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
               cargo test --locked -q -p prodex-app --lib --all-features \
-                "${filter}" -- --test-threads=1 2>&1 | tee "${test_log}"
+                "${filter}" -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
               if grep -Fq 'running 0 tests' "${test_log}"; then
                 echo "prodex-app filter matched no tests: ${filter}"
                 exit 1
               fi
             done <<< "${PRODEX_APP_FILTERS}"
           else
-            skip_args=()
-            while IFS= read -r filter; do
-              [[ -z "${filter}" ]] && continue
-              skip_args+=(--skip "${filter}")
-            done <<< "${PRODEX_APP_SKIP_FILTERS}"
             cargo test --locked -q -p prodex-app --lib --all-features \
               -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
             if grep -Fq 'running 0 tests' "${test_log}"; then
@@ -1211,7 +1211,7 @@ jobs:
 
       - name: Run profile command internal tests
         run: |
-          cargo test --locked -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1
+          cargo test --locked -p prodex-app --lib --all-features profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})

@@ -1,6 +1,7 @@
 use super::{
-    RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, RuntimeBufferedWebsocketTextFrame, RuntimeLocalWebSocket,
-    RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeWebsocketResponseBindingContext,
+    RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES,
+    RuntimeBufferedWebsocketTextFrame, RuntimeLocalWebSocket, RuntimeProxyRequest,
+    RuntimeRotationProxyShared, RuntimeWebsocketResponseBindingContext,
     RuntimeWebsocketSessionState, release_runtime_compact_lineage,
     remember_runtime_response_ids_with_turn_state,
     remember_runtime_successful_previous_response_owner, runtime_proxy_log,
@@ -80,7 +81,6 @@ pub(super) struct RuntimeWebsocketPrecommitHoldRequest<'a> {
     pub(super) profile_name: &'a str,
     pub(super) reuse_existing_session: bool,
     pub(super) precommit_hold_promotion_allowed: bool,
-    pub(super) precommit_transport_retry_allowed: bool,
     pub(super) inspected: &'a runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
     pub(super) text: &'a str,
     pub(super) buffered_precommit_text_frames: &'a mut Vec<RuntimeBufferedWebsocketTextFrame>,
@@ -98,7 +98,6 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         profile_name,
         reuse_existing_session,
         precommit_hold_promotion_allowed,
-        precommit_transport_retry_allowed,
         inspected,
         text,
         buffered_precommit_text_frames,
@@ -126,9 +125,9 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
     }
     let promotion_event_seen = runtime_websocket_precommit_hold_promotion_event_seen(inspected);
     let next_hold_bytes = precommit_hold_bytes.saturating_add(text.len());
-    if !precommit_transport_retry_allowed
+    if !precommit_hold_promotion_allowed
         && !promotion_event_seen
-        && next_hold_bytes >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES
+        && next_hold_bytes > RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES
     {
         runtime_proxy_log(
             shared,
@@ -142,7 +141,7 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
                     runtime_proxy_log_field("hold_bytes", next_hold_bytes.to_string()),
                     runtime_proxy_log_field(
                         "hold_limit",
-                        RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES.to_string(),
+                        RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES.to_string(),
                     ),
                     runtime_proxy_log_field("action", "fail_closed"),
                 ],
