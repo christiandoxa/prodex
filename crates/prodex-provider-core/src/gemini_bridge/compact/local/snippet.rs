@@ -82,5 +82,24 @@ pub(super) fn gemini_provider_core_local_compact_snippet(
         }
     };
 
-    Some(snippet)
+    Some(gemini_provider_core_truncate_utf8(
+        snippet,
+        GEMINI_PROVIDER_CORE_LOCAL_COMPACT_MAX_SNIPPET_BYTES,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_snippet_stays_within_its_byte_limit() {
+        let snippet = gemini_provider_core_local_compact_snippet(&serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "月".repeat(1_000)}],
+        }))
+        .unwrap();
+        assert!(snippet.len() <= GEMINI_PROVIDER_CORE_LOCAL_COMPACT_MAX_SNIPPET_BYTES);
+    }
 }

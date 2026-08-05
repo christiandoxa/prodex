@@ -185,15 +185,11 @@ fn login_menu_entries_explain_runtime_only_api_key_providers() {
     );
     assert!(gemini_api_key.command.contains("GEMINI_API_KEY"));
 
-    let google_oauth = entries
-        .iter()
-        .find(|entry| entry.title == "Google Gemini OAuth")
-        .expect("gemini OAuth login should be listed");
-    assert_eq!(
-        google_oauth.action,
-        LoginMenuAction::Method(LoginMethod::Google)
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.title != "Google Gemini OAuth")
     );
-    assert!(google_oauth.auth.contains("OAuth"));
 }
 
 #[test]

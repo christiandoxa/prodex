@@ -300,7 +300,7 @@ fn kiro_provider_core_shapes_acp_session_info() {
 #[test]
 fn kiro_provider_core_shapes_acp_metadata() {
     assert_eq!(
-        kiro_provider_core_acp_metadata("", None, None, None, None, None, None, None),
+        kiro_provider_core_acp_metadata("", None, None, None, None, None, None, None, Vec::new()),
         None
     );
     assert_eq!(
@@ -313,6 +313,7 @@ fn kiro_provider_core_shapes_acp_metadata() {
             Some("Session"),
             Some("2026-07-08T00:00:00Z"),
             Some("end_turn"),
+            Vec::new(),
         )
         .unwrap(),
         json!({
@@ -694,10 +695,10 @@ fn kiro_provider_core_extracts_stream_content_text() {
 }
 
 #[test]
-fn kiro_provider_core_shapes_stream_tool_call_item() {
+fn kiro_provider_core_shapes_stream_tool_activity_item() {
     assert_eq!(
         kiro_provider_core_stream_tool_arguments(Some(&json!({"cmd": "pwd"}))),
-        "{\"cmd\":\"pwd\"}"
+        "{\"details_omitted\":true}"
     );
     assert_eq!(kiro_provider_core_stream_tool_arguments(None), "{}");
 
@@ -709,18 +710,19 @@ fn kiro_provider_core_shapes_stream_tool_call_item() {
         Some(&json!({"cmd": "pwd"})),
     );
 
-    assert_eq!(item["type"], "function_call");
-    assert_eq!(item["call_id"], "call_1");
-    assert_eq!(item["name"], "run_shell");
-    assert_eq!(item["namespace"], "kiro");
-    assert_eq!(item["arguments"], "{\"cmd\":\"pwd\"}");
-    assert_eq!(item["metadata"]["kiro"]["title"], "Run Shell!");
-    assert_eq!(item["metadata"]["kiro"]["status"], "completed");
-    assert_eq!(item["metadata"]["kiro"]["kind"], "command");
+    assert_eq!(item["type"], "kiro_internal_activity");
+    assert_eq!(item["name"], "Run Shell!");
+    assert_eq!(item["status"], "completed");
+    assert_eq!(item["phase"], "completed");
+    assert_eq!(item["kind"], "command");
+    assert_eq!(item["details_omitted"], true);
+    assert!(item.get("call_id").is_none());
+    assert!(item.get("arguments").is_none());
+    assert!(item.get("namespace").is_none());
 }
 
 #[test]
-fn kiro_provider_core_shapes_acp_tool_call_items() {
+fn kiro_provider_core_shapes_acp_tool_activity_items() {
     let raw_input = json!({"cmd": "pwd"});
     let raw_output = json!({"exit_code": 0});
     let content = vec![json!({"text": "done"})];
@@ -736,16 +738,15 @@ fn kiro_provider_core_shapes_acp_tool_call_items() {
         Some(&content),
         Some(&locations),
     );
-    assert_eq!(response_item["type"], "function_call");
-    assert_eq!(response_item["call_id"], "call_1");
-    assert_eq!(response_item["name"], "run_shell");
-    assert_eq!(response_item["arguments"], "{\"cmd\":\"pwd\"}");
-    assert_eq!(response_item["metadata"]["kiro"]["raw_output"], raw_output);
-    assert_eq!(response_item["metadata"]["kiro"]["content"], json!(content));
-    assert_eq!(
-        response_item["metadata"]["kiro"]["locations"],
-        json!(locations)
-    );
+    assert_eq!(response_item["type"], "kiro_internal_activity");
+    assert_eq!(response_item["name"], "Run Shell!");
+    assert_eq!(response_item["status"], "completed");
+    assert_eq!(response_item["phase"], "completed");
+    assert_eq!(response_item["details_omitted"], true);
+    let serialized = serde_json::to_string(&response_item).unwrap();
+    assert!(!serialized.contains("pwd"));
+    assert!(!serialized.contains("/tmp"));
+    assert!(!serialized.contains("function_call"));
 
     let chat_item = kiro_provider_core_acp_chat_tool_call_item(
         "call_1",
@@ -753,10 +754,76 @@ fn kiro_provider_core_shapes_acp_tool_call_items() {
         Some("command"),
         Some(&raw_input),
     );
-    assert_eq!(chat_item["id"], "call_1");
-    assert_eq!(chat_item["type"], "function");
-    assert_eq!(chat_item["function"]["name"], "run_shell");
-    assert_eq!(chat_item["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    assert_eq!(chat_item["type"], "kiro_internal_activity");
+    assert_eq!(chat_item["name"], "Run Shell!");
+    assert_eq!(chat_item["status"], "unknown");
+    assert!(chat_item.get("id").is_none());
+    assert!(chat_item.get("function").is_none());
+}
+
+#[test]
+fn kiro_provider_core_bounds_and_redacts_tool_activity_metadata() {
+    let oversized = "界".repeat(400);
+    let item = kiro_provider_core_tool_activity_item(
+        Some(&oversized),
+        Some("malformed-status"),
+        Some("read"),
+        true,
+        true,
+    );
+    assert!(item["name"].as_str().unwrap().len() <= 160);
+    assert_eq!(item["status"], "unknown");
+    assert_eq!(item["phase"], "started");
+    assert!(serde_json::to_vec(&item).unwrap().len() < 512);
+
+    let private = kiro_provider_core_tool_activity_item(
+        Some("Read /home/test-user/private.txt"),
+        Some("failed"),
+        Some("read"),
+        false,
+        true,
+    );
+    assert_eq!(private["name"], "read");
+    assert_eq!(private["phase"], "failed");
+    let serialized = serde_json::to_string(&private).unwrap();
+    assert!(!serialized.contains("/home/"));
+
+    let unicode = kiro_provider_core_tool_activity_item(
+        Some("Überprüfung 界"),
+        Some("running"),
+        Some("analysis"),
+        true,
+        false,
+    );
+    assert_eq!(unicode["name"], "Überprüfung 界");
+}
+
+#[test]
+fn kiro_provider_core_bounds_ordered_activity_metadata() {
+    let activities = (0..130)
+        .map(|index| {
+            kiro_provider_core_tool_activity_item(
+                Some(&format!("activity {index}")),
+                Some(if index == 1 { "failed" } else { "running" }),
+                None,
+                index < 2,
+                false,
+            )
+        })
+        .collect();
+    let metadata =
+        kiro_provider_core_acp_metadata("", None, None, None, None, None, None, None, activities)
+            .unwrap();
+    let activities = metadata["kiro"]["tool_activities"].as_array().unwrap();
+
+    assert_eq!(
+        activities.len(),
+        KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS
+    );
+    assert_eq!(activities[0]["name"], "activity 0");
+    assert_eq!(activities[1]["name"], "activity 1");
+    assert_eq!(activities[1]["phase"], "failed");
+    assert_eq!(activities.last().unwrap()["phase"], "truncated");
 }
 
 #[test]

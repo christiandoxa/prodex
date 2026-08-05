@@ -1,17 +1,23 @@
 use crate::app_state::AppStateIoExt;
-use anyhow::Result;
-use prodex_cli::{
-    SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID,
-    SUPER_GEMINI_PROVIDER_ID, SuperExternalProvider,
-};
+use anyhow::{Result, bail};
+use prodex_cli::SuperExternalProvider;
 use prodex_core::AppPaths;
+use prodex_provider_core::ProviderId;
 use prodex_state::AppState;
 use std::ffi::OsString;
 
 pub(super) fn runtime_resume_external_provider_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<SuperExternalProvider>> {
-    let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args) else {
+    Ok(runtime_resume_provider_from_codex_args(codex_args)?
+        .and_then(SuperExternalProvider::from_provider_id))
+}
+
+pub(in crate::app_commands) fn runtime_resume_provider_from_codex_args(
+    codex_args: &[OsString],
+) -> Result<Option<ProviderId>> {
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
+    let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) else {
         return Ok(None);
     };
     let paths = AppPaths::discover()?;
@@ -22,40 +28,43 @@ pub(super) fn runtime_resume_external_provider_from_codex_args(
         session_id,
     ) {
         Ok(report) => report,
-        Err(prodex_session_store::SessionResolveError::Missing { .. })
-        | Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => return Ok(None),
+        Err(prodex_session_store::SessionResolveError::Missing { .. }) => return Ok(None),
+        Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => {
+            bail!("resume target is ambiguous; use the full session UUID")
+        }
     };
-    Ok(report
-        .model_provider
-        .as_deref()
-        .and_then(runtime_external_provider_from_model_provider_id))
+    resolve_bound_provider_identity(report.model_provider.as_deref())
 }
 
+fn resolve_bound_provider_identity(value: Option<&str>) -> Result<Option<ProviderId>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    prodex_provider_core::provider_implementation_registry()
+        .resolve_model_provider_id(value)
+        .map(Some)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "resumed session has an unsupported provider identity; configure the matching provider or start a fresh session"
+            )
+        })
+}
+
+#[cfg(test)]
 fn runtime_external_provider_from_model_provider_id(
     model_provider: &str,
 ) -> Option<SuperExternalProvider> {
-    let model_provider = model_provider.trim();
-    if model_provider.eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID) {
-        return Some(SuperExternalProvider::Gemini);
-    }
-    if model_provider.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
-        return Some(SuperExternalProvider::Anthropic);
-    }
-    if model_provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
-        return Some(SuperExternalProvider::Copilot);
-    }
-    if model_provider.eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID) {
-        return Some(SuperExternalProvider::DeepSeek);
-    }
-    if model_provider.eq_ignore_ascii_case(prodex_cli::SUPER_KIRO_PROVIDER_ID) {
-        return Some(SuperExternalProvider::Kiro);
-    }
-    None
+    prodex_provider_core::provider_implementation_registry()
+        .resolve_model_provider_id(model_provider)
+        .and_then(SuperExternalProvider::from_provider_id)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SuperExternalProvider, runtime_external_provider_from_model_provider_id};
+    use super::{
+        SuperExternalProvider, resolve_bound_provider_identity,
+        runtime_external_provider_from_model_provider_id,
+    };
 
     #[test]
     fn runtime_external_provider_from_model_provider_id_accepts_kiro() {
@@ -63,5 +72,19 @@ mod tests {
             runtime_external_provider_from_model_provider_id(prodex_cli::SUPER_KIRO_PROVIDER_ID),
             Some(SuperExternalProvider::Kiro)
         );
+    }
+
+    #[test]
+    fn unknown_bound_provider_fails_instead_of_becoming_unbound() {
+        assert_eq!(resolve_bound_provider_identity(None).unwrap(), None);
+        assert_eq!(
+            resolve_bound_provider_identity(Some(prodex_cli::SUPER_KIRO_PROVIDER_ID)).unwrap(),
+            Some(prodex_provider_core::ProviderId::Kiro)
+        );
+        let error = resolve_bound_provider_identity(Some("unknown-provider"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unsupported provider identity"), "{error}");
+        assert!(!error.contains("unknown-provider"), "{error}");
     }
 }

@@ -65,3 +65,28 @@ if os.environ.get("LINGER_AFTER_RESPONSE"):
 "#,
     )
 }
+
+fn write_fake_kiro_activity_agent(root: &Path) -> std::path::PathBuf {
+    crate::test_support::write_test_python_executable(
+        root,
+        "fake-kiro-activity",
+        r#"#!/usr/bin/env python3
+import json, os, sys
+count_path = os.path.join(os.getcwd(), "activity-agent-invocations")
+with open(count_path, "a", encoding="utf-8") as count:
+    count.write("1\n")
+first = json.loads(sys.stdin.readline())
+second = json.loads(sys.stdin.readline())
+assert first["method"] == "initialize"
+assert second["method"] == "session/new"
+print(json.dumps({"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":True,"promptCapabilities":{"image":False,"audio":False,"embeddedContext":False},"mcpCapabilities":{"http":True,"sse":False},"sessionCapabilities":{},"auth":{}},"authMethods":[],"agentInfo":{"name":"Kiro CLI Agent","title":"Kiro CLI Agent","version":"test"}},"id":0}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-example","models":{"currentModelId":"model-example","availableModels":[{"modelId":"model-example","name":"model-example"}]}},"id":1}), flush=True)
+third = json.loads(sys.stdin.readline())
+assert third["method"] == "session/prompt"
+print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"tool_call","toolCallId":"activity-example","title":"Read file","status":"in_progress","kind":"read","rawInput":{"path":"/home/test-user/private.txt"}}}}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"agent_message_chunk","messageId":"message-example","content":{"type":"text","text":"final answer"}}}}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"tool_call_update","toolCallId":"activity-example","status":"completed","rawOutput":{"path":"/home/test-user/private.txt"}}}}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
+"#,
+    )
+}

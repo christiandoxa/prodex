@@ -40,7 +40,10 @@ impl RuntimeLaunchSelection {
             external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"));
         let antigravity_external_provider =
             external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("antigravity"));
-        if requested.is_none() && antigravity_external_provider {
+        let native_gemini_external_provider = external_provider
+            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"));
+        if requested.is_none() && (antigravity_external_provider || native_gemini_external_provider)
+        {
             return Ok(Self {
                 initial_profile_name: "local".to_string(),
                 selected_profile_name: "local".to_string(),
@@ -137,6 +140,38 @@ impl RuntimeLaunchSelection {
             )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_gemini_uses_profileless_shared_home_without_prodex_oauth_profile() {
+        let root = PathBuf::from("/synthetic/prodex");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let selection = RuntimeLaunchSelection::resolve(
+            &paths,
+            &AppState::default(),
+            None,
+            None,
+            None,
+            Some("gemini-native"),
+            None,
+        )
+        .unwrap();
+
+        assert!(selection.profileless_local_home);
+        assert_eq!(selection.codex_home, paths.shared_codex_root);
+        assert_eq!(selection.selected_profile_name, "local");
+        assert!(selection.non_openai_model_provider.is_none());
     }
 }
 

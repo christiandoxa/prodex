@@ -2,6 +2,48 @@
   {
     "provider": "openai",
     "owned_by": "openai",
+    "id": "gpt-5.6-luna",
+    "display_name": "GPT-5.6 Luna",
+    "description": "GPT-5.6 coding model for clear, repeatable agentic tasks.",
+    "context_window_tokens": 400000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches"
+    ],
+    "aliases": [
+      "luna"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
     "id": "gpt-5.4",
     "display_name": "GPT-5.4",
     "description": "Frontier agentic coding model routed through OpenAI Responses.",
@@ -10,15 +52,13 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ],
     "aliases": [
       "opus",
@@ -46,15 +86,13 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ],
     "aliases": [
       "haiku",
@@ -81,15 +119,13 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ],
     "aliases": [
       "codex",
@@ -116,15 +152,13 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ],
     "aliases": [
       "spark"
@@ -150,15 +184,13 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
-      "messages",
       "models",
       "embeddings",
       "images",
       "audio",
-      "batches",
-      "rerank",
-      "a2a"
+      "batches"
     ],
     "aliases": [],
     "feature_flags": {
@@ -182,6 +214,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -210,6 +243,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -238,6 +272,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -266,6 +301,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -294,6 +330,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -320,6 +357,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -346,6 +384,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -372,6 +411,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -398,6 +438,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -416,14 +457,55 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "auto",
-    "display_name": "Copilot Auto",
-    "description": "GitHub Copilot alias routed through provider fallback.",
+    "id": "gpt-5.6-luna",
+    "display_name": "GPT-5.6 Luna",
+    "description": "GPT-5.6 Luna model exposed through GitHub Copilot.",
     "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "luna"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "copilot",
+    "owned_by": "github-copilot",
+    "id": "auto",
+    "display_name": "Copilot Auto",
+    "description": "GitHub Copilot alias routed through provider fallback.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -448,10 +530,13 @@
     "display_name": "Copilot Codex",
     "description": "GitHub Copilot Codex alias routed through provider fallback.",
     "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "medium",
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -476,10 +561,13 @@
     "display_name": "GPT-5.3 Codex",
     "description": "GitHub Copilot model exposed through Prodex.",
     "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "medium",
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -506,6 +594,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -534,6 +623,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -560,6 +650,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -588,6 +679,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -616,6 +708,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -642,6 +735,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -671,6 +765,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -699,6 +794,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -725,6 +821,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -751,6 +848,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -777,6 +875,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -803,6 +902,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -829,6 +929,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -855,6 +956,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -883,6 +985,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -911,6 +1014,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -937,6 +1041,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -965,6 +1070,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -991,6 +1097,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1017,6 +1124,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1043,6 +1151,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1069,6 +1178,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1095,6 +1205,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1124,6 +1235,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1152,6 +1264,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1178,6 +1291,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models"
@@ -1204,6 +1318,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1233,6 +1348,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1260,6 +1376,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1287,6 +1404,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1314,6 +1432,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1341,6 +1460,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1360,7 +1480,7 @@
   {
     "provider": "gemini",
     "owned_by": "google",
-    "id": "PRODEX_GEMINI_CHAT_COMPRESSION_MODEL",
+    "id": "chat-compression-default",
     "display_name": "Gemini Chat Compression",
     "description": "Gemini CLI semantic compaction alias routed through chat-compression-default.",
     "context_window_tokens": 1048576,
@@ -1368,6 +1488,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1395,6 +1516,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1422,6 +1544,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1449,6 +1572,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1476,6 +1600,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1503,6 +1628,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1530,6 +1656,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1557,6 +1684,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1594,6 +1722,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1631,6 +1760,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1668,6 +1798,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1695,6 +1826,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1722,6 +1854,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",
@@ -1745,6 +1878,7 @@
     "display_name": "Kiro Auto",
     "description": "Kiro alias routed through the imported runtime model selection.",
     "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1778,6 +1912,7 @@
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",

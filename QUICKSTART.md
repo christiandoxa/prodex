@@ -138,46 +138,36 @@ Super sub-agents accept fresh and resumed Codex targets:
 
 ```bash
 prodex s --sub-agent --no-presidio
+prodex s --sub-agent --sub-agent-max-concurrency default
+prodex s --sub-agent --sub-agent-max-concurrency 8
 prodex s --presidio --sub-agent --sub-agent-provider kiro \
-  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max
-prodex s --sub-agent --sub-agent-provider local \
-  --sub-agent-url http://127.0.0.1:11434/v1 --sub-agent-model example-local-model \
-  --no-presidio
-prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9 --presidio --sub-agent \
-  --sub-agent-provider kiro --sub-agent-model gpt-5.6-luna \
-  --sub-agent-model-reasoning-effort max
+  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max \
+  --sub-agent-max-concurrency 16
+prodex s 00000000-0000-7000-8000-000000000042 --presidio --sub-agent \
+  --sub-agent-max-concurrency=23
 ```
 
-The child uses `prodex s --no-sub-agent`, an explicit inherited Presidio choice,
-the selected provider/optional model, then optional `-c model_reasoning_effort=<value>`,
-then `exec <shell-safe-task>` in that order. OpenAI omits the provider flag;
-local uses `--url`; external providers use `--provider`. Parent UUIDs are never
-forwarded to children. Explicit `--sub-agent` skips the provider/model/effort
-wizard and uses provider defaults. See
-[Sub-agents](docs/sub-agents.md) for flags before/after a UUID, `--` handling,
-the recursion marker, all 17 generated `SUB_AGENTS.md` rules, TTY/non-TTY and
-dry-run behavior, native frontend rejection, bounded prompts, and overlay
-session access. The canonical providers are `openai`, `anthropic`, `copilot`,
-`deepseek`, `gemini`, `kiro`, and `local`; the public Kiro example requests
-`gpt-5.6-luna`/`max`, but the provider decides whether that model and effort
-are supported. Custom model IDs and documented reasoning-effort values are
-optional and are omitted when unset rather than copied from the parent. The interactive local URL
-prompt is prefilled with `http://127.0.0.1:11434/v1`; explicit and non-TTY
-local launches still require a URL. URL validation rejects credentials,
-queries, and fragments but does not prove endpoint trust or compatibility.
-Interactive order is Presidio, sub-agent opt-in, provider, model, effort, then
-local URL; non-TTY defaults disable both prompts. Native frontends reject the
-bridge. Parent UUIDs are not inherited, and local subprocess/A2A extension
-details are in the guide.
+Interactive order is Presidio, main-agent provider, required main-provider
+configuration, sub-agent opt-in, then child provider, local URL when needed,
+model, catalog-backed effort, and maximum active children. Explicit
+`--sub-agent` skips that child wizard and uses OpenAI/provider defaults.
+
+The default maximum is 4; presets are 4, 8, 16, and 32; custom values accept 1
+through 64. OS-backed exclusive slots enforce this across separate official
+launcher processes. The child uses the current Prodex executable, a private
+bounded task file, `--no-sub-agent`, exactly one inherited Presidio flag, and a
+shell-free argument vector. Parent UUIDs are never inherited. See
+[Sub-agents](docs/sub-agents.md) for resume affinity, model catalogs,
+limit-reached behavior, instruction injection, dry-run output, and MVP limits.
 
 ## 6. Select another provider
 
 Examples:
 
 ```bash
-prodex login --with-google
-prodex s gemini
+GEMINI_API_KEY=example-key prodex s gemini
+# Vertex AI is supported through the native Gemini CLI, which owns auth and transport:
+prodex s gemini --cli gemini
 
 prodex login --with-claude
 prodex s --provider anthropic

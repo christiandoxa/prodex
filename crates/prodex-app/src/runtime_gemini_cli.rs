@@ -1,37 +1,30 @@
 use crate::{
-    PreparedRuntimeLaunch, ResolvedSuperSubAgent, RuntimeLaunchRequest, RuntimeLaunchStrategy,
-    RuntimeOverlayCleanup, RuntimeProxyEndpoint, agy_bin, apply_sub_agent_recursion_marker,
-    clear_rtk_auto_wrap_control_env, copilot_bin, execute_runtime_launch, gemini_bin, kiro_bin,
-    kiro_cli_data_dir_env, prepare_kiro_cli_data_dir, prepare_prodex_overlay_home,
-    prepend_child_path, redact_super_session_args, refresh_gemini_oauth_secret_if_needed,
+    PROVIDER_SECRET_ENV_KEYS, PreparedRuntimeLaunch, ResolvedSuperSubAgent, RuntimeLaunchRequest,
+    RuntimeLaunchStrategy, RuntimeOverlayCleanup, RuntimeProxyEndpoint, agy_bin,
+    apply_sub_agent_recursion_marker, clear_rtk_auto_wrap_control_env, copilot_bin,
+    execute_runtime_launch, gemini_bin, kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir,
+    prepare_prodex_overlay_home, prepend_child_path, redact_super_session_args,
     render_sub_agent_disabled_dry_run_report, render_sub_agent_dry_run_report,
     resolve_runtime_optional_tool_plan, resolve_super_launch_target, write_sub_agent_overlay,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
-    SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID, SUPER_GEMINI_DEFAULT_BASE_URL,
-    SUPER_GEMINI_PROVIDER_ID, SuperArgs, SuperCliAgent, SuperExternalProvider,
+    SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID, SuperArgs, SuperCliAgent,
+    SuperExternalProvider,
 };
 use prodex_runtime_launch::{ChildProcessPlan, RuntimeLaunchPlan, local_proxy_bypass_env};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::io::{ErrorKind, Read};
-use std::path::{Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 const PRODEX_COPILOT_PROXY_API_KEY: &str = "prodex-runtime-provider";
-const GEMINI_SETTINGS_FILE_LIMIT: u64 = 512 * 1024;
-const GEMINI_REMOVED_ENV_KEYS: [&str; 11] = [
-    "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
-    "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
-    "GEMINI_CLI_USE_COMPUTE_ADC",
-    "GEMINI_DEFAULT_AUTH_TYPE",
-    "GOOGLE_CLOUD_ACCESS_TOKEN",
-    "GOOGLE_CLOUD_PROJECT",
-    "GOOGLE_CLOUD_PROJECT_ID",
-    "GOOGLE_CLOUD_QUOTA_PROJECT",
-    "GOOGLE_GEMINI_BASE_URL",
-    "GOOGLE_GENAI_USE_GCA",
-    "GOOGLE_GENAI_USE_VERTEXAI",
+const NATIVE_GEMINI_AUTH_ENV_KEYS: [&str; 4] = [
+    "GEMINI_API_KEYS",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEYS",
+    "GOOGLE_API_KEY",
 ];
 const KIRO_REMOVED_ENV_KEYS: [&str; 18] = [
     "ALL_PROXY",
@@ -97,34 +90,28 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
-            allow_auto_rotate: !self.args.no_auto_rotate
-                && matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot),
+            allow_auto_rotate: !self.args.no_auto_rotate && self.agent == SuperCliAgent::Copilot,
             auto_redeem: false,
             skip_quota_check: true,
             base_url: self.args.base_url.as_deref().or(match self.agent {
-                SuperCliAgent::Gemini => Some(SUPER_GEMINI_DEFAULT_BASE_URL),
                 SuperCliAgent::Copilot => Some(SuperExternalProvider::Copilot.default_base_url()),
                 _ => None,
             }),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: false,
-            smart_context_enabled: matches!(
-                self.agent,
-                SuperCliAgent::Gemini | SuperCliAgent::Copilot
-            ),
+            smart_context_enabled: self.agent == SuperCliAgent::Copilot,
             presidio_redaction_enabled: self.presidio_enabled
-                && matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot),
+                && self.agent == SuperCliAgent::Copilot,
             model_context_window_tokens: self.args.local_context_window.map(|value| value as u64),
             gemini_thinking_budget_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: match self.agent {
-                SuperCliAgent::Gemini => Some(SUPER_GEMINI_PROVIDER_ID),
                 SuperCliAgent::Copilot => Some(SUPER_COPILOT_PROVIDER_ID),
                 _ => None,
             },
             profile_v2_name: None,
             external_provider: match self.agent {
-                SuperCliAgent::Gemini => Some("gemini-oauth"),
+                SuperCliAgent::Gemini => Some("gemini-native"),
                 SuperCliAgent::Copilot => Some("copilot"),
                 SuperCliAgent::Kiro => Some("kiro"),
                 SuperCliAgent::Agy => Some("antigravity"),
@@ -142,8 +129,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
         let tool_plan = resolve_super_native_tool_plan(&self.args)?;
-        let presidio_enabled = self.presidio_enabled
-            && matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot);
+        let presidio_enabled = self.presidio_enabled && self.agent == SuperCliAgent::Copilot;
         if presidio_enabled {
             crate::ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
@@ -183,10 +169,9 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
             runtime_proxy,
             &prepared.codex_home,
             child_home,
-            &overlay_home,
             launch_args,
         )?;
-        if matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot) {
+        if self.agent == SuperCliAgent::Copilot {
             crate::remove_provider_secret_env(&mut child);
         }
         prepend_child_path(&mut child, overlay_home.join("bin"));
@@ -208,17 +193,10 @@ fn build_super_native_child(
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
     codex_home: &Path,
     child_home: &Path,
-    overlay_home: &Path,
     launch_args: Vec<OsString>,
 ) -> Result<ChildProcessPlan> {
     match agent {
-        SuperCliAgent::Gemini => build_super_gemini_child(
-            runtime_proxy,
-            codex_home,
-            child_home,
-            overlay_home,
-            launch_args,
-        ),
+        SuperCliAgent::Gemini => build_super_gemini_child(args, child_home, launch_args),
         SuperCliAgent::Copilot => {
             build_super_copilot_child(args, runtime_proxy, child_home, launch_args)
         }
@@ -231,50 +209,30 @@ fn build_super_native_child(
 }
 
 fn build_super_gemini_child(
-    runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    codex_home: &Path,
+    args: &SuperArgs,
     child_home: &Path,
-    overlay_home: &Path,
     launch_args: Vec<OsString>,
 ) -> Result<ChildProcessPlan> {
-    let runtime_proxy =
-        runtime_proxy.context("Gemini CLI launch requires a local runtime proxy")?;
-    let proxy_base_url = format!("http://{}", runtime_proxy.listen_addr);
-    let mut gemini_auth_env = runtime_super_gemini_cli_oauth_env(codex_home)?;
-    let (system_settings, system_defaults) =
-        runtime_super_gemini_cli_system_settings(overlay_home)?;
-    gemini_auth_env.extend(
-        local_proxy_bypass_env()
-            .into_iter()
-            .map(|(key, value)| (OsString::from(key), value)),
-    );
-    Ok(
-        ChildProcessPlan::new(gemini_bin(), child_home.to_path_buf())
-            .with_args(launch_args)
-            .with_extra_env(gemini_auth_env.into_iter().chain([
-                (
-                    OsString::from("GOOGLE_GENAI_USE_GCA"),
-                    OsString::from("true"),
-                ),
-                (
-                    OsString::from("CODE_ASSIST_ENDPOINT"),
-                    OsString::from(proxy_base_url),
-                ),
-                (
-                    OsString::from("CODE_ASSIST_API_VERSION"),
-                    OsString::from("v1internal"),
-                ),
-                (
-                    OsString::from("GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
-                    system_settings.into_os_string(),
-                ),
-                (
-                    OsString::from("GEMINI_CLI_SYSTEM_DEFAULTS_PATH"),
-                    system_defaults.into_os_string(),
-                ),
-            ]))
-            .with_removed_env(GEMINI_REMOVED_ENV_KEYS),
-    )
+    let explicit_api_key = args.api_key.as_deref();
+    if explicit_api_key.is_some_and(|value| value.trim().is_empty()) {
+        bail!("--api-key must be non-empty");
+    }
+
+    let mut removed_env = BTreeSet::new();
+    for key in PROVIDER_SECRET_ENV_KEYS {
+        if explicit_api_key.is_some() || !NATIVE_GEMINI_AUTH_ENV_KEYS.contains(&key) {
+            removed_env.insert(OsString::from(key));
+        }
+    }
+    let mut child = ChildProcessPlan::new(gemini_bin(), child_home.to_path_buf())
+        .with_args(launch_args)
+        .with_removed_env(removed_env);
+    if let Some(api_key) = explicit_api_key {
+        child
+            .extra_env
+            .push((OsString::from("GEMINI_API_KEY"), OsString::from(api_key)));
+    }
+    Ok(child)
 }
 
 fn build_super_copilot_child(
@@ -356,124 +314,6 @@ fn runtime_super_copilot_cli_env(
             .map(|(key, value)| (OsString::from(key), value)),
     );
     env
-}
-
-fn runtime_super_gemini_cli_oauth_env(codex_home: &Path) -> Result<Vec<(OsString, OsString)>> {
-    let secret = refresh_gemini_oauth_secret_if_needed(codex_home)?;
-    let mut env = vec![(
-        OsString::from("GOOGLE_CLOUD_ACCESS_TOKEN"),
-        OsString::from(secret.access_token),
-    )];
-    if let Some(project_id) = secret.project_id.filter(|value| !value.trim().is_empty()) {
-        env.push((
-            OsString::from("GOOGLE_CLOUD_PROJECT"),
-            OsString::from(project_id),
-        ));
-    }
-    Ok(env)
-}
-
-fn runtime_super_gemini_cli_system_settings(overlay_home: &Path) -> Result<(PathBuf, PathBuf)> {
-    let sources = prodex_runtime_gemini_cli_compat::gemini_settings_source_paths(None);
-    let source = sources
-        .iter()
-        .find_map(|(name, path)| (name == "system").then(|| path.clone()));
-    let defaults = sources
-        .into_iter()
-        .find_map(|(name, path)| (name == "system-defaults").then_some(path))
-        .context("Gemini CLI system defaults path is unavailable")?;
-    Ok((
-        runtime_super_gemini_cli_system_settings_from(overlay_home, source.as_deref())?,
-        defaults,
-    ))
-}
-
-fn runtime_super_gemini_cli_system_settings_from(
-    overlay_home: &Path,
-    source: Option<&Path>,
-) -> Result<PathBuf> {
-    let mut settings = match source {
-        Some(path)
-            if path.try_exists().with_context(|| {
-                format!(
-                    "failed to inspect Gemini CLI system settings {}",
-                    path.display()
-                )
-            })? =>
-        {
-            let mut bytes = Vec::new();
-            std::fs::File::open(path)
-                .with_context(|| {
-                    format!(
-                        "failed to open Gemini CLI system settings {}",
-                        path.display()
-                    )
-                })?
-                .take(GEMINI_SETTINGS_FILE_LIMIT + 1)
-                .read_to_end(&mut bytes)
-                .with_context(|| {
-                    format!(
-                        "failed to read Gemini CLI system settings {}",
-                        path.display()
-                    )
-                })?;
-            if bytes.len() as u64 > GEMINI_SETTINGS_FILE_LIMIT {
-                bail!(
-                    "Gemini CLI system settings exceed {} bytes: {}",
-                    GEMINI_SETTINGS_FILE_LIMIT,
-                    path.display()
-                );
-            }
-            let text = std::str::from_utf8(&bytes).with_context(|| {
-                format!(
-                    "Gemini CLI system settings are not UTF-8: {}",
-                    path.display()
-                )
-            })?;
-            prodex_runtime_gemini_cli_compat::parse_gemini_settings_json(text).with_context(
-                || format!("invalid Gemini CLI system settings: {}", path.display()),
-            )?
-        }
-        _ => serde_json::json!({}),
-    };
-    let root = settings
-        .as_object_mut()
-        .context("Gemini CLI system settings must be a JSON object")?;
-    let security = root
-        .entry("security")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .context("Gemini CLI system setting `security` must be an object")?;
-    let auth = security
-        .entry("auth")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .context("Gemini CLI system setting `security.auth` must be an object")?;
-    if let Some(enforced_type) = auth.get("enforcedType") {
-        let enforced_type = enforced_type
-            .as_str()
-            .context("Gemini CLI `security.auth.enforcedType` must be a string")?;
-        if enforced_type != "oauth-personal" {
-            bail!(
-                "Gemini CLI system policy enforces auth type `{enforced_type}`; imported Prodex profiles require `oauth-personal`"
-            );
-        }
-    }
-    auth.insert(
-        "selectedType".to_string(),
-        serde_json::Value::String("oauth-personal".to_string()),
-    );
-
-    let path = overlay_home.join("gemini-system-settings.json");
-    let bytes = serde_json::to_vec_pretty(&settings)
-        .context("failed to serialize Gemini CLI system settings")?;
-    secret_store::write_private_file_atomic(&path, &bytes).with_context(|| {
-        format!(
-            "failed to write Gemini CLI system settings {}",
-            path.display()
-        )
-    })?;
-    Ok(path)
 }
 
 fn runtime_super_native_cli_launch_args(
@@ -644,6 +484,11 @@ pub(super) fn validate_super_native_cli_capability_args(args: &SuperArgs) -> Res
 fn validate_super_native_cli_args(args: &SuperArgs) -> Result<SuperCliAgent> {
     let agent = args.cli.context("native external agent CLI is missing")?;
     validate_super_native_cli_capabilities(args, agent)?;
+    if agent == SuperCliAgent::Gemini && args.profile.is_some() {
+        bail!(
+            "--profile is unsupported by the native Gemini CLI path; use authentication owned by Gemini CLI or its environment"
+        );
+    }
     match agent {
         SuperCliAgent::Gemini | SuperCliAgent::Agy
             if args.provider != Some(SuperExternalProvider::Gemini) =>
@@ -686,7 +531,7 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
     if args.harness.is_some() {
         return Err(unsupported("--harness"));
     }
-    if args.api_key.is_some() && agent != SuperCliAgent::Copilot {
+    if args.api_key.is_some() && !matches!(agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot) {
         return Err(unsupported(concat!("--api", "-key")));
     }
     if let Some(option) = first_unsupported_native_option(args) {
@@ -710,7 +555,12 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
     {
         return Err(unsupported("--tool presidio"));
     }
-    if args.presidio && matches!(agent, SuperCliAgent::Kiro | SuperCliAgent::Agy) {
+    if args.presidio
+        && matches!(
+            agent,
+            SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy
+        )
+    {
         return Err(unsupported("--presidio"));
     }
 
@@ -818,7 +668,8 @@ fn super_native_cli_dry_run_report(
         .unwrap_or("(CLI default)");
     let model = redaction::redaction_redact_secret_like_text(model);
     let proxy = match agent {
-        SuperCliAgent::Gemini | SuperCliAgent::Copilot => "would use local provider bridge",
+        SuperCliAgent::Gemini => "disabled; native Gemini CLI owns transport and authentication",
+        SuperCliAgent::Copilot => "would use local provider bridge",
         SuperCliAgent::Kiro => "would use authenticated CONNECT tunnel",
         SuperCliAgent::Agy => "disabled",
         SuperCliAgent::Codex => unreachable!(),
@@ -829,7 +680,11 @@ fn super_native_cli_dry_run_report(
     let mut output = format!(
         "Prodex dry run: launch diagnostics\nFlow: native-cli\nBinary: {}\nProvider: {provider}\nModel: {model}\nProfile: {}\nRuntime proxy: {proxy}\nArgs:\n",
         redaction::redaction_display_os(&binary),
-        args.profile.as_deref().unwrap_or("(active/default)")
+        if agent == SuperCliAgent::Gemini {
+            "(native CLI owned)"
+        } else {
+            args.profile.as_deref().unwrap_or("(active/default)")
+        }
     );
     if launch_args.is_empty() {
         output.push_str("  (none)\n");
@@ -845,7 +700,7 @@ fn super_native_cli_dry_run_report(
         output.push_str(&render_sub_agent_dry_run_report(sub_agent));
     } else {
         output.push_str(&render_sub_agent_disabled_dry_run_report(
-            args.presidio && matches!(agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot),
+            args.presidio && agent == SuperCliAgent::Copilot,
         ));
     }
     Ok(output)

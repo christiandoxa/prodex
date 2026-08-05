@@ -27,8 +27,9 @@ struct RuntimeKiroAcpTurnStateBuilder {
     current_mode_id: Option<String>,
     session_title: Option<String>,
     session_updated_at: Option<String>,
-    tool_calls: Vec<RuntimeKiroAcpToolCallState>,
-    tool_call_indexes: BTreeMap<String, usize>,
+    tool_activities: Vec<Value>,
+    tool_activities_truncated: bool,
+    tool_activity_labels: BTreeMap<String, (String, Option<String>)>,
 }
 
 impl RuntimeKiroAcpTurnStateBuilder {
@@ -49,16 +50,18 @@ impl RuntimeKiroAcpTurnStateBuilder {
                 raw_input,
                 raw_output,
                 locations,
-            } => self.apply_tool_call(RuntimeKiroAcpToolCallState {
-                tool_call_id,
-                title: Some(title),
-                status: Some(status),
-                kind,
-                raw_input,
-                raw_output,
-                content,
-                locations,
-            }),
+                ..
+            } => self.apply_tool_activity(
+                &tool_call_id,
+                Some(title.as_str()),
+                Some(status.as_str()),
+                kind.as_deref(),
+                true,
+                raw_input.is_some()
+                    || raw_output.is_some()
+                    || content.as_ref().is_some_and(|items| !items.is_empty())
+                    || locations.as_ref().is_some_and(|items| !items.is_empty()),
+            ),
             RuntimeKiroAcpSessionUpdate::ToolCallUpdate {
                 tool_call_id,
                 title,
@@ -68,16 +71,18 @@ impl RuntimeKiroAcpTurnStateBuilder {
                 raw_input,
                 raw_output,
                 locations,
-            } => self.apply_tool_call_update(RuntimeKiroAcpToolCallUpdate {
-                tool_call_id,
-                title,
-                status,
-                content,
-                kind,
-                raw_input,
-                raw_output,
-                locations,
-            }),
+                ..
+            } => self.apply_tool_activity(
+                &tool_call_id,
+                title.as_deref(),
+                status.as_deref(),
+                kind.as_deref(),
+                false,
+                raw_input.is_some()
+                    || raw_output.is_some()
+                    || content.as_ref().is_some_and(|items| !items.is_empty())
+                    || locations.as_ref().is_some_and(|items| !items.is_empty()),
+            ),
             RuntimeKiroAcpSessionUpdate::UsageUpdate { used, size, cost } => {
                 self.usage_update = Some(runtime_kiro_acp_usage_update_json(used, size, cost));
             }
@@ -120,57 +125,64 @@ impl RuntimeKiroAcpTurnStateBuilder {
         }
     }
 
-    fn apply_tool_call(&mut self, tool_call: RuntimeKiroAcpToolCallState) {
-        let index = self.tool_call_index(&tool_call.tool_call_id);
-        if index == self.tool_calls.len() {
-            self.tool_calls.push(tool_call);
-        } else if let Some(existing) = self.tool_calls.get_mut(index) {
-            *existing = tool_call;
-        }
-    }
-
-    fn apply_tool_call_update(&mut self, update: RuntimeKiroAcpToolCallUpdate) {
-        let RuntimeKiroAcpToolCallUpdate {
-            tool_call_id,
-            title,
-            status,
-            content,
-            kind,
-            raw_input,
-            raw_output,
-            locations,
-        } = update;
-        let index = self.tool_call_index(&tool_call_id);
-        if index == self.tool_calls.len() {
-            self.tool_calls.push(RuntimeKiroAcpToolCallState {
-                tool_call_id,
-                title,
-                status,
-                kind,
-                raw_input,
-                raw_output,
-                content,
-                locations,
-            });
+    fn apply_tool_activity(
+        &mut self,
+        tool_call_id: &str,
+        title: Option<&str>,
+        status: Option<&str>,
+        kind: Option<&str>,
+        initial: bool,
+        details_omitted: bool,
+    ) {
+        if self.tool_activities_truncated {
             return;
         }
-        if let Some(existing) = self.tool_calls.get_mut(index) {
-            runtime_kiro_acp_replace_if_present(&mut existing.title, title);
-            runtime_kiro_acp_replace_if_present(&mut existing.status, status);
-            runtime_kiro_acp_replace_if_present(&mut existing.kind, kind);
-            runtime_kiro_acp_replace_if_present(&mut existing.raw_input, raw_input);
-            runtime_kiro_acp_replace_if_present(&mut existing.raw_output, raw_output);
-            runtime_kiro_acp_replace_if_present(&mut existing.content, content);
-            runtime_kiro_acp_replace_if_present(&mut existing.locations, locations);
+        let bounded_id = (tool_call_id.len()
+            <= prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES)
+            .then_some(tool_call_id);
+        let previous = bounded_id
+            .and_then(|tool_call_id| self.tool_activity_labels.get(tool_call_id))
+            .cloned();
+        let resolved_title = title
+            .map(str::to_string)
+            .or_else(|| previous.as_ref().map(|(name, _)| name.clone()));
+        let resolved_kind = kind
+            .map(str::to_string)
+            .or_else(|| previous.as_ref().and_then(|(_, kind)| kind.clone()));
+        let activity = if self.tool_activities.len()
+            < prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS.saturating_sub(1)
+        {
+            prodex_provider_core::kiro_provider_core_tool_activity_item(
+                resolved_title.as_deref(),
+                status,
+                resolved_kind.as_deref(),
+                initial,
+                details_omitted,
+            )
+        } else {
+            self.tool_activities_truncated = true;
+            prodex_provider_core::kiro_provider_core_truncated_tool_activity_item()
+        };
+        if !self.tool_activities_truncated
+            && bounded_id.is_some()
+            && (self.tool_activity_labels.contains_key(tool_call_id)
+                || self.tool_activity_labels.len()
+                    < prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS)
+        {
+            self.tool_activity_labels.insert(
+                tool_call_id.to_string(),
+                (
+                    activity["name"]
+                        .as_str()
+                        .unwrap_or("Kiro internal activity")
+                        .to_string(),
+                    activity["kind"].as_str().map(str::to_string),
+                ),
+            );
         }
-    }
-
-    fn tool_call_index(&mut self, tool_call_id: &str) -> usize {
-        let next_index = self.tool_calls.len();
-        *self
-            .tool_call_indexes
-            .entry(tool_call_id.to_string())
-            .or_insert(next_index)
+        self.assistant_text
+            .push_str(&prodex_provider_core::kiro_provider_core_tool_activity_text(&activity));
+        self.tool_activities.push(activity);
     }
 
     fn finish(self) -> RuntimeKiroAcpTurnState {
@@ -183,26 +195,9 @@ impl RuntimeKiroAcpTurnStateBuilder {
             current_mode_id: self.current_mode_id,
             session_title: self.session_title,
             session_updated_at: self.session_updated_at,
-            tool_calls: self.tool_calls,
+            tool_activities: self.tool_activities,
         }
     }
-}
-
-fn runtime_kiro_acp_replace_if_present<T>(target: &mut Option<T>, value: Option<T>) {
-    if value.is_some() {
-        *target = value;
-    }
-}
-
-struct RuntimeKiroAcpToolCallUpdate {
-    tool_call_id: String,
-    title: Option<String>,
-    status: Option<String>,
-    kind: Option<String>,
-    raw_input: Option<Value>,
-    raw_output: Option<Value>,
-    content: Option<Vec<Value>>,
-    locations: Option<Vec<Value>>,
 }
 
 fn runtime_kiro_acp_session_update(
@@ -232,18 +227,6 @@ fn runtime_kiro_acp_usage_update_json(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct RuntimeKiroAcpToolCallState {
-    pub(super) tool_call_id: String,
-    pub(super) title: Option<String>,
-    pub(super) status: Option<String>,
-    pub(super) kind: Option<String>,
-    pub(super) raw_input: Option<Value>,
-    pub(super) raw_output: Option<Value>,
-    pub(super) content: Option<Vec<Value>>,
-    pub(super) locations: Option<Vec<Value>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub(super) struct RuntimeKiroAcpTurnState {
     pub(super) assistant_text: String,
     pub(super) reasoning_text: String,
@@ -253,5 +236,5 @@ pub(super) struct RuntimeKiroAcpTurnState {
     pub(super) current_mode_id: Option<String>,
     pub(super) session_title: Option<String>,
     pub(super) session_updated_at: Option<String>,
-    pub(super) tool_calls: Vec<RuntimeKiroAcpToolCallState>,
+    pub(super) tool_activities: Vec<Value>,
 }

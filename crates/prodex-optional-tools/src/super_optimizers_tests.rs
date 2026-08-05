@@ -370,31 +370,6 @@ fn agents_reference_is_idempotent() -> Result<()> {
 }
 
 #[test]
-fn sub_agents_overlay_is_referenced_once() -> Result<()> {
-    let home = temp_dir("super-sub-agents-reference");
-    fs::create_dir_all(&home)?;
-    fs::write(
-        home.join("SUB_AGENTS.md"),
-        "temporary sub-agent instructions\n",
-    )?;
-
-    ensure_sub_agents_reference(&home)?;
-    ensure_sub_agents_reference(&home)?;
-
-    let agents = fs::read_to_string(home.join("AGENTS.md"))?;
-    let expected = format!("@{}", home.join("SUB_AGENTS.md").display());
-    assert_eq!(
-        agents
-            .lines()
-            .filter(|line| line.trim() == expected)
-            .count(),
-        1
-    );
-    fs::remove_dir_all(home)?;
-    Ok(())
-}
-
-#[test]
 fn awareness_contains_only_the_minimal_stack() {
     let awareness = render_super_optimizer_awareness(
         Some(Path::new("/bin/rtk")),

@@ -539,6 +539,28 @@ mod tests {
             assert!(launch.contains("prodex s") || launch.contains("prodex super"));
             assert!(!contains_secret_marker(launch));
         }
+
+        let gemini = preset_values
+            .iter()
+            .find(|value| value["id"] == "gemini")
+            .expect("Gemini preset should be present");
+        assert!(
+            gemini["auth"]
+                .as_str()
+                .is_some_and(|value| value.contains("GEMINI_API_KEY"))
+        );
+        assert!(
+            gemini["notes"]
+                .as_str()
+                .is_some_and(|value| value.contains("OAuth profiles are disabled"))
+        );
+        assert!(
+            !gemini["availableThrough"]
+                .as_array()
+                .expect("Gemini availability should be an array")
+                .iter()
+                .any(|value| value == "profile-backed routing")
+        );
     }
 
     #[test]

@@ -236,7 +236,7 @@ fn runtime_local_rewrite_gemini_options(
     }
     if selection.profileless_local_home {
         bail!(
-            "Gemini provider requires Google sign-in from `prodex login`, or --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S)"
+            "Codex-fronted Gemini requires --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S); Google Gemini OAuth profiles are disabled. Use `prodex s gemini --cli gemini` for supported native Vertex AI authentication"
         );
     }
     let profiles = runtime_gemini_oauth_profiles_for_provider(state, selection, request)?;

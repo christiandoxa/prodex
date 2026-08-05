@@ -91,14 +91,6 @@ fn login_menu_entries() -> &'static [LoginMenuEntry] {
             action: LoginMenuAction::Method(LoginMethod::ApiKey),
         },
         LoginMenuEntry {
-            title: "Google Gemini OAuth",
-            provider: "Google Gemini",
-            auth: "Google OAuth profile",
-            usage: "Reusable Gemini profile for prodex s --provider gemini, including OAuth rotation.",
-            command: "prodex login --with-google",
-            action: LoginMenuAction::Method(LoginMethod::Google),
-        },
-        LoginMenuEntry {
             title: "Google Gemini API key",
             provider: "Google Gemini",
             auth: "Runtime API key only",

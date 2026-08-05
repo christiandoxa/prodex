@@ -95,6 +95,7 @@ mod runtime_state_shared;
 mod runtime_store;
 mod runtime_tools;
 mod secret_store_support;
+mod semantic_compact_metrics;
 mod shared_codex_fs;
 mod shared_types;
 #[cfg(test)]

@@ -14,6 +14,16 @@ import { join, resolve } from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_EXTENDED_TIMEOUT_MS = 420_000;
+const SUPPORTED_GEMINI_API_KEY_ENV = [
+  "GEMINI_API_KEY",
+  "GEMINI_API_KEYS",
+  "GOOGLE_API_KEY",
+  "GOOGLE_API_KEYS",
+];
+
+function hasSupportedGeminiAuth() {
+  return SUPPORTED_GEMINI_API_KEY_ENV.some((name) => process.env[name]?.trim());
+}
 
 function prodexBinary() {
   if (process.env.PRODEX_BIN) {
@@ -616,15 +626,20 @@ function observedCommandOutput(output, expectedFinal) {
 async function run() {
   if (process.env.PRODEX_LIVE_GEMINI !== "1") {
     process.stdout.write(
-      "gemini-live-smoke skipped: set PRODEX_LIVE_GEMINI=1 to use configured Gemini credentials\n",
+      "gemini-live-smoke SKIPPED: PRODEX_LIVE_GEMINI is not 1; no live verification ran\n",
     );
     return 0;
+  }
+  if (!hasSupportedGeminiAuth()) {
+    throw new Error(
+      "supported Gemini API-key authentication is not configured; Gemini OAuth is unsupported",
+    );
   }
 
   const marker = `PRODEX_GEMINI_LIVE_OK_${Date.now()}`;
   if (process.env.PRODEX_LIVE_GEMINI_EXTENDED !== "1") {
     await runProdex(simpleCommand(marker), marker, "simple", timeoutMs(DEFAULT_TIMEOUT_MS));
-    process.stdout.write("gemini-live-smoke passed\n");
+    process.stdout.write("gemini-live-smoke PASSED: supported API-key authentication\n");
     return 0;
   }
 
@@ -709,7 +724,7 @@ async function run() {
     if (process.env.PRODEX_LIVE_GEMINI_MULTIMODAL === "1") {
       await runProdex(optionalMultimodalCommand(marker, workspace), "red", "optional-multimodal", timeout);
     }
-    process.stdout.write("gemini-live-smoke extended passed\n");
+    process.stdout.write("gemini-live-smoke PASSED: extended supported API-key authentication\n");
     return 0;
   } finally {
     if (process.env.PRODEX_LIVE_GEMINI_KEEP_WORKSPACE !== "1") {
@@ -725,6 +740,6 @@ run()
     process.exitCode = code;
   })
   .catch((error) => {
-    process.stderr.write(`gemini-live-smoke: ${error.message}\n`);
+    process.stderr.write(`gemini-live-smoke FAILED: ${error.message}\n`);
     process.exitCode = 1;
   });

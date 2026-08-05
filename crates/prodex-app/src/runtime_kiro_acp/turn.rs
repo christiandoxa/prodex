@@ -1,14 +1,8 @@
-use self::turn_tools::{
-    runtime_kiro_acp_chat_tool_call_item, runtime_kiro_acp_responses_tool_call_item,
-};
 use super::turn_state::runtime_kiro_acp_collect_turn_state;
 use super::{
     RuntimeKiroAcpEnvelope, RuntimeKiroAcpNewSessionResult, RuntimeKiroAcpPromptTurnResult,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[path = "turn_tools.rs"]
-mod turn_tools;
 
 pub(crate) fn runtime_kiro_acp_model_catalog(
     session: &RuntimeKiroAcpNewSessionResult,
@@ -52,13 +46,6 @@ pub(crate) fn runtime_kiro_acp_responses_value_from_prompt_turn(
             ),
         );
     }
-    output.extend(
-        turn_state
-            .tool_calls
-            .iter()
-            .map(runtime_kiro_acp_responses_tool_call_item),
-    );
-
     let mut response = prodex_provider_core::kiro_provider_core_acp_response_value(
         &response_id,
         runtime_kiro_acp_created_at(),
@@ -92,6 +79,7 @@ pub(crate) fn runtime_kiro_acp_responses_value_from_prompt_turn(
         turn_state.session_title.as_deref(),
         turn_state.session_updated_at.as_deref(),
         stop_reason.as_deref(),
+        turn_state.tool_activities,
     ) {
         response["metadata"] = metadata;
     }
@@ -105,11 +93,7 @@ pub(crate) fn runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(
     prodex_provider_core::kiro_provider_core_acp_chat_assistant_message(
         &turn_state.assistant_text,
         &turn_state.reasoning_text,
-        turn_state
-            .tool_calls
-            .iter()
-            .map(runtime_kiro_acp_chat_tool_call_item)
-            .collect(),
+        Vec::new(),
     )
     .into_iter()
     .collect()

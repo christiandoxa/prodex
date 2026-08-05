@@ -1,6 +1,7 @@
 use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +40,46 @@ pub struct ProviderCatalogEntry {
     pub aliases: Vec<String>,
     pub feature_flags: ProviderCatalogFeatureFlags,
     pub pricing_known: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderModelChoice {
+    ProviderDefault,
+    Model(String),
+    Custom,
+}
+
+/// Builds the offline model picker from the canonical catalog plus local configuration.
+pub fn resolve_provider_model_choices(
+    provider: ProviderId,
+    configured_models: &[String],
+    current_model: Option<&str>,
+) -> Vec<ProviderModelChoice> {
+    let mut choices = vec![ProviderModelChoice::ProviderDefault];
+    let mut seen = BTreeSet::new();
+    let mut push = |model: &str| {
+        if model.trim().is_empty() {
+            return;
+        }
+        let canonical = provider_catalog_entry(provider, model)
+            .map(|entry| entry.id.as_str())
+            .or_else(|| crate::provider_model_spec(provider, model).map(|spec| spec.id))
+            .unwrap_or(model);
+        if seen.insert(canonical.to_ascii_lowercase()) {
+            choices.push(ProviderModelChoice::Model(canonical.to_string()));
+        }
+    };
+    for entry in provider_catalog_entries_for(provider) {
+        push(&entry.id);
+    }
+    for model in configured_models {
+        push(model);
+    }
+    if let Some(model) = current_model {
+        push(model);
+    }
+    choices.push(ProviderModelChoice::Custom);
+    choices
 }
 
 fn provider_catalog_entries_static() -> &'static [ProviderCatalogEntry] {
@@ -136,32 +177,11 @@ pub fn provider_model_json(provider: ProviderId, model: &str) -> Option<serde_js
 }
 
 pub fn provider_model_catalog_json(provider: ProviderId) -> Vec<serde_json::Value> {
-    let catalog = provider_catalog_json(provider);
-    if !catalog.is_empty() {
-        return catalog;
-    }
-    crate::provider_model_catalog(provider)
-        .iter()
-        .map(|model| {
-            serde_json::json!({
-                "id": model.id,
-                "object": "model",
-                "provider": provider.label(),
-                "owned_by": model.owned_by,
-                "display_name": model.display_name,
-                "description": model.description,
-                "context_window": model.context_window_tokens,
-                "max_output_tokens": null,
-                "default_output_reserve_tokens": null,
-                "supported_reasoning_efforts": null,
-                "default_reasoning_effort": null,
-                "reasoning_reserve_tokens": null,
-                "embedding_compatible": null,
-                "input_cost_per_million_microusd": model.input_cost_per_million_microusd,
-                "output_cost_per_million_microusd": model.output_cost_per_million_microusd,
-                "endpoints": model.endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),
-                "aliases": model.aliases,
-            })
+    resolve_provider_model_choices(provider, &[], None)
+        .into_iter()
+        .filter_map(|choice| match choice {
+            ProviderModelChoice::Model(model) => provider_model_json(provider, &model),
+            ProviderModelChoice::ProviderDefault | ProviderModelChoice::Custom => None,
         })
         .collect()
 }
@@ -198,6 +218,108 @@ mod tests {
             assert!(seen.insert(key));
             for alias in &entry.aliases {
                 assert!(!alias.trim().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn openai_picker_uses_catalog_order_and_luna_supports_max() {
+        let choices = resolve_provider_model_choices(
+            ProviderId::OpenAi,
+            &["profile-model".to_string(), "gpt-5.6-luna".to_string()],
+            Some("current-model"),
+        );
+        assert_eq!(choices[0], ProviderModelChoice::ProviderDefault);
+        assert_eq!(
+            choices[1],
+            ProviderModelChoice::Model("gpt-5.6-luna".to_string())
+        );
+        assert!(choices.contains(&ProviderModelChoice::Model("profile-model".to_string())));
+        assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
+        assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+        let luna = provider_catalog_entry(ProviderId::OpenAi, "gpt-5.6-luna").unwrap();
+        assert!(
+            luna.supported_reasoning_efforts
+                .as_ref()
+                .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Max))
+        );
+    }
+
+    #[test]
+    fn copilot_luna_and_kiro_auto_expose_verified_efforts() {
+        let copilot = provider_catalog_entry(ProviderId::Copilot, "gpt-5.6-luna").unwrap();
+        assert!(
+            copilot
+                .supported_reasoning_efforts
+                .as_ref()
+                .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Max))
+        );
+        let kiro = provider_catalog_entry(ProviderId::Kiro, "auto").unwrap();
+        assert_eq!(
+            kiro.supported_reasoning_efforts.as_deref(),
+            Some(
+                [
+                    ProviderReasoningEffort::Low,
+                    ProviderReasoningEffort::Medium,
+                    ProviderReasoningEffort::High,
+                    ProviderReasoningEffort::XHigh,
+                    ProviderReasoningEffort::Max,
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn every_picker_and_models_endpoint_include_the_full_static_catalog() {
+        for descriptor in crate::provider_implementation_registry().iter() {
+            let provider = descriptor.provider();
+            let choices = resolve_provider_model_choices(provider, &[], None);
+            let json = provider_model_catalog_json(provider);
+            let detailed_ids = provider_catalog_entries_for(provider)
+                .into_iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<BTreeSet<_>>();
+            let static_ids = descriptor
+                .model_catalog()
+                .iter()
+                .map(|model| model.id)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                detailed_ids,
+                static_ids,
+                "{} catalog drift",
+                provider.label()
+            );
+            for entry in provider_catalog_entries_for(provider) {
+                let static_model = descriptor
+                    .model_catalog()
+                    .iter()
+                    .find(|model| model.id == entry.id)
+                    .unwrap();
+                assert_eq!(
+                    entry.supported_endpoints,
+                    static_model.endpoints,
+                    "{}:{} endpoint drift",
+                    provider.label(),
+                    entry.id
+                );
+            }
+            assert_eq!(choices.first(), Some(&ProviderModelChoice::ProviderDefault));
+            assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+            for model in descriptor.model_catalog() {
+                assert!(
+                    choices.contains(&ProviderModelChoice::Model(model.id.to_string())),
+                    "{} picker omitted {}",
+                    provider.label(),
+                    model.id
+                );
+                assert!(
+                    json.iter().any(|entry| entry["id"] == model.id),
+                    "{} models endpoint omitted {}",
+                    provider.label(),
+                    model.id
+                );
             }
         }
     }

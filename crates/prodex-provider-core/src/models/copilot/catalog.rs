@@ -12,6 +12,18 @@ pub(in crate::models) const MODELS: &[ProviderModelSpec] = &[
     model!(
         ProviderId::Copilot,
         "github-copilot",
+        "gpt-5.6-luna",
+        "GPT-5.6 Luna",
+        "GPT-5.6 Luna model exposed through GitHub Copilot.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        COPILOT_TEXT_ENDPOINTS,
+        ["luna"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
         "auto",
         "Copilot Auto",
         "GitHub Copilot alias routed through provider fallback.",

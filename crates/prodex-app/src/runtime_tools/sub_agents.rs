@@ -1,27 +1,40 @@
 use anyhow::{Context, Result, bail};
+use fs2::FileExt;
 use prodex_cli::{
-    SubAgentConfig, SubAgentLaunchTarget, SubAgentReasoningEffort, SuperLaunchTarget,
+    SubAgentConfig, SubAgentLaunchTarget, SubAgentMaxConcurrency, SubAgentReasoningEffort,
+    SuperLaunchTarget,
 };
 use prodex_provider_core::{
-    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderReasoningEffort, provider_catalog_entry,
-    provider_model_catalog, provider_model_spec, provider_runtime_metadata,
+    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice, ProviderReasoningEffort,
+    provider_catalog_entry, provider_implementation_registry, provider_model_spec,
+    resolve_provider_model_choices,
 };
 use prodex_runtime_launch::ChildProcessPlan;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
-const SUB_AGENT_MODEL_ENV: &str = "PRODEX_SUB_AGENT_MODEL";
 const SUB_AGENTS_FILE: &str = "SUB_AGENTS.md";
+const SUB_AGENT_CONFIG_FILE: &str = "sub-agent-launch.json";
+const SUB_AGENT_TASK_DIR: &str = "sub-agent-tasks";
+const SUB_AGENT_SLOT_DIR: &str = "sub-agent-slots";
+const SUB_AGENT_TASK_MAX_BYTES: usize = 65_536;
+const SUB_AGENT_BLOCK_BEGIN: &str = "<!-- PRODEX SUB-AGENT BEGIN -->";
+const SUB_AGENT_BLOCK_END: &str = "<!-- PRODEX SUB-AGENT END -->";
+const SUB_AGENT_LIMIT_EXIT_CODE: i32 = 75;
 const SUB_AGENT_RULES: [&str; 17] = [
     "Act as lead and sole integrator: own delegation, integration, testing, and the final response.",
     "Plan the decomposition first; give each child a narrow objective, clear scope, relevant paths, expected output, and required validation.",
-    "Keep at most four active children; delegate only genuinely independent work and continue alone when coordination overhead or conflicts outweigh the benefit.",
+    "Never have more than the configured number of child sub-agents active at once; the official launcher enforces this limit.",
     "For parallel edits, assign strictly disjoint file ownership or use isolated worktrees and integrate deliberately; never allow overlapping writes.",
-    "Start every child with the exact command printed below and keep its argument order unchanged.",
-    "Use `prodex s` for child launches; do not call `codex` or another front end directly.",
-    "Replace `<task>` with one shell-safe task only; do not append unrelated prompts, flags, or the unchanged whole request.",
+    "Write each narrow delegated task to a new task file in the designated temporary task directory.",
+    "Invoke only the official internal launcher command shown below; never run a raw nested `prodex s`, `codex`, or another front end.",
+    "When the launcher reports that the concurrency limit is reached, wait for an active child to finish before retrying.",
     "Start a fresh child session; never forward the parent UUID, `resume`, `--last`, or continuation metadata.",
     "Keep the provider, optional model, and reasoning effort shown below; omit each option when absent.",
     "Presidio is inherited explicitly through `--presidio` or `--no-presidio`; never prompt again.",
@@ -33,6 +46,39 @@ const SUB_AGENT_RULES: [&str; 17] = [
     "Never copy secrets, API keys, OAuth tokens, cookies, or arbitrary parent environment values into child work.",
     "Retry only after a corrective change; otherwise report the blocker without changing provider, flags, or session target.",
 ];
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct ChildLaunchSpec {
+    executable: PathBuf,
+    provider: ProviderId,
+    model: Option<String>,
+    effort: Option<SubAgentReasoningEffort>,
+    local_url: Option<String>,
+    presidio_enabled: bool,
+    max_concurrency: SubAgentMaxConcurrency,
+    slot_dir: PathBuf,
+    task_dir: PathBuf,
+    task_max_bytes: usize,
+    recursion_marker: String,
+}
+
+impl std::fmt::Debug for ChildLaunchSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChildLaunchSpec")
+            .field("executable_resolved", &self.executable.is_absolute())
+            .field("provider", &self.provider)
+            .field("model_configured", &self.model.is_some())
+            .field("effort", &self.effort)
+            .field("local_url_configured", &self.local_url.is_some())
+            .field("presidio_enabled", &self.presidio_enabled)
+            .field("max_concurrency", &self.max_concurrency)
+            .field("task_max_bytes", &self.task_max_bytes)
+            .field("recursion_marker", &self.recursion_marker)
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubAgentRecursionPolicy {
@@ -56,6 +102,7 @@ pub(crate) struct ResolvedSuperSubAgent {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<SubAgentReasoningEffort>,
     pub(crate) url: Option<String>,
+    pub(crate) max_concurrency: SubAgentMaxConcurrency,
     pub(crate) target: SubAgentLaunchTarget,
     pub(crate) presidio_enabled: bool,
     pub(crate) recursion_disabled: bool,
@@ -83,6 +130,7 @@ impl std::fmt::Debug for ResolvedSuperSubAgent {
             .field("model_configured", &self.model.is_some())
             .field("effort", &self.effort)
             .field("url_configured", &self.url.is_some())
+            .field("max_concurrency", &self.max_concurrency)
             .field("target", &sub_agent_target_label(&self.target))
             .field("presidio_enabled", &self.presidio_enabled)
             .field("recursion_disabled", &self.recursion_disabled)
@@ -107,6 +155,32 @@ pub(crate) fn resolve_super_sub_agent_config(
             .map(|spec| spec.id.to_string())
             .unwrap_or_else(|| model.to_string())
     });
+    let effort_model = model.as_deref().or_else(|| {
+        prodex_provider_core::provider_runtime_metadata(provider)
+            .map(|metadata| metadata.default_model)
+    });
+    if let (Some(model), Some(effort)) = (effort_model, config.model_reasoning_effort)
+        && let Some(supported) = provider_catalog_entry(provider, model)
+            .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
+    {
+        let effort = match effort {
+            SubAgentReasoningEffort::None => ProviderReasoningEffort::None,
+            SubAgentReasoningEffort::Minimal => ProviderReasoningEffort::Minimal,
+            SubAgentReasoningEffort::Low => ProviderReasoningEffort::Low,
+            SubAgentReasoningEffort::Medium => ProviderReasoningEffort::Medium,
+            SubAgentReasoningEffort::High => ProviderReasoningEffort::High,
+            SubAgentReasoningEffort::XHigh => ProviderReasoningEffort::XHigh,
+            SubAgentReasoningEffort::Max => ProviderReasoningEffort::Max,
+        };
+        if !supported.contains(&effort) {
+            bail!(
+                "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
+                config.model_reasoning_effort.unwrap().as_str(),
+                provider.label(),
+                model
+            );
+        }
+    }
 
     let url = config
         .url
@@ -128,6 +202,7 @@ pub(crate) fn resolve_super_sub_agent_config(
         model,
         effort: config.model_reasoning_effort,
         url,
+        max_concurrency: config.max_concurrency,
         target,
         presidio_enabled: false,
         recursion_disabled: true,
@@ -138,10 +213,11 @@ pub(crate) fn canonical_sub_agent_providers() -> &'static [ProviderId] {
     PROVIDER_IMPLEMENTATION_ORDER
 }
 
-pub(crate) fn canonical_sub_agent_models(
+pub(crate) fn canonical_sub_agent_model_choices(
     provider: ProviderId,
-) -> &'static [prodex_provider_core::ProviderModelSpec] {
-    provider_model_catalog(provider)
+    current_model: Option<&str>,
+) -> Vec<ProviderModelChoice> {
+    resolve_provider_model_choices(provider, &[], current_model)
 }
 
 pub(crate) fn canonical_sub_agent_efforts(
@@ -152,20 +228,10 @@ pub(crate) fn canonical_sub_agent_efforts(
         .and_then(|model| provider_catalog_entry(provider, model))
         .and_then(|entry| entry.supported_reasoning_efforts.as_deref());
     let Some(catalog_efforts) = catalog_efforts else {
-        return [
-            SubAgentReasoningEffort::None,
-            SubAgentReasoningEffort::Minimal,
-            SubAgentReasoningEffort::Low,
-            SubAgentReasoningEffort::Medium,
-            SubAgentReasoningEffort::High,
-            SubAgentReasoningEffort::XHigh,
-            SubAgentReasoningEffort::Max,
-        ]
-        .into_iter()
-        .collect();
+        return Vec::new();
     };
 
-    let mut efforts = catalog_efforts
+    catalog_efforts
         .iter()
         .filter_map(|effort| match effort {
             ProviderReasoningEffort::None => Some(SubAgentReasoningEffort::None),
@@ -174,24 +240,16 @@ pub(crate) fn canonical_sub_agent_efforts(
             ProviderReasoningEffort::Medium => Some(SubAgentReasoningEffort::Medium),
             ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
             ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
+            ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
             ProviderReasoningEffort::Unknown => None,
         })
-        .collect::<Vec<_>>();
-    if efforts.is_empty() {
-        return canonical_sub_agent_efforts(provider, None);
-    }
-    if !efforts.contains(&SubAgentReasoningEffort::XHigh) {
-        efforts.push(SubAgentReasoningEffort::XHigh);
-    }
-    if !efforts.contains(&SubAgentReasoningEffort::Max) {
-        efforts.push(SubAgentReasoningEffort::Max);
-    }
-    efforts
+        .collect()
 }
 
 pub(crate) fn provider_display_name(provider: ProviderId) -> &'static str {
-    provider_runtime_metadata(provider)
-        .map(|metadata| metadata.display_name)
+    provider_implementation_registry()
+        .get(provider)
+        .map(|descriptor| descriptor.display_name())
         .unwrap_or(provider.label())
 }
 
@@ -203,18 +261,349 @@ pub(crate) fn write_sub_agent_overlay(
     overlay_home: &Path,
     sub_agent: &ResolvedSuperSubAgent,
 ) -> Result<PathBuf> {
+    let executable = env::current_exe().context("failed to resolve current Prodex executable")?;
+    write_sub_agent_overlay_with_executable(overlay_home, sub_agent, executable)
+}
+
+fn write_sub_agent_overlay_with_executable(
+    overlay_home: &Path,
+    sub_agent: &ResolvedSuperSubAgent,
+    executable: PathBuf,
+) -> Result<PathBuf> {
+    let task_dir = overlay_home.join(SUB_AGENT_TASK_DIR);
+    let slot_dir = overlay_home.join(SUB_AGENT_SLOT_DIR);
+    create_private_directory(&task_dir)?;
+    create_private_directory(&slot_dir)?;
+    reconcile_sub_agent_slots(&slot_dir, sub_agent.max_concurrency.get())?;
+    let spec = ChildLaunchSpec {
+        executable,
+        provider: sub_agent.provider,
+        model: sub_agent.model.clone(),
+        effort: sub_agent.effort,
+        local_url: sub_agent.url.clone(),
+        presidio_enabled: sub_agent.presidio_enabled,
+        max_concurrency: sub_agent.max_concurrency,
+        slot_dir,
+        task_dir,
+        task_max_bytes: SUB_AGENT_TASK_MAX_BYTES,
+        recursion_marker: SUB_AGENT_RECURSION_MARKER.to_string(),
+    };
+    let config_path = overlay_home.join(SUB_AGENT_CONFIG_FILE);
+    let config =
+        serde_json::to_vec_pretty(&spec).context("failed to encode sub-agent launcher config")?;
+    secret_store::write_private_file_atomic(&config_path, &config)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
     let path = overlay_home.join(SUB_AGENTS_FILE);
-    let contents = render_sub_agent_overlay(sub_agent);
+    let contents = render_sub_agent_overlay_for_spec(sub_agent, &spec, &config_path);
     secret_store::write_private_file_atomic(&path, contents.as_bytes())
         .with_context(|| format!("failed to write {}", path.display()))?;
+    prodex_optional_tools::upsert_agents_block(
+        overlay_home,
+        SUB_AGENT_BLOCK_BEGIN,
+        SUB_AGENT_BLOCK_END,
+        &contents,
+    )?;
     Ok(path)
+}
+
+fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<()> {
+    let mut stale = Vec::with_capacity(usize::from(
+        prodex_cli::HARD_MAX_SUB_AGENT_CONCURRENCY - limit,
+    ));
+    for index in limit..prodex_cli::HARD_MAX_SUB_AGENT_CONCURRENCY {
+        let slot = slot_dir.join(format!("slot-{index:02}.lock"));
+        let file = match OpenOptions::new().read(true).write(true).open(&slot) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to open stale concurrency slot {index}"));
+            }
+        };
+        match file.try_lock_exclusive() {
+            Ok(()) => stale.push((slot, file)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                bail!(
+                    "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
+                );
+            }
+            Err(error) => {
+                return Err(error).context("failed to inspect stale sub-agent concurrency slot");
+            }
+        }
+    }
+    for (slot, _) in &stale {
+        fs::remove_file(slot).with_context(|| {
+            format!("failed to remove stale concurrency slot {}", slot.display())
+        })?;
+    }
+    for index in 0..limit {
+        let slot = slot_dir.join(format!("slot-{index:02}.lock"));
+        match OpenOptions::new().write(true).create_new(true).open(&slot) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to create {}", slot.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn create_private_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to secure {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Result<()> {
+    let config = read_bounded_utf8(&args.config, 65_536, "sub-agent launcher config")?;
+    let spec: ChildLaunchSpec =
+        serde_json::from_str(&config).context("invalid sub-agent launcher config")?;
+    validate_child_launch_spec(&spec)?;
+    let task_dir = fs::canonicalize(&spec.task_dir).with_context(|| {
+        format!(
+            "failed to resolve task directory {}",
+            spec.task_dir.display()
+        )
+    })?;
+    let task_path = fs::canonicalize(&args.task_file)
+        .with_context(|| format!("failed to resolve task file {}", args.task_file.display()))?;
+    if task_path.parent() != Some(task_dir.as_path()) {
+        bail!("sub-agent task file must be directly inside the configured task directory");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&task_path, fs::Permissions::from_mode(0o600))
+            .context("failed to secure sub-agent task file")?;
+    }
+    let task = read_bounded_utf8(&task_path, spec.task_max_bytes, "sub-agent task")?;
+    if task.trim().is_empty() {
+        bail!("sub-agent task must be nonempty");
+    }
+    let _slot = acquire_sub_agent_slot(&spec)?;
+    fs::remove_file(&task_path).with_context(|| {
+        format!(
+            "failed to remove consumed task file {}",
+            task_path.display()
+        )
+    })?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to initialize sub-agent launcher runtime")?;
+    let outcome = runtime.block_on(run_sub_agent_child(&spec, &task))?;
+    if outcome.cancelled {
+        return Err(crate::command_dispatch::command_exit_error(
+            130,
+            "sub-agent launcher cancelled",
+        ));
+    }
+    if !outcome.status.success() {
+        let code = outcome.status.code().unwrap_or(1);
+        return Err(crate::command_dispatch::command_exit_error(
+            code,
+            format!("sub-agent child exited with status {code}"),
+        ));
+    }
+    Ok(())
+}
+
+fn read_bounded_utf8(path: &Path, max_bytes: usize, label: &str) -> Result<String> {
+    let mut file = File::open(path).with_context(|| format!("failed to open {label}"))?;
+    let mut bytes = Vec::with_capacity(max_bytes.min(8_192));
+    file.by_ref()
+        .take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {label}"))?;
+    if bytes.len() > max_bytes {
+        bail!("{label} exceeds the {max_bytes}-byte limit");
+    }
+    String::from_utf8(bytes).with_context(|| format!("{label} must be valid UTF-8"))
+}
+
+fn validate_child_launch_spec(spec: &ChildLaunchSpec) -> Result<()> {
+    if !spec.executable.is_absolute() {
+        bail!("sub-agent executable path must be absolute");
+    }
+    if spec.recursion_marker != SUB_AGENT_RECURSION_MARKER {
+        bail!("sub-agent recursion marker is invalid");
+    }
+    if spec.task_max_bytes == 0 || spec.task_max_bytes > SUB_AGENT_TASK_MAX_BYTES {
+        bail!("sub-agent task size policy is invalid");
+    }
+    if spec.provider == ProviderId::Local {
+        let url = spec
+            .local_url
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("local child provider requires a URL"))?;
+        prodex_cli::parse_sub_agent_url(url).map_err(anyhow::Error::msg)?;
+    } else if spec.local_url.is_some() {
+        bail!("child local URL is valid only for the local provider");
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct SubAgentSlotLease(File);
+
+impl Drop for SubAgentSlotLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
+fn acquire_sub_agent_slot(spec: &ChildLaunchSpec) -> Result<SubAgentSlotLease> {
+    for index in 0..spec.max_concurrency.get() {
+        let path = spec.slot_dir.join(format!("slot-{index:02}.lock"));
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("failed to open concurrency slot {index}"))?;
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(SubAgentSlotLease(file)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                return Err(error).context("failed to acquire sub-agent concurrency slot");
+            }
+        }
+    }
+    Err(crate::command_dispatch::command_exit_error(
+        SUB_AGENT_LIMIT_EXIT_CODE,
+        "sub-agent concurrency limit reached; wait for an active child to finish before retrying",
+    ))
+}
+
+fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
+    let mut args = vec![OsString::from("s"), OsString::from("--no-sub-agent")];
+    args.push(OsString::from(if spec.presidio_enabled {
+        "--presidio"
+    } else {
+        "--no-presidio"
+    }));
+    match spec.provider {
+        ProviderId::OpenAi => {
+            args.push(OsString::from("-c"));
+            args.push(OsString::from("model_provider=\"openai\""));
+        }
+        ProviderId::Local => {
+            args.push(OsString::from("--url"));
+            args.push(OsString::from(
+                spec.local_url.as_deref().unwrap_or_default(),
+            ));
+        }
+        provider => {
+            args.push(OsString::from("--provider"));
+            args.push(OsString::from(provider.label()));
+        }
+    }
+    if let Some(model) = &spec.model {
+        args.push(OsString::from("--model"));
+        args.push(OsString::from(model));
+    }
+    if let Some(effort) = spec.effort {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(format!(
+            "model_reasoning_effort={}",
+            effort.as_str()
+        )));
+    }
+    args.push(OsString::from("exec"));
+    args.push(OsString::from(task));
+    args
+}
+
+struct SubAgentChildOutcome {
+    status: std::process::ExitStatus,
+    cancelled: bool,
+}
+
+async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAgentChildOutcome> {
+    let mut command = tokio::process::Command::new(&spec.executable);
+    command
+        .args(child_argv(spec, task))
+        .env(SUB_AGENT_RECURSION_MARKER, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().context("failed to spawn sub-agent child")?;
+    let stdout = child.stdout.take().context("child stdout pipe missing")?;
+    let stderr = child.stderr.take().context("child stderr pipe missing")?;
+    let stdout_task = tokio::spawn(relay_child_output(stdout, tokio::io::stdout()));
+    let stderr_task = tokio::spawn(relay_child_output(stderr, tokio::io::stderr()));
+    let mut cancelled = false;
+    let status = tokio::select! {
+        status = child.wait() => status.context("failed to wait for sub-agent child")?,
+        signal = sub_agent_shutdown_signal() => {
+            signal?;
+            cancelled = true;
+            child.start_kill().context("failed to terminate cancelled sub-agent child")?;
+            child.wait().await.context("failed to reap cancelled sub-agent child")?
+        }
+    };
+    stdout_task
+        .await
+        .context("sub-agent stdout relay task failed")??;
+    stderr_task
+        .await
+        .context("sub-agent stderr relay task failed")??;
+    Ok(SubAgentChildOutcome { status, cancelled })
+}
+
+async fn relay_child_output<R, W>(mut reader: R, mut writer: W) -> io::Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buffer = [0_u8; 8_192];
+    let mut write_error = None;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        if write_error.is_none()
+            && let Err(error) = writer.write_all(&buffer[..read]).await
+        {
+            write_error = Some(error);
+        }
+    }
+    if let Some(error) = write_error {
+        Err(error)
+    } else {
+        writer.flush().await
+    }
+}
+
+async fn sub_agent_shutdown_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
+    }
 }
 
 pub(crate) fn apply_sub_agent_recursion_marker(
     child: &mut ChildProcessPlan,
     sub_agent: Option<&ResolvedSuperSubAgent>,
 ) {
-    let Some(sub_agent) = sub_agent else {
+    let Some(_sub_agent) = sub_agent else {
         return;
     };
     let key = OsString::from(SUB_AGENT_RECURSION_MARKER);
@@ -223,92 +612,65 @@ pub(crate) fn apply_sub_agent_recursion_marker(
     } else {
         child.extra_env.push((key, OsString::from("1")));
     }
-    if let Some(model) = secret_like_model(sub_agent) {
-        let key = OsString::from(SUB_AGENT_MODEL_ENV);
-        if let Some((_, value)) = child.extra_env.iter_mut().find(|(name, _)| name == &key) {
-            *value = OsString::from(model);
-        } else {
-            child.extra_env.push((key, OsString::from(model)));
-        }
-    }
 }
 
-pub(crate) fn render_sub_agent_child_command(sub_agent: &ResolvedSuperSubAgent) -> String {
-    render_sub_agent_child_command_with_model(sub_agent, false)
-}
-
-fn render_sub_agent_overlay_child_command(sub_agent: &ResolvedSuperSubAgent) -> String {
-    render_sub_agent_child_command_with_model(sub_agent, secret_like_model(sub_agent).is_some())
-}
-
-fn render_sub_agent_child_command_with_model(
-    sub_agent: &ResolvedSuperSubAgent,
-    model_from_env: bool,
-) -> String {
-    let mut args = vec![shell_quote("prodex"), shell_quote("s")];
-    args.push(shell_quote("--no-sub-agent"));
-    args.push(shell_quote(if sub_agent.presidio_enabled {
-        "--presidio"
-    } else {
-        "--no-presidio"
-    }));
-    match sub_agent.provider {
-        ProviderId::OpenAi => {}
-        ProviderId::Local => {
-            args.extend([
-                shell_quote("--url"),
-                shell_quote(sub_agent.url.as_deref().unwrap_or_default()),
-            ]);
-        }
-        provider => args.extend([shell_quote("--provider"), shell_quote(provider.label())]),
-    }
-    if let Some(model) = sub_agent.model.as_deref() {
-        args.push(shell_quote("--model"));
-        args.push(if model_from_env {
-            format!("\"${{{SUB_AGENT_MODEL_ENV}}}\"")
-        } else {
-            shell_quote(model)
-        });
-    }
-    if let Some(effort) = sub_agent.effort {
-        args.extend([
-            shell_quote("-c"),
-            shell_quote(&format!("model_reasoning_effort={}", effort.as_str())),
-        ]);
-    }
-    args.extend([shell_quote("exec"), shell_quote("<task>")]);
-    format!("{SUB_AGENT_RECURSION_MARKER}=1 {}", args.join(" "))
-}
-
-fn secret_like_model(sub_agent: &ResolvedSuperSubAgent) -> Option<&str> {
-    sub_agent
-        .model
-        .as_deref()
-        .filter(|model| redaction::redaction_redact_secret_like_text(model).as_str() != *model)
-}
-
+#[cfg(test)]
 pub(crate) fn render_sub_agent_overlay(sub_agent: &ResolvedSuperSubAgent) -> String {
+    let task_dir = PathBuf::from(SUB_AGENT_TASK_DIR);
+    let spec = ChildLaunchSpec {
+        executable: PathBuf::from("prodex"),
+        provider: sub_agent.provider,
+        model: sub_agent.model.clone(),
+        effort: sub_agent.effort,
+        local_url: sub_agent.url.clone(),
+        presidio_enabled: sub_agent.presidio_enabled,
+        max_concurrency: sub_agent.max_concurrency,
+        slot_dir: PathBuf::from(SUB_AGENT_SLOT_DIR),
+        task_dir,
+        task_max_bytes: SUB_AGENT_TASK_MAX_BYTES,
+        recursion_marker: SUB_AGENT_RECURSION_MARKER.to_string(),
+    };
+    render_sub_agent_overlay_for_spec(sub_agent, &spec, Path::new(SUB_AGENT_CONFIG_FILE))
+}
+
+fn render_sub_agent_overlay_for_spec(
+    sub_agent: &ResolvedSuperSubAgent,
+    spec: &ChildLaunchSpec,
+    config_path: &Path,
+) -> String {
     let effort = sub_agent
         .effort
         .map(SubAgentReasoningEffort::as_str)
         .unwrap_or("provider/model default");
-    let target = sub_agent_target_label(&sub_agent.target);
-    let rules = SUB_AGENT_RULES
+    let mut rules = SUB_AGENT_RULES
+        .iter()
+        .map(|rule| rule.to_string())
+        .collect::<Vec<_>>();
+    rules.insert(
+        2,
+        format!(
+            "Never have more than {} child sub-agents active at once.",
+            sub_agent.max_concurrency.get()
+        ),
+    );
+    let rules = rules
         .iter()
         .enumerate()
         .map(|(index, rule)| format!("{}. {rule}\n", index + 1))
         .collect::<String>();
+    let task_path = spec.task_dir.join("task-001.txt");
+    let launcher = render_platform_launcher_command(&spec.executable, config_path, &task_path);
     format!(
         "# Prodex Sub-Agent Delegation\n\n\
 This file belongs to one temporary Prodex launch overlay.\n\n\
 - Provider: {}\n\
 - Model: {}\n\
 - Reasoning effort: {effort}\n\
+- Maximum active sub-agents: {} ({})\n\
 - Presidio: {}\n\
-- Parent launch target: {target}\n\
 - Recursion marker: `{SUB_AGENT_RECURSION_MARKER}=1`\n\n\
-Run child work with this shell-safe command, replacing `<task>` with only the\n\
-new child task. Parent resume identifiers are intentionally never forwarded:\n\n\
+Write a narrow task to a new file under `{}` (maximum {} bytes), then invoke\n\
+the official launcher. This example uses `task-001.txt`; choose a new name for each task:\n\n\
 `{}`\n\n\
 ## Rules\n\n\
 {rules}\n\
@@ -326,12 +688,53 @@ Each delegated task must request a concise structured result:\n\n\
                 markdown_safe_value(&redaction::redaction_redact_secret_like_text(model))
             })
             .unwrap_or_else(|| "provider default".to_string()),
+        sub_agent.max_concurrency.get(),
+        sub_agent.max_concurrency.source().label(),
         if sub_agent.presidio_enabled {
             "enabled (inherited)"
         } else {
             "disabled (inherited)"
         },
-        markdown_safe_value(&render_sub_agent_overlay_child_command(sub_agent)),
+        markdown_safe_value(&spec.task_dir.display().to_string()),
+        spec.task_max_bytes,
+        markdown_safe_value(&launcher),
+    )
+}
+
+fn render_platform_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
+    #[cfg(windows)]
+    {
+        render_powershell_launcher_command(executable, config, task)
+    }
+    #[cfg(not(windows))]
+    {
+        render_posix_launcher_command(executable, config, task)
+    }
+}
+
+fn render_posix_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
+    [
+        shell_quote(&executable.display().to_string()),
+        shell_quote("__sub-agent-exec"),
+        shell_quote("--config"),
+        shell_quote(&config.display().to_string()),
+        shell_quote("--task-file"),
+        shell_quote(&task.display().to_string()),
+    ]
+    .join(" ")
+}
+
+#[cfg(any(windows, test))]
+fn render_powershell_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
+    let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+    format!(
+        "& {} {} {} {} {} {}",
+        quote(&executable.display().to_string()),
+        quote("__sub-agent-exec"),
+        quote("--config"),
+        quote(&config.display().to_string()),
+        quote("--task-file"),
+        quote(&task.display().to_string()),
     )
 }
 
@@ -340,16 +743,18 @@ pub(crate) fn render_sub_agent_dry_run_report(sub_agent: &ResolvedSuperSubAgent)
         .effort
         .map(SubAgentReasoningEffort::as_str)
         .unwrap_or("provider/model default");
-    let child = redacted_sub_agent_child_command(sub_agent);
     let redacted_model = sub_agent
         .model
         .as_deref()
         .map(redaction::redaction_redact_secret_like_text)
         .unwrap_or_else(|| "provider default".into());
     format!(
-        "Sub-agent: enabled\nSub-agent provider: {}\nSub-agent model: {}\nSub-agent reasoning effort: {effort}\nSub-agent inherited Presidio: {}\nSub-agent local URL: {}\nSub-agent launch target: {} (parent resume id is not inherited by children)\nSub-agent recursion disabled: {}\nSub-agent recursion marker: {SUB_AGENT_RECURSION_MARKER}=1\nSub-agent child: {child}\nSub-agent overlay: {SUB_AGENTS_FILE} (temporary; referenced once)\n",
+        "Sub-agent: enabled\nSub-agent provider: {}\nSub-agent model: {}\nSub-agent reasoning effort: {effort}\nMaximum active sub-agents: {} ({})\nSub-agent concurrency hard maximum: {}\nSub-agent concurrency enforcement: cross-process exclusive slot leases\nSub-agent inherited Presidio: {}\nSub-agent local URL: {}\nSub-agent launch target: {} (parent resume id is not inherited by children)\nSub-agent recursion disabled: {}\nSub-agent recursion marker: {SUB_AGENT_RECURSION_MARKER}=1\nSub-agent child launcher: shell-free internal command\nSub-agent overlay: {SUB_AGENTS_FILE} (temporary; full instructions injected into the effective AGENTS file)\n",
         sub_agent.provider.label(),
         redacted_model,
+        sub_agent.max_concurrency.get(),
+        sub_agent.max_concurrency.source().label(),
+        prodex_cli::HARD_MAX_SUB_AGENT_CONCURRENCY,
         if sub_agent.presidio_enabled {
             "enabled"
         } else {
@@ -433,23 +838,57 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn redacted_sub_agent_child_command(sub_agent: &ResolvedSuperSubAgent) -> String {
-    let mut redacted = sub_agent.clone();
-    redacted.model = redacted
-        .model
-        .as_deref()
-        .map(redaction::redaction_redact_secret_like_text);
-    redacted.url = redacted.url.map(|_| "<redacted>".to_string());
-    markdown_safe_value(&render_sub_agent_child_command(&redacted))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prodex_cli::SubAgentConcurrencySource;
+
+    fn temp_test_root(label: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "prodex-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    fn slot_spec(root: &Path, limit: u16) -> ChildLaunchSpec {
+        let slot_dir = root.join(SUB_AGENT_SLOT_DIR);
+        let task_dir = root.join(SUB_AGENT_TASK_DIR);
+        fs::create_dir_all(&slot_dir).unwrap();
+        fs::create_dir_all(&task_dir).unwrap();
+        for index in 0..limit {
+            File::create(slot_dir.join(format!("slot-{index:02}.lock"))).unwrap();
+        }
+        ChildLaunchSpec {
+            executable: env::current_exe().unwrap(),
+            provider: ProviderId::OpenAi,
+            model: None,
+            effort: None,
+            local_url: None,
+            presidio_enabled: false,
+            max_concurrency: SubAgentMaxConcurrency::new(limit, SubAgentConcurrencySource::Custom)
+                .unwrap(),
+            slot_dir,
+            task_dir,
+            task_max_bytes: SUB_AGENT_TASK_MAX_BYTES,
+            recursion_marker: SUB_AGENT_RECURSION_MARKER.to_string(),
+        }
+    }
+
+    fn exec_args(root: &Path, spec: &ChildLaunchSpec, task: &str) -> prodex_cli::SubAgentExecArgs {
+        let config = root.join(SUB_AGENT_CONFIG_FILE);
+        let task_file = spec.task_dir.join("task.txt");
+        fs::write(&config, serde_json::to_vec(spec).unwrap()).unwrap();
+        fs::write(&task_file, task).unwrap();
+        prodex_cli::SubAgentExecArgs { config, task_file }
+    }
 
     #[test]
     fn super_launch_target_uses_canonical_normalization_and_resume_detection() {
-        const SESSION_ID: &str = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
         let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
         let resume = |session_id: &str| SuperLaunchTarget::Resume {
             session_id: session_id.to_string(),
@@ -492,7 +931,7 @@ mod tests {
         assert_eq!(resolved.model, None);
         assert!(resolved.recursion_disabled);
         assert!(canonical_sub_agent_providers().contains(&ProviderId::OpenAi));
-        assert!(!canonical_sub_agent_models(ProviderId::OpenAi).is_empty());
+        assert!(canonical_sub_agent_model_choices(ProviderId::OpenAi, None).len() > 2);
     }
 
     #[test]
@@ -509,25 +948,13 @@ mod tests {
     }
 
     #[test]
-    fn effort_suggestions_use_model_catalog_metadata_with_compatibility_fallback() {
-        let catalogued = canonical_sub_agent_efforts(ProviderId::Gemini, Some("gemini-2.5-pro"));
-        assert!(catalogued.contains(&SubAgentReasoningEffort::XHigh));
-        assert!(catalogued.contains(&SubAgentReasoningEffort::Max));
-
-        let custom = canonical_sub_agent_efforts(ProviderId::Gemini, Some("custom-model"));
-        assert!(custom.contains(&SubAgentReasoningEffort::XHigh));
-        assert!(custom.contains(&SubAgentReasoningEffort::Max));
-    }
-
-    #[test]
-    fn every_provider_keeps_default_custom_xhigh_and_max_choices() {
-        for provider in canonical_sub_agent_providers() {
-            for model in [None, Some("custom-model")] {
-                let efforts = canonical_sub_agent_efforts(*provider, model);
-                assert!(efforts.contains(&SubAgentReasoningEffort::XHigh));
-                assert!(efforts.contains(&SubAgentReasoningEffort::Max));
-            }
-        }
+    fn effort_suggestions_follow_model_metadata_without_global_claims() {
+        let luna = canonical_sub_agent_efforts(ProviderId::OpenAi, Some("gpt-5.6-luna"));
+        assert!(luna.contains(&SubAgentReasoningEffort::Max));
+        let copilot = canonical_sub_agent_efforts(ProviderId::Copilot, Some("gpt-5.3-codex"));
+        assert!(copilot.contains(&SubAgentReasoningEffort::XHigh));
+        assert!(!copilot.contains(&SubAgentReasoningEffort::Max));
+        assert!(canonical_sub_agent_efforts(ProviderId::Gemini, Some("custom-model")).is_empty());
     }
 
     #[test]
@@ -538,6 +965,7 @@ mod tests {
                 model: Some("default".to_string()),
                 model_reasoning_effort: Some(SubAgentReasoningEffort::XHigh),
                 url: Some("http://127.0.0.1:11434/v1".to_string()),
+                max_concurrency: Default::default(),
             },
             SuperLaunchTarget::Exec,
         )
@@ -560,186 +988,112 @@ mod tests {
         assert!(error.to_string().contains("requires --sub-agent-url"));
     }
 
-    #[test]
-    fn child_renderer_quotes_custom_model_and_omits_resume_id() {
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
-        let resolved = resolve_super_sub_agent_config(
-            SubAgentConfig {
-                model: Some("model $(touch /tmp/pwned)".to_string()),
-                model_reasoning_effort: Some(SubAgentReasoningEffort::Max),
-                ..SubAgentConfig::default()
-            },
-            SuperLaunchTarget::Resume {
-                session_id: session_id.to_string(),
-            },
-        )
-        .unwrap();
-        let command = render_sub_agent_child_command(&resolved);
-        assert!(command.contains("'model $(touch /tmp/pwned)'"));
-        assert!(command.contains("PRODEX_SUB_AGENT=1"));
-        assert!(command.contains("--no-sub-agent"));
-        assert!(!command.contains(session_id));
-        assert!(!command.contains("resume"));
-        assert!(!command.contains("--last"));
-        assert!(command.starts_with("PRODEX_SUB_AGENT=1 'prodex' 's'"));
-    }
-
-    #[test]
-    fn child_renderer_preserves_unicode_custom_model() {
-        let resolved = resolve_super_sub_agent_config(
-            SubAgentConfig {
-                model: Some("模型/β-🦀".to_string()),
-                ..SubAgentConfig::default()
-            },
-            SuperLaunchTarget::Fresh,
-        )
-        .unwrap();
-        let command = render_sub_agent_child_command(&resolved);
-        assert!(command.contains("'模型/β-🦀'"), "{command}");
-    }
-
-    #[test]
-    fn child_renderer_uses_exact_order_for_openai_local_and_external() {
-        let openai = resolve_super_sub_agent_config(
-            SubAgentConfig {
-                model: Some("openai-model".to_string()),
-                model_reasoning_effort: Some(SubAgentReasoningEffort::High),
-                ..SubAgentConfig::default()
-            },
-            SuperLaunchTarget::Exec,
-        )
-        .unwrap();
-        assert_eq!(
-            render_sub_agent_child_command(&openai),
-            "PRODEX_SUB_AGENT=1 'prodex' 's' '--no-sub-agent' '--no-presidio' '--model' 'openai-model' '-c' 'model_reasoning_effort=high' 'exec' '<task>'"
-        );
-
-        let local = resolve_super_sub_agent_config(
-            SubAgentConfig {
-                provider: ProviderId::Local,
-                url: Some("http://127.0.0.1:8131/v1".to_string()),
-                ..SubAgentConfig::default()
-            },
-            SuperLaunchTarget::Fresh,
-        )
-        .unwrap();
-        assert_eq!(
-            render_sub_agent_child_command(&local),
-            "PRODEX_SUB_AGENT=1 'prodex' 's' '--no-sub-agent' '--no-presidio' '--url' 'http://127.0.0.1:8131/v1' 'exec' '<task>'"
-        );
-
-        for provider in [
-            ProviderId::Anthropic,
-            ProviderId::Copilot,
-            ProviderId::DeepSeek,
-            ProviderId::Gemini,
-            ProviderId::Kiro,
-        ] {
-            let external = resolve_super_sub_agent_config(
-                SubAgentConfig {
-                    provider,
-                    ..SubAgentConfig::default()
-                },
-                SuperLaunchTarget::Fresh,
-            )
-            .unwrap();
-            assert_eq!(
-                render_sub_agent_child_command(&external),
-                format!(
-                    "PRODEX_SUB_AGENT=1 'prodex' 's' '--no-sub-agent' '--no-presidio' '--provider' '{}' 'exec' '<task>'",
-                    provider.label()
-                )
-            );
+    fn test_spec(provider: ProviderId) -> ChildLaunchSpec {
+        ChildLaunchSpec {
+            executable: PathBuf::from("/opt/Prodex Binary/prodex"),
+            provider,
+            model: None,
+            effort: None,
+            local_url: None,
+            presidio_enabled: false,
+            max_concurrency: SubAgentMaxConcurrency::default(),
+            slot_dir: PathBuf::from("sub-agent-slots"),
+            task_dir: PathBuf::from("sub-agent-tasks"),
+            task_max_bytes: SUB_AGENT_TASK_MAX_BYTES,
+            recursion_marker: SUB_AGENT_RECURSION_MARKER.to_string(),
         }
     }
 
-    #[cfg(unix)]
     #[test]
-    fn child_command_executes_with_quoted_spaces_quotes_and_unicode() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::Command;
-
-        let root = env::temp_dir().join(format!(
-            "prodex-sub-agent-command-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let bin = root.join("bin");
-        let output = root.join("argv.txt");
-        std::fs::create_dir_all(&bin).unwrap();
-        let prodex = bin.join("prodex");
-        std::fs::write(
-            &prodex,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$PRODEX_SUB_AGENT\" \"$@\" > '{}'\n",
-                output.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&prodex, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let model = "model with spaces 'quotes' / 模型/β-🦀";
-        let resolved = resolve_super_sub_agent_config(
-            SubAgentConfig {
-                model: Some(model.to_string()),
-                ..SubAgentConfig::default()
-            },
-            SuperLaunchTarget::Fresh,
-        )
-        .unwrap();
-        let command = render_sub_agent_child_command(&resolved)
-            .replace("'<task>'", &shell_quote("task with spaces 'quotes' / 任务"));
-        let status = Command::new("/bin/sh")
-            .arg("-c")
-            .arg(command)
-            .env("PATH", bin)
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let lines = std::fs::read_to_string(&output).unwrap();
-        assert!(lines.lines().any(|line| line == "1"));
-        assert!(lines.lines().any(|line| line == "--no-sub-agent"));
-        assert!(lines.lines().any(|line| line == "--no-presidio"));
-        assert!(lines.lines().any(|line| line == model));
+    fn child_argv_is_shell_free_exact_and_never_inherits_parent_uuid() {
+        let task = "spaces 'apostrophe' \"quotes\"\nUnicode 任务; $(touch nope) & |";
+        let mut spec = test_spec(ProviderId::Copilot);
+        spec.model = Some("模型/β-🦀".to_string());
+        spec.effort = Some(SubAgentReasoningEffort::XHigh);
+        spec.presidio_enabled = true;
+        let args = child_argv(&spec, task);
+        assert_eq!(args[0], "s");
+        assert_eq!(args[1], "--no-sub-agent");
+        assert_eq!(
+            args.iter()
+                .filter(|value| **value == "--presidio" || **value == "--no-presidio")
+                .count(),
+            1
+        );
         assert!(
-            lines
-                .lines()
-                .any(|line| line == "task with spaces 'quotes' / 任务")
+            args.windows(2)
+                .any(|pair| pair == ["--provider", "copilot"])
         );
-        std::fs::remove_dir_all(root).unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--model", "模型/β-🦀"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-c", "model_reasoning_effort=xhigh"])
+        );
+        assert_eq!(args[args.len() - 2], "exec");
+        assert_eq!(args.last().unwrap(), task);
+        assert_eq!(args.iter().filter(|value| **value == task).count(), 1);
+        assert!(
+            !args
+                .iter()
+                .any(|value| value.to_string_lossy().contains("019c"))
+        );
     }
 
     #[test]
-    fn child_renderer_emits_one_presidio_choice_and_no_grandchild_flag() {
-        for presidio_enabled in [false, true] {
-            let mut resolved =
-                resolve_super_sub_agent_config(SubAgentConfig::default(), SuperLaunchTarget::Fresh)
-                    .unwrap();
-            resolved.presidio_enabled = presidio_enabled;
-            let tokens = render_sub_agent_child_command(&resolved);
-            let tokens = tokens.split_whitespace().collect::<Vec<_>>();
-            assert_eq!(
-                tokens
-                    .iter()
-                    .filter(|token| { **token == "'--presidio'" || **token == "'--no-presidio'" })
-                    .count(),
-                1
-            );
-            assert_eq!(
-                tokens
-                    .iter()
-                    .filter(|token| **token == "'--no-sub-agent'")
-                    .count(),
-                1
-            );
+    fn openai_child_argv_uses_accepted_override_and_cannot_inherit_profile_provider() {
+        let args = child_argv(&test_spec(ProviderId::OpenAi), "task");
+        assert!(!args.iter().any(|arg| arg == "--provider"));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-c", "model_provider=\"openai\""])
+        );
+        let parsed = prodex_cli::parse_cli_command_from(
+            std::iter::once(OsString::from("prodex")).chain(args),
+        )
+        .unwrap();
+        let prodex_cli::Commands::Super(parsed) = parsed else {
+            panic!("child argv must parse as Super");
+        };
+        assert!(parsed.provider.is_none());
+        assert!(
+            parsed
+                .codex_args
+                .windows(2)
+                .any(|pair| pair == ["-c", "model_provider=\"openai\""])
+        );
+    }
+
+    #[test]
+    fn local_child_argv_keeps_exact_url() {
+        let mut spec = test_spec(ProviderId::Local);
+        spec.local_url = Some("http://127.0.0.1:8131/v1".to_string());
+        let args = child_argv(&spec, "task");
+        assert!(
+            args.windows(2)
+                .any(|pair| { pair == ["--url", "http://127.0.0.1:8131/v1"] })
+        );
+        assert!(!args.iter().any(|value| value == "--provider"));
+    }
+
+    #[test]
+    fn launcher_rendering_quotes_posix_and_powershell_paths() {
+        let executable = Path::new("/opt/Prodex Binary/引用'prodex");
+        let config = Path::new("/tmp/config file.json");
+        let task = Path::new("/tmp/task 'one'.txt");
+        let posix = render_posix_launcher_command(executable, config, task);
+        assert!(posix.contains("'/opt/Prodex Binary/引用'\\''prodex'"));
+        let powershell = render_powershell_launcher_command(executable, config, task);
+        assert!(powershell.contains("'/opt/Prodex Binary/引用''prodex'"));
+        for rendered in [posix, powershell] {
+            assert!(rendered.contains("__sub-agent-exec"));
+            assert!(rendered.contains("--config"));
+            assert!(rendered.contains("--task-file"));
+            assert!(!rendered.contains("<task>"));
         }
     }
 
     #[test]
-    fn overlay_has_seventeen_english_rules_and_is_idempotent() {
+    fn overlay_has_bounded_english_rules_and_is_idempotent() {
         let resolved =
             resolve_super_sub_agent_config(SubAgentConfig::default(), SuperLaunchTarget::Fresh)
                 .unwrap();
@@ -755,9 +1109,11 @@ mod tests {
                         .is_some_and(|byte| byte.is_ascii_digit())
                 })
                 .count(),
-            17
+            SUB_AGENT_RULES.len() + 1
         );
-        assert!(first.contains("Use `prodex s` for child launches"));
+        assert!(first.contains("Never have more than 4 child sub-agents active at once."));
+        assert!(first.contains("official launcher enforces this limit"));
+        assert!(first.contains("never run a raw nested `prodex s`"));
         assert!(first.contains("Presidio is inherited explicitly"));
         assert!(first.contains(
             "Keep integration, testing, and the final response main-owned; never modify the parent profile, base `CODEX_HOME`, or repository `AGENTS.md` to activate delegation."
@@ -765,15 +1121,13 @@ mod tests {
         for required in [
             "lead and sole integrator",
             "Plan the decomposition",
-            "at most four active children",
-            "genuinely independent work",
+            "configured number of child sub-agents",
             "disjoint file ownership",
             "stdout and stderr separately",
             "wait for status",
             "full result",
             "untrusted evidence",
             "main-owned",
-            "unchanged whole request",
             "Retry only after a corrective change",
             "objective completed",
             "files inspected or modified",
@@ -801,7 +1155,7 @@ mod tests {
 
     #[test]
     fn dry_run_redacts_endpoint_and_resume_id() {
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         let url = "http://127.0.0.1:11434/v1";
         let model = "sk-proj-sub-agent-secret";
         let resolved = resolve_super_sub_agent_config(
@@ -833,18 +1187,23 @@ mod tests {
 
     #[test]
     fn session_arg_redaction_covers_standalone_and_embedded_uuids() {
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         let redacted = redact_super_session_args(&[
             OsString::from(session_id),
             OsString::from(format!("session_id={session_id}")),
+            OsString::from(format!("prefix={session_id};suffix=kept")),
         ]);
         assert_eq!(redacted[0], OsString::from("<SESSION_UUID>"));
         assert_eq!(redacted[1], OsString::from("session_id=<SESSION_UUID>"));
+        assert_eq!(
+            redacted[2],
+            OsString::from("prefix=<SESSION_UUID>;suffix=kept")
+        );
     }
 
     #[test]
     fn overlay_redacts_secret_like_model_and_parent_target() {
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         let resolved = resolve_super_sub_agent_config(
             SubAgentConfig {
                 model: Some("sk-proj-parent-secret".to_string()),
@@ -858,11 +1217,8 @@ mod tests {
         let overlay = render_sub_agent_overlay(&resolved);
         assert!(!overlay.contains(session_id));
         assert!(!overlay.contains("sk-proj-parent-secret"));
-        assert!(overlay.contains("resume <SESSION_UUID>"));
-        assert!(
-            overlay.contains("\"${PRODEX_SUB_AGENT_MODEL}\""),
-            "{overlay}"
-        );
+        assert!(overlay.contains("never forward the parent UUID, `resume`"));
+        assert!(overlay.contains("official launcher"), "{overlay}");
     }
 
     #[test]
@@ -895,7 +1251,7 @@ mod tests {
                 ..SubAgentConfig::default()
             },
             SuperLaunchTarget::Resume {
-                session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
+                session_id: "00000000-0000-7000-8000-000000000042".to_string(),
             },
         )
         .unwrap();
@@ -904,7 +1260,17 @@ mod tests {
         let path = write_sub_agent_overlay(&root, &resolved).unwrap();
         let contents = std::fs::read_to_string(path).unwrap();
         assert!(contents.contains("--presidio"));
-        assert!(!contents.contains("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"));
+        assert!(!contents.contains("00000000-0000-7000-8000-000000000042"));
+        let agents = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(agents.contains(SUB_AGENT_BLOCK_BEGIN));
+        assert!(agents.contains("Never have more than 4 child sub-agents active at once."));
+        assert!(!agents.contains("@/") && !agents.contains("@SUB_AGENTS.md"));
+        assert_eq!(
+            std::fs::read_dir(root.join(SUB_AGENT_SLOT_DIR))
+                .unwrap()
+                .count(),
+            usize::from(resolved.max_concurrency.get())
+        );
 
         let mut child = ChildProcessPlan::new(OsString::from("codex"), root.clone());
         apply_sub_agent_recursion_marker(&mut child, Some(&resolved));
@@ -916,39 +1282,307 @@ mod tests {
                 .map(|(_, value)| value.as_os_str()),
             Some(std::ffi::OsStr::new("1"))
         );
-        assert!(
-            child
-                .extra_env
-                .iter()
-                .all(|(name, _)| name != SUB_AGENT_MODEL_ENV)
-        );
+        assert_eq!(child.extra_env.len(), 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn secret_like_custom_model_is_passed_only_through_the_temporary_child_environment() {
+    fn child_config_contains_only_launch_data_and_no_parent_uuid() {
         let model = "sk-proj-synthetic-model-id";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         let resolved = resolve_super_sub_agent_config(
             SubAgentConfig {
                 model: Some(model.to_string()),
                 ..SubAgentConfig::default()
             },
-            SuperLaunchTarget::Fresh,
+            SuperLaunchTarget::Resume {
+                session_id: session_id.to_string(),
+            },
         )
         .unwrap();
-        let overlay = render_sub_agent_overlay(&resolved);
-        assert!(!overlay.contains(model));
-        assert!(overlay.contains("\"${PRODEX_SUB_AGENT_MODEL}\""));
+        let root = env::temp_dir().join(format!(
+            "prodex-sub-agent-config-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        create_private_directory(&root).unwrap();
+        write_sub_agent_overlay_with_executable(
+            &root,
+            &resolved,
+            PathBuf::from("/opt/Prodex Binary/prodex"),
+        )
+        .unwrap();
+        let config = std::fs::read_to_string(root.join(SUB_AGENT_CONFIG_FILE)).unwrap();
+        assert!(config.contains(model));
+        assert!(!config.contains(session_id));
+        for forbidden in ["api_key", "oauth", "authorization", "bearer", "cookie"] {
+            assert!(!config.to_ascii_lowercase().contains(forbidden), "{config}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
-        let mut child = ChildProcessPlan::new(OsString::from("codex"), PathBuf::from("."));
-        apply_sub_agent_recursion_marker(&mut child, Some(&resolved));
-        assert_eq!(
-            child
-                .extra_env
-                .iter()
-                .find(|(name, _)| name == SUB_AGENT_MODEL_ENV)
-                .map(|(_, value)| value.as_os_str()),
-            Some(OsStr::new(model))
+    #[test]
+    fn child_config_rejects_unknown_fields() {
+        let root = temp_test_root("sub-agent-config-unknown-field");
+        let spec = slot_spec(&root, 1);
+        let mut config = serde_json::to_value(&spec).unwrap();
+        config
+            .as_object_mut()
+            .unwrap()
+            .insert("api-key".to_string(), serde_json::json!("synthetic"));
+
+        assert!(serde_json::from_value::<ChildLaunchSpec>(config).is_err());
+
+        let mut config = serde_json::to_value(&spec).unwrap();
+        config["max-concurrency"]
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_string(), serde_json::json!(true));
+        assert!(serde_json::from_value::<ChildLaunchSpec>(config).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn repeated_setup_reconciles_exact_slots_and_protects_active_downsize() {
+        let root = temp_test_root("sub-agent-slot-reconcile");
+        create_private_directory(&root).unwrap();
+        let mut resolved =
+            resolve_super_sub_agent_config(SubAgentConfig::default(), SuperLaunchTarget::Fresh)
+                .unwrap();
+        resolved.max_concurrency = prodex_cli::parse_sub_agent_max_concurrency("8").unwrap();
+        let executable = PathBuf::from("/opt/Prodex Binary/prodex");
+
+        write_sub_agent_overlay_with_executable(&root, &resolved, executable.clone()).unwrap();
+        write_sub_agent_overlay_with_executable(&root, &resolved, executable.clone()).unwrap();
+        let slot_dir = root.join(SUB_AGENT_SLOT_DIR);
+        assert_eq!(fs::read_dir(&slot_dir).unwrap().count(), 8);
+
+        let active = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(slot_dir.join("slot-07.lock"))
+            .unwrap();
+        FileExt::lock_exclusive(&active).unwrap();
+        resolved.max_concurrency = prodex_cli::parse_sub_agent_max_concurrency("4").unwrap();
+        let error = write_sub_agent_overlay_with_executable(&root, &resolved, executable.clone())
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("wait for active children"),
+            "{error:#}"
         );
+        assert_eq!(fs::read_dir(&slot_dir).unwrap().count(), 8);
+        FileExt::unlock(&active).unwrap();
+        drop(active);
+
+        write_sub_agent_overlay_with_executable(&root, &resolved, executable.clone()).unwrap();
+        assert_eq!(fs::read_dir(&slot_dir).unwrap().count(), 4);
+        resolved.max_concurrency = prodex_cli::parse_sub_agent_max_concurrency("16").unwrap();
+        write_sub_agent_overlay_with_executable(&root, &resolved, executable).unwrap();
+        assert_eq!(fs::read_dir(&slot_dir).unwrap().count(), 16);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&slot_dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(root.join(SUB_AGENT_TASK_DIR))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(root.join(SUB_AGENT_CONFIG_FILE))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn slot_limits_are_bounded_release_and_reusable() {
+        for limit in [1, 4, 8, 23, 64] {
+            let root = temp_test_root("sub-agent-slot-limit");
+            let spec = slot_spec(&root, limit);
+            let mut leases = Vec::new();
+            let mut maximum_observed_concurrency = 0;
+            for _ in 0..limit {
+                leases.push(acquire_sub_agent_slot(&spec).unwrap());
+                maximum_observed_concurrency = maximum_observed_concurrency.max(leases.len());
+            }
+            assert!(maximum_observed_concurrency <= usize::from(limit));
+            assert_eq!(maximum_observed_concurrency, usize::from(limit));
+            assert_eq!(leases.len(), usize::from(limit));
+            let error = acquire_sub_agent_slot(&spec).unwrap_err().to_string();
+            assert!(
+                error.contains("sub-agent concurrency limit reached"),
+                "{error}"
+            );
+            drop(leases.pop());
+            leases.push(acquire_sub_agent_slot(&spec).unwrap());
+            assert_eq!(leases.len(), usize::from(limit));
+            drop(leases);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_spawn_releases_its_cross_process_slot() {
+        let root = temp_test_root("sub-agent-failed-spawn");
+        let mut spec = slot_spec(&root, 1);
+        spec.executable = root.join("missing-prodex-binary");
+        let error = handle_sub_agent_exec(exec_args(&root, &spec, "narrow task")).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to spawn sub-agent child")
+        );
+        drop(acquire_sub_agent_slot(&spec).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn limit_reached_secures_and_preserves_task_for_retry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_test_root("sub-agent-secure-task");
+        let spec = slot_spec(&root, 1);
+        let lease = acquire_sub_agent_slot(&spec).unwrap();
+        let args = exec_args(&root, &spec, "narrow task");
+        let task_file = args.task_file.clone();
+        fs::set_permissions(&args.task_file, fs::Permissions::from_mode(0o666)).unwrap();
+
+        let error = handle_sub_agent_exec(args).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("sub-agent concurrency limit reached")
+        );
+        assert!(task_file.exists());
+        assert_eq!(
+            fs::metadata(&task_file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        drop(lease);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn slot_holder_process() {
+        let Some(root) = env::var_os("PRODEX_TEST_SUB_AGENT_SLOT_ROOT") else {
+            return;
+        };
+        let limit = env::var("PRODEX_TEST_SUB_AGENT_SLOT_LIMIT")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let result_dir = PathBuf::from(&root).join("results");
+        fs::create_dir_all(&result_dir).unwrap();
+        let spec = slot_spec(Path::new(&root), limit);
+        let result = result_dir.join(format!("{}.txt", std::process::id()));
+        match acquire_sub_agent_slot(&spec) {
+            Ok(_lease) => {
+                fs::write(&result, "acquired").unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1_500));
+            }
+            Err(error) => {
+                assert!(
+                    error
+                        .to_string()
+                        .contains("sub-agent concurrency limit reached")
+                );
+                fs::write(&result, "rejected").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn separate_processes_share_limit_and_os_releases_stale_slot() {
+        let root = temp_test_root("sub-agent-cross-process");
+        let spec = slot_spec(&root, 4);
+        let test_name = "runtime_tools::sub_agents::tests::slot_holder_process";
+        let mut children = (0..5)
+            .map(|_| {
+                std::process::Command::new(env::current_exe().unwrap())
+                    .args(["--exact", test_name, "--nocapture"])
+                    .env("PRODEX_TEST_SUB_AGENT_SLOT_ROOT", &root)
+                    .env("PRODEX_TEST_SUB_AGENT_SLOT_LIMIT", "4")
+                    .spawn()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let result_dir = root.join("results");
+        for _ in 0..200 {
+            if fs::read_dir(&result_dir)
+                .map(|entries| entries.count() == 5)
+                .unwrap_or(false)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let results = fs::read_dir(&result_dir)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let pid = path
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .parse::<u32>()
+                    .unwrap();
+                (pid, fs::read_to_string(path).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let maximum_observed_concurrency = results
+            .iter()
+            .filter(|(_, value)| value == "acquired")
+            .count();
+        assert!(maximum_observed_concurrency <= 4);
+        assert_eq!(maximum_observed_concurrency, 4);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|(_, value)| value == "rejected")
+                .count(),
+            1
+        );
+        let started = std::time::Instant::now();
+        let error = acquire_sub_agent_slot(&spec).unwrap_err().to_string();
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
+        assert!(error.contains("sub-agent concurrency limit reached"));
+
+        let acquired_pid = results
+            .iter()
+            .find_map(|(pid, value)| (value == "acquired").then_some(*pid))
+            .unwrap();
+        let acquired_index = children
+            .iter()
+            .position(|child| child.id() == acquired_pid)
+            .unwrap();
+        children[acquired_index].kill().unwrap();
+        children[acquired_index].wait().unwrap();
+        let lease = acquire_sub_agent_slot(&spec).unwrap();
+        drop(lease);
+        for (index, child) in children.iter_mut().enumerate() {
+            if index != acquired_index {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

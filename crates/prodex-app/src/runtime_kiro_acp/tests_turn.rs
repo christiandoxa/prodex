@@ -72,7 +72,7 @@ fn kiro_acp_prompt_turn_translates_text_response() {
 }
 
 #[test]
-fn kiro_acp_prompt_turn_translates_tool_call_response() {
+fn kiro_acp_prompt_turn_translates_tool_activity_as_non_executable_progress() {
     let turn = RuntimeKiroAcpPromptTurnResult {
         initialize: RuntimeKiroAcpInitializeResult {
             protocol_version: 1,
@@ -125,22 +125,32 @@ fn kiro_acp_prompt_turn_translates_tool_call_response() {
     };
 
     let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, 8);
-    assert_eq!(response["output"][0]["type"], "function_call");
-    assert_eq!(response["output"][0]["call_id"], "call_1");
-    assert_eq!(response["output"][0]["name"], "read_file");
-    assert_eq!(response["output"][0]["namespace"], "kiro");
-    assert_eq!(
-        response["output"][0]["arguments"],
-        r#"{"path":"/tmp/main.py"}"#
-    );
-    assert_eq!(
-        response["output"][0]["metadata"]["kiro"]["status"],
-        "completed"
-    );
-    assert_eq!(
-        response["output"][0]["metadata"]["kiro"]["raw_output"]["content"],
-        "ok"
-    );
+    assert_eq!(response["output"][0]["type"], "message");
+    let progress = response["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    let started = progress.find("phase=started").unwrap();
+    let completed = progress.find("phase=completed").unwrap();
+    assert!(started < completed);
+    assert!(progress.contains("Read file"));
+    let activities = response["metadata"]["kiro"]["tool_activities"]
+        .as_array()
+        .unwrap();
+    assert_eq!(activities.len(), 2);
+    assert_eq!(activities[0]["name"], "Read file");
+    assert_eq!(activities[0]["phase"], "started");
+    assert_eq!(activities[1]["name"], "Read file");
+    assert_eq!(activities[1]["phase"], "completed");
+    assert_eq!(activities[1]["details_omitted"], true);
+    let serialized = serde_json::to_string(&response).unwrap();
+    assert!(!serialized.contains("function_call"));
+    assert!(!serialized.contains("/tmp/main.py"));
+    assert!(!serialized.contains("rawOutput"));
+
+    let chat = runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn);
+    assert_eq!(chat.len(), 1);
+    assert!(chat[0].get("tool_calls").is_none());
+    assert!(chat[0]["content"].as_str().unwrap().contains("Read file"));
 }
 
 #[test]

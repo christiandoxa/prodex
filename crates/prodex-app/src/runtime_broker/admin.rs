@@ -120,7 +120,9 @@ fn runtime_broker_metrics_prometheus_response(
             ));
         }
     };
-    let body = runtime_metrics::render_runtime_broker_prometheus_from_metrics(metadata, &metrics);
+    let mut body =
+        runtime_metrics::render_runtime_broker_prometheus_from_metrics(metadata, &metrics);
+    body.push_str(&crate::semantic_compact_metrics::render_semantic_compact_metrics());
     Some(build_runtime_proxy_prometheus_response(200, body))
 }
 

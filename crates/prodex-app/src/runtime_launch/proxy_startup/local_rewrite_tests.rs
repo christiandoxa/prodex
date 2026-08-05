@@ -361,7 +361,7 @@ fn kiro_responses_route_reuses_previous_response_history() {
 }
 
 #[test]
-fn kiro_responses_route_reuses_tool_history_by_call_id() {
+fn kiro_responses_route_keeps_internal_tool_activity_non_executable() {
     let root = temp_root("kiro-responses-tool-continuity");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -432,26 +432,17 @@ fn kiro_responses_route_reuses_tool_history_by_call_id() {
         .expect("first tool continuity request should be sent")
         .json()
         .expect("first response JSON should parse");
-    assert_eq!(first["output"][0]["type"], "function_call");
-    assert_eq!(first["output"][0]["call_id"], "call_1");
-
-    let second: serde_json::Value = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .json(&serde_json::json!({
-            "model": "claude-sonnet-4",
-            "stream": false,
-            "input": [{
-                "type": "function_call_output",
-                "call_id": "call_1",
-                "output": "ok"
-            }]
-        }))
-        .send()
-        .expect("second tool continuity request should be sent")
-        .json()
-        .expect("second response JSON should parse");
-
-    assert_eq!(second["output"][0]["content"][0]["text"], "done after tool");
+    assert_eq!(first["output"][0]["type"], "message");
+    assert!(
+        first["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Kiro activity: Read file")
+    );
+    let serialized = serde_json::to_string(&first).unwrap();
+    assert!(!serialized.contains("function_call"));
+    assert!(!serialized.contains("call_1"));
+    assert!(!serialized.contains("/tmp/main.py"));
 }
 
 #[test]
@@ -635,6 +626,26 @@ fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
         .send()
         .expect("kiro compact request should be sent");
     assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-prodex-compact-mode")
+            .and_then(|value| value.to_str().ok()),
+        Some("semantic")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-prodex-compact-provider")
+            .and_then(|value| value.to_str().ok()),
+        Some("kiro")
+    );
+    assert!(
+        response
+            .headers()
+            .get("x-prodex-compact-degraded")
+            .is_none()
+    );
     let body: serde_json::Value = response.json().expect("compact response JSON should parse");
     let summary = body["output"][0]["content"][0]["text"]
         .as_str()
@@ -864,7 +875,7 @@ fn kiro_messages_route_reuses_anthropic_translation_surface() {
 }
 
 #[test]
-fn kiro_messages_route_preserves_anthropic_tool_use_blocks() {
+fn kiro_messages_route_renders_internal_activity_as_text() {
     let root = temp_root("kiro-messages-tool-use");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -940,11 +951,16 @@ fn kiro_messages_route_preserves_anthropic_tool_use_blocks() {
     let body: serde_json::Value =
         serde_json::from_str(&body_text).expect("response JSON should parse");
     assert_eq!(body["type"], "message");
-    assert_eq!(body["stop_reason"], "tool_use");
-    assert_eq!(body["content"][0]["type"], "tool_use");
-    assert_eq!(body["content"][0]["id"], "call_1");
-    assert_eq!(body["content"][0]["name"], "read_file");
-    assert_eq!(body["content"][0]["input"]["path"], "/tmp/main.py");
+    assert_eq!(body["stop_reason"], "end_turn");
+    assert_eq!(body["content"][0]["type"], "text");
+    assert!(
+        body["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Kiro activity: Read file")
+    );
+    assert!(!body_text.contains("tool_use"));
+    assert!(!body_text.contains("/tmp/main.py"));
 }
 
 #[test]
@@ -1020,8 +1036,14 @@ fn kiro_messages_route_replays_anthropic_tool_result_followup() {
         .expect("first kiro messages request should be sent")
         .json()
         .expect("first kiro messages response should parse");
-    assert_eq!(first["stop_reason"], "tool_use");
-    assert_eq!(first["content"][0]["type"], "tool_use");
+    assert_eq!(first["stop_reason"], "end_turn");
+    assert_eq!(first["content"][0]["type"], "text");
+    assert!(
+        first["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Kiro activity: Read file")
+    );
 
     let second: serde_json::Value = reqwest::blocking::Client::new()
         .post(format!("http://{}/v1/messages", proxy.listen_addr))
@@ -2228,7 +2250,7 @@ fn kiro_chat_completions_stream_translates_to_chat_chunks() {
 }
 
 #[test]
-fn kiro_chat_completions_stream_emits_tool_calls() {
+fn kiro_chat_completions_stream_emits_non_executable_tool_activity() {
     let root = temp_root("kiro-chat-stream-tool");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -2301,18 +2323,18 @@ fn kiro_chat_completions_stream_emits_tool_calls() {
         .text()
         .expect("chat tool stream body should be readable");
     assert!(body.contains("\"object\":\"chat.completion.chunk\""));
-    assert!(body.contains("\"tool_calls\":[{"));
-    assert!(body.contains("\"id\":\"call_1\""));
-    assert!(body.contains("\"name\":\"read_file\""));
-    assert!(body.contains("\"arguments\":"));
-    assert!(body.contains("/tmp/main.py"));
-    assert!(body.contains("\"finish_reason\":\"tool_calls\""));
+    assert!(body.contains("Kiro activity: Read file"));
+    assert!(body.contains("phase=started"));
+    assert!(body.contains("phase=completed"));
+    assert!(body.contains("\"finish_reason\":\"stop\""));
     assert!(body.contains("data: [DONE]"));
-    assert!(!body.contains("\"type\":\"response.function_call_arguments.delta\""));
+    assert!(!body.contains("tool_calls"));
+    assert!(!body.contains("function_call"));
+    assert!(!body.contains("/tmp/main.py"));
 }
 
 #[test]
-fn kiro_streaming_emits_tool_argument_delta_from_tool_call_update() {
+fn kiro_streaming_emits_bounded_non_executable_activity_progress() {
     let root = temp_root("kiro-streaming-tool-update");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -2383,10 +2405,14 @@ fn kiro_streaming_emits_tool_argument_delta_from_tool_call_update() {
         .expect("kiro streaming request should be sent");
     assert_eq!(response.status().as_u16(), 200);
     let body = response.text().expect("stream body should be readable");
-    assert!(body.contains("\"type\":\"response.function_call_arguments.delta\""));
-    assert!(body.contains("\"delta\":"));
-    assert!(body.contains("/tmp/main.py"));
+    assert!(body.contains("\"type\":\"response.output_text.delta\""));
+    assert!(body.contains("Kiro activity: Read file"));
+    assert!(body.contains("phase=started"));
+    assert!(body.contains("phase=completed"));
     assert!(body.contains("\"type\":\"response.output_item.done\""));
+    assert!(!body.contains("function_call"));
+    assert!(!body.contains("arguments.delta"));
+    assert!(!body.contains("/tmp/main.py"));
 }
 
 #[test]

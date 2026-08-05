@@ -70,7 +70,7 @@ Prodex supports two provider paths:
 | Provider | Launch path | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
 | OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Quota preflight, plus profile auto-rotation when multiple eligible profiles exist. |
-| Google Gemini | `prodex s gemini` or `prodex s gemini --cli gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` for the Codex front end | OAuth profiles | Native Gemini CLI uses the Prodex Code Assist OAuth proxy; API-key mode uses the Codex front end and Google's OpenAI-compatible Chat Completions endpoint. |
+| Google Gemini | `prodex s gemini` or `prodex s gemini --cli gemini` | Codex bridge: `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key`; native CLI: CLI-owned supported auth, including Vertex AI | API-key bridge | Third-party Gemini CLI OAuth reuse is disabled. Legacy OAuth profiles fail with migration guidance instead of falling back. Vertex AI is not emulated by the Codex bridge. |
 | Google Antigravity CLI | `prodex s gemini --cli agy` | Antigravity keyring / Google Sign-In via `prodex login --with-antigravity` or `agy auth login` | CLI quota snapshot | Native CLI path; no Prodex account auto-rotation or Presidio proxying. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
 | GitHub Copilot | `prodex s --provider copilot` or `prodex s --provider copilot --cli copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Codex and native Copilot CLI front ends use the Prodex Responses adapter; fresh requests can rotate before commit and continuations stay bound to the owning profile. |
@@ -119,7 +119,7 @@ JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/response
 <details>
 <summary>Provider behavior details (advanced)</summary>
 
-The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. Prodex does not auto-redeem reset credits by default. If you launch an OpenAI/Codex runtime path with `--auto-redeem`, Prodex may redeem one earned reset credit only when the weekly usage-limit window is exhausted, no other profile in the quota pool still has weekly quota remaining, and the weekly reset is not already imminent, then retries the same profile before rotating. It still does not redeem for merely critical/thin windows or 5h-only exhaustion. You can also run `prodex redeem <profile>` to send one explicit reset-credit consume request for a named OpenAI/Codex profile; the upstream backend decides whether that manual request applies, reports nothing-to-reset, or reports no-credit/already-redeemed. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. Prodex does not auto-redeem reset credits by default. If you launch an OpenAI/Codex runtime path with `--auto-redeem`, Prodex may redeem one earned reset credit only when the weekly usage-limit window is exhausted, no other profile in the quota pool still has weekly quota remaining, and the weekly reset is not already imminent, then retries the same profile before rotating. It still does not redeem for merely critical/thin windows or 5h-only exhaustion. You can also run `prodex redeem <profile>` to send one explicit reset-credit consume request for a named OpenAI/Codex profile; the upstream backend decides whether that manual request applies, reports nothing-to-reset, or reports no-credit/already-redeemed. OpenAI/Codex remains the default quota-aware pool. Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers skip OpenAI quota preflight.
 
 Runtime proxy design contract:
 
@@ -328,12 +328,11 @@ prodex profile import-current main
 prodex login
 prodex profile add second
 prodex login --profile second
-prodex login --with-google
 prodex login --with-claude
 prodex login --with-antigravity
 ```
 
-Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, Claude sign-in through Claude Code OAuth, or Antigravity CLI sign-in through `agy auth login`. Antigravity login is global to the `agy` CLI and does not create a Prodex profile. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+Interactive `prodex login` asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Claude sign-in through Claude Code OAuth, or Antigravity CLI sign-in through `agy auth login`. The Codex-fronted Gemini bridge uses an API key; supported Vertex AI authentication belongs only to the native Gemini CLI. Antigravity login is global to the `agy` CLI and does not create a Prodex profile. For API-key profiles, you can also set an OpenAI-compatible backend URL:
 
 ```bash
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
@@ -446,78 +445,58 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 
 ## Sub-agents
 
-`prodex super` has a typed sub-agent launch path for fresh and resumed Codex
-targets. The generated child is a fresh `prodex s` process in an isolated
-temporary overlay:
+`prodex s` can delegate bounded tasks to fresh child Prodex processes. Main and
+child providers remain separate; Presidio is inherited explicitly; recursion is
+disabled; and the official shell-free launcher enforces the active-child limit
+across separate launcher processes.
+
+<details>
+<summary>Sub-agent configuration, runtime enforcement, and MVP boundaries</summary>
 
 ```bash
 prodex s --sub-agent --no-presidio
+prodex s --sub-agent --sub-agent-max-concurrency default
+prodex s --sub-agent --sub-agent-max-concurrency 8
 prodex s --presidio --sub-agent --sub-agent-provider kiro \
-  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max
-prodex s --sub-agent --sub-agent-provider local \
-  --sub-agent-url http://127.0.0.1:11434/v1 \
-  --sub-agent-model example-local-model --no-presidio
-prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-prodex s 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9 --presidio --sub-agent \
-  --sub-agent-provider kiro --sub-agent-model gpt-5.6-luna \
-  --sub-agent-model-reasoning-effort max
+  --sub-agent-model gpt-5.6-luna \
+  --sub-agent-model-reasoning-effort max \
+  --sub-agent-max-concurrency 16
+prodex s 00000000-0000-7000-8000-000000000042 \
+  --sub-agent --sub-agent-max-concurrency=23
 ```
 
-`--sub-agent` enables the preference; `--no-sub-agent` disables it. Provider,
-optional model and reasoning effort, credential-free local URLs, exact child
-argument order, explicit Presidio inheritance, the recursion marker, and
-`--` handling around a UUID are documented in [Sub-agents](docs/sub-agents.md).
-OpenAI children use the `prodex s` default, local children use `--url`, and
-external providers use `--provider`. Unset model and effort options are
-omitted rather than copied from the parent. Explicit `--sub-agent` skips the
-provider/model/effort wizard and uses OpenAI or selected-provider defaults.
+Interactive fresh-launch order is Presidio, main-agent provider, required main
+provider configuration, sub-agent opt-in, then child provider, local URL when
+needed, model, catalog-backed effort, and maximum active sub-agents. Answering
+no skips every child screen. Explicit parent or child values skip their screens;
+non-TTY launches never open a TUI.
 
-The parent resolves Presidio once and renders either `--presidio` or
-`--no-presidio` into every child command. Non-TTY launches do not prompt.
-Unspecified interactive launches ask in this order: Presidio, sub-agent opt-in,
-provider, model, effort, and local URL. Enter or Escape skips sub-agent opt-in.
-The generated child places any `-c model_reasoning_effort=...` before `exec`,
-quotes every argument individually, and uses no JSON-style quoting.
-`--dry-run` prints a redacted child plan without starting Codex or resolving
-launch credentials. Native `--cli` front ends reject `--sub-agent` before
-profile-lifecycle recovery or child setup. Overlay setup is private and
-idempotent, references `SUB_AGENTS.md` once, and keeps normal shared Codex
-session surfaces available without forwarding the parent UUID.
+The built-in concurrency default is 4. Presets are 4, 8, 16, and 32; custom
+values accept 1 through 64. This limits simultaneous child processes, not total
+tasks. When every exclusive lock slot is active, the launcher fails immediately
+and tells the main agent to wait for a child before retrying. Child exit, failed
+spawn, cancellation, and launcher termination release the OS-backed slot.
 
-The canonical sub-agent providers are `openai`, `anthropic`, `copilot`,
-`deepseek`, `gemini`, `kiro`, and `local`. These public examples request
-Kiro's `gpt-5.6-luna` at `max`, and a local OpenAI-compatible endpoint:
+The complete instruction block is injected into the temporary effective
+`AGENTS.override.md` or `AGENTS.md`; `SUB_AGENTS.md` is diagnostic, not a lone
+`@path` reference. Child tasks travel through bounded private task files and an
+argument vector built from the current Prodex executable, so quotes, newlines,
+Unicode, shell metacharacters, and executable paths with spaces survive without
+shell evaluation. Parent UUIDs are never inherited.
 
-```bash
-prodex s --sub-agent --sub-agent-provider kiro \
-  --sub-agent-model gpt-5.6-luna --sub-agent-model-reasoning-effort max \
-  exec "review one bounded task"
-prodex s --sub-agent --sub-agent-provider local \
-  --sub-agent-url http://127.0.0.1:11434/v1 \
-  --sub-agent-model example-local-model exec "review one bounded task"
-```
+OpenAI's canonical picker includes `gpt-5.6-luna` and its `max` effort metadata.
+All provider pickers scroll, merge the full offline catalog deterministically,
+and keep arbitrary nonempty custom model IDs unchanged.
 
-Model IDs are optional nonempty custom inputs, and reasoning effort accepts the
-documented ecosystem values; when omitted both are left to the selected
-provider and are not copied from the parent. A provider may reject an
-unsupported model or effort. Local URL validation rejects
-credentials, query strings, and fragments but does not authenticate, prove
-loopback/trust, or verify endpoint compatibility; the interactive URL is only
-a prompt prefill, while explicit and non-TTY local launches still require a
-URL.
+This remains an MVP delegation surface, not a centralized semantic scheduler.
+Prodex does not claim automatic task decomposition, runtime-enforced file
+ownership, a global cancellation tree, distributed supervision, A2A child
+transport, remote model discovery, or automatic worktree allocation.
 
-Flags before or after a bare UUID or explicit `resume UUID` are extracted and
-never leak to Codex; simultaneous `--presidio`/`--no-presidio` or
-`--sub-agent`/`--no-sub-agent` remains a validation error. Parent UUIDs are
-never inherited. Generated instructions cap direct fan-out at four children;
-that is guidance, not a runtime scheduler. The MVP uses a local subprocess
-and temporary `CODEX_HOME` overlay; a future renderer seam can map the same
-typed child configuration to another transport, while `/v1/a2a` remains a
-separate future remote extension point.
+See [Sub-agents](docs/sub-agents.md) for the exact CLI, dry-run, instruction,
+launcher, concurrency, resume-affinity, and isolation contracts.
 
-Super's existing Presidio, non-TTY, dry-run, temporary-overlay, native-CLI, and
-provider-adapter boundaries continue to apply. The `/v1/a2a` gateway route is a
-separate HTTP surface, not the local-process implementation target.
+</details>
 
 ## Commands
 
@@ -545,7 +524,7 @@ prodex run
 prodex run --profile main
 prodex run --dry-run
 prodex exec "review this repo"
-prodex delete 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex delete 00000000-0000-7000-8000-000000000042
 ```
 
 Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` stay upstream Codex behavior. Prodex preserves their request metadata through the proxy and does not add a competing command surface. If an active goal reaches Codex's `usage_limited` state while the TUI remains open, Prodex waits for another quota-ready OpenAI profile, gracefully relaunches the same session, releases its old affinity, and invokes `/goal resume`; `--no-auto-rotate` disables this recovery. The CLI form `prodex delete <session>` passes through to Codex and, after a successful delete, prunes matching Prodex session affinity metadata.
@@ -627,7 +606,7 @@ prodex update
 <summary>More Codex command examples</summary>
 
 ```bash
-prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex run 00000000-0000-7000-8000-000000000042
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
@@ -727,7 +706,7 @@ prodex s doctor
 prodex s doctor --json --strict
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
-prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex caveman 00000000-0000-7000-8000-000000000042
 ```
 
 `prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
@@ -753,7 +732,7 @@ prodex s gemini
 prodex super
 prodex super --profile main
 prodex super --dry-run
-prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex super 00000000-0000-7000-8000-000000000042
 ```
 
 `prodex s` is the short alias for `prodex super`. `--dry-run` reports the resolved binary, provider, model, profile, proxy mode, and redacted arguments for both Codex-fronted and native `--cli gemini`, `copilot`, `kiro`, and `agy` launches without reading launch credentials or starting the child.
@@ -844,22 +823,21 @@ Gateway/profileless launches can use `PRODEX_DEEPSEEK_STRICT_TOOLS=1` and option
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 
 ```bash
-prodex login --with-google
-prodex s gemini
+GEMINI_API_KEY=example-key prodex s gemini
 prodex s gemini --cli gemini
 prodex s gemini --cli agy
-GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
+GEMINI_API_KEY=example-key prodex s gemini --model gemini-2.5-pro
 ```
 
-Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login --with-google` or the interactive Google sign-in choice, then routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex converts Codex Responses requests to Chat Completions and sends them through Google's documented `/v1beta/openai/chat/completions` endpoint with Bearer authentication. Streaming, function calls, continuations, and Gemini `reasoning_effort` values are converted back into Codex Responses semantics. Plural key env vars may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks; launch-time Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` are projected into the Codex catalog and runtime fallback snapshot when configured. The injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. Available Super optimizer tools remain local Prodex overlay additions around Codex on this path.
+Prodex's third-party Google Gemini OAuth login and Code Assist credential reuse are unsupported and disabled. Existing OAuth profiles remain parseable but fail with guidance to migrate the Codex bridge to a Gemini API key, or to use Vertex AI only through the native Gemini CLI; Prodex never silently falls back. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, Prodex converts Codex Responses requests to Chat Completions and sends them through Google's documented OpenAI-compatible endpoint. Streaming, function calls, continuations, and supported Gemini reasoning values are converted back into Codex Responses semantics. Plural key variables may rotate before commit on auth, quota, rate, or temporary failures. The default model is `auto`; checked-in and configured Gemini model catalogs remain available without a live discovery request.
 
-`prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex, defaults its native tools to YOLO approval mode, and routes Code Assist requests through Prodex OAuth profile routing. This native CLI path currently requires a Google OAuth profile and does not accept `--api-key`. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
+`prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex and leaves supported authentication, including Vertex AI, and transport to that CLI or environment. Prodex does not inject the removed OAuth client. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
 
 `prodex s gemini --cli agy` launches the native Antigravity CLI with `--dangerously-skip-permissions` so tool permission prompts are auto-approved. Antigravity CLI owns its authentication through the system keyring/Google Sign-In and does not expose an endpoint or token override, so Prodex account auto-rotation and Presidio proxying are not available on this path. It works without a Prodex profile and rejects `--presidio` instead of silently ignoring it. Set `PRODEX_AGY_BIN` to override the `agy` executable.
 
-The OAuth bridge also maps native Gemini `computerUse`, code execution, grounding/citation/URL-context metadata, generated images, video metadata, multimodal file inputs, log-probability metadata, tool-use and cached-token accounting, safety metadata, and Gemini finish reasons into Codex-compatible request, response, and SSE shapes. Citations are emitted as a separate completed output item after Gemini supplies a finish reason. Assistant followups retain native Gemini code, media, video, cache, and thought-signature parts without replaying citation display text as model history.
+The Gemini bridge also maps native Gemini `computerUse`, code execution, grounding/citation/URL-context metadata, generated images, video metadata, multimodal file inputs, log-probability metadata, tool-use and cached-token accounting, safety metadata, and Gemini finish reasons into Codex-compatible request, response, and SSE shapes. Citations are emitted as a separate completed output item after Gemini supplies a finish reason. Assistant followups retain native Gemini code, media, video, cache, and thought-signature parts without replaying citation display text as model history.
 
-`@path` and bounded `read_many_files` context honor default binary/build/dependency exclusions plus ordered root `.gitignore`, `.geminiignore`, and custom ignore files, including later negation overrides. Large tool outputs are masked before replaying them into Gemini history and are written to `PRODEX_GEMINI_TOOL_OUTPUT_DIR` or the OS temp directory; set `PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD=0` to disable this guard. Codex `/responses/compact` requests use a tool-free unary Gemini semantic-compaction turn on the Gemini CLI `chat-compression-default` alias and return Codex replacement history; a bounded deterministic local summary is used only when semantic compaction fails before commit. Invalid pre-commit Gemini streams are retried with bounded backoff before model fallback.
+`@path` and bounded `read_many_files` context honor default binary/build/dependency exclusions plus ordered root `.gitignore`, `.geminiignore`, and custom ignore files, including later negation overrides. Large tool outputs are masked before replaying them into Gemini history and are written to `PRODEX_GEMINI_TOOL_OUTPUT_DIR` or the OS temp directory; set `PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD=0` to disable this guard. Codex `/responses/compact` requests use a tool-free unary semantic-compaction turn and return Codex replacement history. If semantic compaction fails before commit, Prodex preserves HTTP 200 continuity with a bounded lossy local summary and marks it with `x-prodex-compact-mode: local-fallback`, provider, degraded, and bounded reason headers. Semantic success uses `x-prodex-compact-mode: semantic`. Prometheus output counts both modes and bounded fallback reasons. Invalid pre-commit Gemini streams are retried with bounded backoff before model fallback.
 
 Gemini CLI compatibility helpers accept inline `gemini_memory` / `gemini_policy` / `gemini_session` request metadata, file-based `gemini_*_file` imports, and `PRODEX_GEMINI_SESSION_FILE` or `PRODEX_GEMINI_CHECKPOINT_FILE` import paths. Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, ancestor `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; set `PRODEX_GEMINI_DISABLE_MEMORY=1`, `PRODEX_GEMINI_DISABLE_CONTEXT_FILES=1`, or request metadata `gemini_load_memory=false` to opt out. Host-file imports are local-CLI-only: gateway and in-process gateway requests cannot read request-selected or implicit Gemini files from the service host. Gemini settings are read in CLI precedence order from system defaults, global, ancestor project, cwd-local, and system override settings, honoring `GEMINI_CLI_HOME`, `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`; extension manifests and extension policy TOML files are also read when present to apply Gemini tool allow/exclude, hard command-specific tool-call blocking, and `defaultApprovalMode` behavior.
 
@@ -1063,7 +1041,7 @@ prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex setup --dry-run
 prodex capability list
 prodex context audit
-prodex context export 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+prodex context export 00000000-0000-7000-8000-000000000042
 prodex context compress ~/.codex/AGENTS.md --dry-run
 git diff | prodex context compact-output --kind git-diff
 ```
@@ -1136,7 +1114,7 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 <details>
 <summary>Bedrock and custom providers</summary>
 
-Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, and configured custom providers.
+Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, supported Gemini API-key configurations, and configured custom providers. Disabled Gemini OAuth profiles receive migration guidance.
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 

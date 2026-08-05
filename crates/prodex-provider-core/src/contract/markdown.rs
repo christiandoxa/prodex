@@ -90,6 +90,7 @@ pub fn provider_capabilities_markdown() -> String {
     }
     markdown.push_str("\nStatus values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.\n\n");
     markdown.push_str("Fixture summary counts are `request/response/stream-event` conformance cases per provider.\n\n");
+    markdown.push_str("Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.\n\n");
     markdown.push_str("## Harness modes\n\n");
     let _ = writeln!(
         markdown,
@@ -144,5 +145,10 @@ pub fn provider_capabilities_markdown() -> String {
     if !wrote_limit {
         markdown.push_str("- none\n");
     }
+    markdown.push_str("\n## Semantic compact observability\n\n");
+    markdown.push_str("Gemini and Kiro semantic compact responses expose `x-prodex-compact-mode` (`semantic` or `local-fallback`) and `x-prodex-compact-provider`. Lossy fallback also exposes `x-prodex-compact-degraded: true` plus a bounded `x-prodex-compact-reason` code: `timeout`, `unsupported`, `unavailable`, `invalid-response`, `provider-error`, or `local-policy`. Raw upstream errors are never copied into headers.\n\n");
+    markdown.push_str("Prometheus output includes `prodex_semantic_compact_total{provider,mode}` and `prodex_semantic_compact_fallback_total{provider,reason}` with fixed-cardinality labels. Local fallback preserves HTTP 200 for continuation compatibility but is not semantic success. It is intentionally lossy and retains at most 24 recent snippets, 768 bytes per snippet, and 24 KiB total.\n\n");
+    markdown.push_str("## Transport limits\n\n");
+    markdown.push_str("Capability labels describe documented HTTP/text transformations, not lossless equivalence. Translated or emulated shapes may reject unsupported fields as listed above. Gemini Live rejects unexpected upstream binary WebSocket frames predictably; it does not reinterpret them as text.\n");
     markdown
 }

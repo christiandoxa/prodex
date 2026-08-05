@@ -1,5 +1,8 @@
 //! Kiro ACP compatibility helpers.
 
+use super::stream::{
+    KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS, kiro_provider_core_truncated_tool_activity_item,
+};
 use serde_json::{Value, json};
 
 pub fn kiro_provider_core_acp_initialize_request(
@@ -166,6 +169,7 @@ pub fn kiro_provider_core_acp_metadata(
     session_title: Option<&str>,
     session_updated_at: Option<&str>,
     stop_reason: Option<&str>,
+    mut tool_activities: Vec<Value>,
 ) -> Option<Value> {
     let mut kiro_metadata = serde_json::Map::new();
     if !reasoning_text.is_empty() {
@@ -203,6 +207,13 @@ pub fn kiro_provider_core_acp_metadata(
             "stop_reason".to_string(),
             Value::String(stop_reason.to_string()),
         );
+    }
+    if tool_activities.len() > KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS {
+        tool_activities.truncate(KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS.saturating_sub(1));
+        tool_activities.push(kiro_provider_core_truncated_tool_activity_item());
+    }
+    if !tool_activities.is_empty() {
+        kiro_metadata.insert("tool_activities".to_string(), Value::Array(tool_activities));
     }
     if kiro_metadata.is_empty() {
         return None;

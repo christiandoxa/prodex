@@ -3,16 +3,16 @@
 use super::{
     PRODEX_COPILOT_PROXY_API_KEY, PreparedRuntimeLaunch, RuntimeProxyEndpoint,
     SUPER_COPILOT_PROVIDER_ID, SuperArgs, SuperCliAgent, SuperExternalProvider,
-    SuperNativeCliLaunchStrategy, runtime_super_copilot_cli_env,
-    runtime_super_gemini_cli_oauth_env, runtime_super_gemini_cli_system_settings_from,
+    SuperNativeCliLaunchStrategy, build_super_gemini_child, runtime_super_copilot_cli_env,
     runtime_super_native_cli_launch_args, super_native_cli_dry_run_report,
     validate_super_native_cli_preflight,
 };
 #[cfg(unix)]
 use crate::TestEnvVarGuard;
-use crate::{AppPaths, GeminiOAuthSecret, RuntimeLaunchStrategy, write_gemini_oauth_secret};
+use crate::{AppPaths, RuntimeLaunchStrategy};
 use prodex_cli::CodexRuntimeFeatureArgs;
 use std::ffi::OsString;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn native_cli_super_args() -> SuperArgs {
@@ -34,6 +34,7 @@ fn native_cli_super_args() -> SuperArgs {
         sub_agent_model: None,
         sub_agent_model_reasoning_effort: None,
         sub_agent_url: None,
+        sub_agent_max_concurrency: None,
         tools: Vec::new(),
         required_tools: Vec::new(),
         url: None,
@@ -407,6 +408,7 @@ fn native_gemini_cli_dry_run_does_not_probe_optional_tools() {
     );
 
     let mut args = native_cli_super_args();
+    args.profile = None;
     args.dry_run = true;
     args.cli = Some(SuperCliAgent::Gemini);
     args.provider = Some(SuperExternalProvider::Gemini);
@@ -416,11 +418,77 @@ fn native_gemini_cli_dry_run_does_not_probe_optional_tools() {
         vec![OsString::from("review")],
     ] {
         args.codex_args = codex_args;
-        super_native_cli_dry_run_report(&args, None).unwrap();
+        let report = super_native_cli_dry_run_report(&args, None).unwrap();
+        assert!(report.contains("Provider: gemini"));
+        assert!(report.contains("native Gemini CLI owns transport and authentication"));
     }
 
     assert!(!marker.exists(), "dry-run must not execute optional tools");
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_gemini_child_uses_cli_owned_auth_without_oauth_injection() {
+    let mut args = native_cli_super_args();
+    args.profile = None;
+    let child = build_super_gemini_child(
+        &args,
+        Path::new("/synthetic/native-gemini"),
+        vec![OsString::from("review")],
+    )
+    .unwrap();
+
+    assert!(child.removed_env.iter().any(|key| key == "OPENAI_API_KEY"));
+    assert!(!child.removed_env.iter().any(|key| key == "GEMINI_API_KEY"));
+    assert!(child.extra_env.is_empty());
+    assert!(
+        !child
+            .extra_env
+            .iter()
+            .any(|(key, _)| key == "GOOGLE_CLOUD_ACCESS_TOKEN")
+    );
+}
+
+#[test]
+fn native_gemini_explicit_api_key_overrides_inherited_provider_keys_safely() {
+    let mut args = native_cli_super_args();
+    args.profile = None;
+    args.api_key = Some("synthetic-native-gemini-key".to_string());
+    let child =
+        build_super_gemini_child(&args, Path::new("/synthetic/native-gemini"), Vec::new()).unwrap();
+
+    for key in super::NATIVE_GEMINI_AUTH_ENV_KEYS {
+        assert!(child.removed_env.iter().any(|removed| removed == key));
+    }
+    assert_eq!(
+        child
+            .extra_env
+            .iter()
+            .find(|(key, _)| key == "GEMINI_API_KEY")
+            .map(|(_, value)| value.as_os_str()),
+        Some(std::ffi::OsStr::new("synthetic-native-gemini-key"))
+    );
+    assert!(!format!("{child:?}").contains("synthetic-native-gemini-key"));
+}
+
+#[test]
+fn native_gemini_preflight_accepts_cli_owned_auth_but_rejects_prodex_profile_and_presidio() {
+    let mut supported = native_cli_super_args();
+    supported.profile = None;
+    supported.cli = Some(SuperCliAgent::Gemini);
+    supported.provider = Some(SuperExternalProvider::Gemini);
+    supported.api_key = Some("synthetic-native-gemini-key".to_string());
+    validate_super_native_cli_preflight(&supported).unwrap();
+
+    let mut profile = supported.clone();
+    profile.profile = Some("legacy-gemini".to_string());
+    let error = validate_super_native_cli_preflight(&profile).unwrap_err();
+    assert!(error.to_string().contains("--profile is unsupported"));
+
+    let mut presidio = supported;
+    presidio.presidio = true;
+    let error = validate_super_native_cli_preflight(&presidio).unwrap_err();
+    assert!(error.to_string().contains("--presidio"));
 }
 
 #[test]
@@ -460,117 +528,6 @@ fn native_copilot_cli_uses_local_responses_provider_contract() {
         value("COPILOT_PROVIDER_API_KEY").as_deref(),
         Some(PRODEX_COPILOT_PROXY_API_KEY)
     );
-}
-
-#[test]
-fn native_gemini_cli_uses_profile_oauth_token_env() {
-    let home = std::env::temp_dir().join(format!(
-        "prodex-native-gemini-cli-oauth-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let secret = GeminiOAuthSecret {
-        auth_mode: "gemini_oauth".to_string(),
-        access_token: "profile-access-token".to_string(),
-        refresh_token: Some("profile-refresh-token".to_string()),
-        token_type: Some("Bearer".to_string()),
-        scope: None,
-        expiry_date: None,
-        email: "gemini-user@example.com".to_string(),
-        project_id: Some("profile-project".to_string()),
-    };
-    write_gemini_oauth_secret(&home, &secret).expect("secret should write");
-
-    let env = runtime_super_gemini_cli_oauth_env(&home).expect("env should build");
-    assert_eq!(
-        env.iter()
-            .find(|(key, _)| key == "GOOGLE_CLOUD_ACCESS_TOKEN")
-            .map(|(_, value)| value.as_os_str()),
-        Some(std::ffi::OsStr::new("profile-access-token"))
-    );
-    assert_eq!(
-        env.iter()
-            .find(|(key, _)| key == "GOOGLE_CLOUD_PROJECT")
-            .map(|(_, value)| value.as_os_str()),
-        Some(std::ffi::OsStr::new("profile-project"))
-    );
-
-    let _ = std::fs::remove_dir_all(home);
-}
-
-#[test]
-fn native_gemini_cli_system_override_preserves_policy_and_forces_profile_oauth() {
-    let home = std::env::temp_dir().join(format!(
-        "prodex-native-gemini-cli-settings-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let source = home.join("source.json");
-    std::fs::write(
-        &source,
-        r#"{
-                // The native CLI accepts comments.
-                "security": {"auth": {"selectedType": "gemini-api-key"}},
-                "tools": {"exclude": ["run_shell_command"]}
-            }"#,
-    )
-    .unwrap();
-
-    let path = runtime_super_gemini_cli_system_settings_from(&home, Some(&source)).unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(
-        value.pointer("/security/auth/selectedType"),
-        Some(&serde_json::json!("oauth-personal"))
-    );
-    assert_eq!(
-        value.pointer("/tools/exclude/0"),
-        Some(&serde_json::json!("run_shell_command"))
-    );
-
-    let _ = std::fs::remove_dir_all(home);
-}
-
-#[test]
-fn native_gemini_cli_rejects_incompatible_enforced_auth_policy() {
-    let home = std::env::temp_dir().join(format!(
-        "prodex-native-gemini-cli-enforced-auth-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let source = home.join("source.json");
-    std::fs::write(
-        &source,
-        r#"{"security":{"auth":{"enforcedType":"gemini-api-key"}}}"#,
-    )
-    .unwrap();
-
-    let error = runtime_super_gemini_cli_system_settings_from(&home, Some(&source))
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("enforces auth type `gemini-api-key`"));
-
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
@@ -667,6 +624,26 @@ fn native_antigravity_cli_runtime_request_skips_proxy_features() {
 }
 
 #[test]
+fn native_gemini_cli_runtime_request_skips_prodex_oauth_and_proxy_features() {
+    let mut args = native_cli_super_args();
+    args.profile = None;
+    args.provider = Some(SuperExternalProvider::Gemini);
+    let strategy = SuperNativeCliLaunchStrategy {
+        args,
+        presidio_enabled: false,
+        agent: SuperCliAgent::Gemini,
+        sub_agent: None,
+    };
+    let request = strategy.runtime_request();
+    assert_eq!(request.external_provider, Some("gemini-native"));
+    assert!(!request.smart_context_enabled);
+    assert!(!request.presidio_redaction_enabled);
+    assert!(!request.allow_auto_rotate);
+    assert_eq!(request.model_provider_override, None);
+    assert_eq!(request.base_url, None);
+}
+
+#[test]
 fn native_copilot_cli_runtime_request_enables_provider_proxy() {
     let mut args = native_cli_super_args();
     args.profile = Some("copilot-main".to_string());
@@ -695,7 +672,7 @@ fn native_copilot_cli_runtime_request_enables_provider_proxy() {
 }
 
 #[test]
-fn native_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
+fn native_copilot_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
     let root = std::env::temp_dir()
         .canonicalize()
         .expect("temporary directory should resolve")
@@ -715,12 +692,12 @@ fn native_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
         .expect("config should be written");
 
     let mut args = native_cli_super_args();
-    args.cli = Some(SuperCliAgent::Gemini);
-    args.provider = Some(SuperExternalProvider::Gemini);
+    args.cli = Some(SuperCliAgent::Copilot);
+    args.provider = Some(SuperExternalProvider::Copilot);
     let strategy = SuperNativeCliLaunchStrategy {
         args,
         presidio_enabled: false,
-        agent: SuperCliAgent::Gemini,
+        agent: SuperCliAgent::Copilot,
         sub_agent: None,
     };
     let paths = AppPaths {
@@ -742,7 +719,7 @@ fn native_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
     assert!(
         error
             .to_string()
-            .contains("Gemini CLI launch requires a local runtime proxy")
+            .contains("Copilot CLI launch requires a local runtime proxy")
     );
     assert!(
         std::fs::read_dir(&prepared.paths.managed_profiles_root)

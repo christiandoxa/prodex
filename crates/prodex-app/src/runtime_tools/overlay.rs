@@ -252,7 +252,7 @@ mod tests {
                     .as_nanos()
             ));
         let base_home = root.join("base");
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         std::fs::create_dir_all(base_home.join("sessions/2026/08/04"))
             .expect("session directory should exist");
         std::fs::create_dir_all(base_home.join("archived_sessions"))
@@ -311,11 +311,14 @@ mod tests {
 
         let overlay_agents = std::fs::read_to_string(overlay.join("AGENTS.md"))
             .expect("overlay instructions should be readable");
-        assert!(overlay_agents.contains(&format!("@{}", overlay.join("SUB_AGENTS.md").display())));
+        assert!(overlay_agents.contains("<!-- PRODEX SUB-AGENT BEGIN -->"));
+        assert!(overlay_agents.contains("<!-- PRODEX SUB-AGENT END -->"));
+        assert!(overlay_agents.contains("Never have more than 4 child sub-agents active at once."));
+        assert!(!overlay_agents.contains(&format!("@{}", overlay.join("SUB_AGENTS.md").display())));
         assert_eq!(
             overlay_agents
                 .lines()
-                .filter(|line| line.contains("SUB_AGENTS.md"))
+                .filter(|line| line.contains("<!-- PRODEX SUB-AGENT BEGIN -->"))
                 .count(),
             1
         );
@@ -376,7 +379,7 @@ mod tests {
         let base_home = root.join("base");
         let shared_home = root.join("shared");
         let profiles = root.join("profiles");
-        let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+        let session_id = "00000000-0000-7000-8000-000000000042";
         std::fs::create_dir_all(base_home.join("sessions/2026/08/04"))
             .expect("session directory should exist");
         std::fs::create_dir_all(&shared_home).expect("shared home should exist");
@@ -470,11 +473,22 @@ mod tests {
         );
         let instructions = std::fs::read_to_string(plan.child.codex_home.join("SUB_AGENTS.md"))
             .expect("sub-agent instructions should exist");
-        assert!(instructions.contains("'--provider' 'kiro'"));
-        assert!(instructions.contains("'--model' 'gpt-5.6-luna'"));
-        assert!(instructions.contains("'model_reasoning_effort=max'"));
-        assert!(instructions.contains("'--no-sub-agent' '--no-presidio'"));
+        assert!(instructions.contains("- Provider: kiro"));
+        assert!(instructions.contains("- Model: gpt-5.6-luna"));
+        assert!(instructions.contains("- Reasoning effort: max"));
+        assert!(instructions.contains("- Presidio: disabled (inherited)"));
+        assert!(instructions.contains("__sub-agent-exec"));
+        let launch_config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(plan.child.codex_home.join("sub-agent-launch.json"))
+                .expect("sub-agent launch config should exist"),
+        )
+        .expect("sub-agent launch config should parse");
+        assert_eq!(launch_config["provider"], "kiro");
+        assert_eq!(launch_config["model"], "gpt-5.6-luna");
+        assert_eq!(launch_config["effort"], "max");
+        assert_eq!(launch_config["presidio-enabled"], false);
         assert!(!instructions.contains(session_id));
+        assert!(!launch_config.to_string().contains(session_id));
         assert!(
             plan.child
                 .extra_env

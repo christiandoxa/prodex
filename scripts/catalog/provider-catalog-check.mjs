@@ -32,7 +32,7 @@ const requiredFeatureFlags = [
   "web_search",
   "reasoning",
 ];
-const reasoningEfforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const reasoningEfforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const providerCounts = new Map();
 const issues = [];
 const seenIds = new Set();

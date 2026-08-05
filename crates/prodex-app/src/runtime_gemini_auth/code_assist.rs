@@ -1,7 +1,4 @@
-use super::{
-    GeminiOAuthSecret, gemini_oauth_project_from_env, normalize_gemini_project_id,
-    refresh_gemini_oauth_secret_if_needed, write_gemini_oauth_secret,
-};
+use super::{GeminiOAuthSecret, gemini_oauth_project_from_env};
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
 use redaction::redaction_redact_secret_like_text;
@@ -9,7 +6,6 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::env;
-use std::path::Path;
 use std::time::{Duration, Instant};
 use validation::gemini_validation_from_load_response;
 pub(super) use validation::{
@@ -63,6 +59,7 @@ struct GeminiCodeAssistOperationResponse {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum GeminiCodeAssistSetupMode {
+    #[allow(dead_code)]
     Interactive,
     NonInteractive,
 }
@@ -74,30 +71,6 @@ pub(super) struct GeminiCodeAssistValidation {
     learn_more_url: Option<String>,
 }
 
-pub(crate) fn ensure_gemini_code_assist_project_if_missing(
-    codex_home: &Path,
-) -> Result<GeminiOAuthSecret> {
-    let mut secret = refresh_gemini_oauth_secret_if_needed(codex_home)?;
-    if normalize_gemini_project_id(secret.project_id.as_deref()).is_some()
-        || gemini_oauth_project_from_env().is_some()
-    {
-        return Ok(secret);
-    }
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build Gemini Code Assist HTTP client")?;
-    if let Some(project_id) = resolve_gemini_code_assist_project(
-        &client,
-        &secret,
-        GeminiCodeAssistSetupMode::NonInteractive,
-    )? {
-        secret.project_id = Some(project_id);
-        write_gemini_oauth_secret(codex_home, &secret)?;
-    }
-    Ok(secret)
-}
-
 pub(crate) fn gemini_code_assist_endpoint() -> String {
     env::var("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT")
         .or_else(|_| env::var("GEMINI_CODE_ASSIST_ENDPOINT"))
@@ -105,15 +78,6 @@ pub(crate) fn gemini_code_assist_endpoint() -> String {
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| GEMINI_CODE_ASSIST_ENDPOINT.to_string())
-}
-
-pub(super) fn resolve_gemini_code_assist_project(
-    client: &Client,
-    secret: &GeminiOAuthSecret,
-    mode: GeminiCodeAssistSetupMode,
-) -> Result<Option<String>> {
-    let code_assist_endpoint = gemini_code_assist_endpoint();
-    resolve_gemini_code_assist_project_with_endpoint(client, secret, &code_assist_endpoint, mode)
 }
 
 pub(super) fn resolve_gemini_code_assist_project_with_endpoint(
@@ -603,7 +567,7 @@ mod tests {
             refresh_token: Some("refresh-123".to_string()),
             token_type: Some("Bearer".to_string()),
             scope: None,
-            expiry_date: Some(super::super::now_ms() + 3_600_000),
+            expiry_date: Some(4_102_444_800_000),
             email: "gemini-user@example.com".to_string(),
             project_id: project_id.map(str::to_string),
         }

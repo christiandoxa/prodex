@@ -5,14 +5,12 @@ use super::super::import_export::{
 };
 use super::{
     LoginMethod, LoginRequest, claude_oauth_profile_identity, create_temporary_login_home,
-    fetch_profile_email, finish_named_anthropic_profile_login, finish_named_gemini_profile_login,
-    finish_named_profile_login, prepare_anthropic_profile_login_home,
-    prepare_gemini_profile_login_home, prepare_profile_login_home, read_auth_summary,
-    read_gemini_oauth_secret, required_auth_json_text, run_codex_login, write_secret_text_file,
+    fetch_profile_email, finish_named_anthropic_profile_login, finish_named_profile_login,
+    prepare_anthropic_profile_login_home, prepare_profile_login_home, read_auth_summary,
+    required_auth_json_text, run_codex_login, write_secret_text_file,
 };
 use crate::{
     AppPaths, AppState, ProfileEntry, ProfileProvider, remove_dir_if_exists, resolve_profile_name,
-    write_gemini_oauth_secret,
 };
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -43,20 +41,7 @@ fn validate_profile_login_request(
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if method == LoginMethod::Google {
-        if matches!(
-            profile.provider,
-            ProfileProvider::Copilot { .. }
-                | ProfileProvider::Anthropic { .. }
-                | ProfileProvider::Agy { .. }
-        ) {
-            bail!(
-                "profile '{}' uses {}. Google sign-in supports OpenAI/Codex placeholders or Google Gemini profiles.",
-                profile_name,
-                profile.provider.display_name()
-            );
-        }
-    } else if method == LoginMethod::Claude {
+    if method == LoginMethod::Claude {
         if matches!(
             profile.provider,
             ProfileProvider::Gemini { .. }
@@ -136,44 +121,6 @@ fn finish_login_into_profile_locked(
     login_home: &Path,
     status: ExitStatus,
 ) -> Result<ExitStatus> {
-    if login_request.method == LoginMethod::Google {
-        let secret = read_gemini_oauth_secret(login_home)?;
-        let codex_home = prepare_gemini_profile_login_home(paths, state, profile_name)?;
-        let mut desired_profile = state
-            .profiles
-            .get(profile_name)
-            .with_context(|| format!("profile '{}' is missing", profile_name))?
-            .clone();
-        desired_profile.email = Some(secret.email.clone());
-        desired_profile.provider = ProfileProvider::Gemini {
-            email: secret.email.clone(),
-            project_id: secret.project_id.clone(),
-        };
-        let secret_text = serde_json::to_string_pretty(&secret)?;
-        let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
-            paths,
-            "login",
-            state,
-            profile_name,
-            &desired_profile,
-            Some(profile_name.to_string()),
-            ProfileAuthUpdate {
-                next_auth_json: None,
-                next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
-                next_secret_files: vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
-                    path: crate::GEMINI_OAUTH_SECRET_FILE.to_string(),
-                    text: Some(secret_text),
-                }],
-                previous_secret_file_paths: &[crate::GEMINI_OAUTH_SECRET_FILE],
-                temporary_home: Some(login_home),
-            },
-        )?;
-        write_gemini_oauth_secret(&codex_home, &secret)?;
-        finish_named_gemini_profile_login(paths, state, profile_name, &codex_home, &secret)?;
-        remove_dir_if_exists(login_home)?;
-        cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
-        return Ok(status);
-    }
     if login_request.method == LoginMethod::Claude {
         let codex_home = prepare_anthropic_profile_login_home(paths, state, profile_name)?;
         let (account, auth_method) = claude_oauth_profile_identity(login_home)?;

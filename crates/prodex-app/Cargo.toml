@@ -104,7 +104,7 @@ prodex_update_notice = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 tiny_http = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "sync"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "net", "process", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }

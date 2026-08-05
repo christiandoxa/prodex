@@ -84,7 +84,8 @@ pub(super) fn validate_sub_agent_flags(args: &SuperArgs) -> Result<(), String> {
         && (args.sub_agent_provider.is_some()
             || args.sub_agent_model.is_some()
             || args.sub_agent_model_reasoning_effort.is_some()
-            || args.sub_agent_url.is_some())
+            || args.sub_agent_url.is_some()
+            || args.sub_agent_max_concurrency.is_some())
     {
         return Err("sub-agent detail flags require explicit --sub-agent".to_string());
     }
@@ -99,15 +100,8 @@ pub(super) fn validate_sub_agent_flags(args: &SuperArgs) -> Result<(), String> {
     if args.sub_agent_url.is_some() && provider != ProviderId::Local {
         return Err("--sub-agent-url requires --sub-agent-provider local".to_string());
     }
-    if args.sub_agent
-        && provider == ProviderId::Local
-        && args.sub_agent_url.is_none()
-        && args.url.is_none()
-    {
-        return Err(
-            "local sub-agent provider requires --sub-agent-url or an unambiguous main --url"
-                .to_string(),
-        );
+    if args.sub_agent && provider == ProviderId::Local && args.sub_agent_url.is_none() {
+        return Err("local sub-agent provider requires --sub-agent-url".to_string());
     }
     Ok(())
 }

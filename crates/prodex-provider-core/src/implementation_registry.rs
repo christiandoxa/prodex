@@ -369,6 +369,14 @@ impl ProviderImplementationDescriptor {
         self.registration.provider.label()
     }
 
+    pub const fn display_name(&self) -> &'static str {
+        match self.registration.runtime_metadata {
+            Some(metadata) => metadata.display_name,
+            None if matches!(self.registration.provider, ProviderId::OpenAi) => "OpenAI",
+            None => self.registration.provider.label(),
+        }
+    }
+
     pub const fn accepted_aliases(&self) -> &'static [&'static str] {
         self.registration.aliases
     }
@@ -483,6 +491,18 @@ impl ProviderImplementationRegistry {
                     .iter()
                     .any(|alias| alias.eq_ignore_ascii_case(value)))
             .then_some(descriptor.provider())
+        })
+    }
+
+    pub fn resolve_model_provider_id(&self, value: &str) -> Option<ProviderId> {
+        let value = value.trim();
+        self.resolve_alias(value).or_else(|| {
+            self.descriptors.iter().find_map(|descriptor| {
+                descriptor
+                    .runtime_metadata()
+                    .is_some_and(|metadata| metadata.model_provider_id.eq_ignore_ascii_case(value))
+                    .then_some(descriptor.provider())
+            })
         })
     }
 

@@ -50,6 +50,9 @@ pub(super) fn provider_profile_count(state: &AppState, provider: ProviderId) -> 
 }
 
 fn provider_has_active_profile(state: &AppState, provider: ProviderId) -> Result<bool> {
+    if provider == ProviderId::Gemini {
+        return Ok(false);
+    }
     Ok(state
         .active_profile
         .as_ref()
@@ -100,7 +103,9 @@ pub(super) fn provider_display_name(provider: ProviderId) -> &'static str {
 fn provider_auth_summary(provider: ProviderId) -> &'static str {
     match provider {
         ProviderId::OpenAi => "ChatGPT login, device code, or API key profile",
-        ProviderId::Gemini => "Google OAuth profile or GEMINI_API_KEY(S)",
+        ProviderId::Gemini => {
+            "GEMINI_API_KEY(S)/GOOGLE_API_KEY(S) for Codex bridge; CLI-owned auth/Vertex via --cli gemini"
+        }
         ProviderId::Anthropic => "Claude OAuth import or ANTHROPIC_API_KEY(S)",
         ProviderId::Copilot => "Copilot CLI import or GITHUB_COPILOT_API_KEY(S)",
         ProviderId::DeepSeek => "DEEPSEEK_API_KEY(S)",
@@ -126,7 +131,7 @@ pub(super) fn provider_available_through(
     configured_profiles: usize,
 ) -> Vec<&'static str> {
     let mut routes = Vec::new();
-    if configured_profiles > 0 {
+    if configured_profiles > 0 && provider != ProviderId::Gemini {
         routes.push("profile-backed routing");
     }
     match provider {
@@ -155,8 +160,8 @@ fn provider_setup_commands(provider: ProviderId) -> Vec<&'static str> {
             "prodex profile import-current openai-main",
         ],
         ProviderId::Gemini => vec![
-            "prodex login --with-google",
             "GEMINI_API_KEY=... prodex s gemini --model auto",
+            "prodex s gemini --cli gemini",
         ],
         ProviderId::Anthropic => vec![
             "prodex login --with-claude",
@@ -225,7 +230,7 @@ fn provider_notes(provider: ProviderId) -> &'static str {
             "Prodex profile pool keeps quota-aware rotation and continuation affinity."
         }
         ProviderId::Gemini => {
-            "OAuth profiles use Code Assist; API-key launches use the Gemini OpenAI-compatible endpoint."
+            "Google Gemini OAuth profiles are disabled. The Codex bridge uses API keys; supported Vertex AI authentication is owned by the native --cli gemini path. Legacy profiles remain visible for migration diagnostics."
         }
         ProviderId::Anthropic => {
             "Command generation only; dashboard does not store Anthropic secrets."

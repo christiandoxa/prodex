@@ -1,6 +1,6 @@
 use super::super::local_rewrite::RUNTIME_LOCAL_REWRITE_PROFILE;
 use super::super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
-use super::super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
+use super::super::local_rewrite_gemini_compact::runtime_local_compact_response_parts_with_reason;
 use super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteAcceptedBinding, RuntimeLocalRewriteUpstreamResponse,
     runtime_local_rewrite_binding_recorder, runtime_local_rewrite_continuation_is_bound,
@@ -123,7 +123,11 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
         return Ok(request);
     }
     let response = runtime_local_rewrite_response_with_call_id(
-        runtime_gemini_local_compact_response_parts(&request.captured.body),
+        runtime_local_compact_response_parts_with_reason(
+            &request.captured.body,
+            selected_shared.provider.bridge_kind().provider_id().label(),
+            "local-policy",
+        ),
         request.state.request_id,
         &selected_shared,
     );

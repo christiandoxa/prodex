@@ -99,7 +99,7 @@ fn prepare_runtime_launch_enables_gemini_rewrite_proxy_for_api_key_provider() {
 }
 
 #[test]
-fn prepare_runtime_launch_uses_gemini_oauth_profile_without_api_key() {
+fn prepare_runtime_launch_rejects_legacy_gemini_oauth_profile_without_api_key() {
     let root = temp_dir("gemini-oauth-smart-context-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let gemini_home = root.join("gemini-home");
@@ -138,7 +138,7 @@ fn prepare_runtime_launch_uses_gemini_oauth_profile_without_api_key() {
         },
     );
 
-    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+    let error = match prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
         auto_redeem: false,
@@ -155,16 +155,13 @@ fn prepare_runtime_launch_uses_gemini_oauth_profile_without_api_key() {
         profile_v2_name: None,
         external_provider: Some("gemini"),
         external_provider_api_key: None,
-    })
-    .unwrap();
+    }) {
+        Err(error) => error,
+        Ok(_) => panic!("legacy Gemini OAuth profile must not launch"),
+    };
 
-    assert_eq!(prepared.codex_home, gemini_home);
-    let runtime_proxy = prepared
-        .runtime_proxy
-        .as_ref()
-        .expect("Gemini OAuth profile should use local rewrite proxy");
-    assert_eq!(
-        runtime_proxy.local_model_provider_id.as_deref(),
-        Some(SUPER_GEMINI_PROVIDER_ID)
-    );
+    let message = error.to_string();
+    assert!(message.contains("unsupported and disabled"));
+    assert!(message.contains("Gemini API key"));
+    assert!(message.contains("Vertex AI"));
 }

@@ -4,7 +4,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Read as IoRead};
 use terminal_ui::{
     fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
     tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
@@ -12,7 +12,9 @@ use terminal_ui::{
 };
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
-const SUPER_PROMPT_MAX_MENU_CANDIDATES: usize = 32;
+const SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES: u64 = 1024 * 1024;
+const SUPER_CONFIGURED_MODEL_PROFILE_LIMIT: usize = 128;
+const SUPER_CONFIGURED_MODEL_LIMIT: usize = 1024;
 
 mod app_server_broker;
 mod audit;
@@ -67,15 +69,24 @@ pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 pub(crate) use self::status::*;
 
-pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedMainAgentConfig {
+    provider: prodex_provider_core::ProviderId,
+    model: Option<String>,
+    local_url: Option<String>,
+}
+
+pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
     reject_sub_agent_recursion_reenable(&args)?;
     let interactive = super_prompt_is_interactive();
-    let (use_presidio, sub_agent) = resolve_super_launch_decisions_with_prompts(
-        &args,
+    let (use_presidio, _main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+        &mut args,
         interactive,
         prompt_super_presidio_opt_in,
-        || prompt_super_sub_agent_configuration(&args),
+        |args| runtime_launch::runtime_resume_provider_from_codex_args(&args.codex_args),
+        prompt_super_main_agent_configuration,
+        prompt_super_sub_agent_configuration,
     )?;
     if matches!(
         args.cli,
@@ -104,11 +115,18 @@ pub(super) fn resolve_super_sub_agent(
 }
 
 fn resolve_super_launch_decisions_with_prompts(
-    args: &SuperArgs,
+    args: &mut SuperArgs,
     interactive: bool,
     prompt_presidio: impl FnOnce() -> Result<bool>,
-    prompt_sub_agent: impl FnOnce() -> Result<Option<SubAgentConfig>>,
-) -> Result<(bool, Option<ResolvedSuperSubAgent>)> {
+    resolve_session_provider: impl FnOnce(
+        &SuperArgs,
+    ) -> Result<Option<prodex_provider_core::ProviderId>>,
+    prompt_main_agent: impl FnOnce(
+        &SuperArgs,
+        Option<prodex_provider_core::ProviderId>,
+    ) -> Result<ResolvedMainAgentConfig>,
+    prompt_sub_agent: impl FnOnce(&SuperArgs) -> Result<Option<SubAgentConfig>>,
+) -> Result<(bool, ResolvedMainAgentConfig, Option<ResolvedSuperSubAgent>)> {
     let use_presidio = if matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
         false
     } else {
@@ -118,11 +136,183 @@ fn resolve_super_launch_decisions_with_prompts(
             None => false,
         }
     };
-    let mut sub_agent = resolve_super_sub_agent_with_prompt(args, interactive, prompt_sub_agent)?;
+    let session_provider = resolve_session_provider(args)?;
+    let main_agent = resolve_super_main_agent_with_prompt(
+        args,
+        interactive,
+        session_provider,
+        prompt_main_agent,
+    )?;
+    let mut sub_agent =
+        resolve_super_sub_agent_with_prompt(args, interactive, || prompt_sub_agent(args))?;
     if let Some(sub_agent) = sub_agent.as_mut() {
         sub_agent.presidio_enabled = use_presidio;
     }
-    Ok((use_presidio, sub_agent))
+    Ok((use_presidio, main_agent, sub_agent))
+}
+
+fn resolve_super_main_agent_with_prompt(
+    args: &mut SuperArgs,
+    interactive: bool,
+    session_provider: Option<prodex_provider_core::ProviderId>,
+    prompt: impl FnOnce(
+        &SuperArgs,
+        Option<prodex_provider_core::ProviderId>,
+    ) -> Result<ResolvedMainAgentConfig>,
+) -> Result<ResolvedMainAgentConfig> {
+    let explicit_super_provider = args
+        .url
+        .as_ref()
+        .map(|_| prodex_provider_core::ProviderId::Local)
+        .or(args.provider.map(SuperExternalProvider::provider_id))
+        .or(match args.cli {
+            Some(SuperCliAgent::Gemini | SuperCliAgent::Agy) => {
+                Some(prodex_provider_core::ProviderId::Gemini)
+            }
+            Some(SuperCliAgent::Copilot) => Some(prodex_provider_core::ProviderId::Copilot),
+            Some(SuperCliAgent::Kiro) => Some(prodex_provider_core::ProviderId::Kiro),
+            Some(SuperCliAgent::Codex) | None => None,
+        });
+    let explicit_codex_provider = codex_cli_config_override_value(
+        &args.codex_args,
+        "model_provider",
+    )
+    .map(|provider| {
+        prodex_provider_core::provider_implementation_registry()
+            .resolve_model_provider_id(&provider)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "explicit Codex model_provider is unsupported by Prodex Super; use a canonical --provider, --url, or start a plain Codex launch"
+                )
+            })
+    })
+    .transpose()?;
+    if let (Some(super_provider), Some(codex_provider)) =
+        (explicit_super_provider, explicit_codex_provider)
+        && super_provider != codex_provider
+    {
+        bail!(
+            "conflicting main-agent provider inputs; remove either the Super provider option or the Codex model_provider override"
+        );
+    }
+    let explicit_provider = explicit_super_provider.or(explicit_codex_provider);
+    if let (Some(explicit), Some(bound)) = (explicit_provider, session_provider)
+        && explicit != bound
+    {
+        bail!(
+            "resumed session is bound to provider {}; remove the conflicting {} provider option or resume a matching session",
+            provider_display_name(bound),
+            provider_display_name(explicit)
+        );
+    }
+
+    let resolved = if let Some(provider) = session_provider {
+        if interactive && explicit_provider.is_none() {
+            let displayed = prompt(args, Some(provider))?;
+            if displayed.provider != provider {
+                bail!("resumed session provider display returned a conflicting provider");
+            }
+            displayed
+        } else {
+            ResolvedMainAgentConfig {
+                provider,
+                model: args.local_model.clone(),
+                local_url: args.url.clone(),
+            }
+        }
+    } else if let Some(url) = args.url.clone() {
+        ResolvedMainAgentConfig {
+            provider: prodex_provider_core::ProviderId::Local,
+            model: args.local_model.clone(),
+            local_url: Some(url),
+        }
+    } else if let Some(provider) = args.provider {
+        ResolvedMainAgentConfig {
+            provider: provider.provider_id(),
+            model: args.local_model.clone(),
+            local_url: None,
+        }
+    } else if let Some(provider) = explicit_provider {
+        ResolvedMainAgentConfig {
+            provider,
+            model: args.local_model.clone(),
+            local_url: None,
+        }
+    } else if interactive {
+        prompt(args, None)?
+    } else {
+        ResolvedMainAgentConfig {
+            provider: prodex_provider_core::ProviderId::OpenAi,
+            model: args.local_model.clone(),
+            local_url: None,
+        }
+    };
+
+    match resolved.provider {
+        prodex_provider_core::ProviderId::OpenAi => {
+            if codex_cli_config_override_value(&args.codex_args, "model_provider").is_none() {
+                args.codex_args.splice(
+                    0..0,
+                    [
+                        OsString::from("-c"),
+                        OsString::from("model_provider=\"openai\""),
+                    ],
+                );
+            }
+        }
+        prodex_provider_core::ProviderId::Local => {
+            let url = resolved
+                .local_url
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("local main-agent provider requires --url"))?;
+            prodex_cli::parse_super_local_url(url).map_err(anyhow::Error::msg)?;
+            args.url = Some(url.to_string());
+        }
+        provider => {
+            args.provider = SuperExternalProvider::from_provider_id(provider);
+        }
+    }
+    Ok(resolved)
+}
+
+fn prompt_super_main_agent_configuration(
+    args: &SuperArgs,
+    locked_provider: Option<prodex_provider_core::ProviderId>,
+) -> Result<ResolvedMainAgentConfig> {
+    let providers = locked_provider.map_or_else(
+        || {
+            prodex_provider_core::provider_implementation_registry()
+                .iter()
+                .map(|descriptor| descriptor.provider())
+                .collect::<Vec<_>>()
+        },
+        |provider| vec![provider],
+    );
+    let choices = providers
+        .iter()
+        .map(|provider| {
+            let label = provider_display_name(*provider);
+            if locked_provider.is_some() {
+                format!("{label} (session affinity)")
+            } else {
+                label.to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+    let provider = providers[prompt_super_choice("Main-agent provider", &choices, 0, false)?];
+    let local_url = if provider == prodex_provider_core::ProviderId::Local {
+        Some(prompt_super_text(
+            "Main-agent local URL",
+            args.url.as_deref().unwrap_or("http://127.0.0.1:11434/v1"),
+        )?)
+    } else {
+        None
+    };
+    Ok(ResolvedMainAgentConfig {
+        provider,
+        model: args.local_model.clone(),
+        local_url,
+    })
 }
 
 fn resolve_super_sub_agent_with_prompt(
@@ -173,18 +363,11 @@ fn resolve_super_sub_agent_with_prompt(
     resolve_super_sub_agent_config(config, resolve_super_launch_target(&args.codex_args)).map(Some)
 }
 
-fn prompt_super_sub_agent_configuration(args: &SuperArgs) -> Result<Option<SubAgentConfig>> {
+fn prompt_super_sub_agent_configuration(_args: &SuperArgs) -> Result<Option<SubAgentConfig>> {
     if !prompt_super_sub_agent_opt_in()? {
         return Ok(None);
     }
-    prompt_super_sub_agent_config(
-        SubAgentConfig::default(),
-        false,
-        false,
-        false,
-        args.url.as_deref(),
-    )
-    .map(Some)
+    prompt_super_sub_agent_config(SubAgentConfig::default(), false, false, false).map(Some)
 }
 
 fn reject_sub_agent_recursion_reenable(args: &SuperArgs) -> Result<()> {
@@ -204,98 +387,284 @@ fn super_prompt_is_interactive() -> bool {
 
 fn prompt_super_sub_agent_opt_in() -> Result<bool> {
     Ok(prompt_super_choice(
-        "Sub-agent opt-in",
-        &["enable".to_string(), "skip".to_string()],
+        "Use sub-agents?",
+        &["yes".to_string(), "no".to_string()],
         1,
         true,
     )? == 0)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SuperSubAgentPromptStep {
+    Provider,
+    LocalUrl,
+    Model,
+    ReasoningEffort,
+    MaxConcurrency,
+}
+
+fn super_sub_agent_prompt_steps(
+    config: &SubAgentConfig,
+    provider_explicit: bool,
+    model_explicit: bool,
+    effort_explicit: bool,
+) -> Vec<SuperSubAgentPromptStep> {
+    let mut steps = Vec::with_capacity(5);
+    if !provider_explicit {
+        steps.push(SuperSubAgentPromptStep::Provider);
+    }
+    if config.provider == prodex_provider_core::ProviderId::Local && config.url.is_none() {
+        steps.push(SuperSubAgentPromptStep::LocalUrl);
+    }
+    if !model_explicit {
+        steps.push(SuperSubAgentPromptStep::Model);
+    }
+    if !effort_explicit {
+        steps.push(SuperSubAgentPromptStep::ReasoningEffort);
+    }
+    steps.push(SuperSubAgentPromptStep::MaxConcurrency);
+    steps
+}
+
 fn prompt_super_sub_agent_config(
+    config: SubAgentConfig,
+    provider_explicit: bool,
+    model_explicit: bool,
+    effort_explicit: bool,
+) -> Result<SubAgentConfig> {
+    run_super_sub_agent_prompt_steps(
+        config,
+        provider_explicit,
+        model_explicit,
+        effort_explicit,
+        |step, config| {
+            match step {
+                SuperSubAgentPromptStep::Provider => {
+                    let providers = canonical_sub_agent_providers();
+                    let choices = providers
+                        .iter()
+                        .map(|provider| provider_display_name(*provider).to_string())
+                        .collect::<Vec<_>>();
+                    let selected = providers
+                        .iter()
+                        .position(|provider| *provider == config.provider)
+                        .unwrap_or(0);
+                    config.provider = providers
+                        [prompt_super_choice("Sub-agent provider", &choices, selected, false)?];
+                }
+                SuperSubAgentPromptStep::LocalUrl => {
+                    config.url = Some(prompt_super_text(
+                        "Sub-agent local URL",
+                        "http://127.0.0.1:11434/v1",
+                    )?);
+                }
+                SuperSubAgentPromptStep::Model => {
+                    let configured_models = configured_sub_agent_models(config.provider);
+                    let models = if configured_models.is_empty() {
+                        canonical_sub_agent_model_choices(config.provider, config.model.as_deref())
+                    } else {
+                        prodex_provider_core::resolve_provider_model_choices(
+                            config.provider,
+                            &configured_models,
+                            config.model.as_deref(),
+                        )
+                    };
+                    let choices = models
+                        .iter()
+                        .map(|choice| match choice {
+                            prodex_provider_core::ProviderModelChoice::ProviderDefault => {
+                                "provider default".to_string()
+                            }
+                            prodex_provider_core::ProviderModelChoice::Model(model) => {
+                                model.clone()
+                            }
+                            prodex_provider_core::ProviderModelChoice::Custom => {
+                                "custom model...".to_string()
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let selected = config
+                        .model
+                        .as_ref()
+                        .and_then(|model| choices.iter().position(|choice| choice == model))
+                        .unwrap_or(0);
+                    let selected =
+                        prompt_super_choice("Sub-agent model", &choices, selected, false)?;
+                    match &models[selected] {
+                        prodex_provider_core::ProviderModelChoice::ProviderDefault => {
+                            config.model = None
+                        }
+                        prodex_provider_core::ProviderModelChoice::Model(model) => {
+                            config.model = Some(model.clone())
+                        }
+                        prodex_provider_core::ProviderModelChoice::Custom => {
+                            config.model = Some(prompt_super_text(
+                                "Custom sub-agent model",
+                                config.model.as_deref().unwrap_or_default(),
+                            )?)
+                        }
+                    }
+                }
+                SuperSubAgentPromptStep::ReasoningEffort => {
+                    let mut efforts = vec![("provider default".to_string(), None)];
+                    efforts.extend(
+                        canonical_sub_agent_efforts(config.provider, config.model.as_deref())
+                            .into_iter()
+                            .map(|effort| (effort.as_str().to_string(), Some(effort))),
+                    );
+                    let choices = efforts
+                        .iter()
+                        .map(|(label, _)| label.clone())
+                        .collect::<Vec<_>>();
+                    let selected = efforts
+                        .iter()
+                        .position(|(_, effort)| *effort == config.model_reasoning_effort)
+                        .unwrap_or(0);
+                    config.model_reasoning_effort = efforts[prompt_super_choice(
+                        "Sub-agent reasoning effort",
+                        &choices,
+                        selected,
+                        false,
+                    )?]
+                    .1;
+                }
+                SuperSubAgentPromptStep::MaxConcurrency => {
+                    config.max_concurrency = prompt_super_sub_agent_max_concurrency()?;
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn run_super_sub_agent_prompt_steps(
     mut config: SubAgentConfig,
     provider_explicit: bool,
     model_explicit: bool,
     effort_explicit: bool,
-    main_local_url: Option<&str>,
+    mut prompt: impl FnMut(SuperSubAgentPromptStep, &mut SubAgentConfig) -> Result<()>,
 ) -> Result<SubAgentConfig> {
     if !provider_explicit {
-        let all_providers = canonical_sub_agent_providers();
-        let providers = &all_providers[..all_providers.len().min(SUPER_PROMPT_MAX_MENU_CANDIDATES)];
-        let choices = providers
-            .iter()
-            .map(|provider| provider_display_name(*provider).to_string())
-            .collect::<Vec<_>>();
-        let selected = providers
-            .iter()
-            .position(|provider| *provider == config.provider)
-            .unwrap_or(0);
-        config.provider =
-            providers[prompt_super_choice("Sub-agent provider", &choices, selected, false)?];
+        prompt(SuperSubAgentPromptStep::Provider, &mut config)?;
     }
-
-    if !model_explicit {
-        let all_models = canonical_sub_agent_models(config.provider);
-        let model_limit = SUPER_PROMPT_MAX_MENU_CANDIDATES.saturating_sub(2);
-        let models = &all_models[..all_models.len().min(model_limit)];
-        let mut choices = vec!["provider default".to_string()];
-        choices.extend(
-            models
-                .iter()
-                .map(|model| model.id.to_string())
-                .collect::<Vec<_>>(),
-        );
-        choices.push("custom model…".to_string());
-        let selected = config
-            .model
-            .as_deref()
-            .and_then(|model| prodex_provider_core::provider_model_spec(config.provider, model))
-            .and_then(|model| {
-                models
-                    .iter()
-                    .position(|candidate| candidate.id == model.id)
-                    .map(|index| index + 1)
-            })
-            .unwrap_or(0);
-        let selected = prompt_super_choice("Sub-agent model", &choices, selected, false)?;
-        if selected == 0 {
-            config.model = None;
-        } else if selected == models.len() + 1 {
-            config.model = Some(prompt_super_text(
-                "Custom sub-agent model",
-                config.model.as_deref().unwrap_or_default(),
-            )?);
-        } else {
-            config.model = Some(models[selected - 1].id.to_string());
-        }
-    }
-
-    if !effort_explicit {
-        let mut efforts = vec![("provider default".to_string(), None)];
-        efforts.extend(
-            canonical_sub_agent_efforts(config.provider, config.model.as_deref())
-                .into_iter()
-                .map(|effort| (effort.as_str().to_string(), Some(effort))),
-        );
-        let choices = efforts
-            .iter()
-            .map(|(label, _)| label.clone())
-            .collect::<Vec<_>>();
-        let selected = efforts
-            .iter()
-            .position(|(_, effort)| *effort == config.model_reasoning_effort)
-            .unwrap_or(0);
-        config.model_reasoning_effort = efforts
-            [prompt_super_choice("Sub-agent reasoning effort", &choices, selected, false)?]
-        .1;
-    }
-
-    if config.provider == prodex_provider_core::ProviderId::Local && config.url.is_none() {
-        config.url = Some(prompt_super_text(
-            "Local sub-agent URL",
-            main_local_url.unwrap_or("http://127.0.0.1:11434/v1"),
-        )?);
+    for step in super_sub_agent_prompt_steps(&config, true, model_explicit, effort_explicit) {
+        prompt(step, &mut config)?;
     }
     Ok(config)
+}
+
+fn configured_sub_agent_models(provider: prodex_provider_core::ProviderId) -> Vec<String> {
+    let catalog_file = match provider {
+        prodex_provider_core::ProviderId::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
+        prodex_provider_core::ProviderId::Kiro => KIRO_MODEL_CATALOG_FILE,
+        _ => return Vec::new(),
+    };
+    let Ok(paths) = AppPaths::discover() else {
+        return Vec::new();
+    };
+    let Ok(state) = AppState::load(&paths) else {
+        return Vec::new();
+    };
+    let mut models = Vec::new();
+    for profile in state
+        .profiles
+        .values()
+        .take(SUPER_CONFIGURED_MODEL_PROFILE_LIMIT)
+    {
+        let matches_provider = matches!(
+            (&profile.provider, provider),
+            (
+                ProfileProvider::Copilot { .. },
+                prodex_provider_core::ProviderId::Copilot
+            ) | (
+                ProfileProvider::Kiro { .. },
+                prodex_provider_core::ProviderId::Kiro
+            )
+        );
+        if !matches_provider {
+            continue;
+        }
+        let Ok(file) = fs::File::open(profile.codex_home.join(catalog_file)) else {
+            continue;
+        };
+        let mut contents = String::new();
+        let mut bounded = IoRead::take(file, SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES + 1);
+        if IoRead::read_to_string(&mut bounded, &mut contents).is_err()
+            || contents.len() as u64 > SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES
+        {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+            continue;
+        };
+        configured_sub_agent_model_ids(&value, &mut models);
+        if models.len() >= SUPER_CONFIGURED_MODEL_LIMIT {
+            models.truncate(SUPER_CONFIGURED_MODEL_LIMIT);
+            break;
+        }
+    }
+    models
+}
+
+fn configured_sub_agent_model_ids(value: &serde_json::Value, models: &mut Vec<String>) {
+    let Some(entries) = value.get("models").and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for entry in entries
+        .iter()
+        .take(SUPER_CONFIGURED_MODEL_LIMIT.saturating_sub(models.len()))
+    {
+        let Some(id) = entry
+            .get("id")
+            .or_else(|| entry.get("slug"))
+            .or_else(|| entry.get("model"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if !id.trim().is_empty() {
+            models.push(id.to_string());
+        }
+    }
+}
+
+fn prompt_super_sub_agent_max_concurrency() -> Result<SubAgentMaxConcurrency> {
+    let choices = super_sub_agent_concurrency_choices();
+    loop {
+        match prompt_super_choice("Maximum active sub-agents", &choices, 0, false)? {
+            0 => return Ok(SubAgentMaxConcurrency::default()),
+            index if index <= prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS.len() => {
+                return choices[index]
+                    .parse::<SubAgentMaxConcurrency>()
+                    .map_err(anyhow::Error::msg);
+            }
+            _ => {
+                if let Some(limit) = prompt_super_sub_agent_custom_concurrency()? {
+                    return Ok(limit);
+                }
+            }
+        }
+    }
+}
+
+fn super_sub_agent_concurrency_choices() -> Vec<String> {
+    let mut choices = vec![format!("default ({DEFAULT_SUB_AGENT_MAX_CONCURRENCY})")];
+    choices.extend(
+        prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS
+            .iter()
+            .map(u16::to_string),
+    );
+    choices.push("custom...".to_string());
+    choices
+}
+
+fn prompt_super_sub_agent_custom_concurrency() -> Result<Option<SubAgentMaxConcurrency>> {
+    prompt_super_text_input(
+        &format!("Enter maximum active sub-agents (1-{HARD_MAX_SUB_AGENT_CONCURRENCY})"),
+        "",
+        true,
+        |value| value.parse::<SubAgentMaxConcurrency>(),
+    )
 }
 
 fn prompt_super_choice(
@@ -305,7 +674,7 @@ fn prompt_super_choice(
     escape_selects_last: bool,
 ) -> Result<usize> {
     if choices.is_empty() {
-        bail!("Sub-agent prompt has no choices");
+        bail!("Super prompt has no choices");
     }
     let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent prompt TUI")?;
     let mut selected = selected.min(choices.len().saturating_sub(1));
@@ -355,7 +724,7 @@ fn prompt_super_choice(
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(body, chunks[1]);
-            let footer = Paragraph::new(Line::from(vec![
+            let mut footer_spans = vec![
                 Span::styled("↑/↓", tui_hint_style()),
                 Span::raw(" choose  "),
                 Span::styled("enter", tui_success_style()),
@@ -366,8 +735,15 @@ fn prompt_super_choice(
                 } else {
                     " cancel"
                 }),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
+            ];
+            if visible.start > 0 {
+                footer_spans.push(Span::styled("  ↑ more", tui_hint_style()));
+            }
+            if visible.end < choices.len() {
+                footer_spans.push(Span::styled("  ↓ more", tui_hint_style()));
+            }
+            let footer = Paragraph::new(Line::from(footer_spans))
+                .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 
@@ -381,13 +757,17 @@ fn prompt_super_choice(
                 KeyCode::Down | KeyCode::Char('j') => {
                     selected = (selected + 1) % choices.len();
                 }
+                KeyCode::PageUp => selected = selected.saturating_sub(10),
+                KeyCode::PageDown => selected = selected.saturating_add(10).min(choices.len() - 1),
+                KeyCode::Home => selected = 0,
+                KeyCode::End => selected = choices.len() - 1,
                 KeyCode::Enter => return Ok(selected),
                 KeyCode::Esc if escape_selects_last => return Ok(choices.len() - 1),
-                KeyCode::Esc => bail!("Sub-agent prompt cancelled"),
+                KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
                 KeyCode::Char('c') | KeyCode::Char('z')
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    bail!("Sub-agent prompt cancelled")
+                    bail!("Prodex Super prompt cancelled")
                 }
                 _ => {}
             }
@@ -408,11 +788,26 @@ fn bounded_tui_text(value: &str, width: u16) -> String {
 }
 
 fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
+    prompt_super_text_input(title, initial, false, |value| {
+        (!value.trim().is_empty())
+            .then(|| value.to_string())
+            .ok_or_else(|| "value must be nonempty".to_string())
+    })?
+    .ok_or_else(|| anyhow::anyhow!("Prodex Super prompt cancelled"))
+}
+
+fn prompt_super_text_input<T>(
+    title: &str,
+    initial: &str,
+    escape_returns_none: bool,
+    parse: impl Fn(&str) -> std::result::Result<T, String>,
+) -> Result<Option<T>> {
     let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent text prompt TUI")?;
     let mut value = initial
         .chars()
         .take(SUPER_PROMPT_MAX_TEXT_CHARS)
         .collect::<String>();
+    let mut validation_error = None::<String>;
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()
@@ -431,22 +826,33 @@ fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
             .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
             let value_display = bounded_tui_text(&value, frame.area().width.saturating_sub(4));
-            let body = Paragraph::new(Line::from(vec![
+            let mut lines = vec![Line::from(vec![
                 Span::styled(value_display, tui_primary_style()),
                 Span::styled("▌", tui_success_style()),
-            ]))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(tui_border_style()),
-            )
-            .wrap(Wrap { trim: true });
+            ])];
+            if let Some(error) = validation_error.as_deref() {
+                lines.push(Line::from(Span::styled(
+                    bounded_tui_text(error, frame.area().width.saturating_sub(4)),
+                    tui_hint_style(),
+                )));
+            }
+            let body = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::LEFT | Borders::RIGHT)
+                        .border_style(tui_border_style()),
+                )
+                .wrap(Wrap { trim: true });
             frame.render_widget(body, chunks[1]);
             let footer = Paragraph::new(Line::from(vec![
                 Span::styled("enter", tui_success_style()),
                 Span::raw(" accept  "),
                 Span::styled("esc", tui_hint_style()),
-                Span::raw(" cancel"),
+                Span::raw(if escape_returns_none {
+                    " back"
+                } else {
+                    " cancel"
+                }),
             ]))
             .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
@@ -455,21 +861,27 @@ fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
             && key.kind == KeyEventKind::Press
         {
             match key.code {
-                KeyCode::Enter if !value.trim().is_empty() => return Ok(value),
+                KeyCode::Enter => match parse(&value) {
+                    Ok(parsed) => return Ok(Some(parsed)),
+                    Err(error) => validation_error = Some(error),
+                },
                 KeyCode::Backspace => {
                     value.pop();
+                    validation_error = None;
                 }
                 KeyCode::Char(character)
                     if !key.modifiers.contains(KeyModifiers::CONTROL)
                         && value.chars().count() < SUPER_PROMPT_MAX_TEXT_CHARS =>
                 {
                     value.push(character);
+                    validation_error = None;
                 }
-                KeyCode::Esc => bail!("Sub-agent prompt cancelled"),
+                KeyCode::Esc if escape_returns_none => return Ok(None),
+                KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
                 KeyCode::Char('c') | KeyCode::Char('z')
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    bail!("Sub-agent prompt cancelled")
+                    bail!("Prodex Super prompt cancelled")
                 }
                 _ => {}
             }
@@ -564,14 +976,16 @@ pub(super) fn prompt_super_presidio_opt_in() -> Result<bool> {
 #[cfg(test)]
 mod sub_agent_prompt_tests {
     use super::{
-        bounded_tui_text, resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
-        visible_choice_range,
+        ResolvedMainAgentConfig, SuperSubAgentPromptStep, bounded_tui_text,
+        configured_sub_agent_model_ids, resolve_super_launch_decisions_with_prompts,
+        resolve_super_sub_agent, run_super_sub_agent_prompt_steps,
+        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
     use std::cell::RefCell;
 
-    const SESSION_ID: &str = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
 
     fn super_args(values: &[&str]) -> prodex_cli::SuperArgs {
         let mut argv = vec!["prodex", "s"];
@@ -588,10 +1002,181 @@ mod sub_agent_prompt_tests {
 
     #[test]
     fn choice_window_stays_bounded_and_keeps_selection_visible() {
+        assert_eq!(visible_choice_range(3, 6, 10), 0..6);
         assert_eq!(visible_choice_range(0, 20, 4), 0..4);
         assert_eq!(visible_choice_range(19, 20, 4), 16..20);
         assert_eq!(visible_choice_range(10, 20, 4), 8..12);
         assert_eq!(visible_choice_range(10, 20, 1), 10..11);
+        assert_eq!(visible_choice_range(19, 20, 30), 0..20);
+    }
+
+    #[test]
+    fn concurrency_menu_uses_exact_bounded_presets_with_default_first() {
+        assert_eq!(
+            super_sub_agent_concurrency_choices(),
+            ["default (4)", "4", "8", "16", "32", "custom..."]
+        );
+    }
+
+    #[test]
+    fn child_configuration_steps_are_ordered_and_local_url_is_conditional() {
+        assert_eq!(
+            super_sub_agent_prompt_steps(&SubAgentConfig::default(), false, false, false),
+            [
+                SuperSubAgentPromptStep::Provider,
+                SuperSubAgentPromptStep::Model,
+                SuperSubAgentPromptStep::ReasoningEffort,
+                SuperSubAgentPromptStep::MaxConcurrency,
+            ]
+        );
+        assert_eq!(
+            super_sub_agent_prompt_steps(
+                &SubAgentConfig {
+                    provider: ProviderId::Local,
+                    ..SubAgentConfig::default()
+                },
+                false,
+                false,
+                false,
+            ),
+            [
+                SuperSubAgentPromptStep::Provider,
+                SuperSubAgentPromptStep::LocalUrl,
+                SuperSubAgentPromptStep::Model,
+                SuperSubAgentPromptStep::ReasoningEffort,
+                SuperSubAgentPromptStep::MaxConcurrency,
+            ]
+        );
+    }
+
+    #[test]
+    fn launch_sequence_combines_outer_decisions_and_child_runner() {
+        let _marker =
+            crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
+        let calls = RefCell::new(Vec::new());
+        let mut args = super_args(&[]);
+        let (_, _, enabled) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            true,
+            || {
+                calls.borrow_mut().push("Presidio");
+                Ok(true)
+            },
+            |_| Ok(None),
+            |_, locked| {
+                assert_eq!(locked, None);
+                calls.borrow_mut().push("Main-agent provider");
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::OpenAi,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| {
+                calls.borrow_mut().push("Use sub-agents?");
+                let config = run_super_sub_agent_prompt_steps(
+                    SubAgentConfig::default(),
+                    false,
+                    false,
+                    false,
+                    |step, config| {
+                        calls.borrow_mut().push(match step {
+                            SuperSubAgentPromptStep::Provider => "Sub-agent provider",
+                            SuperSubAgentPromptStep::LocalUrl => "Sub-agent local URL",
+                            SuperSubAgentPromptStep::Model => "Sub-agent model",
+                            SuperSubAgentPromptStep::ReasoningEffort => {
+                                "Sub-agent reasoning effort"
+                            }
+                            SuperSubAgentPromptStep::MaxConcurrency => "Maximum active sub-agents",
+                        });
+                        match step {
+                            SuperSubAgentPromptStep::Provider => {
+                                config.provider = ProviderId::Local
+                            }
+                            SuperSubAgentPromptStep::LocalUrl => {
+                                config.url = Some("http://127.0.0.1:8131/v1".to_string())
+                            }
+                            _ => {}
+                        }
+                        Ok(())
+                    },
+                )?;
+                Ok(Some(config))
+            },
+        )
+        .unwrap();
+        assert!(enabled.is_some());
+        assert_eq!(
+            &*calls.borrow(),
+            &[
+                "Presidio",
+                "Main-agent provider",
+                "Use sub-agents?",
+                "Sub-agent provider",
+                "Sub-agent local URL",
+                "Sub-agent model",
+                "Sub-agent reasoning effort",
+                "Maximum active sub-agents",
+            ]
+        );
+
+        let disabled_calls = RefCell::new(Vec::new());
+        let mut args = super_args(&[]);
+        let (_, _, disabled) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            true,
+            || {
+                disabled_calls.borrow_mut().push("Presidio");
+                Ok(false)
+            },
+            |_| Ok(None),
+            |_, locked| {
+                assert_eq!(locked, None);
+                disabled_calls.borrow_mut().push("Main-agent provider");
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::OpenAi,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| {
+                disabled_calls.borrow_mut().push("Use sub-agents?");
+                Ok(None)
+            },
+        )
+        .unwrap();
+        assert!(disabled.is_none());
+        assert_eq!(
+            &*disabled_calls.borrow(),
+            &["Presidio", "Main-agent provider", "Use sub-agents?"]
+        );
+    }
+
+    #[test]
+    fn configured_model_ids_augment_the_canonical_picker_inputs() {
+        let mut configured = Vec::new();
+        configured_sub_agent_model_ids(
+            &serde_json::json!({
+                "models": [
+                    {"id": "profile-only-model"},
+                    {"slug": "slug-only-model"},
+                    {"model": "model-only-model"},
+                    {"id": "   "}
+                ]
+            }),
+            &mut configured,
+        );
+        let choices = prodex_provider_core::resolve_provider_model_choices(
+            ProviderId::Kiro,
+            &configured,
+            None,
+        );
+        for expected in ["profile-only-model", "slug-only-model", "model-only-model"] {
+            assert!(choices.iter().any(|choice| matches!(
+                choice,
+                prodex_provider_core::ProviderModelChoice::Model(model) if model == expected
+            )));
+        }
     }
 
     #[test]
@@ -623,29 +1208,45 @@ mod sub_agent_prompt_tests {
     fn pure_interactive_resolution_prompts_presidio_before_resumed_sub_agent_config() {
         let _marker =
             crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
-        let args = super_args(&[SESSION_ID]);
+        let mut args = super_args(&[SESSION_ID]);
         let calls = RefCell::new(Vec::new());
-        let (presidio, sub_agent) = resolve_super_launch_decisions_with_prompts(
-            &args,
+        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
             true,
             || {
                 calls.borrow_mut().push("presidio");
                 Ok(true)
             },
-            || {
+            |_| Ok(None),
+            |_, locked| {
+                assert_eq!(locked, None);
+                calls.borrow_mut().push("main-agent");
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::OpenAi,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| {
                 calls.borrow_mut().push("sub-agent");
                 Ok(Some(SubAgentConfig {
                     provider: ProviderId::Kiro,
                     model: Some("gpt-5.6-luna".to_string()),
                     model_reasoning_effort: Some(SubAgentReasoningEffort::Max),
                     url: None,
+                    max_concurrency: Default::default(),
                 }))
             },
         )
         .expect("interactive resolution should succeed");
 
-        assert_eq!(&*calls.borrow(), &["presidio", "sub-agent"]);
+        assert_eq!(&*calls.borrow(), &["presidio", "main-agent", "sub-agent"]);
         assert!(presidio);
+        assert_eq!(main_agent.provider, ProviderId::OpenAi);
+        assert_eq!(
+            super::codex_cli_config_override_value(&args.codex_args, "model_provider").as_deref(),
+            Some("openai")
+        );
         let sub_agent = sub_agent.expect("sub-agent should be enabled");
         assert!(sub_agent.presidio_enabled);
         assert_eq!(sub_agent.provider, ProviderId::Kiro);
@@ -664,22 +1265,34 @@ mod sub_agent_prompt_tests {
         let _marker =
             crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
         let calls = RefCell::new(Vec::new());
-        let (presidio, sub_agent) = resolve_super_launch_decisions_with_prompts(
-            &super_args(&[SESSION_ID]),
+        let mut args = super_args(&[SESSION_ID]);
+        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
             true,
             || {
                 calls.borrow_mut().push("presidio");
                 Ok(false)
             },
-            || {
+            |_| Ok(None),
+            |_, locked| {
+                assert_eq!(locked, None);
+                calls.borrow_mut().push("main-agent");
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::Kiro,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| {
                 calls.borrow_mut().push("sub-agent");
                 Ok(None)
             },
         )
         .expect("interactive skip should succeed");
 
-        assert_eq!(&*calls.borrow(), &["presidio", "sub-agent"]);
+        assert_eq!(&*calls.borrow(), &["presidio", "main-agent", "sub-agent"]);
         assert!(!presidio);
+        assert_eq!(main_agent.provider, ProviderId::Kiro);
         assert!(sub_agent.is_none());
     }
 
@@ -687,18 +1300,24 @@ mod sub_agent_prompt_tests {
     fn pure_resolution_skips_prompts_for_non_tty_and_fully_configured_resume() {
         let _marker =
             crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
-        let (presidio, sub_agent) = resolve_super_launch_decisions_with_prompts(
-            &super_args(&[]),
+        let mut args = super_args(&[]);
+        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
             false,
             || panic!("non-TTY Presidio prompt must not run"),
-            || panic!("non-TTY sub-agent prompt must not run"),
+            |_| Ok(None),
+            |_, _| panic!("non-TTY main-agent prompt must not run"),
+            |_| panic!("non-TTY sub-agent prompt must not run"),
         )
         .expect("non-TTY defaults should resolve");
         assert!(!presidio);
+        assert_eq!(main_agent.provider, ProviderId::OpenAi);
         assert!(sub_agent.is_none());
 
-        let args = super_args(&[
+        let mut args = super_args(&[
             "--presidio",
+            "--provider",
+            "copilot",
             "--sub-agent",
             "--sub-agent-provider",
             "copilot",
@@ -708,14 +1327,17 @@ mod sub_agent_prompt_tests {
             "xhigh",
             SESSION_ID,
         ]);
-        let (presidio, sub_agent) = resolve_super_launch_decisions_with_prompts(
-            &args,
+        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
             true,
             || panic!("explicit Presidio must skip the prompt"),
-            || panic!("explicit sub-agent config must skip the wizard"),
+            |_| Ok(None),
+            |_, _| panic!("explicit main provider must skip the prompt"),
+            |_| panic!("explicit sub-agent config must skip the wizard"),
         )
         .expect("explicit resume should resolve");
         assert!(presidio);
+        assert_eq!(main_agent.provider, ProviderId::Copilot);
         let sub_agent = sub_agent.expect("explicit sub-agent should resolve");
         assert_eq!(sub_agent.provider, ProviderId::Copilot);
         assert_eq!(sub_agent.model.as_deref(), Some("configured-model"));
@@ -727,6 +1349,77 @@ mod sub_agent_prompt_tests {
                 session_id: SESSION_ID.to_string()
             }
         );
+    }
+
+    #[test]
+    fn resumed_provider_affinity_displays_locked_provider_and_rejects_conflicts() {
+        let _marker =
+            crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
+        let mut args = super_args(&[SESSION_ID, "--no-sub-agent"]);
+        let (_, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            true,
+            || Ok(false),
+            |_| Ok(Some(ProviderId::Kiro)),
+            |_, locked| {
+                assert_eq!(locked, Some(ProviderId::Kiro));
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::Kiro,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| panic!("explicit --no-sub-agent must skip the prompt"),
+        )
+        .expect("bound resume should resolve");
+        assert_eq!(main_agent.provider, ProviderId::Kiro);
+        assert!(sub_agent.is_none());
+
+        let mut args = super_args(&["--provider", "copilot", SESSION_ID, "--no-sub-agent"]);
+        let error = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            false,
+            || panic!("non-TTY must not prompt"),
+            |_| Ok(Some(ProviderId::Kiro)),
+            |_, _| panic!("conflicting provider must fail before picker"),
+            |_| panic!("conflicting provider must fail before sub-agent resolution"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("bound to provider Kiro"), "{error}");
+        assert!(error.contains("GitHub Copilot"), "{error}");
+
+        let mut args = super_args(&[
+            "-c",
+            "model_provider=\"prodex-kiro\"",
+            SESSION_ID,
+            "--no-sub-agent",
+        ]);
+        let error = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            false,
+            || panic!("non-TTY must not prompt"),
+            |_| Ok(Some(ProviderId::OpenAi)),
+            |_, _| panic!("conflicting provider must fail before picker"),
+            |_| panic!("conflicting provider must fail before sub-agent resolution"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("bound to provider OpenAI"), "{error}");
+        assert!(error.contains("Kiro"), "{error}");
+
+        let mut args = super_args(&["-c", "model_provider=\"prodex-kiro\"", "--no-sub-agent"]);
+        let (_, main_agent, _) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            true,
+            || Ok(false),
+            |_| Ok(None),
+            |_, _| panic!("explicit model_provider must skip the picker"),
+            |_| panic!("explicit --no-sub-agent must skip the prompt"),
+        )
+        .unwrap();
+        assert_eq!(main_agent.provider, ProviderId::Kiro);
+        assert_eq!(args.provider, Some(prodex_cli::SuperExternalProvider::Kiro));
     }
 
     #[test]

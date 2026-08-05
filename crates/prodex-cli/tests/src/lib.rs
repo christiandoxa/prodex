@@ -145,6 +145,23 @@ fn runtime_broker_hidden_command_accepts_no_secret_arguments() {
 }
 
 #[test]
+fn sub_agent_exec_hidden_command_is_not_rewritten_to_managed_run() {
+    let args = os_args(&[
+        "prodex",
+        "__sub-agent-exec",
+        "--config",
+        "/tmp/config.json",
+        "--task-file",
+        "/tmp/task.txt",
+    ]);
+    assert!(!should_default_cli_invocation_to_run(&args));
+    assert!(matches!(
+        parse_cli_command_from(args).unwrap(),
+        Commands::SubAgentExec(_)
+    ));
+}
+
+#[test]
 fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
     const API_KEY: &str = "debug-api-key-sentinel";
     const AUTH_TOKEN: &str = "debug-auth-token-sentinel";

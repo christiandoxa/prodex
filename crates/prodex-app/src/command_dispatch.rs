@@ -35,6 +35,7 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
                 | Commands::Update(_)
                 | Commands::GeminiCompatRefresh(_)
                 | Commands::McpJsonlBridge(_)
+                | Commands::SubAgentExec(_)
         )
 }
 
@@ -87,6 +88,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
             Commands::Profile(ProfileCommands::Remove(_))
                 | Commands::Cleanup(_)
                 | Commands::Doctor(_)
+                | Commands::SubAgentExec(_)
         )
     {
         recover_pending_profile_lifecycle()?;
@@ -136,6 +138,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
         Commands::GeminiCompatRefresh(args) => handle_gemini_compat_refresh(args),
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
+        Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
     }
 }
 
