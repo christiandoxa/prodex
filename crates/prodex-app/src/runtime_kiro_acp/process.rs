@@ -190,27 +190,13 @@ fn runtime_kiro_acp_bootstrap_child(
             continue;
         }
         let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
-        if runtime_kiro_acp_reject_unsupported_server_request(&mut stdin, &envelope)? {
-            notifications.push(envelope);
-            continue;
-        }
-        if let Some(error) = &envelope.error {
-            if matches!(envelope.id, Some(0 | 1)) {
-                bail!(
-                    "Kiro ACP bootstrap failed for request {:?}: {}",
-                    envelope.id,
-                    error.message
-                );
-            }
-            notifications.push(envelope);
-            continue;
-        }
-        match envelope.id {
-            Some(0) => initialize = Some(envelope.parse_initialize_result()?),
-            Some(1) => session = Some(envelope.parse_session_new_result()?),
-            _ => notifications.push(envelope),
-        }
-        if initialize.is_some() && session.is_some() {
+        if collect_runtime_kiro_bootstrap_envelope(
+            &mut stdin,
+            envelope,
+            &mut initialize,
+            &mut session,
+            &mut notifications,
+        )? {
             break;
         }
     }
@@ -223,6 +209,36 @@ fn runtime_kiro_acp_bootstrap_child(
         session,
         notifications,
     })
+}
+
+fn collect_runtime_kiro_bootstrap_envelope(
+    stdin: &mut impl Write,
+    envelope: RuntimeKiroAcpEnvelope,
+    initialize: &mut Option<RuntimeKiroAcpInitializeResult>,
+    session: &mut Option<RuntimeKiroAcpNewSessionResult>,
+    notifications: &mut Vec<RuntimeKiroAcpEnvelope>,
+) -> Result<bool> {
+    if runtime_kiro_acp_reject_unsupported_server_request(stdin, &envelope)? {
+        notifications.push(envelope);
+        return Ok(false);
+    }
+    if let Some(error) = &envelope.error {
+        if matches!(envelope.id, Some(0 | 1)) {
+            bail!(
+                "Kiro ACP bootstrap failed for request {:?}: {}",
+                envelope.id,
+                error.message
+            );
+        }
+        notifications.push(envelope);
+        return Ok(false);
+    }
+    match envelope.id {
+        Some(0) => *initialize = Some(envelope.parse_initialize_result()?),
+        Some(1) => *session = Some(envelope.parse_session_new_result()?),
+        _ => notifications.push(envelope),
+    }
+    Ok(initialize.is_some() && session.is_some())
 }
 
 fn runtime_kiro_acp_prompt_turn_child(

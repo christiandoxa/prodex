@@ -152,42 +152,15 @@ impl RuntimeGeminiModelResolution {
         };
         for (model, resolution) in resolutions {
             let mut chain = Vec::new();
-            if let Some(default) = resolution
-                .get("default")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|target| !target.is_empty())
-            {
+            for target in gemini_model_resolution_targets(resolution) {
                 if chain.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
                     bail!(
                         "Gemini fallback chain exceeds the hard limit of {} entries",
                         PROVIDER_MODEL_CATALOG_HARD_LIMIT
                     );
                 }
-                chain.push(default.to_string());
-                self.remember_catalog_model(default, default, "Gemini CLI resolved model.")?;
-            }
-            if let Some(contexts) = resolution
-                .get("contexts")
-                .and_then(serde_json::Value::as_array)
-            {
-                for context in contexts {
-                    if let Some(target) = context
-                        .get("target")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .filter(|target| !target.is_empty())
-                    {
-                        if chain.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                            bail!(
-                                "Gemini fallback chain exceeds the hard limit of {} entries",
-                                PROVIDER_MODEL_CATALOG_HARD_LIMIT
-                            );
-                        }
-                        chain.push(target.to_string());
-                        self.remember_catalog_model(target, target, "Gemini CLI resolved model.")?;
-                    }
-                }
+                chain.push(target.to_string());
+                self.remember_catalog_model(target, target, "Gemini CLI resolved model.")?;
             }
             if !chain.is_empty() {
                 self.remember_catalog_model(model, model, "Gemini CLI modelIdResolution alias.")?;
@@ -311,6 +284,28 @@ pub(crate) fn preview_gemini_provider_codex_args(
     user_args: &[OsString],
 ) -> Result<Vec<OsString>> {
     gemini_provider_codex_args(codex_home, user_args, false)
+}
+
+fn gemini_model_resolution_targets(resolution: &serde_json::Value) -> Vec<&str> {
+    let mut targets = resolution
+        .get("default")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .into_iter()
+        .collect::<Vec<_>>();
+    targets.extend(
+        resolution
+            .get("contexts")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|context| context.get("target"))
+            .filter_map(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|target| !target.is_empty()),
+    );
+    targets
 }
 
 fn gemini_provider_codex_args(
