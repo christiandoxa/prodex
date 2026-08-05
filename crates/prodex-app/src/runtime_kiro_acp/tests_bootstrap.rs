@@ -271,8 +271,10 @@ fn kiro_acp_internal_activity_smoke_is_non_executable_and_does_not_reconnect() {
     assert!(!serialized.contains("tool_calls"));
     assert!(!serialized.contains("/home/test-user"));
     assert_eq!(
-        fs::read_to_string(root.join("activity-agent-invocations")).unwrap(),
-        "1\n"
+        fs::read_to_string(root.join("activity-agent-invocations"))
+            .unwrap()
+            .trim_end(),
+        "1"
     );
     let _ = fs::remove_dir_all(root);
 }

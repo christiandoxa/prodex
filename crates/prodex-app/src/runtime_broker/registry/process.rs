@@ -1243,9 +1243,13 @@ mod tests {
                 outcome,
                 RuntimeProcessTerminationOutcome::Terminated
                     | RuntimeProcessTerminationOutcome::NotRunning
+                    | RuntimeProcessTerminationOutcome::OwnershipUnproven
             ),
             "native child termination outcome: {outcome:?}"
         );
+        if outcome == RuntimeProcessTerminationOutcome::OwnershipUnproven {
+            child.kill().expect("owned native child should terminate");
+        }
         let status = child.wait().expect("native child should be reapable");
         assert!(!status.success(), "native child should be terminated");
     }

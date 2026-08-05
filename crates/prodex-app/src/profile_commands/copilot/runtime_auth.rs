@@ -260,37 +260,46 @@ fn collect_copilot_runtime_models<'a>(
 ) -> bool {
     match value {
         serde_json::Value::Object(object) => {
-            for (key, nested) in object {
-                if (key.eq_ignore_ascii_case("models")
-                    || key.eq_ignore_ascii_case("available_models")
-                    || key.eq_ignore_ascii_case("model_catalog")
-                    || key.eq_ignore_ascii_case("chat_models")
-                    || key.eq_ignore_ascii_case("data"))
-                    && let Some(array) = nested.as_array()
-                {
-                    for model in array {
-                        if output.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                            return true;
-                        }
-                        output.push(model);
-                    }
-                    continue;
-                }
-                if collect_copilot_runtime_models(nested, output) {
+            collect_copilot_runtime_models_from_object(object, output)
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|nested| collect_copilot_runtime_models(nested, output)),
+        _ => false,
+    }
+}
+
+fn collect_copilot_runtime_models_from_object<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    output: &mut Vec<&'a serde_json::Value>,
+) -> bool {
+    for (key, nested) in object {
+        if is_copilot_runtime_model_list(key)
+            && let Some(models) = nested.as_array()
+        {
+            for model in models {
+                if output.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
                     return true;
                 }
+                output.push(model);
             }
+        } else if collect_copilot_runtime_models(nested, output) {
+            return true;
         }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                if collect_copilot_runtime_models(nested, output) {
-                    return true;
-                }
-            }
-        }
-        _ => {}
     }
     false
+}
+
+fn is_copilot_runtime_model_list(key: &str) -> bool {
+    [
+        "models",
+        "available_models",
+        "model_catalog",
+        "chat_models",
+        "data",
+    ]
+    .iter()
+    .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
 fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serde_json::Value> {

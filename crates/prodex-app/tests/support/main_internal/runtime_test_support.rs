@@ -109,7 +109,10 @@ impl TestDir {
                     .as_nanos(),
                 TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed),
             );
-            let path = std::env::temp_dir().join(unique);
+            let path = std::env::temp_dir()
+                .canonicalize()
+                .expect("failed to resolve test temp dir")
+                .join(unique);
             match fs::create_dir(&path) {
                 Ok(()) => {
                     #[cfg(unix)]

@@ -206,48 +206,74 @@ fn resolve_super_main_agent_with_prompt(
         );
     }
 
-    let resolved = if let Some(provider) = session_provider {
+    let resolved = resolve_main_agent_config(
+        args,
+        interactive,
+        session_provider,
+        explicit_provider,
+        prompt,
+    )?;
+    apply_resolved_main_agent(args, &resolved)?;
+    Ok(resolved)
+}
+
+fn resolve_main_agent_config(
+    args: &SuperArgs,
+    interactive: bool,
+    session_provider: Option<prodex_provider_core::ProviderId>,
+    explicit_provider: Option<prodex_provider_core::ProviderId>,
+    prompt: impl FnOnce(
+        &SuperArgs,
+        Option<prodex_provider_core::ProviderId>,
+    ) -> Result<ResolvedMainAgentConfig>,
+) -> Result<ResolvedMainAgentConfig> {
+    if let Some(provider) = session_provider {
         if interactive && explicit_provider.is_none() {
             let displayed = prompt(args, Some(provider))?;
             if displayed.provider != provider {
                 bail!("resumed session provider display returned a conflicting provider");
             }
-            displayed
+            Ok(displayed)
         } else {
-            ResolvedMainAgentConfig {
+            Ok(ResolvedMainAgentConfig {
                 provider,
                 model: args.local_model.clone(),
                 local_url: args.url.clone(),
-            }
+            })
         }
     } else if let Some(url) = args.url.clone() {
-        ResolvedMainAgentConfig {
+        Ok(ResolvedMainAgentConfig {
             provider: prodex_provider_core::ProviderId::Local,
             model: args.local_model.clone(),
             local_url: Some(url),
-        }
+        })
     } else if let Some(provider) = args.provider {
-        ResolvedMainAgentConfig {
+        Ok(ResolvedMainAgentConfig {
             provider: provider.provider_id(),
             model: args.local_model.clone(),
             local_url: None,
-        }
+        })
     } else if let Some(provider) = explicit_provider {
-        ResolvedMainAgentConfig {
+        Ok(ResolvedMainAgentConfig {
             provider,
             model: args.local_model.clone(),
             local_url: None,
-        }
+        })
     } else if interactive {
-        prompt(args, None)?
+        prompt(args, None)
     } else {
-        ResolvedMainAgentConfig {
+        Ok(ResolvedMainAgentConfig {
             provider: prodex_provider_core::ProviderId::OpenAi,
             model: args.local_model.clone(),
             local_url: None,
-        }
-    };
+        })
+    }
+}
 
+fn apply_resolved_main_agent(
+    args: &mut SuperArgs,
+    resolved: &ResolvedMainAgentConfig,
+) -> Result<()> {
     match resolved.provider {
         prodex_provider_core::ProviderId::OpenAi => {
             if codex_cli_config_override_value(&args.codex_args, "model_provider").is_none() {
@@ -272,7 +298,7 @@ fn resolve_super_main_agent_with_prompt(
             args.provider = SuperExternalProvider::from_provider_id(provider);
         }
     }
-    Ok(resolved)
+    Ok(())
 }
 
 fn prompt_super_main_agent_configuration(
@@ -759,30 +785,42 @@ fn prompt_super_choice(
 
         if let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
+            && let Some(choice) = update_super_choice_selection(
+                key,
+                &mut selected,
+                choices.len(),
+                escape_selects_last,
+            )?
         {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    selected = selected.checked_sub(1).unwrap_or(choices.len() - 1);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    selected = (selected + 1) % choices.len();
-                }
-                KeyCode::PageUp => selected = selected.saturating_sub(10),
-                KeyCode::PageDown => selected = selected.saturating_add(10).min(choices.len() - 1),
-                KeyCode::Home => selected = 0,
-                KeyCode::End => selected = choices.len() - 1,
-                KeyCode::Enter => return Ok(selected),
-                KeyCode::Esc if escape_selects_last => return Ok(choices.len() - 1),
-                KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
-                KeyCode::Char('c') | KeyCode::Char('z')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    bail!("Prodex Super prompt cancelled")
-                }
-                _ => {}
-            }
+            return Ok(choice);
         }
     }
+}
+
+fn update_super_choice_selection(
+    key: crossterm::event::KeyEvent,
+    selected: &mut usize,
+    len: usize,
+    escape_selects_last: bool,
+) -> Result<Option<usize>> {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => *selected = selected.checked_sub(1).unwrap_or(len - 1),
+        KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1) % len,
+        KeyCode::PageUp => *selected = selected.saturating_sub(10),
+        KeyCode::PageDown => *selected = selected.saturating_add(10).min(len - 1),
+        KeyCode::Home => *selected = 0,
+        KeyCode::End => *selected = len - 1,
+        KeyCode::Enter => return Ok(Some(*selected)),
+        KeyCode::Esc if escape_selects_last => return Ok(Some(len - 1)),
+        KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
+        KeyCode::Char('c') | KeyCode::Char('z')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            bail!("Prodex Super prompt cancelled")
+        }
+        _ => {}
+    }
+    Ok(None)
 }
 
 fn visible_choice_range(selected: usize, len: usize, height: u16) -> std::ops::Range<usize> {
