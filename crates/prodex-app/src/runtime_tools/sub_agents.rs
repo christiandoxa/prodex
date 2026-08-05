@@ -17,6 +17,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
 const SUB_AGENTS_FILE: &str = "SUB_AGENTS.md";
@@ -27,6 +28,10 @@ const SUB_AGENT_TASK_MAX_BYTES: usize = 65_536;
 const SUB_AGENT_BLOCK_BEGIN: &str = "<!-- PRODEX SUB-AGENT BEGIN -->";
 const SUB_AGENT_BLOCK_END: &str = "<!-- PRODEX SUB-AGENT END -->";
 const SUB_AGENT_LIMIT_EXIT_CODE: i32 = 75;
+const SUB_AGENT_OUTPUT_DRAIN_TIMEOUT: Duration =
+    Duration::from_millis(if cfg!(test) { 100 } else { 5_000 });
+const SUB_AGENT_CHILD_REAP_TIMEOUT: Duration =
+    Duration::from_millis(if cfg!(test) { 250 } else { 5_000 });
 const SUB_AGENT_RULES: [&str; 17] = [
     "Act as lead and sole integrator: own delegation, integration, testing, and the final response.",
     "Plan the decomposition first; give each child a narrow objective, clear scope, relevant paths, expected output, and required validation.",
@@ -322,7 +327,7 @@ fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<()> {
         };
         match file.try_lock_exclusive() {
             Ok(()) => stale.push((slot, file)),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Err(error) if sub_agent_lock_contended(&error) => {
                 bail!(
                     "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
                 );
@@ -402,15 +407,26 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
     if outcome.cancelled {
         return Err(crate::command_dispatch::command_exit_error(
             130,
-            "sub-agent launcher cancelled",
+            if outcome.output_incomplete {
+                "sub-agent launcher cancelled; child output was incomplete"
+            } else {
+                "sub-agent launcher cancelled"
+            },
         ));
     }
     if !outcome.status.success() {
         let code = outcome.status.code().unwrap_or(1);
         return Err(crate::command_dispatch::command_exit_error(
             code,
-            format!("sub-agent child exited with status {code}"),
+            if outcome.output_incomplete {
+                format!("sub-agent child exited with status {code}; child output was incomplete")
+            } else {
+                format!("sub-agent child exited with status {code}")
+            },
         ));
+    }
+    if outcome.output_incomplete {
+        bail!("sub-agent child output collection failed");
     }
     Ok(())
 }
@@ -459,6 +475,14 @@ impl Drop for SubAgentSlotLease {
     }
 }
 
+fn sub_agent_lock_contended(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
+        || matches!(
+            (error.raw_os_error(), fs2::lock_contended_error().raw_os_error()),
+            (Some(actual), Some(expected)) if actual == expected
+        )
+}
+
 fn acquire_sub_agent_slot(spec: &ChildLaunchSpec) -> Result<SubAgentSlotLease> {
     for index in 0..spec.max_concurrency.get() {
         let path = spec.slot_dir.join(format!("slot-{index:02}.lock"));
@@ -469,7 +493,7 @@ fn acquire_sub_agent_slot(spec: &ChildLaunchSpec) -> Result<SubAgentSlotLease> {
             .with_context(|| format!("failed to open concurrency slot {index}"))?;
         match file.try_lock_exclusive() {
             Ok(()) => return Ok(SubAgentSlotLease(file)),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if sub_agent_lock_contended(&error) => {}
             Err(error) => {
                 return Err(error).context("failed to acquire sub-agent concurrency slot");
             }
@@ -523,6 +547,7 @@ fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
 struct SubAgentChildOutcome {
     status: std::process::ExitStatus,
     cancelled: bool,
+    output_incomplete: bool,
 }
 
 async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAgentChildOutcome> {
@@ -530,6 +555,7 @@ async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAg
     command
         .args(child_argv(spec, task))
         .env(SUB_AGENT_RECURSION_MARKER, "1")
+        .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -545,16 +571,47 @@ async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAg
             signal?;
             cancelled = true;
             child.start_kill().context("failed to terminate cancelled sub-agent child")?;
-            child.wait().await.context("failed to reap cancelled sub-agent child")?
+            tokio::time::timeout(SUB_AGENT_CHILD_REAP_TIMEOUT, child.wait())
+                .await
+                .context("timed out while reaping cancelled sub-agent child")?
+                .context("failed to reap cancelled sub-agent child")?
         }
     };
-    stdout_task
+    let output_incomplete = drain_child_output_tasks(stdout_task, stderr_task)
         .await
-        .context("sub-agent stdout relay task failed")??;
-    stderr_task
-        .await
-        .context("sub-agent stderr relay task failed")??;
-    Ok(SubAgentChildOutcome { status, cancelled })
+        .is_err();
+    Ok(SubAgentChildOutcome {
+        status,
+        cancelled,
+        output_incomplete,
+    })
+}
+
+async fn drain_child_output_tasks(
+    mut stdout_task: tokio::task::JoinHandle<io::Result<()>>,
+    mut stderr_task: tokio::task::JoinHandle<io::Result<()>>,
+) -> Result<()> {
+    let drained = tokio::time::timeout(SUB_AGENT_OUTPUT_DRAIN_TIMEOUT, async {
+        let (stdout, stderr) = tokio::join!(&mut stdout_task, &mut stderr_task);
+        stdout.context("sub-agent stdout relay task failed")??;
+        stderr.context("sub-agent stderr relay task failed")??;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await;
+    match drained {
+        Ok(result) => result,
+        Err(_) => {
+            stdout_task.abort();
+            stderr_task.abort();
+            if !stdout_task.is_finished() {
+                let _ = stdout_task.await;
+            }
+            if !stderr_task.is_finished() {
+                let _ = stderr_task.await;
+            }
+            bail!("sub-agent output drain timed out after child exit");
+        }
+    }
 }
 
 async fn relay_child_output<R, W>(mut reader: R, mut writer: W) -> io::Result<()>
@@ -884,6 +941,17 @@ mod tests {
         fs::write(&config, serde_json::to_vec(spec).unwrap()).unwrap();
         fs::write(&task_file, task).unwrap();
         prodex_cli::SubAgentExecArgs { config, task_file }
+    }
+
+    #[test]
+    fn lock_contention_errors_are_classified_portably() {
+        assert!(sub_agent_lock_contended(&fs2::lock_contended_error()));
+        assert!(sub_agent_lock_contended(&io::Error::from(
+            io::ErrorKind::WouldBlock
+        )));
+        assert!(!sub_agent_lock_contended(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
     }
 
     #[test]
@@ -1448,6 +1516,36 @@ mod tests {
                 .to_string()
                 .contains("failed to spawn sub-agent child")
         );
+        drop(acquire_sub_agent_slot(&spec).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn inherited_output_pipe_is_bounded_and_cannot_hold_a_slot() {
+        let root = temp_test_root("sub-agent-held-output-pipe");
+        let spec = slot_spec(&root, 1);
+        let started = std::time::Instant::now();
+        {
+            let _slot = acquire_sub_agent_slot(&spec).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let error = runtime
+                .block_on(async {
+                    let (stdout_reader, _held_by_descendant) = tokio::io::duplex(1);
+                    let (stderr_reader, stderr_writer) = tokio::io::duplex(1);
+                    drop(stderr_writer);
+                    drain_child_output_tasks(
+                        tokio::spawn(relay_child_output(stdout_reader, tokio::io::sink())),
+                        tokio::spawn(relay_child_output(stderr_reader, tokio::io::sink())),
+                    )
+                    .await
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains("output drain timed out"));
+        }
+        assert!(started.elapsed() < Duration::from_secs(1));
         drop(acquire_sub_agent_slot(&spec).unwrap());
         fs::remove_dir_all(root).unwrap();
     }

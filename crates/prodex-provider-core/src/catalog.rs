@@ -2,7 +2,28 @@ use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::sync::OnceLock;
+
+pub const PROVIDER_MODEL_CATALOG_HARD_LIMIT: usize = 1_024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderModelCatalogLimitError {
+    provider: ProviderId,
+}
+
+impl fmt::Display for ProviderModelCatalogLimitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} model catalog exceeds the hard limit of {} entries",
+            self.provider.label(),
+            PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        )
+    }
+}
+
+impl std::error::Error for ProviderModelCatalogLimitError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCatalogFeatureFlags {
@@ -57,26 +78,46 @@ pub fn resolve_provider_model_choices(
 ) -> Vec<ProviderModelChoice> {
     let mut choices = vec![ProviderModelChoice::ProviderDefault];
     let mut seen = BTreeSet::new();
-    let mut push = |model: &str| {
-        if model.trim().is_empty() {
-            return;
-        }
-        let canonical = provider_catalog_entry(provider, model)
+    let normalize = |model: &str| {
+        provider_catalog_entry(provider, model)
             .map(|entry| entry.id.as_str())
             .or_else(|| crate::provider_model_spec(provider, model).map(|spec| spec.id))
-            .unwrap_or(model);
-        if seen.insert(canonical.to_ascii_lowercase()) {
-            choices.push(ProviderModelChoice::Model(canonical.to_string()));
-        }
+            .unwrap_or(model)
+            .to_string()
     };
     for entry in provider_catalog_entries_for(provider) {
-        push(&entry.id);
+        let model = normalize(&entry.id);
+        if seen.len() < PROVIDER_MODEL_CATALOG_HARD_LIMIT && seen.insert(model.to_ascii_lowercase())
+        {
+            choices.push(ProviderModelChoice::Model(model));
+        }
     }
+    let current = current_model
+        .filter(|model| !model.trim().is_empty())
+        .map(normalize);
+    let current_key = current.as_ref().map(|model| model.to_ascii_lowercase());
+    let reserve_current = usize::from(current_key.as_ref().is_some_and(|key| !seen.contains(key)));
     for model in configured_models {
-        push(model);
+        if model.trim().is_empty() {
+            continue;
+        }
+        let model = normalize(model);
+        let key = model.to_ascii_lowercase();
+        if current_key.as_ref() == Some(&key) {
+            continue;
+        }
+        if seen.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT - reserve_current {
+            break;
+        }
+        if seen.insert(key) {
+            choices.push(ProviderModelChoice::Model(model));
+        }
     }
-    if let Some(model) = current_model {
-        push(model);
+    if let Some(model) = current
+        && seen.len() < PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        && seen.insert(model.to_ascii_lowercase())
+    {
+        choices.push(ProviderModelChoice::Model(model));
     }
     choices.push(ProviderModelChoice::Custom);
     choices
@@ -186,6 +227,43 @@ pub fn provider_model_catalog_json(provider: ProviderId) -> Vec<serde_json::Valu
         .collect()
 }
 
+/// Returns the canonical offline catalog followed by additional locally discovered models.
+pub fn merge_provider_model_catalog_json<'a>(
+    provider: ProviderId,
+    additional_models: impl IntoIterator<Item = &'a serde_json::Value>,
+) -> Result<Vec<serde_json::Value>, ProviderModelCatalogLimitError> {
+    let mut models = provider_model_catalog_json(provider);
+    if models.len() > PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+        return Err(ProviderModelCatalogLimitError { provider });
+    }
+    let mut seen = models
+        .iter()
+        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+        .map(|id| id.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    for model in additional_models {
+        let Some(id) = model
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        let canonical_id = provider_catalog_entry(provider, id)
+            .map(|entry| entry.id.as_str())
+            .or_else(|| crate::provider_model_spec(provider, id).map(|spec| spec.id))
+            .unwrap_or(id);
+        if seen.insert(canonical_id.to_ascii_lowercase()) {
+            if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                return Err(ProviderModelCatalogLimitError { provider });
+            }
+            models.push(model.clone());
+        }
+    }
+    Ok(models)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +354,7 @@ mod tests {
             let provider = descriptor.provider();
             let choices = resolve_provider_model_choices(provider, &[], None);
             let json = provider_model_catalog_json(provider);
+            assert!(json.len() <= PROVIDER_MODEL_CATALOG_HARD_LIMIT);
             let detailed_ids = provider_catalog_entries_for(provider)
                 .into_iter()
                 .map(|entry| entry.id.as_str())
@@ -322,5 +401,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn additional_model_catalog_entries_augment_canonical_models_stably() {
+        let canonical = provider_model_catalog_json(ProviderId::OpenAi);
+        let additional = [
+            serde_json::json!({"id": "GPT-5.6-LUNA", "display_name": "duplicate"}),
+            serde_json::json!({"id": "account/model:custom", "display_name": "Custom"}),
+            serde_json::json!({"id": "ACCOUNT/MODEL:CUSTOM", "display_name": "duplicate"}),
+            serde_json::json!({"id": "  "}),
+        ];
+
+        let merged = merge_provider_model_catalog_json(ProviderId::OpenAi, &additional).unwrap();
+
+        assert_eq!(&merged[..canonical.len()], canonical.as_slice());
+        assert_eq!(merged.len(), canonical.len() + 1);
+        assert_eq!(merged.last().unwrap()["id"], "account/model:custom");
+    }
+
+    #[test]
+    fn additional_model_catalog_entries_fail_explicitly_at_the_hard_limit() {
+        let canonical_len = provider_model_catalog_json(ProviderId::OpenAi).len();
+        let additional = (0..=PROVIDER_MODEL_CATALOG_HARD_LIMIT - canonical_len)
+            .map(|index| serde_json::json!({"id": format!("custom-{index}")}))
+            .collect::<Vec<_>>();
+
+        let error = merge_provider_model_catalog_json(ProviderId::OpenAi, &additional).unwrap_err();
+
+        assert_eq!(error.provider, ProviderId::OpenAi);
+        assert!(error.to_string().contains("hard limit of 1024 entries"));
+    }
+
+    #[test]
+    fn additional_model_catalog_accepts_exactly_the_hard_limit() {
+        let canonical_len = provider_model_catalog_json(ProviderId::OpenAi).len();
+        let additional = (0..PROVIDER_MODEL_CATALOG_HARD_LIMIT - canonical_len)
+            .map(|index| serde_json::json!({"id": format!("custom-{index}")}))
+            .collect::<Vec<_>>();
+
+        let merged = merge_provider_model_catalog_json(ProviderId::OpenAi, &additional).unwrap();
+
+        assert_eq!(merged.len(), PROVIDER_MODEL_CATALOG_HARD_LIMIT);
+    }
+
+    #[test]
+    fn model_choices_keep_current_model_with_a_full_configured_catalog() {
+        let configured = (0..PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+            .map(|index| format!("configured-{index}"))
+            .collect::<Vec<_>>();
+
+        let choices =
+            resolve_provider_model_choices(ProviderId::OpenAi, &configured, Some("current-model"));
+
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|choice| matches!(choice, ProviderModelChoice::Model(_)))
+                .count(),
+            PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+        assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
+        assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
     }
 }

@@ -143,38 +143,6 @@ impl RuntimeLaunchSelection {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_gemini_uses_profileless_shared_home_without_prodex_oauth_profile() {
-        let root = PathBuf::from("/synthetic/prodex");
-        let paths = AppPaths {
-            root: root.clone(),
-            state_file: root.join("state.json"),
-            managed_profiles_root: root.join("profiles"),
-            shared_codex_root: root.join("shared"),
-            legacy_shared_codex_root: root.join("legacy-shared"),
-        };
-        let selection = RuntimeLaunchSelection::resolve(
-            &paths,
-            &AppState::default(),
-            None,
-            None,
-            None,
-            Some("gemini-native"),
-            None,
-        )
-        .unwrap();
-
-        assert!(selection.profileless_local_home);
-        assert_eq!(selection.codex_home, paths.shared_codex_root);
-        assert_eq!(selection.selected_profile_name, "local");
-        assert!(selection.non_openai_model_provider.is_none());
-    }
-}
-
 fn profile_openai_compatible_model_provider_for_launch(
     codex_home: &Path,
     model_provider_override: Option<&str>,
@@ -250,4 +218,36 @@ pub(crate) fn resolve_runtime_launch_profile_name(
                 route_policy,
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_gemini_uses_profileless_shared_home_without_prodex_oauth_profile() {
+        let root = PathBuf::from("/synthetic/prodex");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let selection = RuntimeLaunchSelection::resolve(
+            &paths,
+            &AppState::default(),
+            None,
+            None,
+            None,
+            Some("gemini-native"),
+            None,
+        )
+        .unwrap();
+
+        assert!(selection.profileless_local_home);
+        assert_eq!(selection.codex_home, paths.shared_codex_root);
+        assert_eq!(selection.selected_profile_name, "local");
+        assert!(selection.non_openai_model_provider.is_none());
+    }
 }

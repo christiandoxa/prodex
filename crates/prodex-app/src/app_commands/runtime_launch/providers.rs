@@ -223,7 +223,7 @@ fn runtime_local_rewrite_gemini_options(
 ) -> Result<RuntimeLocalRewriteProviderOptions> {
     let thinking_budget_tokens =
         runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
-    let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
+    let model_resolution = RuntimeGeminiModelResolution::from_current_settings()?;
     if !provider.eq_ignore_ascii_case("gemini-oauth")
         && let Some(api_keys) =
             runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)?

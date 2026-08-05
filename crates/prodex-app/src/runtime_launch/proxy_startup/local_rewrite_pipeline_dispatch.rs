@@ -167,7 +167,17 @@ fn runtime_local_rewrite_builtin_models_response(
             parts, request_id, shared,
         ));
     }
-    let mut catalog = runtime_copilot_model_catalog_from_provider(&shared.provider);
+    let mut catalog = match runtime_copilot_model_catalog_from_provider(&shared.provider) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            runtime_local_rewrite_log_builtin_response(request_id, request, 503, shared);
+            return Some(build_runtime_proxy_json_error_response(
+                503,
+                "model_catalog_limit_exceeded",
+                &error.to_string(),
+            ));
+        }
+    };
     if catalog.is_empty() {
         catalog = runtime_kiro_model_catalog_from_provider(&shared.provider);
     }

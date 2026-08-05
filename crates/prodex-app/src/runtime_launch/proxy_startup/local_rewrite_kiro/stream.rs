@@ -233,6 +233,25 @@ pub(super) fn runtime_kiro_stream_notification(
                 chat_delta_started,
             )?;
         }
+        RuntimeKiroAcpSessionUpdate::AgentThoughtChunk { content, .. }
+            if chat_completions_route =>
+        {
+            let Some(text) = runtime_kiro_content_text(content) else {
+                return Ok(());
+            };
+            sender.send(RuntimeKiroStreamingChunk::Data(
+                runtime_kiro_chat_completion_chunk(
+                    chat_completion_id,
+                    Some(stream_model),
+                    prodex_provider_core::kiro_provider_core_chat_completion_reasoning_delta(
+                        &text,
+                        !*chat_delta_started,
+                    ),
+                    None,
+                )?,
+            ))?;
+            *chat_delta_started = true;
+        }
         RuntimeKiroAcpSessionUpdate::ToolCall {
             tool_call_id,
             title,

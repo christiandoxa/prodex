@@ -141,20 +141,25 @@ fn read_optional_link_target_contents(path: &Path) -> Result<String> {
 mod tests {
     use super::{ensure_agents_reference, remove_agents_block, upsert_agents_block};
     use std::fs;
+    use std::path::PathBuf;
 
-    #[test]
-    fn keeps_unrelated_same_basename_reference_and_deduplicates_exact_reference() {
-        let root = std::env::temp_dir()
+    fn temp_root(name: &str) -> PathBuf {
+        std::env::temp_dir()
             .canonicalize()
             .expect("temp dir should resolve")
             .join(format!(
-                "prodex-localization-{}-{}",
+                "prodex-localization-{name}-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
-            ));
+            ))
+    }
+
+    #[test]
+    fn keeps_unrelated_same_basename_reference_and_deduplicates_exact_reference() {
+        let root = temp_root("reference");
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join("AGENTS.md"),
@@ -181,8 +186,7 @@ mod tests {
 
     #[test]
     fn marked_block_uses_nonempty_override_and_replaces_in_place() {
-        let root =
-            std::env::temp_dir().join(format!("prodex-localization-block-{}", std::process::id()));
+        let root = temp_root("block");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("AGENTS.md"), "base instructions\n").unwrap();
@@ -207,10 +211,7 @@ mod tests {
 
     #[test]
     fn empty_override_is_skipped() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-localization-empty-override-{}",
-            std::process::id()
-        ));
+        let root = temp_root("empty-override");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("AGENTS.override.md"), " \n").unwrap();
@@ -231,10 +232,7 @@ mod tests {
             ),
             (2, None, None, "AGENTS.md"),
         ] {
-            let root = std::env::temp_dir().join(format!(
-                "prodex-localization-effective-{}-{index}",
-                std::process::id()
-            ));
+            let root = temp_root(&format!("effective-{index}"));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).unwrap();
             if let Some(contents) = agents {

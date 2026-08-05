@@ -2,14 +2,13 @@ use super::{
     GatewayArgs, GatewayCommands, GatewayProviderFilterArgs, GatewayProvidersArgs, Result,
 };
 use crate::profile_commands::{KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_text};
+use crate::read_provider_model_catalog_text;
 use crate::{AppPaths, AppState, AppStateIoExt, ProfileProvider};
 use anyhow::{Context, anyhow};
 use prodex_provider_core::{
     ProviderAdapterContractSpec, ProviderId, provider_adapter, provider_adapter_contract_matrix,
     provider_contract_catalog, provider_model_catalog_json, resolve_harness_mode,
 };
-use std::collections::BTreeSet;
-use std::fs;
 use terminal_ui::print_stdout_line;
 
 pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
@@ -125,7 +124,7 @@ fn handle_gateway_kiro_models(args: &GatewayProviderFilterArgs) -> Result<()> {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .unwrap_or(id);
-        print_stdout_line(&format!("{id}: {name} (imported kiro profile snapshot)"))?;
+        print_stdout_line(&format!("{id}: {name} (Kiro model catalog)"))?;
     }
     Ok(())
 }
@@ -137,29 +136,26 @@ fn gateway_kiro_model_catalog_json() -> Result<Vec<serde_json::Value>> {
 
 fn gateway_kiro_model_catalog_json_from_paths(paths: &AppPaths) -> Result<Vec<serde_json::Value>> {
     let state = AppState::load(paths)?;
-    let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for profile in state.profiles.values() {
         if !matches!(profile.provider, ProfileProvider::Kiro { .. }) {
             continue;
         }
         let path = profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        let Ok(text) = fs::read_to_string(&path) else {
+        let Some(text) = read_provider_model_catalog_text(&path)? else {
             continue;
         };
-        let Ok(catalog) = parse_kiro_model_catalog_text(&text) else {
-            continue;
-        };
-        for model in catalog {
-            let Some(id) = model.get("id").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let id = id.trim();
-            if id.is_empty() || !seen.insert(id.to_ascii_lowercase()) {
-                continue;
-            }
-            models.push(model);
-        }
+        let catalog = parse_kiro_model_catalog_text(&text)
+            .context("failed to parse a Kiro profile model catalog")?;
+        let previous = std::mem::take(&mut models);
+        models = prodex_provider_core::merge_provider_model_catalog_json(
+            ProviderId::Kiro,
+            previous.iter().chain(&catalog),
+        )
+        .map_err(anyhow::Error::new)?;
+    }
+    if models.is_empty() {
+        models = provider_model_catalog_json(ProviderId::Kiro);
     }
     Ok(models)
 }
@@ -179,6 +175,7 @@ mod tests {
     use crate::create_codex_home_if_missing;
     use std::collections::BTreeMap;
     use std::env;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -265,7 +262,7 @@ mod tests {
                 (
                     "kiro-a".to_string(),
                     crate::ProfileEntry {
-                        codex_home: first_home,
+                        codex_home: first_home.clone(),
                         managed: true,
                         email: Some("a@example.com".to_string()),
                         provider: ProfileProvider::Kiro {
@@ -302,9 +299,23 @@ mod tests {
 
         let models =
             gateway_kiro_model_catalog_json_from_paths(&paths).expect("catalog should load");
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[0]["id"], "claude-sonnet-4");
-        assert_eq!(models[1]["id"], "claude-sonnet-4.5");
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0]["id"], "auto");
+        assert_eq!(models[1]["id"], "claude-sonnet-4");
+        assert_eq!(models[2]["id"], "claude-sonnet-4.5");
+
+        fs::write(
+            first_home.join(KIRO_MODEL_CATALOG_FILE),
+            serde_json::json!({
+                "models": (0..=prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+                    .map(|index| serde_json::json!({"id": format!("model-{index}")}))
+                    .collect::<Vec<_>>()
+            })
+            .to_string(),
+        )
+        .expect("oversized catalog should be written");
+        let error = gateway_kiro_model_catalog_json_from_paths(&paths).unwrap_err();
+        assert!(format!("{error:#}").contains("hard limit of 1024 entries"));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -355,7 +366,7 @@ mod tests {
         assert_eq!(spec["provider"], "kiro");
         assert_eq!(spec["supports_streaming"], true);
         assert_eq!(spec["transform_status"], "translated");
-        assert_eq!(spec["model_count"], 1);
+        assert_eq!(spec["model_count"], 2);
         assert_eq!(spec["endpoint_status"][2]["endpoint"], "chat-completions");
         assert_eq!(spec["endpoint_status"][2]["streaming"], true);
         assert_eq!(spec["endpoint_status"][2]["tested"], true);

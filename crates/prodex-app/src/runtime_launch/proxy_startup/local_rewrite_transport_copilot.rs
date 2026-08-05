@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn copilot_request_body_strips_encrypted_content_only() {
+    fn copilot_request_body_preserves_required_compaction_content() {
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.5",
             "input": [
@@ -86,6 +86,10 @@ mod tests {
                             "image_url": "data:image/png;base64,iVBORw0KGgo="
                         }
                     ]
+                },
+                {
+                    "type": "compaction",
+                    "encrypted_content": "enc-compact-v2"
                 }
             ],
             "metadata": {
@@ -102,7 +106,8 @@ mod tests {
         assert!(changed);
         assert!(value.to_string().contains("input_image"));
         assert!(value.to_string().contains("iVBORw0KGgo="));
-        assert!(!value.to_string().contains("encrypted_content"));
+        assert!(value["input"][0].get("encrypted_content").is_none());
+        assert_eq!(value["input"][2]["encrypted_content"], "enc-compact-v2");
         assert_eq!(value["input"][0]["type"], "reasoning");
     }
 

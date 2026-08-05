@@ -67,6 +67,11 @@ fn kiro_provider_core_rejects_unenforceable_responses_controls() {
         ("max_output_tokens", json!(64), "unsupported_token_limit"),
         ("tool_choice", json!("required"), "unsupported_tool_choice"),
         (
+            "tools",
+            json!([{"type": "function", "name": "shell"}]),
+            "unsupported_tools",
+        ),
+        (
             "web_search_options",
             json!({}),
             "unsupported_web_search_options",

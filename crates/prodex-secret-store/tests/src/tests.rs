@@ -9,6 +9,7 @@ use crate::{
 };
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod keyring;
@@ -82,6 +83,34 @@ fn file_backend_round_trips_text_values() {
     store.delete(&location).unwrap();
     assert_eq!(store.read(&location).unwrap(), None);
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn concurrent_atomic_writes_to_one_path_all_commit() {
+    const WRITERS: usize = 8;
+    let root = temp_dir("concurrent-atomic-write");
+    let path = root.join("catalog.json");
+    let barrier = Arc::new(Barrier::new(WRITERS));
+    let writers = (0..WRITERS)
+        .map(|index| {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let contents = format!("catalog-{index}");
+                barrier.wait();
+                write_private_file_atomic(&path, contents.as_bytes()).unwrap();
+                contents
+            })
+        })
+        .collect::<Vec<_>>();
+    let expected = writers
+        .into_iter()
+        .map(|writer| writer.join().unwrap())
+        .collect::<Vec<_>>();
+    let actual = fs::read_to_string(&path).unwrap();
+
+    assert!(expected.contains(&actual));
     let _ = fs::remove_dir_all(root);
 }
 

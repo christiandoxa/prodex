@@ -46,6 +46,14 @@ pub fn kiro_provider_core_chat_completion_text_delta(text: &str, include_role: b
     }
 }
 
+pub fn kiro_provider_core_chat_completion_reasoning_delta(text: &str, include_role: bool) -> Value {
+    if include_role {
+        json!({"role": "assistant", "reasoning_content": text})
+    } else {
+        json!({"reasoning_content": text})
+    }
+}
+
 pub fn kiro_provider_core_chat_completion_tool_call_delta(
     tool_call_id: &str,
     name: &str,

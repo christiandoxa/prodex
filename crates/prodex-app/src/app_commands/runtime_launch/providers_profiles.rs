@@ -5,12 +5,12 @@ use super::{
 use crate::{
     AppState, KIRO_MODEL_CATALOG_FILE, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
     RuntimeCopilotProfileAuth, RuntimeGeminiOAuthProfileAuth, RuntimeKiroProfileAuth,
-    parse_kiro_model_catalog_text, refresh_claude_oauth_secret_if_needed,
-    resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
+    parse_kiro_model_catalog_text, read_provider_model_catalog_text,
+    refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
+    write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
 use redaction::redaction_redact_secret_like_text;
-use std::collections::BTreeSet;
 
 pub(crate) fn resolve_gemini_runtime_launch_profile_name(
     state: &AppState,
@@ -182,7 +182,7 @@ pub(crate) fn runtime_copilot_profiles_for_provider(
     }
 
     if !profiles.is_empty() {
-        let catalog = runtime_copilot_combined_model_catalog(&profiles);
+        let catalog = runtime_copilot_combined_model_catalog(&profiles)?;
         if !catalog.is_empty() {
             write_copilot_runtime_model_catalog(&selection.codex_home, &catalog)?;
         }
@@ -273,22 +273,17 @@ fn runtime_external_provider_matches_profile(
 
 fn runtime_copilot_combined_model_catalog(
     profiles: &[RuntimeCopilotProfileAuth],
-) -> Vec<serde_json::Value> {
-    let mut seen = BTreeSet::new();
+) -> Result<Vec<serde_json::Value>> {
     let mut catalog = Vec::new();
     for profile in profiles {
-        for model in &profile.model_catalog {
-            let Some(id) = model.get("id").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let id = id.trim();
-            if id.is_empty() || !seen.insert(id.to_ascii_lowercase()) {
-                continue;
-            }
-            catalog.push(model.clone());
-        }
+        let previous = std::mem::take(&mut catalog);
+        catalog = prodex_provider_core::merge_provider_model_catalog_json(
+            prodex_provider_core::ProviderId::Copilot,
+            previous.iter().chain(&profile.model_catalog),
+        )
+        .map_err(anyhow::Error::new)?;
     }
-    catalog
+    Ok(catalog)
 }
 
 fn runtime_kiro_profile_auth(
@@ -307,13 +302,10 @@ fn runtime_kiro_profile_auth(
         );
     }
     let model_catalog_path = selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
-    let model_catalog = match std::fs::read_to_string(&model_catalog_path) {
-        Ok(text) => parse_kiro_model_catalog_text(&text)
+    let model_catalog = match read_provider_model_catalog_text(&model_catalog_path)? {
+        Some(text) => parse_kiro_model_catalog_text(&text)
             .context("failed to parse the imported Kiro model catalog")?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => {
-            return Err(error).context("failed to read the imported Kiro model catalog");
-        }
+        None => Vec::new(),
     };
     Ok(RuntimeKiroProfileAuth {
         profile_name: selected_profile_name.to_string(),

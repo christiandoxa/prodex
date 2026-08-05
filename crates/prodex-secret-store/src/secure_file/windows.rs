@@ -178,13 +178,7 @@ impl Directory {
         if file_identity(file)? != file_identity(&source)? {
             return Err(permission_denied("secret file changed before replacement"));
         }
-        let to_path = self.path.join(to);
         rename_opened_file(&self.file, to, &source)?;
-        let replaced = open_regular(&to_path, false)?;
-        require_beneath(&self.file, &replaced)?;
-        if file_identity(file)? != file_identity(&replaced)? {
-            return Err(permission_denied("secret file changed during replacement"));
-        }
         Ok(())
     }
 

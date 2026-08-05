@@ -656,7 +656,7 @@ fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
 }
 
 #[test]
-fn kiro_models_route_does_not_fallback_to_openai_catalog_when_snapshot_is_empty() {
+fn kiro_models_route_uses_kiro_canonical_catalog_when_snapshot_is_empty() {
     let root = temp_root("kiro-models-empty");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
@@ -699,12 +699,20 @@ fn kiro_models_route_does_not_fallback_to_openai_catalog_when_snapshot_is_empty(
     assert_eq!(list.status().as_u16(), 200);
     let list_body: serde_json::Value = list.json().expect("models list JSON should parse");
     assert_eq!(list_body["object"], "list");
-    assert_eq!(
-        list_body["data"]
-            .as_array()
-            .expect("models data should be an array"),
-        &Vec::<serde_json::Value>::new()
-    );
+    let models = list_body["data"]
+        .as_array()
+        .expect("models data should be an array");
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["id"], "auto");
+
+    let canonical = client
+        .get(format!("http://{}/v1/models/auto", proxy.listen_addr))
+        .send()
+        .expect("Kiro canonical model should be sent");
+    assert_eq!(canonical.status().as_u16(), 200);
+    let canonical_body: serde_json::Value =
+        canonical.json().expect("canonical model JSON should parse");
+    assert_eq!(canonical_body["id"], "auto");
 
     let model = client
         .get(format!("http://{}/v1/models/gpt-5.4", proxy.listen_addr))
@@ -2721,6 +2729,10 @@ fn copilot_responses_route_preserves_responses_endpoint() {
                             "image_url": "data:image/png;base64,iVBORw0KGgo="
                         }
                     ]
+                },
+                {
+                    "type": "compaction",
+                    "encrypted_content": "enc-compact-v2"
                 }
             ]
         }))
@@ -2748,6 +2760,7 @@ fn copilot_responses_route_preserves_responses_endpoint() {
         body["input"][1]["content"][1]["image_url"],
         "data:image/png;base64,iVBORw0KGgo="
     );
+    assert_eq!(body["input"][2]["encrypted_content"], "enc-compact-v2");
 }
 
 #[test]

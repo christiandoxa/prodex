@@ -463,10 +463,11 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
         extra_report.push_str(&format!(
             "\n  {}: active ({})",
             activation.tool.descriptor.id,
-            activation.tool.path.as_deref().map_or_else(
-                || "local service".to_string(),
-                |path| path.display().to_string()
-            )
+            if activation.tool.path.is_some() {
+                "resolved executable"
+            } else {
+                "local service"
+            }
         ));
     }
     for unavailable in &tool_plan.unavailable {

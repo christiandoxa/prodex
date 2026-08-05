@@ -362,7 +362,8 @@ fn strict_gemini_oauth_gateway_blocks_host_files_and_remembers_the_concrete_mode
                     }],
                 },
                 thinking_budget_tokens: None,
-                model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
+                model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings()
+                    .unwrap(),
             },
             upstream_no_proxy: false,
             smart_context_enabled: false,
@@ -464,7 +465,7 @@ fn gemini_compact_sender_marks_fallback_on_oversized_upstream_error_body() {
                 }],
             },
             thinking_budget_tokens: None,
-            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
+            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings().unwrap(),
         },
         upstream_no_proxy: false,
         smart_context_enabled: false,

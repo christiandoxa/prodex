@@ -90,8 +90,14 @@ pub(super) fn runtime_gateway_launch_environment(
             web_search_mode,
         }
     });
-    let gemini_model_resolution = (provider == Some(SuperExternalProvider::Gemini))
-        .then(|| RuntimeGeminiModelResolution::from_runtime_config(gemini));
+    let gemini_model_resolution = (provider == Some(SuperExternalProvider::Gemini)).then(|| {
+        runtime_gateway_capture(
+            parser,
+            "runtime.gemini.model_catalog",
+            RuntimeGeminiModelResolution::from_runtime_config(gemini),
+            RuntimeGeminiModelResolution::default(),
+        )
+    });
     let production = policy.is_some_and(|policy| policy.secrets.production);
     let present_secret_env = if production {
         BTreeSet::new()

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use prodex_provider_core::ProviderId;
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
@@ -210,6 +211,14 @@ pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
         .get("models")
         .and_then(Value::as_array)
         .context("Kiro model catalog is missing models array")?;
+    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+        bail!(
+            "Kiro model catalog exceeds the hard limit of {} entries",
+            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+    }
+    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Kiro, models)
+        .map_err(anyhow::Error::new)?;
     Ok(models.clone())
 }
 
@@ -265,18 +274,22 @@ fn write_kiro_model_catalog_snapshot_with_command(
     let cwd = env::current_dir().unwrap_or_else(|_| codex_home.to_path_buf());
     let models = native_kiro_model_catalog(command, &cwd, &extra_env).or_else(|_| {
         let bootstrap = runtime_kiro_acp_bootstrap_with_command(command, &cwd, &extra_env)?;
-        Ok::<_, anyhow::Error>(runtime_kiro_acp_model_catalog(&bootstrap.session))
+        runtime_kiro_acp_model_catalog(&bootstrap.session)
     })?;
     let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
     if models.is_empty() {
         let _ = std::fs::remove_file(&path);
         return Ok(());
     }
-    write_secret_text_file(
-        &path,
-        &serde_json::to_string_pretty(&serde_json::json!({ "models": models }))
-            .context("failed to serialize Kiro model catalog")?,
-    )
+    let contents = serde_json::to_string_pretty(&serde_json::json!({ "models": models }))
+        .context("failed to serialize Kiro model catalog")?;
+    if contents.len() as u64 > crate::PROVIDER_MODEL_CATALOG_MAX_BYTES {
+        bail!(
+            "Kiro model catalog exceeds the hard limit of {} bytes",
+            crate::PROVIDER_MODEL_CATALOG_MAX_BYTES
+        );
+    }
+    write_secret_text_file(&path, &contents)
 }
 
 fn native_kiro_model_catalog(
@@ -300,6 +313,12 @@ fn native_kiro_model_catalog(
         .get("models")
         .and_then(Value::as_array)
         .context("Kiro model catalog is missing models")?;
+    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+        bail!(
+            "Kiro model catalog exceeds the hard limit of {} entries",
+            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+    }
     let models = models
         .iter()
         .filter_map(|model| {
@@ -337,6 +356,8 @@ fn native_kiro_model_catalog(
     if models.is_empty() {
         bail!("Kiro model catalog returned no usable models");
     }
+    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Kiro, &models)
+        .map_err(anyhow::Error::new)?;
     Ok(models)
 }
 
@@ -455,6 +476,20 @@ mod tests {
         assert!(!warning.contains("/tmp/"));
         assert!(!warning.contains("token"));
         assert_eq!(kiro_model_catalog_warning(true), None);
+    }
+
+    #[test]
+    fn kiro_model_catalog_parser_rejects_oversized_payloads() {
+        let text = serde_json::json!({
+            "models": (0..=prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+                .map(|index| serde_json::json!({"id": format!("model-{index}")}))
+                .collect::<Vec<_>>()
+        })
+        .to_string();
+
+        let error = parse_kiro_model_catalog_text(&text).unwrap_err();
+
+        assert!(error.to_string().contains("hard limit of 1024 entries"));
     }
 
     fn write_fake_kiro_binary(root: &Path) -> PathBuf {

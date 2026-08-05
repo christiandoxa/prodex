@@ -4,7 +4,7 @@ use super::super::{
     runtime_provider_model_fallback_chain, runtime_provider_models_buffered_response,
     runtime_provider_native_passthrough, runtime_provider_route_kind,
 };
-use prodex_provider_core::{ProviderWireFormat, provider_adapter};
+use prodex_provider_core::{ProviderId, ProviderWireFormat, provider_adapter};
 
 #[test]
 fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
@@ -94,7 +94,7 @@ fn anthropic_and_copilot_models_endpoint_expose_provider_catalogs() {
 }
 
 #[test]
-fn copilot_models_endpoint_prefers_dynamic_token_catalog() {
+fn copilot_models_endpoint_augments_the_canonical_catalog() {
     let dynamic = vec![serde_json::json!({
         "id": "copilot-account-only-model",
         "object": "model",
@@ -112,8 +112,12 @@ fn copilot_models_endpoint_prefers_dynamic_token_catalog() {
     let body: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
     let models = body["data"].as_array().unwrap();
 
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0]["id"], "copilot-account-only-model");
+    let canonical = prodex_provider_core::provider_model_catalog_json(ProviderId::Copilot);
+    assert_eq!(models.len(), canonical.len() + 1);
+    assert_eq!(models.last().unwrap()["id"], "copilot-account-only-model");
+    for model in canonical {
+        assert!(models.iter().any(|entry| entry["id"] == model["id"]));
+    }
 
     let single = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::Copilot,
@@ -125,6 +129,35 @@ fn copilot_models_endpoint_prefers_dynamic_token_catalog() {
     assert_eq!(single.status, 200);
     let single_body: serde_json::Value = serde_json::from_slice(&single.body).unwrap();
     assert_eq!(single_body["display_name"], "Account Only Model");
+}
+
+#[test]
+fn dynamic_models_endpoint_fails_explicitly_at_the_catalog_hard_limit() {
+    let dynamic = (0..prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+        .map(|index| serde_json::json!({"id": format!("account-model-{index}")}))
+        .collect::<Vec<_>>();
+
+    let parts = runtime_provider_models_buffered_response(
+        RuntimeProviderBridgeKind::Copilot,
+        Some(&dynamic),
+        "GET",
+        "/v1/models",
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+
+    assert_eq!(parts.status, 503);
+    assert_eq!(body["error"]["code"], "model_catalog_limit_exceeded");
+    assert!(!body["error"]["message"].as_str().unwrap().is_empty());
+    assert!(
+        runtime_provider_models_buffered_response(
+            RuntimeProviderBridgeKind::Copilot,
+            Some(&dynamic),
+            "GET",
+            "/health",
+        )
+        .is_none()
+    );
 }
 
 #[test]
