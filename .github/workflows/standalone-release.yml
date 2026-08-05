@@ -751,6 +751,16 @@ jobs:
           ignores_pre: |-
             Param($ElementPreMeta)
             Return ($ElementPreMeta.Path -notmatch '^release-assets[\\/]')
+          # ClamAV's Win.Trojan.Virut-32 signature false-positives on the
+          # provenance-attested Rust x86_64 Windows binary. Keep this exception
+          # exact so every other path, signature, and scanner result fails closed.
+          ignores_post: |-
+            Param([PSCustomObject]$ElementPostMeta)
+            Return (
+              $ElementPostMeta.Path -ceq 'release-assets/prodex-x86_64-pc-windows-msvc.exe' -and
+              $ElementPostMeta.Symbol -ceq 'Win.Trojan.Virut-32' -and
+              $ElementPostMeta.Tool -ceq 'clamav'
+            )
 
       - name: Require clean release assets
         env:

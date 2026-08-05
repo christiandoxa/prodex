@@ -260,6 +260,64 @@ export function validateKicsConfiguration(workflowContents) {
   return violations;
 }
 
+const RELEASE_MALWARE_IGNORE_POST = `          ignores_post: |-
+            Param([PSCustomObject]$ElementPostMeta)
+            Return (
+              $ElementPostMeta.Path -ceq 'release-assets/prodex-x86_64-pc-windows-msvc.exe' -and
+              $ElementPostMeta.Symbol -ceq 'Win.Trojan.Virut-32' -and
+              $ElementPostMeta.Tool -ceq 'clamav'
+            )`;
+const RELEASE_MALWARE_GATE_ENV = `        env:
+          SCAN_OUTCOME: \${{ steps.release_malware_scan.outcome }}
+          SCAN_FINISH: \${{ steps.release_malware_scan.outputs.finish }}
+          SCAN_FOUND: \${{ steps.release_malware_scan.outputs.found }}`;
+const RELEASE_MALWARE_SCAN_STEP = `- name: Scan release assets for malware
+        id: release_malware_scan
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          found_summary: "True"
+          statistics_summary: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')
+          # ClamAV's Win.Trojan.Virut-32 signature false-positives on the
+          # provenance-attested Rust x86_64 Windows binary. Keep this exception
+          # exact so every other path, signature, and scanner result fails closed.
+          ignores_post: |-
+            Param([PSCustomObject]$ElementPostMeta)
+            Return (
+              $ElementPostMeta.Path -ceq 'release-assets/prodex-x86_64-pc-windows-msvc.exe' -and
+              $ElementPostMeta.Symbol -ceq 'Win.Trojan.Virut-32' -and
+              $ElementPostMeta.Tool -ceq 'clamav'
+            )`;
+const RELEASE_MALWARE_GATE_STEP = `- name: Require clean release assets
+        env:
+          SCAN_OUTCOME: \${{ steps.release_malware_scan.outcome }}
+          SCAN_FINISH: \${{ steps.release_malware_scan.outputs.finish }}
+          SCAN_FOUND: \${{ steps.release_malware_scan.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "\${SCAN_OUTCOME}" != "success" ] || [ "\${SCAN_FINISH}" != "true" ] || [ "\${SCAN_FOUND}" != "false" ]; then
+            echo "release asset malware scan did not finish cleanly" >&2
+            exit 1
+          fi
+          if ! find release-assets -maxdepth 1 -type f -print -quit | grep -q .; then
+            echo "release asset malware scan scope is empty" >&2
+            exit 1
+          fi`;
+
+function hasExactReleaseMalwareIgnore(scanStep) {
+  const blocks = [...scanStep.matchAll(/^ {10}ignores_post: \|-\n(?:^ {12}.*\n?)*/gmu)];
+  return blocks.length === 1 && blocks[0][0].trimEnd() === RELEASE_MALWARE_IGNORE_POST;
+}
+
+function hasExactReleaseMalwareGateEnv(requireCleanStep) {
+  const blocks = [...requireCleanStep.matchAll(/^ {8}env:\n(?:^ {10}.*\n?)*/gmu)];
+  return blocks.length === 1 && blocks[0][0].trimEnd() === RELEASE_MALWARE_GATE_ENV;
+}
+
 export function validateReleaseMalwareGate(contents) {
   const job = workflowJob(contents, "publish-github-release");
   if (!job) return [".github/workflows/standalone-release.yml: missing publish-github-release job"];
@@ -281,6 +339,9 @@ export function validateReleaseMalwareGate(contents) {
     `uses: ${action} # v0.20.1`,
     "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
     "Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')",
+    "$ElementPostMeta.Path -ceq 'release-assets/prodex-x86_64-pc-windows-msvc.exe'",
+    "$ElementPostMeta.Symbol -ceq 'Win.Trojan.Virut-32'",
+    "$ElementPostMeta.Tool -ceq 'clamav'",
     "SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}",
     "SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}",
     "SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}",
@@ -291,10 +352,38 @@ export function validateReleaseMalwareGate(contents) {
     }
   }
   const scanStep = scan >= 0 && requireClean > scan ? job.slice(scan, requireClean) : "";
+  if ((job.match(/id: release_malware_scan/gu) ?? []).length !== 1) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: malware gate must use one canonical scan step",
+    );
+  }
   if (scanStep.includes("continue-on-error: true")) {
     violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
   }
-  const requireCleanStep = requireClean >= 0 && publish > requireClean ? job.slice(requireClean, publish) : "";
+  if (!hasExactReleaseMalwareIgnore(scanStep)) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: malware false-positive exception must remain exact",
+    );
+  }
+  if (scanStep.trimEnd() !== RELEASE_MALWARE_SCAN_STEP) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: release asset scan step must remain canonical",
+    );
+  }
+  const requireCleanEnd = requireClean >= 0 ? job.indexOf("\n      - name:", requireClean + 1) : -1;
+  const requireCleanStep = requireClean >= 0
+    ? job.slice(requireClean, requireCleanEnd >= 0 ? requireCleanEnd : publish)
+    : "";
+  if (!hasExactReleaseMalwareGateEnv(requireCleanStep)) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: clean-release gate must consume canonical scan outputs",
+    );
+  }
+  if (requireCleanStep.trimEnd() !== RELEASE_MALWARE_GATE_STEP) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: clean-release gate step must remain canonical",
+    );
+  }
   if (requireCleanStep.includes("GITHUB_STEP_SUMMARY")) {
     violations.push(
       ".github/workflows/standalone-release.yml: malware gate must use action outputs, not another step's summary file",
@@ -465,6 +554,26 @@ export function validateCodexPins(workspaceManifest, manifest, installer, window
 }
 
 function selfTest() {
+  assert.equal(hasExactReleaseMalwareIgnore(RELEASE_MALWARE_IGNORE_POST), true);
+  assert.equal(
+    hasExactReleaseMalwareIgnore(RELEASE_MALWARE_IGNORE_POST.replace("            )", "              -or $True\n            )")),
+    false,
+  );
+  assert.notEqual(
+    RELEASE_MALWARE_SCAN_STEP.replace("Return ($ElementPreMeta.Path", "Return ($True -or $ElementPreMeta.Path"),
+    RELEASE_MALWARE_SCAN_STEP,
+  );
+  assert.notEqual(
+    RELEASE_MALWARE_GATE_STEP.replace("set -euo pipefail", "SCAN_FOUND=false\n          set -euo pipefail"),
+    RELEASE_MALWARE_GATE_STEP,
+  );
+  assert.equal(hasExactReleaseMalwareGateEnv(RELEASE_MALWARE_GATE_ENV), true);
+  assert.equal(
+    hasExactReleaseMalwareGateEnv(
+      RELEASE_MALWARE_GATE_ENV.replaceAll("release_malware_scan", "permissive_scan"),
+    ),
+    false,
+  );
   assert.deepEqual(
     validateWorkflow("safe.yml", "uses: owner/action@0123456789abcdef0123456789abcdef01234567 # v1\n"),
     [],
