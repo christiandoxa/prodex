@@ -354,12 +354,23 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         .spawn()
         .expect("mismatched broker script should spawn");
 
-    wait_for_runtime_process_alive(child.id());
-    let process_identity = runtime_process_prodex_binary_identity(child.id());
+    let (process_birth_identity, process_identity) = wait_for_poll(
+        "runtime broker identity to become observable",
+        Duration::from_secs(2),
+        Duration::from_millis(10),
+        || {
+            let birth_identity = runtime_process_birth_identity(child.id())?;
+            let binary_identity = runtime_process_prodex_binary_identity(child.id());
+            binary_identity
+                .executable_path
+                .is_some()
+                .then_some((birth_identity, binary_identity))
+        },
+    );
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
-        process_birth_identity: runtime_process_birth_identity(child.id()),
+        process_birth_identity: Some(process_birth_identity),
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
