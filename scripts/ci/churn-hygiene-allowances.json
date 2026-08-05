@@ -19,9 +19,9 @@
       "fix(ci): close cross-platform catalog gaps"
     ],
     "caps": {
-      "maxFiles": 116,
-      "maxBehaviorFiles": 110,
-      "maxLines": 9515,
+      "maxFiles": 117,
+      "maxBehaviorFiles": 111,
+      "maxLines": 9585,
       "maxFileLines": 1376
     },
     "reason": "Reviewed the complete 0.384.0 feature range covering provider selection and bounded canonical-plus-configured model catalogs, cross-process sub-agent execution, effective instruction delivery, Gemini OAuth removal, non-executable Kiro activity, observable semantic compact fallback, safe macOS broker recovery, and accurate capability documentation; verified with focused cross-platform regressions, the locked full workspace suite, strict Clippy, security and dependency guards, and tracked-diff identifier scanning."
