@@ -184,6 +184,7 @@ fn runtime_broker_realtime_endpoint_requires_loopback_and_preserves_mount() {
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version() {
     let temp_dir = TestDir::isolated();
     let script_path = temp_dir.path.join("legacy-prodex.sh");

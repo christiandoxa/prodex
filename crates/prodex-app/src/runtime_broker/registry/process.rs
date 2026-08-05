@@ -573,6 +573,7 @@ fn macos_process_wait(
     timeout: Duration,
 ) -> MacosProcessWait {
     let deadline = Instant::now() + timeout;
+    let mut ownership_unproven = false;
     loop {
         match runtime_process_identity_outcome_for::<RuntimeProcessMacos>(
             pid,
@@ -584,12 +585,16 @@ fn macos_process_wait(
                 return MacosProcessWait::ExitedOrChanged;
             }
             RuntimeProcessIdentityOutcome::OwnershipUnproven => {
-                return MacosProcessWait::Failed;
+                ownership_unproven = true;
             }
             RuntimeProcessIdentityOutcome::Proven => {}
         }
         if Instant::now() >= deadline {
-            return MacosProcessWait::TimedOut;
+            return if ownership_unproven {
+                MacosProcessWait::Failed
+            } else {
+                MacosProcessWait::TimedOut
+            };
         }
         thread::sleep(
             deadline
