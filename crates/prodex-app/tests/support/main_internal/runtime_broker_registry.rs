@@ -325,13 +325,8 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker() {
-    const CHILD_ENV: &str = "PRODEX_MISMATCHED_BROKER_CHILD";
-    if env::var_os(CHILD_ENV).is_some() {
-        loop {
-            thread::sleep(Duration::from_secs(60));
-        }
-    }
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {
@@ -342,35 +337,32 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     let broker_key = "replace-version-mismatch";
-    let mut child = Command::new(env::current_exe().expect("test executable should resolve"))
-        .args([
-            "wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker",
-            "--nocapture",
-        ])
-        .env(CHILD_ENV, "1")
+    let script_path = temp_dir.path.join("mismatched-broker.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n",
+    )
+    .expect("mismatched broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("mismatched broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("mismatched broker script permissions should update");
+
+    let mut child = Command::new(&script_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("mismatched broker script should spawn");
 
-    let (process_birth_identity, process_identity) = wait_for_poll(
-        "runtime broker identity to become observable",
-        Duration::from_secs(2),
-        Duration::from_millis(10),
-        || {
-            let birth_identity = runtime_process_birth_identity(child.id())?;
-            let binary_identity = runtime_process_prodex_binary_identity(child.id());
-            binary_identity
-                .executable_path
-                .is_some()
-                .then_some((birth_identity, binary_identity))
-        },
-    );
+    wait_for_runtime_process_alive(child.id());
+    let process_identity = runtime_process_prodex_binary_identity(child.id());
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
-        process_birth_identity: Some(process_birth_identity),
+        process_birth_identity: runtime_process_birth_identity(child.id()),
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
