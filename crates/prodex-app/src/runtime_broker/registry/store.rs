@@ -340,7 +340,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        let temp_root = std::env::temp_dir();
+        #[cfg(target_os = "macos")]
+        let temp_root = temp_root.canonicalize().unwrap();
+        let root = temp_root.join(format!(
             "prodex-broker-capability-{label}-{}-{nonce}",
             std::process::id()
         ));
