@@ -45,6 +45,31 @@ struct RuntimeBrokerWaitOptions {
     ready_timeout: Duration,
 }
 
+fn discard_stale_runtime_broker_registry(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> bool {
+    let identity = runtime_process_identity_outcome(
+        registry.pid,
+        registry.process_birth_identity.as_deref(),
+        registry.executable_path.as_deref().map(Path::new),
+    );
+    if matches!(
+        identity,
+        RuntimeProcessIdentityOutcome::Absent | RuntimeProcessIdentityOutcome::OwnershipChanged
+    ) {
+        remove_runtime_broker_registry_if_instance_matches(
+            paths,
+            broker_key,
+            &registry.instance_id,
+        );
+        true
+    } else {
+        false
+    }
+}
+
 #[cfg(all(test, unix))]
 pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     client: &Client,
@@ -89,12 +114,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
             return Ok(None);
         };
 
-        if runtime_process_absence_proven(existing.pid) {
-            remove_runtime_broker_registry_if_instance_matches(
-                paths,
-                broker_key,
-                &existing.instance_id,
-            );
+        if discard_stale_runtime_broker_registry(paths, broker_key, &existing) {
             return Ok(None);
         }
 
@@ -111,7 +131,9 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
                 return Ok(None);
             }
             RuntimeBrokerVersionGuardOutcome::TerminationFailed => {
-                bail!("could not prove ownership before replacing runtime broker")
+                bail!(
+                    "could not prove runtime broker process ownership; refusing to signal it. Stop the stale broker manually and retry"
+                )
             }
         }
 
@@ -176,12 +198,7 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
         if !launch_config.matches_registry(&registry) {
             continue;
         }
-        if runtime_process_absence_proven(registry.pid) {
-            remove_runtime_broker_registry_if_instance_matches(
-                paths,
-                &broker_key,
-                &registry.instance_id,
-            );
+        if discard_stale_runtime_broker_registry(paths, &broker_key, &registry) {
             continue;
         }
         let health = probe_runtime_broker_health(client, paths, &broker_key, &registry)?;
@@ -331,49 +348,44 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing, &broker_client);
     }
 
-    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
-        if runtime_process_absence_proven(existing.pid) {
-            remove_runtime_broker_registry_if_instance_matches(
-                paths,
-                &broker_key,
-                &existing.instance_id,
-            );
-        } else {
-            let health =
-                probe_runtime_broker_health(&broker_client, paths, &broker_key, &existing)?;
-            match replace_runtime_broker_if_version_mismatch_with_health(
-                paths,
-                &broker_key,
-                &existing,
-                health.as_ref(),
-            )? {
-                RuntimeBrokerVersionGuardOutcome::Compatible => {
-                    if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
+    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)?
+        && !discard_stale_runtime_broker_registry(paths, &broker_key, &existing)
+    {
+        let health = probe_runtime_broker_health(&broker_client, paths, &broker_key, &existing)?;
+        match replace_runtime_broker_if_version_mismatch_with_health(
+            paths,
+            &broker_key,
+            &existing,
+            health.as_ref(),
+        )? {
+            RuntimeBrokerVersionGuardOutcome::Compatible => {
+                if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
+                    &existing,
+                    health.as_ref(),
+                    launch_config,
+                ) == prodex_runtime_broker::RuntimeBrokerRegistryReuseDecision::Reuse
+                {
+                    activate_runtime_broker_profile(
+                        &broker_client,
+                        paths,
+                        &broker_key,
                         &existing,
-                        health.as_ref(),
-                        launch_config,
-                    ) == prodex_runtime_broker::RuntimeBrokerRegistryReuseDecision::Reuse
-                    {
-                        activate_runtime_broker_profile(
-                            &broker_client,
-                            paths,
-                            &broker_key,
-                            &existing,
-                            current_profile,
-                        )?;
-                        return runtime_proxy_endpoint_from_registry(
-                            paths,
-                            &broker_key,
-                            &existing,
-                            &broker_client,
-                        );
-                    }
+                        current_profile,
+                    )?;
+                    return runtime_proxy_endpoint_from_registry(
+                        paths,
+                        &broker_key,
+                        &existing,
+                        &broker_client,
+                    );
                 }
-                RuntimeBrokerVersionGuardOutcome::Replaced
-                | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {}
-                RuntimeBrokerVersionGuardOutcome::TerminationFailed => {
-                    bail!("could not prove ownership before replacing runtime broker")
-                }
+            }
+            RuntimeBrokerVersionGuardOutcome::Replaced
+            | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {}
+            RuntimeBrokerVersionGuardOutcome::TerminationFailed => {
+                bail!(
+                    "could not prove runtime broker process ownership; refusing to signal it. Stop the stale broker manually and retry"
+                )
             }
         }
     }

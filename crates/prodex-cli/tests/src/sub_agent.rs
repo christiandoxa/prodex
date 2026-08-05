@@ -1,7 +1,7 @@
 use super::*;
 use prodex_provider_core::ProviderId;
 
-const SESSION_ID: &str = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
 
 fn super_command(args: &[&str]) -> SuperArgs {
     let mut argv = vec!["prodex", "super"];
@@ -30,6 +30,8 @@ fn sub_agent_flags_parse_split_and_equals_forms() {
         "vendor/model with spaces",
         "--sub-agent-model-reasoning-effort",
         "xhigh",
+        "--sub-agent-max-concurrency",
+        "16",
         "exec",
         "review",
     ]);
@@ -45,12 +47,14 @@ fn sub_agent_flags_parse_split_and_equals_forms() {
         Some(SubAgentReasoningEffort::XHigh)
     );
     assert_eq!(split.sub_agent_url, None);
+    assert_eq!(split.sub_agent_max_concurrency.unwrap().get(), 16);
 
     let equals = super_command(&[
         "--sub-agent",
         "--sub-agent-provider=github-copilot",
         "--sub-agent-model=arbitrary-model",
         "--sub-agent-model-reasoning-effort=max",
+        "--sub-agent-max-concurrency=23",
     ]);
     assert_eq!(equals.sub_agent_provider, Some(ProviderId::Copilot));
     assert_eq!(equals.sub_agent_model.as_deref(), Some("arbitrary-model"));
@@ -59,6 +63,7 @@ fn sub_agent_flags_parse_split_and_equals_forms() {
         Some(SubAgentReasoningEffort::Max)
     );
     assert_eq!(equals.sub_agent_url, None);
+    assert_eq!(equals.sub_agent_max_concurrency.unwrap().get(), 23);
 
     let local = super_command(&[
         "--sub-agent",
@@ -94,6 +99,7 @@ fn sub_agent_detail_flags_require_explicit_enable() {
         "--sub-agent-model",
         "--sub-agent-model-reasoning-effort",
         "--sub-agent-url",
+        "--sub-agent-max-concurrency",
     ] {
         assert!(
             parse_cli_command_from(["prodex", "super", flag, "openai"]).is_err(),
@@ -141,6 +147,7 @@ fn sub_agent_tail_flags_parse_after_bare_uuid_and_explicit_resume() {
             "--sub-agent-model=tail-model",
             "--sub-agent-model-reasoning-effort",
             "max",
+            "--sub-agent-max-concurrency=8",
         ]
         .as_slice(),
     ] {
@@ -173,6 +180,45 @@ fn sub_agent_tail_flags_parse_after_bare_uuid_and_explicit_resume() {
         args.sub_agent_url.as_deref(),
         Some("https://example.com/sub-agent")
     );
+}
+
+#[test]
+fn max_concurrency_parses_before_and_after_session_without_leakage() {
+    for values in [
+        vec![
+            "--sub-agent",
+            "--sub-agent-max-concurrency",
+            "16",
+            SESSION_ID,
+        ],
+        vec![SESSION_ID, "--sub-agent", "--sub-agent-max-concurrency=16"],
+    ] {
+        let args = extract(&values);
+        let limit = args.sub_agent_max_concurrency.unwrap();
+        assert_eq!(limit.get(), 16);
+        assert_eq!(limit.source(), SubAgentConcurrencySource::Preset);
+        assert_eq!(args.codex_args, os_args(&[SESSION_ID]));
+    }
+}
+
+#[test]
+fn max_concurrency_rejects_unbounded_and_unenabled_values() {
+    for value in ["0", "65", "-1", "1.5", "1e2", "", "999999999999999999999"] {
+        assert!(
+            parse_cli_command_from([
+                "prodex",
+                "s",
+                "--sub-agent",
+                "--sub-agent-max-concurrency",
+                value,
+            ])
+            .is_err(),
+            "{value:?}"
+        );
+    }
+    assert!(parse_cli_command_from(["prodex", "s", "--sub-agent-max-concurrency", "8"]).is_err());
+    let mut args = super_command(&["--no-sub-agent", "--sub-agent-max-concurrency", "8"]);
+    assert!(args.extract_super_overrides_from_codex_args().is_err());
 }
 
 #[test]
@@ -349,6 +395,10 @@ fn sub_agent_model_accepts_arbitrary_nonempty_values_only() {
         "custom/vendor/model@2026"
     );
     assert_eq!(parse_sub_agent_model("模型/β-🦀").unwrap(), "模型/β-🦀");
+    assert_eq!(
+        parse_sub_agent_model("gpt-5.6-luna").unwrap(),
+        "gpt-5.6-luna"
+    );
     assert!(parse_sub_agent_model("").is_err());
     assert!(parse_sub_agent_model(" \t").is_err());
     assert!(
@@ -420,17 +470,33 @@ fn sub_agent_url_requires_local_and_local_requires_a_resolved_url() {
             .contains("requires --sub-agent-url")
     );
 
-    let inherited = super_command(&[
+    let separated = super_command(&[
         "--sub-agent",
         "--sub-agent-provider",
         "local",
         "--url",
         "http://127.0.0.1:8131/v1",
     ]);
-    inherited.validate_urls().unwrap();
+    assert!(
+        separated
+            .validate_urls()
+            .unwrap_err()
+            .contains("requires --sub-agent-url")
+    );
+
+    let explicit = super_command(&[
+        "--sub-agent",
+        "--sub-agent-provider",
+        "local",
+        "--url",
+        "http://127.0.0.1:8131/v1",
+        "--sub-agent-url",
+        "http://127.0.0.1:9131/v1",
+    ]);
+    explicit.validate_urls().unwrap();
     assert_eq!(
-        inherited.sub_agent_config().url.as_deref(),
-        Some("http://127.0.0.1:8131/v1")
+        explicit.sub_agent_config().url.as_deref(),
+        Some("http://127.0.0.1:9131/v1")
     );
 }
 
@@ -466,6 +532,7 @@ fn sub_agent_preference_and_config_are_typed() {
             model: Some("claude-test".to_string()),
             model_reasoning_effort: Some(SubAgentReasoningEffort::High),
             url: Some("http://127.0.0.1:8131".to_string()),
+            max_concurrency: Default::default(),
         })
     );
 }
@@ -515,6 +582,7 @@ fn super_help_documents_sub_agent_layer() {
         "--sub-agent-model",
         "--sub-agent-model-reasoning-effort",
         "--sub-agent-url",
+        "--sub-agent-max-concurrency",
         "xhigh",
         "max",
     ] {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -25,6 +25,11 @@ test("provider catalog reports non-zero model and provider counts", () => {
   assert.ok(summary.provider_count > 0);
   assert.ok(summary.providers.OpenAi > 0);
   assert.ok(summary.providers.Kiro > 0);
+  const catalog = JSON.parse(
+    readFileSync(resolve(root, "crates/prodex-provider-core/catalog/models.json"), "utf8"),
+  );
+  const luna = catalog.find((model) => model.provider === "openai" && model.id === "gpt-5.6-luna");
+  assert.ok(luna?.supported_reasoning_efforts.includes("max"));
 });
 
 test("empty catalog fixture fails", () => {

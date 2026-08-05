@@ -37,9 +37,10 @@ pub use bridge::{
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{
-    ProviderCatalogEntry, ProviderCatalogFeatureFlags, provider_catalog_entries,
-    provider_catalog_entries_for, provider_catalog_entry, provider_catalog_json,
-    provider_model_catalog_json, provider_model_json,
+    ProviderCatalogEntry, ProviderCatalogFeatureFlags, ProviderModelChoice,
+    provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
+    provider_catalog_json, provider_model_catalog_json, provider_model_json,
+    resolve_provider_model_choices,
 };
 pub use chat_tools_bridge::{
     provider_core_chat_request_body_without_web_search_options,
@@ -273,8 +274,9 @@ pub use translators::{
     DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
     DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
-    GeminiProviderCoreStreamToolCall, KiroProviderCoreRequestError, anthropic_messages_translator,
-    copilot_provider_core_request_body_with_canonical_model,
+    GeminiProviderCoreStreamToolCall, KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS,
+    KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES, KiroProviderCoreRequestError,
+    anthropic_messages_translator, copilot_provider_core_request_body_with_canonical_model,
     copilot_provider_core_request_body_without_encrypted_content,
     copilot_provider_core_request_has_agent_input, copilot_provider_core_request_has_vision_input,
     copilot_provider_core_response_id_from_value, deepseek_provider_core_chat_stream_error,
@@ -360,9 +362,11 @@ pub use translators::{
     kiro_provider_core_semantic_compact_instructions,
     kiro_provider_core_semantic_compact_request_body, kiro_provider_core_stream_content_text,
     kiro_provider_core_stream_tool_arguments, kiro_provider_core_stream_tool_call_item,
+    kiro_provider_core_tool_activity_item, kiro_provider_core_tool_activity_text,
     kiro_provider_core_tool_call_arguments_delta_chat_value,
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
+    kiro_provider_core_truncated_tool_activity_item,
     kiro_provider_core_unsupported_path_error_value, provider_conformance_cases,
     provider_translator, translate_openai_chat_request_to_anthropic_messages,
 };

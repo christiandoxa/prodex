@@ -34,6 +34,7 @@ use gateway_startup::start_gateway_backend;
 use gateway_status::print_gateway_status;
 use goal_resume::*;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
+pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
 use session_delete::{
@@ -455,6 +456,12 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if request
+            .external_provider
+            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"))
+        {
+            return Ok(None);
+        }
         if runtime_launch_uses_kiro_connect_proxy(request) {
             let proxy = start_runtime_kiro_connect_proxy(paths, request.upstream_no_proxy)?;
             return Ok(Some(RuntimeProxyEndpoint {
@@ -545,6 +552,12 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if request
+            .external_provider
+            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"))
+        {
+            return Ok(None);
+        }
         if runtime_launch_uses_kiro_connect_proxy(request) {
             let proxy = RuntimeKiroConnectProxy::dry_run();
             return Ok(Some(RuntimeProxyEndpoint {

@@ -356,6 +356,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         .expect("mismatched broker script should spawn");
 
     wait_for_runtime_process_alive(child.id());
+    let process_identity = runtime_process_prodex_binary_identity(child.id());
 
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
@@ -368,8 +369,10 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
-        prodex_version: None,
-        executable_path: None,
+        prodex_version: Some("0.0.1".to_string()),
+        executable_path: process_identity
+            .executable_path
+            .map(|path| path.display().to_string()),
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         realtime_ws_addr: None,

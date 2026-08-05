@@ -250,6 +250,14 @@ pub struct SuperArgs {
         requires = "sub_agent"
     )]
     pub sub_agent_url: Option<String>,
+    /// Maximum number of child sub-agent processes active at once (1-64).
+    #[arg(
+        long,
+        value_name = "VALUE",
+        value_parser = crate::parse_sub_agent_max_concurrency,
+        requires = "sub_agent"
+    )]
+    pub sub_agent_max_concurrency: Option<crate::SubAgentMaxConcurrency>,
     /// Add an optional tool to the default Super tool set.
     #[arg(long = "tool", value_name = "TOOL")]
     pub tools: Vec<OptionalToolId>,
@@ -328,6 +336,7 @@ impl fmt::Debug for SuperArgs {
                 "sub_agent_model_reasoning_effort",
                 &self.sub_agent_model_reasoning_effort,
             )
+            .field("sub_agent_max_concurrency", &self.sub_agent_max_concurrency)
             .field("sub_agent_url_configured", &self.sub_agent_url.is_some())
             .field("tools", &self.tools)
             .field("required_tools", &self.required_tools)
@@ -376,6 +385,16 @@ pub struct McpJsonlBridgeArgs {
         allow_hyphen_values = true
     )]
     pub args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct SubAgentExecArgs {
+    /// Temporary, secret-free child launch configuration.
+    #[arg(long, value_name = "PATH")]
+    pub config: PathBuf,
+    /// File containing the exact delegated task.
+    #[arg(long, value_name = "PATH")]
+    pub task_file: PathBuf,
 }
 
 #[derive(Args, Debug)]
@@ -604,11 +623,8 @@ impl SuperArgs {
             provider,
             model: self.sub_agent_model.clone(),
             model_reasoning_effort: self.sub_agent_model_reasoning_effort,
-            url: self.sub_agent_url.clone().or_else(|| {
-                (provider == prodex_provider_core::ProviderId::Local)
-                    .then(|| self.url.clone())
-                    .flatten()
-            }),
+            url: self.sub_agent_url.clone(),
+            max_concurrency: self.sub_agent_max_concurrency.unwrap_or_default(),
         }
     }
 }
@@ -683,13 +699,24 @@ impl SuperExternalProvider {
         self.metadata().model_provider_id
     }
 
-    fn provider_id(self) -> ProviderId {
+    pub const fn provider_id(self) -> ProviderId {
         match self {
             Self::Anthropic => ProviderId::Anthropic,
             Self::Copilot => ProviderId::Copilot,
             Self::DeepSeek => ProviderId::DeepSeek,
             Self::Gemini => ProviderId::Gemini,
             Self::Kiro => ProviderId::Kiro,
+        }
+    }
+
+    pub const fn from_provider_id(provider: ProviderId) -> Option<Self> {
+        match provider {
+            ProviderId::Anthropic => Some(Self::Anthropic),
+            ProviderId::Copilot => Some(Self::Copilot),
+            ProviderId::DeepSeek => Some(Self::DeepSeek),
+            ProviderId::Gemini => Some(Self::Gemini),
+            ProviderId::Kiro => Some(Self::Kiro),
+            ProviderId::OpenAi | ProviderId::Local => None,
         }
     }
 
@@ -863,7 +890,7 @@ fn super_external_provider_base_url(url: &str) -> String {
     url.trim_end_matches('/').to_string()
 }
 
-fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {
+pub fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {
     parse_credential_free_http_url(url, "--url")?;
     Ok(url.to_string())
 }
@@ -934,6 +961,7 @@ mod tests {
             sub_agent_model: None,
             sub_agent_model_reasoning_effort: None,
             sub_agent_url: None,
+            sub_agent_max_concurrency: None,
             tools: Vec::new(),
             required_tools: Vec::new(),
             url: None,

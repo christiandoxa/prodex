@@ -16,12 +16,6 @@ pub(super) fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
     }
     if codex_args
         .iter()
-        .any(|arg| arg == "--with-google" || arg == "--google")
-    {
-        return LoginMethod::Google;
-    }
-    if codex_args
-        .iter()
         .any(|arg| arg == "--with-claude" || arg == "--claude")
     {
         return LoginMethod::Claude;
@@ -41,6 +35,12 @@ pub(super) fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
         return LoginMethod::DeviceCode;
     }
     LoginMethod::ChatGpt
+}
+
+pub(super) fn gemini_oauth_login_requested(codex_args: &[OsString]) -> bool {
+    codex_args
+        .iter()
+        .any(|arg| arg == "--with-google" || arg == "--google")
 }
 
 pub(super) fn normalize_optional_base_url(value: &str) -> Result<Option<String>> {
@@ -76,5 +76,16 @@ mod tests {
             normalize_optional_base_url("https://example.test/v1/").unwrap(),
             Some("https://example.test/v1/".to_string())
         );
+    }
+
+    #[test]
+    fn removed_gemini_oauth_flags_remain_detectable_for_migration_errors() {
+        assert!(gemini_oauth_login_requested(&[OsString::from(
+            "--with-google"
+        )]));
+        assert!(gemini_oauth_login_requested(&[OsString::from("--google")]));
+        assert!(!gemini_oauth_login_requested(&[OsString::from(
+            "--with-api-key"
+        )]));
     }
 }

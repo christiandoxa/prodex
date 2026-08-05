@@ -114,6 +114,7 @@ pub(crate) use gemini::{
 };
 pub(crate) use gemini::{gemini_validate_candidate_count, gemini_validate_openai_tools};
 pub use kiro::{
+    KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS, KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES,
     KiroProviderCoreRequestError, KiroTranslator, kiro_provider_core_acp_assistant_output_message,
     kiro_provider_core_acp_chat_assistant_message, kiro_provider_core_acp_chat_tool_call_item,
     kiro_provider_core_acp_error_value, kiro_provider_core_acp_incomplete_details,
@@ -144,9 +145,11 @@ pub use kiro::{
     kiro_provider_core_semantic_compact_instructions,
     kiro_provider_core_semantic_compact_request_body, kiro_provider_core_stream_content_text,
     kiro_provider_core_stream_tool_arguments, kiro_provider_core_stream_tool_call_item,
+    kiro_provider_core_tool_activity_item, kiro_provider_core_tool_activity_text,
     kiro_provider_core_tool_call_arguments_delta_chat_value,
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
+    kiro_provider_core_truncated_tool_activity_item,
     kiro_provider_core_unsupported_path_error_value,
 };
 pub use passthrough::PassthroughTranslator;

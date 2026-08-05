@@ -6,20 +6,24 @@ use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-#[cfg(test)]
+#[cfg(any(target_os = "macos", test))]
 use std::thread;
 use std::time::Duration;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 use std::time::Instant;
 
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStringExt as _;
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
+#[cfg(not(target_os = "macos"))]
+use crate::collect_process_rows;
 use crate::{
     ProcessRow, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeProdexBinaryIdentity,
-    collect_process_rows, parse_prodex_version_output,
+    parse_prodex_version_output,
 };
 
 const RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -31,6 +35,15 @@ pub(crate) enum RuntimeProcessTerminationOutcome {
     OwnershipChanged,
     Terminated,
     StillRunning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+pub(crate) enum RuntimeProcessIdentityOutcome {
+    Absent,
+    Proven,
+    OwnershipChanged,
+    OwnershipUnproven,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +61,7 @@ trait RuntimeProcessPlatform {
     fn terminate(
         pid: u32,
         expected_birth_identity: Option<&str>,
+        expected_executable_path: Option<&Path>,
     ) -> RuntimeProcessTerminationOutcome;
 }
 
@@ -57,7 +71,10 @@ struct RuntimeProcessLinux;
 #[cfg(windows)]
 struct RuntimeProcessWindows;
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+struct RuntimeProcessMacos;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 struct RuntimeProcessFallback;
 
 type RuntimeProcessPlatformImpl = RuntimeProcessPlatformForTarget;
@@ -68,9 +85,13 @@ type RuntimeProcessPlatformForTarget = RuntimeProcessLinux;
 #[cfg(windows)]
 type RuntimeProcessPlatformForTarget = RuntimeProcessWindows;
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+type RuntimeProcessPlatformForTarget = RuntimeProcessMacos;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 type RuntimeProcessPlatformForTarget = RuntimeProcessFallback;
 
+#[cfg(not(target_os = "macos"))]
 fn runtime_process_row(pid: u32) -> Option<ProcessRow> {
     collect_process_rows()
         .into_iter()
@@ -105,6 +126,7 @@ impl RuntimeProcessPlatform for RuntimeProcessLinux {
     fn terminate(
         pid: u32,
         expected_birth_identity: Option<&str>,
+        _expected_executable_path: Option<&Path>,
     ) -> RuntimeProcessTerminationOutcome {
         terminate_runtime_process_linux(pid, expected_birth_identity)
     }
@@ -297,6 +319,7 @@ impl RuntimeProcessPlatform for RuntimeProcessWindows {
     fn terminate(
         pid: u32,
         expected_birth_identity: Option<&str>,
+        _expected_executable_path: Option<&Path>,
     ) -> RuntimeProcessTerminationOutcome {
         terminate_runtime_process_windows(pid, expected_birth_identity)
     }
@@ -433,7 +456,231 @@ fn terminate_runtime_process_windows(
     }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+impl RuntimeProcessPlatform for RuntimeProcessMacos {
+    fn pid_alive(pid: u32) -> bool {
+        macos_pid_exists(pid)
+    }
+
+    fn process_absence_proven(pid: u32) -> bool {
+        macos_process_bsdinfo(pid).is_ok_and(|info| info.pbi_status == libc::SZOMB)
+            || macos_pid_absent(pid)
+    }
+
+    fn process_birth_identity(pid: u32) -> Option<String> {
+        let info = macos_process_bsdinfo(pid).ok()?;
+        Some(format!(
+            "macos:{}:{}",
+            info.pbi_start_tvsec, info.pbi_start_tvusec
+        ))
+    }
+
+    fn executable_path(pid: u32) -> Option<PathBuf> {
+        macos_process_executable_path(pid).ok()
+    }
+
+    fn terminate(
+        pid: u32,
+        expected_birth_identity: Option<&str>,
+        expected_executable_path: Option<&Path>,
+    ) -> RuntimeProcessTerminationOutcome {
+        terminate_runtime_process_macos(pid, expected_birth_identity, expected_executable_path)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_pid(pid: u32) -> Option<libc::pid_t> {
+    let pid = libc::pid_t::try_from(pid).ok()?;
+    (pid > 0).then_some(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_pid_exists(pid: u32) -> bool {
+    let Some(pid) = macos_pid(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only probes existence for a validated positive PID.
+    (unsafe { libc::kill(pid, 0) }) == 0
+        || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_pid_absent(pid: u32) -> bool {
+    let Some(pid) = macos_pid(pid) else {
+        return true;
+    };
+    // SAFETY: signal 0 only probes existence for a validated positive PID.
+    (unsafe { libc::kill(pid, 0) }) != 0
+        && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_bsdinfo(pid: u32) -> io::Result<libc::proc_bsdinfo> {
+    let pid =
+        macos_pid(pid).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let expected = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: buffer points to enough writable memory for PROC_PIDTBSDINFO.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            expected,
+        )
+    };
+    if read != expected {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: proc_pidinfo initialized the complete structure above.
+    Ok(unsafe { info.assume_init() })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_executable_path(pid: u32) -> io::Result<PathBuf> {
+    let pid =
+        macos_pid(pid).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))?;
+    let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: buffer is writable for the supplied size and PID is positive.
+    let read = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if read <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    buffer.truncate(read as usize);
+    if let Some(nul) = buffer.iter().position(|byte| *byte == 0) {
+        buffer.truncate(nul);
+    }
+    if buffer.is_empty() {
+        return Err(io::Error::other("process executable path is empty"));
+    }
+    Ok(PathBuf::from(std::ffi::OsString::from_vec(buffer)))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+enum MacosProcessWait {
+    ExitedOrChanged,
+    TimedOut,
+    Failed,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_wait(
+    pid: u32,
+    expected_birth_identity: &str,
+    expected_executable_path: &Path,
+    timeout: Duration,
+) -> MacosProcessWait {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match runtime_process_identity_outcome_for::<RuntimeProcessMacos>(
+            pid,
+            Some(expected_birth_identity),
+            Some(expected_executable_path),
+        ) {
+            RuntimeProcessIdentityOutcome::Absent
+            | RuntimeProcessIdentityOutcome::OwnershipChanged => {
+                return MacosProcessWait::ExitedOrChanged;
+            }
+            RuntimeProcessIdentityOutcome::OwnershipUnproven => {
+                return MacosProcessWait::Failed;
+            }
+            RuntimeProcessIdentityOutcome::Proven => {}
+        }
+        if Instant::now() >= deadline {
+            return MacosProcessWait::TimedOut;
+        }
+        thread::sleep(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(10)),
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_send_signal(pid: u32, signal: libc::c_int) -> io::Result<()> {
+    let pid =
+        macos_pid(pid).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))?;
+    // SAFETY: PID is positive and signal is a fixed POSIX process signal.
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_runtime_process_macos(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+    expected_executable_path: Option<&Path>,
+) -> RuntimeProcessTerminationOutcome {
+    let (Some(expected_birth_identity), Some(expected_executable_path)) =
+        (expected_birth_identity, expected_executable_path)
+    else {
+        return RuntimeProcessTerminationOutcome::OwnershipUnproven;
+    };
+    match runtime_process_identity_outcome_for::<RuntimeProcessMacos>(
+        pid,
+        Some(expected_birth_identity),
+        Some(expected_executable_path),
+    ) {
+        RuntimeProcessIdentityOutcome::Absent => {
+            return RuntimeProcessTerminationOutcome::NotRunning;
+        }
+        RuntimeProcessIdentityOutcome::OwnershipChanged => {
+            return RuntimeProcessTerminationOutcome::OwnershipChanged;
+        }
+        RuntimeProcessIdentityOutcome::OwnershipUnproven => {
+            return RuntimeProcessTerminationOutcome::OwnershipUnproven;
+        }
+        RuntimeProcessIdentityOutcome::Proven => {}
+    }
+
+    if let Err(error) = macos_send_signal(pid, libc::SIGTERM) {
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            RuntimeProcessTerminationOutcome::Terminated
+        } else {
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        };
+    }
+    match macos_process_wait(
+        pid,
+        expected_birth_identity,
+        expected_executable_path,
+        Duration::from_millis(500),
+    ) {
+        MacosProcessWait::ExitedOrChanged => {
+            return RuntimeProcessTerminationOutcome::Terminated;
+        }
+        MacosProcessWait::Failed => {
+            return RuntimeProcessTerminationOutcome::OwnershipUnproven;
+        }
+        MacosProcessWait::TimedOut => {}
+    }
+
+    if let Err(error) = macos_send_signal(pid, libc::SIGKILL) {
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            RuntimeProcessTerminationOutcome::Terminated
+        } else {
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        };
+    }
+    match macos_process_wait(
+        pid,
+        expected_birth_identity,
+        expected_executable_path,
+        Duration::from_millis(250),
+    ) {
+        MacosProcessWait::ExitedOrChanged => RuntimeProcessTerminationOutcome::Terminated,
+        MacosProcessWait::TimedOut => RuntimeProcessTerminationOutcome::StillRunning,
+        MacosProcessWait::Failed => RuntimeProcessTerminationOutcome::OwnershipUnproven,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 impl RuntimeProcessPlatform for RuntimeProcessFallback {
     fn pid_alive(_pid: u32) -> bool {
         false
@@ -466,8 +713,109 @@ impl RuntimeProcessPlatform for RuntimeProcessFallback {
     fn terminate(
         _pid: u32,
         _expected_birth_identity: Option<&str>,
+        _expected_executable_path: Option<&Path>,
     ) -> RuntimeProcessTerminationOutcome {
         RuntimeProcessTerminationOutcome::OwnershipUnproven
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn runtime_process_executable_paths_match(actual: &Path, expected: &Path) -> bool {
+    actual == expected
+        || fs::canonicalize(actual)
+            .ok()
+            .zip(fs::canonicalize(expected).ok())
+            .is_some_and(|(actual, expected)| actual == expected)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn runtime_process_identity_outcome_for<P: RuntimeProcessPlatform>(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+    expected_executable_path: Option<&Path>,
+) -> RuntimeProcessIdentityOutcome {
+    if P::process_absence_proven(pid) {
+        return RuntimeProcessIdentityOutcome::Absent;
+    }
+    let (Some(expected_birth_identity), Some(expected_executable_path)) =
+        (expected_birth_identity, expected_executable_path)
+    else {
+        return RuntimeProcessIdentityOutcome::OwnershipUnproven;
+    };
+    match P::process_birth_identity(pid) {
+        Some(actual) if actual == expected_birth_identity => {}
+        Some(_) => return RuntimeProcessIdentityOutcome::OwnershipChanged,
+        None if P::process_absence_proven(pid) => return RuntimeProcessIdentityOutcome::Absent,
+        None => return RuntimeProcessIdentityOutcome::OwnershipUnproven,
+    }
+    match P::executable_path(pid) {
+        Some(actual)
+            if runtime_process_executable_paths_match(&actual, expected_executable_path) =>
+        {
+            // Re-read the start identity after the path lookup so a same-path PID reuse
+            // cannot pass both checks.
+            match P::process_birth_identity(pid) {
+                Some(actual) if actual == expected_birth_identity => {
+                    RuntimeProcessIdentityOutcome::Proven
+                }
+                Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
+                None if P::process_absence_proven(pid) => RuntimeProcessIdentityOutcome::Absent,
+                None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
+            }
+        }
+        Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
+        None if P::process_absence_proven(pid) => RuntimeProcessIdentityOutcome::Absent,
+        None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn runtime_process_identity_outcome(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+    expected_executable_path: Option<&Path>,
+) -> RuntimeProcessIdentityOutcome {
+    runtime_process_identity_outcome_for::<RuntimeProcessMacos>(
+        pid,
+        expected_birth_identity,
+        expected_executable_path,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn runtime_process_identity_outcome(
+    pid: u32,
+    _expected_birth_identity: Option<&str>,
+    _expected_executable_path: Option<&Path>,
+) -> RuntimeProcessIdentityOutcome {
+    if RuntimeProcessPlatformImpl::process_absence_proven(pid) {
+        RuntimeProcessIdentityOutcome::Absent
+    } else {
+        RuntimeProcessIdentityOutcome::Proven
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn terminate_runtime_process_with_platform<P: RuntimeProcessPlatform>(
+    pid: u32,
+    expected_birth_identity: Option<&str>,
+    expected_executable_path: Option<&Path>,
+) -> RuntimeProcessTerminationOutcome {
+    match runtime_process_identity_outcome_for::<P>(
+        pid,
+        expected_birth_identity,
+        expected_executable_path,
+    ) {
+        RuntimeProcessIdentityOutcome::Absent => RuntimeProcessTerminationOutcome::NotRunning,
+        RuntimeProcessIdentityOutcome::OwnershipChanged => {
+            RuntimeProcessTerminationOutcome::OwnershipChanged
+        }
+        RuntimeProcessIdentityOutcome::OwnershipUnproven => {
+            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        }
+        RuntimeProcessIdentityOutcome::Proven => {
+            P::terminate(pid, expected_birth_identity, expected_executable_path)
+        }
     }
 }
 
@@ -535,6 +883,9 @@ pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
     if RuntimeProcessPlatformImpl::pid_alive(pid) {
         return true;
     }
+    #[cfg(target_os = "macos")]
+    return false;
+    #[cfg(not(target_os = "macos"))]
     runtime_process_row(pid).is_some()
 }
 
@@ -612,6 +963,7 @@ fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> 
     if let Some(executable) = RuntimeProcessPlatformImpl::executable_path(pid) {
         push_runtime_process_candidate(&mut candidates, executable);
     }
+    #[cfg(not(target_os = "macos"))]
     if let Some(row) = row {
         for arg in &row.args {
             let path = PathBuf::from(arg);
@@ -620,11 +972,16 @@ fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> 
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    let _ = row;
     candidates
 }
 
 fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResolution {
+    #[cfg(not(target_os = "macos"))]
     let row = runtime_process_row(pid);
+    #[cfg(target_os = "macos")]
+    let row = None;
     let executable_candidates = runtime_process_executable_candidates(pid, row.as_ref());
     let (executable_path, version, executable_sha256) =
         resolve_prodex_executable_identity(&executable_candidates);
@@ -684,14 +1041,90 @@ pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
 pub(crate) fn terminate_runtime_process(
     pid: u32,
     expected_birth_identity: Option<&str>,
+    expected_executable_path: Option<&Path>,
 ) -> RuntimeProcessTerminationOutcome {
-    RuntimeProcessPlatformImpl::terminate(pid, expected_birth_identity)
+    #[cfg(target_os = "macos")]
+    {
+        return terminate_runtime_process_with_platform::<RuntimeProcessMacos>(
+            pid,
+            expected_birth_identity,
+            expected_executable_path,
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    RuntimeProcessPlatformImpl::terminate(pid, expected_birth_identity, expected_executable_path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write as _;
+    use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+
+    const FAKE_ABSENT: u8 = 0;
+    const FAKE_MATCH_TERMINATES: u8 = 1;
+    const FAKE_BIRTH_CHANGED: u8 = 2;
+    const FAKE_PATH_CHANGED: u8 = 3;
+    const FAKE_PERMISSION_DENIED: u8 = 4;
+    const FAKE_STILL_RUNNING: u8 = 5;
+    const FAKE_FORCED_TERMINATES: u8 = 6;
+    const FAKE_BIRTH_CHANGED_AFTER_PATH: u8 = 7;
+    static FAKE_PROCESS_STATE: AtomicU8 = AtomicU8::new(FAKE_ABSENT);
+    static FAKE_BIRTH_READS: AtomicUsize = AtomicUsize::new(0);
+    static FAKE_TERMINATE_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    struct FakeRuntimeProcess;
+
+    impl RuntimeProcessPlatform for FakeRuntimeProcess {
+        fn pid_alive(_pid: u32) -> bool {
+            FAKE_PROCESS_STATE.load(Ordering::SeqCst) != FAKE_ABSENT
+        }
+
+        fn process_absence_proven(_pid: u32) -> bool {
+            FAKE_PROCESS_STATE.load(Ordering::SeqCst) == FAKE_ABSENT
+        }
+
+        fn process_birth_identity(_pid: u32) -> Option<String> {
+            match FAKE_PROCESS_STATE.load(Ordering::SeqCst) {
+                FAKE_PERMISSION_DENIED => None,
+                FAKE_BIRTH_CHANGED => Some("birth-reused".to_string()),
+                FAKE_BIRTH_CHANGED_AFTER_PATH => {
+                    if FAKE_BIRTH_READS.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Some("birth-expected".to_string())
+                    } else {
+                        Some("birth-reused".to_string())
+                    }
+                }
+                _ => Some("birth-expected".to_string()),
+            }
+        }
+
+        fn executable_path(_pid: u32) -> Option<PathBuf> {
+            match FAKE_PROCESS_STATE.load(Ordering::SeqCst) {
+                FAKE_PERMISSION_DENIED => None,
+                FAKE_PATH_CHANGED => Some(PathBuf::from("/opt/other/bin/worker")),
+                _ => Some(PathBuf::from("/opt/prodex/bin/prodex")),
+            }
+        }
+
+        fn terminate(
+            _pid: u32,
+            _expected_birth_identity: Option<&str>,
+            _expected_executable_path: Option<&Path>,
+        ) -> RuntimeProcessTerminationOutcome {
+            let signals = if FAKE_PROCESS_STATE.load(Ordering::SeqCst) == FAKE_FORCED_TERMINATES {
+                2
+            } else {
+                1
+            };
+            FAKE_TERMINATE_CALLS.fetch_add(signals, Ordering::SeqCst);
+            if FAKE_PROCESS_STATE.load(Ordering::SeqCst) == FAKE_STILL_RUNNING {
+                RuntimeProcessTerminationOutcome::StillRunning
+            } else {
+                RuntimeProcessTerminationOutcome::Terminated
+            }
+        }
+    }
 
     #[test]
     fn runtime_executable_sha256_hashes_small_files() {
@@ -733,14 +1166,15 @@ mod tests {
     #[test]
     fn termination_requires_proven_process_ownership() {
         let pid = std::process::id();
+        let executable = env::current_exe().expect("current executable should be known");
 
         assert_eq!(
-            terminate_runtime_process(pid, None),
+            terminate_runtime_process(pid, None, Some(&executable)),
             RuntimeProcessTerminationOutcome::OwnershipUnproven
         );
         assert_eq!(
-            terminate_runtime_process(pid, Some("not-this-process")),
-            if cfg!(any(target_os = "linux", windows)) {
+            terminate_runtime_process(pid, Some("not-this-process"), Some(&executable)),
+            if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
                 RuntimeProcessTerminationOutcome::OwnershipChanged
             } else {
                 RuntimeProcessTerminationOutcome::OwnershipUnproven
@@ -749,7 +1183,7 @@ mod tests {
         assert!(runtime_process_pid_alive(pid));
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn current_process_has_a_birth_identity() {
         assert!(runtime_process_birth_identity(std::process::id()).is_some());
@@ -761,7 +1195,7 @@ mod tests {
         assert!(!runtime_process_absence_proven(std::process::id()));
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn native_child_smoke_uses_stable_process_reference() {
         if env::var_os("PRODEX_RUNTIME_PROCESS_CHILD").is_some() {
@@ -797,7 +1231,13 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         };
 
-        let outcome = terminate_runtime_process(child.id(), Some(&expected_birth_identity));
+        let expected_executable = RuntimeProcessPlatformImpl::executable_path(child.id())
+            .expect("native child executable path should be observable");
+        let outcome = terminate_runtime_process(
+            child.id(),
+            Some(&expected_birth_identity),
+            Some(&expected_executable),
+        );
         assert!(
             matches!(
                 outcome,
@@ -808,6 +1248,56 @@ mod tests {
         );
         let status = child.wait().expect("native child should be reapable");
         assert!(!status.success(), "native child should be terminated");
+    }
+
+    #[test]
+    fn fake_probe_never_signals_absent_unrelated_or_unproven_processes() {
+        let expected_path = Path::new("/opt/prodex/bin/prodex");
+        let terminate = |state| {
+            FAKE_PROCESS_STATE.store(state, Ordering::SeqCst);
+            FAKE_BIRTH_READS.store(0, Ordering::SeqCst);
+            FAKE_TERMINATE_CALLS.store(0, Ordering::SeqCst);
+            let outcome = terminate_runtime_process_with_platform::<FakeRuntimeProcess>(
+                4242,
+                Some("birth-expected"),
+                Some(expected_path),
+            );
+            (outcome, FAKE_TERMINATE_CALLS.load(Ordering::SeqCst))
+        };
+
+        assert_eq!(
+            terminate(FAKE_ABSENT),
+            (RuntimeProcessTerminationOutcome::NotRunning, 0)
+        );
+        assert_eq!(
+            terminate(FAKE_BIRTH_CHANGED),
+            (RuntimeProcessTerminationOutcome::OwnershipChanged, 0)
+        );
+        assert_eq!(
+            terminate(FAKE_PATH_CHANGED),
+            (RuntimeProcessTerminationOutcome::OwnershipChanged, 0)
+        );
+        assert_eq!(
+            terminate(FAKE_BIRTH_CHANGED_AFTER_PATH),
+            (RuntimeProcessTerminationOutcome::OwnershipChanged, 0)
+        );
+        assert_eq!(
+            terminate(FAKE_PERMISSION_DENIED),
+            (RuntimeProcessTerminationOutcome::OwnershipUnproven, 0)
+        );
+        assert_eq!(
+            terminate(FAKE_MATCH_TERMINATES),
+            (RuntimeProcessTerminationOutcome::Terminated, 1)
+        );
+        assert_eq!(
+            terminate(FAKE_FORCED_TERMINATES),
+            (RuntimeProcessTerminationOutcome::Terminated, 2)
+        );
+        assert_eq!(
+            terminate(FAKE_STILL_RUNNING),
+            (RuntimeProcessTerminationOutcome::StillRunning, 1)
+        );
+        FAKE_PROCESS_STATE.store(FAKE_ABSENT, Ordering::SeqCst);
     }
 
     fn runtime_process_test_path(name: &str) -> PathBuf {

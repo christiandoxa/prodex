@@ -161,6 +161,8 @@ function render() {
   lines.push("");
   lines.push("Fixture summary counts are `request/response/stream-event` conformance cases per provider.");
   lines.push("");
+  lines.push("Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.");
+  lines.push("");
   lines.push("## Harness modes");
   lines.push("");
   lines.push(`Default mode: \`${contractCatalog.default_harness_mode}\`. Resolved mode for this catalog: \`${contractCatalog.resolved_harness_mode}\`.`);
@@ -186,6 +188,16 @@ function render() {
     }
     lines.push("");
   }
+  lines.push("## Semantic compact observability");
+  lines.push("");
+  lines.push("Gemini and Kiro semantic compact responses expose `x-prodex-compact-mode` (`semantic` or `local-fallback`) and `x-prodex-compact-provider`. Lossy fallback also exposes `x-prodex-compact-degraded: true` plus a bounded `x-prodex-compact-reason` code: `timeout`, `unsupported`, `unavailable`, `invalid-response`, `provider-error`, or `local-policy`. Raw upstream errors are never copied into headers.");
+  lines.push("");
+  lines.push("Prometheus output includes `prodex_semantic_compact_total{provider,mode}` and `prodex_semantic_compact_fallback_total{provider,reason}` with fixed-cardinality labels. Local fallback preserves HTTP 200 for continuation compatibility but is not semantic success. It is intentionally lossy and retains at most 24 recent snippets, 768 bytes per snippet, and 24 KiB total.");
+  lines.push("");
+  lines.push("## Transport limits");
+  lines.push("");
+  lines.push("Capability labels describe documented HTTP/text transformations, not lossless equivalence. Translated or emulated shapes may reject unsupported fields as listed above. Gemini Live rejects unexpected upstream binary WebSocket frames predictably; it does not reinterpret them as text.");
+  lines.push("");
   return `${lines.join("\n")}`;
 }
 

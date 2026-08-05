@@ -20,7 +20,6 @@ use terminal_ui::{
 mod api_key;
 mod claude;
 mod copilot_import;
-mod google;
 mod home;
 pub(super) mod lifecycle_support;
 mod login_menu;
@@ -30,7 +29,6 @@ mod request;
 use self::api_key::*;
 use self::claude::*;
 use self::copilot_import::*;
-use self::google::*;
 use self::home::create_temporary_login_home;
 use self::lifecycle_support::login_into_profile;
 use self::login_menu::{
@@ -52,9 +50,8 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
     activate_profile, agy_bin, claude_oauth_profile_identity, codex_child_plan, exit_with_status,
     fetch_profile_email, fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
-    login_with_google_oauth, managed_profile_home_path, persist_login_home,
-    prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists,
-    required_auth_json_text, run_child_plan, unique_profile_name_for_email,
+    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, read_auth_summary,
+    remove_dir_if_exists, required_auth_json_text, run_child_plan, unique_profile_name_for_email,
     update_existing_profile_auth, write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
@@ -65,7 +62,6 @@ enum LoginMethod {
     DeviceCode,
     ApiKey,
     AccessToken,
-    Google,
     Claude,
     Antigravity,
     Status,
@@ -195,13 +191,6 @@ fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Re
     }
     if login_request.method == LoginMethod::Status {
         remove_dir_if_exists(&login_home)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Google {
-        let secret = read_gemini_oauth_secret(&login_home)?;
-        let _lock = acquire_profile_lifecycle_lock(paths)?;
-        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
-        finish_auto_login_for_gemini_profile(paths, &mut state, &login_home, &secret)?;
         return Ok(status);
     }
     if login_request.method == LoginMethod::Claude {
@@ -366,10 +355,6 @@ fn finish_auto_login_for_new_profile(
 }
 
 fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<ExitStatus> {
-    if login_request.method == LoginMethod::Google {
-        login_with_google_oauth(codex_home)?;
-        return Ok(success_exit_status());
-    }
     if login_request.method == LoginMethod::Claude {
         return login_with_claude_oauth(codex_home, None);
     }
@@ -421,6 +406,9 @@ fn resolve_login_request(
     selected_profile: Option<&str>,
     codex_args: Vec<OsString>,
 ) -> Result<ResolvedLoginRequest> {
+    if gemini_oauth_login_requested(&codex_args) {
+        bail!(crate::GEMINI_OAUTH_DISABLED_GUIDANCE);
+    }
     let (openai_base_url, openai_base_url_specified, codex_args) =
         extract_login_base_url(codex_args)?;
     let inferred_method = infer_login_method(&codex_args);
@@ -512,9 +500,7 @@ fn login_request_for_method(
                 api_key_profile_name,
             })
         }
-        LoginMethod::Google | LoginMethod::Claude => {
-            login_request_without_base_url(method, openai_base_url_specified)
-        }
+        LoginMethod::Claude => login_request_without_base_url(method, openai_base_url_specified),
         LoginMethod::Antigravity => {
             if openai_base_url_specified {
                 bail!("--base-url is not supported for Antigravity login");
@@ -799,4 +785,23 @@ fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {
     let mut plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
     plan.args = vec![OsString::from("auth"), OsString::from("login")];
     run_child_plan(&plan, None)
+}
+
+#[cfg(test)]
+mod disabled_google_login_tests {
+    use super::*;
+
+    #[test]
+    fn removed_google_oauth_flags_fail_with_migration_guidance() {
+        for flag in ["--with-google", "--google"] {
+            let error = match resolve_login_request(None, vec![OsString::from(flag)]) {
+                Err(error) => error,
+                Ok(_) => panic!("removed Gemini OAuth login must fail"),
+            };
+            let message = error.to_string();
+            assert!(message.contains("unsupported and disabled"));
+            assert!(message.contains("Gemini API key"));
+            assert!(message.contains("Vertex AI"));
+        }
+    }
 }

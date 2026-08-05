@@ -91,6 +91,11 @@ pub(crate) fn runtime_external_provider_rotation_summary(
         }
         return "Using one provider API key; API-key rotation is skipped and quota preflight stays disabled.".to_string();
     }
+    if external_provider.eq_ignore_ascii_case("gemini")
+        || external_provider.eq_ignore_ascii_case("gemini-oauth")
+    {
+        return crate::GEMINI_OAUTH_DISABLED_GUIDANCE.to_string();
+    }
     if !allow_auto_rotate {
         return "Account rotation is disabled by launch flags; quota preflight stays disabled."
             .to_string();
@@ -207,5 +212,20 @@ mod tests {
             Some(SUPER_ANTHROPIC_PROVIDER_ID)
         );
         assert_eq!(runtime_external_provider_local_rewrite_id("unknown"), None);
+    }
+
+    #[test]
+    fn disabled_gemini_oauth_rotation_reports_migration_guidance() {
+        for provider in ["gemini", "gemini-oauth"] {
+            let summary = runtime_external_provider_rotation_summary(
+                &AppState::default(),
+                "profile",
+                provider,
+                None,
+                true,
+            );
+            assert!(summary.contains("Gemini API key"));
+            assert!(summary.contains("Vertex AI"));
+        }
     }
 }

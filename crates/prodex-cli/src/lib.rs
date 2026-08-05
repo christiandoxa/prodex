@@ -196,6 +196,8 @@ pub enum Commands {
     GeminiCompatRefresh(GeminiCompatRefreshArgs),
     #[command(name = "__mcp-jsonl-bridge", hide = true)]
     McpJsonlBridge(McpJsonlBridgeArgs),
+    #[command(name = "__sub-agent-exec", hide = true)]
+    SubAgentExec(SubAgentExecArgs),
 }
 
 impl Commands {
@@ -253,6 +255,7 @@ impl Commands {
             Self::RuntimeBroker(_) => "__runtime-broker",
             Self::GeminiCompatRefresh(_) => "__gemini-compat-refresh",
             Self::McpJsonlBridge(_) => "__mcp-jsonl-bridge",
+            Self::SubAgentExec(_) => "__sub-agent-exec",
         }
     }
 }
@@ -431,6 +434,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "__runtime-broker"
             | "__gemini-compat-refresh"
             | "__mcp-jsonl-bridge"
+            | "__sub-agent-exec"
     )
 }
 

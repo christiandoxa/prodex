@@ -117,7 +117,7 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
                 }
             })
             .collect(),
-        model_count: adapter.model_catalog().len(),
+        model_count: crate::provider_catalog_entries_for(provider).len(),
         replay_case_count: provider_replay_case_count(provider),
     }
 }

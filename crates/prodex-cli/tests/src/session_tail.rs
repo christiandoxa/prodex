@@ -1,13 +1,13 @@
 use super::*;
 
-const SESSION_ID: &str = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
 
 #[test]
 fn s_session_tail_profile_and_no_auto_rotate_are_prodex_flags() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--profile",
         "main",
         "--no-auto-rotate",
@@ -21,7 +21,7 @@ fn s_session_tail_profile_and_no_auto_rotate_are_prodex_flags() {
     assert!(args.no_auto_rotate);
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -32,7 +32,7 @@ fn s_session_tail_profile_does_not_override_existing_profile() {
         "s",
         "--profile",
         "main",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--profile=tail",
     ])
     .expect("s session command should parse");
@@ -43,7 +43,7 @@ fn s_session_tail_profile_does_not_override_existing_profile() {
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -52,7 +52,7 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--skip-quota-check",
         "--dry-run",
         "--auto-redeem",
@@ -81,7 +81,7 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
     assert!(!args.no_auto_rotate);
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -90,7 +90,7 @@ fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--url",
         "http://127.0.0.1:8131/v1",
         "--local-model",
@@ -114,7 +114,7 @@ fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
     assert_eq!(args.cli, Some(SuperCliAgent::Gemini));
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -123,7 +123,7 @@ fn s_session_tail_codex_feature_flags_are_extracted_after_target() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--web-search=live",
         "--rollout-budget-tokens",
         "100000",
@@ -171,7 +171,7 @@ fn s_session_tail_codex_feature_flags_are_extracted_after_target() {
     assert!(!args.codex_features.no_respect_system_proxy);
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -180,7 +180,7 @@ fn s_session_tail_harness_is_extracted_and_never_forwarded_to_codex() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--provider",
         "deepseek",
         "--harness=minimal",
@@ -200,7 +200,7 @@ fn s_session_tail_harness_is_extracted_and_never_forwarded_to_codex() {
     );
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -228,7 +228,7 @@ fn s_session_tail_invalid_typed_values_fail_before_codex_launch() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--provider",
         "unknown",
         "--local-context-window",
@@ -257,7 +257,7 @@ fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
         let command = parse_cli_command_from([
             "prodex",
             "s",
-            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            "00000000-0000-7000-8000-000000000042",
             argument,
         ])
         .expect("s session command should parse before tail extraction");
@@ -282,7 +282,7 @@ fn s_session_tail_equals_forms_cover_value_options_and_aliases() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--provider=anthropic",
         "--harness=native",
         "--api-key=test-key",
@@ -322,7 +322,7 @@ fn s_session_tail_equals_forms_cover_value_options_and_aliases() {
     assert_eq!(args.cli, Some(SuperCliAgent::Agy));
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -331,7 +331,7 @@ fn s_session_tail_extracts_native_copilot_cli() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--provider=copilot",
         "--cli=copilot",
     ])
@@ -346,7 +346,7 @@ fn s_session_tail_extracts_native_copilot_cli() {
     assert_eq!(args.cli, Some(SuperCliAgent::Copilot));
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -355,7 +355,7 @@ fn s_session_tail_missing_and_invalid_values_fail_closed() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--unknown-before",
         "value",
         "--provider",
@@ -385,7 +385,7 @@ fn s_session_tail_presidio_conflicts_are_rejected_after_target() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--presidio",
         "--no-presidio",
     ])
@@ -405,7 +405,7 @@ fn s_session_tail_presidio_conflicts_are_rejected_after_target() {
     );
     assert_eq!(
         args.codex_args,
-        os_args(&["019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -416,7 +416,7 @@ fn s_explicit_resume_presidio_conflicts_are_rejected_after_target() {
         "s",
         "--presidio",
         "resume",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--no-presidio",
     ])
     .unwrap();
@@ -435,7 +435,7 @@ fn s_explicit_resume_presidio_conflicts_are_rejected_after_target() {
     );
     assert_eq!(
         args.codex_args,
-        os_args(&["resume", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+        os_args(&["resume", "00000000-0000-7000-8000-000000000042"])
     );
 }
 
@@ -444,7 +444,7 @@ fn s_session_tail_boolean_pairs_keep_last_value_for_non_conflicting_flags() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
-        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "00000000-0000-7000-8000-000000000042",
         "--auto-rotate",
         "--no-auto-rotate",
         "--auto-rotate",
@@ -527,7 +527,7 @@ fn s_session_tail_preserves_non_utf8_arguments() {
     let command = parse_cli_command_from(vec![
         OsString::from("prodex"),
         OsString::from("s"),
-        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("00000000-0000-7000-8000-000000000042"),
         non_utf8.clone(),
         OsString::from("--provider=gemini"),
     ])
@@ -542,7 +542,7 @@ fn s_session_tail_preserves_non_utf8_arguments() {
     assert_eq!(
         args.codex_args,
         vec![
-            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("00000000-0000-7000-8000-000000000042"),
             non_utf8,
         ]
     );

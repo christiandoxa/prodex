@@ -1,35 +1,19 @@
 mod code_assist;
-mod oauth;
 mod quota;
 
-use crate::secret_store_support::secret_file_read_error;
-use crate::{create_codex_home_if_missing, print_wrapped_stderr};
-use anyhow::{Context, Result};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use code_assist::{GeminiCodeAssistSetupMode, resolve_gemini_code_assist_project_with_endpoint};
-pub(crate) use code_assist::{
-    ensure_gemini_code_assist_project_if_missing, gemini_code_assist_endpoint,
-};
-use oauth::{
-    exchange_google_oauth_code, fetch_google_user_email, gemini_oauth_authorize_url,
-    gemini_oauth_secret_from_token, random_hex, refresh_google_oauth_token,
-    wait_for_google_oauth_code,
-};
-use quota::verify_gemini_code_assist_quota_access;
+use crate::create_codex_home_if_missing;
+use anyhow::{Context, Result, bail};
+pub(crate) use code_assist::gemini_code_assist_endpoint;
 pub(crate) use quota::{
     fetch_gemini_quota, fetch_gemini_quota_json, fetch_gemini_quota_with_code_assist_endpoint,
 };
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tiny_http::Server as TinyServer;
 
 pub(crate) const GEMINI_OAUTH_SECRET_FILE: &str = "gemini_oauth.json";
-const GEMINI_OAUTH_EXPIRY_SKEW_MS: i64 = 60_000;
+pub(crate) const GEMINI_OAUTH_DISABLED_GUIDANCE: &str = "Google Gemini OAuth profiles are unsupported and disabled. For Codex-fronted Gemini, migrate to a Gemini API key (`--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`). For supported Vertex AI authentication, use the native Gemini CLI path (`prodex s gemini --cli gemini`), which owns its authentication.";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct GeminiOAuthSecret {
@@ -76,16 +60,6 @@ pub(crate) fn gemini_oauth_secret_path(codex_home: &Path) -> PathBuf {
     codex_home.join(GEMINI_OAUTH_SECRET_FILE)
 }
 
-pub(crate) fn read_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthSecret> {
-    let path = gemini_oauth_secret_path(codex_home);
-    let text = secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
-        .read_text(&secret_store::SecretLocation::file(&path))
-        .map_err(secret_file_read_error)
-        .with_context(|| format!("failed to read {}", path.display()))?
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
-}
-
 pub(crate) fn write_gemini_oauth_secret(
     codex_home: &Path,
     secret: &GeminiOAuthSecret,
@@ -102,107 +76,14 @@ pub(crate) fn write_gemini_oauth_secret(
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
-pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSecret> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build Google OAuth HTTP client")?;
-    let server = TinyServer::http("127.0.0.1:0")
-        .map_err(|err| anyhow::anyhow!("failed to bind Google OAuth callback server: {err}"))?;
-    let listen_addr = server
-        .server_addr()
-        .to_ip()
-        .context("Google OAuth callback server did not expose a TCP address")?;
-    let redirect_uri = format!("http://{listen_addr}/oauth2callback");
-    let state = random_hex(24)?;
-    let code_verifier = random_hex(32)?;
-    let code_challenge = gemini_oauth_pkce_challenge(&code_verifier);
-    let auth_url = gemini_oauth_authorize_url(&redirect_uri, &state, &code_challenge)?;
-
-    print_wrapped_stderr("Opening Google sign-in in your browser.")?;
-    print_wrapped_stderr(&format!("If it does not open, visit: {auth_url}"))?;
-    let _ = crate::dashboard::open_browser(&auth_url);
-
-    let code = wait_for_google_oauth_code(&server, &state)?;
-    let token = exchange_google_oauth_code(&client, &code, &redirect_uri, &code_verifier)?;
-    let email = fetch_google_user_email(&client, &token.access_token)?;
-    let secret = complete_gemini_oauth_secret(
-        &client,
-        gemini_oauth_secret_from_token(email, token, None),
-        GeminiCodeAssistSetupMode::Interactive,
-    )?;
-    write_gemini_oauth_secret(codex_home, &secret)?;
-    Ok(secret)
-}
-
-fn gemini_oauth_pkce_challenge(code_verifier: &str) -> String {
-    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
-}
-
-fn complete_gemini_oauth_secret(
-    client: &Client,
-    mut secret: GeminiOAuthSecret,
-    mode: GeminiCodeAssistSetupMode,
-) -> Result<GeminiOAuthSecret> {
-    let code_assist_endpoint = gemini_code_assist_endpoint();
-    let project_id = resolve_gemini_code_assist_project_with_endpoint(
-        client,
-        &secret,
-        &code_assist_endpoint,
-        mode,
-    )?
-    .context("Gemini Code Assist setup did not return a project")?;
-    secret.project_id = Some(project_id.clone());
-    verify_gemini_code_assist_quota_access(
-        client,
-        &secret,
-        &project_id,
-        &code_assist_endpoint,
-        mode,
-    )?;
-    Ok(secret)
-}
-
 pub(crate) fn refresh_gemini_oauth_secret_if_needed(
-    codex_home: &Path,
+    _codex_home: &Path,
 ) -> Result<GeminiOAuthSecret> {
-    let secret = read_gemini_oauth_secret(codex_home)?;
-    if !gemini_oauth_secret_expired(&secret) {
-        return Ok(secret);
-    }
-    refresh_gemini_oauth_secret(codex_home, secret)
+    bail!(GEMINI_OAUTH_DISABLED_GUIDANCE)
 }
 
-pub(crate) fn force_refresh_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthSecret> {
-    let secret = read_gemini_oauth_secret(codex_home)?;
-    refresh_gemini_oauth_secret(codex_home, secret)
-}
-
-fn refresh_gemini_oauth_secret(
-    codex_home: &Path,
-    mut secret: GeminiOAuthSecret,
-) -> Result<GeminiOAuthSecret> {
-    let refresh_token = secret.refresh_token.as_deref().context(
-        "Gemini OAuth refresh token is missing; run `prodex login` and choose Sign in with Google",
-    )?;
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build Google OAuth refresh HTTP client")?;
-    let token = refresh_google_oauth_token(&client, refresh_token)?;
-    secret.access_token = token.access_token;
-    if let Some(refresh_token) = token.refresh_token {
-        secret.refresh_token = Some(refresh_token);
-    }
-    if let Some(token_type) = token.token_type {
-        secret.token_type = Some(token_type);
-    }
-    if let Some(scope) = token.scope {
-        secret.scope = Some(scope);
-    }
-    secret.expiry_date = token.expires_in.map(gemini_oauth_expiry_date_ms);
-    write_gemini_oauth_secret(codex_home, &secret)?;
-    Ok(secret)
+pub(crate) fn force_refresh_gemini_oauth_secret(_codex_home: &Path) -> Result<GeminiOAuthSecret> {
+    bail!(GEMINI_OAUTH_DISABLED_GUIDANCE)
 }
 
 pub(crate) fn gemini_oauth_project_from_env() -> Option<String> {
@@ -227,75 +108,9 @@ fn normalize_gemini_project_id(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn gemini_oauth_secret_expired(secret: &GeminiOAuthSecret) -> bool {
-    let Some(expiry_date) = secret.expiry_date else {
-        return false;
-    };
-    now_ms().saturating_add(GEMINI_OAUTH_EXPIRY_SKEW_MS) >= expiry_date
-}
-
-fn gemini_oauth_expiry_date_ms(expires_in_seconds: i64) -> i64 {
-    now_ms().saturating_add(expires_in_seconds.saturating_mul(1000))
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use tiny_http::Response as TinyResponse;
-
-    #[test]
-    fn pkce_challenge_matches_rfc_7636_s256_vector() {
-        assert_eq!(
-            gemini_oauth_pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-        );
-    }
-
-    #[cfg(unix)]
-    fn test_gemini_oauth_secret() -> GeminiOAuthSecret {
-        GeminiOAuthSecret {
-            auth_mode: "gemini_oauth".to_string(),
-            access_token: "token-123".to_string(),
-            refresh_token: Some("refresh-123".to_string()),
-            token_type: Some("Bearer".to_string()),
-            scope: None,
-            expiry_date: None,
-            email: "user@example.com".to_string(),
-            project_id: Some("project-123".to_string()),
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_gemini_oauth_secret_rejects_symlink() {
-        let root = env::temp_dir().join(format!(
-            "prodex-gemini-oauth-symlink-{}-{}",
-            std::process::id(),
-            oauth::random_hex(4).expect("random suffix")
-        ));
-        std::fs::create_dir_all(&root).expect("test dir should be created");
-        let target = root.join("target.json");
-        std::fs::write(
-            &target,
-            serde_json::to_string_pretty(&test_gemini_oauth_secret()).unwrap(),
-        )
-        .unwrap();
-        std::os::unix::fs::symlink(&target, gemini_oauth_secret_path(&root)).unwrap();
-
-        let err = read_gemini_oauth_secret(&root).expect_err("symlink secret must be rejected");
-
-        assert!(err.to_string().contains("failed to read"));
-        assert!(format!("{err:#}").contains("regular secret file"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
 
     #[test]
     fn gemini_oauth_secret_debug_output_redacts_sensitive_fields() {
@@ -328,70 +143,38 @@ mod tests {
     }
 
     #[test]
-    fn google_login_completion_requires_quota_probe_after_code_assist_setup() {
-        let _env_lock = crate::TestEnvVarGuard::lock();
-        let server = TinyServer::http("127.0.0.1:0").expect("setup test server should bind");
-        let listen_addr = server.server_addr().to_ip().unwrap();
-        let endpoint = format!("http://{listen_addr}/v1internal");
-        let _endpoint_guard =
-            crate::TestEnvVarGuard::set("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT", endpoint.as_str());
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("client should build");
-        let secret = GeminiOAuthSecret {
-            auth_mode: "gemini_oauth".to_string(),
-            access_token: "token-123".to_string(),
-            refresh_token: Some("refresh-123".to_string()),
-            token_type: Some("Bearer".to_string()),
-            scope: None,
-            expiry_date: Some(now_ms() + 3_600_000),
-            email: "gemini-user@example.com".to_string(),
-            project_id: None,
-        };
+    fn disabled_gemini_oauth_never_refreshes_legacy_credentials() {
+        let err = refresh_gemini_oauth_secret_if_needed(Path::new("/synthetic/profile"))
+            .expect_err("Gemini OAuth must remain disabled");
+        let message = err.to_string();
+        assert!(message.contains("unsupported and disabled"));
+        assert!(message.contains("Gemini API key"));
+        assert!(message.contains("Vertex AI"));
+    }
 
-        let handle = thread::spawn(move || {
-            let mut load = server.recv().expect("loadCodeAssist request should arrive");
-            assert_eq!(load.method().as_str(), "POST");
-            assert_eq!(load.url(), "/v1internal:loadCodeAssist");
-            let mut load_body = String::new();
-            load.as_reader()
-                .read_to_string(&mut load_body)
-                .expect("loadCodeAssist body should read");
-            assert!(load_body.contains("\"pluginType\":\"GEMINI\""));
-            load.respond(TinyResponse::from_string(
-                r#"{"currentTier":{"id":"standard-tier"},"cloudaicompanionProject":"gemini-project"}"#,
-            ))
-            .expect("loadCodeAssist response should send");
+    #[test]
+    fn legacy_gemini_oauth_profile_remains_parseable_for_migration() {
+        let secret: GeminiOAuthSecret = serde_json::from_value(serde_json::json!({
+            "auth_mode": "gemini_oauth",
+            "access_token": "synthetic-access-token",
+            "refresh_token": "synthetic-refresh-token",
+            "email": "synthetic@example.com"
+        }))
+        .expect("legacy Gemini OAuth profile should remain parseable");
+        assert_eq!(secret.auth_mode, "gemini_oauth");
+    }
 
-            let mut quota = server.recv().expect("quota probe should arrive");
-            assert_eq!(quota.method().as_str(), "POST");
-            assert_eq!(quota.url(), "/v1internal:retrieveUserQuota");
-            let mut quota_body = String::new();
-            quota
-                .as_reader()
-                .read_to_string(&mut quota_body)
-                .expect("quota probe body should read");
-            assert!(quota_body.contains("\"project\":\"gemini-project\""));
-            quota
-                .respond(
-                    TinyResponse::from_string(
-                        r#"{"error":{"code":403,"message":"Verify your account to continue.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"VALIDATION_REQUIRED","domain":"cloudcode-pa.googleapis.com","metadata":{"validation_error_message":"Verify your account to continue.","validation_url":"https://accounts.google.com/verify"}},{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Verify your account","url":"https://accounts.google.com/verify"},{"description":"Learn more","url":"https://support.google.com/accounts?p=al_alert"}]}]}}"#,
-                    )
-                    .with_status_code(403),
-                )
-                .expect("validation response should send");
-        });
-
-        let err = complete_gemini_oauth_secret(
-            &client,
-            secret,
-            GeminiCodeAssistSetupMode::NonInteractive,
-        )
-        .expect_err("login completion should not succeed while account validation is required");
-        handle.join().expect("setup test server should finish");
-        let message = format!("{err:#}");
-        assert!(message.contains("Verify your account"));
-        assert!(message.contains("https://accounts.google.com/verify"));
+    #[test]
+    fn tracked_oauth_credential_reconstruction_source_is_absent() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for source in [
+            "src/runtime_gemini_auth/oauth.rs",
+            "src/profile_commands/login/google.rs",
+        ] {
+            assert!(
+                !manifest_dir.join(source).exists(),
+                "removed Gemini OAuth source must stay absent: {source}"
+            );
+        }
     }
 }

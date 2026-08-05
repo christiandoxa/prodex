@@ -2,6 +2,11 @@
 
 use serde_json::{Value, json};
 
+pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS: usize = 128;
+pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES: usize = 256;
+const KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES: usize = 160;
+const KIRO_PROVIDER_CORE_ACTIVITY_KIND_MAX_BYTES: usize = 48;
+
 pub fn kiro_provider_core_chat_completion_chunk(
     chat_completion_id: &str,
     model: Option<&str>,
@@ -208,33 +213,18 @@ pub fn kiro_provider_core_stream_content_text(value: &Value) -> Option<String> {
 }
 
 pub fn kiro_provider_core_stream_tool_call_item(
-    tool_call_id: &str,
+    _tool_call_id: &str,
     title: Option<&str>,
     status: Option<&str>,
     kind: Option<&str>,
     raw_input: Option<&Value>,
 ) -> Value {
-    let name = kiro_provider_core_stream_tool_name(title, kind);
-    let arguments = kiro_provider_core_stream_tool_arguments(raw_input);
-    json!({
-        "type": "function_call",
-        "call_id": tool_call_id,
-        "name": name,
-        "namespace": "kiro",
-        "arguments": arguments,
-        "metadata": {
-            "kiro": {
-                "title": title.unwrap_or("tool_call"),
-                "status": status,
-                "kind": kind,
-            }
-        }
-    })
+    kiro_provider_core_tool_activity_item(title, status, kind, true, raw_input.is_some())
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn kiro_provider_core_acp_responses_tool_call_item(
-    tool_call_id: &str,
+    _tool_call_id: &str,
     title: Option<&str>,
     status: Option<&str>,
     kind: Option<&str>,
@@ -243,39 +233,103 @@ pub fn kiro_provider_core_acp_responses_tool_call_item(
     content: Option<&[Value]>,
     locations: Option<&[Value]>,
 ) -> Value {
-    json!({
-        "type": "function_call",
-        "call_id": tool_call_id,
-        "name": kiro_provider_core_stream_tool_name(title, kind),
-        "namespace": "kiro",
-        "arguments": kiro_provider_core_stream_tool_arguments(raw_input),
-        "metadata": {
-            "kiro": {
-                "title": title.unwrap_or("tool_call"),
-                "status": status,
-                "kind": kind,
-                "raw_output": raw_output,
-                "content": content,
-                "locations": locations,
-            }
-        }
-    })
+    kiro_provider_core_tool_activity_item(
+        title,
+        status,
+        kind,
+        false,
+        raw_input.is_some()
+            || raw_output.is_some()
+            || content.is_some_and(|items| !items.is_empty())
+            || locations.is_some_and(|items| !items.is_empty()),
+    )
 }
 
 pub fn kiro_provider_core_acp_chat_tool_call_item(
-    tool_call_id: &str,
+    _tool_call_id: &str,
     title: Option<&str>,
     kind: Option<&str>,
     raw_input: Option<&Value>,
 ) -> Value {
+    kiro_provider_core_tool_activity_item(title, None, kind, false, raw_input.is_some())
+}
+
+pub fn kiro_provider_core_tool_activity_item(
+    title: Option<&str>,
+    status: Option<&str>,
+    kind: Option<&str>,
+    initial: bool,
+    details_omitted: bool,
+) -> Value {
+    let safe_kind = kind.and_then(|value| {
+        kiro_provider_core_safe_activity_field(value, KIRO_PROVIDER_CORE_ACTIVITY_KIND_MAX_BYTES)
+    });
+    let name = title
+        .and_then(|value| {
+            kiro_provider_core_safe_activity_field(
+                value,
+                KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES,
+            )
+        })
+        .or_else(|| safe_kind.clone())
+        .unwrap_or_else(|| "Kiro internal activity".to_string());
+    let status = kiro_provider_core_activity_status(status);
+    let phase = match status.as_str() {
+        "completed" => "completed",
+        "failed" | "error" => "failed",
+        "cancelled" => "cancelled",
+        "truncated" => "truncated",
+        _ if initial => "started",
+        _ => "updated",
+    };
     json!({
-        "id": tool_call_id,
-        "type": "function",
-        "function": {
-            "name": kiro_provider_core_stream_tool_name(title, kind),
-            "arguments": kiro_provider_core_stream_tool_arguments(raw_input),
-        },
+        "type": "kiro_internal_activity",
+        "name": name,
+        "status": status,
+        "phase": phase,
+        "kind": safe_kind,
+        "details_omitted": details_omitted,
     })
+}
+
+pub fn kiro_provider_core_truncated_tool_activity_item() -> Value {
+    kiro_provider_core_tool_activity_item(
+        Some("Additional Kiro activities omitted"),
+        Some("truncated"),
+        None,
+        false,
+        true,
+    )
+}
+
+pub fn kiro_provider_core_tool_activity_text(activity: &Value) -> String {
+    let name = activity
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Kiro internal activity");
+    let status = activity
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let phase = activity
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("updated");
+    let kind = activity
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(|kind| format!("; kind={kind}"))
+        .unwrap_or_default();
+    let details_omitted = activity
+        .get("details_omitted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let details = if details_omitted {
+        "; details=omitted"
+    } else {
+        ""
+    };
+    format!("[Kiro activity: {name}; status={status}; phase={phase}{kind}{details}]\n")
 }
 
 pub fn kiro_provider_core_acp_usage_update_json(
@@ -295,26 +349,52 @@ pub fn kiro_provider_core_acp_usage_update_json(
 }
 
 pub fn kiro_provider_core_stream_tool_arguments(raw_input: Option<&Value>) -> String {
-    raw_input
-        .and_then(|value| serde_json::to_string(value).ok())
-        .unwrap_or_else(|| "{}".to_string())
+    if raw_input.is_some() {
+        r#"{"details_omitted":true}"#.to_string()
+    } else {
+        "{}".to_string()
+    }
 }
 
-fn kiro_provider_core_stream_tool_name(title: Option<&str>, kind: Option<&str>) -> String {
-    let candidate = title
-        .filter(|title| !title.trim().is_empty())
-        .or(kind)
-        .unwrap_or("tool_call");
-    let mut normalized = String::new();
-    let mut last_was_separator = false;
-    for ch in candidate.chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            normalized.push(ch);
-            last_was_separator = false;
-        } else if !last_was_separator && !normalized.is_empty() {
-            normalized.push('_');
-            last_was_separator = true;
-        }
+fn kiro_provider_core_activity_status(status: Option<&str>) -> String {
+    let normalized = status.unwrap_or_default().trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "pending" | "in_progress" | "running" | "completed" | "failed" | "error" | "cancelled"
+        | "truncated" => normalized,
+        _ => "unknown".to_string(),
     }
-    normalized.trim_matches('_').to_string()
+}
+
+fn kiro_provider_core_safe_activity_field(value: &str, max_bytes: usize) -> Option<String> {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let lowercase = normalized.to_ascii_lowercase();
+    if normalized.contains(['/', '\\', '@'])
+        || [
+            "authorization",
+            "bearer",
+            "api_key",
+            "apikey",
+            "password",
+            "sk-",
+            "sk_",
+            "secret",
+            "token",
+            "credential",
+        ]
+        .iter()
+        .any(|needle| lowercase.contains(needle))
+    {
+        return None;
+    }
+    let mut bounded = String::new();
+    for ch in normalized.chars() {
+        if bounded.len() + ch.len_utf8() > max_bytes {
+            break;
+        }
+        bounded.push(ch);
+    }
+    (!bounded.is_empty()).then_some(bounded)
 }

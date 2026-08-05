@@ -2,7 +2,9 @@ mod request_validation;
 mod response;
 mod stream;
 use self::response::{runtime_kiro_anthropic_message_parts_from_response, runtime_kiro_json_parts};
-use self::stream::{runtime_kiro_finish_stream, runtime_kiro_stream_notification};
+use self::stream::{
+    RuntimeKiroStreamingActivityState, runtime_kiro_finish_stream, runtime_kiro_stream_notification,
+};
 
 use self::request_validation::runtime_kiro_request_body_for_endpoint;
 use super::chat_compatible_request::runtime_provider_chat_compatible_request_body;
@@ -16,7 +18,8 @@ use super::local_rewrite::{
 };
 use super::local_rewrite_copilot::runtime_copilot_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_compact::{
-    runtime_gemini_compact_response_parts, runtime_gemini_local_compact_response_parts,
+    runtime_compact_reason, runtime_compact_response_parts,
+    runtime_local_compact_response_parts_with_reason,
 };
 use super::local_rewrite_upstream::RuntimeLocalRewriteStreamingResponse;
 use super::local_rewrite_upstream::{
@@ -24,7 +27,6 @@ use super::local_rewrite_upstream::{
     runtime_local_rewrite_binding_recorder, runtime_local_rewrite_raw_binding_identity,
     runtime_local_rewrite_remember_accepted_binding,
 };
-use super::provider_bridge::runtime_provider_stream_function_call_arguments_delta_event;
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
 use super::provider_sse_events::{
     runtime_provider_sse_event, runtime_provider_sse_output_text_item_added_event,
@@ -55,12 +57,10 @@ use prodex_provider_core::{
     kiro_provider_core_chat_completion_value_from_response as runtime_kiro_chat_completion_value_from_response,
     kiro_provider_core_prompt_from_chat_messages as runtime_kiro_prompt_from_messages,
     kiro_provider_core_stream_content_text as runtime_kiro_content_text,
-    kiro_provider_core_stream_tool_call_item as runtime_kiro_stream_tool_call_item,
 };
 use prodex_provider_spi::{ProviderStreamMode, ProviderStreamMode::Streaming};
 use runtime_proxy_crate::path_without_query;
 use serde_json::Value;
-use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, BufWriter, Cursor, Read, Write};
@@ -68,8 +68,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
+
+const RUNTIME_KIRO_ACP_STREAM_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn runtime_kiro_rewrite_options() -> RuntimeDeepSeekRewriteOptions {
     RuntimeDeepSeekRewriteOptions {
@@ -429,8 +431,12 @@ pub(super) fn runtime_kiro_compact_response_parts(
     auth: &RuntimeKiroProfileAuth,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
     match runtime_kiro_semantic_compact_summary(request_id, body, async_runtime, auth) {
-        Ok(summary) => runtime_gemini_compact_response_parts(&summary),
-        Err(_) => runtime_gemini_local_compact_response_parts(body),
+        Ok(summary) => runtime_compact_response_parts(&summary, "kiro", "semantic", None),
+        Err(error) => runtime_local_compact_response_parts_with_reason(
+            body,
+            "kiro",
+            runtime_compact_reason(&error),
+        ),
     }
 }
 
@@ -776,6 +782,7 @@ fn runtime_kiro_streaming_child(
         &mut state,
         chat_completions_route,
         idle_timeout,
+        RUNTIME_KIRO_ACP_STREAM_TOTAL_TIMEOUT,
     )?;
     drop(stdin);
     runtime_kiro_finish_stream(
@@ -806,9 +813,7 @@ struct RuntimeKiroStreamingState {
     message_item_id: String,
     message_item_open: bool,
     assistant_text: String,
-    added_tool_calls: BTreeSet<String>,
-    delta_tool_calls: BTreeSet<String>,
-    done_tool_calls: BTreeSet<String>,
+    tool_activities: RuntimeKiroStreamingActivityState,
     prompt_sent: bool,
     chat_delta_started: bool,
     chat_completion_id: String,
@@ -829,9 +834,7 @@ impl RuntimeKiroStreamingState {
             message_item_id: format!("msg_kiro_{request_id}_0"),
             message_item_open: false,
             assistant_text: String::new(),
-            added_tool_calls: BTreeSet::new(),
-            delta_tool_calls: BTreeSet::new(),
-            done_tool_calls: BTreeSet::new(),
+            tool_activities: RuntimeKiroStreamingActivityState::default(),
             prompt_sent: false,
             chat_delta_started: false,
             chat_completion_id: format!("chatcmpl_{response_id}"),
@@ -843,6 +846,7 @@ impl RuntimeKiroStreamingState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_receive_stream(
     sender: &SyncSender<RuntimeKiroStreamingChunk>,
     stdin: &mut impl Write,
@@ -851,9 +855,25 @@ fn runtime_kiro_receive_stream(
     state: &mut RuntimeKiroStreamingState,
     chat_completions_route: bool,
     idle_timeout: Duration,
+    total_timeout: Duration,
 ) -> Result<()> {
+    let deadline = Instant::now() + total_timeout;
     loop {
-        let Some(line) = runtime_kiro_next_stream_line(&lines, idle_timeout)? else {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            anyhow::bail!(runtime_kiro_stream_total_timeout_message(
+                state.prompt_sent,
+                total_timeout,
+            ));
+        };
+        let total_deadline_is_next = remaining <= idle_timeout;
+        let Some(line) = runtime_kiro_next_stream_line(
+            &lines,
+            idle_timeout.min(remaining),
+            total_deadline_is_next,
+            state.prompt_sent,
+            total_timeout,
+        )?
+        else {
             break;
         };
         if line.trim().is_empty() {
@@ -876,15 +896,42 @@ fn runtime_kiro_receive_stream(
 
 fn runtime_kiro_next_stream_line(
     lines: &Receiver<io::Result<String>>,
-    idle_timeout: Duration,
+    timeout: Duration,
+    total_deadline_is_next: bool,
+    visible_output: bool,
+    total_timeout: Duration,
 ) -> Result<Option<String>> {
-    match lines.recv_timeout(idle_timeout) {
+    match lines.recv_timeout(timeout) {
         Ok(Ok(line)) => Ok(Some(line)),
         Ok(Err(error)) => Err(error).context("failed to read Kiro ACP stdout"),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            anyhow::bail!("Kiro ACP stream timed out waiting for output")
+            if total_deadline_is_next {
+                anyhow::bail!(runtime_kiro_stream_total_timeout_message(
+                    visible_output,
+                    total_timeout,
+                ));
+            }
+            anyhow::bail!(
+                "Kiro ACP stream timed out waiting for output; no reconnect was attempted"
+            )
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+    }
+}
+
+fn runtime_kiro_stream_total_timeout_message(
+    visible_output: bool,
+    total_timeout: Duration,
+) -> String {
+    let seconds = total_timeout.as_secs_f64();
+    if visible_output {
+        format!(
+            "Kiro ACP stream exceeded its {seconds:.3}-second total limit after output began; Prodex did not reconnect or replay committed output"
+        )
+    } else {
+        format!(
+            "Kiro ACP stream exceeded its {seconds:.3}-second total limit before output; retry the request after checking the Kiro agent"
+        )
     }
 }
 
@@ -927,9 +974,7 @@ fn runtime_kiro_process_stream_envelope(
                     &mut state.sequence_number,
                     &mut state.message_item_open,
                     &mut state.assistant_text,
-                    &mut state.added_tool_calls,
-                    &mut state.delta_tool_calls,
-                    &mut state.done_tool_calls,
+                    &mut state.tool_activities,
                     chat_completions_route,
                     &mut state.chat_delta_started,
                 )?;

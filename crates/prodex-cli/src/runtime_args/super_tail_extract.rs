@@ -5,9 +5,9 @@ use super::{
     parse_super_local_url,
 };
 use crate::{
-    CodexCurrentTimeClockSource, CodexWebSearchMode, SubAgentReasoningEffort,
-    parse_sub_agent_model, parse_sub_agent_provider, parse_sub_agent_reasoning_effort,
-    parse_sub_agent_url,
+    CodexCurrentTimeClockSource, CodexWebSearchMode, SubAgentMaxConcurrency,
+    SubAgentReasoningEffort, parse_sub_agent_max_concurrency, parse_sub_agent_model,
+    parse_sub_agent_provider, parse_sub_agent_reasoning_effort, parse_sub_agent_url,
 };
 use prodex_optional_tools::OptionalToolId;
 
@@ -33,6 +33,7 @@ enum SuperOverride {
     SubAgentModel(String),
     SubAgentReasoningEffort(SubAgentReasoningEffort),
     SubAgentUrl(String),
+    SubAgentMaxConcurrency(SubAgentMaxConcurrency),
     BaseUrl(String),
     Url(String),
     LocalContextWindow(usize),
@@ -188,6 +189,14 @@ fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<Scan
             parse_sub_agent_url,
             SuperOverride::SubAgentUrl,
             "--sub-agent-url",
+        ));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--sub-agent-max-concurrency"]) {
+        return Some(parse_required(
+            scanned,
+            parse_sub_agent_max_concurrency,
+            SuperOverride::SubAgentMaxConcurrency,
+            "--sub-agent-max-concurrency",
         ));
     }
     if let Some(scanned) = scan_value(args, index, &["--model", "--local-model"]) {
@@ -451,6 +460,9 @@ fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
             args.sub_agent_model_reasoning_effort = Some(value)
         }
         SuperOverride::SubAgentUrl(value) => args.sub_agent_url = Some(value),
+        SuperOverride::SubAgentMaxConcurrency(value) => {
+            args.sub_agent_max_concurrency = Some(value)
+        }
         SuperOverride::BaseUrl(value) => args.base_url = Some(value),
         SuperOverride::Url(value) => args.url = Some(value),
         SuperOverride::LocalContextWindow(value) => args.local_context_window = Some(value),
@@ -514,6 +526,7 @@ fn is_known_super_flag(value: &str) -> bool {
             | "--sub-agent-model"
             | "--sub-agent-model-reasoning-effort"
             | "--sub-agent-url"
+            | "--sub-agent-max-concurrency"
             | "--model"
             | "--local-model"
             | "--profile"

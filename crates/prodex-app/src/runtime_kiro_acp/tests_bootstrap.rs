@@ -205,6 +205,37 @@ fn kiro_acp_prompt_turn_does_not_wait_for_agent_exit() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn kiro_acp_internal_activity_smoke_is_non_executable_and_does_not_reconnect() {
+    let root = temp_dir("activity-smoke");
+    let fake_agent = write_fake_kiro_activity_agent(&root);
+    let started = Instant::now();
+
+    let turn = runtime_kiro_acp_prompt_turn_with_command(
+        fake_agent.as_os_str(),
+        &root,
+        &[],
+        "inspect one file",
+    )
+    .expect("local ACP activity smoke should complete");
+    let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, 11);
+    let serialized = serde_json::to_string(&response).unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(turn.prompt_response.id, Some(2));
+    assert!(serialized.contains("final answer"));
+    assert!(serialized.contains("phase=started"));
+    assert!(serialized.contains("phase=completed"));
+    assert!(!serialized.contains("function_call"));
+    assert!(!serialized.contains("tool_calls"));
+    assert!(!serialized.contains("/home/test-user"));
+    assert_eq!(
+        fs::read_to_string(root.join("activity-agent-invocations")).unwrap(),
+        "1\n"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn kiro_acp_prompt_turn_times_out_and_terminates_the_agent() {

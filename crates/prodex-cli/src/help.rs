@@ -37,12 +37,12 @@ Examples:
   prodex login
   prodex login --profile main
   prodex login --device-auth
-  prodex login --with-google
   prodex login --with-claude
   prodex login --with-antigravity
 
 Notes:
-  OpenAI/Codex, Google, Claude, and API-key login paths create or update Prodex profiles.
+  OpenAI/Codex, Claude, and API-key login paths create or update Prodex profiles.
+  Google Gemini OAuth is unsupported. Use a Gemini API key for the Codex bridge, or native `prodex s gemini --cli gemini` for supported Vertex AI authentication.
   Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
@@ -60,7 +60,7 @@ Examples:
   prodex quota --raw --profile main
 
 Notes:
-  `prodex quota` supports OpenAI/Codex, Gemini OAuth, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
+  `prodex quota` supports OpenAI/Codex, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
   Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, prodex shows a provider snapshot instead of failing the quota view.";
@@ -145,6 +145,7 @@ Examples:
   prodex super gemini --cli agy
   prodex super --sub-agent --sub-agent-provider openai --sub-agent-model gpt-5.3-codex
   prodex super --sub-agent --sub-agent-model-reasoning-effort xhigh
+  prodex super --sub-agent --sub-agent-max-concurrency 8
   prodex super --no-sub-agent
   prodex super doctor
   prodex super doctor --json --strict
@@ -168,15 +169,17 @@ Notes:
   Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account routing/rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
   Add `--cli copilot` with `--provider copilot` to launch GitHub Copilot CLI through the same Prodex Responses proxy. Override the binary with PRODEX_COPILOT_BIN.
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
-  Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login --with-google`.
-  Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth profile routing. Override the binary with PRODEX_GEMINI_BIN.
+  Use `gemini` or `--provider gemini` to route Codex through Gemini with `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS.
+  Google Gemini OAuth profile routing is unsupported and disabled. Existing OAuth profiles remain readable for migration diagnostics but cannot launch.
+  Add `--cli gemini` to launch the native Gemini CLI with authentication, including supported Vertex AI configuration, owned by that CLI or its environment. Prodex does not inject or reuse the removed OAuth client. Override the binary with PRODEX_GEMINI_BIN.
   Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot through an authenticated loopback CONNECT tunnel. Kiro's TLS payload stays opaque; `--provider kiro` is the application-level Codex-to-Kiro ACP bridge. Override the binary with PRODEX_KIRO_BIN.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   --sub-agent explicitly enables sub-agents; --no-sub-agent explicitly disables them.
-  --sub-agent-provider, --sub-agent-model, --sub-agent-model-reasoning-effort, and --sub-agent-url require --sub-agent.
+  --sub-agent-provider, --sub-agent-model, --sub-agent-model-reasoning-effort, --sub-agent-url, and --sub-agent-max-concurrency require --sub-agent.
   Sub-agent provider names use canonical ProviderId values and default to openai; model ids are arbitrary nonempty strings.
   Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, or max.
+  Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
   Additional Codex args are appended after the implied optimizer prefixes.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:

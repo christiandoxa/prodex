@@ -17,6 +17,7 @@ pub use launch_home::{
     prepare_prodex_overlay_home_from_prepared_base, prepare_runtime_overlay_home,
     prepare_runtime_overlay_home_from_prepared_base,
 };
+pub use localization::{effective_agents_path, remove_agents_block, upsert_agents_block};
 pub use optional_tools::{
     OptionalToolId, OptionalToolSet, ResolvedTool, ToolActivation, ToolActivationPlan,
     ToolCapability, ToolDescriptor, ToolDiscoverySource, ToolHealth, ToolHealthStatus, ToolKind,

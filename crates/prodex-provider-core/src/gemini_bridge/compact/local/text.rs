@@ -42,12 +42,16 @@ pub(super) fn gemini_provider_core_truncate_utf8(mut text: String, max_bytes: us
     if text.len() <= max_bytes {
         return text;
     }
-    let mut end = max_bytes.min(text.len());
+    const SUFFIX: &str = "\n[truncated]";
+    if max_bytes <= SUFFIX.len() {
+        return SUFFIX[..max_bytes].to_string();
+    }
+    let mut end = max_bytes - SUFFIX.len();
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
     text.truncate(end);
-    text.push_str("\n[truncated]");
+    text.push_str(SUFFIX);
     text
 }
 
@@ -55,8 +59,13 @@ pub(super) fn gemini_provider_core_truncate_utf8_edges(text: String, max_bytes: 
     if text.len() <= max_bytes {
         return text;
     }
-    let head_bytes = max_bytes / 3;
-    let tail_bytes = max_bytes.saturating_sub(head_bytes);
+    const SEPARATOR: &str = "\n[... middle truncated ...]\n";
+    if max_bytes <= SEPARATOR.len() {
+        return SEPARATOR[..max_bytes].to_string();
+    }
+    let retained_bytes = max_bytes - SEPARATOR.len();
+    let head_bytes = retained_bytes / 3;
+    let tail_bytes = retained_bytes - head_bytes;
     let mut head_end = head_bytes.min(text.len());
     while head_end > 0 && !text.is_char_boundary(head_end) {
         head_end -= 1;
@@ -65,9 +74,23 @@ pub(super) fn gemini_provider_core_truncate_utf8_edges(text: String, max_bytes: 
     while tail_start < text.len() && !text.is_char_boundary(tail_start) {
         tail_start += 1;
     }
-    format!(
-        "{}\n[... middle truncated ...]\n{}",
-        &text[..head_end],
-        &text[tail_start..]
-    )
+    format!("{}{}{}", &text[..head_end], SEPARATOR, &text[tail_start..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncation_limits_include_markers_and_preserve_utf8() {
+        let text = "月".repeat(100);
+        for max_bytes in [0, 1, 12, 64] {
+            let tail = gemini_provider_core_truncate_utf8(text.clone(), max_bytes);
+            let edges = gemini_provider_core_truncate_utf8_edges(text.clone(), max_bytes);
+            assert!(tail.len() <= max_bytes);
+            assert!(edges.len() <= max_bytes);
+            assert!(std::str::from_utf8(tail.as_bytes()).is_ok());
+            assert!(std::str::from_utf8(edges.as_bytes()).is_ok());
+        }
+    }
 }

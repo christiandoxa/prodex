@@ -41,6 +41,79 @@ fn kiro_streaming_queue_applies_backpressure() {
 }
 
 #[test]
+fn kiro_streaming_internal_activity_is_ordered_non_executable_text() {
+    let start = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"tool_call","toolCallId":"activity-example","title":"Read file","status":"in_progress","kind":"read","rawInput":{"path":"/home/test-user/private.txt"}}}}"#,
+    )
+    .unwrap()
+    .parse_session_notification()
+    .unwrap();
+    let done = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"tool_call_update","toolCallId":"activity-example","status":"completed","rawOutput":{"path":"/home/test-user/private.txt"}}}}"#,
+    )
+    .unwrap()
+    .parse_session_notification()
+    .unwrap();
+    let (sender, receiver) = mpsc::sync_channel(8);
+    let mut state = RuntimeKiroStreamingState::new(1, Some("model-example"));
+
+    for notification in [&start, &done] {
+        super::stream::runtime_kiro_stream_notification(
+            &sender,
+            notification,
+            &state.response_id,
+            &state.chat_completion_id,
+            &state.stream_model,
+            state.created_at,
+            &state.message_item_id,
+            &mut state.sequence_number,
+            &mut state.message_item_open,
+            &mut state.assistant_text,
+            &mut state.tool_activities,
+            false,
+            &mut state.chat_delta_started,
+        )
+        .unwrap();
+    }
+
+    let mut body = Vec::new();
+    while let Ok(RuntimeKiroStreamingChunk::Data(bytes)) = receiver.try_recv() {
+        body.extend(bytes);
+    }
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.find("phase=started").unwrap() < body.find("phase=completed").unwrap());
+    assert!(!body.contains("function_call"));
+    assert!(!body.contains("tool_calls"));
+    assert!(!body.contains("arguments.delta"));
+    assert!(!body.contains("/home/test-user"));
+}
+
+#[test]
+fn kiro_streaming_total_timeout_is_bounded_without_reconnect_after_output() {
+    let (sender, _receiver) = mpsc::sync_channel(1);
+    let (_line_sender, line_receiver) = mpsc::channel::<io::Result<String>>();
+    let mut state = RuntimeKiroStreamingState::new(1, Some("model-example"));
+    state.prompt_sent = true;
+    let started = std::time::Instant::now();
+
+    let error = runtime_kiro_receive_stream(
+        &sender,
+        &mut Vec::new(),
+        line_receiver,
+        "prompt",
+        &mut state,
+        false,
+        Duration::from_secs(1),
+        Duration::from_millis(10),
+    )
+    .unwrap_err();
+
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(error.to_string().contains("after output began"));
+    assert!(error.to_string().contains("did not reconnect or replay"));
+}
+
+#[test]
 fn kiro_responses_stream_preserves_terminal_status() {
     for (status, event_type, response) in [
         (

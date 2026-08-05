@@ -52,6 +52,7 @@ pub use self::response::{
     kiro_provider_core_unsupported_path_error_value,
 };
 pub use self::stream::{
+    KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS, KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES,
     kiro_provider_core_acp_chat_tool_call_item, kiro_provider_core_acp_responses_tool_call_item,
     kiro_provider_core_acp_usage_update_json, kiro_provider_core_chat_completion_chunk,
     kiro_provider_core_chat_completion_empty_delta, kiro_provider_core_chat_completion_role_delta,
@@ -61,8 +62,9 @@ pub use self::stream::{
     kiro_provider_core_response_completed_event, kiro_provider_core_response_created_event,
     kiro_provider_core_response_failed_event, kiro_provider_core_response_incomplete_event,
     kiro_provider_core_stream_content_text, kiro_provider_core_stream_tool_arguments,
-    kiro_provider_core_stream_tool_call_item,
-    kiro_provider_core_tool_call_arguments_delta_chat_value,
+    kiro_provider_core_stream_tool_call_item, kiro_provider_core_tool_activity_item,
+    kiro_provider_core_tool_activity_text, kiro_provider_core_tool_call_arguments_delta_chat_value,
+    kiro_provider_core_truncated_tool_activity_item,
 };
 
 #[derive(Clone, Copy)]

@@ -171,6 +171,24 @@ fn append_doctor_runtime_json_fields(
     object.insert("runtime_logs".to_string(), runtime_logs_json_value());
     object.insert("audit_logs".to_string(), audit_logs_json_value());
     object.insert(
+        "disabled_auth_profiles".to_string(),
+        serde_json::Value::Array(
+            context
+                .state
+                .profiles
+                .iter()
+                .filter(|(_, profile)| matches!(profile.provider, ProfileProvider::Gemini { .. }))
+                .map(|(name, _)| {
+                    serde_json::json!({
+                        "profile": name,
+                        "auth": "gemini-oauth-disabled",
+                        "migration": GEMINI_OAUTH_DISABLED_GUIDANCE,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    object.insert(
         "live_brokers".to_string(),
         serde_json::to_value(collect_live_runtime_broker_observations(context.paths))
             .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
@@ -386,6 +404,12 @@ fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
             .to_string(),
         ),
     ];
+    if matches!(summary.provider, ProfileProvider::Gemini { .. }) {
+        fields.push((
+            "Migration".to_string(),
+            GEMINI_OAUTH_DISABLED_GUIDANCE.to_string(),
+        ));
+    }
     if let Some(quota) = report.quota {
         append_doctor_quota_fields(&mut fields, quota);
     }
@@ -546,5 +570,32 @@ mod install_only_tests {
             !root.exists(),
             "install checks must not initialize home state"
         );
+    }
+
+    #[test]
+    fn doctor_marks_legacy_gemini_oauth_profile_disabled() {
+        let report = DoctorProfileReport {
+            summary: ProfileSummaryReport {
+                name: "legacy-gemini".to_string(),
+                active: true,
+                managed: true,
+                auth: AuthSummary {
+                    label: "gemini-oauth-disabled".to_string(),
+                    quota_compatible: false,
+                },
+                email: None,
+                provider: ProfileProvider::Gemini {
+                    email: "synthetic@example.com".to_string(),
+                    project_id: Some("synthetic-project".to_string()),
+                },
+                codex_home: std::path::PathBuf::from("/home/test-user/.prodex/profile"),
+            },
+            quota: None,
+        };
+
+        let panel = doctor_profile_panel(report);
+        assert!(panel.fields.iter().any(|(name, value)| {
+            name == "Migration" && value.contains("Gemini API key") && value.contains("Vertex AI")
+        }));
     }
 }

@@ -1,4 +1,5 @@
 use std::env;
+use std::path::Path;
 
 use anyhow::Result;
 
@@ -57,8 +58,31 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             &observed_identity,
         )
     });
-    let termination =
-        terminate_runtime_process(registry.pid, registry.process_birth_identity.as_deref());
+    let termination = terminate_runtime_process(
+        registry.pid,
+        registry.process_birth_identity.as_deref(),
+        registry.executable_path.as_deref().map(Path::new),
+    );
+    if termination == super::process::RuntimeProcessTerminationOutcome::OwnershipChanged {
+        audit_log_event(
+            "runtime_broker",
+            "discard_stale_registry",
+            "success",
+            serde_json::json!({
+                "reason": "process_identity_mismatch",
+                "broker_key": broker_key,
+                "pid": registry.pid,
+                "instance_id": registry.instance_id,
+                "platform": env::consts::OS,
+            }),
+        )?;
+        remove_runtime_broker_registry_if_instance_matches(
+            paths,
+            broker_key,
+            &registry.instance_id,
+        );
+        return Ok(RuntimeBrokerVersionGuardOutcome::Replaced);
+    }
     if !matches!(
         termination,
         super::process::RuntimeProcessTerminationOutcome::Terminated

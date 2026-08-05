@@ -439,7 +439,7 @@ fn strict_gemini_oauth_gateway_blocks_host_files_and_remembers_the_concrete_mode
 }
 
 #[test]
-fn gemini_compact_sender_preserves_status_on_oversized_upstream_error_body() {
+fn gemini_compact_sender_marks_fallback_on_oversized_upstream_error_body() {
     let root = temp_root("gemini-compact-oversized-error-body");
     let paths = app_paths_for_root(root.clone());
     let oversized: &'static str = Box::leak(
@@ -497,16 +497,46 @@ fn gemini_compact_sender_preserves_status_on_oversized_upstream_error_body() {
         .send()
         .expect("compact request should be sent");
 
-    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(response.status().as_u16(), 200);
     assert_eq!(
         response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
-        Some("application/json")
+        Some("application/json; charset=utf-8")
     );
     assert_eq!(
-        response.text().unwrap(),
-        "provider response could not be processed"
+        response
+            .headers()
+            .get("x-prodex-compact-mode")
+            .and_then(|value| value.to_str().ok()),
+        Some("local-fallback")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-prodex-compact-provider")
+            .and_then(|value| value.to_str().ok()),
+        Some("gemini")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-prodex-compact-degraded")
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-prodex-compact-reason")
+            .and_then(|value| value.to_str().ok()),
+        Some("provider-error")
+    );
+    assert!(
+        response
+            .text()
+            .unwrap()
+            .contains("Local Prodex compact fallback summary.")
     );
 }
