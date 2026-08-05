@@ -64,6 +64,36 @@ fn runtime_launch_dry_run_report_redacts_secret_env_and_args() {
 }
 
 #[test]
+fn runtime_launch_dry_run_report_redacts_private_paths() {
+    let codex_home = PathBuf::from("/home/test-user/.prodex/profiles/private@example.com");
+    let plan = RuntimeLaunchPlan::new(
+        ChildProcessPlan::new(
+            OsString::from("/home/test-user/bin/codex"),
+            codex_home.clone(),
+        )
+        .with_args(vec![
+            OsString::from("-c"),
+            OsString::from(format!(
+                "model_catalog_json=\"{}\"",
+                codex_home.join("models.json").display()
+            )),
+        ])
+        .with_extra_env(vec![(
+            "PRODEX_VISIBLE_PATH",
+            codex_home.join("runtime").into_os_string(),
+        )]),
+    );
+
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan).unwrap();
+
+    assert!(report.contains("Binary: codex"));
+    assert!(report.contains("CODEX_HOME: <CODEX_HOME>"));
+    assert!(report.contains("<redacted-path>"));
+    assert!(!report.contains("/home/test-user"));
+    assert!(!report.contains("private@example.com"));
+}
+
+#[test]
 fn runtime_launch_dry_run_report_prefers_cli_model_flag() {
     let codex_home = PathBuf::from("/tmp/prodex-home");
     let plan = RuntimeLaunchPlan::new(

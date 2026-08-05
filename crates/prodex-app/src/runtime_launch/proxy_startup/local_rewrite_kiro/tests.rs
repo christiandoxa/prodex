@@ -11,6 +11,58 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn kiro_models_endpoint_augments_canonical_models_and_serves_each_entry() {
+    let auth = RuntimeKiroProfileAuth {
+        profile_name: "kiro-example".to_string(),
+        codex_home: PathBuf::from("/synthetic/kiro-home"),
+        model_catalog: vec![json!({
+            "id": "account-only-model",
+            "name": "Account Only Model",
+            "object": "model",
+            "owned_by": "kiro-cli"
+        })],
+        command: None,
+    };
+
+    let list = runtime_kiro_models_buffered_response(&auth, "GET", "/v1/models").unwrap();
+    let body: Value = serde_json::from_slice(&list.body).unwrap();
+    let models = body["data"].as_array().unwrap();
+    assert_eq!(models[0]["id"], "auto");
+    assert!(
+        models
+            .iter()
+            .any(|model| model["id"] == "account-only-model")
+    );
+
+    for model_id in ["auto", "account-only-model"] {
+        let response =
+            runtime_kiro_models_buffered_response(&auth, "GET", &format!("/v1/models/{model_id}"))
+                .unwrap();
+        assert_eq!(response.status, 200);
+        let model: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(model["id"], model_id);
+    }
+}
+
+#[test]
+fn oversized_kiro_catalog_only_rejects_model_routes() {
+    let auth = RuntimeKiroProfileAuth {
+        profile_name: "kiro-example".to_string(),
+        codex_home: PathBuf::from("/synthetic/kiro-home"),
+        model_catalog: (0..prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+            .map(|index| json!({"id": format!("account-model-{index}")}))
+            .collect(),
+        command: None,
+    };
+
+    assert!(runtime_kiro_models_buffered_response(&auth, "GET", "/health").is_none());
+    let response = runtime_kiro_models_buffered_response(&auth, "GET", "/v1/models").unwrap();
+    let body: Value = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(response.status, 503);
+    assert_eq!(body["error"]["code"], "model_catalog_limit_exceeded");
+}
+
+#[test]
 fn kiro_streaming_reader_times_out_while_the_worker_is_silent() {
     let (_sender, receiver) = mpsc::channel();
     let mut reader = RuntimeKiroStreamingReader {
@@ -86,6 +138,42 @@ fn kiro_streaming_internal_activity_is_ordered_non_executable_text() {
     assert!(!body.contains("tool_calls"));
     assert!(!body.contains("arguments.delta"));
     assert!(!body.contains("/home/test-user"));
+}
+
+#[test]
+fn kiro_chat_streaming_preserves_reasoning_chunks() {
+    let thought = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"agent_thought_chunk","messageId":"thought-example","content":{"type":"text","text":"inspect code"}}}}"#,
+    )
+    .unwrap()
+    .parse_session_notification()
+    .unwrap();
+    let (sender, receiver) = mpsc::sync_channel(2);
+    let mut state = RuntimeKiroStreamingState::new(1, Some("model-example"));
+
+    super::stream::runtime_kiro_stream_notification(
+        &sender,
+        &thought,
+        &state.response_id,
+        &state.chat_completion_id,
+        &state.stream_model,
+        state.created_at,
+        &state.message_item_id,
+        &mut state.sequence_number,
+        &mut state.message_item_open,
+        &mut state.assistant_text,
+        &mut state.tool_activities,
+        true,
+        &mut state.chat_delta_started,
+    )
+    .unwrap();
+
+    let RuntimeKiroStreamingChunk::Data(bytes) = receiver.try_recv().unwrap() else {
+        panic!("reasoning update should emit a chat chunk");
+    };
+    let body = String::from_utf8(bytes).unwrap();
+    assert!(body.contains(r#""reasoning_content":"inspect code""#));
+    assert!(body.contains(r#""role":"assistant""#));
 }
 
 #[test]

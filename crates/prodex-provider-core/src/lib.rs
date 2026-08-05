@@ -37,7 +37,8 @@ pub use bridge::{
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{
-    ProviderCatalogEntry, ProviderCatalogFeatureFlags, ProviderModelChoice,
+    PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderCatalogFeatureFlags,
+    ProviderModelCatalogLimitError, ProviderModelChoice, merge_provider_model_catalog_json,
     provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
     provider_catalog_json, provider_model_catalog_json, provider_model_json,
     resolve_provider_model_choices,
@@ -347,6 +348,7 @@ pub use translators::{
     kiro_provider_core_chat_completion_empty_delta,
     kiro_provider_core_chat_completion_finish_reason,
     kiro_provider_core_chat_completion_finish_reason_from_response,
+    kiro_provider_core_chat_completion_reasoning_delta,
     kiro_provider_core_chat_completion_role_delta, kiro_provider_core_chat_completion_text_delta,
     kiro_provider_core_chat_completion_tool_call_delta,
     kiro_provider_core_chat_completion_value_from_response,

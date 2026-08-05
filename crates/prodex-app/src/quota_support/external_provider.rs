@@ -4,13 +4,14 @@ use super::{
     first_line_of_error, format_response_body, quota_error_message,
     refresh_claude_oauth_secret_if_needed,
 };
-use crate::{KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_text, read_kiro_auth_secret};
+use crate::{
+    KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_text, read_kiro_auth_secret,
+    read_provider_model_catalog_text,
+};
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
 use std::env;
-use std::fs;
-use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Command;
 
@@ -38,16 +39,13 @@ pub(super) fn fetch_agy_quota_info(account: Option<&str>) -> Result<ExternalQuot
 pub(super) fn fetch_kiro_quota_info(codex_home: &Path) -> Result<ExternalQuotaInfo> {
     let secret = read_kiro_auth_secret(codex_home)?;
     let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
-    let model_count = match fs::read_to_string(&catalog_path) {
-        Ok(text) => Some(
+    let model_count = match read_provider_model_catalog_text(&catalog_path)? {
+        Some(text) => Some(
             parse_kiro_model_catalog_text(&text)
-                .with_context(|| format!("failed to parse {}", catalog_path.display()))?
+                .context("failed to parse Kiro model catalog")?
                 .len(),
         ),
-        Err(err) if err.kind() == ErrorKind::NotFound => None,
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to read {}", catalog_path.display()));
-        }
+        None => None,
     };
     let account = secret
         .email

@@ -354,6 +354,7 @@ fn native_cli_dry_run_is_redacted_and_does_not_resolve_credentials() {
     args.cli = Some(SuperCliAgent::Copilot);
     args.provider = Some(SuperExternalProvider::Copilot);
     args.api_key = Some("secret-provider-key".to_string());
+    args.profile = Some("private@example.com".to_string());
     args.local_model = Some("gpt-test".to_string());
     args.codex_args = vec![OsString::from("--prompt"), OsString::from("review")];
 
@@ -363,6 +364,8 @@ fn native_cli_dry_run_is_redacted_and_does_not_resolve_credentials() {
     assert!(report.contains("Model: gpt-test"));
     assert!(report.contains("would use local provider bridge"));
     assert!(report.contains("--prompt"));
+    assert!(report.contains("Profile: <configured>"));
+    assert!(!report.contains("private@example.com"));
     assert!(!report.contains("secret-provider-key"));
 
     args.local_model = Some("sk-proj-native-secret".to_string());

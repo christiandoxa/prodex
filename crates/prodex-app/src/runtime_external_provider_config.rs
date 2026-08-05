@@ -4,7 +4,7 @@ use crate::{
     codex_cli_config_override_value, codex_effective_config_exact_value,
     codex_effective_config_value,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
@@ -17,11 +17,32 @@ use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const EXTERNAL_MODEL_CATALOG_FILE: &str = "prodex-external-provider-model-catalog.json";
 pub(crate) const COPILOT_RUNTIME_MODEL_CATALOG_FILE: &str =
     "prodex-copilot-runtime-model-catalog.json";
+pub(crate) const PROVIDER_MODEL_CATALOG_MAX_BYTES: u64 = 1024 * 1024;
+
+pub(crate) fn read_provider_model_catalog_text(path: &Path) -> Result<Option<String>> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("failed to open provider model catalog"),
+    };
+    let mut contents = String::new();
+    file.take(PROVIDER_MODEL_CATALOG_MAX_BYTES + 1)
+        .read_to_string(&mut contents)
+        .context("failed to read provider model catalog")?;
+    if contents.len() as u64 > PROVIDER_MODEL_CATALOG_MAX_BYTES {
+        bail!(
+            "provider model catalog exceeds the hard limit of {} bytes",
+            PROVIDER_MODEL_CATALOG_MAX_BYTES
+        );
+    }
+    Ok(Some(contents))
+}
 
 #[derive(Clone, Copy)]
 enum ExternalCatalogProvider {
@@ -34,11 +55,23 @@ pub(crate) fn write_copilot_runtime_model_catalog(
     codex_home: &Path,
     model_catalog: &[serde_json::Value],
 ) -> Result<()> {
+    if model_catalog.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+        bail!(
+            "Copilot model catalog exceeds the hard limit of {} entries",
+            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+    }
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(COPILOT_RUNTIME_MODEL_CATALOG_FILE);
     let catalog = json!({ "models": model_catalog });
     let contents = serde_json::to_string_pretty(&catalog)
         .context("failed to serialize Copilot model catalog")?;
+    if contents.len() as u64 > PROVIDER_MODEL_CATALOG_MAX_BYTES {
+        bail!(
+            "Copilot model catalog exceeds the hard limit of {} bytes",
+            PROVIDER_MODEL_CATALOG_MAX_BYTES
+        );
+    }
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .write_text(&secret_store::SecretLocation::file(&catalog_path), contents)
         .map_err(anyhow::Error::new)
@@ -167,7 +200,7 @@ fn write_external_model_catalog(
             model,
             context_window,
             auto_compact_token_limit,
-        )
+        )?
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize provider catalog")?;
@@ -184,8 +217,8 @@ fn external_catalog_models(
     launch_model: &str,
     context_window: u64,
     auto_compact_token_limit: u64,
-) -> Vec<serde_json::Value> {
-    let dynamic_models = external_dynamic_catalog_models(codex_home, provider);
+) -> Result<Vec<serde_json::Value>> {
+    let dynamic_models = external_dynamic_catalog_models(codex_home, provider)?;
     let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
     let mut seen = BTreeSet::new();
     let launch_model_context_window = dynamic_models
@@ -215,6 +248,12 @@ fn external_catalog_models(
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
         }
+        if models.len() >= prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            bail!(
+                "provider model catalog exceeds the hard limit of {} entries",
+                prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
+            );
+        }
         let priority = models.len() + 1;
         let dynamic_model = dynamic_models
             .iter()
@@ -241,7 +280,7 @@ fn external_catalog_models(
             model_compact_limit,
         ));
     }
-    models
+    Ok(models)
 }
 
 #[derive(Clone, Debug)]
@@ -255,24 +294,30 @@ struct ExternalDynamicCatalogModel {
 fn external_dynamic_catalog_models(
     codex_home: &Path,
     provider: ExternalCatalogProvider,
-) -> Vec<ExternalDynamicCatalogModel> {
+) -> Result<Vec<ExternalDynamicCatalogModel>> {
     let catalog_file = match provider {
         ExternalCatalogProvider::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
         ExternalCatalogProvider::Kiro => KIRO_MODEL_CATALOG_FILE,
-        ExternalCatalogProvider::Anthropic => return Vec::new(),
+        ExternalCatalogProvider::Anthropic => return Ok(Vec::new()),
     };
     let catalog_path = codex_home.join(catalog_file);
-    let Ok(contents) = fs::read_to_string(catalog_path) else {
-        return Vec::new();
+    let Some(contents) = read_provider_model_catalog_text(&catalog_path)? else {
+        return Ok(Vec::new());
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
-        return Vec::new();
-    };
-    let Some(models) = value.get("models").and_then(serde_json::Value::as_array) else {
-        return Vec::new();
-    };
+    let value = serde_json::from_str::<serde_json::Value>(&contents)
+        .context("failed to parse provider model catalog")?;
+    let models = value
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .context("provider model catalog is missing models array")?;
+    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+        bail!(
+            "provider model catalog exceeds the hard limit of {} entries",
+            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+    }
     let mut seen = BTreeSet::new();
-    models
+    Ok(models
         .iter()
         .filter_map(|model| {
             let slug = model
@@ -296,11 +341,6 @@ fn external_dynamic_catalog_models(
             if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
                 return None;
             }
-            if matches!(provider, ExternalCatalogProvider::Copilot)
-                && !copilot_dynamic_model_is_responses_compatible(provider, slug)
-            {
-                return None;
-            }
             Some(ExternalDynamicCatalogModel {
                 slug: slug.to_string(),
                 display_name: model
@@ -315,7 +355,7 @@ fn external_dynamic_catalog_models(
                 context_window,
             })
         })
-        .collect()
+        .collect())
 }
 
 fn copilot_catalog_entry_prompt_token_limit(model: &serde_json::Value) -> Option<u64> {
@@ -329,22 +369,6 @@ fn copilot_catalog_entry_prompt_token_limit(model: &serde_json::Value) -> Option
         })
         .and_then(serde_json::Value::as_u64)
         .filter(|tokens| *tokens > 1)
-}
-
-fn copilot_dynamic_model_is_responses_compatible(
-    provider: ExternalCatalogProvider,
-    slug: &str,
-) -> bool {
-    let lower = slug.trim().to_ascii_lowercase();
-    provider
-        .models()
-        .iter()
-        .any(|(model, _, _)| model.eq_ignore_ascii_case(&lower))
-        || lower.starts_with("gpt-5")
-        || lower.starts_with("claude-")
-        || lower.starts_with("gemini-")
-        || lower.starts_with("mai-")
-        || lower.starts_with("raptor-")
 }
 
 fn external_catalog_model(
@@ -792,7 +816,7 @@ mod tests {
             &codex_home,
             &[
                 json!({
-                    "id": "gpt-5.6-account-only-model",
+                    "id": "account/model-v1",
                     "object": "model",
                     "owned_by": "github-copilot"
                 }),
@@ -820,10 +844,10 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|model| { model["slug"] == "gpt-5.6-account-only-model" })
+                .any(|model| { model["slug"] == "account/model-v1" })
         );
         assert!(
-            !catalog["models"]
+            catalog["models"]
                 .as_array()
                 .unwrap()
                 .iter()

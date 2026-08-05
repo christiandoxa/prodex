@@ -45,12 +45,33 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered
     if !method.eq_ignore_ascii_case("GET") {
         return None;
     }
-    let models = runtime_provider_model_catalog_json(kind, dynamic_catalog);
+    let path = path_without_query(path_and_query);
+    let route = runtime_provider_route_kind(path)?;
+    if !matches!(
+        route,
+        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_)
+    ) {
+        return None;
+    }
+    let models = match runtime_provider_model_catalog_json(kind, dynamic_catalog) {
+        Ok(models) => models,
+        Err(error) => {
+            return Some(runtime_provider_json_response(
+                503,
+                serde_json::json!({
+                    "error": {
+                        "message": error.to_string(),
+                        "type": "service_unavailable",
+                        "code": "model_catalog_limit_exceeded"
+                    }
+                }),
+            ));
+        }
+    };
     if models.is_empty() {
         return None;
     }
-    let path = path_without_query(path_and_query);
-    match runtime_provider_route_kind(path)? {
+    match route {
         RuntimeProviderRouteKind::ModelsList => {
             let body = serde_json::json!({
                 "object": "list",
@@ -59,7 +80,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered
             Some(runtime_provider_json_response(200, body))
         }
         RuntimeProviderRouteKind::ModelsSingle(model_id) => {
-            let model = runtime_provider_model_json_for(kind, dynamic_catalog, model_id);
+            let model = runtime_provider_model_json_for(kind, &models, model_id);
             let status = if model.is_some() { 200 } else { 404 };
             let body = model.unwrap_or_else(|| {
                 serde_json::json!({

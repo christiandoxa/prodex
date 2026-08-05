@@ -2746,7 +2746,7 @@
     "expected_usage": null
   },
   {
-    "name": "kiro-chat-completions-request-maps-legacy-functions",
+    "name": "kiro-chat-completions-request-rejects-legacy-functions",
     "provider": "kiro",
     "endpoint": "chat-completions",
     "operation": "request",
@@ -2789,51 +2789,8 @@
       ],
       "stream": false
     },
-    "expected_body": {
-      "model": "claude-sonnet-4",
-      "stream": false,
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "call lookup"
-            }
-          ]
-        },
-        {
-          "type": "function_call",
-          "call_id": "call_lookup",
-          "name": "lookup",
-          "arguments": "{\"query\":\"prodex\"}"
-        },
-        {
-          "type": "function_call_output",
-          "call_id": "lookup",
-          "output": "lookup result"
-        }
-      ],
-      "tools": [
-        {
-          "type": "function",
-          "function": {
-            "name": "lookup",
-            "description": "Search docs",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "query": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "expected_loss": "degraded",
+    "expected_body": null,
+    "expected_loss": "rejected",
     "expected_usage": null
   },
   {

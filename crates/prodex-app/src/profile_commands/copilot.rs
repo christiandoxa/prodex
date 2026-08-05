@@ -666,6 +666,42 @@ mod tests {
     }
 
     #[test]
+    fn copilot_runtime_auth_uses_canonical_fallback_when_discovery_is_unavailable() {
+        let (base_url, observed, handle) = start_copilot_auth_test_server(vec![
+            (
+                "/models",
+                503,
+                serde_json::json!({"message": "unavailable"}),
+            ),
+            (
+                "/copilot_internal/v2/token",
+                404,
+                serde_json::json!({"message": "removed"}),
+            ),
+        ]);
+        let client = Client::new();
+
+        let auth = refresh_copilot_runtime_api_auth_with_urls(
+            &client,
+            &format!("{base_url}/copilot_internal/v2/token"),
+            &base_url,
+            "oauth-token",
+        )
+        .expect("optional discovery failure should keep direct OAuth usable");
+
+        handle.join().expect("test server should finish");
+        assert_eq!(
+            observed
+                .lock()
+                .expect("observed requests lock should not be poisoned")
+                .len(),
+            2
+        );
+        assert_eq!(auth.api_key, "oauth-token");
+        assert!(auth.model_catalog.is_empty());
+    }
+
+    #[test]
     fn copilot_runtime_model_catalog_reads_token_models() {
         let value = serde_json::json!({
             "token": "runtime-token",
@@ -684,7 +720,7 @@ mod tests {
             ]
         });
 
-        let catalog = copilot_runtime_model_catalog_from_token(&value);
+        let catalog = copilot_runtime_model_catalog_from_token(&value).unwrap();
 
         assert_eq!(catalog.len(), 2);
         assert_eq!(catalog[0]["id"], "gpt-5.1-codex");
@@ -712,7 +748,7 @@ mod tests {
             ]
         });
 
-        let catalog = copilot_runtime_model_catalog_from_token(&value);
+        let catalog = copilot_runtime_model_catalog_from_token(&value).unwrap();
 
         assert_eq!(catalog.len(), 1);
         assert_eq!(catalog[0]["id"], "gpt-5.3-codex");
@@ -732,10 +768,23 @@ mod tests {
             }
         });
 
-        let catalog = copilot_runtime_model_catalog_from_token(&value);
+        let catalog = copilot_runtime_model_catalog_from_token(&value).unwrap();
 
         assert_eq!(catalog.len(), 1);
         assert_eq!(catalog[0]["id"], "gemini-3.1-pro-preview");
         assert_eq!(catalog[0]["display_name"], "Gemini 3.1 Pro Preview");
+    }
+
+    #[test]
+    fn copilot_runtime_model_catalog_rejects_oversized_payloads() {
+        let value = serde_json::json!({
+            "models": (0..=prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+                .map(|index| serde_json::json!({"id": format!("model-{index}")}))
+                .collect::<Vec<_>>()
+        });
+
+        let error = copilot_runtime_model_catalog_from_token(&value).unwrap_err();
+
+        assert!(error.to_string().contains("hard limit of 1024 entries"));
     }
 }

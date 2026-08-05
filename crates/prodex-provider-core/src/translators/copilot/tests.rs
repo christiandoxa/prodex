@@ -43,13 +43,14 @@ fn copilot_provider_core_rewrites_request_to_canonical_model() {
 }
 
 #[test]
-fn copilot_provider_core_strips_encrypted_content_only() {
+fn copilot_provider_core_preserves_required_compaction_content() {
     let body = serde_json::to_vec(&json!({
         "messages": [{
             "role": "assistant",
             "content": [{"type": "text", "text": "keep", "encrypted_content": "qAAA.VDK="}]
         }],
-        "reasoning": {"encrypted_content": "qBBB.VDK=", "summary": "keep"}
+        "reasoning": {"encrypted_content": "qBBB.VDK=", "summary": "keep"},
+        "input": [{"type": "compaction", "encrypted_content": "enc-compact-v2"}]
     }))
     .unwrap();
 
@@ -57,7 +58,13 @@ fn copilot_provider_core_strips_encrypted_content_only() {
     let value: Value = serde_json::from_slice(&stripped).unwrap();
 
     assert!(changed);
-    assert!(!value.to_string().contains("encrypted_content"));
+    assert!(
+        value["messages"][0]["content"][0]
+            .get("encrypted_content")
+            .is_none()
+    );
+    assert!(value["reasoning"].get("encrypted_content").is_none());
+    assert_eq!(value["input"][0]["encrypted_content"], "enc-compact-v2");
     assert_eq!(value["messages"][0]["content"][0]["text"], "keep");
     assert_eq!(value["reasoning"]["summary"], "keep");
 }

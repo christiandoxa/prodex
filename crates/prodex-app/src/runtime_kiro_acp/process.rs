@@ -166,8 +166,6 @@ fn runtime_kiro_acp_bootstrap_child(
     stdin
         .flush()
         .context("failed to flush Kiro ACP bootstrap requests")?;
-    drop(stdin);
-
     let stdout = child
         .stdout
         .take()
@@ -192,6 +190,10 @@ fn runtime_kiro_acp_bootstrap_child(
             continue;
         }
         let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
+        if runtime_kiro_acp_reject_unsupported_server_request(&mut stdin, &envelope)? {
+            notifications.push(envelope);
+            continue;
+        }
         if let Some(error) = &envelope.error {
             if matches!(envelope.id, Some(0 | 1)) {
                 bail!(
@@ -215,6 +217,7 @@ fn runtime_kiro_acp_bootstrap_child(
 
     let initialize = initialize.context("Kiro ACP bootstrap did not return initialize result")?;
     let session = session.context("Kiro ACP bootstrap did not return session/new result")?;
+    drop(stdin);
     Ok(RuntimeKiroAcpBootstrapResult {
         initialize,
         session,
@@ -279,6 +282,10 @@ fn runtime_kiro_acp_prompt_turn_child(
             continue;
         }
         let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
+        if runtime_kiro_acp_reject_unsupported_server_request(&mut stdin, &envelope)? {
+            notifications.push(envelope);
+            continue;
+        }
         if !prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
             let parsed_session = envelope.parse_session_new_result()?;
             writeln!(
@@ -320,6 +327,32 @@ fn runtime_kiro_acp_prompt_turn_child(
         prompt_response,
         notifications,
     })
+}
+
+pub(crate) fn runtime_kiro_acp_reject_unsupported_server_request(
+    stdin: &mut impl Write,
+    envelope: &RuntimeKiroAcpEnvelope,
+) -> Result<bool> {
+    let (Some(id), Some(_method)) = (envelope.id, envelope.method.as_deref()) else {
+        return Ok(false);
+    };
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32601,
+                "message": "Unsupported ACP server request",
+            }
+        })
+    )
+    .context("failed to reject unsupported Kiro ACP server request")?;
+    stdin
+        .flush()
+        .context("failed to flush unsupported Kiro ACP server request response")?;
+    Ok(true)
 }
 
 pub(crate) fn runtime_kiro_acp_line_receiver(

@@ -3,6 +3,7 @@ pub(crate) use self::process::runtime_kiro_acp_prompt_turn_with_command;
 pub(crate) use self::process::{
     RuntimeKiroAcpPromptTurnResult, runtime_kiro_acp_bootstrap_with_command,
     runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
+    runtime_kiro_acp_reject_unsupported_server_request,
 };
 #[cfg(all(test, unix))]
 pub(crate) use self::process::{

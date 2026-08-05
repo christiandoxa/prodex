@@ -130,6 +130,7 @@ pub use kiro::{
     kiro_provider_core_chat_completion_empty_delta,
     kiro_provider_core_chat_completion_finish_reason,
     kiro_provider_core_chat_completion_finish_reason_from_response,
+    kiro_provider_core_chat_completion_reasoning_delta,
     kiro_provider_core_chat_completion_role_delta, kiro_provider_core_chat_completion_text_delta,
     kiro_provider_core_chat_completion_tool_call_delta,
     kiro_provider_core_chat_completion_value_from_response,

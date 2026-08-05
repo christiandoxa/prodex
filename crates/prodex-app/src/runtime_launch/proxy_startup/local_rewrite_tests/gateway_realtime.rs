@@ -29,7 +29,7 @@ fn gateway_realtime_websocket_requires_auth_and_reserves_bounded_virtual_key_usa
                 api_keys: vec!["gemini-key".to_string()],
             },
             thinking_budget_tokens: None,
-            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
+            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings().unwrap(),
         },
         upstream_no_proxy: false,
         smart_context_enabled: false,

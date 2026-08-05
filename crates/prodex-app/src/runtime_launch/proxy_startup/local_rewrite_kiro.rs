@@ -43,6 +43,7 @@ use crate::runtime_kiro_acp::{
     RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
     runtime_kiro_acp_chat_assistant_messages_from_prompt_turn, runtime_kiro_acp_initialize_request,
     runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
+    runtime_kiro_acp_reject_unsupported_server_request,
     runtime_kiro_acp_responses_value_from_prompt_turn, runtime_kiro_acp_session_new_request,
     runtime_kiro_acp_session_prompt_request,
 };
@@ -106,20 +107,38 @@ pub(super) fn runtime_kiro_models_buffered_response(
         return None;
     }
     let path = path_without_query(path_and_query);
-    if path.ends_with("/models") {
+    let model_id = if path.ends_with("/models") {
+        None
+    } else {
+        let model_id = path.split("/models/").nth(1)?.trim();
+        if model_id.is_empty() {
+            return None;
+        }
+        Some(model_id)
+    };
+    let model_catalog = match prodex_provider_core::merge_provider_model_catalog_json(
+        ProviderId::Kiro,
+        &auth.model_catalog,
+    ) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            return Some(runtime_kiro_json_parts(
+                503,
+                prodex_provider_core::kiro_provider_core_invalid_request_error_value(
+                    &error.to_string(),
+                    "model_catalog_limit_exceeded",
+                ),
+            ));
+        }
+    };
+    let Some(model_id) = model_id else {
         return Some(runtime_kiro_json_parts(
             200,
-            prodex_provider_core::kiro_provider_core_model_list_value(&auth.model_catalog),
+            prodex_provider_core::kiro_provider_core_model_list_value(&model_catalog),
         ));
-    }
-    let model_id = path.split("/models/").nth(1)?.trim();
-    if model_id.is_empty() {
-        return None;
-    }
-    let (status, body) = prodex_provider_core::kiro_provider_core_model_value_or_not_found(
-        &auth.model_catalog,
-        model_id,
-    );
+    };
+    let (status, body) =
+        prodex_provider_core::kiro_provider_core_model_value_or_not_found(&model_catalog, model_id);
     Some(runtime_kiro_json_parts(status, body))
 }
 
@@ -943,6 +962,10 @@ fn runtime_kiro_process_stream_envelope(
     state: &mut RuntimeKiroStreamingState,
     chat_completions_route: bool,
 ) -> Result<()> {
+    if runtime_kiro_acp_reject_unsupported_server_request(stdin, &envelope)? {
+        state.notifications.push(envelope);
+        return Ok(());
+    }
     if !state.prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
         return runtime_kiro_send_stream_prompt(
             sender,

@@ -3,12 +3,13 @@ use crate::{
     codex_cli_config_override_value, codex_effective_config_exact_value,
     codex_effective_config_value,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use prodex_cli::SUPER_GEMINI_PROVIDER_ID;
 use prodex_provider_core::{
     PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
     PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW as GEMINI_DEFAULT_CONTEXT_WINDOW,
-    PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, ProviderId, provider_model_catalog,
+    PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, PROVIDER_MODEL_CATALOG_HARD_LIMIT,
+    ProviderId, provider_model_catalog,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,12 +39,12 @@ struct RuntimeGeminiDynamicModel {
 }
 
 impl RuntimeGeminiModelResolution {
-    pub(crate) fn from_current_settings() -> Self {
+    pub(crate) fn from_current_settings() -> Result<Self> {
         let cwd = std::env::current_dir().ok();
         Self::from_settings_sources(crate::gemini_settings_sources(cwd.as_deref()))
     }
 
-    pub(crate) fn from_runtime_config(config: &crate::RuntimeGeminiConfig) -> Self {
+    pub(crate) fn from_runtime_config(config: &crate::RuntimeGeminiConfig) -> Result<Self> {
         let cwd = std::env::current_dir().ok();
         Self::from_settings_sources(crate::gemini_settings_sources_for_config_home(
             config.config_dir.as_deref(),
@@ -53,7 +54,7 @@ impl RuntimeGeminiModelResolution {
         ))
     }
 
-    fn from_settings_sources(sources: Vec<crate::GeminiSettingsSource>) -> Self {
+    fn from_settings_sources(sources: Vec<crate::GeminiSettingsSource>) -> Result<Self> {
         let mut resolution = Self::default();
         for source in sources {
             let Some(model_configs) = source
@@ -63,9 +64,9 @@ impl RuntimeGeminiModelResolution {
             else {
                 continue;
             };
-            resolution.apply_model_configs(model_configs);
+            resolution.apply_model_configs(model_configs)?;
         }
-        resolution
+        Ok(resolution)
     }
 
     pub(crate) fn fallback_chain(&self, model: &str) -> Option<Vec<String>> {
@@ -80,22 +81,22 @@ impl RuntimeGeminiModelResolution {
         self.catalog_models.iter()
     }
 
-    fn apply_model_configs(&mut self, model_configs: &serde_json::Value) {
-        self.apply_model_definitions(model_configs);
-        self.apply_model_aliases(model_configs, "aliases");
-        self.apply_model_aliases(model_configs, "customAliases");
-        self.apply_model_aliases(model_configs, "custom_aliases");
-        self.apply_model_id_resolutions(model_configs);
-        self.apply_model_chains(model_configs);
+    fn apply_model_configs(&mut self, model_configs: &serde_json::Value) -> Result<()> {
+        self.apply_model_definitions(model_configs)?;
+        self.apply_model_aliases(model_configs, "aliases")?;
+        self.apply_model_aliases(model_configs, "customAliases")?;
+        self.apply_model_aliases(model_configs, "custom_aliases")?;
+        self.apply_model_id_resolutions(model_configs)?;
+        self.apply_model_chains(model_configs)
     }
 
-    fn apply_model_definitions(&mut self, model_configs: &serde_json::Value) {
+    fn apply_model_definitions(&mut self, model_configs: &serde_json::Value) -> Result<()> {
         let Some(definitions) = model_configs
             .get("modelDefinitions")
             .or_else(|| model_configs.get("model_definitions"))
             .and_then(serde_json::Value::as_object)
         else {
-            return;
+            return Ok(());
         };
         for (slug, definition) in definitions {
             if !definition
@@ -111,16 +112,17 @@ impl RuntimeGeminiModelResolution {
                 .or_else(|| definition.get("display_name"))
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or(slug);
-            self.remember_catalog_model(slug, display_name, "Gemini CLI modelConfig model.");
+            self.remember_catalog_model(slug, display_name, "Gemini CLI modelConfig model.")?;
         }
+        Ok(())
     }
 
-    fn apply_model_aliases(&mut self, model_configs: &serde_json::Value, key: &str) {
+    fn apply_model_aliases(&mut self, model_configs: &serde_json::Value, key: &str) -> Result<()> {
         let Some(aliases) = model_configs
             .get(key)
             .and_then(serde_json::Value::as_object)
         else {
-            return;
+            return Ok(());
         };
         for (alias, config) in aliases {
             let Some(model) = config
@@ -133,19 +135,20 @@ impl RuntimeGeminiModelResolution {
             else {
                 continue;
             };
-            self.remember_catalog_model(alias, alias, "Gemini CLI modelConfig alias.");
-            self.remember_catalog_model(model, model, "Gemini CLI modelConfig target.");
-            self.remember_chain(alias, [model]);
+            self.remember_catalog_model(alias, alias, "Gemini CLI modelConfig alias.")?;
+            self.remember_catalog_model(model, model, "Gemini CLI modelConfig target.")?;
+            self.remember_chain(alias, [model])?;
         }
+        Ok(())
     }
 
-    fn apply_model_id_resolutions(&mut self, model_configs: &serde_json::Value) {
+    fn apply_model_id_resolutions(&mut self, model_configs: &serde_json::Value) -> Result<()> {
         let Some(resolutions) = model_configs
             .get("modelIdResolutions")
             .or_else(|| model_configs.get("model_id_resolutions"))
             .and_then(serde_json::Value::as_object)
         else {
-            return;
+            return Ok(());
         };
         for (model, resolution) in resolutions {
             let mut chain = Vec::new();
@@ -155,8 +158,14 @@ impl RuntimeGeminiModelResolution {
                 .map(str::trim)
                 .filter(|target| !target.is_empty())
             {
+                if chain.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                    bail!(
+                        "Gemini fallback chain exceeds the hard limit of {} entries",
+                        PROVIDER_MODEL_CATALOG_HARD_LIMIT
+                    );
+                }
                 chain.push(default.to_string());
-                self.remember_catalog_model(default, default, "Gemini CLI resolved model.");
+                self.remember_catalog_model(default, default, "Gemini CLI resolved model.")?;
             }
             if let Some(contexts) = resolution
                 .get("contexts")
@@ -169,43 +178,68 @@ impl RuntimeGeminiModelResolution {
                         .map(str::trim)
                         .filter(|target| !target.is_empty())
                     {
+                        if chain.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                            bail!(
+                                "Gemini fallback chain exceeds the hard limit of {} entries",
+                                PROVIDER_MODEL_CATALOG_HARD_LIMIT
+                            );
+                        }
                         chain.push(target.to_string());
-                        self.remember_catalog_model(target, target, "Gemini CLI resolved model.");
+                        self.remember_catalog_model(target, target, "Gemini CLI resolved model.")?;
                     }
                 }
             }
             if !chain.is_empty() {
-                self.remember_catalog_model(model, model, "Gemini CLI modelIdResolution alias.");
-                self.remember_chain(model, chain.iter().map(String::as_str));
+                self.remember_catalog_model(model, model, "Gemini CLI modelIdResolution alias.")?;
+                self.remember_chain(model, chain.iter().map(String::as_str))?;
             }
         }
+        Ok(())
     }
 
-    fn apply_model_chains(&mut self, model_configs: &serde_json::Value) {
+    fn apply_model_chains(&mut self, model_configs: &serde_json::Value) -> Result<()> {
         let Some(chains) = model_configs
             .get("modelChains")
             .or_else(|| model_configs.get("model_chains"))
             .and_then(serde_json::Value::as_object)
         else {
-            return;
+            return Ok(());
         };
         for (name, chain) in chains {
-            let models = chain
+            let mut models = Vec::new();
+            for model in chain
                 .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(|entry| entry.get("model").and_then(serde_json::Value::as_str))
                 .map(str::trim)
                 .filter(|model| !model.is_empty())
-                .collect::<Vec<_>>();
-            for model in &models {
-                self.remember_catalog_model(model, model, "Gemini CLI modelChain model.");
+            {
+                if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                    bail!(
+                        "Gemini fallback chain exceeds the hard limit of {} entries",
+                        PROVIDER_MODEL_CATALOG_HARD_LIMIT
+                    );
+                }
+                models.push(model);
             }
-            self.remember_chain(name, models);
+            for model in &models {
+                self.remember_catalog_model(model, model, "Gemini CLI modelChain model.")?;
+            }
+            if !models.is_empty() {
+                self.remember_catalog_model(name, name, "Gemini CLI modelChain alias.")?;
+            }
+            self.remember_chain(name, models)?;
         }
+        Ok(())
     }
 
-    fn remember_catalog_model(&mut self, slug: &str, display_name: &str, description: &str) {
+    fn remember_catalog_model(
+        &mut self,
+        slug: &str,
+        display_name: &str,
+        description: &str,
+    ) -> Result<()> {
         let slug = slug.trim();
         if slug.is_empty()
             || self
@@ -213,28 +247,55 @@ impl RuntimeGeminiModelResolution {
                 .iter()
                 .any(|model| model.slug.eq_ignore_ascii_case(slug))
         {
-            return;
+            return Ok(());
+        }
+        if self.catalog_models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            bail!(
+                "Gemini model catalog exceeds the hard limit of {} entries",
+                PROVIDER_MODEL_CATALOG_HARD_LIMIT
+            );
         }
         self.catalog_models.push(RuntimeGeminiDynamicModel {
             slug: slug.to_string(),
             display_name: display_name.trim().to_string(),
             description: description.to_string(),
         });
+        Ok(())
     }
 
-    fn remember_chain<'a>(&mut self, model: &str, chain: impl IntoIterator<Item = &'a str>) {
+    fn remember_chain<'a>(
+        &mut self,
+        model: &str,
+        chain: impl IntoIterator<Item = &'a str>,
+    ) -> Result<()> {
         let mut seen = BTreeSet::new();
-        let chain = chain
-            .into_iter()
-            .map(str::trim)
-            .filter(|item| !item.is_empty())
-            .filter(|item| seen.insert(item.to_ascii_lowercase()))
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        if !chain.is_empty() {
-            self.fallback_chains
-                .insert(model.trim().to_ascii_lowercase(), chain);
+        let mut bounded = Vec::new();
+        for item in chain {
+            let item = item.trim();
+            if item.is_empty() || !seen.insert(item.to_ascii_lowercase()) {
+                continue;
+            }
+            if bounded.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                bail!(
+                    "Gemini fallback chain exceeds the hard limit of {} entries",
+                    PROVIDER_MODEL_CATALOG_HARD_LIMIT
+                );
+            }
+            bounded.push(item.to_string());
         }
+        if !bounded.is_empty() {
+            let key = model.trim().to_ascii_lowercase();
+            if !self.fallback_chains.contains_key(&key)
+                && self.fallback_chains.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT
+            {
+                bail!(
+                    "Gemini fallback map exceeds the hard limit of {} entries",
+                    PROVIDER_MODEL_CATALOG_HARD_LIMIT
+                );
+            }
+            self.fallback_chains.insert(key, bounded);
+        }
+        Ok(())
     }
 }
 
@@ -268,7 +329,7 @@ fn gemini_provider_codex_args(
     }
 
     let model = gemini_model_for_launch(codex_home, user_args)?;
-    let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
+    let model_resolution = RuntimeGeminiModelResolution::from_current_settings()?;
     let context_window = gemini_u64_config_for_launch(
         codex_home,
         user_args,
@@ -348,7 +409,7 @@ fn write_gemini_model_catalog(
             model_resolution,
             context_window,
             auto_compact_token_limit,
-        )
+        )?
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize Gemini catalog")?;
@@ -364,7 +425,7 @@ fn gemini_catalog_models(
     model_resolution: &RuntimeGeminiModelResolution,
     context_window: u64,
     auto_compact_token_limit: u64,
-) -> Vec<serde_json::Value> {
+) -> Result<Vec<serde_json::Value>> {
     let mut models = Vec::with_capacity(
         provider_model_catalog(ProviderId::Gemini).len()
             + model_resolution.catalog_models.len()
@@ -388,6 +449,12 @@ fn gemini_catalog_models(
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
         }
+        if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            bail!(
+                "Gemini model catalog exceeds the hard limit of {} entries",
+                PROVIDER_MODEL_CATALOG_HARD_LIMIT
+            );
+        }
         let priority = models.len() + 1;
         let (display_name, description) = gemini_catalog_model_metadata(slug, model_resolution);
         models.push(gemini_catalog_model(
@@ -400,7 +467,7 @@ fn gemini_catalog_models(
         ));
     }
 
-    models
+    Ok(models)
 }
 
 fn gemini_catalog_model_metadata(
@@ -683,7 +750,7 @@ mod tests {
             mcp_servers: BTreeMap::new(),
         };
 
-        let resolution = RuntimeGeminiModelResolution::from_settings_sources(vec![source]);
+        let resolution = RuntimeGeminiModelResolution::from_settings_sources(vec![source]).unwrap();
 
         assert_eq!(
             resolution.fallback_chain("fast-review"),
@@ -704,7 +771,7 @@ mod tests {
             ])
         );
 
-        let catalog = gemini_catalog_models("fast-review", &resolution, 100_000, 90_000);
+        let catalog = gemini_catalog_models("fast-review", &resolution, 100_000, 90_000).unwrap();
         assert!(catalog.iter().any(|model| model["slug"] == "fast-review"));
         assert!(
             catalog
@@ -716,6 +783,65 @@ mod tests {
                 .iter()
                 .any(|model| model["display_name"] == "Visible Gemini")
         );
+        assert!(catalog.iter().any(|model| model["slug"] == "custom-chain"));
+    }
+
+    #[test]
+    fn gemini_dynamic_and_final_catalogs_are_bounded() {
+        let mut definitions = serde_json::Map::new();
+        for index in 0..=PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            definitions.insert(
+                format!("model-{index}"),
+                json!({"displayName": format!("Model {index}"), "isVisible": true}),
+            );
+        }
+        let error = RuntimeGeminiModelResolution::from_settings_sources(vec![
+            crate::GeminiSettingsSource {
+                name: "synthetic".to_string(),
+                directory: PathBuf::from("/synthetic"),
+                value: json!({"modelConfigs": {"modelDefinitions": definitions}}),
+                mcp_servers: BTreeMap::new(),
+            },
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("hard limit of 1024 entries"));
+
+        let resolution = RuntimeGeminiModelResolution {
+            catalog_models: (0..PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+                .map(|index| RuntimeGeminiDynamicModel {
+                    slug: format!("dynamic-{index}"),
+                    display_name: format!("Dynamic {index}"),
+                    description: "Synthetic dynamic model.".to_string(),
+                })
+                .collect(),
+            fallback_chains: BTreeMap::new(),
+        };
+        let error =
+            gemini_catalog_models("launch-model", &resolution, 100_000, 90_000).unwrap_err();
+        assert!(error.to_string().contains("hard limit of 1024 entries"));
+    }
+
+    #[test]
+    fn gemini_fallback_chains_and_map_are_bounded() {
+        let targets = (0..=PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+            .map(|index| format!("target-{index}"))
+            .collect::<Vec<_>>();
+        let mut resolution = RuntimeGeminiModelResolution::default();
+        let error = resolution
+            .remember_chain("alias", targets.iter().map(String::as_str))
+            .unwrap_err();
+        assert!(error.to_string().contains("fallback chain"));
+
+        let mut resolution = RuntimeGeminiModelResolution::default();
+        for index in 0..PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            resolution
+                .remember_chain(&format!("alias-{index}"), ["target"])
+                .unwrap();
+        }
+        let error = resolution
+            .remember_chain("one-too-many", ["target"])
+            .unwrap_err();
+        assert!(error.to_string().contains("fallback map"));
     }
 
     #[test]

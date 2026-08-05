@@ -179,15 +179,15 @@ fn v1_conformance_fixtures_cover_explicit_non_openai_provider_flows() {
     );
     assert!(
         cases.iter().any(|case| {
-            case.name == "kiro-chat-completions-request-maps-legacy-functions"
+            case.name == "kiro-chat-completions-request-rejects-legacy-functions"
                 && case.endpoint == ProviderEndpoint::ChatCompletions
                 && case.operation == ProviderConformanceOperation::Request
                 && matches!(
                     case.expected_loss,
-                    ProviderConformanceExpectedLoss::Degraded
+                    ProviderConformanceExpectedLoss::Rejected
                 )
         }),
-        "missing legacy-function Kiro chat-completions request fixture"
+        "missing rejected legacy-function Kiro chat-completions request fixture"
     );
     assert!(
         cases.iter().any(|case| {

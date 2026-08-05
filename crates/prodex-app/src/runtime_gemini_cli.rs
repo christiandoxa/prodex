@@ -677,13 +677,18 @@ fn super_native_cli_dry_run_report(
     let launch_args =
         runtime_super_native_cli_launch_args(agent, &args.codex_args, args.local_model.as_deref());
     let launch_args = redact_super_session_args(&launch_args);
+    let binary_name = std::path::Path::new(&binary)
+        .file_name()
+        .unwrap_or(binary.as_os_str());
     let mut output = format!(
         "Prodex dry run: launch diagnostics\nFlow: native-cli\nBinary: {}\nProvider: {provider}\nModel: {model}\nProfile: {}\nRuntime proxy: {proxy}\nArgs:\n",
-        redaction::redaction_display_os(&binary),
+        redaction::redaction_display_os(binary_name),
         if agent == SuperCliAgent::Gemini {
             "(native CLI owned)"
+        } else if args.profile.is_some() {
+            "<configured>"
         } else {
-            args.profile.as_deref().unwrap_or("(active/default)")
+            "(active/default)"
         }
     );
     if launch_args.is_empty() {

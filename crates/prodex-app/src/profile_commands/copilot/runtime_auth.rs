@@ -11,6 +11,7 @@ use crate::{
     read_blocking_response_body_with_limit,
 };
 use prodex_profile_export::{copilot_user_api_origin, default_copilot_models_api_url};
+use prodex_provider_core::{PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderId};
 
 pub(super) const COPILOT_RUNTIME_INTEGRATION_ID: &str = "copilot-developer-cli";
 pub(super) const COPILOT_RUNTIME_API_VERSION: &str = "2025-04-01";
@@ -71,16 +72,22 @@ pub(super) fn refresh_copilot_runtime_api_auth_with_urls(
     // Bearer credential to the Copilot API.  Prefer that path first so a removed
     // or blocked legacy exchange endpoint cannot prevent launch.
     match fetch_copilot_runtime_models_with_oauth(client, api_url, access_token) {
-        Ok(auth) => Ok(auth),
-        Err(oauth_err) => {
+        Ok(Some(auth)) => Ok(auth),
+        direct_result => {
             match fetch_copilot_runtime_legacy_token(client, token_url, access_token) {
                 Ok(auth) => Ok(auth),
                 Err(legacy_err) => {
-                    bail!(
-                        "Copilot runtime auth failed: direct OAuth request failed ({:#}); legacy token exchange failed ({:#})",
-                        oauth_err,
-                        legacy_err
-                    )
+                    if let Err(oauth_err) = direct_result {
+                        bail!(
+                            "Copilot runtime auth failed: direct OAuth request failed ({:#}); legacy token exchange failed ({:#})",
+                            oauth_err,
+                            legacy_err
+                        );
+                    }
+                    Ok(CopilotRuntimeApiAuth {
+                        api_key: access_token.to_string(),
+                        model_catalog: Vec::new(),
+                    })
                 }
             }
         }
@@ -91,9 +98,9 @@ fn fetch_copilot_runtime_models_with_oauth(
     client: &Client,
     api_url: &str,
     access_token: &str,
-) -> Result<CopilotRuntimeApiAuth> {
+) -> Result<Option<CopilotRuntimeApiAuth>> {
     let models_url = format!("{}/models", api_url.trim_end_matches('/'));
-    let models_resp = client
+    let Ok(models_resp) = client
         .get(&models_url)
         .bearer_auth(access_token)
         .header("Accept", "application/json")
@@ -102,36 +109,36 @@ fn fetch_copilot_runtime_models_with_oauth(
         .header("x-github-api-version", COPILOT_RUNTIME_API_VERSION)
         .header("User-Agent", COPILOT_RUNTIME_USER_AGENT)
         .send()
-        .with_context(|| format!("failed to query {models_url}"))?;
+    else {
+        return Ok(None);
+    };
     let models_status = models_resp.status();
-    let models_body = read_blocking_response_body_with_limit(
+    let Ok(models_body) = read_blocking_response_body_with_limit(
         models_resp,
         RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
         &format!("failed to read {models_url}"),
-    )?;
+    ) else {
+        return Ok(None);
+    };
     if !models_status.is_success() {
-        let body_text = format_response_body(&models_body);
-        if body_text.is_empty() {
+        if matches!(models_status.as_u16(), 401 | 403) {
             bail!(
-                "models endpoint returned HTTP {} at {}",
-                models_status.as_u16(),
-                models_url
+                "Copilot models endpoint rejected direct OAuth with HTTP {}",
+                models_status.as_u16()
             );
         }
-        bail!(
-            "models endpoint returned HTTP {} at {}: {}",
-            models_status.as_u16(),
-            models_url,
-            body_text
-        );
+        return Ok(None);
     }
-    let models_value: serde_json::Value = serde_json::from_slice(&models_body)
-        .with_context(|| format!("failed to parse {models_url}"))?;
-    let model_catalog = copilot_runtime_model_catalog_from_token(&models_value);
-    Ok(CopilotRuntimeApiAuth {
+    let Ok(models_value) = serde_json::from_slice(&models_body) else {
+        return Ok(None);
+    };
+    let Ok(model_catalog) = copilot_runtime_model_catalog_from_token(&models_value) else {
+        return Ok(None);
+    };
+    Ok(Some(CopilotRuntimeApiAuth {
         api_key: access_token.to_string(),
         model_catalog,
-    })
+    }))
 }
 
 fn fetch_copilot_runtime_legacy_token(
@@ -165,7 +172,7 @@ fn fetch_copilot_runtime_legacy_token(
             .filter(|token| !token.is_empty())
             .map(str::to_string)
             .context("Copilot runtime token response did not contain token")?;
-        let model_catalog = copilot_runtime_model_catalog_from_token(&value);
+        let model_catalog = copilot_runtime_model_catalog_from_token(&value).unwrap_or_default();
         return Ok(CopilotRuntimeApiAuth {
             api_key,
             model_catalog,
@@ -194,11 +201,16 @@ fn fetch_copilot_runtime_legacy_token(
 
 pub(super) fn copilot_runtime_model_catalog_from_token(
     value: &serde_json::Value,
-) -> Vec<serde_json::Value> {
+) -> Result<Vec<serde_json::Value>> {
     let mut models = Vec::new();
-    collect_copilot_runtime_models(value, &mut models);
+    if collect_copilot_runtime_models(value, &mut models) {
+        bail!(
+            "Copilot model catalog exceeds the hard limit of {} entries",
+            PROVIDER_MODEL_CATALOG_HARD_LIMIT
+        );
+    }
     let mut seen = BTreeSet::new();
-    models
+    let models = models
         .into_iter()
         .filter_map(copilot_runtime_model_catalog_entry)
         .filter(|model| {
@@ -208,7 +220,10 @@ pub(super) fn copilot_runtime_model_catalog_from_token(
                 .is_some_and(|id| !id.is_empty() && seen.insert(id.to_ascii_lowercase()))
         })
         .map(sanitize_copilot_catalog_entry)
-        .collect()
+        .collect::<Vec<_>>();
+    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Copilot, &models)
+        .map_err(anyhow::Error::new)?;
+    Ok(models)
 }
 
 /// Strip null-valued string fields from a catalog entry so downstream JSON
@@ -242,7 +257,7 @@ fn sanitize_copilot_catalog_entry(mut entry: serde_json::Value) -> serde_json::V
 fn collect_copilot_runtime_models<'a>(
     value: &'a serde_json::Value,
     output: &mut Vec<&'a serde_json::Value>,
-) {
+) -> bool {
     match value {
         serde_json::Value::Object(object) => {
             for (key, nested) in object {
@@ -253,19 +268,29 @@ fn collect_copilot_runtime_models<'a>(
                     || key.eq_ignore_ascii_case("data"))
                     && let Some(array) = nested.as_array()
                 {
-                    output.extend(array);
+                    for model in array {
+                        if output.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+                            return true;
+                        }
+                        output.push(model);
+                    }
                     continue;
                 }
-                collect_copilot_runtime_models(nested, output);
+                if collect_copilot_runtime_models(nested, output) {
+                    return true;
+                }
             }
         }
         serde_json::Value::Array(values) => {
             for nested in values {
-                collect_copilot_runtime_models(nested, output);
+                if collect_copilot_runtime_models(nested, output) {
+                    return true;
+                }
             }
         }
         _ => {}
     }
+    false
 }
 
 fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serde_json::Value> {

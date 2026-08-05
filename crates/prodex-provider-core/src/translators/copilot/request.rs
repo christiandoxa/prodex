@@ -85,7 +85,10 @@ fn copilot_provider_core_strip_encrypted_content(value: &mut Value) -> bool {
             changed
         }
         Value::Object(object) => {
-            let mut changed = object.remove("encrypted_content").is_some();
+            let preserve_encrypted_content =
+                object.get("type").and_then(Value::as_str) == Some("compaction");
+            let mut changed =
+                !preserve_encrypted_content && object.remove("encrypted_content").is_some();
             for value in object.values_mut() {
                 changed |= copilot_provider_core_strip_encrypted_content(value);
             }

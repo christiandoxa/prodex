@@ -362,6 +362,15 @@ fn kiro_validate_response_format_and_tools(
             "unsupported_tool_choice",
         ));
     }
+    if let Some(tools) = object.get("tools")
+        && !tools.is_null()
+        && tools.as_array().is_none_or(|tools| !tools.is_empty())
+    {
+        return Err(KiroProviderCoreRequestError::new(
+            "Kiro ACP owns its tool inventory and cannot execute external tools",
+            "unsupported_tools",
+        ));
+    }
     if object.get("web_search_options").is_some() {
         return Err(KiroProviderCoreRequestError::new(
             "Kiro ACP owns web search and cannot honor web_search_options",

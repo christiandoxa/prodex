@@ -51,13 +51,13 @@ fn kiro_acp_parses_initialize_result_from_captured_agent_line() {
 #[test]
 fn kiro_acp_parses_new_session_result_and_model_ids() {
     let envelope = RuntimeKiroAcpEnvelope::parse(
-        r#"{"jsonrpc":"2.0","result":{"sessionId":"43dc1cdb-4376-442a-afa8-b12238274893","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"},{"modelId":"claude-sonnet-4.5","name":"claude-sonnet-4.5"}]}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","result":{"sessionId":"00000000-0000-4000-8000-000000000001","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"},{"modelId":"claude-sonnet-4.5","name":"claude-sonnet-4.5"}]}},"id":1}"#,
     )
     .expect("session/new envelope should parse");
     let result = envelope
         .parse_session_new_result()
         .expect("session/new result should parse");
-    assert_eq!(result.session_id, "43dc1cdb-4376-442a-afa8-b12238274893");
+    assert_eq!(result.session_id, "00000000-0000-4000-8000-000000000001");
     assert_eq!(
         result.model_ids(),
         vec!["claude-sonnet-4", "claude-sonnet-4.5"]
@@ -155,10 +155,31 @@ fn kiro_acp_model_catalog_maps_session_models() {
             ],
         }),
     };
-    let catalog = runtime_kiro_acp_model_catalog(&session);
+    let catalog = runtime_kiro_acp_model_catalog(&session).unwrap();
     assert_eq!(catalog.len(), 2);
     assert_eq!(catalog[0]["id"], "claude-sonnet-4");
     assert_eq!(catalog[0]["owned_by"], "kiro-cli");
+}
+
+#[test]
+fn kiro_acp_model_catalog_rejects_oversized_sessions() {
+    let session = RuntimeKiroAcpNewSessionResult {
+        session_id: "session-example".to_string(),
+        modes: None,
+        models: Some(RuntimeKiroAcpModelState {
+            current_model_id: "model-0".to_string(),
+            available_models: (0..=prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
+                .map(|index| RuntimeKiroAcpModelInfo {
+                    model_id: format!("model-{index}"),
+                    name: format!("Model {index}"),
+                })
+                .collect(),
+        }),
+    };
+
+    let error = runtime_kiro_acp_model_catalog(&session).unwrap_err();
+
+    assert!(error.to_string().contains("hard limit of 1024 entries"));
 }
 
 #[test]
@@ -184,6 +205,26 @@ fn kiro_acp_prompt_turn_sends_prompt_after_session_bootstrap() {
         result.notifications[0].method.as_deref(),
         Some("_kiro.dev/metadata")
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn kiro_acp_prompt_turn_rejects_unsupported_server_requests() {
+    let root = temp_dir("prompt-turn-server-request");
+    let fake_agent = write_fake_kiro_prompt_agent(&root);
+
+    let result = runtime_kiro_acp_prompt_turn_with_command(
+        fake_agent.as_os_str(),
+        &root,
+        &[(OsString::from("SERVER_REQUEST"), OsString::from("1"))],
+        "hello from prodex",
+    )
+    .expect("unsupported server request should receive an explicit error");
+
+    assert_eq!(result.prompt_response.id, Some(2));
+    assert!(result.notifications.iter().any(|notification| {
+        notification.id == Some(9) && notification.method.as_deref() == Some("fs/read_text_file")
+    }));
     let _ = fs::remove_dir_all(root);
 }
 

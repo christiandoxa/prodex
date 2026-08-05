@@ -4,7 +4,6 @@ use super::super::local_rewrite::RuntimeLocalRewriteProviderOptions;
 use super::super::local_rewrite_copilot_bindings::{
     RuntimeCopilotBindingAcceptance, RuntimeCopilotBindingRecorder,
 };
-use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -82,28 +81,22 @@ pub(in crate::runtime_launch::proxy_startup) struct RuntimeCopilotRequestContext
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_model_catalog_from_provider(
     provider: &RuntimeLocalRewriteProviderOptions,
-) -> Vec<serde_json::Value> {
+) -> Result<Vec<serde_json::Value>, prodex_provider_core::ProviderModelCatalogLimitError> {
     let RuntimeLocalRewriteProviderOptions::Copilot {
         auth: RuntimeCopilotProviderAuth::Profiles { profiles },
     } = provider
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let mut seen = BTreeSet::new();
     let mut catalog = Vec::new();
     for profile in profiles {
-        for model in &profile.model_catalog {
-            let Some(id) = model.get("id").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let id = id.trim();
-            if id.is_empty() || !seen.insert(id.to_ascii_lowercase()) {
-                continue;
-            }
-            catalog.push(model.clone());
-        }
+        let previous = std::mem::take(&mut catalog);
+        catalog = prodex_provider_core::merge_provider_model_catalog_json(
+            prodex_provider_core::ProviderId::Copilot,
+            previous.iter().chain(&profile.model_catalog),
+        )?;
     }
-    catalog
+    Ok(catalog)
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_oauth_pool_from_provider(

@@ -78,6 +78,17 @@ pub fn runtime_launch_dry_run_report(
     plan: &RuntimeLaunchPlan,
 ) -> codex_config::CodexConfigResult<String> {
     let child = &plan.child;
+    let current_dir = std::env::current_dir().ok();
+    let redact = |value: &str| {
+        dry_run_redact_paths(
+            value,
+            [
+                Some(child.codex_home.as_path()),
+                Some(base_codex_home),
+                current_dir.as_deref(),
+            ],
+        )
+    };
     let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")?
         .unwrap_or_else(|| "openai".to_string());
     let model = dry_run_config_value(&child.args, base_codex_home, "model")?
@@ -87,11 +98,15 @@ pub fn runtime_launch_dry_run_report(
     output.push_str(&format!("Flow: {flow}\n"));
     output.push_str(&format!(
         "Binary: {}\n",
-        redaction::redaction_display_os(&child.binary)
+        redaction::redaction_display_os(
+            Path::new(&child.binary)
+                .file_name()
+                .unwrap_or(child.binary.as_os_str())
+        )
     ));
     output.push_str(&format!("Provider: {provider}\n"));
     output.push_str(&format!("Model: {model}\n"));
-    output.push_str(&format!("CODEX_HOME: {}\n", child.codex_home.display()));
+    output.push_str("CODEX_HOME: <CODEX_HOME>\n");
     output.push_str(&format!(
         "Runtime proxy: {}\n",
         runtime_proxy
@@ -112,16 +127,17 @@ pub fn runtime_launch_dry_run_report(
         output.push_str("  (none)\n");
     } else {
         for arg in redaction::redaction_redacted_cli_args(&child.args) {
-            output.push_str(&format!("  {arg}\n"));
+            output.push_str(&format!("  {}\n", redact(&arg)));
         }
     }
     output.push_str("Env:\n");
-    output.push_str(&format!("  CODEX_HOME={}\n", child.codex_home.display()));
+    output.push_str("  CODEX_HOME=<CODEX_HOME>\n");
     for (key, value) in &child.extra_env {
+        let value = redaction::redaction_redacted_env_value(key, value);
         output.push_str(&format!(
             "  {}={}\n",
             redaction::redaction_display_os(key),
-            redaction::redaction_redacted_env_value(key, value)
+            redact(&value)
         ));
     }
     if !child.removed_env.is_empty() {
@@ -132,6 +148,23 @@ pub fn runtime_launch_dry_run_report(
     }
     output.push_str("Codex/TUI not started because --dry-run was set.\n");
     Ok(output)
+}
+
+fn dry_run_redact_paths<'a>(
+    value: &str,
+    paths: impl IntoIterator<Item = Option<&'a Path>>,
+) -> String {
+    let mut paths = paths
+        .into_iter()
+        .flatten()
+        .map(|path| path.display().to_string())
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+    paths.sort_by_key(|path| std::cmp::Reverse(path.len()));
+    paths.dedup();
+    paths.into_iter().fold(value.to_string(), |value, path| {
+        value.replace(&path, "<redacted-path>")
+    })
 }
 
 fn dry_run_config_value(

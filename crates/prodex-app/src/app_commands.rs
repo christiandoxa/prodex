@@ -14,7 +14,7 @@ use terminal_ui::{
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
 const SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES: u64 = 1024 * 1024;
 const SUPER_CONFIGURED_MODEL_PROFILE_LIMIT: usize = 128;
-const SUPER_CONFIGURED_MODEL_LIMIT: usize = 1024;
+const SUPER_CONFIGURED_MODEL_LIMIT: usize = prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT;
 
 mod app_server_broker;
 mod audit;
@@ -565,6 +565,8 @@ fn configured_sub_agent_models(provider: prodex_provider_core::ProviderId) -> Ve
     let Ok(state) = AppState::load(&paths) else {
         return Vec::new();
     };
+    let model_limit = SUPER_CONFIGURED_MODEL_LIMIT
+        .saturating_sub(prodex_provider_core::provider_model_catalog_json(provider).len());
     let mut models = Vec::new();
     for profile in state
         .profiles
@@ -597,23 +599,31 @@ fn configured_sub_agent_models(provider: prodex_provider_core::ProviderId) -> Ve
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
             continue;
         };
-        configured_sub_agent_model_ids(&value, &mut models);
-        if models.len() >= SUPER_CONFIGURED_MODEL_LIMIT {
-            models.truncate(SUPER_CONFIGURED_MODEL_LIMIT);
+        configured_sub_agent_model_ids(&value, &mut models, model_limit);
+        if models.len() >= model_limit {
+            models.truncate(model_limit);
             break;
         }
     }
     models
 }
 
-fn configured_sub_agent_model_ids(value: &serde_json::Value, models: &mut Vec<String>) {
+fn configured_sub_agent_model_ids(
+    value: &serde_json::Value,
+    models: &mut Vec<String>,
+    model_limit: usize,
+) {
     let Some(entries) = value.get("models").and_then(serde_json::Value::as_array) else {
         return;
     };
-    for entry in entries
+    let mut seen = models
         .iter()
-        .take(SUPER_CONFIGURED_MODEL_LIMIT.saturating_sub(models.len()))
-    {
+        .map(|model| model.trim().to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    for entry in entries {
+        if models.len() >= model_limit {
+            break;
+        }
         let Some(id) = entry
             .get("id")
             .or_else(|| entry.get("slug"))
@@ -622,7 +632,7 @@ fn configured_sub_agent_model_ids(value: &serde_json::Value, models: &mut Vec<St
         else {
             continue;
         };
-        if !id.trim().is_empty() {
+        if !id.trim().is_empty() && seen.insert(id.trim().to_ascii_lowercase()) {
             models.push(id.to_string());
         }
     }
@@ -976,10 +986,11 @@ pub(super) fn prompt_super_presidio_opt_in() -> Result<bool> {
 #[cfg(test)]
 mod sub_agent_prompt_tests {
     use super::{
-        ResolvedMainAgentConfig, SuperSubAgentPromptStep, bounded_tui_text,
-        configured_sub_agent_model_ids, resolve_super_launch_decisions_with_prompts,
-        resolve_super_sub_agent, run_super_sub_agent_prompt_steps,
-        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
+        ResolvedMainAgentConfig, SUPER_CONFIGURED_MODEL_LIMIT, SuperSubAgentPromptStep,
+        bounded_tui_text, configured_sub_agent_model_ids,
+        resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
+        run_super_sub_agent_prompt_steps, super_sub_agent_concurrency_choices,
+        super_sub_agent_prompt_steps, visible_choice_range,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
@@ -1165,6 +1176,7 @@ mod sub_agent_prompt_tests {
                 ]
             }),
             &mut configured,
+            SUPER_CONFIGURED_MODEL_LIMIT,
         );
         let choices = prodex_provider_core::resolve_provider_model_choices(
             ProviderId::Kiro,
@@ -1177,6 +1189,25 @@ mod sub_agent_prompt_tests {
                 prodex_provider_core::ProviderModelChoice::Model(model) if model == expected
             )));
         }
+    }
+
+    #[test]
+    fn configured_model_budget_counts_only_valid_unique_ids() {
+        let mut configured = vec!["duplicate".to_string()];
+        configured_sub_agent_model_ids(
+            &serde_json::json!({
+                "models": [
+                    {},
+                    {"id": "duplicate"},
+                    {"id": "DUPLICATE"},
+                    {"id": "tail-model"}
+                ]
+            }),
+            &mut configured,
+            2,
+        );
+
+        assert_eq!(configured, ["duplicate", "tail-model"]);
     }
 
     #[test]

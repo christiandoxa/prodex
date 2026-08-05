@@ -134,6 +134,7 @@ impl Directory {
     pub(super) fn replace(&self, from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
         let from = c_name(from)?;
         let to = c_name(to)?;
+        require_name_identity(self.file.as_raw_fd(), &from, &file.metadata()?)?;
         // SAFETY: both names are single components relative to the same live
         // directory handle, so `renameat` is an atomic in-directory replacement.
         let result = unsafe {
@@ -147,7 +148,7 @@ impl Directory {
         if result == -1 {
             return Err(io::Error::last_os_error());
         }
-        require_name_identity(self.file.as_raw_fd(), &to, &file.metadata()?)
+        Ok(())
     }
 
     pub(super) fn remove_verified(&self, name: &OsStr, file: &File) -> io::Result<()> {
