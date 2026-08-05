@@ -6,17 +6,17 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands.rs",
-    "maxLines": 1472,
-    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, resume affinity validation, and terminal restoration together; this cap records the audited 0.384.0 flow."
+    "maxLines": 1510,
+    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, resume affinity validation, and terminal restoration together; this cap includes the audited low-complexity decision helpers for the 0.384.0 flow."
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
-    "maxLines": 1313,
+    "maxLines": 1317,
     "reason": "Cross-platform broker identity probing and bounded stale-process recovery remain colocated so PID reuse and termination decisions share one safety boundary; this cap records the audited macOS implementation and tests."
   },
   {
     "file": "crates/prodex-app/src/runtime_gemini_config.rs",
-    "maxLines": 950,
+    "maxLines": 945,
     "reason": "Gemini profile configuration keeps supported API-key and Vertex paths, disabled OAuth migration diagnostics, and bounded model catalog loading together; this cap records the audited 0.384.0 behavior."
   },
   {
