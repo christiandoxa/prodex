@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.384.0 - 2026-08-05
+
+### Runtime
+
+- Stabilize macOS broker recovery (`5de7743`)
+
+### CLI
+
+- Harden provider delegation (`e865fac`)
+
 ## 0.383.0 - 2026-08-05
 
 ### Runtime
@@ -121,9 +131,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden bank and control-plane boundaries (`8449b93`)
-
-## 0.372.0 - 2026-07-30
-
-### Misc
-
-- Complete deployment and observability hardening (`f469cea`)
