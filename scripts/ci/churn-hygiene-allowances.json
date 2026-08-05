@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-provider-delegation-follow-up-0.384.0",
+    "requiredSubjects": [
+      "fix(ci): close cross-platform catalog gaps"
+    ],
+    "caps": {
+      "maxFiles": 52,
+      "maxBehaviorFiles": 52,
+      "maxLines": 1799,
+      "maxFileLines": 232
+    },
+    "reason": "Reviewed the bounded 0.384.0 cross-platform follow-up covering deterministic provider catalog fallback, Kiro ACP rejection and reasoning fidelity, Copilot compaction preservation, child process cleanup, private dry-run rendering, and portable tests; verified with the locked full workspace suite, strict Clippy, security and dependency guards, an optimized locked build, and tracked-diff identifier scanning."
+  },
+  {
     "id": "audited-provider-delegation-feature-0.384.0",
     "requiredSubjects": [
       "feat(super): harden provider delegation",
