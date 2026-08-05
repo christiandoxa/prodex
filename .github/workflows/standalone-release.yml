@@ -743,7 +743,6 @@ jobs:
 
       - name: Scan release assets for malware
         id: release_malware_scan
-        continue-on-error: true
         uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
         with:
           clamav_update: "True"
@@ -752,16 +751,6 @@ jobs:
           ignores_pre: |-
             Param($ElementPreMeta)
             Return ($ElementPreMeta.Path -notmatch '^release-assets[\\/]')
-          # ClamAV's Win.Trojan.Virut-32 signature false-positives on the
-          # provenance-attested Rust x86_64 Windows binary. Keep this exception
-          # exact so every other path, signature, and scanner result fails closed.
-          ignores_post: |-
-            Param([PSCustomObject]$ElementPostMeta)
-            Return (
-              $ElementPostMeta.Path -ceq 'release-assets/prodex-x86_64-pc-windows-msvc.exe' -and
-              $ElementPostMeta.Symbol -ceq 'Win.Trojan.Virut-32' -and
-              $ElementPostMeta.Tool -ceq 'clamav'
-            )
 
       - name: Require clean release assets
         env:
@@ -771,7 +760,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
+          if [ "${SCAN_OUTCOME}" != "success" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
             echo "release asset malware scan did not finish cleanly" >&2
             exit 1
           fi
