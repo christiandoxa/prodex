@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
-    "maxLines": 1322,
-    "reason": "Cross-platform broker identity probing and bounded stale-process recovery remain colocated so PID reuse and termination decisions share one safety boundary; this cap records the audited macOS recovery polling and tests."
+    "maxLines": 1317,
+    "reason": "Cross-platform broker identity probing and bounded stale-process recovery remain colocated so PID reuse and termination decisions share one safety boundary; this cap records the audited macOS implementation and tests."
   },
   {
     "file": "crates/prodex-app/src/runtime_gemini_config.rs",
