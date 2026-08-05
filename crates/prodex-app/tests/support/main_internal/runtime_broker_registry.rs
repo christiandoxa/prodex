@@ -326,6 +326,12 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
 
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker() {
+    const CHILD_ENV: &str = "PRODEX_MISMATCHED_BROKER_CHILD";
+    if env::var_os(CHILD_ENV).is_some() {
+        loop {
+            thread::sleep(Duration::from_secs(60));
+        }
+    }
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {
@@ -336,20 +342,12 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     let broker_key = "replace-version-mismatch";
-    let script_path = temp_dir.path.join("mismatched-broker.sh");
-    fs::write(
-        &script_path,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n",
-    )
-    .expect("mismatched broker script should write");
-    let mut permissions = fs::metadata(&script_path)
-        .expect("mismatched broker script metadata should load")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&script_path, permissions)
-        .expect("mismatched broker script permissions should update");
-
-    let mut child = Command::new(&script_path)
+    let mut child = Command::new(env::current_exe().expect("test executable should resolve"))
+        .args([
+            "wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
