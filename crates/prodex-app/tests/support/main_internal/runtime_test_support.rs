@@ -109,10 +109,12 @@ impl TestDir {
                     .as_nanos(),
                 TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed),
             );
-            let path = std::env::temp_dir()
+            let temp_root = std::env::temp_dir();
+            #[cfg(target_os = "macos")]
+            let temp_root = temp_root
                 .canonicalize()
-                .expect("failed to resolve test temp dir")
-                .join(unique);
+                .expect("failed to resolve test temp dir");
+            let path = temp_root.join(unique);
             match fs::create_dir(&path) {
                 Ok(()) => {
                     #[cfg(unix)]
