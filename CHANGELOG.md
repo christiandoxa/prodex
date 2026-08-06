@@ -2,6 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.385.0 - 2026-08-06
+
+### Runtime
+
+- Preserve sub-agent provider compatibility (`5f23df7`)
+
+### CLI
+
+- Tolerate slow Windows heartbeats (`f3cfa3c`)
+
+### Misc
+
+- Sync Codex installer and fuzz metadata (`a8682ee`)
+- Track Codex 0.146.1 baseline (`b1eac18`)
+
 ## 0.384.0 - 2026-08-05
 
 ### Runtime
@@ -125,9 +140,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Make revision publication atomic (`b4f1ade`)
-
-## 0.373.0 - 2026-07-30
-
-### Misc
-
-- Harden bank and control-plane boundaries (`8449b93`)
