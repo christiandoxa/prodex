@@ -21,7 +21,7 @@ $RunningExe = $env:PRODEX_RUNNING_EXE
 $NonInteractive = $env:PRODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
 $Migrate = $env:PRODEX_MIGRATE -match "^(?i:1|true|yes)$"
 $NoPathUpdate = $env:PRODEX_NO_PATH_UPDATE -match "^(?i:1|true|yes)$"
-$CodexNpmVersion = "0.146.0"
+$CodexNpmVersion = "0.146.1"
 
 function Write-Step {
     param([string]$Message)
