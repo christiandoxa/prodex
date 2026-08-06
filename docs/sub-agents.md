@@ -130,6 +130,8 @@ Prodex resolves its current executable with `std::env::current_exe()`. The overl
 
 That small display command is rendered for the host shell. Actual child construction uses an argument vector, never `/bin/sh -c`, PowerShell evaluation, or `cmd.exe /c`. Task text may contain spaces, apostrophes, quotes, newlines, Unicode, and shell metacharacters; it reaches `exec` as one exact argument.
 
+The hidden `__sub-agent-exec` command accepts only `--config` and `--task-file`. Do not append public child flags such as `--no-sub-agent`, `--provider`, `--model`, or `exec` to that launcher command; Prodex constructs those arguments after reading the private config.
+
 A safe representative child argument vector is:
 
 ```text
