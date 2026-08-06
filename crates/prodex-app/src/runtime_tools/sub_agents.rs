@@ -393,17 +393,11 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
         bail!("sub-agent task must be nonempty");
     }
     let _slot = acquire_sub_agent_slot(&spec)?;
-    fs::remove_file(&task_path).with_context(|| {
-        format!(
-            "failed to remove consumed task file {}",
-            task_path.display()
-        )
-    })?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("failed to initialize sub-agent launcher runtime")?;
-    let outcome = runtime.block_on(run_sub_agent_child(&spec, &task))?;
+    let outcome = runtime.block_on(run_child(&spec, &task, &task_path))?;
     if outcome.cancelled {
         return Err(crate::command_dispatch::command_exit_error(
             130,
@@ -550,7 +544,11 @@ struct SubAgentChildOutcome {
     output_incomplete: bool,
 }
 
-async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAgentChildOutcome> {
+async fn run_child(
+    spec: &ChildLaunchSpec,
+    task: &str,
+    task_path: &Path,
+) -> Result<SubAgentChildOutcome> {
     let mut command = tokio::process::Command::new(&spec.executable);
     command
         .args(child_argv(spec, task))
@@ -560,6 +558,7 @@ async fn run_sub_agent_child(spec: &ChildLaunchSpec, task: &str) -> Result<SubAg
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn().context("failed to spawn sub-agent child")?;
+    fs::remove_file(task_path).context("failed to remove consumed task file")?;
     let stdout = child.stdout.take().context("child stdout pipe missing")?;
     let stderr = child.stderr.take().context("child stderr pipe missing")?;
     let stdout_task = tokio::spawn(relay_child_output(stdout, tokio::io::stdout()));
@@ -1512,9 +1511,10 @@ mod tests {
         spec.executable = root.join("missing-prodex-binary");
         let error = handle_sub_agent_exec(exec_args(&root, &spec, "narrow task")).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("failed to spawn sub-agent child")
+            spec.task_dir.join("task.txt").exists()
+                && error
+                    .to_string()
+                    .contains("failed to spawn sub-agent child")
         );
         drop(acquire_sub_agent_slot(&spec).unwrap());
         fs::remove_dir_all(root).unwrap();

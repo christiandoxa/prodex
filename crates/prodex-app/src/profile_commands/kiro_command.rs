@@ -38,6 +38,11 @@ fn run_kiro_metadata_command_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .envs(extra_env.iter().cloned());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
     if let Some(cwd) = cwd {
         process.current_dir(cwd);
     }
@@ -69,8 +74,8 @@ fn run_kiro_metadata_command_with_timeout(
             }
         }
     };
-    let stdout = join_reader(stdout_reader, "stdout")?;
-    let stderr = join_reader(stderr_reader, "stderr")?;
+    let stdout = join_reader_with_timeout(stdout_reader, "stdout", &mut child, timeout)?;
+    let stderr = join_reader_with_timeout(stderr_reader, "stderr", &mut child, timeout)?;
     if stdout.len() > KIRO_METADATA_OUTPUT_MAX_BYTES
         || stderr.len() > KIRO_METADATA_OUTPUT_MAX_BYTES
     {
@@ -103,7 +108,39 @@ fn join_reader(reader: thread::JoinHandle<io::Result<Vec<u8>>>, stream: &str) ->
         .with_context(|| format!("failed to read Kiro metadata {stream}"))
 }
 
+fn join_reader_with_timeout(
+    reader: thread::JoinHandle<io::Result<Vec<u8>>>,
+    stream: &str,
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Result<Vec<u8>> {
+    let deadline = Instant::now() + timeout;
+    while !reader.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    if !reader.is_finished() {
+        terminate(child);
+        let deadline = Instant::now() + timeout;
+        while !reader.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        if !reader.is_finished() {
+            bail!("Kiro metadata {stream} reader timed out");
+        }
+    }
+    join_reader(reader, stream)
+}
+
 fn terminate(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -125,6 +162,26 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn metadata_command_does_not_wait_for_inherited_output_pipes() {
+        let started = Instant::now();
+        let output = run_kiro_metadata_command_with_timeout(
+            OsStr::new("sh"),
+            &[
+                "-c",
+                "(sleep 5) &
+exit 0",
+            ],
+            None,
+            &[],
+            Duration::from_millis(50),
+        )
+        .expect("metadata should finish after closing inherited pipes");
+
+        assert!(output.status.success());
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

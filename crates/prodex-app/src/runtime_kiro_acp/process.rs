@@ -50,23 +50,27 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command_and_timeout(
     extra_env: &[(OsString, OsString)],
     timeout: Duration,
 ) -> Result<RuntimeKiroAcpBootstrapResult> {
-    let mut child = Command::new(command)
+    let mut process = Command::new(command);
+    process
         .arg("acp")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .envs(extra_env.iter().cloned())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to start Kiro ACP agent {}",
-                command.to_string_lossy()
-            )
-        })?;
+        .envs(extra_env.iter().cloned());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
+    let mut child = process.spawn().with_context(|| {
+        format!(
+            "failed to start Kiro ACP agent {}",
+            command.to_string_lossy()
+        )
+    })?;
     let result = runtime_kiro_acp_bootstrap_child(&mut child, cwd, timeout);
-    let _ = child.kill();
-    let _ = child.wait();
+    terminate_kiro_acp_child(&mut child);
     result
 }
 
@@ -110,31 +114,49 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
     prompt: &str,
     timeout: Duration,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
-    let mut command = Command::new(command);
-    command.arg("acp");
+    let program = command;
+    let mut process = Command::new(program);
+    process.arg("acp");
     if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
-        command.arg("--model").arg(model);
+        process.arg("--model").arg(model);
     }
     if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
-        command.arg("--effort").arg(effort);
+        process.arg("--effort").arg(effort);
     }
-    let mut child = command
+    process
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .envs(extra_env.iter().cloned())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to start Kiro ACP agent {}",
-                command.get_program().to_string_lossy()
-            )
-        })?;
+        .envs(extra_env.iter().cloned());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
+    let mut child = process.spawn().with_context(|| {
+        format!(
+            "failed to start Kiro ACP agent {}",
+            program.to_string_lossy()
+        )
+    })?;
     let result = runtime_kiro_acp_prompt_turn_child(&mut child, cwd, prompt, timeout);
+    terminate_kiro_acp_child(&mut child);
+    result
+}
+
+fn terminate_kiro_acp_child(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
-    result
 }
 
 fn runtime_kiro_acp_bootstrap_child(
