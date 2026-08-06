@@ -134,6 +134,16 @@ pub enum SubAgentReasoningEffort {
 }
 
 impl SubAgentReasoningEffort {
+    pub const ALL: [Self; 7] = [
+        Self::None,
+        Self::Minimal,
+        Self::Low,
+        Self::Medium,
+        Self::High,
+        Self::XHigh,
+        Self::Max,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",

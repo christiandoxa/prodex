@@ -6,8 +6,8 @@ use prodex_cli::{
 };
 use prodex_provider_core::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice, ProviderReasoningEffort,
-    provider_catalog_entries_for, provider_catalog_entry, provider_implementation_registry,
-    provider_model_spec, resolve_provider_model_choices,
+    provider_catalog_entry, provider_implementation_registry, provider_model_spec,
+    resolve_provider_model_choices,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 use serde::{Deserialize, Serialize};
@@ -229,67 +229,25 @@ pub(crate) fn canonical_sub_agent_efforts(
     provider: ProviderId,
     model: Option<&str>,
 ) -> Vec<SubAgentReasoningEffort> {
-    if let Some(efforts) = model
+    let Some(catalog_efforts) = model
         .and_then(|model| provider_catalog_entry(provider, model))
         .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
-        .map(sub_agent_reasoning_efforts)
-        .filter(|efforts| !efforts.is_empty())
-    {
-        return efforts;
-    }
+    else {
+        return SubAgentReasoningEffort::ALL.to_vec();
+    };
 
-    let mut provider_efforts = Vec::new();
-    for efforts in provider_catalog_entries_for(provider)
-        .into_iter()
-        .filter_map(|entry| entry.supported_reasoning_efforts.as_deref())
-    {
-        for effort in efforts
-            .iter()
-            .copied()
-            .filter_map(sub_agent_reasoning_effort)
-        {
-            if !provider_efforts.contains(&effort) {
-                provider_efforts.push(effort);
-            }
-        }
-    }
-    if !provider_efforts.is_empty() {
-        return provider_efforts;
-    }
-
-    [
-        SubAgentReasoningEffort::None,
-        SubAgentReasoningEffort::Minimal,
-        SubAgentReasoningEffort::Low,
-        SubAgentReasoningEffort::Medium,
-        SubAgentReasoningEffort::High,
-        SubAgentReasoningEffort::XHigh,
-        SubAgentReasoningEffort::Max,
-    ]
-    .into_iter()
-    .collect()
-}
-
-fn sub_agent_reasoning_effort(effort: ProviderReasoningEffort) -> Option<SubAgentReasoningEffort> {
-    match effort {
-        ProviderReasoningEffort::None => Some(SubAgentReasoningEffort::None),
-        ProviderReasoningEffort::Minimal => Some(SubAgentReasoningEffort::Minimal),
-        ProviderReasoningEffort::Low => Some(SubAgentReasoningEffort::Low),
-        ProviderReasoningEffort::Medium => Some(SubAgentReasoningEffort::Medium),
-        ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
-        ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
-        ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
-        ProviderReasoningEffort::Unknown => None,
-    }
-}
-
-fn sub_agent_reasoning_efforts(
-    efforts: &[ProviderReasoningEffort],
-) -> Vec<SubAgentReasoningEffort> {
-    efforts
+    catalog_efforts
         .iter()
-        .copied()
-        .filter_map(sub_agent_reasoning_effort)
+        .filter_map(|effort| match effort {
+            ProviderReasoningEffort::None => Some(SubAgentReasoningEffort::None),
+            ProviderReasoningEffort::Minimal => Some(SubAgentReasoningEffort::Minimal),
+            ProviderReasoningEffort::Low => Some(SubAgentReasoningEffort::Low),
+            ProviderReasoningEffort::Medium => Some(SubAgentReasoningEffort::Medium),
+            ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
+            ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
+            ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
+            ProviderReasoningEffort::Unknown => None,
+        })
         .collect()
 }
 
@@ -1057,25 +1015,11 @@ mod tests {
     }
 
     #[test]
-    fn effort_suggestions_fall_back_for_dynamic_models_and_providers() {
-        let luna = canonical_sub_agent_efforts(ProviderId::OpenAi, Some("gpt-5.6-luna"));
-        assert!(luna.contains(&SubAgentReasoningEffort::Max));
-        let copilot = canonical_sub_agent_efforts(ProviderId::Copilot, Some("gpt-5.3-codex"));
-        assert!(copilot.contains(&SubAgentReasoningEffort::XHigh));
-        assert!(!copilot.contains(&SubAgentReasoningEffort::Max));
+    fn effort_suggestions_fall_back_for_dynamic_models() {
         assert_eq!(
             canonical_sub_agent_efforts(ProviderId::Kiro, Some("gpt-5.6-luna")),
-            vec![
-                SubAgentReasoningEffort::Low,
-                SubAgentReasoningEffort::Medium,
-                SubAgentReasoningEffort::High,
-                SubAgentReasoningEffort::XHigh,
-                SubAgentReasoningEffort::Max,
-            ]
+            SubAgentReasoningEffort::ALL.to_vec()
         );
-        assert!(canonical_sub_agent_efforts(ProviderId::Gemini, Some("custom-model")).len() > 1);
-        assert!(canonical_sub_agent_efforts(ProviderId::DeepSeek, Some("custom-model")).len() > 1);
-        assert!(canonical_sub_agent_efforts(ProviderId::Local, Some("custom-model")).len() > 1);
     }
 
     #[test]
