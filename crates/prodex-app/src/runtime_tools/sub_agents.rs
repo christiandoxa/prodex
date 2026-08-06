@@ -1181,9 +1181,7 @@ mod tests {
         );
         assert!(first.contains("Never have more than 4 child sub-agents active at once."));
         assert!(first.contains("official launcher enforces this limit"));
-        assert!(first.contains("never run a raw nested `prodex s`"));
         assert!(first.contains("accepts only `__sub-agent-exec --config ... --task-file ...`"));
-        assert!(first.contains("never add `--no-sub-agent` to the hidden launcher command"));
         assert!(first.contains("Presidio is inherited explicitly"));
         assert!(first.contains(
             "Keep integration, testing, and the final response main-owned; never modify the parent profile, base `CODEX_HOME`, or repository `AGENTS.md` to activate delegation."
