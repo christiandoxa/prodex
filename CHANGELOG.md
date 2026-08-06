@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.389.0 - 2026-08-06
+
+### CLI
+
+- Trim effort fallback (`15b3a1c`)
+- Expose sub-agent effort choices (`83e97dd`)
+
 ## 0.388.0 - 2026-08-06
 
 ### Misc
@@ -113,19 +120,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close cross-platform CI regressions (`2d02ea8`)
-
-## 0.377.0 - 2026-08-01
-
-### Runtime
-
-- Make Windows runtime tests deterministic (`5cb36da`)
-
-### Misc
-
-- Synchronize cross-platform log reads (`c52403a`)
-- Make auto-redeem selection deterministic (`ebd9c44`)
-- Eliminate Windows test stalls (`d716574`)
-- Finish Windows test portability (`7d440ec`)
-- Complete Windows CI portability (`c79b524`)
-- Close audited cross-platform quality gaps (`a8320e5`)
-- Close audited reliability gaps (`805983d`)
