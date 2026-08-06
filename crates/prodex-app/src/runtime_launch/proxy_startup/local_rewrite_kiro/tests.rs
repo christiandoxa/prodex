@@ -602,6 +602,35 @@ fn kiro_responses_request_rejects_unenforceable_generation_control() {
 }
 
 #[test]
+fn kiro_sub_agent_request_removes_external_tool_controls() {
+    let result = super::request_validation::runtime_kiro_request_body_for_endpoint_with_sub_agent(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "model": "claude-sonnet-4.5",
+            "input": "inspect the repository",
+            "parallel_tool_calls": true,
+            "tool_choice": "auto",
+            "tools": [{"type": "function", "name": "shell"}],
+            "web_search_options": {}
+        }))
+        .unwrap(),
+        true,
+    );
+    let Ok(body) = result else {
+        panic!("sub-agent Kiro request should let ACP own tools");
+    };
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    for field in [
+        "parallel_tool_calls",
+        "tool_choice",
+        "tools",
+        "web_search_options",
+    ] {
+        assert!(value.get(field).is_none(), "{field}");
+    }
+}
+
+#[test]
 fn kiro_semantic_compact_summary_uses_acp_turn() {
     let root = std::env::temp_dir().join(format!(
         "prodex-kiro-compact-test-{}",
