@@ -602,6 +602,29 @@ fn kiro_responses_request_rejects_unenforceable_generation_control() {
 }
 
 #[test]
+fn kiro_parent_request_removes_external_tool_declarations() {
+    let result = runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "model": "claude-sonnet-4.5",
+            "input": "inspect the repository",
+            "tools": [{"type": "function", "name": "shell"}],
+            "functions": [{"name": "shell"}],
+            "parallel_tool_calls": true,
+            "tool_choice": "auto"
+        }))
+        .unwrap(),
+    );
+    let Ok(result) = result else {
+        panic!("parent Kiro request should let ACP own tools");
+    };
+    let value: Value = serde_json::from_slice(&result).unwrap();
+    for field in ["tools", "functions"] {
+        assert!(value.get(field).is_none(), "{field}");
+    }
+}
+
+#[test]
 fn kiro_sub_agent_request_removes_external_tool_controls() {
     let result = super::request_validation::runtime_kiro_request_body_for_endpoint_with_sub_agent(
         ProviderEndpoint::Responses,
@@ -611,6 +634,8 @@ fn kiro_sub_agent_request_removes_external_tool_controls() {
             "parallel_tool_calls": true,
             "tool_choice": "auto",
             "tools": [{"type": "function", "name": "shell"}],
+            "functions": [{"name": "shell"}],
+            "function_call": "auto",
             "web_search_options": {}
         }))
         .unwrap(),
@@ -624,6 +649,8 @@ fn kiro_sub_agent_request_removes_external_tool_controls() {
         "parallel_tool_calls",
         "tool_choice",
         "tools",
+        "functions",
+        "function_call",
         "web_search_options",
     ] {
         assert!(value.get(field).is_none(), "{field}");

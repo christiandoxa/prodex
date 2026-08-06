@@ -41,11 +41,7 @@ fn runtime_kiro_request_body_for_endpoint_with_tool_ownership(
     body: Vec<u8>,
     sub_agent: bool,
 ) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    let body = if sub_agent {
-        strip_kiro_sub_agent_tool_controls(body)?
-    } else {
-        body
-    };
+    let body = strip_kiro_external_tool_controls(body, sub_agent)?;
     if endpoint == ProviderEndpoint::ChatCompletions {
         return prodex_provider_core::kiro_provider_core_chat_completions_request_body(&body)
             .map_err(|error| invalid_request(&error.message, &error.code));
@@ -69,8 +65,9 @@ fn runtime_kiro_request_body_for_endpoint_with_tool_ownership(
     }
 }
 
-fn strip_kiro_sub_agent_tool_controls(
+fn strip_kiro_external_tool_controls(
     body: Vec<u8>,
+    sub_agent: bool,
 ) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
     let mut value: Value = serde_json::from_slice(&body)
         .map_err(|_| invalid_request("Kiro request body must be valid JSON", "invalid_json"))?;
@@ -80,17 +77,25 @@ fn strip_kiro_sub_agent_tool_controls(
             "invalid_request_body",
         ));
     };
-    for field in [
-        "parallel_tool_calls",
-        "tool_choice",
-        "tools",
-        "web_search_options",
-    ] {
-        object.remove(field);
+    let fields = if sub_agent {
+        [
+            "parallel_tool_calls",
+            "tool_choice",
+            "tools",
+            "functions",
+            "function_call",
+            "web_search_options",
+        ]
+        .as_slice()
+    } else {
+        ["tools", "functions"].as_slice()
+    };
+    for field in fields {
+        object.remove(*field);
     }
     serde_json::to_vec(&value).map_err(|_| {
         invalid_request(
-            "failed to serialize rewritten Kiro sub-agent request body",
+            "failed to serialize rewritten Kiro request body",
             "invalid_request_body",
         )
     })
