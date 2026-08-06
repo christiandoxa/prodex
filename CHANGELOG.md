@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.386.0 - 2026-08-06
+
+### CLI
+
+- Harden child and Kiro process cleanup (`9897913`)
+- Keep launcher guidance within size guard (`b764e44`)
+- Clarify child launcher contract (`33cd4f3`)
+
 ## 0.385.0 - 2026-08-06
 
 ### Runtime
@@ -134,9 +142,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Durable governance invalidation (`871a208`)
 - Preserve committed mutation success (`e536986`)
 - Close audited CLI and CI gaps (`cb3151f`)
-
-## 0.374.0 - 2026-07-31
-
-### Misc
-
-- Make revision publication atomic (`b4f1ade`)
