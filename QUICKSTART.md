@@ -149,7 +149,7 @@ prodex s 00000000-0000-7000-8000-000000000042 --presidio --sub-agent \
 
 Interactive order is Presidio, main-agent provider, required main-provider
 configuration, sub-agent opt-in, then child provider, local URL when needed,
-model, catalog-backed effort, and maximum active children. Explicit
+model, catalog-backed or standard effort, and maximum active children. Explicit
 `--sub-agent` skips that child wizard and uses OpenAI/provider defaults.
 
 The default maximum is 4; presets are 4, 8, 16, and 32; custom values accept 1
