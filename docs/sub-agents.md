@@ -58,7 +58,7 @@ A session with recorded provider affinity stays bound to that parent provider. A
 | --- | --- |
 | `--sub-agent-provider PROVIDER` | Defaults to OpenAI. Aliases resolve through the canonical provider registry. |
 | `--sub-agent-model MODEL` | Optional nonempty model ID. Catalog entries are suggestions, not an allowlist. |
-| `--sub-agent-model-reasoning-effort EFFORT` | Optional catalog-validated effort. Known models expose only their declared efforts. |
+| `--sub-agent-model-reasoning-effort EFFORT` | Optional effort. Known models use declared efforts; dynamic or custom models use provider or standard choices. |
 | `--sub-agent-url URL` | Credential-free absolute HTTP(S) URL, valid only for a local child provider. |
 | `--sub-agent-max-concurrency VALUE` | Maximum simultaneously active official child processes. Accepts `default` or an integer from 1 through 64. |
 

@@ -467,7 +467,7 @@ prodex s 00000000-0000-7000-8000-000000000042 \
 
 Interactive fresh-launch order is Presidio, main-agent provider, required main
 provider configuration, sub-agent opt-in, then child provider, local URL when
-needed, model, catalog-backed effort, and maximum active sub-agents. Answering
+needed, model, catalog-backed or standard effort, and maximum active sub-agents. Answering
 no skips every child screen. Explicit parent or child values skip their screens;
 non-TTY launches never open a TUI.
 
