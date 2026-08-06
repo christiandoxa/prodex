@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.387.0 - 2026-08-06
+
+### Misc
+
+- Strip parent external tools (`1e46eb6`)
+
 ## 0.386.0 - 2026-08-06
 
 ### CLI
@@ -121,24 +127,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.376.0 - 2026-07-31
 
 - No grouped changes.
-
-## 0.375.0 - 2026-07-31
-
-### Runtime
-
-- Finish gateway module splits (`5fa71c0`)
-- Preserve Gemini blocked response metadata (`0711553`)
-- Satisfy Gemini Clippy checks (`f98d478`)
-- Satisfy core clippy lints (`41d62be`)
-
-### CLI
-
-- Pass Windows descriptor pointer (`cded4b1`)
-
-### Misc
-
-- Latch poisoned audit writer (`7274d89`)
-- Recover postcommit audits (`e1e6758`)
-- Durable governance invalidation (`871a208`)
-- Preserve committed mutation success (`e536986`)
-- Close audited CLI and CI gaps (`cb3151f`)
