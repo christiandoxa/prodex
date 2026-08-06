@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.146.0 release",
+      "baseline_source": "openai/codex rust-v0.146.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1278,7 +1278,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.146.0",
+      "tested_codex_release": "rust-v0.146.1",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1295,19 +1295,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.146.0",
-      "name": "0.146.0",
-      "published_at": "2026-07-29T01:42:51Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.146.0",
+      "tag_name": "rust-v0.146.1",
+      "name": "0.146.1",
+      "published_at": "2026-08-05T15:55:06Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.146.1",
       "body_head": [
-        "## New Features",
-        "- Name new sessions with `/new` or `/clear`, pin important threads, and switch between side conversations without closing them. (#34605, #34840, #35011)",
-        "- Support Agent Plugins manifests, workspace plugin publishing, and additional plugin marketplaces for Amazon Bedrock and Claude Code. (#35105, #35254, #34931, #34979)",
-        "- Fork threads with paginated history, including temporary forks that do not appear in thread listings. (#35220, #35251)",
-        "- Connect app-server to remote Code Mode hosts over WebSocket. (#35078, #35098)",
-        "- Enable standalone web search for compatible custom model providers. (#34846)",
-        "- Discover executor-provided skills and securely read their associated resources, including explicitly selected skills. (#35184, #35198)",
-        "## Bug Fixes"
+        "## Bug Fixes",
+        "- Apply safer automatic-review defaults for cyber-capable models and explain permission changes in the terminal interface. (#37057)",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.146.0...rust-v0.146.1",
+        "- #37057 [0.146] Backport safer cyber-model auto-review defaults @anp-oai"
       ]
     }
   },
