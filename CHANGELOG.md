@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.388.0 - 2026-08-06
+
+### Misc
+
+- Reuse native CLI credentials (`ccf5f27`)
+
 ## 0.387.0 - 2026-08-06
 
 ### Misc
@@ -123,7 +129,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Complete Windows CI portability (`c79b524`)
 - Close audited cross-platform quality gaps (`a8320e5`)
 - Close audited reliability gaps (`805983d`)
-
-## 0.376.0 - 2026-07-31
-
-- No grouped changes.
