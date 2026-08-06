@@ -37,7 +37,7 @@ const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
 mod keychain;
 mod runtime_auth;
 pub(crate) use self::runtime_auth::resolve_copilot_runtime_api_auth;
-use keychain::{read_copilot_keychain_token, read_copilot_libsecret_token};
+use keychain::{read_copilot_keychain_token, read_copilot_libsecret_token, read_copilot_sdk_token};
 
 struct CopilotImportContext {
     host: String,
@@ -331,6 +331,7 @@ fn resolve_copilot_account_token_from_config(
     copilot_token_from_config(config, host, login)
         .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
         .or_else(|| read_copilot_libsecret_token(&account_key).ok().flatten())
+        .or_else(|| read_copilot_sdk_token(host, login).ok().flatten())
         .context(format!(
             "failed to resolve the stored Copilot token for {} from config or keychain",
             account_key
