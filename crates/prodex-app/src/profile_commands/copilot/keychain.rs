@@ -43,10 +43,55 @@ keytar.getPassword(process.argv[2], process.argv[3]).then(
     Ok((!token.is_empty()).then_some(token))
 }
 
-/// Read a Copilot OAuth token from GNOME keyring via `secret-tool` (libsecret).
+/// Ask the installed Copilot SDK for credentials stored by the current CLI.
 ///
-/// Copilot CLI v1.0.65+ stores OAuth tokens through the `rust-keyring` crate,
-/// which writes into the system keyring (GNOME keyring on Linux via libsecret).
+/// Recent Copilot CLI releases keep OAuth tokens behind their native vault
+/// implementation. The SDK is the supported boundary for reading that vault;
+/// reimplementing its platform-specific storage here would be both brittle and
+/// unsafe.
+pub(super) fn read_copilot_sdk_token(host: &str, login: &str) -> Result<Option<String>> {
+    let sdk_path = discover_copilot_sdk_path()?;
+    let copilot_bin = prodex_core::resolve_binary_path(&crate::copilot_bin())
+        .context("failed to locate the Copilot CLI executable")?;
+    let node_script = r#"
+const { CopilotClient, RuntimeConnection } = await import(process.argv[1]);
+const client = new CopilotClient({
+  connection: RuntimeConnection.forStdio({ path: process.argv[2] }),
+  logLevel: "none",
+});
+try {
+  await client.start();
+  const users = await client.rpc.account.getAllUsers();
+  const normalizeHost = value => String(value || "").replace(/\/+$/, "").toLowerCase();
+  const host = normalizeHost(process.argv[3]);
+  const login = process.argv[4];
+  const user = users.find(({ authInfo }) =>
+    normalizeHost(authInfo?.host) === host && authInfo?.login === login
+  );
+  const token = typeof user?.token === "string" ? user.token.trim() : "";
+  if (token) process.stdout.write(token);
+} finally {
+  try { await client.stop(); } catch {}
+}
+"#;
+    let output = Command::new("node")
+        .arg("--input-type=module")
+        .arg("-e")
+        .arg(node_script)
+        .arg(&sdk_path)
+        .arg(copilot_bin)
+        .arg(host)
+        .arg(login)
+        .output()
+        .context("failed to execute the Copilot SDK")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!token.is_empty()).then_some(token))
+}
+
+/// Read legacy Copilot OAuth entries from GNOME keyring via `secret-tool`.
 pub(super) fn read_copilot_libsecret_token(account_key: &str) -> Result<Option<String>> {
     match Command::new("secret-tool")
         .arg("lookup")
@@ -106,7 +151,7 @@ fn discover_copilot_keytar_path() -> Result<PathBuf> {
                 continue;
             }
             let keytar_path = path.join(&keytar_suffix);
-            if !copilot_keytar_path_is_regular_file(&path, &keytar_suffix) {
+            if !copilot_path_is_regular_file(&path, &keytar_suffix) {
                 continue;
             }
             let version = path
@@ -131,9 +176,42 @@ fn copilot_path_is_regular_dir(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn copilot_keytar_path_is_regular_file(version_dir: &Path, keytar_suffix: &Path) -> bool {
+fn discover_copilot_sdk_path() -> Result<PathBuf> {
+    let sdk_suffix = PathBuf::from("copilot-sdk").join("index.js");
+    let mut candidates = Vec::new();
+    for root in copilot_package_roots()? {
+        if !root.exists() {
+            continue;
+        }
+        for entry in
+            fs::read_dir(&root).with_context(|| format!("failed to read {}", root.display()))?
+        {
+            let entry = entry.with_context(|| format!("failed to read {}", root.display()))?;
+            let path = entry.path();
+            if !copilot_path_is_regular_dir(&path)
+                || !copilot_path_is_regular_file(&path, &sdk_suffix)
+            {
+                continue;
+            }
+            let version = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(parse_copilot_version)
+                .unwrap_or((0, 0, 0));
+            candidates.push((version, path.join(&sdk_suffix)));
+        }
+    }
+
+    candidates.sort_by_key(|(version, _)| *version);
+    candidates
+        .pop()
+        .map(|(_, path)| path)
+        .context("failed to locate the Copilot CLI SDK")
+}
+
+fn copilot_path_is_regular_file(version_dir: &Path, file_suffix: &Path) -> bool {
     let mut current = version_dir.to_path_buf();
-    for component in keytar_suffix.components() {
+    for component in file_suffix.components() {
         current.push(component.as_os_str());
         if fs::symlink_metadata(&current)
             .map(|metadata| metadata.file_type().is_symlink())
@@ -142,7 +220,7 @@ fn copilot_keytar_path_is_regular_file(version_dir: &Path, keytar_suffix: &Path)
             return false;
         }
     }
-    fs::symlink_metadata(version_dir.join(keytar_suffix))
+    fs::symlink_metadata(version_dir.join(file_suffix))
         .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
         .unwrap_or(false)
 }
@@ -253,5 +331,23 @@ mod tests {
         std::os::unix::fs::symlink(&outside_prebuilds, version_dir.join("prebuilds")).unwrap();
 
         assert!(discover_copilot_keytar_path().is_err());
+    }
+
+    #[test]
+    fn copilot_sdk_discovery_accepts_the_native_sdk_entrypoint() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root = temp_dir("sdk-entrypoint");
+        let _env = isolate_copilot_env(&root);
+        let sdk_path = root
+            .join("copilot-cache")
+            .join("pkg")
+            .join(copilot_platform_label())
+            .join("1.0.78")
+            .join("copilot-sdk")
+            .join("index.js");
+        fs::create_dir_all(sdk_path.parent().unwrap()).unwrap();
+        fs::write(&sdk_path, "export {};").unwrap();
+
+        assert_eq!(discover_copilot_sdk_path().unwrap(), sdk_path);
     }
 }
