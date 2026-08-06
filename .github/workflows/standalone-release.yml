@@ -18,6 +18,7 @@ env:
   CARGO_HTTP_MULTIPLEXING: "false"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
+  KIRO_CLI_VERSION: "2.16.1"
 
 jobs:
   verify-ci:
@@ -303,6 +304,8 @@ jobs:
           echo "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
           echo "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
           echo "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
+          kiro_manifest_version="$(curl --proto '=https' --tlsv1.2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          test "${kiro_manifest_version}" = "${KIRO_CLI_VERSION}"
           bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
           VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
           bash "${RUNNER_TEMP}/claude-install.sh" 2.1.220
@@ -318,6 +321,8 @@ jobs:
             command -v "${command}"
             "${command}" --version
           done
+          kiro_version="$(kiro-cli --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          test "${kiro_version}" = "${KIRO_CLI_VERSION}"
           gemini --help > "${RUNNER_TEMP}/gemini-help.txt"
           grep -q -- "--yolo" "${RUNNER_TEMP}/gemini-help.txt"
           kiro-cli-chat chat --help > "${RUNNER_TEMP}/kiro-help.txt"
@@ -342,6 +347,53 @@ jobs:
           for name in ("gemini", "kiro", "copilot", "claude"):
               assert rows[name]["status"] == "available", rows[name]
           PY
+          copilot --model gpt-5.6-luna --effort max --help > "${RUNNER_TEMP}/copilot-luna-help.txt"
+          grep -q -- "GitHub Copilot CLI" "${RUNNER_TEMP}/copilot-luna-help.txt"
+          smoke_root="${RUNNER_TEMP}/prodex-sub-agent-smoke"
+          stub="${smoke_root}/stub-child"
+          mkdir -p "${smoke_root}"
+          cat > "${stub}" <<'SH'
+          #!/bin/sh
+          set -eu
+          printf '%s\n' "$@" > "${PRODEX_STUB_ARGS}"
+          printf '%s\n' "${PRODEX_SUB_AGENT:-}" > "${PRODEX_STUB_MARKER}"
+          SH
+          chmod 0755 "${stub}"
+          for provider in kiro copilot; do
+            provider_root="${smoke_root}/${provider}"
+            mkdir -p "${provider_root}/tasks" "${provider_root}/slots"
+            : > "${provider_root}/slots/slot-00.lock"
+            printf '%s\n' "credential-free launcher smoke" > "${provider_root}/tasks/task.txt"
+            SMOKE_PROVIDER_ROOT="${provider_root}" SMOKE_STUB="${stub}" SMOKE_PROVIDER="${provider}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["SMOKE_PROVIDER_ROOT"])
+          spec = {
+              "executable": os.environ["SMOKE_STUB"],
+              "provider": os.environ["SMOKE_PROVIDER"],
+              "model": "gpt-5.6-luna",
+              "effort": "max",
+              "local-url": None,
+              "presidio-enabled": False,
+              "max-concurrency": {"value": 1, "source": "custom"},
+              "slot-dir": str(root / "slots"),
+              "task-dir": str(root / "tasks"),
+              "task-max-bytes": 65536,
+              "recursion-marker": "PRODEX_SUB_AGENT",
+          }
+          (root / "config.json").write_text(json.dumps(spec), encoding="utf-8")
+          PY
+            PRODEX_STUB_ARGS="${provider_root}/args.txt" PRODEX_STUB_MARKER="${provider_root}/marker.txt" PRODEX_HOME="${provider_root}/home" "${prodex_binary}" __sub-agent-exec --config "${provider_root}/config.json" --task-file "${provider_root}/tasks/task.txt"
+            test ! -e "${provider_root}/tasks/task.txt"
+            grep -Fxq -- "s" "${provider_root}/args.txt"
+            grep -Fxq -- "--no-sub-agent" "${provider_root}/args.txt"
+            grep -Fxq -- "${provider}" "${provider_root}/args.txt"
+            grep -Fxq -- "gpt-5.6-luna" "${provider_root}/args.txt"
+            grep -Fxq -- "max" "${provider_root}/args.txt"
+            grep -Fxq -- "1" "${provider_root}/marker.txt"
+          done
           PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true "${prodex_binary}" s gemini --cli agy --no-presidio
           if PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true "${prodex_binary}" s gemini --cli agy --presidio 2> "${RUNNER_TEMP}/presidio-error.txt"; then
             echo "native Antigravity unexpectedly accepted --presidio" >&2
