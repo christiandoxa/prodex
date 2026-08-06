@@ -59,6 +59,9 @@ fn runtime_patch_openai_spark_models_response(
         })
         .or_else(|| models.first().cloned())
     {
+        if let Some(object) = model.as_object_mut() {
+            object.remove("model_specialty");
+        }
         runtime_patch_openai_spark_model_entry(&mut model);
         models.push(model);
     }
@@ -161,7 +164,8 @@ mod tests {
                 "context_window": 272000,
                 "max_context_window": 1000000,
                 "auto_compact_token_limit": null,
-                "effective_context_window_percent": 95
+                "effective_context_window_percent": 95,
+                "model_specialty": "cyber"
             }]
         })));
         let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
@@ -176,6 +180,8 @@ mod tests {
         assert_eq!(spark["context_window"], 128_000);
         assert_eq!(spark["max_context_window"], 128_000);
         assert_eq!(spark["auto_compact_token_limit"], 115_200);
+        assert!(spark.get("model_specialty").is_none());
+        assert_eq!(value["models"][0]["model_specialty"], "cyber");
     }
 
     #[test]
