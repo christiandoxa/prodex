@@ -391,7 +391,7 @@ jobs:
             grep -Fxq -- "--no-sub-agent" "${provider_root}/args.txt"
             grep -Fxq -- "${provider}" "${provider_root}/args.txt"
             grep -Fxq -- "gpt-5.6-luna" "${provider_root}/args.txt"
-            grep -Fxq -- "max" "${provider_root}/args.txt"
+            grep -Fxq -- "model_reasoning_effort=max" "${provider_root}/args.txt"
             grep -Fxq -- "1" "${provider_root}/marker.txt"
           done
           PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true "${prodex_binary}" s gemini --cli agy --no-presidio
