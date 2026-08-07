@@ -36,6 +36,22 @@ pub(super) fn runtime_websocket_error_log_value(error: &str) -> String {
     redaction_redact_secret_like_text(error).replace('\n', " ")
 }
 
+fn runtime_websocket_local_disconnect_error(error: &WsError) -> bool {
+    match error {
+        WsError::ConnectionClosed | WsError::AlreadyClosed => true,
+        WsError::Io(error) => matches!(
+            error.kind(),
+            io::ErrorKind::BrokenPipe
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::UnexpectedEof
+        ),
+        WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => true,
+        _ => false,
+    }
+}
+
 pub(super) fn run_runtime_proxy_websocket_session(
     session_id: u64,
     local_socket: &mut RuntimeLocalWebSocket,
@@ -124,9 +140,26 @@ pub(super) fn run_runtime_proxy_websocket_session(
                 break;
             }
             Err(err) => {
+                if runtime_websocket_local_disconnect_error(&err) {
+                    runtime_proxy_log(
+                        shared,
+                        format!("websocket_session={session_id} local_connection_closed"),
+                    );
+                    websocket_session.close();
+                    break;
+                }
                 runtime_proxy_log(
                     shared,
-                    format!("websocket_session={session_id} local_read_error={err}"),
+                    runtime_proxy_structured_log_message(
+                        "local_read_error",
+                        [
+                            runtime_proxy_log_field("websocket_session", session_id.to_string()),
+                            runtime_proxy_log_field(
+                                "error",
+                                runtime_websocket_error_log_value(&err.to_string()),
+                            ),
+                        ],
+                    ),
                 );
                 websocket_session.close();
                 return Err(anyhow::anyhow!(
@@ -569,6 +602,19 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("websocket-token"));
         assert!(!message.contains("websocket-key"));
+    }
+
+    #[test]
+    fn local_disconnect_errors_are_not_reported_as_session_failures() {
+        assert!(runtime_websocket_local_disconnect_error(
+            &WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)
+        ));
+        assert!(runtime_websocket_local_disconnect_error(&WsError::Io(
+            io::Error::from(io::ErrorKind::ConnectionReset),
+        )));
+        assert!(!runtime_websocket_local_disconnect_error(
+            &WsError::Protocol(tungstenite::error::ProtocolError::WrongHttpMethod,)
+        ));
     }
 
     #[test]

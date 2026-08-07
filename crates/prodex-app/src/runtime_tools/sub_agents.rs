@@ -20,6 +20,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
+const SUB_AGENT_LAUNCHER_MARKER: &str = "PRODEX_SUB_AGENT_LAUNCHER";
 const SUB_AGENTS_FILE: &str = "SUB_AGENTS.md";
 const SUB_AGENT_CONFIG_FILE: &str = "sub-agent-launch.json";
 const SUB_AGENT_TASK_DIR: &str = "sub-agent-tasks";
@@ -367,6 +368,15 @@ fn create_private_directory(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Result<()> {
+    if matches!(
+        sub_agent_recursion_policy(),
+        SubAgentRecursionPolicy::Disabled
+    ) && env::var_os(SUB_AGENT_LAUNCHER_MARKER).as_deref() != Some(OsStr::new("1"))
+    {
+        bail!(
+            "hidden sub-agent launcher cannot be invoked recursively while {SUB_AGENT_RECURSION_MARKER} is set"
+        );
+    }
     let config = read_bounded_utf8(&args.config, 65_536, "sub-agent launcher config")?;
     let spec: ChildLaunchSpec =
         serde_json::from_str(&config).context("invalid sub-agent launcher config")?;
@@ -409,7 +419,7 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
         ));
     }
     if !outcome.status.success() {
-        let code = outcome.status.code().unwrap_or(1);
+        let code = sub_agent_child_exit_code(&outcome.status);
         return Err(crate::command_dispatch::command_exit_error(
             code,
             if outcome.output_incomplete {
@@ -422,7 +432,27 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
     if outcome.output_incomplete {
         bail!("sub-agent child output collection failed");
     }
+    if outcome.output_bytes == 0 {
+        bail!("sub-agent child completed without output");
+    }
     Ok(())
+}
+
+fn sub_agent_child_exit_code(status: &std::process::ExitStatus) -> i32 {
+    status
+        .code()
+        .or_else(|| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                status.signal().map(|signal| 128 + signal)
+            }
+            #[cfg(not(unix))]
+            {
+                None
+            }
+        })
+        .unwrap_or(1)
 }
 
 fn read_bounded_utf8(path: &Path, max_bytes: usize, label: &str) -> Result<String> {
@@ -542,6 +572,7 @@ struct SubAgentChildOutcome {
     status: std::process::ExitStatus,
     cancelled: bool,
     output_incomplete: bool,
+    output_bytes: u64,
 }
 
 async fn run_child(
@@ -553,6 +584,7 @@ async fn run_child(
     command
         .args(child_argv(spec, task))
         .env(SUB_AGENT_RECURSION_MARKER, "1")
+        .env_remove(SUB_AGENT_LAUNCHER_MARKER)
         .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -580,25 +612,26 @@ async fn run_child(
                 .context("failed to reap cancelled sub-agent child")?
         }
     };
-    let output_incomplete = drain_child_output_tasks(stdout_task, stderr_task)
-        .await
-        .is_err();
+    let output = drain_child_output_tasks(stdout_task, stderr_task).await;
+    let output_incomplete = output.is_err();
+    let output_bytes = output.unwrap_or_default();
     Ok(SubAgentChildOutcome {
         status,
         cancelled,
         output_incomplete,
+        output_bytes,
     })
 }
 
 async fn drain_child_output_tasks(
-    mut stdout_task: tokio::task::JoinHandle<io::Result<()>>,
-    mut stderr_task: tokio::task::JoinHandle<io::Result<()>>,
-) -> Result<()> {
+    mut stdout_task: tokio::task::JoinHandle<io::Result<u64>>,
+    mut stderr_task: tokio::task::JoinHandle<io::Result<u64>>,
+) -> Result<u64> {
     let drained = tokio::time::timeout(SUB_AGENT_OUTPUT_DRAIN_TIMEOUT, async {
         let (stdout, stderr) = tokio::join!(&mut stdout_task, &mut stderr_task);
-        stdout.context("sub-agent stdout relay task failed")??;
-        stderr.context("sub-agent stderr relay task failed")??;
-        Ok::<_, anyhow::Error>(())
+        let stdout = stdout.context("sub-agent stdout relay task failed")??;
+        let stderr = stderr.context("sub-agent stderr relay task failed")??;
+        Ok::<_, anyhow::Error>(stdout.saturating_add(stderr))
     })
     .await;
     match drained {
@@ -617,7 +650,7 @@ async fn drain_child_output_tasks(
     }
 }
 
-async fn relay_child_output<R, W>(mut reader: R, mut writer: W) -> io::Result<()>
+async fn relay_child_output<R, W>(mut reader: R, mut writer: W) -> io::Result<u64>
 where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -625,11 +658,13 @@ where
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut buffer = [0_u8; 8_192];
     let mut write_error = None;
+    let mut bytes_read = 0_u64;
     loop {
         let read = reader.read(&mut buffer).await?;
         if read == 0 {
             break;
         }
+        bytes_read = bytes_read.saturating_add(read as u64);
         if write_error.is_none()
             && let Err(error) = writer.write_all(&buffer[..read]).await
         {
@@ -639,7 +674,7 @@ where
     if let Some(error) = write_error {
         Err(error)
     } else {
-        writer.flush().await
+        writer.flush().await.map(|()| bytes_read)
     }
 }
 
@@ -671,6 +706,16 @@ pub(crate) fn apply_sub_agent_recursion_marker(
         *value = OsString::from("1");
     } else {
         child.extra_env.push((key, OsString::from("1")));
+    }
+    let launcher_key = OsString::from(SUB_AGENT_LAUNCHER_MARKER);
+    if let Some((_, value)) = child
+        .extra_env
+        .iter_mut()
+        .find(|(name, _)| name == &launcher_key)
+    {
+        *value = OsString::from("1");
+    } else {
+        child.extra_env.push((launcher_key, OsString::from("1")));
     }
 }
 
@@ -902,6 +947,21 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::*;
     use prodex_cli::SubAgentConcurrencySource;
+
+    #[cfg(unix)]
+    #[test]
+    fn child_exit_code_preserves_signal_status() {
+        use std::os::unix::process::ExitStatusExt;
+
+        assert_eq!(
+            sub_agent_child_exit_code(&std::process::ExitStatus::from_raw(9)),
+            137
+        );
+        assert_eq!(
+            sub_agent_child_exit_code(&std::process::ExitStatus::from_raw(7 << 8)),
+            7
+        );
+    }
 
     fn temp_test_root(label: &str) -> PathBuf {
         env::temp_dir().join(format!(
@@ -1351,7 +1411,13 @@ mod tests {
                 .map(|(_, value)| value.as_os_str()),
             Some(std::ffi::OsStr::new("1"))
         );
-        assert_eq!(child.extra_env.len(), 1);
+        assert!(
+            child
+                .extra_env
+                .iter()
+                .any(|(name, value)| name == SUB_AGENT_LAUNCHER_MARKER && value == "1")
+        );
+        assert_eq!(child.extra_env.len(), 2);
         std::fs::remove_dir_all(root).unwrap();
     }
 
