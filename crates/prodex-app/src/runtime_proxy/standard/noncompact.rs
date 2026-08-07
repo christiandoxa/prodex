@@ -232,7 +232,6 @@ fn run_runtime_noncompact_standard_loop(
             &mut *loop_state,
             session_profile.is_some(),
             session_profile.as_deref(),
-            session_profile.as_deref() == Some(candidate_name.as_str()),
         )? {
             continue;
         }
@@ -335,8 +334,8 @@ fn runtime_noncompact_candidate_saturated(
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
     continuation: bool,
     wait_affinity_owner: Option<&str>,
-    hard_affinity: bool,
 ) -> Result<bool> {
+    let hard_affinity = wait_affinity_owner == Some(candidate_name);
     if hard_affinity
         || !runtime_profile_inflight_hard_limited_for_context(
             shared,
