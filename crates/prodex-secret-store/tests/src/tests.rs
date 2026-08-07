@@ -2,8 +2,8 @@ use crate::{
     FileSecretBackend, KeyringSecretBackend, RefreshLeaseBypassReason, RefreshLeaseCoordinator,
     RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
     SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
-    SecretStoreErrorStatus, SecretValue, auth_json_location, auth_json_path,
-    decrypt_private_payload, encrypt_private_payload, ensure_private_directory,
+    SecretStoreErrorStatus, SecretValue, allow_insecure_file_access, auth_json_location,
+    auth_json_path, decrypt_private_payload, encrypt_private_payload, ensure_private_directory,
     plan_refresh_lease_error_response, plan_secret_error_response, read_private_file_bounded,
     write_private_file_atomic,
 };
@@ -415,6 +415,42 @@ fn file_backend_rejects_non_private_file_and_parent_modes() {
     ));
     assert!(!path.exists());
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn insecure_file_access_bypasses_private_mode_checks_only_while_guarded() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = temp_dir("insecure-mode-validation");
+    let path = root.join("auth.json");
+    fs::write(&path, "trusted test secret").unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    assert!(store.read_text(&location).is_err());
+    {
+        let _guard = allow_insecure_file_access();
+        assert_eq!(
+            store.read_text(&location).unwrap().as_deref(),
+            Some("trusted test secret")
+        );
+    }
+    assert!(store.read_text(&location).is_err());
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
+    assert!(store.read_text(&location).is_err());
+    {
+        let _guard = allow_insecure_file_access();
+        assert_eq!(
+            store.read_text(&location).unwrap().as_deref(),
+            Some("trusted test secret")
+        );
+    }
+
     let _ = fs::remove_dir_all(root);
 }
 

@@ -276,7 +276,7 @@ pub(super) fn runtime_kiro_stream_notification(
                 tool_activities,
                 tool_call_id,
                 Some(title.as_str()),
-                Some(status.as_str()),
+                status.as_deref(),
                 kind.as_deref(),
                 true,
                 raw_input.is_some()

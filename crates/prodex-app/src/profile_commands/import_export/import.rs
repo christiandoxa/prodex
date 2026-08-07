@@ -109,6 +109,7 @@ pub(crate) fn handle_import_current_profile(args: ImportCurrentArgs) -> Result<(
         copy_from: None,
         copy_current: true,
         activate: true,
+        insecure: args.insecure,
     })
 }
 

@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.146.1 release",
+      "baseline_source": "openai/codex rust-v0.147.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -141,19 +141,18 @@
             "\"slug\": \"gpt-5.6-luna\"",
             "\"context_window\": 272000",
             "\"max_context_window\": 272000",
-            "\"base_instructions\":",
+            "\"model_messages\":",
             "\"instructions_template\":"
           ]
         },
         {
           "path": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Owns remote compaction capability gating for model providers and Bedrock model ID constants. Prodex Gemini relies on the current OpenAI/Azure capability behavior, and Prodex Bedrock direct-launch docs/guards track the upstream static catalog contract.",
+          "reason": "Owns provider metadata and Bedrock model ID constants. Codex 0.147.0 moves remote-compaction capability gating into the provider runtime, while Prodex Gemini and Bedrock direct-launch compatibility depend on the resulting OpenAI/Azure behavior.",
           "required_contains": [
             "ModelProviderInfo",
-            "supports_remote_compaction",
             "supports_standalone_web_search",
-            "is_openai()",
-            "is_azure_responses_provider",
+            "pub fn is_openai",
+            "is_amazon_bedrock",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "openai.gpt-5.6-sol",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
@@ -164,10 +163,10 @@
         },
         {
           "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve the upstream GPT-5.6 Bedrock slugs, max reasoning effort, and default-only service-tier contract.",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve GPT-5.6 slugs, max reasoning effort, default-only service tiers, text-only web search, and multi-agent metadata.",
           "required_contains": [
             "static_model_catalog",
-            "with_default_only_service_tier",
+            "normalize_bedrock_catalog",
             "gpt_5_6_bedrock_model",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
@@ -176,13 +175,20 @@
             "Maximum reasoning depth for the hardest problems",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
-            "model.default_service_tier = None"
+            "model.default_service_tier = None",
+            "WebSearchToolType::Text",
+            "model.multi_agent_version"
           ]
         },
         {
           "path": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Owns the Codex model manager wiring for the static Amazon Bedrock catalog used by direct Bedrock launches.",
+          "reason": "Owns Codex provider capabilities and model-manager wiring for direct Bedrock launches. Codex 0.147.0 keeps remote-compaction support in ProviderCapabilities.",
           "required_contains": [
+            "RemoteCompactionSupport",
+            "ProviderCapabilities",
+            "remote_compaction",
+            "is_azure_responses_provider",
+            "RemoteCompactionSupport::V2",
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
             "openai.gpt-5.4",
@@ -403,7 +409,7 @@
         },
         {
           "path": "codex-rs/ext/web-search/src/extension.rs",
-          "reason": "Owns the Codex 0.146 custom-provider gate for standalone web search used by the governed OpenAI-through-Prodex provider.",
+          "reason": "Owns the Codex 0.147 custom-provider gate for standalone web search used by the governed OpenAI-through-Prodex provider.",
           "required_contains": [
             "WebSearchExtensionConfig",
             "supports_standalone_web_search",
@@ -893,14 +899,14 @@
         {
           "id": "model-provider.remote-compaction-capability",
           "kind": "capability_gate",
-          "file": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Gemini semantic compact depends on Codex continuing to expose remote compaction through the current OpenAI/Azure provider capability gate.",
+          "file": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Gemini semantic compact depends on Codex continuing to expose remote compaction through the provider-owned capability gate.",
           "file_contains_all": [
-            "ModelProviderInfo",
-            "supports_remote_compaction",
-            "supports_standalone_web_search",
-            "is_openai()",
-            "is_azure_responses_provider"
+            "RemoteCompactionSupport",
+            "ProviderCapabilities",
+            "remote_compaction",
+            "is_azure_responses_provider",
+            "RemoteCompactionSupport::V2"
           ]
         },
         {
@@ -914,7 +920,7 @@
             "\"slug\": \"gpt-5.6-luna\"",
             "\"context_window\": 272000",
             "\"max_context_window\": 272000",
-            "\"base_instructions\":",
+            "\"model_messages\":",
             "\"instructions_template\":"
           ]
         },
@@ -925,7 +931,7 @@
           "reason": "Codex 0.142.3 adds GPT-5.6 Sol/Terra/Luna Bedrock models by copying GPT-5.5 config, adding max reasoning effort, and keeping Bedrock service tiers default-only.",
           "file_contains_all": [
             "static_model_catalog",
-            "with_default_only_service_tier",
+            "normalize_bedrock_catalog",
             "gpt_5_6_bedrock_model",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
@@ -934,7 +940,9 @@
             "Maximum reasoning depth for the hardest problems",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
-            "model.default_service_tier = None"
+            "model.default_service_tier = None",
+            "WebSearchToolType::Text",
+            "model.multi_agent_version"
           ]
         },
         {
@@ -1278,7 +1286,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.146.1",
+      "tested_codex_release": "rust-v0.147.0",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1295,16 +1303,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.146.1",
-      "name": "0.146.1",
-      "published_at": "2026-08-05T15:55:06Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.146.1",
+      "tag_name": "rust-v0.147.0",
+      "name": "0.147.0",
+      "published_at": "2026-08-07T01:41:49Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.147.0",
       "body_head": [
-        "## Bug Fixes",
-        "- Apply safer automatic-review defaults for cyber-capable models and explain permission changes in the terminal interface. (#37057)",
-        "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.146.0...rust-v0.146.1",
-        "- #37057 [0.146] Backport safer cyber-model auto-review defaults @anp-oai"
+        "## New Features",
+        "- Install portable Agent Plugins and search across local, personal, workspace, and remote plugin catalogs. (#36544, #36409, #36919, #36796)",
+        "- Organize conversations into persistent, manually ordered sections and browse long transcripts incrementally. (#35722, #36007, #36380, #36948, #36950)",
+        "- Enable automatically reviewed approvals with the new `--approve-for-me` CLI flag. (#36373)",
+        "- Import Cursor-managed skills and synchronize changes to imported Claude and Cursor conversations without creating duplicates. (#36361, #36356, #35623)",
+        "- Support the opt-in MCP 2026-07-28 protocol, including paginated discovery, multi-round requests, and non-blocking server startup. (#35724, #35725, #35590, #35742)",
+        "- Enable cached web search and remote conversation compaction for Amazon Bedrock. (#36938, #36981)"
       ]
     }
   },

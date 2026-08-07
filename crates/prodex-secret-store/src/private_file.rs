@@ -10,6 +10,27 @@ use crate::secure_file::{self, FileSecurity};
 const PRIVATE_PAYLOAD_KEY_BYTES: usize = 32;
 const PRIVATE_PAYLOAD_NONCE_BYTES: usize = 12;
 
+/// Temporarily bypasses private-file ownership, permission, and ACL validation.
+///
+/// Path containment, symlink/reparse-point checks, regular-file checks, and size
+/// limits remain active. Keep this guard scoped to a trusted profile operation.
+pub struct InsecureFileAccessGuard {
+    previous: bool,
+}
+
+/// Enables insecure private-file access until the returned guard is dropped.
+pub fn allow_insecure_file_access() -> InsecureFileAccessGuard {
+    InsecureFileAccessGuard {
+        previous: secure_file::set_insecure_file_access(true),
+    }
+}
+
+impl Drop for InsecureFileAccessGuard {
+    fn drop(&mut self) {
+        secure_file::set_insecure_file_access(self.previous);
+    }
+}
+
 /// Creates or tightens a directory for current-user-private secret storage.
 pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
     secure_file::ensure_private_directory(path)

@@ -18,9 +18,11 @@ pub const CLI_PROFILE_AFTER_HELP: &str = "\
 Examples:
   prodex profile list
   prodex profile add main --activate
+  prodex profile add main --insecure
   prodex profile export
   prodex profile export backup.json
   prodex profile import backup.json
+  prodex profile import backup.json --insecure
   prodex profile import claude
   prodex profile import copilot
   prodex profile import kiro
@@ -30,6 +32,7 @@ Examples:
   prodex profile remove --all
 
 Notes:
+  `--insecure` bypasses local private-file permission and ACL validation; use it only with trusted files.
   `prodex profile import kiro` reads the installed Kiro CLI auth store and profile metadata.
   Prodex prefers `kiro-cli-chat`, falls back to `kiro-cli`, and accepts `PRODEX_KIRO_BIN` for an explicit path override.";
 pub const CLI_LOGIN_AFTER_HELP: &str = "\

@@ -8,5 +8,6 @@ pub(super) fn handle_copilot_login_import() -> Result<()> {
         path: PathBuf::from("copilot"),
         name: None,
         activate: false,
+        insecure: false,
     })
 }

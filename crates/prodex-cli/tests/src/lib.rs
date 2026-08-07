@@ -61,6 +61,34 @@ fn assert_same_runtime_tool_args(left: RuntimeToolArgs, right: RuntimeToolArgs) 
     );
     assert_eq!(left.codex_args, right.codex_args);
 }
+
+#[test]
+fn profile_lifecycle_commands_parse_insecure_flag() {
+    let Commands::Profile(ProfileCommands::Add(args)) =
+        parse_cli_command_from(["prodex", "profile", "add", "main", "--insecure"])
+            .expect("profile add should parse")
+    else {
+        panic!("expected profile add");
+    };
+    assert!(args.insecure);
+
+    let Commands::Profile(ProfileCommands::Import(args)) =
+        parse_cli_command_from(["prodex", "profile", "import", "backup.json", "--insecure"])
+            .expect("profile import should parse")
+    else {
+        panic!("expected profile import");
+    };
+    assert!(args.insecure);
+
+    let Commands::Profile(ProfileCommands::ImportCurrent(args)) =
+        parse_cli_command_from(["prodex", "profile", "import-current", "main", "--insecure"])
+            .expect("profile import-current should parse")
+    else {
+        panic!("expected profile import-current");
+    };
+    assert!(args.insecure);
+}
+
 #[test]
 fn presidio_commands_parse_as_top_level_commands() {
     let command = parse_cli_command_from(["prodex", "presidio", "doctor", "--json"])
