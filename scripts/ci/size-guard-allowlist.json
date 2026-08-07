@@ -281,8 +281,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1688,
-    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, shell-free child execution, process cleanup, recursion protection, and deterministic effective instruction injection form one audited launch-policy boundary."
+    "maxLines": 1754,
+    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, shell-free child execution, process cleanup, recursion protection, output validation, and deterministic effective instruction injection form one audited launch-policy boundary."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
