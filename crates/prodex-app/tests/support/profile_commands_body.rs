@@ -28,6 +28,7 @@ fn profile_add_and_remove_succeed_when_local_audit_persistence_fails() {
         copy_from: None,
         copy_current: false,
         activate: true,
+        insecure: false,
     })
     .expect("profile add should not fail after its state commit");
 

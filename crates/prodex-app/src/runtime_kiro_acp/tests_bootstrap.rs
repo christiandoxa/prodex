@@ -396,8 +396,25 @@ fn kiro_acp_parses_session_update_tool_call() {
         } => {
             assert_eq!(tool_call_id, "call_1");
             assert_eq!(title, "Read file");
-            assert_eq!(status, "in_progress");
+            assert_eq!(status.as_deref(), Some("in_progress"));
             assert_eq!(kind.as_deref(), Some("read"));
+        }
+        other => panic!("expected tool call, got {other:?}"),
+    }
+}
+
+#[test]
+fn kiro_acp_parses_tool_call_without_initial_status() {
+    let envelope = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess_abc123def456","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"Read file","kind":"read","rawInput":{"path":"/tmp/main.py"}}}}"#,
+    )
+    .expect("tool call envelope should parse without status");
+    let notification = envelope
+        .parse_session_notification()
+        .expect("tool call without status should parse");
+    match notification.update {
+        RuntimeKiroAcpSessionUpdate::ToolCall { status, .. } => {
+            assert_eq!(status, None);
         }
         other => panic!("expected tool call, got {other:?}"),
     }

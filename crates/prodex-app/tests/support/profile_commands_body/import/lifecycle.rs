@@ -165,6 +165,7 @@ fn profile_import_save_failure_rolls_back_existing_gemini_profile() {
         path: bundle_path,
         name: None,
         activate: false,
+        insecure: false,
     })
     .expect_err("state save failure should fail Gemini import");
 

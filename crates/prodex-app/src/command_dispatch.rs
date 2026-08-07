@@ -77,6 +77,8 @@ fn super_tail_requests_native_cli(args: &[std::ffi::OsString]) -> bool {
 }
 
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
+    let _insecure_file_access =
+        profile_command_requests_insecure(&command).then(secret_store::allow_insecure_file_access);
     if !command_is_native_dry_run(&command)
         && let Commands::Super(args) = &command
     {
@@ -139,6 +141,15 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::GeminiCompatRefresh(args) => handle_gemini_compat_refresh(args),
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
         Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
+    }
+}
+
+fn profile_command_requests_insecure(command: &Commands) -> bool {
+    match command {
+        Commands::Profile(ProfileCommands::Add(args)) => args.insecure,
+        Commands::Profile(ProfileCommands::Import(args)) => args.insecure,
+        Commands::Profile(ProfileCommands::ImportCurrent(args)) => args.insecure,
+        _ => false,
     }
 }
 

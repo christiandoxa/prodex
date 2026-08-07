@@ -943,6 +943,7 @@ fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
         path: bundle_path,
         name: None,
         activate: false,
+        insecure: false,
     })
     .expect_err("state save failure should fail import");
 
@@ -1015,6 +1016,7 @@ fn import_current_updates_existing_profile_token_for_duplicate_email() {
 
     handle_import_current_profile(ImportCurrentArgs {
         name: "duplicate".to_string(),
+        insecure: false,
     })
     .expect("import-current should update duplicate auth");
 

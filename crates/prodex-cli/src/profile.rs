@@ -37,6 +37,11 @@ pub struct AddProfileArgs {
     /// Make the new profile active after creation.
     #[arg(long)]
     pub activate: bool,
+    /// Bypass private-file permission and ACL validation for this operation.
+    ///
+    /// This is unsafe; use it only when the profile files are otherwise trusted.
+    #[arg(long)]
+    pub insecure: bool,
 }
 
 #[derive(Args, Debug)]
@@ -68,6 +73,11 @@ pub struct ImportProfileArgs {
     /// Activate the imported profile immediately when using a built-in source such as `claude`, `copilot`, or `kiro`.
     #[arg(long)]
     pub activate: bool,
+    /// Bypass private-file permission and ACL validation for this operation.
+    ///
+    /// This is unsafe; use it only when the profile files are otherwise trusted.
+    #[arg(long)]
+    pub insecure: bool,
 }
 
 #[derive(Args, Debug)]
@@ -75,6 +85,11 @@ pub struct ImportCurrentArgs {
     /// Name of the managed profile to create from the current shared Codex home.
     #[arg(default_value = "default")]
     pub name: String,
+    /// Bypass private-file permission and ACL validation for this operation.
+    ///
+    /// This is unsafe; use it only when the profile files are otherwise trusted.
+    #[arg(long)]
+    pub insecure: bool,
 }
 
 #[derive(Args, Debug)]

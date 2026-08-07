@@ -206,7 +206,7 @@ pub(crate) enum RuntimeKiroAcpSessionUpdate {
     ToolCall {
         tool_call_id: String,
         title: String,
-        status: String,
+        status: Option<String>,
         content: Option<Vec<Value>>,
         kind: Option<String>,
         raw_input: Option<Value>,
@@ -299,8 +299,7 @@ impl RuntimeKiroAcpSessionUpdate {
                 status: value
                     .get("status")
                     .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .context("tool_call is missing status")?,
+                    .map(str::to_string),
                 content: value.get("content").and_then(Value::as_array).cloned(),
                 kind: value
                     .get("kind")

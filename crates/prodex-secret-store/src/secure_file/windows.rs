@@ -1,4 +1,4 @@
-use super::FileSecurity;
+use super::{FileSecurity, insecure_file_access_enabled};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -99,8 +99,8 @@ impl Directory {
         } else {
             false
         };
-        let file = open_directory(&path, created)?;
-        if created {
+        let file = open_directory(&path, created && !insecure_file_access_enabled())?;
+        if created && !insecure_file_access_enabled() {
             set_private_acl(&file, true)?;
         }
         validate_directory(&file)?;
@@ -117,10 +117,12 @@ impl Directory {
         {
             return Err(error);
         }
-        let file = open_directory(&path, true)?;
+        let file = open_directory(&path, !insecure_file_access_enabled())?;
         validate_directory(&file)?;
         require_beneath(&self.file, &file)?;
-        set_private_acl(&file, true)?;
+        if !insecure_file_access_enabled() {
+            set_private_acl(&file, true)?;
+        }
         validate_acl(&file, AclUse::Directory)?;
         Self::from_file(path, file)
     }
@@ -149,7 +151,9 @@ impl Directory {
         let result = (|| {
             validate_regular(&created)?;
             require_beneath(&self.file, &created)?;
-            set_private_acl(&created, false)?;
+            if !insecure_file_access_enabled() {
+                set_private_acl(&created, false)?;
+            }
             validate_acl(&created, AclUse::PrivateFile)?;
 
             // Publish a share-delete handle only after the ACL is complete. The
@@ -278,8 +282,8 @@ fn open_path_entry(current: &mut PathBuf, name: &OsStr, create: bool) -> io::Res
     } else {
         false
     };
-    let file = open_directory(current, created)?;
-    if created {
+    let file = open_directory(current, created && !insecure_file_access_enabled())?;
+    if created && !insecure_file_access_enabled() {
         set_private_acl(&file, true)?;
     }
     validate_directory(&file)?;
@@ -317,7 +321,14 @@ fn open_directory(path: &Path, needs_write_dac: bool) -> io::Result<File> {
 fn open_regular(path: &Path, create: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
     let access = if create {
-        FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER | READ_CONTROL | DELETE
+        FILE_GENERIC_READ
+            | FILE_GENERIC_WRITE
+            | DELETE
+            | if insecure_file_access_enabled() {
+                0
+            } else {
+                WRITE_DAC | WRITE_OWNER | READ_CONTROL
+            }
     } else {
         FILE_GENERIC_READ
     };
@@ -340,7 +351,15 @@ fn open_private_regular(path: &Path) -> io::Result<File> {
     options
         .read(true)
         .write(true)
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER)
+        .access_mode(
+            FILE_GENERIC_READ
+                | FILE_GENERIC_WRITE
+                | if insecure_file_access_enabled() {
+                    0
+                } else {
+                    WRITE_DAC | WRITE_OWNER
+                },
+        )
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
@@ -550,6 +569,9 @@ fn set_private_acl(file: &File, directory: bool) -> io::Result<()> {
 }
 
 fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
+    if insecure_file_access_enabled() {
+        return Ok(());
+    }
     let user = CurrentUserSid::load()?;
     let (owner, dacl, descriptor) = security_info(file)?;
     if owner.is_null() || dacl.is_null() {

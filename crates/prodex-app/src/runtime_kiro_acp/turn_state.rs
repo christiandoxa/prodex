@@ -54,7 +54,7 @@ impl RuntimeKiroAcpTurnStateBuilder {
             } => self.apply_tool_activity(
                 &tool_call_id,
                 Some(title.as_str()),
-                Some(status.as_str()),
+                status.as_deref(),
                 kind.as_deref(),
                 true,
                 raw_input.is_some()

@@ -521,6 +521,7 @@ fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
         path: PathBuf::from("copilot"),
         name: Some("copilot-main".to_string()),
         activate: true,
+        insecure: false,
     })
     .expect("copilot import should succeed");
 
@@ -611,6 +612,7 @@ fn profile_import_kiro_reads_provider_metadata_from_local_cli_state() {
         path: PathBuf::from("kiro"),
         name: Some("kiro-main".to_string()),
         activate: true,
+        insecure: false,
     })
     .expect("kiro import should succeed");
 

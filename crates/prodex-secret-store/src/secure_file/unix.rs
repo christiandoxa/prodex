@@ -1,4 +1,4 @@
-use super::FileSecurity;
+use super::{FileSecurity, insecure_file_access_enabled};
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::{File, Metadata};
 use std::io;
@@ -90,9 +90,11 @@ impl Directory {
         if !file.metadata()?.is_dir() {
             return Err(permission_denied("secret parent is not a directory"));
         }
-        // SAFETY: `file` owns the opened directory, so no path is followed here.
-        if unsafe { libc::fchmod(file.as_raw_fd(), 0o700) } == -1 {
-            return Err(io::Error::last_os_error());
+        if !insecure_file_access_enabled() {
+            // SAFETY: `file` owns the opened directory, so no path is followed here.
+            if unsafe { libc::fchmod(file.as_raw_fd(), 0o700) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
         }
         validate_directory(&file.metadata()?)?;
         Ok(Self { file })
@@ -225,6 +227,9 @@ fn validate_directory(metadata: &Metadata) -> io::Result<()> {
     if !metadata.is_dir() {
         return Err(permission_denied("secret parent is not a directory"));
     }
+    if insecure_file_access_enabled() {
+        return Ok(());
+    }
     let euid = effective_uid();
     let mode = metadata.mode();
     let trusted_owner = metadata.uid() == euid || metadata.uid() == 0;
@@ -242,6 +247,9 @@ fn validate_directory(metadata: &Metadata) -> io::Result<()> {
 fn validate_file(metadata: &Metadata, security: FileSecurity) -> io::Result<()> {
     if !metadata.is_file() {
         return Err(permission_denied("secret is not a regular file"));
+    }
+    if insecure_file_access_enabled() {
+        return Ok(());
     }
     let euid = effective_uid();
     match security {

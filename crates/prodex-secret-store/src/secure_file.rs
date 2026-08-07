@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, Metadata};
 use std::io::{self, Read as _, Write as _};
@@ -17,6 +18,18 @@ mod platform;
 mod platform;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    static INSECURE_FILE_ACCESS: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn set_insecure_file_access(enabled: bool) -> bool {
+    INSECURE_FILE_ACCESS.with(|access| access.replace(enabled))
+}
+
+pub(crate) fn insecure_file_access_enabled() -> bool {
+    INSECURE_FILE_ACCESS.with(Cell::get)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FileSecurity {
