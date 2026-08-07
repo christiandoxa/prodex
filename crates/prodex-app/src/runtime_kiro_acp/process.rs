@@ -5,6 +5,7 @@ use super::{
 };
 use crate::RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES;
 use anyhow::{Context, Result, bail};
+use serde_json::Value;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
@@ -53,6 +54,8 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command_and_timeout(
     let mut process = Command::new(command);
     process
         .arg("acp")
+        .arg("--model")
+        .arg(prodex_provider_core::PRODEX_KIRO_DEFAULT_MODEL)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -116,10 +119,11 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let program = command;
     let mut process = Command::new(program);
-    process.arg("acp");
-    if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
-        process.arg("--model").arg(model);
-    }
+    let model = model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or(prodex_provider_core::PRODEX_KIRO_DEFAULT_MODEL);
+    process.arg("acp").arg("--model").arg(model);
     if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
         process.arg("--effort").arg(effort);
     }
@@ -245,7 +249,7 @@ fn collect_runtime_kiro_bootstrap_envelope(
         return Ok(false);
     }
     if let Some(error) = &envelope.error {
-        if matches!(envelope.id, Some(0 | 1)) {
+        if matches!(envelope.numeric_id(), Some(0 | 1)) {
             bail!(
                 "Kiro ACP bootstrap failed for request {:?}: {}",
                 envelope.id,
@@ -255,7 +259,7 @@ fn collect_runtime_kiro_bootstrap_envelope(
         notifications.push(envelope);
         return Ok(false);
     }
-    match envelope.id {
+    match envelope.numeric_id() {
         Some(0) => *initialize = Some(envelope.parse_initialize_result()?),
         Some(1) => *session = Some(envelope.parse_session_new_result()?),
         _ => notifications.push(envelope),
@@ -324,7 +328,7 @@ fn runtime_kiro_acp_prompt_turn_child(
             notifications.push(envelope);
             continue;
         }
-        if !prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
+        if !prompt_sent && matches!(envelope.numeric_id(), Some(1)) && envelope.error.is_none() {
             let parsed_session = envelope.parse_session_new_result()?;
             writeln!(
                 stdin,
@@ -339,7 +343,7 @@ fn runtime_kiro_acp_prompt_turn_child(
             session = Some(parsed_session);
             continue;
         }
-        match envelope.id {
+        match envelope.numeric_id() {
             Some(0) if envelope.error.is_none() => {
                 initialize = Some(envelope.parse_initialize_result()?)
             }
@@ -371,9 +375,46 @@ pub(crate) fn runtime_kiro_acp_reject_unsupported_server_request(
     stdin: &mut impl Write,
     envelope: &RuntimeKiroAcpEnvelope,
 ) -> Result<bool> {
-    let (Some(id), Some(_method)) = (envelope.id, envelope.method.as_deref()) else {
+    let (Some(id), Some(method)) = (envelope.id.as_ref(), envelope.method.as_deref()) else {
         return Ok(false);
     };
+    if method == "session/request_permission" && std::env::var_os("PRODEX_SUB_AGENT").is_some() {
+        let option_id = envelope
+            .params
+            .as_ref()
+            .and_then(|params| params.get("options"))
+            .and_then(Value::as_array)
+            .and_then(|options| {
+                options
+                    .iter()
+                    .find(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"))
+                    .or_else(|| {
+                        options.iter().find(|option| {
+                            option.get("kind").and_then(Value::as_str) == Some("allow_always")
+                        })
+                    })
+            })
+            .and_then(|option| option.get("optionId"))
+            .and_then(Value::as_str);
+        let result = option_id.map_or_else(
+            || serde_json::json!({"outcome": {"outcome": "cancelled"}}),
+            |option_id| {
+                serde_json::json!({
+                    "outcome": {"outcome": "selected", "optionId": option_id}
+                })
+            },
+        );
+        writeln!(
+            stdin,
+            "{}",
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result})
+        )
+        .context("failed to answer Kiro ACP permission request")?;
+        stdin
+            .flush()
+            .context("failed to flush Kiro ACP permission response")?;
+        return Ok(true);
+    }
     writeln!(
         stdin,
         "{}",

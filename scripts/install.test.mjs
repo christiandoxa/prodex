@@ -109,6 +109,17 @@ test("install.ps1 verifies Windows release assets", async () => {
   assert.doesNotMatch(source, /@openai\/codex@latest\b/);
 });
 
+test("install.ps1 prefers the OS architecture under emulation", async () => {
+  const source = await fs.readFile(windowsInstallerPath, "utf8");
+  const osArchitectureProbe = source.indexOf('GetProperty("OSArchitecture")');
+  const processArchitectureFallback = source.indexOf("$arch = $env:PROCESSOR_ARCHITEW6432");
+  assert.ok(osArchitectureProbe >= 0, "installer should probe OSArchitecture");
+  assert.ok(
+    processArchitectureFallback > osArchitectureProbe,
+    "process architecture environment variables must remain a fallback",
+  );
+});
+
 test("install.ps1 installs the native Windows binary", { skip: process.platform !== "win32" }, async (t) => {
   const cargoToml = await fs.readFile(path.join(repoRoot, "Cargo.toml"), "utf8");
   const currentVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];

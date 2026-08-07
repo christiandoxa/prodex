@@ -686,18 +686,25 @@ fn runtime_kiro_streaming_worker(
         conversations,
         idle_timeout,
     } = context;
-    let mut child = runtime_kiro_streaming_command(
+    let mut acp_command = runtime_kiro_streaming_command(
         &command,
         requested_model.as_deref(),
         requested_effort.as_deref(),
-    )
-    .current_dir(&cwd)
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::null())
-    .envs(extra_env.iter().cloned())
-    .spawn()
-    .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
+    );
+    acp_command
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .envs(extra_env.iter().cloned());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        acp_command.process_group(0);
+    }
+    let mut child = acp_command
+        .spawn()
+        .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
     let result = runtime_kiro_streaming_child(
         &mut child,
         RuntimeKiroStreamingContext {
@@ -713,6 +720,15 @@ fn runtime_kiro_streaming_worker(
         },
         sender,
     );
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
     result
@@ -724,10 +740,11 @@ fn runtime_kiro_streaming_command(
     effort: Option<&str>,
 ) -> Command {
     let mut acp_command = Command::new(command);
-    acp_command.arg("acp");
-    if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
-        acp_command.arg("--model").arg(model);
-    }
+    let model = model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or(prodex_provider_core::PRODEX_KIRO_DEFAULT_MODEL);
+    acp_command.arg("acp").arg("--model").arg(model);
     if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
         acp_command.arg("--effort").arg(effort);
     }
@@ -966,7 +983,7 @@ fn runtime_kiro_process_stream_envelope(
         state.notifications.push(envelope);
         return Ok(());
     }
-    if !state.prompt_sent && matches!(envelope.id, Some(1)) && envelope.error.is_none() {
+    if !state.prompt_sent && matches!(envelope.numeric_id(), Some(1)) && envelope.error.is_none() {
         return runtime_kiro_send_stream_prompt(
             sender,
             stdin,
@@ -976,7 +993,7 @@ fn runtime_kiro_process_stream_envelope(
             chat_completions_route,
         );
     }
-    match envelope.id {
+    match envelope.numeric_id() {
         Some(0) if envelope.error.is_none() => {
             state.initialize = Some(envelope.parse_initialize_result()?);
         }

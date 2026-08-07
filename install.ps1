@@ -40,16 +40,6 @@ function Assert-ValidRelease {
 }
 
 function Get-Target {
-    $arch = $env:PROCESSOR_ARCHITEW6432
-    if ([string]::IsNullOrWhiteSpace($arch)) {
-        $arch = $env:PROCESSOR_ARCHITECTURE
-    }
-    if ($arch -eq "AMD64" -or $arch -eq "x64") {
-        return "x86_64-pc-windows-msvc"
-    }
-    if ($arch -eq "ARM64") {
-        return "aarch64-pc-windows-msvc"
-    }
     try {
         $type = [System.Type]::GetType("System.Runtime.InteropServices.RuntimeInformation")
         if ($null -ne $type) {
@@ -66,6 +56,16 @@ function Get-Target {
         }
     } catch {
         # ignore fallback error
+    }
+    $arch = $env:PROCESSOR_ARCHITEW6432
+    if ([string]::IsNullOrWhiteSpace($arch)) {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+    }
+    if ($arch -eq "AMD64" -or $arch -eq "x64") {
+        return "x86_64-pc-windows-msvc"
+    }
+    if ($arch -eq "ARM64") {
+        return "aarch64-pc-windows-msvc"
     }
     throw "install.ps1 supports only x64 and arm64 Windows. Detected: $arch"
 }

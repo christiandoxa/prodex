@@ -62,6 +62,11 @@ if os.environ.get("SERVER_REQUEST"):
     rejection = json.loads(sys.stdin.readline())
     assert rejection["id"] == 9
     assert rejection["error"]["code"] == -32601
+if os.environ.get("SERVER_PERMISSION"):
+    print(json.dumps({"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"session-1","toolCall":{"toolCallId":"call-1","title":"Read file","status":"in_progress"},"options":[{"optionId":"allow_once","name":"Yes","kind":"allow_once"},{"optionId":"reject_once","name":"No","kind":"reject_once"}]}}), flush=True)
+    permission = json.loads(sys.stdin.readline())
+    assert permission["id"] == "permission-1"
+    assert permission["result"]["outcome"] == {"outcome":"selected","optionId":"allow_once"}
 print(json.dumps({"jsonrpc":"2.0","method":"_kiro.dev/metadata","params":{"sessionId":"session-1","turnDurationMs":8}}), flush=True)
 print(json.dumps({"jsonrpc":"2.0","result":{"status":"completed"},"id":2}), flush=True)
 if os.environ.get("LINGER_AFTER_RESPONSE"):

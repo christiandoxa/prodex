@@ -49,6 +49,14 @@ mod tests {
             provider_canonical_model(ProviderId::OpenAi, "custom-model"),
             "custom-model"
         );
+        assert_eq!(
+            provider_canonical_model(ProviderId::Kiro, "gpt-5.6-luna"),
+            "auto"
+        );
+        assert_eq!(
+            provider_canonical_model(ProviderId::Kiro, "claude-sonnet-4.5"),
+            "claude-sonnet-4.5"
+        );
     }
 
     #[test]
