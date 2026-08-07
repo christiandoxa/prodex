@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.391.0 - 2026-08-07
+
+### Runtime
+
+- Complete Kiro sub-agent turns and harden installer (`f7d63a7`)
+
+### Misc
+
+- Merge pull request #47 from kbakdev/fix/install_on_windows (`41cf6c0`)
+- Improve architecture detection for Windows (`1c7bb25`)
+
 ## 0.390.0 - 2026-08-07
 
 ### CLI
@@ -99,20 +110,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Validate Redis ledger indexes atomically (`a085ce4`)
 - Preserve ACP terminal states (`e0298b5`)
-
-## 0.379.0 - 2026-08-03
-
-### Deps
-
-- Defer fuzz base64 0.23 (`92469a6`)
-- Defer base64 0.23 (`4718816`)
-- Bump rust from 1.97.0-bookworm to 1.97.1-bookworm (`c599d15`)
-- Bump the fuzz-cargo group in /fuzz with 2 updates (`eea022c`)
-- Bump the cargo group with 3 updates (`f82f090`)
-
-### Misc
-
-- Merge pull request #45 from christiandoxa/dependabot/docker/rust-1.97.1-bookworm (`b1eb26f`)
-- Merge pull request #44 from christiandoxa/dependabot/github_actions/github-actions-5eb7864991 (`17f159b`)
-- Merge pull request #43 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-83702f5d0b (`6db4406`)
-- Merge pull request #42 from christiandoxa/dependabot/cargo/cargo-8ee9223565 (`04bf95a`)
