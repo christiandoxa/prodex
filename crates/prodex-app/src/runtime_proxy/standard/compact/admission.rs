@@ -43,7 +43,7 @@ pub(super) fn build_runtime_fresh_compact_pressure_response(
     )
 }
 
-fn log_runtime_compact_inflight_saturated(
+pub(super) fn log_runtime_compact_inflight_saturated(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

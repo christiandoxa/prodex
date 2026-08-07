@@ -709,3 +709,36 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         _ => panic!("expected exhausted pre-send compact skip"),
     }
 }
+
+#[test]
+fn attempt_runtime_standard_request_reports_profile_inflight_saturation() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .profile_usage_snapshot(
+        "main",
+        runtime_usage_snapshot(quota_window_ready(300, 3600), quota_window_ready(90, 86_400)),
+    )
+    .build();
+    let _inflight = (0..runtime_proxy_profile_inflight_hard_limit())
+        .map(|_| acquire_runtime_profile_inflight_guard(harness.shared(), "main", "compact_http"))
+        .collect::<Result<Vec<_>>>()
+        .expect("profile inflight guards should be acquired");
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: Vec::new(),
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    match attempt_runtime_standard_request(1, &request, harness.shared(), "main", false, false)
+        .expect("standard attempt should succeed")
+    {
+        RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
+            assert_eq!(profile_name, "main");
+        }
+        _ => panic!("expected profile inflight saturation"),
+    }
+}

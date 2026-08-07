@@ -48,6 +48,9 @@ pub(super) enum RuntimeStandardAttempt {
     LocalSelectionBlocked {
         profile_name: String,
     },
+    ProfileInflightSaturated {
+        profile_name: String,
+    },
     TransportFailed {
         profile_name: String,
         stage: &'static str,

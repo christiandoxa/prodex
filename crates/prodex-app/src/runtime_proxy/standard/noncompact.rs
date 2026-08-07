@@ -69,6 +69,9 @@ fn proxy_runtime_noncompact_realtime_request(
             503,
             runtime_proxy_local_selection_failure_message(),
         )),
+        RuntimeStandardAttempt::ProfileInflightSaturated { .. } => Ok(
+            build_runtime_proxy_text_response(503, runtime_proxy_local_selection_failure_message()),
+        ),
     }
 }
 
@@ -281,7 +284,7 @@ fn runtime_noncompact_next_action(
                 },
                 affinity_kind: preferred_is_session
                     .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
-                hard_affinity: false,
+                hard_affinity: preferred_is_session,
             },
         );
         return Ok(RuntimePrecommitLoopAction::Attempt(
@@ -439,6 +442,18 @@ fn handle_runtime_noncompact_attempt(
                     "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=quota_exhausted_before_send"
                 ),
             );
+            clear_noncompact_session_profile(session_profile, &profile_name);
+            loop_state.excluded_profiles.insert(profile_name);
+            Ok(None)
+        }
+        RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=profile_inflight_saturated"
+                ),
+            );
+            loop_state.record_inflight_saturation();
             clear_noncompact_session_profile(session_profile, &profile_name);
             loop_state.excluded_profiles.insert(profile_name);
             Ok(None)
