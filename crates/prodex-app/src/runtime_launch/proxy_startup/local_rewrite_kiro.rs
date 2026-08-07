@@ -1,6 +1,11 @@
+mod process;
 mod request_validation;
 mod response;
 mod stream;
+use self::process::{
+    runtime_kiro_configure_process_group, runtime_kiro_kill_process_group,
+    runtime_kiro_streaming_command,
+};
 use self::response::{runtime_kiro_anthropic_message_parts_from_response, runtime_kiro_json_parts};
 use self::stream::{
     RuntimeKiroStreamingActivityState, runtime_kiro_finish_stream, runtime_kiro_stream_notification,
@@ -66,7 +71,7 @@ use std::env;
 use std::ffi::OsString;
 use std::io::{self, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -697,11 +702,7 @@ fn runtime_kiro_streaming_worker(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .envs(extra_env.iter().cloned());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        acp_command.process_group(0);
-    }
+    runtime_kiro_configure_process_group(&mut acp_command);
     let mut child = acp_command
         .spawn()
         .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
@@ -720,35 +721,10 @@ fn runtime_kiro_streaming_worker(
         },
         sender,
     );
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 {
-            unsafe {
-                libc::kill(-pid, libc::SIGKILL);
-            }
-        }
-    }
+    runtime_kiro_kill_process_group(&child);
     let _ = child.kill();
     let _ = child.wait();
     result
-}
-
-fn runtime_kiro_streaming_command(
-    command: &Path,
-    model: Option<&str>,
-    effort: Option<&str>,
-) -> Command {
-    let mut acp_command = Command::new(command);
-    let model = model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .unwrap_or(prodex_provider_core::PRODEX_KIRO_DEFAULT_MODEL);
-    acp_command.arg("acp").arg("--model").arg(model);
-    if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
-        acp_command.arg("--effort").arg(effort);
-    }
-    acp_command
 }
 
 struct RuntimeKiroStreamingContext<'a> {

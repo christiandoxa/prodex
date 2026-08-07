@@ -31,8 +31,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1123,
-    "reason": "Kiro ACP process lifecycle, bounded reconnect and idle handling, non-executable activity, streaming sequence state, and runtime metadata orchestration remain at one protocol boundary."
+    "maxLines": 1116,
+    "reason": "Kiro ACP process lifecycle, bounded reconnect and idle handling, non-executable activity, streaming sequence state, and runtime metadata orchestration remain at one protocol boundary; cap ratcheted after process helpers moved out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
