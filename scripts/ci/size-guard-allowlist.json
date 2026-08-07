@@ -76,12 +76,12 @@
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/export.rs",
-    "maxLines": 942,
+    "maxLines": 944,
     "reason": "Profile export regression fixtures include bounded v1/v2 migration and resource-exhaustion cases; capped until provider-specific scenarios split from shared helpers."
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/import.rs",
-    "maxLines": 1039,
+    "maxLines": 1041,
     "reason": "Profile import regression fixtures cover cross-provider identity handling and transactional rollback; lifecycle and committed-journal recovery cases moved to a focused sibling module."
   },
   {
@@ -216,7 +216,7 @@
   },
   {
     "file": "crates/prodex-secret-store/src/secure_file/windows.rs",
-    "maxLines": 937,
+    "maxLines": 959,
     "reason": "Windows secure-file ownership keeps ACL validation, no-follow containment, and native handle-relative rename/delete in one platform module; the exact cap covers the verified DELETE handle, NT rename fallback, POSIX delete fallback, and focused regressions."
   },
   {
