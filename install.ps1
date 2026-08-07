@@ -40,14 +40,34 @@ function Assert-ValidRelease {
 }
 
 function Get-Target {
-    $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    if ($architecture -eq [System.Runtime.InteropServices.Architecture]::X64) {
+    $arch = $env:PROCESSOR_ARCHITEW6432
+    if ([string]::IsNullOrWhiteSpace($arch)) {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+    }
+    if ($arch -eq "AMD64" -or $arch -eq "x64") {
         return "x86_64-pc-windows-msvc"
     }
-    if ($architecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) {
+    if ($arch -eq "ARM64") {
         return "aarch64-pc-windows-msvc"
     }
-    throw "install.ps1 supports only x64 and arm64 Windows. Detected: $architecture"
+    try {
+        $type = [System.Type]::GetType("System.Runtime.InteropServices.RuntimeInformation")
+        if ($null -ne $type) {
+            $prop = $type.GetProperty("OSArchitecture")
+            if ($null -ne $prop) {
+                $val = [string]$prop.GetValue($null, $null)
+                if ($val -eq "X64") {
+                    return "x86_64-pc-windows-msvc"
+                }
+                if ($val -eq "Arm64") {
+                    return "aarch64-pc-windows-msvc"
+                }
+            }
+        }
+    } catch {
+        # ignore fallback error
+    }
+    throw "install.ps1 supports only x64 and arm64 Windows. Detected: $arch"
 }
 
 function Copy-Download {
