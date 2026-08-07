@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.392.0 - 2026-08-07
+
+### Runtime
+
+- Bound fresh profile admission and preserve Kiro models (`299a462`)
+
 ## 0.391.0 - 2026-08-07
 
 ### Runtime
 
+- Keep Kiro process modules within size guard (`77d5919`)
 - Complete Kiro sub-agent turns and harden installer (`f7d63a7`)
 
 ### Misc
@@ -92,21 +99,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve secure Windows sharing (`ceb30ca`)
 - Restore cross-platform atomic writes (`25a5d0b`)
 - Close audited reliability gaps (`710b4bc`)
-
-## 0.380.0 - 2026-08-03
-
-### Runtime
-
-- Reject unsuccessful buffered terminal states (`bae6476`)
-- Commit noncompact profile selection (`1feba09`)
-- Preserve provider stream terminal failures (`e5d975d`)
-
-### CLI
-
-- Prevent implicit export races (`5f9cd3c`)
-- Harden filesystem lifecycle (`679fcfd`)
-
-### Misc
-
-- Validate Redis ledger indexes atomically (`a085ce4`)
-- Preserve ACP terminal states (`e0298b5`)
