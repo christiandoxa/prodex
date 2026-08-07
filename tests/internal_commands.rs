@@ -99,7 +99,7 @@ fn sub_agent_exec_is_shell_free_preserves_streams_status_and_releases_slot() {
     let fake_child = temp_dir.path.join("fake child '引用");
     fs::write(
         &fake_child,
-        "#!/bin/sh\nprintf 'MARKER=%s\\n' \"$PRODEX_SUB_AGENT\" > \"$PRODEX_TEST_CAPTURE\"\nprintf 'ARG\\n%s\\n' \"$@\" >> \"$PRODEX_TEST_CAPTURE\"\nprintf 'child stdout\\n'\nprintf 'child stderr\\n' >&2\nexit 7\n",
+        "#!/bin/sh\nif [ \"$PRODEX_TEST_CHILD_MODE\" = empty ]; then exit 0; fi\nprintf 'MARKER=%s\\n' \"$PRODEX_SUB_AGENT\" > \"$PRODEX_TEST_CAPTURE\"\nprintf 'ARG\\n%s\\n' \"$@\" >> \"$PRODEX_TEST_CAPTURE\"\nprintf 'child stdout\\n'\nprintf 'child stderr\\n' >&2\nexit 7\n",
     )
     .unwrap();
     fs::set_permissions(&fake_child, fs::Permissions::from_mode(0o700)).unwrap();
@@ -165,6 +165,40 @@ fn sub_agent_exec_is_shell_free_preserves_streams_status_and_releases_slot() {
         assert_eq!(argv.matches(task).count(), 1, "{argv}");
         assert!(!argv.contains("00000000-0000-7000-8000-000000000042"));
     }
+
+    let empty_task = task_dir.join("empty task.txt");
+    fs::write(&empty_task, "empty result task").unwrap();
+    let empty_output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args(["__sub-agent-exec", "--config"])
+        .arg(&config)
+        .arg("--task-file")
+        .arg(&empty_task)
+        .env("PRODEX_TEST_CHILD_MODE", "empty")
+        .output()
+        .expect("empty-result launcher should run");
+    assert_eq!(empty_output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&empty_output.stderr)
+            .contains("sub-agent child completed without output")
+    );
+    assert!(!empty_task.exists());
+
+    let recursive_task = task_dir.join("recursive task.txt");
+    fs::write(&recursive_task, "recursive result task").unwrap();
+    let recursive_output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args(["__sub-agent-exec", "--config"])
+        .arg(&config)
+        .arg("--task-file")
+        .arg(&recursive_task)
+        .env("PRODEX_SUB_AGENT", "1")
+        .output()
+        .expect("recursive launcher should run");
+    assert_eq!(recursive_output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&recursive_output.stderr)
+            .contains("hidden sub-agent launcher cannot be invoked recursively")
+    );
+    assert!(recursive_task.exists());
 }
 
 #[cfg(unix)]
@@ -179,7 +213,7 @@ fn sub_agent_exec_sigterm_reaps_child_and_releases_slot() {
     let fake_child = temp_dir.path.join("blocking child");
     fs::write(
         &fake_child,
-        "#!/bin/sh\nif [ \"$PRODEX_TEST_CHILD_MODE\" = quick ]; then exit 0; fi\nprintf '%s\\n' \"$$\" > \"$PRODEX_TEST_CHILD_PID_FILE\"\nexec sleep 30\n",
+        "#!/bin/sh\nif [ \"$PRODEX_TEST_CHILD_MODE\" = quick ]; then printf '%s\\n' 'quick child output'; exit 0; fi\nprintf '%s\\n' \"$$\" > \"$PRODEX_TEST_CHILD_PID_FILE\"\nexec sleep 30\n",
     )
     .unwrap();
     fs::set_permissions(&fake_child, fs::Permissions::from_mode(0o700)).unwrap();
