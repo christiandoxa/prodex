@@ -2,10 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.393.0 - 2026-08-08
+
+### Runtime
+
+- Harden websocket and sub-agent execution (`3f699c0`)
+
 ## 0.392.0 - 2026-08-07
 
 ### Runtime
 
+- Simplify websocket session admission (`24b51e2`)
+- Preserve local saturation and child cleanup (`e956baf`)
+- Satisfy clippy argument lint (`38abfdc`)
 - Bound fresh profile admission and preserve Kiro models (`299a462`)
 
 ## 0.391.0 - 2026-08-07
@@ -89,13 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Close audited production gaps (`92d7bf8`)
-
-## 0.381.0 - 2026-08-03
-
-### Misc
-
-- Support legacy glibc releases (`9126093`)
-- Restore Windows open-file deletion (`1a163f1`)
-- Preserve secure Windows sharing (`ceb30ca`)
-- Restore cross-platform atomic writes (`25a5d0b`)
-- Close audited reliability gaps (`710b4bc`)
