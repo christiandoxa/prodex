@@ -357,6 +357,7 @@ jobs:
           set -eu
           printf '%s\n' "$@" > "${PRODEX_STUB_ARGS}"
           printf '%s\n' "${PRODEX_SUB_AGENT:-}" > "${PRODEX_STUB_MARKER}"
+          printf '%s\n' "stub child output"
           SH
           chmod 0755 "${stub}"
           for provider in kiro copilot; do
