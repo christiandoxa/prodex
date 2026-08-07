@@ -7,10 +7,11 @@ use super::{
     RuntimeAutoRedeemResetCreditOutcome, RuntimeProfileInFlightGuard, RuntimeProxyRequest,
     RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeUpstreamWebSocket,
     RuntimeWebsocketAttempt, RuntimeWebsocketConnectResult, RuntimeWebsocketSessionState,
-    acquire_runtime_profile_inflight_guard, connect_runtime_proxy_upstream_websocket,
-    runtime_auto_redeem_usage_limit_reset_credit, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message, runtime_websocket_precommit_hold_promotion_allowed,
+    connect_runtime_proxy_upstream_websocket, runtime_auto_redeem_usage_limit_reset_credit,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    runtime_websocket_precommit_hold_promotion_allowed,
     runtime_websocket_precommit_transport_retry_allowed,
+    try_acquire_runtime_profile_inflight_guard,
 };
 
 pub(super) struct RuntimeWebsocketSessionStartRequest<'a> {
@@ -24,6 +25,7 @@ pub(super) struct RuntimeWebsocketSessionStartRequest<'a> {
     pub(super) profile_name: &'a str,
     pub(super) turn_state_override: Option<&'a str>,
     pub(super) promote_committed_profile: bool,
+    pub(super) hard_affinity: bool,
 }
 
 pub(super) struct RuntimeWebsocketSessionStart {
@@ -56,6 +58,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
         profile_name,
         turn_state_override,
         promote_committed_profile,
+        hard_affinity,
     } = request;
 
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
@@ -76,6 +79,29 @@ pub(super) fn start_runtime_websocket_upstream_session(
     );
     let reuse_started_at = reuse_existing_session.then(Instant::now);
     let precommit_started_at = Instant::now();
+    if !reuse_existing_session {
+        websocket_session.close();
+    }
+    let mut inflight_guard = if reuse_existing_session {
+        None
+    } else {
+        match try_acquire_runtime_profile_inflight_guard(
+            shared,
+            profile_name,
+            "websocket_session",
+            hard_affinity,
+        )? {
+            Some(guard) => Some(guard),
+            None => {
+                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                    RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                        profile_name: profile_name.to_string(),
+                        reason: "profile_inflight_saturated",
+                    },
+                ));
+            }
+        }
+    };
     let (mut upstream_socket, upstream_turn_state, inflight_guard) = if reuse_existing_session {
         runtime_proxy_log(
             shared,
@@ -121,7 +147,6 @@ pub(super) fn start_runtime_websocket_upstream_session(
         };
         (socket, websocket_session.turn_state.clone(), None)
     } else {
-        websocket_session.close();
         runtime_proxy_log(
             shared,
             format!(
@@ -139,15 +164,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
                 turn_state_override,
             ) {
                 Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => {
-                    break (
-                        socket,
-                        turn_state,
-                        Some(acquire_runtime_profile_inflight_guard(
-                            shared,
-                            profile_name,
-                            "websocket_session",
-                        )?),
-                    );
+                    break (socket, turn_state, inflight_guard.take());
                 }
                 Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {
                     if !auto_redeem_attempted

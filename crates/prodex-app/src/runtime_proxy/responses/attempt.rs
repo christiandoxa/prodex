@@ -7,6 +7,7 @@ pub(crate) fn attempt_runtime_responses_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
     prompt_cache_key: Option<&str>,
+    hard_affinity: bool,
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
     let request_previous_response_id = runtime_request_previous_response_id(request);
@@ -43,8 +44,18 @@ pub(crate) fn attempt_runtime_responses_request(
             reason: reason_label,
         });
     }
-    let inflight_guard =
-        acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
+    let Some(inflight_guard) = try_acquire_runtime_profile_inflight_guard(
+        shared,
+        profile_name,
+        "responses_http",
+        hard_affinity,
+    )?
+    else {
+        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+            reason: "profile_inflight_saturated",
+        });
+    };
 
     let mut inflight_guard = Some(inflight_guard);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();

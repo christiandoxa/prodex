@@ -232,6 +232,7 @@ pub(super) fn proxy_runtime_compact_request(
             shared,
             &candidate_name,
             candidate_has_hard_affinity,
+            candidate_has_hard_affinity,
         )?;
         if let Some(response) = handle_runtime_compact_attempt(
             RuntimeCompactAttemptContext {

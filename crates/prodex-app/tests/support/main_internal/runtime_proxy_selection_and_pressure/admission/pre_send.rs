@@ -22,7 +22,7 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
         body: br#"{"input":[]}"#.to_vec(),
     };
 
-    match attempt_runtime_responses_request(1, &request, harness.shared(), "main", None, None)
+    match attempt_runtime_responses_request(1, &request, harness.shared(), "main", None, None, false)
         .expect("responses attempt should succeed")
     {
         RuntimeResponsesAttempt::LocalSelectionBlocked {
@@ -700,7 +700,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
     };
 
-    match attempt_runtime_standard_request(1, &request, harness.shared(), "main", false)
+    match attempt_runtime_standard_request(1, &request, harness.shared(), "main", false, false)
         .expect("standard attempt should succeed")
     {
         RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {

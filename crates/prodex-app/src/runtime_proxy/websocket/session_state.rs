@@ -83,20 +83,37 @@ impl RuntimeWebsocketSessionState {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn acquire_runtime_profile_inflight_guard(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     context: &'static str,
 ) -> Result<RuntimeProfileInFlightGuard> {
+    try_acquire_runtime_profile_inflight_guard(shared, profile_name, context, true)?
+        .ok_or_else(|| anyhow::anyhow!("unbounded profile in-flight admission was rejected"))
+}
+
+pub(crate) fn try_acquire_runtime_profile_inflight_guard(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &'static str,
+    hard_affinity: bool,
+) -> Result<Option<RuntimeProfileInFlightGuard>> {
     let weight = runtime_profile_inflight_weight(context);
-    let count = shared
-        .lane_admission
-        .acquire_profile_inflight(profile_name, weight);
+    let hard_limit =
+        (!hard_affinity).then_some(shared.runtime_config.tuning.profile_inflight_hard_limit);
+    let Some(count) =
+        shared
+            .lane_admission
+            .try_acquire_profile_inflight(profile_name, weight, hard_limit)
+    else {
+        return Ok(None);
+    };
     record_runtime_profile_inflight_acquire(shared, profile_name, count, weight, context);
-    Ok(RuntimeProfileInFlightGuard {
+    Ok(Some(RuntimeProfileInFlightGuard {
         shared: shared.clone(),
         profile_name: profile_name.to_string(),
         context,
         weight,
-    })
+    }))
 }

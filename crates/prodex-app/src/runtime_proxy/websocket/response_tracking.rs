@@ -22,8 +22,21 @@ use session::*;
 use terminal::*;
 use upstream_send::*;
 
+#[cfg(test)]
 pub(crate) fn attempt_runtime_websocket_request(
     attempt: RuntimeWebsocketAttemptRequest<'_>,
+) -> Result<RuntimeWebsocketAttempt> {
+    let hard_affinity = attempt.request_previous_response_id.is_some()
+        || attempt.request_session_id.is_some()
+        || attempt.request_turn_state.is_some()
+        || attempt.turn_state_override.is_some()
+        || attempt.websocket_session.profile_name.as_deref() == Some(attempt.profile_name);
+    attempt_runtime_websocket_request_with_hard_affinity(attempt, hard_affinity)
+}
+
+pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
+    attempt: RuntimeWebsocketAttemptRequest<'_>,
+    hard_affinity: bool,
 ) -> Result<RuntimeWebsocketAttempt> {
     let RuntimeWebsocketAttemptRequest {
         request_id,
@@ -69,6 +82,7 @@ pub(crate) fn attempt_runtime_websocket_request(
             profile_name,
             turn_state_override,
             promote_committed_profile,
+            hard_affinity,
         })?;
     let RuntimeWebsocketSessionStart {
         mut upstream_socket,

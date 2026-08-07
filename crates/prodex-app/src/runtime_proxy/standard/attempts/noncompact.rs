@@ -7,6 +7,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
     attempt_runtime_noncompact_standard_request_with_policy(
         request_id,
@@ -14,6 +15,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
         shared,
         profile_name,
         true,
+        hard_affinity,
     )
 }
 
@@ -23,6 +25,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     enforce_local_precommit_quota_guard: bool,
+    hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
     let request_session_id = runtime_request_session_id(request);
     if enforce_local_precommit_quota_guard {
@@ -40,13 +43,23 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                     shared,
                     profile_name,
                     false,
+                    hard_affinity,
                 );
             }
             RuntimeStandardPrecommitGuard::Blocked(attempt) => return Ok(attempt),
         }
     }
-    let _inflight_guard =
-        acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
+    let Some(_inflight_guard) = try_acquire_runtime_profile_inflight_guard(
+        shared,
+        profile_name,
+        "standard_http",
+        hard_affinity,
+    )?
+    else {
+        return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+        });
+    };
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let upstream_auth =

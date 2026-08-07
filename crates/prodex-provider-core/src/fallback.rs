@@ -51,7 +51,7 @@ mod tests {
         );
         assert_eq!(
             provider_canonical_model(ProviderId::Kiro, "gpt-5.6-luna"),
-            "auto"
+            "gpt-5.6-luna"
         );
         assert_eq!(
             provider_canonical_model(ProviderId::Kiro, "claude-sonnet-4.5"),

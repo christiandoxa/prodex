@@ -152,8 +152,15 @@ pub(crate) fn attempt_runtime_noncompact_standard_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
-    attempts::attempt_runtime_noncompact_standard_request(request_id, request, shared, profile_name)
+    attempts::attempt_runtime_noncompact_standard_request(
+        request_id,
+        request,
+        shared,
+        profile_name,
+        hard_affinity,
+    )
 }
 
 pub(crate) fn attempt_runtime_noncompact_standard_request_with_policy(
@@ -162,6 +169,7 @@ pub(crate) fn attempt_runtime_noncompact_standard_request_with_policy(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     enforce_local_precommit_quota_guard: bool,
+    hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
     attempts::attempt_runtime_noncompact_standard_request_with_policy(
         request_id,
@@ -169,6 +177,7 @@ pub(crate) fn attempt_runtime_noncompact_standard_request_with_policy(
         shared,
         profile_name,
         enforce_local_precommit_quota_guard,
+        hard_affinity,
     )
 }
 
@@ -178,6 +187,7 @@ pub(crate) fn attempt_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     allow_quota_exhausted_send: bool,
+    hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
     attempts::attempt_runtime_standard_request(
         request_id,
@@ -185,6 +195,7 @@ pub(crate) fn attempt_runtime_standard_request(
         shared,
         profile_name,
         allow_quota_exhausted_send,
+        hard_affinity,
     )
 }
 
