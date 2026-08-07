@@ -44,6 +44,25 @@ pub(super) enum RuntimeWebsocketSessionStartDecision {
     Attempt(RuntimeWebsocketAttempt),
 }
 
+fn prepare_runtime_websocket_session_admission(
+    shared: &RuntimeRotationProxyShared,
+    websocket_session: &mut RuntimeWebsocketSessionState,
+    profile_name: &str,
+    hard_affinity: bool,
+    reuse_existing_session: bool,
+) -> Result<Option<RuntimeProfileInFlightGuard>> {
+    if reuse_existing_session {
+        return Ok(None);
+    }
+    websocket_session.close();
+    try_acquire_runtime_profile_inflight_guard(
+        shared,
+        profile_name,
+        "websocket_session",
+        hard_affinity,
+    )
+}
+
 pub(super) fn start_runtime_websocket_upstream_session(
     request: RuntimeWebsocketSessionStartRequest<'_>,
 ) -> Result<RuntimeWebsocketSessionStartDecision> {
@@ -79,28 +98,20 @@ pub(super) fn start_runtime_websocket_upstream_session(
     );
     let reuse_started_at = reuse_existing_session.then(Instant::now);
     let precommit_started_at = Instant::now();
-    if !reuse_existing_session {
-        websocket_session.close();
-    }
-    let mut inflight_guard = if reuse_existing_session {
-        None
-    } else {
-        match try_acquire_runtime_profile_inflight_guard(
-            shared,
-            profile_name,
-            "websocket_session",
-            hard_affinity,
-        )? {
-            Some(guard) => Some(guard),
-            None => {
-                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
-                    RuntimeWebsocketAttempt::LocalSelectionBlocked {
-                        profile_name: profile_name.to_string(),
-                        reason: "profile_inflight_saturated",
-                    },
-                ));
-            }
-        }
+    let mut inflight_guard = prepare_runtime_websocket_session_admission(
+        shared,
+        websocket_session,
+        profile_name,
+        hard_affinity,
+        reuse_existing_session,
+    )?;
+    if !reuse_existing_session && inflight_guard.is_none() {
+        return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+            RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                profile_name: profile_name.to_string(),
+                reason: "profile_inflight_saturated",
+            },
+        ));
     };
     let (mut upstream_socket, upstream_turn_state, inflight_guard) = if reuse_existing_session {
         runtime_proxy_log(
