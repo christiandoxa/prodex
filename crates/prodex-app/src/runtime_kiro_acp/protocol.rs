@@ -6,7 +6,7 @@ use serde_json::Value;
 pub(crate) struct RuntimeKiroAcpEnvelope {
     pub(crate) jsonrpc: String,
     #[serde(default)]
-    pub(crate) id: Option<u64>,
+    pub(crate) id: Option<Value>,
     #[serde(default)]
     pub(crate) method: Option<String>,
     #[serde(default)]
@@ -18,6 +18,10 @@ pub(crate) struct RuntimeKiroAcpEnvelope {
 }
 
 impl RuntimeKiroAcpEnvelope {
+    pub(crate) fn numeric_id(&self) -> Option<u64> {
+        self.id.as_ref().and_then(Value::as_u64)
+    }
+
     pub(crate) fn parse(line: &str) -> Result<Self> {
         let envelope: Self =
             serde_json::from_str(line).context("failed to parse Kiro ACP JSON-RPC line")?;

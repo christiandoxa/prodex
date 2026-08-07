@@ -558,7 +558,11 @@ async fn run_child(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn().context("failed to spawn sub-agent child")?;
-    fs::remove_file(task_path).context("failed to remove consumed task file")?;
+    if let Err(error) = fs::remove_file(task_path) {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+        return Err(error).context("failed to remove consumed task file");
+    }
     let stdout = child.stdout.take().context("child stdout pipe missing")?;
     let stderr = child.stderr.take().context("child stderr pipe missing")?;
     let stdout_task = tokio::spawn(relay_child_output(stdout, tokio::io::stdout()));

@@ -91,6 +91,16 @@ fn kiro_acp_parses_error_notification_line() {
 }
 
 #[test]
+fn kiro_acp_accepts_string_request_ids() {
+    let envelope = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"options":[]}}"#,
+    )
+    .expect("string request id should parse");
+    assert_eq!(envelope.id, Some(json!("permission-1")));
+    assert_eq!(envelope.numeric_id(), None);
+}
+
+#[test]
 fn kiro_acp_bootstrap_reads_initialize_session_and_notifications() {
     let root = temp_dir("bootstrap");
     let fake_agent = write_fake_kiro_acp_agent(&root);
@@ -195,7 +205,7 @@ fn kiro_acp_prompt_turn_sends_prompt_after_session_bootstrap() {
     .expect("prompt turn should succeed");
     assert_eq!(result.initialize.agent_info.version, "2.10.0");
     assert_eq!(result.session.session_id, "session-1");
-    assert_eq!(result.prompt_response.id, Some(2));
+    assert_eq!(result.prompt_response.id, Some(json!(2)));
     assert_eq!(
         result.prompt_response.result,
         Some(json!({"status":"completed"}))
@@ -221,10 +231,32 @@ fn kiro_acp_prompt_turn_rejects_unsupported_server_requests() {
     )
     .expect("unsupported server request should receive an explicit error");
 
-    assert_eq!(result.prompt_response.id, Some(2));
+    assert_eq!(result.prompt_response.id, Some(json!(2)));
     assert!(result.notifications.iter().any(|notification| {
-        notification.id == Some(9) && notification.method.as_deref() == Some("fs/read_text_file")
+        notification.id == Some(json!(9))
+            && notification.method.as_deref() == Some("fs/read_text_file")
     }));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn kiro_acp_sub_agent_selects_one_time_permission() {
+    let root = temp_dir("prompt-turn-permission");
+    let fake_agent = write_fake_kiro_prompt_agent(&root);
+    let _marker = crate::test_support::TestEnvVarGuard::set("PRODEX_SUB_AGENT", "1");
+
+    let result = runtime_kiro_acp_prompt_turn_with_command(
+        fake_agent.as_os_str(),
+        &root,
+        &[
+            (OsString::from("PRODEX_SUB_AGENT"), OsString::from("1")),
+            (OsString::from("SERVER_PERMISSION"), OsString::from("1")),
+        ],
+        "hello from prodex",
+    )
+    .expect("sub-agent permission request should be answered");
+
+    assert_eq!(result.prompt_response.id, Some(json!(2)));
     let _ = fs::remove_dir_all(root);
 }
 
@@ -263,7 +295,7 @@ fn kiro_acp_internal_activity_smoke_is_non_executable_and_does_not_reconnect() {
     let serialized = serde_json::to_string(&response).unwrap();
 
     assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(turn.prompt_response.id, Some(2));
+    assert_eq!(turn.prompt_response.id, Some(json!(2)));
     assert!(serialized.contains("final answer"));
     assert!(serialized.contains("phase=started"));
     assert!(serialized.contains("phase=completed"));
