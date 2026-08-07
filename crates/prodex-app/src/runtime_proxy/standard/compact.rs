@@ -26,8 +26,8 @@ mod logging;
 mod retryable;
 mod transport;
 use admission::{
-    build_runtime_fresh_compact_pressure_response, log_runtime_compact_local_selection_blocked,
-    runtime_compact_candidate_inflight_saturated,
+    build_runtime_fresh_compact_pressure_response, log_runtime_compact_inflight_saturated,
+    log_runtime_compact_local_selection_blocked, runtime_compact_candidate_inflight_saturated,
 };
 use affinity::runtime_compact_route_candidate_has_hard_affinity;
 use auth::{RuntimeProxyCompactAuthFailure, handle_runtime_proxy_compact_auth_failure};
@@ -251,7 +251,7 @@ pub(super) fn proxy_runtime_compact_request(
                 selection_attempts,
                 selection_started_at,
                 pressure_mode,
-                saw_inflight_saturation,
+                saw_inflight_saturation: &mut saw_inflight_saturation,
                 saw_transport_failure: &mut saw_transport_failure,
             },
             attempt,
@@ -277,7 +277,7 @@ struct RuntimeCompactAttemptContext<'a> {
     selection_attempts: usize,
     selection_started_at: Instant,
     pressure_mode: bool,
-    saw_inflight_saturation: bool,
+    saw_inflight_saturation: &'a mut bool,
     saw_transport_failure: &'a mut bool,
 }
 
@@ -331,7 +331,7 @@ fn handle_runtime_compact_attempt(
                     selection_started_at,
                     pressure_mode,
                     last_failure: last_failure.as_ref(),
-                    saw_inflight_saturation,
+                    saw_inflight_saturation: *saw_inflight_saturation,
                     saw_transport_failure: *saw_transport_failure,
                 },
             ) {
@@ -364,7 +364,7 @@ fn handle_runtime_compact_attempt(
                 selection_attempts,
                 selection_started_at,
                 pressure_mode,
-                saw_inflight_saturation,
+                saw_inflight_saturation: *saw_inflight_saturation,
                 saw_transport_failure: *saw_transport_failure,
             },
         )? {
@@ -389,7 +389,7 @@ fn handle_runtime_compact_attempt(
             selection_attempts,
             selection_started_at,
             pressure_mode,
-            saw_inflight_saturation,
+            saw_inflight_saturation: *saw_inflight_saturation,
             saw_transport_failure: *saw_transport_failure,
         })? {
             RuntimeCompactFailureFlow::Retry => Ok(None),
@@ -397,6 +397,12 @@ fn handle_runtime_compact_attempt(
         },
         RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
             log_runtime_compact_local_selection_blocked(request_id, shared, &profile_name);
+            excluded_profiles.insert(profile_name);
+            Ok(None)
+        }
+        RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
+            log_runtime_compact_inflight_saturated(request_id, shared, &profile_name);
+            *saw_inflight_saturation = true;
             excluded_profiles.insert(profile_name);
             Ok(None)
         }

@@ -173,6 +173,20 @@ fn attempt_runtime_compact_owner_fallback(
                 runtime_proxy_local_selection_failure_message(),
             ))
         }
+        RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
+            log_runtime_proxy_compact_fallback_failure(
+                &exhausted,
+                "inflight_saturated",
+                last_failure_kind,
+                true,
+                &profile_name,
+            );
+            Ok(build_runtime_proxy_json_error_response(
+                503,
+                "service_unavailable",
+                runtime_proxy_local_selection_failure_message(),
+            ))
+        }
         RuntimeStandardAttempt::TransportFailed {
             profile_name,
             stage: _,

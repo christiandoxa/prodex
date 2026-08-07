@@ -38,7 +38,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         hard_affinity,
     )?
     else {
-        return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
+        return Ok(RuntimeStandardAttempt::ProfileInflightSaturated {
             profile_name: profile_name.to_string(),
         });
     };
