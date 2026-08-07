@@ -10,7 +10,9 @@ mod tcp_connect_executor;
 mod unauthorized_recovery;
 
 pub(in crate::runtime_proxy) use self::session_state::RuntimeWebsocketSessionState;
+#[cfg(test)]
 pub(crate) use self::session_state::acquire_runtime_profile_inflight_guard;
+pub(crate) use self::session_state::try_acquire_runtime_profile_inflight_guard;
 use self::tcp_connect_executor::*;
 pub(super) use self::unauthorized_recovery::{
     RuntimeProfileUnauthorizedRecoveryStep, RuntimeProfileUnauthorizedRecoverySteps,

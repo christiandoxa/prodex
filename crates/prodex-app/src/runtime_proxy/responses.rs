@@ -199,6 +199,8 @@ fn run_runtime_responses_loop(
         let turn_state_override = affinity_state
             .turn_state_override_for(&candidate_name, context.request_turn_state)
             .map(str::to_owned);
+        let hard_affinity =
+            runtime_candidate_has_hard_affinity(affinity_state.candidate_affinity(&candidate_name));
         runtime_proxy_log(
             context.shared,
             format!(
@@ -219,6 +221,7 @@ fn run_runtime_responses_loop(
             auto_redeemed_profiles,
             quota_last_chance_profile,
             loop_state,
+            hard_affinity,
         )? {
             return Ok(response);
         }
@@ -252,9 +255,7 @@ fn runtime_responses_candidate_saturated(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     candidate_name: &str,
 ) -> Result<bool> {
-    if context.previous_response_id.is_some()
-        || affinity_state.pinned_profile().is_some()
-        || affinity_state.turn_state_profile().is_some()
+    if runtime_candidate_has_hard_affinity(affinity_state.candidate_affinity(candidate_name))
         || !runtime_profile_inflight_hard_limited_for_context(
             context.shared,
             candidate_name,
@@ -487,6 +488,7 @@ fn handle_runtime_responses_attempt(
     auto_redeemed_profiles: &mut BTreeSet<String>,
     quota_last_chance_profile: &mut Option<String>,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    hard_affinity: bool,
 ) -> Result<Option<RuntimeResponsesReply>> {
     match attempt_runtime_responses_request(
         context.request_id,
@@ -495,6 +497,7 @@ fn handle_runtime_responses_attempt(
         candidate_name,
         turn_state_override,
         context.prompt_cache_key,
+        hard_affinity,
     )? {
         RuntimeResponsesAttempt::Success {
             profile_name,

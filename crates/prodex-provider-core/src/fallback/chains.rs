@@ -51,8 +51,7 @@ pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<S
         },
         ProviderId::Kiro => match lower.as_str() {
             "" | "auto" | "default" | "claude" | "sonnet" => &[PRODEX_KIRO_DEFAULT_MODEL],
-            _ if lower.starts_with("claude-") => return non_empty_single(model),
-            _ => &[PRODEX_KIRO_DEFAULT_MODEL],
+            _ => return non_empty_single(model),
         },
         ProviderId::OpenAi | ProviderId::Local => return non_empty_single(model),
     };

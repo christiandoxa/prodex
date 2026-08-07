@@ -123,6 +123,57 @@ fn websocket_fresh_connect_failure_returns_retryable_transport_attempt() {
 }
 
 #[test]
+fn websocket_unbound_session_id_does_not_bypass_profile_inflight_hard_limit() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = websocket_test_shared_with_main_profile(
+        "unbound-session-inflight-limit",
+        websocket_unused_local_addr(),
+    );
+    let inflight = (0..runtime_proxy_profile_inflight_hard_limit())
+        .map(|_| acquire_runtime_profile_inflight_guard(&shared, "main", "websocket_session"))
+        .collect::<Result<Vec<_>>>()
+        .expect("inflight guards should be acquired");
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request_with_hard_affinity(
+        RuntimeWebsocketAttemptRequest {
+            request_id: 371,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake_request,
+            request_text: r#"{"type":"response.create","session_id":"unbound-session"}"#,
+            request_previous_response_id: None,
+            request_prompt_cache_key: None,
+            request_session_id: Some("unbound-session"),
+            request_turn_state: None,
+            shared: &shared,
+            websocket_session: &mut websocket_session,
+            profile_name: "main",
+            turn_state_override: None,
+            promote_committed_profile: true,
+        },
+        false,
+    )
+    .expect("saturated unbound session should return a local selection result");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::LocalSelectionBlocked {
+            profile_name,
+            reason: "profile_inflight_saturated",
+        } if profile_name == "main"
+    ));
+    drop(inflight);
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_attempt() {
     let _guard = acquire_test_runtime_lock();
     let _env_lock = TestEnvVarGuard::lock();

@@ -103,20 +103,22 @@ fn attempt_runtime_compact_owner_fallback(
     last_failure_kind: &'static str,
     saw_inflight_saturation: bool,
 ) -> Result<tiny_http::ResponseBox> {
+    let hard_affinity = runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+        route_kind: RuntimeRouteKind::Compact,
+        candidate_name: exhausted.compact_owner_profile,
+        strict_affinity_profile: exhausted.strict_affinity_profile,
+        pinned_profile: None,
+        turn_state_profile: None,
+        session_profile: exhausted.session_profile,
+        trusted_previous_response_affinity: false,
+    });
     match attempt_runtime_standard_request(
         exhausted.request_id,
         exhausted.request,
         exhausted.shared,
         exhausted.compact_owner_profile,
-        runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind: RuntimeRouteKind::Compact,
-            candidate_name: exhausted.compact_owner_profile,
-            strict_affinity_profile: exhausted.strict_affinity_profile,
-            pinned_profile: None,
-            turn_state_profile: None,
-            session_profile: exhausted.session_profile,
-            trusted_previous_response_affinity: false,
-        }),
+        hard_affinity,
+        hard_affinity,
     )? {
         RuntimeStandardAttempt::Success {
             profile_name,

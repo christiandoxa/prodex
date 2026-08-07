@@ -312,15 +312,31 @@ impl RuntimeProxyLaneAdmission {
     }
 
     pub fn acquire_profile_inflight(&self, profile_name: &str, weight: usize) -> usize {
+        self.try_acquire_profile_inflight(profile_name, weight, None)
+            .expect("unbounded profile in-flight admission cannot be rejected")
+    }
+
+    pub fn try_acquire_profile_inflight(
+        &self,
+        profile_name: &str,
+        weight: usize,
+        hard_limit: Option<usize>,
+    ) -> Option<usize> {
         let mut inflight = self
             .profile_inflight
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let weight = weight.max(1);
+        let current = inflight.get(profile_name).copied().unwrap_or(0);
+        let next = current.saturating_add(weight);
+        if hard_limit.is_some_and(|limit| next > limit) {
+            return None;
+        }
         let count = inflight.entry(profile_name.to_string()).or_default();
-        *count = count.saturating_add(weight.max(1));
+        *count = next;
         self.profile_inflight_admissions_total
             .fetch_add(1, Ordering::Relaxed);
-        *count
+        Some(*count)
     }
 
     pub fn release_profile_inflight(

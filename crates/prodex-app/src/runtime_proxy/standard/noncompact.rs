@@ -42,39 +42,13 @@ fn proxy_runtime_noncompact_realtime_request(
             "request={request_id} transport=http realtime_call_owner_pinned profile={current_profile} reason=sideband_auth_uses_current_profile"
         ),
     );
-    if runtime_profile_inflight_hard_limited_for_context(shared, current_profile, "standard_http")?
-    {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "profile_inflight_saturated",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("profile", current_profile),
-                    runtime_proxy_log_field(
-                        "hard_limit",
-                        shared
-                            .runtime_config
-                            .tuning
-                            .profile_inflight_hard_limit
-                            .to_string(),
-                    ),
-                ],
-            ),
-        );
-        return Ok(build_runtime_proxy_text_response(
-            503,
-            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
-        ));
-    }
-
     match attempt_runtime_noncompact_standard_request_with_policy(
         request_id,
         request,
         shared,
         current_profile,
         false,
+        true,
     )? {
         RuntimeStandardAttempt::Success {
             profile_name,
@@ -258,6 +232,7 @@ fn run_runtime_noncompact_standard_loop(
             &mut *loop_state,
             session_profile.is_some(),
             session_profile.as_deref(),
+            session_profile.as_deref() == Some(candidate_name.as_str()),
         )? {
             continue;
         }
@@ -267,6 +242,7 @@ fn run_runtime_noncompact_standard_loop(
             request,
             shared,
             &candidate_name,
+            session_profile.as_deref() == Some(candidate_name.as_str()),
         )?;
         if let Some(response) = handle_runtime_noncompact_attempt(
             request_id,
@@ -359,8 +335,14 @@ fn runtime_noncompact_candidate_saturated(
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
     continuation: bool,
     wait_affinity_owner: Option<&str>,
+    hard_affinity: bool,
 ) -> Result<bool> {
-    if !runtime_profile_inflight_hard_limited_for_context(shared, candidate_name, "standard_http")?
+    if hard_affinity
+        || !runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            candidate_name,
+            "standard_http",
+        )?
     {
         return Ok(false);
     }

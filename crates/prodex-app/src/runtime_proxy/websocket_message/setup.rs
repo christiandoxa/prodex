@@ -4,12 +4,12 @@ use super::super::{
     RuntimeResponseProfileAffinityClear, RuntimeResponseRouteAffinityLogContext,
     RuntimeResponseRouteAffinityRefreshSlots, RuntimeResponseRouteAffinityRequest,
     RuntimeRouteKind, RuntimeUpstreamFailureResponse, RuntimeWebsocketAttempt,
-    RuntimeWebsocketAttemptRequest, attempt_runtime_websocket_request,
+    RuntimeWebsocketAttemptRequest, attempt_runtime_websocket_request_with_hard_affinity,
     bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
     clear_runtime_response_profile_affinity, mark_runtime_profile_retry_backoff,
     refresh_and_log_runtime_response_route_affinity_for_request,
-    release_runtime_quota_blocked_affinity, runtime_noncompact_session_priority_profile,
-    runtime_previous_response_affinity_is_trusted,
+    release_runtime_quota_blocked_affinity, runtime_candidate_has_hard_affinity,
+    runtime_noncompact_session_priority_profile, runtime_previous_response_affinity_is_trusted,
     runtime_previous_response_fresh_fallback_shape_with_session,
     runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
@@ -285,21 +285,36 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         turn_state_override: Option<&str>,
     ) -> Result<RuntimeWebsocketAttempt> {
         let promote_committed_profile = self.should_promote_committed_profile();
-        attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
-            request_id: self.request_id,
-            local_socket: &mut *self.local_socket,
-            handshake_request: &self.handshake_request,
-            request_text: &self.request_text,
-            request_previous_response_id: self.previous_response_id.as_deref(),
-            request_prompt_cache_key: self.prompt_cache_key.as_deref(),
-            request_session_id: self.request_session_id.as_deref(),
-            request_turn_state: self.request_turn_state.as_deref(),
-            shared: self.shared,
-            websocket_session: &mut *self.websocket_session,
-            profile_name,
-            turn_state_override,
-            promote_committed_profile,
-        })
+        let hard_affinity = runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+            route_kind: RuntimeRouteKind::Websocket,
+            candidate_name: profile_name,
+            strict_affinity_profile: self
+                .compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
+            pinned_profile: self.pinned_profile.as_deref(),
+            turn_state_profile: self.turn_state_profile.as_deref(),
+            session_profile: self.session_profile.as_deref(),
+            trusted_previous_response_affinity: self.trusted_previous_response_affinity,
+        });
+        attempt_runtime_websocket_request_with_hard_affinity(
+            RuntimeWebsocketAttemptRequest {
+                request_id: self.request_id,
+                local_socket: &mut *self.local_socket,
+                handshake_request: &self.handshake_request,
+                request_text: &self.request_text,
+                request_previous_response_id: self.previous_response_id.as_deref(),
+                request_prompt_cache_key: self.prompt_cache_key.as_deref(),
+                request_session_id: self.request_session_id.as_deref(),
+                request_turn_state: self.request_turn_state.as_deref(),
+                shared: self.shared,
+                websocket_session: &mut *self.websocket_session,
+                profile_name,
+                turn_state_override,
+                promote_committed_profile,
+            },
+            hard_affinity,
+        )
     }
 
     pub(super) fn should_promote_committed_profile(&self) -> bool {

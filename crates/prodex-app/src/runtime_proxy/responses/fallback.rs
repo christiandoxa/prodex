@@ -87,6 +87,7 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
         &current_profile,
         fallback.request_turn_state,
         fallback.prompt_cache_key,
+        false,
     )?;
     handle_runtime_responses_direct_attempt(
         &fallback,

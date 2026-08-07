@@ -238,7 +238,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         reason: &'static str,
         reset_previous_response_retry_index: bool,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        if reason != "profile_inflight_saturated" {
+            mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        }
         if !self.quota_blocked_affinity_is_releasable(
             &profile_name,
             self.request_requires_locked_previous_response_affinity(),
@@ -411,7 +413,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, reason
             ),
         );
-        mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        if reason != "profile_inflight_saturated" {
+            mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        }
         if !self.quota_blocked_affinity_is_releasable(
             &profile_name,
             self.request_requires_locked_previous_response_affinity(),

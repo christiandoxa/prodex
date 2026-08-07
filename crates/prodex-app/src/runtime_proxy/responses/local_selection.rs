@@ -61,7 +61,9 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
             "request={request_id} transport=http local_selection_blocked profile={profile_name} route=responses reason={reason}"
         ),
     );
-    mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    if reason != "profile_inflight_saturated" {
+        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    }
     match runtime_responses_local_selection_action(
         affinity_state.quota_blocked_affinity_is_releasable(
             &profile_name,
