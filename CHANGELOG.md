@@ -2,7 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.389.0 - 2026-08-06
+## 0.390.0 - 2026-08-07
+
+### CLI
+
+- Support trusted imports and Codex 0.147.0 (`1ac7b11`)
+
+## 0.389.0 - 2026-08-07
 
 ### CLI
 
@@ -110,13 +116,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Merge pull request #44 from christiandoxa/dependabot/github_actions/github-actions-5eb7864991 (`17f159b`)
 - Merge pull request #43 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-83702f5d0b (`6db4406`)
 - Merge pull request #42 from christiandoxa/dependabot/cargo/cargo-8ee9223565 (`04bf95a`)
-
-## 0.378.0 - 2026-08-02
-
-### Runtime
-
-- Close audited runtime and control-plane gaps (`e24f7aa`)
-
-### Misc
-
-- Close cross-platform CI regressions (`2d02ea8`)
