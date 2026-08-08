@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.396.0 - 2026-08-08
+
+### Misc
+
+- Skip ponytail when node is unavailable (`625c4ae`)
+
 ## 0.395.0 - 2026-08-08
 
 ### Misc
@@ -88,13 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Sync Codex installer and fuzz metadata (`a8682ee`)
 - Track Codex 0.146.1 baseline (`b1eac18`)
-
-## 0.384.0 - 2026-08-05
-
-### Runtime
-
-- Stabilize macOS broker recovery (`5de7743`)
-
-### CLI
-
-- Harden provider delegation (`e865fac`)
