@@ -551,26 +551,8 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
         ));
     }
 
-    let presidio_required = args
-        .required_tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
-    let presidio_selected = args
-        .tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
-    if (presidio_required || presidio_selected) && agent != SuperCliAgent::Copilot {
-        return Err(unsupported(if presidio_required {
-            "--require-tool presidio"
-        } else {
-            "--tool presidio"
-        }));
-    }
-    if args.presidio
-        && matches!(
-            agent,
-            SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy
-        )
-    {
-        return Err(unsupported("--presidio"));
+    if let Some(option) = first_unsupported_native_presidio_option(args, agent) {
+        return Err(unsupported(option));
     }
 
     if agent == SuperCliAgent::Agy
@@ -579,6 +561,31 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
         return Err(unsupported(option));
     }
     Ok(())
+}
+
+fn first_unsupported_native_presidio_option(
+    args: &SuperArgs,
+    agent: SuperCliAgent,
+) -> Option<&'static str> {
+    let presidio_required = args
+        .required_tools
+        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
+    let presidio_selected = args
+        .tools
+        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
+    if (presidio_required || presidio_selected) && agent != SuperCliAgent::Copilot {
+        return Some(if presidio_required {
+            "--require-tool presidio"
+        } else {
+            "--tool presidio"
+        });
+    }
+    (args.presidio
+        && matches!(
+            agent,
+            SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy
+        ))
+    .then_some("--presidio")
 }
 
 fn first_unsupported_native_option(args: &SuperArgs) -> Option<&'static str> {
