@@ -16,6 +16,9 @@ CI validates `fuzz/Cargo.lock`, compiles every target under AddressSanitizer wit
 nightly, and runs each target for a bounded ten-second smoke campaign. Local smoke runs can add
 `-- -max_total_time=10` for the same bounded pass.
 
+When the workspace release version changes, refresh the separate fuzz lockfile with
+`cargo update --manifest-path fuzz/Cargo.toml` before committing release metadata.
+
 The request-target harness checks canonical round trips and verifies that owned and borrowed route
 classification always agree on the route kind and plane. The OIDC harness exercises issuer, JWKS,
 and allowlist combinations while checking canonical issuer identity, same-origin discovery, redirect
