@@ -71,7 +71,7 @@ fn watch_profile_quota_tui(
 
     loop {
         if let Some(next_snapshot) = refresh.take_latest() {
-            snapshot = next_snapshot;
+            snapshot = merge_profile_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
             next_refresh_at = Some(quota_watch_next_refresh_at());
         }
@@ -99,6 +99,17 @@ fn watch_profile_quota_tui(
         if profile_quota_tui_should_quit(&mut redraw_needed)? {
             return Ok(());
         }
+    }
+}
+
+fn merge_profile_quota_watch_snapshot(
+    previous: &ProfileQuotaWatchSnapshot,
+    next: ProfileQuotaWatchSnapshot,
+) -> ProfileQuotaWatchSnapshot {
+    if previous.quota.is_ok() && next.quota.is_err() {
+        previous.clone()
+    } else {
+        next
     }
 }
 
@@ -138,4 +149,37 @@ fn start_profile_quota_watch_refresh(
             quota: Err("quota refresh failed unexpectedly".to_string()),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_quota_watch_keeps_previous_success_on_transient_refresh_error() {
+        let merged = merge_profile_quota_watch_snapshot(
+            &ProfileQuotaWatchSnapshot {
+                updated: "before".to_string(),
+                quota: Ok(ProviderQuotaSnapshot::OpenAi(UsageResponse {
+                    email: Some("before@example.com".to_string()),
+                    plan_type: Some("plus".to_string()),
+                    rate_limit: None,
+                    code_review_rate_limit: None,
+                    rate_limit_reset_credits: None,
+                    additional_rate_limits: Vec::new(),
+                })),
+            },
+            ProfileQuotaWatchSnapshot {
+                updated: "after".to_string(),
+                quota: Err("HTTP 503".to_string()),
+            },
+        );
+
+        let ProfileQuotaWatchSnapshot { updated, quota } = merged;
+        assert_eq!(updated, "before");
+        let Ok(ProviderQuotaSnapshot::OpenAi(usage)) = quota else {
+            panic!("expected previous successful quota snapshot");
+        };
+        assert_eq!(usage.email.as_deref(), Some("before@example.com"));
+    }
 }
