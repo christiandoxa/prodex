@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.397.0 - 2026-08-08
 
+### Docs
+
+- Document lockfile refresh on workspace releases (`55beda1`)
+
 ### Misc
 
 - Use local Ponytail marketplace source (`87cf504`)
