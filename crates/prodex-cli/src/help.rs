@@ -64,7 +64,7 @@ Examples:
 
 Notes:
   `prodex quota` supports OpenAI/Codex, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
-  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
+  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `claude`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, prodex shows a provider snapshot instead of failing the quota view.";
 pub const CLI_REDEEM_AFTER_HELP: &str = "\
