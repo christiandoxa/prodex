@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
@@ -9,6 +9,9 @@ use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
+use std::path::Path;
+
+const DEFAULT_TERMINAL_TITLE: &str = "prodex";
 
 #[derive(Clone, Copy)]
 enum TerminalOutput {
@@ -19,6 +22,7 @@ enum TerminalOutput {
 #[derive(Clone, Copy)]
 struct TerminalOperations {
     enable_raw_mode: fn() -> io::Result<()>,
+    set_title: fn(TerminalOutput) -> io::Result<()>,
     enter_alternate_screen: fn(TerminalOutput) -> io::Result<()>,
     leave_alternate_screen: fn(TerminalOutput) -> io::Result<()>,
     disable_raw_mode: fn() -> io::Result<()>,
@@ -28,6 +32,7 @@ impl Default for TerminalOperations {
     fn default() -> Self {
         Self {
             enable_raw_mode,
+            set_title: set_terminal_title,
             enter_alternate_screen,
             leave_alternate_screen,
             disable_raw_mode,
@@ -60,6 +65,9 @@ impl TerminalSessionGuard {
             raw_mode_enabled: true,
             alternate_screen_entered: false,
         };
+        // Window-title updates are cosmetic; an unsupported terminal must not
+        // prevent the interactive screen from starting.
+        let _ = (operations.set_title)(output);
         (operations.enter_alternate_screen)(output)
             .with_context(|| format!("failed to enter {label} alternate screen"))?;
         guard.alternate_screen_entered = true;
@@ -207,6 +215,30 @@ fn enter_alternate_screen(output: TerminalOutput) -> io::Result<()> {
     }
 }
 
+fn set_terminal_title(output: TerminalOutput) -> io::Result<()> {
+    let title = terminal_title_for_path(&std::env::current_dir().unwrap_or_default());
+    match output {
+        TerminalOutput::Stdout => crossterm::execute!(io::stdout(), SetTitle(title)),
+        TerminalOutput::Stderr => crossterm::execute!(io::stderr(), SetTitle(title)),
+    }
+}
+
+fn terminal_title_for_path(path: &Path) -> String {
+    let Some(name) = path.file_name() else {
+        return DEFAULT_TERMINAL_TITLE.to_string();
+    };
+    let title: String = name
+        .to_string_lossy()
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    if title.is_empty() {
+        DEFAULT_TERMINAL_TITLE.to_string()
+    } else {
+        title
+    }
+}
+
 fn leave_alternate_screen(output: TerminalOutput) -> io::Result<()> {
     match output {
         TerminalOutput::Stdout => {
@@ -299,6 +331,7 @@ mod tests {
             TerminalOutput::Stdout,
             TerminalOperations {
                 enable_raw_mode: fake_enable_raw_mode,
+                set_title: fake_set_title,
                 enter_alternate_screen: fake_enter_alternate_screen,
                 leave_alternate_screen: fake_leave_alternate_screen,
                 disable_raw_mode: fake_disable_raw_mode,
@@ -311,10 +344,25 @@ mod tests {
                 calls.borrow().as_slice(),
                 [
                     "enable_raw_mode",
+                    "set_title",
                     "enter_alternate_screen",
                     "disable_raw_mode"
                 ]
             );
         });
+    }
+
+    fn fake_set_title(_: TerminalOutput) -> io::Result<()> {
+        record("set_title");
+        Ok(())
+    }
+
+    #[test]
+    fn terminal_title_uses_directory_basename() {
+        assert_eq!(
+            terminal_title_for_path(Path::new("/home/test-user/IdeaProjects/prodex")),
+            "prodex"
+        );
+        assert_eq!(terminal_title_for_path(Path::new("/")), "prodex");
     }
 }
