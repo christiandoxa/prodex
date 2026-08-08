@@ -47,6 +47,15 @@ pub(super) enum RuntimeGatewayScimUserFilter {
     ExternalId(String),
 }
 
+#[derive(Default)]
+struct RuntimeGatewayScimRawQuery {
+    start_index: Option<usize>,
+    count: Option<usize>,
+    limit: Option<u16>,
+    cursor: Option<usize>,
+    filter: Option<RuntimeGatewayScimUserFilter>,
+}
+
 impl RuntimeGatewayScimUserFilter {
     fn matches(&self, user: &RuntimeGatewayScimUser) -> bool {
         let value = match self {
@@ -68,76 +77,98 @@ impl RuntimeGatewayScimUserFilter {
 pub(super) fn runtime_gateway_admin_scim_list_query(
     path_and_query: &str,
 ) -> Result<RuntimeGatewayScimListQuery, &'static str> {
+    let parsed = runtime_gateway_admin_scim_raw_query(path_and_query)?;
     let mut query = RuntimeGatewayScimListQuery {
         count: usize::from(prodex_domain::PageRequest::DEFAULT_LIMIT),
         ..RuntimeGatewayScimListQuery::default()
     };
-    let mut start_index = None;
-    let mut count = None;
-    let mut limit = None;
-    let mut cursor = None;
-    let mut filter = None;
-    let raw_query = path_and_query
-        .split_once('?')
-        .map_or("", |(_, query)| query.trim_start_matches('?'));
-    for pair in raw_query.split('&').filter(|pair| !pair.is_empty()) {
-        let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
-        let name = runtime_gateway_admin_scim_query_component(raw_name)?;
-        let value = runtime_gateway_admin_scim_query_component(raw_value)?;
-        match name.as_str() {
-            "startIndex" => {
-                let parsed = value
-                    .parse::<usize>()
-                    .ok()
-                    .filter(|value| *value >= 1)
-                    .ok_or("startIndex is invalid")?;
-                if start_index.replace(parsed).is_some() {
-                    return Err("startIndex is invalid");
-                }
-            }
-            "count" => {
-                let parsed = value.parse::<usize>().map_err(|_| "count is invalid")?;
-                if count.replace(parsed).is_some() {
-                    return Err("count is invalid");
-                }
-            }
-            "limit" => {
-                let parsed = value.parse::<u16>().map_err(|_| "limit is invalid")?;
-                if limit.replace(parsed).is_some() {
-                    return Err("limit is invalid");
-                }
-            }
-            "cursor" => {
-                let parsed = value.parse::<usize>().map_err(|_| "cursor is invalid")?;
-                if cursor.replace(parsed).is_some() {
-                    return Err("cursor is invalid");
-                }
-            }
-            "filter" => {
-                let parsed = runtime_gateway_admin_scim_filter(&value)?;
-                if filter.replace(parsed).is_some() {
-                    return Err("filter is invalid");
-                }
-            }
-            _ => {}
-        }
-    }
 
-    if cursor.is_some() && start_index.is_some() {
+    if parsed.cursor.is_some() && parsed.start_index.is_some() {
         return Err("cursor and startIndex cannot be combined");
     }
-    if count.is_some() && limit.is_some() {
+    if parsed.count.is_some() && parsed.limit.is_some() {
         return Err("count and limit cannot be combined");
     }
-    let start_index = start_index.unwrap_or(1);
-    let start = cursor.unwrap_or_else(|| start_index.saturating_sub(1));
-    let requested_count = count
-        .or_else(|| limit.map(usize::from))
+    let start = parsed
+        .cursor
+        .unwrap_or_else(|| parsed.start_index.unwrap_or(1).saturating_sub(1));
+    let requested_count = parsed
+        .count
+        .or_else(|| parsed.limit.map(usize::from))
         .unwrap_or(query.count);
     query.start = start;
     query.count = requested_count.min(usize::from(prodex_domain::PageRequest::MAX_LIMIT));
-    query.filter = filter;
+    query.filter = parsed.filter;
     Ok(query)
+}
+
+fn runtime_gateway_admin_scim_raw_query(
+    path_and_query: &str,
+) -> Result<RuntimeGatewayScimRawQuery, &'static str> {
+    let raw_query = path_and_query
+        .split_once('?')
+        .map_or("", |(_, query)| query.trim_start_matches('?'));
+    raw_query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .try_fold(RuntimeGatewayScimRawQuery::default(), |mut query, pair| {
+            let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+            let name = runtime_gateway_admin_scim_query_component(raw_name)?;
+            let value = runtime_gateway_admin_scim_query_component(raw_value)?;
+            runtime_gateway_admin_scim_query_pair(&mut query, &name, &value)?;
+            Ok(query)
+        })
+}
+
+fn runtime_gateway_admin_scim_query_pair(
+    query: &mut RuntimeGatewayScimRawQuery,
+    name: &str,
+    value: &str,
+) -> Result<(), &'static str> {
+    match name {
+        "startIndex" => set_scim_query_value(
+            &mut query.start_index,
+            value
+                .parse::<usize>()
+                .ok()
+                .filter(|value| *value >= 1)
+                .ok_or("startIndex is invalid")?,
+            "startIndex is invalid",
+        ),
+        "count" => set_scim_query_value(
+            &mut query.count,
+            value.parse::<usize>().map_err(|_| "count is invalid")?,
+            "count is invalid",
+        ),
+        "limit" => set_scim_query_value(
+            &mut query.limit,
+            value.parse::<u16>().map_err(|_| "limit is invalid")?,
+            "limit is invalid",
+        ),
+        "cursor" => set_scim_query_value(
+            &mut query.cursor,
+            value.parse::<usize>().map_err(|_| "cursor is invalid")?,
+            "cursor is invalid",
+        ),
+        "filter" => set_scim_query_value(
+            &mut query.filter,
+            runtime_gateway_admin_scim_filter(value)?,
+            "filter is invalid",
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn set_scim_query_value<T>(
+    slot: &mut Option<T>,
+    value: T,
+    error: &'static str,
+) -> Result<(), &'static str> {
+    if slot.replace(value).is_some() {
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 
 fn runtime_gateway_admin_scim_filter(

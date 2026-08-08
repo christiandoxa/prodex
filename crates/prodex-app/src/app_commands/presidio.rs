@@ -84,71 +84,20 @@ fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: b
         return Ok(());
     }
 
-    if presidio_auto_start_disabled() {
+    if let Some((message, reason)) = presidio_startup_blocker(analyzer_url, anonymizer_url) {
         if required {
-            return required_presidio_services_error(
-                &analyzer,
-                &anonymizer,
-                "automatic startup is disabled",
-            );
+            return required_presidio_services_error(&analyzer, &anonymizer, reason);
         }
-        print_launch_status(&format!(
-            "Presidio auto-start disabled by {PRESIDIO_AUTO_START_ENV}=0; continuing with configured endpoints."
-        ));
+        print_launch_status(message);
         return Ok(());
     }
 
-    if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
-        || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
-    {
-        if required {
-            return required_presidio_services_error(
-                &analyzer,
-                &anonymizer,
-                "custom endpoints are not started automatically",
-            );
-        }
-        print_launch_status(
-            "Presidio uses custom endpoints; not starting Docker containers automatically.",
-        );
-        return Ok(());
-    }
-
-    if !docker_available() {
-        if required {
-            return required_presidio_services_error(
-                &analyzer,
-                &anonymizer,
-                "Docker is unavailable",
-            );
-        }
-        print_launch_status("Docker is unavailable, so Presidio containers were not started.");
-        return Ok(());
-    }
-
-    if !analyzer.ok {
-        print_launch_status("starting Presidio Analyzer Docker container...");
-        ensure_presidio_container(PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, "5002")?;
-    }
-    if !anonymizer.ok {
-        print_launch_status("starting Presidio Anonymizer Docker container...");
-        ensure_presidio_container(
-            PRESIDIO_ANONYMIZER_CONTAINER,
-            PRESIDIO_ANONYMIZER_IMAGE,
-            "5001",
-        )?;
-    }
+    start_presidio_containers(&analyzer, &anonymizer)?;
 
     print_launch_status("waiting for Presidio services to become ready...");
-    let deadline = Instant::now() + Duration::from_secs(90);
-    while Instant::now() < deadline {
-        let analyzer = client.probe_health(analyzer_url);
-        let anonymizer = client.probe_health(anonymizer_url);
-        if analyzer.ok && anonymizer.ok {
-            print_launch_status("Presidio services are ready.");
-            return Ok(());
-        }
-        thread::sleep(Duration::from_secs(2));
+    if wait_for_presidio_services(&client, analyzer_url, anonymizer_url) {
+        print_launch_status("Presidio services are ready.");
+        return Ok(());
     }
 
     if required {
@@ -163,6 +112,63 @@ fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: b
         config.fail_mode
     ));
     Ok(())
+}
+
+fn presidio_startup_blocker(
+    analyzer_url: &str,
+    anonymizer_url: &str,
+) -> Option<(&'static str, &'static str)> {
+    if presidio_auto_start_disabled() {
+        return Some((
+            "Presidio auto-start disabled by PRODEX_PRESIDIO_AUTO_START=0; continuing with configured endpoints.",
+            "automatic startup is disabled",
+        ));
+    }
+    if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
+        || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
+    {
+        return Some((
+            "Presidio uses custom endpoints; not starting Docker containers automatically.",
+            "custom endpoints are not started automatically",
+        ));
+    }
+    (!docker_available()).then_some((
+        "Docker is unavailable, so Presidio containers were not started.",
+        "Docker is unavailable",
+    ))
+}
+
+fn start_presidio_containers(analyzer: &PresidioHealth, anonymizer: &PresidioHealth) -> Result<()> {
+    if !analyzer.ok {
+        print_launch_status("starting Presidio Analyzer Docker container...");
+        ensure_presidio_container(PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, "5002")?;
+    }
+    if !anonymizer.ok {
+        print_launch_status("starting Presidio Anonymizer Docker container...");
+        ensure_presidio_container(
+            PRESIDIO_ANONYMIZER_CONTAINER,
+            PRESIDIO_ANONYMIZER_IMAGE,
+            "5001",
+        )?;
+    }
+    Ok(())
+}
+
+fn wait_for_presidio_services(
+    client: &PresidioBlockingClient,
+    analyzer_url: &str,
+    anonymizer_url: &str,
+) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < deadline {
+        let analyzer = client.probe_health(analyzer_url);
+        let anonymizer = client.probe_health(anonymizer_url);
+        if analyzer.ok && anonymizer.ok {
+            return true;
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+    false
 }
 
 fn required_presidio_services_error(
