@@ -93,6 +93,50 @@ fn handle_all_quota(
     Ok(())
 }
 
+fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
+    let profile_name = resolve_profile_name(state, args.profile.as_deref())?;
+    let profile = state
+        .profiles
+        .get(&profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let codex_home = profile.codex_home.clone();
+
+    if args.raw {
+        let usage =
+            fetch_profile_quota_json(&profile.provider, &codex_home, args.base_url.as_deref())?;
+        let json = serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?;
+        print_stdout_line(&json)?;
+        return Ok(());
+    }
+
+    if quota_watch_enabled(args) {
+        return watch_quota(
+            &profile_name,
+            &profile.provider,
+            &codex_home,
+            args.detail,
+            args.base_url.as_deref(),
+        );
+    }
+
+    let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
+    if let Some(mut terminal) = crate::try_inline_stdout_terminal(12) {
+        terminal.draw(|frame| {
+            render_profile_quota_once_tui(frame, &profile_name, quota.clone(), args.detail)
+        })?;
+        let _ = terminal.show_cursor();
+    } else {
+        print_stdout_text(
+            &crate::quota_support::render_profile_quota_snapshot_with_detail(
+                &profile_name,
+                &quota,
+                args.detail,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,48 +201,4 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
-}
-
-fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
-    let profile_name = resolve_profile_name(state, args.profile.as_deref())?;
-    let profile = state
-        .profiles
-        .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let codex_home = profile.codex_home.clone();
-
-    if args.raw {
-        let usage =
-            fetch_profile_quota_json(&profile.provider, &codex_home, args.base_url.as_deref())?;
-        let json = serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?;
-        print_stdout_line(&json)?;
-        return Ok(());
-    }
-
-    if quota_watch_enabled(args) {
-        return watch_quota(
-            &profile_name,
-            &profile.provider,
-            &codex_home,
-            args.detail,
-            args.base_url.as_deref(),
-        );
-    }
-
-    let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
-    if let Some(mut terminal) = crate::try_inline_stdout_terminal(12) {
-        terminal.draw(|frame| {
-            render_profile_quota_once_tui(frame, &profile_name, quota.clone(), args.detail)
-        })?;
-        let _ = terminal.show_cursor();
-    } else {
-        print_stdout_text(
-            &crate::quota_support::render_profile_quota_snapshot_with_detail(
-                &profile_name,
-                &quota,
-                args.detail,
-            ),
-        )?;
-    }
-    Ok(())
 }
