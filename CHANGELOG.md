@@ -2,6 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.398.0 - 2026-08-09
+
+### Runtime
+
+- Harden runtime paths and CI parallelism (`fc97b65`)
+
+### Misc
+
+- Ratchet presidio size guard (`76bcc08`)
+- Satisfy sonar complexity gates (`3c877b2`)
+- Satisfy clippy quality gates (`db4d929`)
+
 ## 0.397.0 - 2026-08-08
 
 ### Docs
@@ -82,11 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Strip parent external tools (`1e46eb6`)
-
-## 0.386.0 - 2026-08-06
-
-### CLI
-
-- Harden child and Kiro process cleanup (`9897913`)
-- Keep launcher guidance within size guard (`b764e44`)
-- Clarify child launcher contract (`33cd4f3`)
