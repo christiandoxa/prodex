@@ -148,17 +148,11 @@ pub(crate) fn collect_super_tool_statuses(
     paths: &AppPaths,
     check_presidio: bool,
 ) -> Vec<SuperToolStatus> {
-    let mut rows = [
-        prodex_optional_tools::OptionalToolId::Caveman,
-        prodex_optional_tools::OptionalToolId::Rtk,
-        prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
-        prodex_optional_tools::OptionalToolId::PlaywrightMcp,
-        prodex_optional_tools::OptionalToolId::Ponytail,
-    ]
-    .into_iter()
-    .map(optional_tool_super_status)
-    .chain([smart_context_super_status()])
-    .collect::<Vec<_>>();
+    let mut rows = prodex_optional_tools::OptionalToolSet::super_defaults()
+        .iter()
+        .map(optional_tool_super_status)
+        .chain([smart_context_super_status()])
+        .collect::<Vec<_>>();
 
     rows.push(if check_presidio {
         presidio_tool_status(paths)

@@ -5,13 +5,12 @@ use crate::{
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
     fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
     render_all_quota_reports_once_tui, render_profile_quota_once_tui, render_quota_reports,
-    repair_missing_active_profile_and_save, resolve_profile_name, watch_all_quotas, watch_quota,
+    resolve_profile_name, watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
-    repair_missing_active_profile_and_save(&paths, &mut state)?;
+    let state = AppState::load(&paths)?;
     let auth_filter = args
         .auth
         .as_deref()
@@ -92,6 +91,72 @@ fn handle_all_quota(
         print_stdout_text(&render_quota_reports(&reports, args.detail))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AppState, ProfileEntry, ProfileProvider, TestEnvVarGuard};
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn quota_does_not_repair_or_save_state() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-quota-read-only-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let shared = root.join("shared-codex");
+        let _root_guard = TestEnvVarGuard::set("PRODEX_HOME", &root.display().to_string());
+        let _shared_guard =
+            TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", &shared.display().to_string());
+        let paths = AppPaths::discover().expect("paths should resolve");
+        fs::create_dir_all(&paths.root).expect("test state parent should be created");
+        let state = AppState {
+            active_profile: Some("deleted".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: root.join("profiles/main"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        };
+        let original = serde_json::to_string_pretty(&state).expect("state should serialize");
+        fs::write(&paths.state_file, &original).expect("state should be written");
+
+        handle_quota(QuotaArgs {
+            profile: None,
+            all: true,
+            auth: None,
+            provider: Some("gemini".to_string()),
+            detail: false,
+            raw: false,
+            watch: false,
+            once: true,
+            base_url: None,
+        })
+        .expect("filtered quota view should succeed");
+
+        assert_eq!(
+            fs::read_to_string(&paths.state_file).expect("state should remain readable"),
+            original,
+            "quota viewing must not repair or rewrite state"
+        );
+        assert!(
+            !paths.state_file.with_extension("json.lock").exists(),
+            "quota viewing must not create the state lock"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {

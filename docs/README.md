@@ -60,8 +60,6 @@ semantic fidelity:
 
 - [Smart Context replay report](generated/smart-context-replay-report.md) via
   `npm run docs:smart-context-evidence`;
-- [Smart Context performance report](generated/smart-context-performance-report.md)
-  via `npm run bench:smart-context-report`;
 - [Provider capabilities](provider-capabilities.md) via
   `npm run docs:provider-capabilities`.
 

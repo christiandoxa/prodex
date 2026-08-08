@@ -25,7 +25,7 @@ pub(super) fn parse_ingress_request(
         .map_err(|_| Box::new(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET)))?;
     let route = classify_request_target(&target)
         .ok_or_else(|| Box::new(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE)))?;
-    if !route_allowed(mode, route.plane) {
+    if !route_allowed(mode, &target, route.plane) {
         return Err(Box::new(json_error(
             StatusCode::NOT_FOUND,
             ROUTE_UNAVAILABLE,

@@ -184,6 +184,8 @@ fn super_command_parses_as_distinct_subcommand_with_yolo_access_default() {
     assert_eq!(
         args.codex_args,
         vec![
+            OsString::from("-c"),
+            OsString::from("features.apps=false"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]

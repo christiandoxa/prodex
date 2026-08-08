@@ -220,7 +220,12 @@ fn native_frontends_reject_codex_features_and_presidio_tool_aliases() {
         feature.codex_features.current_time_reminder = true;
         let error = validate_super_native_cli_preflight(&feature).unwrap_err();
         assert!(error.to_string().contains("--current-time-reminder"));
+    }
 
+    for (agent, provider) in [
+        (SuperCliAgent::Gemini, Some(SuperExternalProvider::Gemini)),
+        (SuperCliAgent::Kiro, None),
+    ] {
         let mut tool = native_cli_super_args();
         tool.cli = Some(agent);
         tool.provider = provider;
@@ -229,6 +234,20 @@ fn native_frontends_reject_codex_features_and_presidio_tool_aliases() {
         let error = validate_super_native_cli_preflight(&tool).unwrap_err();
         assert!(error.to_string().contains("--tool presidio"));
     }
+
+    let mut copilot_tool = native_cli_super_args();
+    copilot_tool.cli = Some(SuperCliAgent::Copilot);
+    copilot_tool.provider = Some(SuperExternalProvider::Copilot);
+    copilot_tool
+        .tools
+        .push(prodex_optional_tools::OptionalToolId::Presidio);
+    validate_super_native_cli_preflight(&copilot_tool).unwrap();
+
+    let mut copilot_required = copilot_tool;
+    copilot_required
+        .required_tools
+        .push(prodex_optional_tools::OptionalToolId::Presidio);
+    validate_super_native_cli_preflight(&copilot_required).unwrap();
 }
 
 #[test]

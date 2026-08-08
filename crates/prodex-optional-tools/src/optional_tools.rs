@@ -212,13 +212,16 @@ impl OptionalToolSet {
             OptionalToolId::Caveman,
             OptionalToolId::Rtk,
             OptionalToolId::CodebaseMemoryMcp,
-            OptionalToolId::PlaywrightMcp,
             OptionalToolId::Ponytail,
         ]))
     }
 
     pub fn insert(&mut self, id: OptionalToolId) -> bool {
         self.0.insert(id)
+    }
+
+    pub fn remove(&mut self, id: OptionalToolId) -> bool {
+        self.0.remove(&id)
     }
 
     pub fn contains(&self, id: OptionalToolId) -> bool {

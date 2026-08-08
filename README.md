@@ -741,6 +741,8 @@ either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 
+Playwright MCP is opt-in in Super (`--tool playwright` or `--require-tool playwright`) so the first launch does not block on browser-server startup. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
+
 Super also enables Smart Context Autopilot on the Codex/provider-bridge path;
 native opaque CLIs are not automatically rewritten.
 

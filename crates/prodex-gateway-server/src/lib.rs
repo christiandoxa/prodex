@@ -26,9 +26,9 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
 };
 use prodex_gateway_http::{
-    CanonicalRequestTarget, GatewayEdgeSecurityError, GatewayEdgeSecurityPolicy, GatewayHttpHeader,
-    GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane, classify_request_target,
-    validate_gateway_edge_security,
+    CanonicalRequestTarget, GatewayAdminRoute, GatewayEdgeSecurityError, GatewayEdgeSecurityPolicy,
+    GatewayHttpHeader, GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane,
+    classify_request_target, parse_gateway_admin_route, validate_gateway_edge_security,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use sha2::{Digest, Sha256};
@@ -70,8 +70,8 @@ const INVALID_REQUEST_TARGET: &[u8] =
 const BODY_TOO_LARGE: &[u8] = br#"{"error":{"code":"request_body_too_large","message":"request body exceeds the configured limit"}}"#;
 const BACKEND_TIMEOUT: &[u8] =
     br#"{"error":{"code":"backend_timeout","message":"gateway backend timed out"}}"#;
-const BACKEND_UNAVAILABLE: &[u8] =
-    br#"{"error":{"code":"backend_unavailable","message":"gateway backend is unavailable"}}"#;
+const SERVICE_UNAVAILABLE: &[u8] =
+    br#"{"error":{"code":"service_unavailable","message":"gateway backend is unavailable"}}"#;
 const LOCAL_OVERLOAD: &[u8] =
     br#"{"error":{"code":"service_unavailable","message":"gateway is temporarily overloaded"}}"#;
 const EDGE_REQUEST_DENIED: &[u8] =
@@ -961,12 +961,16 @@ fn handler_error_response(error: GatewayHandlerError) -> Response<GatewayRespons
             json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD)
         }
         GatewayHandlerError::Unavailable => {
-            json_error(StatusCode::BAD_GATEWAY, BACKEND_UNAVAILABLE)
+            json_error(StatusCode::SERVICE_UNAVAILABLE, SERVICE_UNAVAILABLE)
         }
     }
 }
 
-fn route_allowed(mode: GatewayServerMode, plane: GatewayHttpRoutePlane) -> bool {
+fn route_allowed(
+    mode: GatewayServerMode,
+    target: &CanonicalRequestTarget,
+    plane: GatewayHttpRoutePlane,
+) -> bool {
     matches!(plane, GatewayHttpRoutePlane::Health)
         || matches!(
             (mode, plane),
@@ -978,6 +982,17 @@ fn route_allowed(mode: GatewayServerMode, plane: GatewayHttpRoutePlane) -> bool 
                 GatewayHttpRoutePlane::ControlPlane
             )
         )
+        || (mode == GatewayServerMode::DataPlane
+            && plane == GatewayHttpRoutePlane::ControlPlane
+            && matches!(
+                gateway_admin_route(target),
+                Some(GatewayAdminRoute::Metrics)
+            ))
+}
+
+fn gateway_admin_route(target: &CanonicalRequestTarget) -> Option<GatewayAdminRoute<'_>> {
+    parse_gateway_admin_route("", target.path())
+        .or_else(|| parse_gateway_admin_route("/v1", target.path()))
 }
 
 fn content_length(request: &Request<Incoming>) -> Result<Option<u64>, ()> {

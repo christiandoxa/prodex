@@ -124,7 +124,9 @@ async fn runtime_prefetch_wait_for_buffer_capacity(
 ) -> Option<RuntimePrefetchSendOutcome> {
     loop {
         let queued_bytes = shared.queued_bytes.load(Ordering::SeqCst);
-        if queued_bytes.saturating_add(chunk_bytes) <= buffered_limit {
+        if (chunk_bytes > buffered_limit && queued_bytes == 0)
+            || queued_bytes.saturating_add(chunk_bytes) <= buffered_limit
+        {
             return None;
         }
         if started_at.elapsed() >= timeout {
@@ -378,6 +380,39 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("prefetch-token"));
         assert!(!message.contains("prefetch-key"));
+    }
+
+    #[test]
+    fn prefetch_sends_one_valid_chunk_larger_than_buffer_limit() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("prefetch test runtime should build");
+        let shared = RuntimePrefetchSharedState {
+            config: RuntimePrefetchConfig {
+                retry_delay_ms: 1,
+                timeout_ms: 20,
+                max_buffered_bytes: 4,
+                ..RuntimePrefetchConfig::default()
+            },
+            ..RuntimePrefetchSharedState::default()
+        };
+        let (sender, receiver) = mpsc::sync_channel(2);
+
+        let outcome = runtime.block_on(runtime_prefetch_send_with_wait(
+            &sender,
+            &shared,
+            RuntimePrefetchChunk::Data(vec![b'x'; 8]),
+        ));
+
+        assert!(matches!(
+            outcome,
+            RuntimePrefetchSendOutcome::Sent { retries: 0, .. }
+        ));
+        assert!(matches!(
+            receiver.recv().expect("oversized chunk should be queued"),
+            RuntimePrefetchChunk::Data(bytes) if bytes == vec![b'x'; 8]
+        ));
     }
 
     #[test]

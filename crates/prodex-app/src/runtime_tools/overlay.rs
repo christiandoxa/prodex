@@ -1,7 +1,8 @@
 use super::{
     AppPaths, PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeProxyEndpoint,
     RuntimeToolLaunchStrategy, ensure_presidio_services_for_super_launch,
-    prepare_desktop_overlay_home, prepare_runtime_overlay_home, redaction_redact_secret_like_text,
+    ensure_required_presidio_services_for_super_launch, prepare_desktop_overlay_home,
+    prepare_runtime_overlay_home, redaction_redact_secret_like_text,
     write_provider_runtime_codex_auth,
 };
 use anyhow::{Result, bail};
@@ -90,7 +91,13 @@ fn resolve_optional_tool_plan(
             &strategy.codex_args,
         )?;
     }
-    if strategy.presidio_enabled {
+    let required_presidio = strategy
+        .args
+        .required_tool_set()
+        .contains(prodex_optional_tools::OptionalToolId::Presidio);
+    if required_presidio {
+        ensure_required_presidio_services_for_super_launch(&prepared.paths)?;
+    } else if strategy.presidio_enabled {
         ensure_presidio_services_for_super_launch(&prepared.paths)?;
     }
     Ok(tool_plan)

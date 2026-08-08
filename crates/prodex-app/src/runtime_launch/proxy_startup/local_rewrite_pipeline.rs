@@ -44,6 +44,7 @@ use super::local_rewrite_copilot::runtime_copilot_model_catalog_from_provider;
 use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_auth_event;
 use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
 use super::local_rewrite_gateway_admin_dispatch::runtime_gateway_respond_route_explain;
+use super::local_rewrite_gateway_admin_response::runtime_gateway_http_plan_error_response;
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_authorization_rejection_response, runtime_gateway_admin_response,
     runtime_gateway_http_request_meta, runtime_gateway_request_path_is_admin,
@@ -420,14 +421,20 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
         return Ok(None);
     }
     let header_request = state.request.header_request();
-    let Some(authentication) = runtime_gateway_admin_auth(&header_request, shared) else {
-        return Err(runtime_local_rewrite_admin_auth_rejection(state, shared));
-    };
-    let admin_auth = &authentication.auth;
     let http = runtime_gateway_http_request_meta(
         &header_request,
         path_without_query(state.context.target().path_and_query()),
     );
+    if let Err(error) = prodex_gateway_http::plan_gateway_http_request(
+        runtime_gateway_application_http_policy(shared),
+        http.clone(),
+    ) {
+        return Err(runtime_gateway_http_plan_error_response(&error));
+    }
+    let Some(authentication) = runtime_gateway_admin_auth(&header_request, shared) else {
+        return Err(runtime_local_rewrite_admin_auth_rejection(state, shared));
+    };
+    let admin_auth = &authentication.auth;
     let application =
         match runtime_gateway_admin_preauthorization(&state.context, &http, &authentication) {
             Ok(application) => application,

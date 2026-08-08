@@ -1,14 +1,14 @@
 //! Compact-route retryable quota and overload handling.
 
 use std::collections::BTreeSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::super::super::{
-    RuntimeAutoRedeemResetCreditOutcome, bump_runtime_profile_bad_pairing_score,
-    bump_runtime_profile_health_score, mark_runtime_profile_retry_backoff,
-    release_runtime_compact_lineage, release_runtime_quota_blocked_affinity,
-    runtime_auto_redeem_usage_limit_reset_credit, runtime_has_route_eligible_quota_fallback,
-    runtime_proxy_log,
+    RuntimeAutoRedeemResetCreditOutcome, await_runtime_proxy_async_task,
+    bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
+    mark_runtime_profile_retry_backoff, release_runtime_compact_lineage,
+    release_runtime_quota_blocked_affinity, runtime_auto_redeem_usage_limit_reset_credit,
+    runtime_has_route_eligible_quota_fallback, runtime_proxy_log,
 };
 use super::{
     affinity::runtime_compact_candidate_has_hard_affinity,
@@ -101,7 +101,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             session_profile: session_profile.as_deref(),
         },
         conservative_overload_retried_profiles,
-    ) {
+    )? {
         *last_failure = Some((response, false));
         return Ok(RuntimeCompactFailureFlow::Retry);
     }
@@ -262,13 +262,20 @@ fn runtime_compact_try_conservative_overload_retry(
     current_profile: &str,
     owners: RuntimeCompactAffinityOwners<'_>,
     retried_profiles: &mut BTreeSet<String>,
-) -> bool {
+) -> Result<bool> {
     let owner_match = owners.compact_followup_profile == Some(profile_name)
         || owners.session_profile == Some(profile_name)
         || current_profile == profile_name;
     if !overload || retried_profiles.contains(profile_name) || !owner_match {
-        return false;
+        return Ok(false);
     }
+    await_runtime_proxy_async_task(shared, "compact_overload_retry_delay", async {
+        tokio::time::sleep(Duration::from_millis(
+            RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS,
+        ))
+        .await;
+        Ok(())
+    })?;
     retried_profiles.insert(profile_name.to_string());
     runtime_proxy_log(
         shared,
@@ -276,7 +283,7 @@ fn runtime_compact_try_conservative_overload_retry(
             "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS} reason=non_blocking_retry"
         ),
     );
-    true
+    Ok(true)
 }
 
 fn runtime_compact_hard_affinity_failure(

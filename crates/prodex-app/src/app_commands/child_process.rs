@@ -95,6 +95,7 @@ fn run_child_plan_inner(
     for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
+    configure_child_process_group(&mut command);
     reset_terminal_keyboard_enhancement_best_effort(plan);
     let mut child = command
         .spawn()
@@ -103,7 +104,7 @@ fn run_child_plan_inner(
         Some(proxy) => match proxy.create_child_lease(child.id()) {
             Ok(lease) => Some(lease),
             Err(err) => {
-                let _ = child.kill();
+                let _ = terminate_child_process_tree(&mut child);
                 let _ = child.wait();
                 return Err(err);
             }
@@ -131,6 +132,7 @@ fn wait_for_monitored_child(
 ) -> Result<ExitStatus> {
     loop {
         if let Some(status) = child.try_wait()? {
+            terminate_child_process_group_best_effort(child);
             return Ok(status);
         }
         let should_stop = match monitor() {
@@ -152,29 +154,77 @@ fn wait_for_child_termination(child: &mut Child) -> io::Result<ExitStatus> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(status) = child.try_wait()? {
+            terminate_child_process_group_best_effort(child);
             return Ok(status);
         }
         if Instant::now() >= deadline {
-            child.kill()?;
+            terminate_child_process_tree(child)?;
             return child.wait();
         }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
+pub(crate) fn configure_child_process_group(_command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        _command.process_group(0);
+    }
+}
+
+fn terminate_child_process_group_best_effort(_child: &Child) {
+    #[cfg(unix)]
+    {
+        let _ = signal_child_process_group(_child, libc::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn signal_child_process_group(child: &Child, signal: libc::c_int) -> io::Result<()> {
+    let pid = child.id() as libc::pid_t;
+    if pid <= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "child process id must be positive",
+        ));
+    }
+    if unsafe { libc::kill(-pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 #[cfg(unix)]
 fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
-    let status = Command::new("kill")
-        .args(["-TERM", &child.id().to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if status.success() || child.try_wait()?.is_some() {
+    if signal_child_process_group(child, libc::SIGTERM).is_ok() || child.try_wait()?.is_some() {
         Ok(())
     } else {
         child.kill()
     }
+}
+
+pub(crate) fn terminate_child_process_tree(child: &mut Child) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        if signal_child_process_group(child, libc::SIGKILL).is_ok() || child.try_wait()?.is_some() {
+            return Ok(());
+        }
+    }
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?;
+        if status.success() || child.try_wait()?.is_some() {
+            return Ok(());
+        }
+    }
+    child.kill()
 }
 
 #[cfg(windows)]
@@ -777,5 +827,21 @@ mod tests {
         );
         assert!(!error.contains("secret-sentinel"), "{error}");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generic_child_process_uses_private_process_group() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        configure_child_process_group(&mut command);
+        let mut child = command.spawn().expect("test child should spawn");
+        let pid = child.id() as libc::pid_t;
+        let process_group = unsafe { libc::getpgid(pid) };
+
+        let _ = terminate_child_process_tree(&mut child);
+        let _ = child.wait();
+
+        assert_eq!(process_group, pid);
     }
 }

@@ -2,6 +2,7 @@ use crate::{
     PROVIDER_SECRET_ENV_KEYS, PreparedRuntimeLaunch, ResolvedSuperSubAgent, RuntimeLaunchRequest,
     RuntimeLaunchStrategy, RuntimeOverlayCleanup, RuntimeProxyEndpoint, agy_bin,
     apply_sub_agent_recursion_marker, clear_rtk_auto_wrap_control_env, copilot_bin,
+    ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
     execute_runtime_launch, gemini_bin, kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir,
     prepare_prodex_overlay_home, prepend_child_path, redact_super_session_args,
     render_sub_agent_disabled_dry_run_report, render_sub_agent_dry_run_report,
@@ -72,6 +73,7 @@ fn resolve_super_native_tool_plan(
     args: &SuperArgs,
 ) -> Result<prodex_optional_tools::ToolActivationPlan> {
     let mut selected = prodex_optional_tools::OptionalToolSet::super_defaults();
+    selected.remove(prodex_optional_tools::OptionalToolId::PlaywrightMcp);
     for tool in args.tools.iter().chain(&args.required_tools) {
         if *tool != prodex_optional_tools::OptionalToolId::Presidio {
             selected.insert(*tool);
@@ -130,8 +132,14 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         let tool_plan = resolve_super_native_tool_plan(&self.args)?;
         let presidio_enabled = self.presidio_enabled && self.agent == SuperCliAgent::Copilot;
-        if presidio_enabled {
-            crate::ensure_presidio_services_for_super_launch(&prepared.paths)?;
+        let required_presidio = self
+            .args
+            .required_tools
+            .contains(&prodex_optional_tools::OptionalToolId::Presidio);
+        if required_presidio {
+            ensure_required_presidio_services_for_super_launch(&prepared.paths)?;
+        } else if presidio_enabled {
+            ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
         let launch_args = runtime_super_native_cli_launch_args(
             self.agent,
@@ -543,17 +551,18 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
         ));
     }
 
-    if args
+    let presidio_required = args
         .required_tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio)
-    {
-        return Err(unsupported("--require-tool presidio"));
-    }
-    if args
+        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
+    let presidio_selected = args
         .tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio)
-    {
-        return Err(unsupported("--tool presidio"));
+        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
+    if (presidio_required || presidio_selected) && agent != SuperCliAgent::Copilot {
+        return Err(unsupported(if presidio_required {
+            "--require-tool presidio"
+        } else {
+            "--tool presidio"
+        }));
     }
     if args.presidio
         && matches!(

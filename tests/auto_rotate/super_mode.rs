@@ -48,11 +48,6 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 #[test]
 fn s_pty_renders_presidio_tui() {
     let fixture = setup_fixture();
-    fs::write(
-        fixture.prodex_home.join("presidio.toml"),
-        "enabled = true\n",
-    )
-    .expect("failed to seed enabled Presidio config");
 
     let run = run_prodex_with_pty_until_prompt(
         &fixture,

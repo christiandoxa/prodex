@@ -72,6 +72,9 @@ impl SuperArgs {
         let mut codex_args = Vec::new();
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
+        if !local_mode {
+            codex_args.extend(["-c".into(), "features.apps=false".into()]);
+        }
         if !local_mode
             && let Some(model) = self
                 .local_model
@@ -86,6 +89,7 @@ impl SuperArgs {
         codex_args.extend(feature_overrides);
         codex_args.extend(self.codex_args);
         let mut tools = OptionalToolSet::super_defaults();
+        tools.remove(OptionalToolId::PlaywrightMcp);
         for tool in self.tools {
             if !(no_presidio && tool == OptionalToolId::Presidio) {
                 tools.insert(tool);
