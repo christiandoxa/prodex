@@ -477,7 +477,24 @@ fn probe_first_line(output: &crate::process::ProbeOutput) -> Result<String> {
 }
 
 fn ponytail_tool_status() -> ToolHealth {
+    ponytail_tool_status_with_node(find_path_command("node"))
+}
+
+fn ponytail_tool_status_with_node(node: Option<PathBuf>) -> ToolHealth {
     let id = OptionalToolId::Ponytail;
+    let Some(node) = node else {
+        return ToolHealth::missing(id, "Node.js was not found on PATH");
+    };
+    match crate::process::probe_command(&node, &["--version"], TOOL_PROBE_TIMEOUT) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            return invalid_tool(
+                id,
+                anyhow::anyhow!("Node.js health check exited with {}", output.status),
+            );
+        }
+        Err(error) => return invalid_tool(id, error),
+    }
     for root in managed_optimizer_roots() {
         let versioned = root.join("ponytail").join(crate::PONYTAIL_VETTED_VERSION);
         let versioned_exists = match crate::tree::path_exists(&versioned) {
@@ -498,6 +515,19 @@ fn ponytail_tool_status() -> ToolHealth {
             TOOL_MANIFEST
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ponytail_is_missing_when_node_is_not_on_path() {
+        let health = ponytail_tool_status_with_node(None);
+
+        assert_eq!(health.status, ToolHealthStatus::Missing);
+        assert!(health.detail.contains("Node.js was not found"));
+    }
 }
 
 fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
