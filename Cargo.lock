@@ -135,9 +135,9 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apple-native-keyring-store"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "797f94b6a53d7d10b56dc18290e0d40a2158352f108bb4ff32350825081a9f29"
+checksum = "2b350bfd03649e07aa05c0a81b3e15934374e585c98204a57e20b9d49f49bb9a"
 dependencies = [
  "keyring-core",
  "log",
@@ -308,9 +308,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.91"
+version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -331,9 +331,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.17.3"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00bdb5da18dac48ca2cc7cd4a98e533e8635a58e2361d13a1a4ee3888e0d72f1"
+checksum = "ce2b2dcc879c3bae0d371e77c99f2238400ef24ec001394befa67b6e543add9e"
 dependencies = [
  "aws-lc-sys",
  "untrusted 0.7.1",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43103168cc76fe62678a375e722fc9cb3a0146159ac5828bc4f0dfd755c2224c"
+checksum = "f09fae7be8bb3174e05c6afdb34199e6dc0c7c04ba9fa237b1967adfbde27483"
 dependencies = [
  "cc",
  "cmake",
@@ -520,9 +520,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
+checksum = "5d262e149917187838d5b42777c8253bcb64500067342904e7d429499a6f277e"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -617,9 +617,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.5"
+version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "301b56658598e48f3648647ac6fc887be7e7108eddfa4e9b63fcf3ec58c0cadf"
+checksum = "473c7e07f409a8d772161724aa8db6a765a2532a70f9667eeb7b49d3d02fbdca"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -627,9 +627,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.5"
+version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94a65403d1a1bd28f7dc68eb8506e8874808ee5eecb59298de588e2e1407a078"
+checksum = "7b48fea5a88e9ae728a2dcbedbfc0e730f7d60da42e1cb049a83c9fb8b789889"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1248,9 +1248,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
 
 [[package]]
 name = "flagset"
@@ -1825,7 +1825,7 @@ dependencies = [
  "jni-sys",
  "log",
  "simd_cesu8",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "walkdir",
  "windows-link",
 ]
@@ -1874,9 +1874,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.103"
+version = "0.3.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102"
+checksum = "0e0c1080212aad755ea003d18543e8768dd432c48819efd73a7bf1e39b7a5a3a"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -1909,7 +1909,7 @@ checksum = "bde5057d6143cc94e861d90f591b9303d6716c6b9602309150bd068853c10899"
 dependencies = [
  "hashbrown 0.16.1",
  "portable-atomic",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2857,7 +2857,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app-reports"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "chrono",
  "prodex-cli",
@@ -2873,7 +2873,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-application"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-authn",
  "prodex-authz",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -2914,18 +2914,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.396.0"
+version = "0.397.0"
 
 [[package]]
 name = "prodex-cli"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "clap",
  "prodex-optional-tools",
@@ -2936,21 +2936,21 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "prodex-config"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-control-plane"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-config",
  "prodex-domain",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2992,7 +2992,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -3015,7 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-server"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3032,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-mcp-stdio"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -3049,14 +3049,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-optional-tools"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -3069,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-presidio"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "prodex-cli",
@@ -3082,7 +3082,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -3099,7 +3099,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "base64",
  "serde",
@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -3129,7 +3129,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-proxy-config"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3153,14 +3153,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
@@ -3181,14 +3181,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-capabilities"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
@@ -3197,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-claude"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -3221,7 +3221,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3235,7 +3235,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-gemini-cli-compat"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "libc",
  "prodex-runtime-proxy",
@@ -3272,14 +3272,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3295,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "base64",
  "prodex-gateway-core",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -3323,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -3331,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-core",
  "prodex-runtime-state",
@@ -3343,11 +3343,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.396.0"
+version = "0.397.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -3361,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-session-store"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3375,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3389,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -3408,14 +3408,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-storage-postgres"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "postgres",
  "prodex-domain",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-postgres-runtime"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "deadpool-postgres",
  "postgres",
@@ -3443,7 +3443,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3451,7 +3451,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis-runtime"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage-redis",
@@ -3461,7 +3461,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3470,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite-runtime"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3482,7 +3482,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -3493,7 +3493,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.396.0"
+version = "0.397.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3521,7 +3521,7 @@ dependencies = [
  "rustc-hash",
  "rustls",
  "socket2",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "web-time",
@@ -3544,7 +3544,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "tinyvec",
  "tracing",
  "web-time",
@@ -3642,7 +3642,7 @@ dependencies = [
  "palette",
  "serde",
  "strum",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width",
@@ -3746,7 +3746,7 @@ checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
  "getrandom 0.2.17",
  "libredox",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3850,7 +3850,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
 dependencies = [
  "hashbrown 0.16.1",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -4271,7 +4271,7 @@ checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
 dependencies = [
  "num-bigint",
  "num-traits",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "time",
 ]
 
@@ -4468,11 +4468,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.19"
+version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09a43598840e33d5b0331f38c5e30d13bb11c11210a4b58f0d9b18a5a5eefcd9"
+checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
 dependencies = [
- "thiserror-impl 2.0.19",
+ "thiserror-impl 2.0.20",
 ]
 
 [[package]]
@@ -4488,9 +4488,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.19"
+version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
+checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4852,7 +4852,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pki-types",
  "sha1",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "url",
 ]
 
@@ -5047,9 +5047,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.126"
+version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4"
+checksum = "1b70935747edd64d89de3efa29d73789b806c15798f8e7dca4d8ac356b50ce70"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -5060,9 +5060,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.76"
+version = "0.4.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62df1340f32221cb9c54d6a27b030e3dba64361d4a95bed55f9aacb44da291d"
+checksum = "6b7777d5cc23d0e91404e53ce2d5e8ec7acae3026b16233dba62cd3246457950"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -5070,9 +5070,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.126"
+version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1"
+checksum = "77775f8f3f7217702089053b94958f8f54061a3f663417df76e19cbdcca29bc1"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -5080,9 +5080,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.126"
+version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e"
+checksum = "e11d33f857dc2fb11b8bc75aee111aa9cbeb12cd9f25efd3d4c2a3dd4e235284"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -5093,18 +5093,18 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.126"
+version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
+checksum = "7ef64dbcc55df09c7e5a46182d181c2cfa3e925f3da937ea764728b4bbb9dcbf"
 dependencies = [
  "unicode-ident",
 ]
 
 [[package]]
 name = "web-sys"
-version = "0.3.103"
+version = "0.3.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
+checksum = "c435338968042f4f59a557f690a253676d47ce13ceb55d70100e7facf6620a30"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -5492,18 +5492,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.55"
+version = "0.8.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5a105cd7b140f6eeec8acff2ea38135d3cab283ada58540f629fe51e46696eb"
+checksum = "556764e583adb45a9f8d413c2a147fa7e8d821e48e12b14fd560b607998b75eb"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.55"
+version = "0.8.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fe976fb70c78cd64cccfe3a6fc142244e8a77b70959b30faf9d0ac37ee228eb"
+checksum = "f2ab42fc20575779bd240faa45f94a74256f755c0fa9e89f0ede20d91d0cdfc1"
 dependencies = [
  "proc-macro2",
  "quote",
