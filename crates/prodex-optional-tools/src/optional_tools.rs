@@ -517,19 +517,6 @@ fn ponytail_tool_status_with_node(node: Option<PathBuf>) -> ToolHealth {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ponytail_is_missing_when_node_is_not_on_path() {
-        let health = ponytail_tool_status_with_node(None);
-
-        assert_eq!(health.status, ToolHealthStatus::Missing);
-        assert!(health.detail.contains("Node.js was not found"));
-    }
-}
-
 fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
     let candidate = validated_managed_directory(allowed_root, candidate)?;
     let manifest_path = candidate.join(TOOL_MANIFEST);
@@ -679,4 +666,17 @@ pub(crate) fn hex_digest(bytes: &[u8]) -> String {
         encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ponytail_is_missing_when_node_is_not_on_path() {
+        let health = ponytail_tool_status_with_node(None);
+
+        assert_eq!(health.status, ToolHealthStatus::Missing);
+        assert!(health.detail.contains("Node.js was not found"));
+    }
 }
