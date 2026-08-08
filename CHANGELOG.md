@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.397.0 - 2026-08-08
+
+### Misc
+
+- Use local Ponytail marketplace source (`87cf504`)
+
 ## 0.396.0 - 2026-08-08
 
 ### Misc
 
+- Satisfy clippy test ordering (`0e6c609`)
 - Skip ponytail when node is unavailable (`625c4ae`)
 
 ## 0.395.0 - 2026-08-08
@@ -79,18 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Harden child and Kiro process cleanup (`9897913`)
 - Keep launcher guidance within size guard (`b764e44`)
 - Clarify child launcher contract (`33cd4f3`)
-
-## 0.385.0 - 2026-08-06
-
-### Runtime
-
-- Preserve sub-agent provider compatibility (`5f23df7`)
-
-### CLI
-
-- Tolerate slow Windows heartbeats (`f3cfa3c`)
-
-### Misc
-
-- Sync Codex installer and fuzz metadata (`a8682ee`)
-- Track Codex 0.146.1 baseline (`b1eac18`)
