@@ -20,6 +20,11 @@
     "reason": "Gemini profile configuration keeps supported API-key and Vertex paths, disabled OAuth migration diagnostics, and bounded model catalog loading together; this cap records the audited 0.384.0 behavior."
   },
   {
+    "file": "crates/prodex-app/src/app_commands/presidio.rs",
+    "maxLines": 856,
+    "reason": "Presidio readiness policy, bounded Docker startup, and required-service failure behavior remain at one safety boundary; this narrow cap records the Sonar complexity decomposition without raising the global production limit."
+  },
+  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
     "maxLines": 1463,
     "reason": "Data-plane authorization, bounded HTTP policy projection, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules; the narrow increase covers a cross-platform source-boundary regression assertion."
