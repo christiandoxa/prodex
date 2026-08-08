@@ -30,7 +30,13 @@ pub(super) fn install_ponytail_plugin(codex_home: &Path, tool: &ResolvedTool) ->
     let plugin_json = checkout.join(".codex-plugin").join("plugin.json");
     let plugin_version = ponytail_plugin_version(&plugin_json)?;
     let marketplace_root = codex_home.join(".tmp/marketplaces").join(MARKETPLACE_NAME);
-    copy_ponytail_checkout(checkout, &marketplace_root)?;
+    remove_existing_dir_path(&marketplace_root)
+        .with_context(|| format!("failed to clear {}", marketplace_root.display()))?;
+    copy_ponytail_checkout(
+        checkout,
+        &marketplace_root.join("plugins").join(PLUGIN_NAME),
+    )?;
+    write_local_marketplace_manifest(&marketplace_root)?;
 
     let plugin_cache_base = codex_home
         .join("plugins/cache")
@@ -39,13 +45,38 @@ pub(super) fn install_ponytail_plugin(codex_home: &Path, tool: &ResolvedTool) ->
     remove_existing_dir_path(&plugin_cache_base)
         .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
     copy_ponytail_checkout(checkout, &plugin_cache_base.join(&plugin_version))?;
-    configure_ponytail_plugin_config(codex_home, checkout, &plugin_version)?;
+    configure_ponytail_plugin_config(codex_home, &marketplace_root, &plugin_version)?;
     Ok(())
+}
+
+fn write_local_marketplace_manifest(marketplace_root: &Path) -> Result<()> {
+    let manifest = serde_json::json!({
+        "name": MARKETPLACE_NAME,
+        "interface": { "displayName": "Ponytail" },
+        "plugins": [{
+            "name": PLUGIN_NAME,
+            "source": {
+                "source": "local",
+                "path": "./plugins/ponytail"
+            },
+            "policy": {
+                "installation": "AVAILABLE",
+                "authentication": "ON_INSTALL"
+            },
+            "category": "Productivity"
+        }]
+    });
+    let rendered = serde_json::to_string_pretty(&manifest)
+        .context("failed to render local Ponytail marketplace manifest")?;
+    write_text_file(
+        &marketplace_root.join(".agents/plugins/marketplace.json"),
+        &rendered,
+    )
 }
 
 fn configure_ponytail_plugin_config(
     codex_home: &Path,
-    checkout: &Path,
+    marketplace_root: &Path,
     plugin_version: &str,
 ) -> Result<()> {
     let config_path = codex_home.join("config.toml");
@@ -73,7 +104,7 @@ fn configure_ponytail_plugin_config(
     );
     ponytail_marketplace.insert(
         "source".to_string(),
-        toml::Value::String(checkout.display().to_string()),
+        toml::Value::String(marketplace_root.display().to_string()),
     );
     ponytail_marketplace.insert(
         "version".to_string(),
@@ -147,6 +178,43 @@ fn copy_ponytail_dir(source: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn local_marketplace_manifest_uses_the_copied_plugin() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .expect("temp dir should resolve")
+            .join(format!(
+                "prodex-ponytail-marketplace-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+
+        write_local_marketplace_manifest(&root).unwrap();
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".agents/plugins/marketplace.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["plugins"][0]["source"]["source"].as_str(),
+            Some("local")
+        );
+        assert_eq!(
+            manifest["plugins"][0]["source"]["path"].as_str(),
+            Some("./plugins/ponytail")
+        );
+        assert!(
+            !manifest["plugins"][0]["source"]
+                .to_string()
+                .contains("github.com")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn ponytail_marketplace_migrates_legacy_directory_source_type() {
