@@ -564,6 +564,7 @@ fn parse_gateway_http_method(value: &str) -> Result<GatewayHttpMethod, String> {
     match value {
         "GET" | "get" => Ok(GatewayHttpMethod::Get),
         "POST" | "post" => Ok(GatewayHttpMethod::Post),
+        "PUT" | "put" => Ok(GatewayHttpMethod::Put),
         "PATCH" | "patch" => Ok(GatewayHttpMethod::Patch),
         "DELETE" | "delete" => Ok(GatewayHttpMethod::Delete),
         "OPTIONS" | "options" => Ok(GatewayHttpMethod::Options),

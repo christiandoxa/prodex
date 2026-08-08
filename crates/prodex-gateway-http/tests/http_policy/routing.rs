@@ -144,6 +144,43 @@ fn route_classifier_covers_every_documented_data_plane_family_and_denies_unknown
 }
 
 #[test]
+fn unknown_routes_fail_closed_before_http_execution_planning() {
+    let error = plan_gateway_http_request(
+        GatewayHttpPolicy::production_default(),
+        request("/v1/not-supported"),
+    )
+    .unwrap_err();
+    assert_eq!(error, GatewayHttpPlanError::UnknownRoute);
+    assert_eq!(error.to_string(), "HTTP route is not available");
+    let response = plan_gateway_http_error_response(&error);
+    assert_eq!(response.status, GatewayHttpErrorStatus::BadRequest);
+    assert_eq!(response.code, "route_not_available");
+    assert_eq!(response.message, "route is not available");
+    assert_eq!(
+        plan_gateway_http_execution(
+            GatewayHttpPolicy::production_default(),
+            GatewayHttpRouteKind::Unknown,
+        ),
+        Err(GatewayHttpPlanError::UnknownRoute)
+    );
+}
+
+#[test]
+fn unmodeled_http_methods_remain_fail_closed_for_get_routes() {
+    let request = GatewayHttpRequestMeta {
+        method: GatewayHttpMethod::Other,
+        ..request("/v1/models")
+    };
+    assert_eq!(
+        plan_gateway_http_request(GatewayHttpPolicy::production_default(), request),
+        Err(GatewayHttpPlanError::MethodNotAllowed {
+            route: GatewayHttpRouteKind::DataPlaneModels,
+            method: GatewayHttpMethod::Other,
+        })
+    );
+}
+
+#[test]
 fn published_route_aliases_cannot_cross_planes() {
     for (canonical, alias) in [
         ("/v1/responses", "/responses"),

@@ -73,7 +73,33 @@ fn super_defaults_to_yolo_access_with_minimal_super_prefixes() {
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Caveman));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
-    assert_eq!(args.codex_args, os_args(&["exec", "review"]));
+    assert!(!tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
+    assert!(rendered_codex_args(&args).contains(&"features.apps=false".to_string()));
+    assert!(args.codex_args.ends_with(&os_args(&["exec", "review"])));
+}
+
+#[test]
+fn super_playwright_is_opt_in() {
+    let default = parse_super_as_runtime_tools(&["prodex", "super", "exec", "review"]);
+    assert!(
+        !default
+            .selected_tool_set()
+            .contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp)
+    );
+
+    let explicit = parse_super_as_runtime_tools(&[
+        "prodex",
+        "super",
+        "--tool",
+        "playwright",
+        "exec",
+        "review",
+    ]);
+    assert!(
+        explicit
+            .selected_tool_set()
+            .contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp)
+    );
 }
 
 #[test]
@@ -112,9 +138,12 @@ fn super_omits_presidio_unless_explicitly_enabled() {
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-    assert_eq!(
-        args.into_runtime_tool_args().codex_args,
-        os_args(&["exec", "hello"])
+    let runtime_args = args.into_runtime_tool_args();
+    assert!(rendered_codex_args(&runtime_args).contains(&"features.apps=false".to_string()));
+    assert!(
+        runtime_args
+            .codex_args
+            .ends_with(&os_args(&["exec", "hello"]))
     );
 }
 
@@ -125,9 +154,12 @@ fn super_includes_presidio_prefix_when_opted_in() {
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-    assert_eq!(
-        args.into_runtime_tool_args_with_presidio(true).codex_args,
-        os_args(&["exec", "hello"])
+    let runtime_args = args.into_runtime_tool_args_with_presidio(true);
+    assert!(rendered_codex_args(&runtime_args).contains(&"features.apps=false".to_string()));
+    assert!(
+        runtime_args
+            .codex_args
+            .ends_with(&os_args(&["exec", "hello"]))
     );
 }
 
@@ -141,7 +173,7 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
         "hello",
     ]);
     assert!(args.presidio);
-    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
+    assert!(args.codex_args.ends_with(&os_args(&["exec", "hello"])));
 }
 
 #[test]
@@ -172,7 +204,7 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
         "exec",
         "hello",
     ]);
-    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
+    assert!(args.codex_args.ends_with(&os_args(&["exec", "hello"])));
 }
 
 #[test]
@@ -240,9 +272,9 @@ fn super_leading_tool_words_are_passed_through_to_codex() {
     let args =
         parse_super_as_runtime_tools(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
     assert!(!args.presidio);
-    assert_eq!(
-        args.codex_args,
-        os_args(&["ponytail", "presidio", "exec", "hello"])
+    assert!(
+        args.codex_args
+            .ends_with(&os_args(&["ponytail", "presidio", "exec", "hello"]))
     );
 }
 

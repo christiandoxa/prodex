@@ -80,11 +80,6 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
     let _insecure_file_access =
         profile_command_requests_insecure(&command).then(secret_store::allow_insecure_file_access);
     if !command_is_native_dry_run(&command)
-        && let Commands::Super(args) = &command
-    {
-        crate::runtime_gemini_cli::validate_super_native_cli_preflight(args)?;
-    }
-    if !command_is_native_dry_run(&command)
         && !matches!(
             &command,
             Commands::Profile(ProfileCommands::Remove(_))
@@ -204,7 +199,10 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
         return handle_super_gui(args);
     }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
-        let use_presidio = args.presidio_preference().unwrap_or(false);
+        let use_presidio = match args.presidio_preference() {
+            Some(use_presidio) => use_presidio,
+            None => stored_presidio_preference()?.unwrap_or(false),
+        };
         let mut sub_agent = resolve_super_sub_agent(&args, false)?;
         if let Some(sub_agent) = sub_agent.as_mut() {
             sub_agent.presidio_enabled = use_presidio;
@@ -223,7 +221,8 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_is_native_dry_run, command_should_show_update_notice, parse_cli_command_from,
+        command_is_native_dry_run, command_should_show_update_notice, execute_command,
+        parse_cli_command_from,
     };
 
     #[test]
@@ -250,5 +249,71 @@ mod tests {
         assert!(crate::housekeeping::command_runs_auto_runtime_housekeeping(
             &codex
         ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn command_dispatch_does_not_repeat_native_preflight() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-native-preflight-count-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let agy = root.join("agy");
+        let marker = root.join("preflight-count");
+        fs::write(
+            &agy,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf x >> \"$PRODEX_AGY_PREFLIGHT_MARKER\"; fi\nexit 0\n",
+        )
+        .unwrap();
+        fs::set_permissions(&agy, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let _lock = crate::test_support::TestEnvVarGuard::lock();
+        let _home = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_HOME",
+            root.to_str().expect("test root should be UTF-8"),
+        );
+        let _agy = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_AGY_BIN",
+            agy.to_str().expect("test binary should be UTF-8"),
+        );
+        let _marker = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_AGY_PREFLIGHT_MARKER",
+            marker.to_str().expect("test marker should be UTF-8"),
+        );
+        let crate::Commands::Super(args) = parse_cli_command_from([
+            "prodex",
+            "super",
+            "--cli",
+            "agy",
+            "--provider",
+            "gemini",
+            "gui",
+            "extra",
+        ])
+        .expect("native Super command should parse") else {
+            panic!("expected Super command");
+        };
+
+        crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args)
+            .expect("native preflight should succeed");
+        let error = execute_command(crate::Commands::Super(args))
+            .expect_err("extra GUI argument should fail before launch");
+        assert!(
+            error
+                .to_string()
+                .contains("does not accept Codex CLI arguments")
+        );
+        assert_eq!(fs::read_to_string(&marker).unwrap().len(), 1);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

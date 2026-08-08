@@ -55,7 +55,20 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
     }
 }
 
+pub(crate) fn stored_presidio_preference() -> Result<Option<bool>> {
+    let paths = AppPaths::discover()?;
+    Ok(load_presidio_config(&paths)?.map(|config| config.enabled))
+}
+
 pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
+    ensure_presidio_services_for_super_launch_inner(paths, false)
+}
+
+pub(crate) fn ensure_required_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
+    ensure_presidio_services_for_super_launch_inner(paths, true)
+}
+
+fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: bool) -> Result<()> {
     let config = load_presidio_config(paths)?.unwrap_or_default();
     let analyzer_url = &config.analyzer_url;
     let anonymizer_url = &config.anonymizer_url;
@@ -72,6 +85,13 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
     }
 
     if presidio_auto_start_disabled() {
+        if required {
+            return required_presidio_services_error(
+                &analyzer,
+                &anonymizer,
+                "automatic startup is disabled",
+            );
+        }
         print_launch_status(&format!(
             "Presidio auto-start disabled by {PRESIDIO_AUTO_START_ENV}=0; continuing with configured endpoints."
         ));
@@ -81,6 +101,13 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
     if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
         || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
     {
+        if required {
+            return required_presidio_services_error(
+                &analyzer,
+                &anonymizer,
+                "custom endpoints are not started automatically",
+            );
+        }
         print_launch_status(
             "Presidio uses custom endpoints; not starting Docker containers automatically.",
         );
@@ -88,6 +115,13 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
     }
 
     if !docker_available() {
+        if required {
+            return required_presidio_services_error(
+                &analyzer,
+                &anonymizer,
+                "Docker is unavailable",
+            );
+        }
         print_launch_status("Docker is unavailable, so Presidio containers were not started.");
         return Ok(());
     }
@@ -117,11 +151,30 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
         thread::sleep(Duration::from_secs(2));
     }
 
+    if required {
+        return required_presidio_services_error(
+            &analyzer,
+            &anonymizer,
+            "services did not become healthy before launch",
+        );
+    }
     print_launch_status(&format!(
         "Presidio services did not become healthy before launch; continuing with runtime fail_mode={}.",
         config.fail_mode
     ));
     Ok(())
+}
+
+fn required_presidio_services_error(
+    analyzer: &PresidioHealth,
+    anonymizer: &PresidioHealth,
+    reason: &str,
+) -> Result<()> {
+    bail!(
+        "required Presidio services are not ready: Analyzer {}; Anonymizer {}; {reason}",
+        presidio_health_label(analyzer),
+        presidio_health_label(anonymizer),
+    )
 }
 
 fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
@@ -742,15 +795,56 @@ mod tests {
 
         let mut config = load_presidio_config(&paths).unwrap().unwrap();
         assert!(config.enabled);
+        assert_eq!(stored_presidio_preference().unwrap(), Some(true));
         config.enabled = false;
         save_presidio_config(&paths, &config).unwrap();
         let saved = load_presidio_config(&paths).unwrap().unwrap();
 
         assert!(!saved.enabled);
+        assert_eq!(stored_presidio_preference().unwrap(), Some(false));
         assert_eq!(saved.trusted_hosts, vec!["presidio.example.com"]);
         assert_eq!(saved.timeout_ms, 12_345);
         assert_eq!(saved.max_response_bytes, 2 * 1024 * 1024);
         assert_eq!(saved.max_concurrency, 17);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn required_presidio_readiness_fails_closed_when_auto_start_is_disabled() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-presidio-required-readiness-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let _auto_start = crate::TestEnvVarGuard::set(PRESIDIO_AUTO_START_ENV, "0");
+        let paths = AppPaths::discover().unwrap();
+        save_presidio_config(
+            &paths,
+            &ProdexPresidioConfig {
+                enabled: true,
+                analyzer_url: "http://127.0.0.1:1".to_string(),
+                anonymizer_url: "http://127.0.0.1:1".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let error = ensure_required_presidio_services_for_super_launch(&paths)
+            .expect_err("required Presidio must fail when services are unavailable");
+        assert!(error.to_string().contains("required Presidio services"));
+        assert!(error.to_string().contains("automatic startup is disabled"));
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

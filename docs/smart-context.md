@@ -120,11 +120,6 @@ Evidence levels are separate:
 3. optional live-model evaluation: non-deterministic and never treated as CI
    proof.
 
-The generated [performance report](generated/smart-context-performance-report.md)
-contains 50 raw samples per exact, canary-out, disabled, rejected, shadow,
-active, and rehydration case at 4 KiB, 64 KiB, and the 240 KiB HTTP near-limit
-where applicable. It is machine-specific and is not live-model evidence.
-
 ## Migration
 
 New identities use `sc2:`/`psc2:` SHA-256. Scoped schema versions 1 and 2

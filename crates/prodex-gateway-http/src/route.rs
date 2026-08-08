@@ -579,7 +579,7 @@ pub(super) fn validate_method(
                 | GatewayHttpMethod::Delete
                 | GatewayHttpMethod::Options
         ),
-        GatewayHttpRouteKind::Unknown => true,
+        GatewayHttpRouteKind::Unknown => false,
     };
     if allowed {
         Ok(())

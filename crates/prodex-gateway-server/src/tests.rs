@@ -32,7 +32,7 @@ use super::{
     GatewayServerConfig, GatewayServerMode, GatewayServerReloadHandle, LoopbackBackend,
     run_with_handler, run_with_handler_reloadable,
 };
-use prodex_gateway_http::GatewayHttpRouteKind;
+use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpRouteKind, GatewayHttpRoutePlane};
 
 mod direct_support;
 mod slowloris;
@@ -44,6 +44,23 @@ type TestFrontend = (
     oneshot::Sender<()>,
     JoinHandle<anyhow::Result<()>>,
 );
+
+#[test]
+fn data_plane_allows_only_the_metrics_admin_route() {
+    let metrics = CanonicalRequestTarget::parse("/v1/prodex/gateway/metrics").unwrap();
+    let keys = CanonicalRequestTarget::parse("/v1/prodex/gateway/keys").unwrap();
+
+    assert!(super::route_allowed(
+        GatewayServerMode::DataPlane,
+        &metrics,
+        GatewayHttpRoutePlane::ControlPlane,
+    ));
+    assert!(!super::route_allowed(
+        GatewayServerMode::DataPlane,
+        &keys,
+        GatewayHttpRoutePlane::ControlPlane,
+    ));
+}
 
 #[test]
 fn reload_handle_swaps_edge_security_for_new_connections() {

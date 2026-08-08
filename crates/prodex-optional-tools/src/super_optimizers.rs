@@ -27,7 +27,6 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     let selected = [
         OptionalToolId::Rtk,
         OptionalToolId::CodebaseMemoryMcp,
-        OptionalToolId::PlaywrightMcp,
         OptionalToolId::Ponytail,
     ]
     .into_iter()

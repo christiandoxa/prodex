@@ -11,8 +11,8 @@ use super::super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_m
 use super::{
     ControlPlaneDecision, GatewayHttpMethod, GatewayHttpRequestMeta, RuntimeGatewayAdminAuth,
     RuntimeGatewayAdminRole, RuntimeProxyRequest, plan_application_control_plane,
-    runtime_gateway_admin_route_explain_plan, runtime_gateway_http_headers,
-    runtime_gateway_http_request_meta,
+    runtime_gateway_admin_keys_page_payload, runtime_gateway_admin_route_explain_plan,
+    runtime_gateway_http_headers, runtime_gateway_http_request_meta,
 };
 use prodex_application::{
     ApplicationRequestContext, ApplicationRequestDeadline,
@@ -55,6 +55,44 @@ fn runtime_gateway_http_headers_preserve_exact_header_order_and_values() {
     assert_eq!(headers[0].value, "idem-1");
     assert_eq!(headers[1].name, "If-Match");
     assert_eq!(headers[1].value, "\"gateway-key-1\"");
+}
+
+#[test]
+fn runtime_gateway_admin_key_pages_bound_configured_and_unknown_entries() {
+    let first_page = prodex_domain::PageRequest::new(Some(2), None);
+    let first = match runtime_gateway_admin_keys_page_payload(
+        serde_json::json!({
+            "keys": [{"name": "alpha"}, {"name": "beta"}, {"name": "gamma"}],
+            "unknown_persisted_keys": ["orphan"]
+        }),
+        &first_page,
+    ) {
+        Ok(page) => page,
+        Err(_) => panic!("first key page should be valid"),
+    };
+    assert_eq!(first["keys"].as_array().unwrap().len(), 2);
+    assert_eq!(first["unknown_persisted_keys"].as_array().unwrap().len(), 0);
+    assert_eq!(first["total"], 4);
+    assert_eq!(first["next_cursor"], "2");
+
+    let second_page =
+        prodex_domain::PageRequest::new(Some(2), Some(prodex_domain::Cursor::new("2").unwrap()));
+    let second = match runtime_gateway_admin_keys_page_payload(
+        serde_json::json!({
+            "keys": [{"name": "alpha"}, {"name": "beta"}, {"name": "gamma"}],
+            "unknown_persisted_keys": ["orphan"]
+        }),
+        &second_page,
+    ) {
+        Ok(page) => page,
+        Err(_) => panic!("second key page should be valid"),
+    };
+    assert_eq!(second["keys"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        second["unknown_persisted_keys"],
+        serde_json::json!(["orphan"])
+    );
+    assert!(second["next_cursor"].is_null());
 }
 
 #[test]

@@ -146,7 +146,7 @@ fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
 
     assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Caveman));
     assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Rtk));
-    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::PlaywrightMcp));
+    assert!(!ids.contains(&prodex_optional_tools::OptionalToolId::PlaywrightMcp));
 
     let caveman = prodex_optional_tools::ToolHealth {
         id: prodex_optional_tools::OptionalToolId::Caveman,
@@ -169,7 +169,7 @@ fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
         .filter_map(|tool| tool["id"].as_str())
         .collect::<Vec<_>>();
     assert!(report_ids.contains(&"rtk"));
-    assert!(report_ids.contains(&"playwright-mcp"));
+    assert!(!report_ids.contains(&"playwright-mcp"));
     assert!(
         report["tools"]
             .as_array()

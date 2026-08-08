@@ -261,3 +261,28 @@ async fn handler_overload_is_a_fail_fast_service_unavailable() {
     stop.send(()).unwrap();
     front.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn handler_unavailable_is_a_service_unavailable() {
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        |_| async { Err(crate::GatewayHandlerError::Unavailable) },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"POST /responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+        .await
+        .unwrap();
+
+    let (headers, body) = super::read_response(&mut client).await;
+    assert!(headers.starts_with("HTTP/1.1 503"));
+    assert_eq!(
+        body,
+        br#"{"error":{"code":"service_unavailable","message":"gateway backend is unavailable"}}"#
+    );
+
+    stop.send(()).unwrap();
+    front.await.unwrap().unwrap();
+}

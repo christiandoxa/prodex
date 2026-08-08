@@ -32,9 +32,171 @@ use prodex_domain::PrincipalId;
 
 const RUNTIME_GATEWAY_SCIM_LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct RuntimeGatewayScimListQuery {
+    pub(super) start: usize,
+    pub(super) count: usize,
+    pub(super) filter: Option<RuntimeGatewayScimUserFilter>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum RuntimeGatewayScimUserFilter {
+    Id(String),
+    UserName(String),
+    DisplayName(String),
+    ExternalId(String),
+}
+
+impl RuntimeGatewayScimUserFilter {
+    fn matches(&self, user: &RuntimeGatewayScimUser) -> bool {
+        let value = match self {
+            Self::Id(_) => &user.id,
+            Self::UserName(_) => &user.user_name,
+            Self::DisplayName(_) => user.display_name.as_deref().unwrap_or_default(),
+            Self::ExternalId(_) => user.external_id.as_deref().unwrap_or_default(),
+        };
+        let expected = match self {
+            Self::Id(expected)
+            | Self::UserName(expected)
+            | Self::DisplayName(expected)
+            | Self::ExternalId(expected) => expected,
+        };
+        value.eq_ignore_ascii_case(expected)
+    }
+}
+
+pub(super) fn runtime_gateway_admin_scim_list_query(
+    path_and_query: &str,
+) -> Result<RuntimeGatewayScimListQuery, &'static str> {
+    let mut query = RuntimeGatewayScimListQuery {
+        count: usize::from(prodex_domain::PageRequest::DEFAULT_LIMIT),
+        ..RuntimeGatewayScimListQuery::default()
+    };
+    let mut start_index = None;
+    let mut count = None;
+    let mut limit = None;
+    let mut cursor = None;
+    let mut filter = None;
+    let raw_query = path_and_query
+        .split_once('?')
+        .map_or("", |(_, query)| query.trim_start_matches('?'));
+    for pair in raw_query.split('&').filter(|pair| !pair.is_empty()) {
+        let (raw_name, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        let name = runtime_gateway_admin_scim_query_component(raw_name)?;
+        let value = runtime_gateway_admin_scim_query_component(raw_value)?;
+        match name.as_str() {
+            "startIndex" => {
+                let parsed = value
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|value| *value >= 1)
+                    .ok_or("startIndex is invalid")?;
+                if start_index.replace(parsed).is_some() {
+                    return Err("startIndex is invalid");
+                }
+            }
+            "count" => {
+                let parsed = value.parse::<usize>().map_err(|_| "count is invalid")?;
+                if count.replace(parsed).is_some() {
+                    return Err("count is invalid");
+                }
+            }
+            "limit" => {
+                let parsed = value.parse::<u16>().map_err(|_| "limit is invalid")?;
+                if limit.replace(parsed).is_some() {
+                    return Err("limit is invalid");
+                }
+            }
+            "cursor" => {
+                let parsed = value.parse::<usize>().map_err(|_| "cursor is invalid")?;
+                if cursor.replace(parsed).is_some() {
+                    return Err("cursor is invalid");
+                }
+            }
+            "filter" => {
+                if filter
+                    .replace(runtime_gateway_admin_scim_filter(&value)?)
+                    .is_some()
+                {
+                    return Err("filter is invalid");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if cursor.is_some() && start_index.is_some() {
+        return Err("cursor and startIndex cannot be combined");
+    }
+    if count.is_some() && limit.is_some() {
+        return Err("count and limit cannot be combined");
+    }
+    let start_index = start_index.unwrap_or(1);
+    let start = cursor.unwrap_or_else(|| start_index.saturating_sub(1));
+    let requested_count = count
+        .or_else(|| limit.map(usize::from))
+        .unwrap_or(query.count);
+    query.start = start;
+    query.count = requested_count.min(usize::from(prodex_domain::PageRequest::MAX_LIMIT));
+    query.filter = filter;
+    Ok(query)
+}
+
+fn runtime_gateway_admin_scim_filter(
+    filter: &str,
+) -> Result<RuntimeGatewayScimUserFilter, &'static str> {
+    let (attribute, value) = filter
+        .split_once(" eq ")
+        .or_else(|| {
+            let lower = filter.to_ascii_lowercase();
+            lower
+                .find(" eq ")
+                .map(|index| (&filter[..index], &filter[index + 4..]))
+        })
+        .ok_or("filter must use equality")?;
+    let value = value.trim();
+    let value = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or("filter value must be quoted")?
+        .to_string();
+    match attribute.trim() {
+        "id" => Ok(RuntimeGatewayScimUserFilter::Id(value)),
+        "userName" => Ok(RuntimeGatewayScimUserFilter::UserName(value)),
+        "displayName" => Ok(RuntimeGatewayScimUserFilter::DisplayName(value)),
+        "externalId" => Ok(RuntimeGatewayScimUserFilter::ExternalId(value)),
+        _ => Err("filter attribute is unsupported"),
+    }
+}
+
+fn runtime_gateway_admin_scim_query_component(value: &str) -> Result<String, &'static str> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => decoded.push(b' '),
+            b'%' if index + 2 < bytes.len() => {
+                let high = (bytes[index + 1] as char).to_digit(16);
+                let low = (bytes[index + 2] as char).to_digit(16);
+                match (high, low) {
+                    (Some(high), Some(low)) => decoded.push((high * 16 + low) as u8),
+                    _ => return Err("query parameter encoding is invalid"),
+                }
+                index += 2;
+            }
+            b'%' => return Err("query parameter encoding is invalid"),
+            byte => decoded.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8(decoded).map_err(|_| "query parameter encoding is invalid")
+}
+
 pub(super) fn runtime_gateway_admin_scim_list_users_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    query: &RuntimeGatewayScimListQuery,
 ) -> tiny_http::ResponseBox {
     let store = match runtime_gateway_virtual_key_store_load_strict(
         &shared.gateway_state_store,
@@ -43,19 +205,42 @@ pub(super) fn runtime_gateway_admin_scim_list_users_response(
         Ok(store) => store,
         Err(_error) => return runtime_gateway_scim_store_unavailable_response(),
     };
+    let total = store
+        .scim_users
+        .iter()
+        .filter(|user| {
+            admin_auth.can_access_scim_user(user)
+                && query
+                    .filter
+                    .as_ref()
+                    .is_none_or(|filter| filter.matches(user))
+        })
+        .count();
+    let start = query.start.min(total);
+    let end = start.saturating_add(query.count).min(total);
+    let next_cursor = (end < total).then(|| end.to_string());
     let resources = store
         .scim_users
         .iter()
-        .filter(|user| admin_auth.can_access_scim_user(user))
+        .filter(|user| {
+            admin_auth.can_access_scim_user(user)
+                && query
+                    .filter
+                    .as_ref()
+                    .is_none_or(|filter| filter.matches(user))
+        })
+        .skip(start)
+        .take(end.saturating_sub(start))
         .map(|user| runtime_gateway_scim_user_json(user, shared))
         .collect::<Vec<_>>();
     runtime_gateway_admin_json_response(
         200,
         serde_json::json!({
             "schemas": [RUNTIME_GATEWAY_SCIM_LIST_SCHEMA],
-            "totalResults": resources.len(),
-            "startIndex": 1,
+            "totalResults": total,
+            "startIndex": start.saturating_add(1),
             "itemsPerPage": resources.len(),
+            "next_cursor": next_cursor,
             "Resources": resources,
         }),
     )
@@ -478,5 +663,27 @@ mod tests {
                 "legacy SCIM path remains: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn scim_list_query_supports_standard_pagination_and_filter() {
+        let query = runtime_gateway_admin_scim_list_query(
+            "/v1/prodex/gateway/scim/v2/Users?startIndex=2&count=3&filter=userName%20eq%20%22alice%40example.com%22",
+        )
+        .expect("SCIM query should parse");
+        assert_eq!(query.start, 1);
+        assert_eq!(query.count, 3);
+        assert!(matches!(
+            query.filter,
+            Some(RuntimeGatewayScimUserFilter::UserName(ref value)) if value == "alice@example.com"
+        ));
+    }
+
+    #[test]
+    fn scim_list_query_rejects_invalid_or_ambiguous_pagination() {
+        assert!(runtime_gateway_admin_scim_list_query("/Users?startIndex=0").is_err());
+        assert!(runtime_gateway_admin_scim_list_query("/Users?count=nope").is_err());
+        assert!(runtime_gateway_admin_scim_list_query("/Users?count=2&limit=2").is_err());
+        assert!(runtime_gateway_admin_scim_list_query("/Users?startIndex=2&cursor=1").is_err());
     }
 }

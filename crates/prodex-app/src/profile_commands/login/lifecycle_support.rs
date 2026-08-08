@@ -86,13 +86,13 @@ pub(super) fn login_into_profile(
         }
     };
 
+    if login_request.method == LoginMethod::Status {
+        return run_codex_login(&target.profile.codex_home, login_request);
+    }
+
     let login_home = create_temporary_login_home(paths)?;
     let status = run_codex_login(&login_home, login_request)?;
     if !status.success() {
-        remove_dir_if_exists(&login_home)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Status {
         remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
@@ -225,6 +225,90 @@ mod tests {
     use std::fs;
     use std::sync::mpsc;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn named_login_status_uses_selected_profile_home() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-login-status-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("test root should be private");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        };
+        fs::create_dir_all(&paths.managed_profiles_root)
+            .expect("managed profiles root should be created");
+        let profile_home = paths.managed_profiles_root.join("main");
+        create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: std::collections::BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: profile_home.clone(),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        }
+        .save(&paths)
+        .expect("initial state should save");
+
+        let script = root.join("fake-codex-login-status.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s' \"$CODEX_HOME\" > \"$PRODEX_LOGIN_HOME_CAPTURE\"\n",
+        )
+        .expect("fake login command should be written");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
+            .expect("fake login command should be executable");
+        let capture = root.join("login-home");
+        let _codex_guard = TestEnvVarGuard::set("PRODEX_CODEX_BIN", &script.display().to_string());
+        let _capture_guard =
+            TestEnvVarGuard::set("PRODEX_LOGIN_HOME_CAPTURE", &capture.display().to_string());
+
+        let status = login_into_profile(
+            &paths,
+            "main",
+            &LoginRequest {
+                method: LoginMethod::Status,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            },
+        )
+        .expect("profile login status should run");
+
+        assert!(status.success());
+        assert_eq!(
+            fs::read_to_string(&capture).expect("fake login should capture CODEX_HOME"),
+            profile_home.display().to_string()
+        );
+        assert!(
+            fs::read_dir(&paths.managed_profiles_root)
+                .expect("managed profiles root should be readable")
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry.file_name().to_string_lossy().starts_with(".login-")),
+            "status should not allocate a temporary login home"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn named_login_rejects_profile_recreated_during_external_login() {

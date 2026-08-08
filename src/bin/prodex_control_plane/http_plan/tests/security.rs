@@ -46,3 +46,15 @@ fn control_plane_plan_header_zeroize_clears_owned_value() {
     header.zeroize();
     assert!(header.value.is_empty());
 }
+
+#[test]
+fn control_plane_plan_accepts_scim_put() {
+    let http = GatewayHttpRequestMeta {
+        method: parse_gateway_http_method("PUT").unwrap(),
+        path: "/v1/prodex/gateway/scim/v2/Users/example-user".to_string(),
+        body_len: 1,
+        headers: Vec::new(),
+    };
+    let route = plan_application_control_plane_http_route(&http).unwrap();
+    assert_eq!(route.operation, ControlPlaneOperation::ScimUserUpdate);
+}

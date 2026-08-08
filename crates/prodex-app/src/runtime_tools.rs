@@ -445,6 +445,8 @@ mod tests {
             strategy.codex_args,
             vec![
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("-c"),
+                OsString::from("features.apps=false"),
                 OsString::from("exec"),
                 OsString::from("hi")
             ]

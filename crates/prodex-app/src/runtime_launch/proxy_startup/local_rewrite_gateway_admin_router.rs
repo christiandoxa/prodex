@@ -21,12 +21,14 @@ use super::local_rewrite_gateway_admin_payloads::{
     runtime_gateway_admin_providers_payload, runtime_gateway_openapi_spec,
 };
 use super::local_rewrite_gateway_admin_policies::runtime_gateway_admin_policy_response;
-use super::local_rewrite_gateway_admin_response::runtime_gateway_admin_json_response;
+use super::local_rewrite_gateway_admin_response::{
+    runtime_gateway_admin_json_response, runtime_gateway_admin_page_window,
+};
 use super::local_rewrite_gateway_admin_route_explain::runtime_gateway_admin_route_explain_response;
 use super::local_rewrite_gateway_admin_scim::{
     runtime_gateway_admin_scim_create_user_response,
     runtime_gateway_admin_scim_delete_user_response, runtime_gateway_admin_scim_get_user_response,
-    runtime_gateway_admin_scim_list_users_response,
+    runtime_gateway_admin_scim_list_query, runtime_gateway_admin_scim_list_users_response,
     runtime_gateway_admin_scim_update_user_response,
 };
 use super::local_rewrite_gateway_admin_sessions::runtime_gateway_admin_session_response;
@@ -37,9 +39,11 @@ use super::local_rewrite_gateway_key_payloads::{
 use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
 use super::*;
 use prodex_application::{
-    ApplicationControlPlaneHttpRouteErrorStatus, plan_application_control_plane,
-    plan_application_control_plane_http_route,
+    ApplicationControlPlaneHttpRouteErrorStatus, ApplicationControlPlanePageRequestErrorStatus,
+    plan_application_control_plane, plan_application_control_plane_http_route,
     plan_application_control_plane_http_route_error_response,
+    plan_application_control_plane_page_request_error_response,
+    plan_application_control_plane_page_request_from_http_query,
 };
 use prodex_control_plane::ControlPlaneDecision;
 use prodex_gateway_http::{
@@ -341,7 +345,7 @@ fn runtime_gateway_admin_static_dispatch(
             runtime_gateway_admin_route_explain_response(captured, shared, admin_auth)
         }
         GatewayAdminRoute::Usage => {
-            runtime_gateway_admin_keys_response(shared, "gateway.usage", admin_auth)
+            runtime_gateway_admin_keys_response(captured, shared, "gateway.usage", admin_auth)
         }
         GatewayAdminRoute::Ledger => {
             runtime_gateway_admin_ledger_response(&captured.path_and_query, shared, admin_auth)
@@ -420,7 +424,7 @@ fn runtime_gateway_admin_keys_dispatch(
     authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
 ) -> tiny_http::ResponseBox {
     match method {
-        "GET" => runtime_gateway_admin_keys_response(shared, "gateway.keys", admin_auth),
+        "GET" => runtime_gateway_admin_keys_response(captured, shared, "gateway.keys", admin_auth),
         "POST" => authorized_action.map_or_else(
             runtime_gateway_admin_missing_action_response,
             |base_action| {
@@ -473,7 +477,12 @@ fn runtime_gateway_admin_scim_users_dispatch(
     authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
 ) -> tiny_http::ResponseBox {
     match method {
-        "GET" => runtime_gateway_admin_scim_list_users_response(shared, admin_auth),
+        "GET" => match runtime_gateway_admin_scim_list_query(&captured.path_and_query) {
+            Ok(query) => runtime_gateway_admin_scim_list_users_response(shared, admin_auth, &query),
+            Err(message) => {
+                build_runtime_proxy_json_error_response(400, "scim_query_invalid", message)
+            }
+        },
         "POST" => authorized_action.map_or_else(
             runtime_gateway_admin_missing_action_response,
             |base_action| {
@@ -536,14 +545,95 @@ fn runtime_gateway_admin_scim_user_dispatch(
 }
 
 fn runtime_gateway_admin_keys_response(
+    captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     object: &str,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
+    let page_request = match runtime_gateway_admin_page_request(captured, admin_auth) {
+        Ok(page_request) => page_request,
+        Err(response) => return response,
+    };
     match runtime_gateway_admin_keys_payload(shared, object, Some(admin_auth)) {
-        Ok(payload) => runtime_gateway_admin_json_response(200, payload),
+        Ok(payload) => match runtime_gateway_admin_keys_page_payload(payload, &page_request) {
+            Ok(payload) => runtime_gateway_admin_json_response(200, payload),
+            Err(response) => response,
+        },
         Err(()) => runtime_gateway_admin_state_unavailable_response(),
     }
+}
+
+fn runtime_gateway_admin_page_request(
+    captured: &RuntimeProxyRequest,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> Result<prodex_domain::PageRequest, tiny_http::ResponseBox> {
+    let query = captured
+        .path_and_query
+        .split_once('?')
+        .map_or("", |(_, query)| query);
+    let path = path_without_query(&captured.path_and_query);
+    let http = runtime_gateway_http_request_meta(captured, path);
+    let action =
+        runtime_gateway_admin_control_plane_action(&http, admin_auth).ok_or_else(|| {
+            build_runtime_proxy_json_error_response(
+                400,
+                "control_plane_route_invalid",
+                "control-plane route is invalid",
+            )
+        })?;
+    plan_application_control_plane_page_request_from_http_query(action, &http, query)
+        .map(|plan| plan.page_request)
+        .map_err(|error| {
+            let response = plan_application_control_plane_page_request_error_response(&error);
+            build_runtime_proxy_json_error_response(
+                match response.status {
+                    ApplicationControlPlanePageRequestErrorStatus::BadRequest => 400,
+                    ApplicationControlPlanePageRequestErrorStatus::MethodNotAllowed => 405,
+                },
+                response.code,
+                response.message,
+            )
+        })
+}
+
+fn runtime_gateway_admin_keys_page_payload(
+    mut payload: serde_json::Value,
+    page_request: &prodex_domain::PageRequest,
+) -> Result<serde_json::Value, tiny_http::ResponseBox> {
+    let keys = payload
+        .get_mut("keys")
+        .map(serde_json::Value::take)
+        .and_then(|value| value.as_array().cloned())
+        .ok_or_else(runtime_gateway_admin_state_unavailable_response)?;
+    let unknown_persisted_keys = payload
+        .get_mut("unknown_persisted_keys")
+        .map(serde_json::Value::take)
+        .and_then(|value| value.as_array().cloned())
+        .ok_or_else(runtime_gateway_admin_state_unavailable_response)?;
+    let configured_key_count = keys.len();
+    let total = configured_key_count + unknown_persisted_keys.len();
+    let (start, end, next_cursor) = runtime_gateway_admin_page_window(page_request, total)?;
+    let keys = keys
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| (start..end).contains(&index).then_some(value))
+        .collect::<Vec<_>>();
+    let unknown_persisted_keys = unknown_persisted_keys
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let index = configured_key_count + index;
+            (start..end).contains(&index).then_some(value)
+        })
+        .collect::<Vec<_>>();
+    payload["keys"] = serde_json::Value::Array(keys);
+    payload["unknown_persisted_keys"] = serde_json::Value::Array(unknown_persisted_keys);
+    payload["total"] = serde_json::json!(total);
+    payload["limit"] = serde_json::json!(page_request.limit);
+    payload["cursor"] =
+        serde_json::json!(page_request.cursor.as_ref().map(|cursor| cursor.as_str()));
+    payload["next_cursor"] = serde_json::json!(next_cursor);
+    Ok(payload)
 }
 
 fn runtime_gateway_admin_key_response(

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::super::{configure_child_process_group, terminate_child_process_tree};
 use crate::app_server_broker::{AppServerBrokerLiveValidator, app_server_broker_pump_live_stream};
 
 pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()> {
@@ -25,6 +26,7 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
     for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
+    configure_child_process_group(&mut command);
     let mut child = command.spawn().with_context(|| {
         format!(
             "failed to start {} app-server",
@@ -35,7 +37,7 @@ pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()>
         Some(proxy) => match proxy.create_child_lease(child.id()) {
             Ok(lease) => Some(lease),
             Err(err) => {
-                let _ = child.kill();
+                let _ = terminate_child_process_tree(&mut child);
                 let _ = child.wait();
                 return Err(err);
             }
@@ -136,7 +138,7 @@ fn wait_for_app_server_broker(
                 }
                 if let Err(error) = result {
                     first_error.get_or_insert_with(|| format!("{direction}: {error}"));
-                    let _ = child.kill();
+                    let _ = terminate_child_process_tree(child);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
@@ -148,7 +150,7 @@ fn wait_for_app_server_broker(
             first_error.get_or_insert_with(|| {
                 "Codex app-server did not stop after client input closed".to_string()
             });
-            let _ = child.kill();
+            let _ = terminate_child_process_tree(child);
             return Ok((child.wait()?, first_error));
         }
     }

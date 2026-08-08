@@ -74,6 +74,7 @@ impl Error for GatewayHttpDrainPlanError {}
 pub enum GatewayHttpPlanError {
     Policy(GatewayHttpPolicyError),
     InvalidRequestTarget(CanonicalRequestTargetError),
+    UnknownRoute,
     BodyTooLarge {
         max: usize,
         actual: usize,
@@ -100,6 +101,7 @@ impl fmt::Display for GatewayHttpPlanError {
         match self {
             Self::Policy(err) => err.fmt(f),
             Self::InvalidRequestTarget(err) => err.fmt(f),
+            Self::UnknownRoute => write!(f, "HTTP route is not available"),
             Self::BodyTooLarge { .. } => write!(f, "HTTP body is too large"),
             Self::HeaderCountExceeded
             | Self::HeaderBytesExceeded
@@ -143,6 +145,11 @@ pub fn plan_gateway_http_error_response(
             status: GatewayHttpErrorStatus::BadRequest,
             code: "invalid_request_target",
             message: "request target is invalid",
+        },
+        GatewayHttpPlanError::UnknownRoute => GatewayHttpErrorResponsePlan {
+            status: GatewayHttpErrorStatus::BadRequest,
+            code: "route_not_available",
+            message: "route is not available",
         },
         GatewayHttpPlanError::BodyTooLarge { .. } => GatewayHttpErrorResponsePlan {
             status: GatewayHttpErrorStatus::PayloadTooLarge,
@@ -219,13 +226,15 @@ pub fn plan_gateway_http_request(
     validate_header_limits(policy, &request.headers)?;
     let target = CanonicalRequestTarget::parse(request.path)
         .map_err(GatewayHttpPlanError::InvalidRequestTarget)?;
+    let route = classify_request_target(&target)
+        .ok_or(GatewayHttpPlanError::UnknownRoute)?
+        .kind;
     if request.body_len > policy.max_body_bytes {
         return Err(GatewayHttpPlanError::BodyTooLarge {
             max: policy.max_body_bytes,
             actual: request.body_len,
         });
     }
-    let route = classify_canonical_route(&target);
     validate_method(route, request.method)?;
     validate_singleton_credential_headers(&request.headers)?;
     validate_singleton_affinity_headers(&request.headers)?;
@@ -285,6 +294,9 @@ pub fn plan_gateway_http_execution(
     route: GatewayHttpRouteKind,
 ) -> Result<GatewayHttpExecutionPlan, GatewayHttpPlanError> {
     policy.validate().map_err(GatewayHttpPlanError::Policy)?;
+    if route.plane().is_none() {
+        return Err(GatewayHttpPlanError::UnknownRoute);
+    }
     let timeout_budget = GatewayTimeoutBudget {
         request_timeout_ms: policy.request_timeout_ms,
         stream_idle_timeout_ms: policy.stream_idle_timeout_ms,

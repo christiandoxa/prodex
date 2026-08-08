@@ -448,6 +448,10 @@ fn main_entry_error_message(err: &anyhow::Error) -> String {
 
 fn run() -> Result<()> {
     let command = parse_cli_command_or_exit();
+    run_command(command)
+}
+
+fn run_command(command: Commands) -> Result<()> {
     let native_dry_run = command_dispatch::command_is_native_dry_run(&command);
     if !native_dry_run && let Commands::Super(args) = &command {
         runtime_gemini_cli::validate_super_native_cli_preflight(args)?;
@@ -460,6 +464,12 @@ fn run() -> Result<()> {
         }
     }
     validate_command_runtime_policy(&command)?;
+    if matches!(&command, Commands::Setup(args) if args.dry_run) {
+        let Commands::Setup(args) = command else {
+            unreachable!("setup dry-run command should match");
+        };
+        return handle_setup(args);
+    }
     if !native_dry_run && !minimal_startup {
         schedule_prodex_auto_runtime_housekeeping(&command);
     }
@@ -467,20 +477,24 @@ fn run() -> Result<()> {
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    matches!(
-        command,
-        Commands::Doctor(args)
-            if args.install
-                && !args.quota
-                && !args.runtime
-                && !args.repair_import_auth_journals
-                && args.bundle.is_none()
-    )
+    matches!(command, Commands::Setup(args) if args.dry_run)
+        || matches!(
+            command,
+            Commands::Doctor(args)
+                if args.install
+                    && !args.quota
+                    && !args.runtime
+                    && !args.repair_import_auth_journals
+                    && args.bundle.is_none()
+        )
 }
 
 #[cfg(test)]
 mod minimal_startup_tests {
-    use super::{command_uses_minimal_startup, parse_cli_command_from};
+    use super::{command_uses_minimal_startup, parse_cli_command_from, run_command};
+    use crate::TestEnvVarGuard;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn doctor_install_alone_uses_minimal_startup() {
@@ -490,6 +504,32 @@ mod minimal_startup_tests {
 
         assert!(command_uses_minimal_startup(&install));
         assert!(!command_uses_minimal_startup(&combined));
+    }
+
+    #[test]
+    fn setup_dry_run_leaves_startup_paths_uncreated() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-setup-dry-run-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let shared = root.join("shared-codex");
+        let _root_guard = TestEnvVarGuard::set("PRODEX_HOME", &root.display().to_string());
+        let _shared_guard =
+            TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", &shared.display().to_string());
+        let command = parse_cli_command_from(["prodex", "setup", "--dry-run", "--json"]).unwrap();
+
+        run_command(command).expect("setup dry-run should succeed");
+
+        assert!(!root.exists(), "setup dry-run must not create Prodex home");
+        assert!(
+            !shared.exists(),
+            "setup dry-run must not create shared CODEX_HOME"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }
 

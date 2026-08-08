@@ -557,8 +557,19 @@ jobs:
         run: cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1
 
   process-guard:
+    name: Process guard (${{ matrix.lane }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane:
+          - hygiene
+          - static
+          - enterprise-core
+          - enterprise-storage
+          - enterprise-edge
+          - node
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -590,6 +601,7 @@ jobs:
           cache-bin: false
 
       - name: Enforce churn hygiene
+        if: matrix.lane == 'hygiene'
         shell: bash
         run: |
           set -euo pipefail
@@ -610,6 +622,7 @@ jobs:
           fi
 
       - name: Enforce release hygiene
+        if: matrix.lane == 'hygiene'
         shell: bash
         run: |
           set -euo pipefail
@@ -632,42 +645,55 @@ jobs:
           fi
 
       - name: Enforce Rust file size guard
+        if: matrix.lane == 'static'
         run: npm run ci:size-guard
 
       - name: Enforce Rust allow attribute guard
+        if: matrix.lane == 'static'
         run: npm run ci:allow-guard
 
       - name: Enforce optional-tool decoupling guard
+        if: matrix.lane == 'static'
         run: npm run ci:optional-tools-guard
 
       - name: Enforce Smart Context correctness guard
+        if: matrix.lane == 'static'
         run: npm run ci:smart-context-guard
 
       - name: Check generated Smart Context evidence
+        if: matrix.lane == 'static'
         run: npm run docs:smart-context-evidence:check
 
       - name: Validate full-test shard manifest
+        if: matrix.lane == 'static'
         run: npm run ci:full-test-shards
 
       - name: Enforce Rust super wildcard guard
+        if: matrix.lane == 'static'
         run: npm run ci:super-wildcard-guard
 
       - name: Enforce Rust env mutation guard
+        if: matrix.lane == 'static'
         run: npm run ci:env-mutation-guard
 
       - name: Enforce secret-bearing argument and URL guard
+        if: matrix.lane == 'static'
         run: npm run ci:secret-boundary-guard
 
       - name: Enforce immutable supply-chain pins
+        if: matrix.lane == 'static'
         run: npm run ci:supply-chain-guard
 
       - name: Enforce crate boundaries
+        if: matrix.lane == 'static'
         run: npm run ci:crate-boundary
 
       - name: Enforce domain crate boundary
+        if: matrix.lane == 'static'
         run: npm run ci:domain-boundary-guard
 
-      - name: Enforce enterprise boundary guards
+      - name: Enforce enterprise core boundary guards
+        if: matrix.lane == 'enterprise-core'
         shell: bash
         run: |
           set -euo pipefail
@@ -677,12 +703,24 @@ jobs:
           npm run ci:application-boundary-guard
           npm run ci:production-boundary-guard
           npm run ci:auth-boundary-guard
+
+      - name: Enforce enterprise storage boundary guards
+        if: matrix.lane == 'enterprise-storage'
+        shell: bash
+        run: |
+          set -euo pipefail
           npm run ci:config-boundary-guard
           npm run ci:control-plane-boundary-guard
           npm run ci:observability-boundary-guard
           npm run ci:provider-spi-boundary-guard
           npm run ci:storage-boundary-guard
           npm run ci:storage-postgres-boundary-guard
+
+      - name: Enforce enterprise edge boundary guards
+        if: matrix.lane == 'enterprise-edge'
+        shell: bash
+        run: |
+          set -euo pipefail
           npm run ci:storage-redis-boundary-guard
           npm run ci:storage-sqlite-boundary-guard
           npm run ci:gateway-core-boundary-guard
@@ -690,9 +728,11 @@ jobs:
           npm run ci:deployment-security-guard
 
       - name: Enforce dependency duplicate budget
+        if: matrix.lane == 'static'
         run: npm run ci:dependency-duplicates
 
       - name: Run all Node.js tests
+        if: matrix.lane == 'node'
         run: npm run test:node
 
   redis-integration:

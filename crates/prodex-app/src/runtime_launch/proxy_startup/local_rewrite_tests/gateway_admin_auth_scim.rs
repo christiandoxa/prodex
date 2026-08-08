@@ -91,6 +91,20 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
         serde_json::json!(["engineering", "platform"])
     );
 
+    let second_user = client
+        .idempotent_post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({
+            "userName": "bob@example.com",
+            "displayName": "Bob Example"
+        }))
+        .send()
+        .expect("second SCIM user create request should be sent");
+    assert_eq!(second_user.status().as_u16(), 201);
+
     let listed_users = client
         .get(format!(
             "http://{}/v1/prodex/gateway/scim/v2/Users",
@@ -103,7 +117,37 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
     let listed_users: serde_json::Value = listed_users
         .json()
         .expect("SCIM list response should be json");
-    assert_eq!(listed_users["totalResults"], 1);
+    assert_eq!(listed_users["totalResults"], 2);
+
+    let first_page = client
+        .get(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users?limit=1",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .send()
+        .expect("first SCIM page request should be sent");
+    assert_eq!(first_page.status().as_u16(), 200);
+    let first_page: serde_json::Value = first_page.json().expect("first SCIM page should be json");
+    assert_eq!(first_page["Resources"].as_array().unwrap().len(), 1);
+    assert_eq!(first_page["startIndex"], 1);
+    assert_eq!(first_page["itemsPerPage"], 1);
+    assert_eq!(first_page["next_cursor"], "1");
+
+    let second_page = client
+        .get(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users?limit=1&cursor=1",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .send()
+        .expect("second SCIM page request should be sent");
+    assert_eq!(second_page.status().as_u16(), 200);
+    let second_page: serde_json::Value =
+        second_page.json().expect("second SCIM page should be json");
+    assert_eq!(second_page["Resources"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["startIndex"], 2);
+    assert!(second_page["next_cursor"].is_null());
 
     let created_key = client
         .idempotent_post(format!(
