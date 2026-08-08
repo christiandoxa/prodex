@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-runtime-ci-completion-0.398.0",
+    "requiredSubjects": [
+      "fix: harden runtime paths and CI parallelism"
+    ],
+    "caps": {
+      "maxFiles": 50,
+      "maxBehaviorFiles": 45,
+      "maxLines": 1700,
+      "maxFileLines": 250
+    },
+    "reason": "Reviewed the parallel whole-source audit covering runtime startup, proxy transport and affinity, Presidio preference/readiness, gateway and SCIM policy boundaries, process-tree cleanup, optional-tool defaults, CI fan-out, and removal of generated performance reports; verified with focused regressions, the locked full workspace suite, repository guards, docs lint, and the full local Rust runner before the 0.398.0 release."
+  },
+  {
     "id": "audited-provider-delegation-follow-up-0.384.0",
     "requiredSubjects": [
       "fix(ci): close cross-platform catalog gaps"
