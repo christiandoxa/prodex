@@ -114,10 +114,8 @@ pub(super) fn runtime_gateway_admin_scim_list_query(
                 }
             }
             "filter" => {
-                if filter
-                    .replace(runtime_gateway_admin_scim_filter(&value)?)
-                    .is_some()
-                {
+                let parsed = runtime_gateway_admin_scim_filter(&value)?;
+                if filter.replace(parsed).is_some() {
                     return Err("filter is invalid");
                 }
             }
