@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.394.0 - 2026-08-08
+
+### CLI
+
+- Preserve quota snapshots and aliases (`b5b6325`)
+
 ## 0.393.0 - 2026-08-08
 
 ### Runtime
@@ -92,9 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Add sub-agent delegation and harden runtime (`c0c048a`)
-
-## 0.382.0 - 2026-08-04
-
-### Misc
-
-- Close audited production gaps (`92d7bf8`)
