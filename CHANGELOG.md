@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.395.0 - 2026-08-08
+
+### Misc
+
+- Set interactive window title (`93888f4`)
+
 ## 0.394.0 - 2026-08-08
 
 ### CLI
@@ -92,9 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Harden provider delegation (`e865fac`)
-
-## 0.383.0 - 2026-08-05
-
-### Runtime
-
-- Add sub-agent delegation and harden runtime (`c0c048a`)
