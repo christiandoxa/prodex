@@ -692,7 +692,7 @@ jobs:
         if: matrix.lane == 'static'
         run: npm run ci:domain-boundary-guard
 
-      - name: Enforce enterprise core boundary guards
+      - name: Enforce enterprise boundary guards (core)
         if: matrix.lane == 'enterprise-core'
         shell: bash
         run: |
