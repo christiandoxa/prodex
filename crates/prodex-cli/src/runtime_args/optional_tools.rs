@@ -89,7 +89,6 @@ impl SuperArgs {
         codex_args.extend(feature_overrides);
         codex_args.extend(self.codex_args);
         let mut tools = OptionalToolSet::super_defaults();
-        tools.remove(OptionalToolId::PlaywrightMcp);
         for tool in self.tools {
             if !(no_presidio && tool == OptionalToolId::Presidio) {
                 tools.insert(tool);

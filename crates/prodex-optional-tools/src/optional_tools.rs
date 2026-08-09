@@ -212,6 +212,7 @@ impl OptionalToolSet {
             OptionalToolId::Caveman,
             OptionalToolId::Rtk,
             OptionalToolId::CodebaseMemoryMcp,
+            OptionalToolId::PlaywrightMcp,
             OptionalToolId::Ponytail,
         ]))
     }
