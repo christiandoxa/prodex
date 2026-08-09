@@ -73,16 +73,16 @@ fn super_defaults_to_yolo_access_with_minimal_super_prefixes() {
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Caveman));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
-    assert!(!tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
     assert!(rendered_codex_args(&args).contains(&"features.apps=false".to_string()));
     assert!(args.codex_args.ends_with(&os_args(&["exec", "review"])));
 }
 
 #[test]
-fn super_playwright_is_opt_in() {
+fn super_playwright_is_default_and_explicit_selection_is_supported() {
     let default = parse_super_as_runtime_tools(&["prodex", "super", "exec", "review"]);
     assert!(
-        !default
+        default
             .selected_tool_set()
             .contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp)
     );

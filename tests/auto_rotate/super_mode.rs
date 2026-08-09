@@ -48,11 +48,16 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 #[test]
 fn s_pty_renders_presidio_tui() {
     let fixture = setup_fixture();
+    fs::write(
+        fixture.prodex_home.join("presidio.toml"),
+        "enabled = true\n",
+    )
+    .expect("saved Presidio config should be writable");
 
     let run = run_prodex_with_pty_until_prompt(
         &fixture,
         &["s", "--skip-quota-check", "exec", "hello"],
-        &[],
+        &[("PRODEX_PRESIDIO_AUTO_START", "0")],
         "Use Presidio for data safety?",
     );
 

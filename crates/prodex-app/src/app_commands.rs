@@ -79,19 +79,11 @@ struct ResolvedMainAgentConfig {
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
     reject_sub_agent_recursion_reenable(&args)?;
-    let stored_presidio = if args.presidio_preference().is_none() {
-        stored_presidio_preference()?
-    } else {
-        None
-    };
     let interactive = super_prompt_is_interactive();
     let (use_presidio, _main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
         &mut args,
         interactive,
-        || match stored_presidio {
-            Some(use_presidio) => Ok(use_presidio),
-            None => prompt_super_presidio_opt_in(),
-        },
+        prompt_super_presidio_opt_in,
         |args| runtime_launch::runtime_resume_provider_from_codex_args(&args.codex_args),
         prompt_super_main_agent_configuration,
         prompt_super_sub_agent_configuration,
@@ -1035,13 +1027,12 @@ mod sub_agent_prompt_tests {
         ResolvedMainAgentConfig, SUPER_CONFIGURED_MODEL_LIMIT, SuperSubAgentPromptStep,
         bounded_tui_text, configured_sub_agent_model_ids,
         resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
-        run_super_sub_agent_prompt_steps, stored_presidio_preference,
-        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
+        run_super_sub_agent_prompt_steps, super_sub_agent_concurrency_choices,
+        super_sub_agent_prompt_steps, visible_choice_range,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
     use std::cell::RefCell;
-    use std::fs;
 
     const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
 
@@ -1427,56 +1418,6 @@ mod sub_agent_prompt_tests {
                 session_id: SESSION_ID.to_string()
             }
         );
-    }
-
-    #[test]
-    fn persisted_presidio_preference_is_used_until_cli_disable_overrides_it() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-super-presidio-preference-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-        ));
-        fs::create_dir_all(&root).expect("preference root should exist");
-        fs::write(root.join("presidio.toml"), "enabled = true\n")
-            .expect("preference should be written");
-        let _home = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_HOME",
-            root.to_str().expect("preference root should be UTF-8"),
-        );
-        let persisted = stored_presidio_preference()
-            .expect("persisted preference should load")
-            .expect("persisted preference should exist");
-        assert!(persisted);
-
-        let resolve = |args: &mut prodex_cli::SuperArgs| {
-            resolve_super_launch_decisions_with_prompts(
-                args,
-                true,
-                || Ok(persisted),
-                |_| Ok(None),
-                |_, _| {
-                    Ok(ResolvedMainAgentConfig {
-                        provider: ProviderId::OpenAi,
-                        model: None,
-                        local_url: None,
-                    })
-                },
-                |_| Ok(None),
-            )
-            .expect("Super preference should resolve")
-            .0
-        };
-
-        let mut enabled = super_args(&[]);
-        assert!(resolve(&mut enabled));
-
-        let mut disabled = super_args(&["--no-presidio"]);
-        assert!(!resolve(&mut disabled));
-
-        fs::remove_dir_all(root).expect("preference root should be removed");
     }
 
     #[test]

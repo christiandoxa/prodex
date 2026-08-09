@@ -30,7 +30,7 @@ fn super_defaults_are_typed_and_presidio_is_opt_in() {
     let tools = OptionalToolSet::super_defaults();
     assert!(tools.contains(OptionalToolId::Caveman));
     assert!(tools.contains(OptionalToolId::Rtk));
-    assert!(!tools.contains(OptionalToolId::PlaywrightMcp));
+    assert!(tools.contains(OptionalToolId::PlaywrightMcp));
     assert!(!tools.contains(OptionalToolId::Presidio));
 }
 
