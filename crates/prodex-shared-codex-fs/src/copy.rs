@@ -89,8 +89,14 @@ fn copy_directory_entry(
     }
 
     if file_type.is_file() {
-        copy_shared_codex_file_replacing_existing(source_path, destination_path, "failed to copy")?;
-        return Ok(());
+        return match copy_shared_codex_file_replacing_existing(
+            source_path,
+            destination_path,
+            "failed to copy",
+        ) {
+            Err(error) if source_disappeared(&error) => Ok(()),
+            result => result,
+        };
     }
 
     if file_type.is_symlink() {
@@ -98,6 +104,14 @@ fn copy_directory_entry(
     }
 
     Ok(())
+}
+
+fn source_disappeared(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
+    })
 }
 
 fn copy_symlinked_file_under_root(

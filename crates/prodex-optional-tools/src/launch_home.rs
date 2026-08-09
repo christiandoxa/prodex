@@ -187,12 +187,7 @@ fn ensure_prodex_overlay_root(managed_profiles_root: &Path) -> Result<()> {
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir_all(managed_profiles_root).with_context(|| {
-                format!(
-                    "failed to create managed profile root {}",
-                    managed_profiles_root.display()
-                )
-            })?;
+            // The shared helper creates and secures the root below.
         }
         Err(err) => {
             return Err(err).with_context(|| {
@@ -203,7 +198,7 @@ fn ensure_prodex_overlay_root(managed_profiles_root: &Path) -> Result<()> {
             });
         }
     }
-    Ok(())
+    prodex_shared_codex_fs::create_codex_home_if_missing(managed_profiles_root)
 }
 
 fn share_prodex_overlay_chat_history(

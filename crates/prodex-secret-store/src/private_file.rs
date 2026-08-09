@@ -80,9 +80,10 @@ pub fn encrypt_private_payload(
     let mut nonce = [0_u8; PRIVATE_PAYLOAD_NONCE_BYTES];
     getrandom::fill(&mut nonce)
         .map_err(|_| io::Error::other("failed to generate private payload nonce"))?;
+    let nonce_ref = <&Nonce>::try_from(nonce.as_slice()).expect("nonce length is fixed");
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce),
+            nonce_ref,
             Payload {
                 msg: plaintext,
                 aad: associated_data,
@@ -119,9 +120,11 @@ pub fn decrypt_private_payload(
             "failed to initialize private payload cipher",
         )
     })?;
+    let nonce = <&Nonce>::try_from(&encoded[..PRIVATE_PAYLOAD_NONCE_BYTES])
+        .expect("nonce slice length is fixed");
     cipher
         .decrypt(
-            Nonce::from_slice(&encoded[..PRIVATE_PAYLOAD_NONCE_BYTES]),
+            nonce,
             Payload {
                 msg: &encoded[PRIVATE_PAYLOAD_NONCE_BYTES..],
                 aad: associated_data,

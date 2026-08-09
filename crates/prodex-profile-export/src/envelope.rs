@@ -244,9 +244,11 @@ where
     derive_profile_export_key_into(password.as_str(), &salt, kdf, &mut key)?;
     let cipher = Aes256GcmSiv::new_from_slice(key.as_ref())
         .map_err(|_| anyhow::anyhow!("failed to initialize import cipher"))?;
+    let nonce_ref = <&Nonce>::try_from(nonce.as_slice())
+        .map_err(|_| anyhow::anyhow!("invalid encrypted export nonce length"))?;
     let plaintext = Zeroizing::new(
         cipher
-            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_slice())
+            .decrypt(nonce_ref, ciphertext.as_slice())
             .map_err(|_| anyhow::anyhow!("failed to decrypt profile export bundle"))?,
     );
     if plaintext.len() > PROFILE_EXPORT_PLAINTEXT_MAX_BYTES {
@@ -511,9 +513,10 @@ where
     )?;
     let cipher = Aes256GcmSiv::new_from_slice(key.as_ref())
         .map_err(|_| anyhow::anyhow!("failed to initialize export cipher"))?;
+    let nonce_ref = <&Nonce>::try_from(nonce.as_slice()).expect("nonce length is fixed");
     let ciphertext = Zeroizing::new(
         cipher
-            .encrypt(Nonce::from_slice(&nonce[..]), payload_json.as_slice())
+            .encrypt(nonce_ref, payload_json.as_slice())
             .map_err(|_| anyhow::anyhow!("failed to encrypt profile export payload"))?,
     );
 

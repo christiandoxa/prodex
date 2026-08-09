@@ -276,6 +276,9 @@ fn super_leading_tool_words_are_passed_through_to_codex() {
         args.codex_args
             .ends_with(&os_args(&["ponytail", "presidio", "exec", "hello"]))
     );
+    let tools = args.selected_tool_set();
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
 }
 
 #[test]

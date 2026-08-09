@@ -24,14 +24,7 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     codex_home: &Path,
     presidio_enabled: bool,
 ) -> Result<()> {
-    let selected = [
-        OptionalToolId::Rtk,
-        OptionalToolId::CodebaseMemoryMcp,
-        OptionalToolId::PlaywrightMcp,
-        OptionalToolId::Ponytail,
-    ]
-    .into_iter()
-    .collect::<OptionalToolSet>();
+    let selected = OptionalToolSet::super_defaults();
     let plan = resolve_optional_tools(&selected, &OptionalToolSet::default());
     activate_optional_tools_for_codex(codex_home, &plan, presidio_enabled)
 }

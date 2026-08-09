@@ -305,7 +305,7 @@ pub struct SuperArgs {
     pub local_auto_compact_token_limit: Option<usize>,
     #[command(flatten)]
     pub codex_features: CodexRuntimeFeatureArgs,
-    /// Arguments passed through to `codex` after the implied optimizer prefixes.
+    /// Arguments passed through to `codex` after Prodex's generated options.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
 }

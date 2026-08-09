@@ -84,6 +84,26 @@ fn copy_directory_contents_preserves_source_file_modified_time() {
     assert_eq!(destination_mtime, source_mtime);
 }
 
+#[test]
+fn copy_directory_entry_ignores_a_source_file_removed_after_enumeration() {
+    let temp_dir = CopyTestDir::new("vanished-source-file");
+    let source = temp_dir.path.join("source");
+    let destination = temp_dir.path.join("destination");
+    let source_file = source.join("queue_1.sqlite-journal");
+    let destination_file = destination.join("queue_1.sqlite-journal");
+    fs::create_dir_all(&source).expect("source should exist");
+    fs::write(&source_file, "journal").expect("source file should write");
+    let file_type = fs::symlink_metadata(&source_file)
+        .expect("source metadata should read")
+        .file_type();
+    fs::remove_file(&source_file).expect("source should disappear");
+
+    copy_directory_entry(&source, &source_file, &destination_file, file_type)
+        .expect("a transient source file may disappear");
+
+    assert!(!destination_file.exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn copy_directory_contents_does_not_preserve_symlink_escape() {
