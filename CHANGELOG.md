@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.400.0 - 2026-08-09
+
+### Misc
+
+- Keep interactive TUI in terminal foreground group (`6718f56`)
+
 ## 0.399.0 - 2026-08-09
 
 ### Misc
@@ -88,9 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Trim effort fallback (`15b3a1c`)
 - Expose sub-agent effort choices (`83e97dd`)
-
-## 0.388.0 - 2026-08-06
-
-### Misc
-
-- Reuse native CLI credentials (`ccf5f27`)
