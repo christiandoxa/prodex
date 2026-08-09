@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.401.0 - 2026-08-09
+
+### Claude
+
+- Harden optional MCP startup probes (`4815d05`)
+
 ## 0.400.0 - 2026-08-09
 
 ### Misc
@@ -87,10 +93,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Support trusted imports and Codex 0.147.0 (`1ac7b11`)
-
-## 0.389.0 - 2026-08-07
-
-### CLI
-
-- Trim effort fallback (`15b3a1c`)
-- Expose sub-agent effort choices (`83e97dd`)
