@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.399.0 - 2026-08-09
+
+### Misc
+
+- Enable all Super optional tools (`1298966`)
+
 ## 0.398.0 - 2026-08-09
 
 ### Runtime
@@ -88,9 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Reuse native CLI credentials (`ccf5f27`)
-
-## 0.387.0 - 2026-08-06
-
-### Misc
-
-- Strip parent external tools (`1e46eb6`)
