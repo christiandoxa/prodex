@@ -38,6 +38,7 @@ pub const PONYTAIL_VETTED_VERSION: &str = "4.8.4";
 pub const PONYTAIL_VETTED_COMMIT: &str = "16f29800fd2681bdf24f3eb4ccffe38be3baec6b";
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =
     "727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d";
+pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
 
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";

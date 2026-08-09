@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use std::env;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
@@ -20,11 +21,51 @@ pub(crate) fn probe_command(
     args: &[impl AsRef<OsStr>],
     timeout: Duration,
 ) -> Result<ProbeOutput> {
-    let mut child = Command::new(program)
+    probe_command_inner(program, args, timeout, false)
+}
+
+pub(crate) fn probe_command_without_secrets(
+    program: &Path,
+    args: &[impl AsRef<OsStr>],
+    timeout: Duration,
+) -> Result<ProbeOutput> {
+    probe_command_inner(program, args, timeout, true)
+}
+
+fn probe_command_inner(
+    program: &Path,
+    args: &[impl AsRef<OsStr>],
+    timeout: Duration,
+    sanitize_environment: bool,
+) -> Result<ProbeOutput> {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if sanitize_environment {
+        command.env_clear();
+        for key in [
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "XDG_CACHE_HOME",
+            "NPM_CONFIG_CACHE",
+            "npm_config_cache",
+        ] {
+            if let Some(value) = env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        command.env(
+            "npm_config_userconfig",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        );
+    }
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to execute {}", program.display()))?;
     let stdout = child
@@ -116,5 +157,22 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("timed out"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sanitized_probe_does_not_inherit_untrusted_environment() {
+        const SECRET: &str = "PRODEX_PROBE_TEST_SECRET";
+        // SAFETY: this test uses a unique variable and removes it before returning.
+        unsafe { std::env::set_var(SECRET, "sentinel") };
+        let output = probe_command_without_secrets(
+            Path::new("/bin/sh"),
+            &["-c", "printf '%s' \"${PRODEX_PROBE_TEST_SECRET:-}\""],
+            Duration::from_secs(2),
+        );
+        // SAFETY: this test owns the unique variable above.
+        unsafe { std::env::remove_var(SECRET) };
+
+        assert!(output.unwrap().stdout.is_empty());
     }
 }

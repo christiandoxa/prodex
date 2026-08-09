@@ -7,14 +7,14 @@ use crate::fs_ops::{read_text_file_limited, write_text_file};
 use crate::localization::ensure_agents_reference;
 use crate::toml_helpers::ensure_child_table;
 use crate::{
-    OptionalToolId, OptionalToolSet, ToolActivation, ToolActivationPlan, resolve_optional_tools,
+    OptionalToolId, OptionalToolSet, PLAYWRIGHT_MCP_PACKAGE, ToolActivation, ToolActivationPlan,
+    resolve_optional_tools,
 };
 use crate::{PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
 mod ponytail;
 
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
-const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     configure_super_optimizer_codex_home_with_presidio(codex_home, false)
@@ -27,6 +27,7 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     let selected = [
         OptionalToolId::Rtk,
         OptionalToolId::CodebaseMemoryMcp,
+        OptionalToolId::PlaywrightMcp,
         OptionalToolId::Ponytail,
     ]
     .into_iter()
@@ -283,7 +284,7 @@ fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Pa
         server,
         command.to_path_buf(),
         &[
-            "-y".to_string(),
+            "--no-install".to_string(),
             PLAYWRIGHT_MCP_PACKAGE.to_string(),
             "--headless".to_string(),
             "--isolated".to_string(),
