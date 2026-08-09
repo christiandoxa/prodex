@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands.rs",
-    "maxLines": 1569,
-    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, resume affinity validation, and terminal restoration together; this ratcheted cap includes the audited persisted-Presidio preference regression coverage."
+    "maxLines": 1510,
+    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, resume affinity validation, and terminal restoration together; this ratcheted cap records the audited Super optional-tools and Presidio prompt flow."
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
