@@ -95,7 +95,8 @@ fn run_child_plan_inner(
     for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
-    configure_child_process_group(&mut command);
+    let private_process_group = !io::stdin().is_terminal();
+    configure_child_process_group(&mut command, private_process_group);
     reset_terminal_keyboard_enhancement_best_effort(plan);
     let mut child = command
         .spawn()
@@ -104,7 +105,7 @@ fn run_child_plan_inner(
         Some(proxy) => match proxy.create_child_lease(child.id()) {
             Ok(lease) => Some(lease),
             Err(err) => {
-                let _ = terminate_child_process_tree(&mut child);
+                let _ = terminate_child_process_tree(&mut child, private_process_group);
                 let _ = child.wait();
                 return Err(err);
             }
@@ -112,7 +113,7 @@ fn run_child_plan_inner(
         None => None,
     };
     let status = match monitor.as_mut() {
-        Some(monitor) => wait_for_monitored_child(&mut child, monitor),
+        Some(monitor) => wait_for_monitored_child(&mut child, monitor, private_process_group),
         None => child.wait().map_err(anyhow::Error::from),
     }
     .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
@@ -129,55 +130,61 @@ fn reset_terminal_keyboard_enhancement_best_effort(plan: &ChildProcessPlan) {
 fn wait_for_monitored_child(
     child: &mut Child,
     monitor: &mut dyn FnMut() -> Result<bool>,
+    private_process_group: bool,
 ) -> Result<ExitStatus> {
     loop {
         if let Some(status) = child.try_wait()? {
-            terminate_child_process_group_best_effort(child);
+            terminate_child_process_group_best_effort(child, private_process_group);
             return Ok(status);
         }
         let should_stop = match monitor() {
             Ok(should_stop) => should_stop,
             Err(error) => {
-                let _ = wait_for_child_termination(child);
+                let _ = wait_for_child_termination(child, private_process_group);
                 return Err(error);
             }
         };
         if should_stop {
-            return Ok(wait_for_child_termination(child)?);
+            return Ok(wait_for_child_termination(child, private_process_group)?);
         }
         thread::sleep(Duration::from_millis(200));
     }
 }
 
-fn wait_for_child_termination(child: &mut Child) -> io::Result<ExitStatus> {
-    terminate_child_gracefully(child)?;
+fn wait_for_child_termination(
+    child: &mut Child,
+    private_process_group: bool,
+) -> io::Result<ExitStatus> {
+    terminate_child_gracefully(child, private_process_group)?;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(status) = child.try_wait()? {
-            terminate_child_process_group_best_effort(child);
+            terminate_child_process_group_best_effort(child, private_process_group);
             return Ok(status);
         }
         if Instant::now() >= deadline {
-            terminate_child_process_tree(child)?;
+            terminate_child_process_tree(child, private_process_group)?;
             return child.wait();
         }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-pub(crate) fn configure_child_process_group(_command: &mut Command) {
+pub(crate) fn configure_child_process_group(_command: &mut Command, private_process_group: bool) {
     #[cfg(unix)]
-    {
+    if private_process_group {
+        // Non-interactive children use a private group for tree cleanup.
         use std::os::unix::process::CommandExt;
         _command.process_group(0);
     }
 }
 
-fn terminate_child_process_group_best_effort(_child: &Child) {
+fn terminate_child_process_group_best_effort(_child: &Child, private_process_group: bool) -> bool {
     #[cfg(unix)]
-    {
-        let _ = signal_child_process_group(_child, libc::SIGKILL);
+    if private_process_group {
+        return signal_child_process_group(_child, libc::SIGKILL).is_ok();
     }
+    false
 }
 
 #[cfg(unix)]
@@ -197,18 +204,25 @@ fn signal_child_process_group(child: &Child, signal: libc::c_int) -> io::Result<
 }
 
 #[cfg(unix)]
-fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
-    if signal_child_process_group(child, libc::SIGTERM).is_ok() || child.try_wait()?.is_some() {
+fn terminate_child_gracefully(child: &mut Child, private_process_group: bool) -> io::Result<()> {
+    if (private_process_group && signal_child_process_group(child, libc::SIGTERM).is_ok())
+        || child.try_wait()?.is_some()
+    {
         Ok(())
     } else {
         child.kill()
     }
 }
 
-pub(crate) fn terminate_child_process_tree(child: &mut Child) -> io::Result<()> {
+pub(crate) fn terminate_child_process_tree(
+    child: &mut Child,
+    private_process_group: bool,
+) -> io::Result<()> {
     #[cfg(unix)]
     {
-        if signal_child_process_group(child, libc::SIGKILL).is_ok() || child.try_wait()?.is_some() {
+        if (private_process_group && signal_child_process_group(child, libc::SIGKILL).is_ok())
+            || child.try_wait()?.is_some()
+        {
             return Ok(());
         }
     }
@@ -228,7 +242,7 @@ pub(crate) fn terminate_child_process_tree(child: &mut Child) -> io::Result<()> 
 }
 
 #[cfg(windows)]
-fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
+fn terminate_child_gracefully(child: &mut Child, _private_process_group: bool) -> io::Result<()> {
     let status = Command::new("taskkill")
         .args(["/PID", &child.id().to_string(), "/T"])
         .stdin(Stdio::null())
@@ -243,7 +257,7 @@ fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
+fn terminate_child_gracefully(child: &mut Child, _private_process_group: bool) -> io::Result<()> {
     child.kill()
 }
 
@@ -834,14 +848,70 @@ mod tests {
     fn generic_child_process_uses_private_process_group() {
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 30"]);
-        configure_child_process_group(&mut command);
+        configure_child_process_group(&mut command, true);
         let mut child = command.spawn().expect("test child should spawn");
         let pid = child.id() as libc::pid_t;
         let process_group = unsafe { libc::getpgid(pid) };
 
-        let _ = terminate_child_process_tree(&mut child);
+        let _ = terminate_child_process_tree(&mut child, true);
         let _ = child.wait();
 
         assert_eq!(process_group, pid);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_process_group_cleanup_survives_reaped_leader() {
+        let pid_file = std::env::temp_dir().join(format!(
+            "prodex-child-group-{}-{}.pid",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "sleep 30 & echo $! > \"$1\"; exit 0",
+            "sh",
+            pid_file.to_str().unwrap(),
+        ]);
+        configure_child_process_group(&mut command, true);
+        let mut child = command.spawn().expect("test child should spawn");
+        let shell_pid = child.id() as libc::pid_t;
+        let status = child.wait().expect("test child should exit");
+        let descendant_pid = fs::read_to_string(&pid_file)
+            .expect("descendant pid should be written")
+            .trim()
+            .parse::<libc::pid_t>()
+            .expect("descendant pid should be numeric");
+        let descendant_group = unsafe { libc::getpgid(descendant_pid) };
+
+        let group_signal_succeeded = terminate_child_process_group_best_effort(&child, true);
+        let _ = fs::remove_file(pid_file);
+
+        assert!(status.success());
+        assert_eq!(descendant_group, shell_pid);
+        assert!(
+            group_signal_succeeded,
+            "private process-group signal failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn interactive_child_keeps_inherited_process_group() {
+        let parent_process_group = unsafe { libc::getpgrp() };
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        configure_child_process_group(&mut command, false);
+        let mut child = command.spawn().expect("test child should spawn");
+        let process_group = unsafe { libc::getpgid(child.id() as libc::pid_t) };
+
+        let _ = terminate_child_process_tree(&mut child, false);
+        let _ = child.wait();
+
+        assert_eq!(process_group, parent_process_group);
     }
 }
