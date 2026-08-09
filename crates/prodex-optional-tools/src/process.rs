@@ -132,6 +132,45 @@ fn read_bounded(mut reader: impl std::io::Read) -> std::io::Result<(Vec<u8>, boo
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = TEST_ENV_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = env::var_os(key);
+            // SAFETY: the shared test lock serializes this mutation and its restoration.
+            unsafe { env::set_var(key, value) };
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: the shared test lock is held for the complete guard lifetime.
+            unsafe {
+                match self.previous.as_ref() {
+                    Some(value) => env::set_var(self.key, value),
+                    None => env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     #[cfg(unix)]
     #[test]
@@ -163,15 +202,12 @@ mod tests {
     #[test]
     fn sanitized_probe_does_not_inherit_untrusted_environment() {
         const SECRET: &str = "PRODEX_PROBE_TEST_SECRET";
-        // SAFETY: this test uses a unique variable and removes it before returning.
-        unsafe { std::env::set_var(SECRET, "sentinel") };
+        let _env_guard = EnvGuard::set(SECRET, "sentinel");
         let output = probe_command_without_secrets(
             Path::new("/bin/sh"),
             &["-c", "printf '%s' \"${PRODEX_PROBE_TEST_SECRET:-}\""],
             Duration::from_secs(2),
         );
-        // SAFETY: this test owns the unique variable above.
-        unsafe { std::env::remove_var(SECRET) };
 
         assert!(output.unwrap().stdout.is_empty());
     }
