@@ -146,3 +146,25 @@ fn overlay_rejects_symlink_managed_root() {
     assert!(fs::read_dir(&outside).unwrap().next().is_none());
     let _ = fs::remove_dir_all(root);
 }
+
+#[cfg(unix)]
+#[test]
+fn overlay_secures_existing_managed_root() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let managed = temp_dir("secure-root-managed");
+    let base = temp_dir("secure-root-base");
+    fs::create_dir_all(&managed).unwrap();
+    fs::create_dir_all(&base).unwrap();
+    fs::set_permissions(&managed, fs::Permissions::from_mode(0o775)).unwrap();
+
+    let overlay = prepare_prodex_overlay_home(&managed, &base).unwrap();
+
+    assert_eq!(
+        fs::metadata(&managed).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let _ = fs::remove_dir_all(managed);
+    let _ = fs::remove_dir_all(base);
+    assert!(!overlay.exists());
+}

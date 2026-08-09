@@ -62,6 +62,27 @@ fn mcp_jsonl_bridge_reports_child_failure_without_waiting_for_stdin_eof() {
 
 #[cfg(unix)]
 #[test]
+fn mcp_jsonl_bridge_stops_child_when_client_stdin_closes() {
+    let started_at = Instant::now();
+    let output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args(["__mcp-jsonl-bridge", "sh", "-c", "exec sleep 2"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("bridge should run");
+
+    assert!(
+        output.status.success(),
+        "unexpected bridge failure: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        started_at.elapsed() < Duration::from_secs(1),
+        "bridge should stop the child when client stdin closes"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn mcp_jsonl_bridge_stops_child_after_malformed_output() {
     let started_at = Instant::now();
     let output = Command::new(env!("CARGO_BIN_EXE_prodex"))

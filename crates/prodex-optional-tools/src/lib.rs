@@ -54,7 +54,8 @@ pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Optional T
 Prodex resolved optional tools for this temporary launch overlay.
 
 - Use visible `rtk <cmd>` for noisy shell output when RTK is available.
-- Use Codebase Memory MCP for structural code navigation when available.
+- When Codebase Memory MCP is available, use it first for architecture, call-chain, impact,
+  and structural code search; run `index_repository` first when the workspace is not indexed.
 - Use Playwright MCP for browser work when available.
 - Follow Ponytail when its plugin is active.
 - Treat Presidio as enabled only when the session status says so.

@@ -397,6 +397,7 @@ fn awareness_contains_only_the_minimal_stack() {
     ] {
         assert!(awareness.contains(kept));
     }
+    assert!(awareness.contains("index_repository"));
     for removed in [
         "prodex-sqz",
         "token-savior",

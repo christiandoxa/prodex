@@ -79,15 +79,7 @@ fn super_tail_requests_native_cli(args: &[std::ffi::OsString]) -> bool {
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
     let _insecure_file_access =
         profile_command_requests_insecure(&command).then(secret_store::allow_insecure_file_access);
-    if !command_is_native_dry_run(&command)
-        && !matches!(
-            &command,
-            Commands::Profile(ProfileCommands::Remove(_))
-                | Commands::Cleanup(_)
-                | Commands::Doctor(_)
-                | Commands::SubAgentExec(_)
-        )
-    {
+    if command_runs_profile_lifecycle_recovery(&command) {
         recover_pending_profile_lifecycle()?;
     }
     match command {
@@ -137,6 +129,18 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
         Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
     }
+}
+
+fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
+    !command_is_native_dry_run(command)
+        && !matches!(
+            command,
+            Commands::Profile(ProfileCommands::Remove(_))
+                | Commands::Cleanup(_)
+                | Commands::Doctor(_)
+                | Commands::McpJsonlBridge(_)
+                | Commands::SubAgentExec(_)
+        )
 }
 
 fn profile_command_requests_insecure(command: &Commands) -> bool {
@@ -221,8 +225,8 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_is_native_dry_run, command_should_show_update_notice, execute_command,
-        parse_cli_command_from,
+        command_is_native_dry_run, command_runs_profile_lifecycle_recovery,
+        command_should_show_update_notice, execute_command, parse_cli_command_from,
     };
 
     #[test]
@@ -315,5 +319,13 @@ mod tests {
         assert_eq!(fs::read_to_string(&marker).unwrap().len(), 1);
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mcp_bridge_dispatches_without_profile_recovery() {
+        let command =
+            parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "codebase-memory-mcp"])
+                .unwrap();
+        assert!(!command_runs_profile_lifecycle_recovery(&command));
     }
 }

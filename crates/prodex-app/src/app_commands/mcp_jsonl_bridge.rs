@@ -75,11 +75,6 @@ fn monitor_mcp_bridge(
     let mut input = Some(input);
     let mut stderr = Some(stderr);
     loop {
-        if let Err(err) = join_finished_mcp_input(&mut input) {
-            stop_mcp_child(child);
-            return Err(err);
-        }
-
         if output.as_ref().is_some_and(JoinHandle::is_finished) {
             return handle_finished_mcp_output(child, &mut output, &mut input, &mut stderr);
         }
@@ -88,8 +83,33 @@ fn monitor_mcp_bridge(
             return handle_exited_mcp_child(status, &mut output, &mut input, &mut stderr);
         }
 
+        if input.as_ref().is_some_and(JoinHandle::is_finished) {
+            return handle_finished_mcp_input(child, &mut output, &mut input, &mut stderr);
+        }
+
         std::thread::sleep(MCP_BRIDGE_MONITOR_INTERVAL);
     }
+}
+
+fn handle_finished_mcp_input(
+    child: &mut Child,
+    output: &mut Option<JoinHandle<Result<()>>>,
+    input: &mut Option<JoinHandle<Result<()>>>,
+    stderr: &mut Option<McpStderrReader>,
+) -> Result<()> {
+    let input_result = join_mcp_bridge_pump(
+        input.take().expect("finished input pump should exist"),
+        "input",
+    );
+    let child_status = child.try_wait().ok().flatten();
+    stop_mcp_child(child);
+    let output_result =
+        join_mcp_bridge_pump(output.take().expect("output pump should exist"), "output");
+    let stderr = join_mcp_stderr(stderr)?;
+    output_result?;
+    input_result.and_then(|()| {
+        child_status.map_or(Ok(()), |status| mcp_child_status_result(status, stderr))
+    })
 }
 
 fn handle_finished_mcp_output(

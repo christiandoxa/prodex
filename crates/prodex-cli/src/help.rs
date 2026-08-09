@@ -183,7 +183,7 @@ Notes:
   Sub-agent provider names use canonical ProviderId values and default to openai; model ids are arbitrary nonempty strings.
   Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, or max.
   Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
-  Additional Codex args are appended after the implied optimizer prefixes.";
+  Additional Codex args are appended unchanged after Prodex's generated options.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
