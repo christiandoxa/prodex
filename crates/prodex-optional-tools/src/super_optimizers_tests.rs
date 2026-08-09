@@ -91,7 +91,12 @@ fn configures_playwright_default() {
             .iter()
             .filter_map(toml::Value::as_str)
             .collect::<Vec<_>>(),
-        ["-y", PLAYWRIGHT_MCP_PACKAGE, "--headless", "--isolated"]
+        [
+            "--no-install",
+            PLAYWRIGHT_MCP_PACKAGE,
+            "--headless",
+            "--isolated"
+        ]
     );
     assert_eq!(
         playwright
@@ -105,6 +110,11 @@ fn configures_playwright_default() {
             .and_then(toml::Value::as_integer),
         Some(60)
     );
+    assert_eq!(
+        playwright.get("enabled").and_then(toml::Value::as_bool),
+        Some(true)
+    );
+    assert!(!playwright.contains_key("required"));
 }
 
 #[test]

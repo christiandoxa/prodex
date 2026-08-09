@@ -183,7 +183,7 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
+Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+, `npx`, and the cached package pass validation. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -741,7 +741,7 @@ either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 
-Playwright MCP is opt-in in Super (`--tool playwright` or `--require-tool playwright`) so the first launch does not block on browser-server startup. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
+Playwright MCP is enabled by default in Super when its pinned package is already available through Node.js 18+ and `npx`; Prodex verifies that package offline and avoids downloading it during launch. Run the install and browser setup commands in [Optional tools](#optional-tools) first when needed. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
 
 Super also enables Smart Context Autopilot on the Codex/provider-bridge path;
 native opaque CLIs are not automatically rewritten.

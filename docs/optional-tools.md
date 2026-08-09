@@ -90,8 +90,10 @@ Ponytail uses the same manifest and tree-validation contract at
 - tree SHA-256: `727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d`
 
 RTK and Codebase Memory MCP resolve from managed roots first and then `PATH`.
-Playwright MCP requires validated Node.js 18+ and `npx`. Presidio remains an
-explicit service selection and is checked by its existing doctor path.
+Playwright MCP requires validated Node.js 18+, `npx`, and the pinned package to
+pass an offline probe; install the package and browser before launching Super.
+Presidio remains an explicit service selection and is checked by its existing
+doctor path.
 
 ## Security And Launch Semantics
 
