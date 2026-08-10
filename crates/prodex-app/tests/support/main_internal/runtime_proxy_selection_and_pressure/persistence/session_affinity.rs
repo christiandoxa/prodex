@@ -78,7 +78,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
 }
 
 #[test]
-fn affinity_candidate_keeps_persisted_exhausted_session_owner() {
+fn affinity_candidate_skips_persisted_exhausted_session_owner() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -192,12 +192,12 @@ fn affinity_candidate_keeps_persisted_exhausted_session_owner() {
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("main".to_string())
+        Some("second".to_string())
     );
 }
 
 #[test]
-fn responses_session_affinity_keeps_bound_profile_without_usable_quota_data() {
+fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -296,7 +296,7 @@ fn responses_session_affinity_keeps_bound_profile_without_usable_quota_data() {
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("main".to_string())
+        Some("second".to_string())
     );
 }
 

@@ -354,6 +354,7 @@ fn handle_runtime_compact_attempt(
                 response,
                 overload,
                 request_session_id,
+                request_turn_state,
                 current_profile,
                 compact_followup_profile,
                 session_profile,

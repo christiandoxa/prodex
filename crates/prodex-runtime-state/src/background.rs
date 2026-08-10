@@ -292,11 +292,16 @@ pub fn runtime_state_save_requires_continuation_journal(mutation: &RuntimeStateM
     matches!(
         mutation,
         RuntimeStateMutation::ResponseIds(_)
+            | RuntimeStateMutation::PreviousResponseOwner(_)
+            | RuntimeStateMutation::PreviousResponseRelease(_)
             | RuntimeStateMutation::TurnState(_)
             | RuntimeStateMutation::SessionId(_)
             | RuntimeStateMutation::SessionAffinityRelease(_)
             | RuntimeStateMutation::CompactLineage(_)
             | RuntimeStateMutation::CompactLineageRelease(_)
+            | RuntimeStateMutation::DeadResponseBindingClear(_)
+            | RuntimeStateMutation::QuotaRelease(_)
+            | RuntimeStateMutation::AuthFailedRelease(_)
     )
 }
 
