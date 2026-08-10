@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1242,14 +1242,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "serde",
  "sha2 0.11.0",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1307,14 +1307,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1350,14 +1350,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "base64 0.23.1",
  "prodex-gateway-core",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -1397,11 +1397,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.402.0"
+version = "0.403.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -1415,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.402.0"
+version = "0.403.0"
 dependencies = [
  "prodex-domain",
 ]

@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.403.0 - 2026-08-10
+
+### CLI
+
+- Harden child tool launches (`8e2f274`)
+
 ## 0.402.0 - 2026-08-10
 
 ### Claude
@@ -88,15 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve local saturation and child cleanup (`e956baf`)
 - Satisfy clippy argument lint (`38abfdc`)
 - Bound fresh profile admission and preserve Kiro models (`299a462`)
-
-## 0.391.0 - 2026-08-07
-
-### Runtime
-
-- Keep Kiro process modules within size guard (`77d5919`)
-- Complete Kiro sub-agent turns and harden installer (`f7d63a7`)
-
-### Misc
-
-- Merge pull request #47 from kbakdev/fix/install_on_windows (`41cf6c0`)
-- Improve architecture detection for Windows (`1c7bb25`)
