@@ -25,6 +25,21 @@ fn turn_state_override_prefers_retry_value_for_matching_candidate() {
 }
 
 #[test]
+fn bound_previous_response_stays_hard_when_continuation_status_is_untrusted() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("setup-untrusted-bound-response");
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.bound_profile = Some("alpha".to_string());
+    flow.pinned_profile = Some("alpha".to_string());
+    flow.trusted_previous_response_affinity = false;
+
+    assert!(flow.candidate_has_hard_affinity("alpha"));
+    assert!(!flow.candidate_has_hard_affinity("beta"));
+}
+
+#[test]
 fn websocket_body_turn_state_wins_over_handshake_header() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("setup-body-turn-state");

@@ -47,6 +47,31 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
 }
 
 #[test]
+fn compact_followup_honors_raw_turn_state_owner() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .turn_state_bindings
+        .insert(
+            "turn-raw".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+
+    assert_eq!(
+        runtime_compact_route_followup_bound_profile(&shared, Some("turn-raw"), None)
+            .expect("compact turn-state lookup should succeed"),
+        Some(("main".to_string(), "turn_state"))
+    );
+}
+
+#[test]
 fn response_selection_fails_closed_for_unavailable_bound_previous_response() {
     let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_affinity_selection(
@@ -453,6 +478,29 @@ fn session_only_affinity_rotates_on_quota_outside_compact() {
 }
 
 #[test]
+fn session_only_affinity_rotates_past_excluded_owner_outside_compact() {
+    for (route_kind, expected) in [
+        (RuntimeRouteKind::Responses, Some("second")),
+        (RuntimeRouteKind::Websocket, Some("second")),
+        (RuntimeRouteKind::Compact, None),
+    ] {
+        let temp_dir = TestDir::isolated();
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        let excluded = BTreeSet::from(["main".to_string()]);
+        let selected = select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some("main"),
+                ..RuntimeResponseCandidateSelection::fresh(&excluded, route_kind)
+            },
+        )
+        .expect("selection should succeed");
+
+        assert_eq!(selected.as_deref(), expected);
+    }
+}
+
+#[test]
 fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
     let temp_dir = TestDir::isolated();
     clear_runtime_prompt_cache_profile_bindings();
@@ -505,6 +553,34 @@ fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
     .expect("selection should succeed");
 
     assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn soft_session_affinity_respects_route_selection_backoff() {
+    for route_kind in [RuntimeRouteKind::Responses, RuntimeRouteKind::Websocket] {
+        let temp_dir = TestDir::isolated();
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        shared
+            .runtime
+            .lock()
+            .expect("runtime lock should succeed")
+            .profile_probe_cache
+            .get_mut("main")
+            .expect("main probe should exist")
+            .result = Ok(usage_with_main_windows(80, 18_000, 80, 604_800));
+        apply_local_selection_penalties(&shared, "main", route_kind);
+
+        let selected = select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some("main"),
+                ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), route_kind)
+            },
+        )
+        .expect("selection should succeed");
+
+        assert_eq!(selected.as_deref(), Some("second"));
+    }
 }
 
 #[test]

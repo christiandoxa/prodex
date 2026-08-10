@@ -171,7 +171,10 @@ pub(crate) fn resolve_runtime_launch_profile_name(
                     state
                         .profiles
                         .get(candidate_name)
-                        .is_some_and(|profile| profile.provider.supports_codex_runtime())
+                        .is_some_and(|profile| {
+                            profile.codex_home.exists()
+                                && profile.provider.supports_codex_runtime()
+                        })
                 })
                 .ok_or_else(|| {
                     anyhow::anyhow!(
@@ -185,11 +188,9 @@ pub(crate) fn resolve_runtime_launch_profile_name(
         return Ok(profile_name);
     }
 
-    if state
-        .profiles
-        .get(&profile_name)
-        .is_some_and(|profile| profile.provider.supports_codex_runtime())
-    {
+    if state.profiles.get(&profile_name).is_some_and(|profile| {
+        profile.codex_home.exists() && profile.provider.supports_codex_runtime()
+    }) {
         return Ok(profile_name);
     }
 

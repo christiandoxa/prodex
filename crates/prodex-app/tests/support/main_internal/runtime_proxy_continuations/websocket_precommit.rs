@@ -116,6 +116,60 @@ fn runtime_proxy_websocket_fresh_request_rotates_past_usage_limit_account() {
 }
 
 #[test]
+fn runtime_proxy_websocket_restarted_session_only_affinity_rotates_after_quota() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "main",
+        &["main", "second"],
+        &[],
+        vec![("sess-ws-restart".to_string(), "main")],
+    )
+    .restart();
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "session_id": "sess-ws-restart",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "resume on a ready account"
+            }],
+        }),
+    );
+
+    let (_, completed) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"response.completed\"")
+    });
+    let _ = socket.close(None);
+
+    assert!(
+        completed.contains("\"response\":{\"id\":\"resp-second\"}"),
+        "session-only resume should complete on the ready profile: {completed}"
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()],
+        "pre-commit quota should release soft session affinity and retry once"
+    );
+
+    let continuations = wait_for_runtime_continuations(&fixture.paths, |continuations| {
+        continuations
+            .session_profile_bindings
+            .get("sess-ws-restart")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations.session_profile_bindings["sess-ws-restart"].profile_name,
+        "second"
+    );
+}
+
+#[test]
 fn runtime_proxy_websocket_keepalive_before_content_does_not_commit_or_block_forwarding() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =

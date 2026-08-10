@@ -285,18 +285,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         turn_state_override: Option<&str>,
     ) -> Result<RuntimeWebsocketAttempt> {
         let promote_committed_profile = self.should_promote_committed_profile();
-        let hard_affinity = runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind: RuntimeRouteKind::Websocket,
-            candidate_name: profile_name,
-            strict_affinity_profile: self
-                .compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            pinned_profile: self.pinned_profile.as_deref(),
-            turn_state_profile: self.turn_state_profile.as_deref(),
-            session_profile: self.session_profile.as_deref(),
-            trusted_previous_response_affinity: self.trusted_previous_response_affinity,
-        });
+        let hard_affinity = self.candidate_has_hard_affinity(profile_name);
         attempt_runtime_websocket_request_with_hard_affinity(
             RuntimeWebsocketAttemptRequest {
                 request_id: self.request_id,
@@ -344,21 +333,30 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         request_requires_previous_response_affinity: bool,
     ) -> bool {
         runtime_quota_blocked_affinity_is_releasable(
-            RuntimeCandidateAffinity {
-                route_kind: RuntimeRouteKind::Websocket,
-                candidate_name: profile_name,
-                strict_affinity_profile: self
-                    .compact_followup_profile
-                    .as_ref()
-                    .map(|(profile_name, _)| profile_name.as_str()),
-                pinned_profile: self.pinned_profile.as_deref(),
-                turn_state_profile: self.turn_state_profile.as_deref(),
-                session_profile: self.session_profile.as_deref(),
-                trusted_previous_response_affinity: self.trusted_previous_response_affinity,
-            },
+            self.candidate_affinity(profile_name),
             request_requires_previous_response_affinity,
             self.previous_response_fresh_fallback_shape,
         )
+    }
+
+    fn candidate_affinity<'b>(&'b self, profile_name: &'b str) -> RuntimeCandidateAffinity<'b> {
+        RuntimeCandidateAffinity {
+            route_kind: RuntimeRouteKind::Websocket,
+            candidate_name: profile_name,
+            strict_affinity_profile: self
+                .compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
+            pinned_profile: self.pinned_profile.as_deref(),
+            turn_state_profile: self.turn_state_profile.as_deref(),
+            session_profile: self.session_profile.as_deref(),
+            trusted_previous_response_affinity: self.trusted_previous_response_affinity,
+        }
+    }
+
+    fn candidate_has_hard_affinity(&self, profile_name: &str) -> bool {
+        self.bound_profile.as_deref() == Some(profile_name)
+            || runtime_candidate_has_hard_affinity(self.candidate_affinity(profile_name))
     }
 
     pub(super) fn release_quota_blocked_affinity(&self, profile_name: &str) -> Result<bool> {

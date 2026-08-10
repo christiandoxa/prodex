@@ -70,6 +70,42 @@ fn runtime_launch_selection_resolve_chooses_profile_when_active_was_deleted() {
 }
 
 #[test]
+fn runtime_launch_selection_skips_active_profile_with_missing_home() {
+    let root = temp_dir("resolve-missing-active-home");
+    let openai_home = root.join("openai-ready");
+    fs::create_dir_all(&openai_home).unwrap();
+
+    let state = AppState {
+        active_profile: Some("missing-home".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "missing-home".to_string(),
+                ProfileEntry {
+                    codex_home: root.join("missing-home"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "openai-ready".to_string(),
+                ProfileEntry {
+                    codex_home: openai_home,
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+
+    let selected =
+        resolve_runtime_launch_profile_name(&state, None).expect("resolve runtime launch name");
+    assert_eq!(selected, "openai-ready");
+}
+
+#[test]
 fn prepare_runtime_launch_persists_implicit_selection_when_none_is_active() {
     let root = temp_dir("persist-no-active-profile-selection");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

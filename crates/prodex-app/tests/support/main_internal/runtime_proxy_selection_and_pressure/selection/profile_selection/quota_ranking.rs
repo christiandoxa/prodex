@@ -145,7 +145,7 @@ fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
 }
 
 #[test]
-fn response_selection_keeps_pinned_affinity_when_quota_blocks_precommit() {
+fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
     let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
 
@@ -162,7 +162,52 @@ fn response_selection_keeps_pinned_affinity_when_quota_blocks_precommit() {
     )
     .expect("selection should succeed");
 
-    assert_eq!(selected.as_deref(), Some("main"));
+    assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn quota_rejected_soft_affinity_does_not_consume_half_open_probe() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    let circuit_key = runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses);
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime
+            .profile_route_circuit_open_until
+            .insert(circuit_key.clone(), now - 1);
+        runtime.profile_health.insert(
+            runtime_profile_route_circuit_health_key(&circuit_key),
+            RuntimeProfileHealth {
+                score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+                updated_at: now,
+            },
+        );
+    }
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            pinned_profile: Some("main"),
+            previous_response_id: Some("resp_unbound"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+    assert_eq!(
+        shared
+            .runtime
+            .lock()
+            .expect("runtime lock should succeed")
+            .profile_route_circuit_open_until
+            .get(&circuit_key),
+        Some(&(now - 1)),
+    );
 }
 
 #[test]
