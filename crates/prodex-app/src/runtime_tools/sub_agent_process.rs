@@ -118,7 +118,13 @@ pub(super) fn assign_sub_agent_child_job(child: &tokio::process::Child) -> io::R
     if !configured {
         return Err(io::Error::last_os_error());
     }
-    if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0 {
+    let child_handle = child.raw_handle().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "sub-agent child exited before job assignment",
+        )
+    })?;
+    if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child_handle) } == 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(job)

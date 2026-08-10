@@ -197,9 +197,11 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::execute_command;
     use super::{
         command_is_super_dry_run, command_runs_profile_lifecycle_recovery,
-        command_should_show_update_notice, execute_command, parse_cli_command_from,
+        command_should_show_update_notice, parse_cli_command_from,
     };
 
     #[test]

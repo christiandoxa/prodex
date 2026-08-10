@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 const COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_PROBE_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
-pub(crate) fn configure_child_process_group(_command: &mut Command, private_process_group: bool) {
+pub(crate) fn configure_child_process_group(_command: &mut Command, _private_process_group: bool) {
     #[cfg(unix)]
-    if private_process_group {
+    if _private_process_group {
         use std::os::unix::process::CommandExt;
         _command.process_group(0);
     }
@@ -17,10 +17,10 @@ pub(crate) fn configure_child_process_group(_command: &mut Command, private_proc
 
 pub(crate) fn terminate_child_process_group_best_effort(
     _child: &Child,
-    private_process_group: bool,
+    _private_process_group: bool,
 ) -> bool {
     #[cfg(unix)]
-    if private_process_group {
+    if _private_process_group {
         return signal_child_process_group(_child, libc::SIGKILL).is_ok();
     }
     false
@@ -58,11 +58,11 @@ pub(crate) fn terminate_child_gracefully(
 
 pub(crate) fn terminate_child_process_tree(
     child: &mut Child,
-    private_process_group: bool,
+    _private_process_group: bool,
 ) -> io::Result<()> {
     #[cfg(unix)]
     {
-        if (private_process_group && signal_child_process_group(child, libc::SIGKILL).is_ok())
+        if (_private_process_group && signal_child_process_group(child, libc::SIGKILL).is_ok())
             || child.try_wait()?.is_some()
         {
             return Ok(());
