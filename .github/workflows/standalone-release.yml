@@ -2,9 +2,10 @@ name: standalone release
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "0.*.*"
+
+concurrency:
+  group: standalone-release
+  cancel-in-progress: false
 
 permissions:
   actions: read
@@ -40,25 +41,21 @@ jobs:
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
           target_sha="${GITHUB_SHA}"
-          if [ "${ref_type}" = "tag" ]; then
-            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
-            target_sha="$(git rev-list -n1 "${ref_name}")"
-          elif [ "${ref_name}" != "main" ]; then
-            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+          if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main" >&2
             exit 1
-          else
-            version="$(python - <<'PY'
+          fi
+          version="$(python - <<'PY'
           import tomllib
           with open("Cargo.toml", "rb") as handle:
               print(tomllib.load(handle)["package"]["version"])
           PY
-            )"
-            git fetch origin --tags --force
-            if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
-              && [ "${release_tag_sha}" != "${target_sha}" ]; then
-              echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
-              exit 1
-            fi
+          )"
+          git fetch origin --tags --force
+          if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
+            && [ "${release_tag_sha}" != "${target_sha}" ]; then
+            echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
+            exit 1
           fi
           echo "target_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
 
@@ -607,18 +604,8 @@ jobs:
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
           target_sha="${GITHUB_SHA}"
-          if [ "${ref_type}" = "tag" ]; then
-            case "${ref_name}" in
-              "${version}") ;;
-              *)
-                echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
-                exit 1
-                ;;
-            esac
-            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
-            target_sha="$(git rev-list -n1 "${ref_name}")"
-          elif [ "${ref_name}" != "main" ]; then
-            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+          if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main" >&2
             exit 1
           fi
           {
@@ -693,18 +680,8 @@ jobs:
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
           target_sha="${GITHUB_SHA}"
-          if [ "${ref_type}" = "tag" ]; then
-            case "${ref_name}" in
-              "${version}") ;;
-              *)
-                echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
-                exit 1
-                ;;
-            esac
-            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
-            target_sha="$(git rev-list -n1 "${ref_name}")"
-          elif [ "${ref_name}" != "main" ]; then
-            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+          if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main" >&2
             exit 1
           fi
           {
@@ -839,6 +816,25 @@ jobs:
           while IFS= read -r -d '' asset; do
             gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}"
           done < <(find release-assets -maxdepth 1 -type f ! -name SHA256SUMS -print0)
+
+      - name: Create release tag
+        env:
+          TARGET_SHA: ${{ steps.release.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          git fetch origin --tags --force
+          if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"; then
+            if [ "${release_tag_sha}" != "${TARGET_SHA}" ]; then
+              echo "release tag ${version} targets ${release_tag_sha}, not ${TARGET_SHA}" >&2
+              exit 1
+            fi
+            echo "release tag ${version} already targets ${TARGET_SHA}"
+            exit 0
+          fi
+          git tag "${version}" "${TARGET_SHA}"
+          git push origin "refs/tags/${version}"
 
       - name: Publish GitHub release
         env:
