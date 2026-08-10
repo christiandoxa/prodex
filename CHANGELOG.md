@@ -2,6 +2,25 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.405.0 - 2026-08-11
+
+### Runtime
+
+- Preserve affinity under selection pressure (`f94e3db`)
+- Rotate exhausted resumed sessions (`1b597df`)
+
+### Docs
+
+- Refresh smart context evidence (`d0c04f4`)
+
+### Misc
+
+- Compile provider process cleanup (`ad9a559`)
+- Bound SDK requests and responses (`27bc17b`)
+- Bound external command lifecycles (`6191a6c`)
+- Share codebase memory across agents (`c658b7d`)
+- Stabilize Kiro and Copilot sessions (`0571169`)
+
 ## 0.404.0 - 2026-08-10
 
 ### Runtime
@@ -89,9 +108,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Preserve quota snapshots and aliases (`b5b6325`)
-
-## 0.393.0 - 2026-08-08
-
-### Runtime
-
-- Harden websocket and sub-agent execution (`3f699c0`)
