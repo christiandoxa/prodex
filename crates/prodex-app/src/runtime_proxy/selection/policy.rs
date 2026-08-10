@@ -65,18 +65,6 @@ fn runtime_candidate_affinity_to_proxy(
 }
 
 pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_>) -> bool {
-    if [
-        affinity.strict_affinity_profile,
-        affinity.pinned_profile,
-        affinity.turn_state_profile,
-        affinity.session_profile,
-    ]
-    .into_iter()
-    .flatten()
-    .any(|profile_name| profile_name == affinity.candidate_name)
-    {
-        return true;
-    }
     runtime_proxy_crate::runtime_candidate_has_hard_affinity(runtime_candidate_affinity_to_proxy(
         affinity,
     ))
@@ -87,18 +75,6 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     _request_requires_previous_response_affinity: bool,
     fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    if [
-        affinity.strict_affinity_profile,
-        affinity.pinned_profile,
-        affinity.turn_state_profile,
-        affinity.session_profile,
-    ]
-    .into_iter()
-    .flatten()
-    .any(|profile_name| profile_name == affinity.candidate_name)
-    {
-        return false;
-    }
     runtime_proxy_crate::runtime_quota_blocked_affinity_is_releasable(
         runtime_candidate_affinity_to_proxy(affinity),
         fresh_fallback_shape,

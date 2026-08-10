@@ -115,8 +115,6 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
-    needs:
-      - verify-ci
     strategy:
       fail-fast: false
       matrix:
@@ -210,7 +208,7 @@ jobs:
       - name: Test native desktop launcher
         if: ${{ matrix.can-native-smoke }}
         shell: bash
-        run: cargo test --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
+        run: cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
 
       - name: Build prodex
         shell: bash
@@ -533,6 +531,7 @@ jobs:
     name: Prepare release SBOM
     runs-on: ubuntu-latest
     needs:
+      - verify-ci
       - build
 
     steps:

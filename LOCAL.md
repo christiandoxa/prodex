@@ -6,7 +6,7 @@ Use this path when you want the Prodex/Codex front end, Caveman/Super mode, and 
 
 ## What Prodex Expects
 
-`prodex super --url` points Codex directly at a local OpenAI-compatible server. It does not use Prodex quota preflight, auto-rotate, or the runtime proxy.
+`prodex super --url` routes Codex through Prodex's local Smart Context rewrite proxy to a local OpenAI-compatible server. It does not use quota preflight or account auto-rotate.
 
 The local server should provide:
 
@@ -25,7 +25,7 @@ Start your local model server first, then run:
 prodex super --url http://127.0.0.1:8131
 ```
 
-Prodex appends `/v1` when the URL has no path, injects a temporary `prodex-local` Codex provider, disables non-function native tools that many local servers reject, and skips quota/proxy routing.
+Prodex appends `/v1` when the URL has no path, injects a temporary `prodex-local` Codex provider, disables non-function native tools that many local servers reject, and skips account quota/rotation routing.
 
 The default local model id is:
 
