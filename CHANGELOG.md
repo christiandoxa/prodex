@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.404.0 - 2026-08-10
+
+- No grouped changes.
+
 ## 0.403.0 - 2026-08-10
 
 ### CLI
@@ -85,12 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden websocket and sub-agent execution (`3f699c0`)
-
-## 0.392.0 - 2026-08-07
-
-### Runtime
-
-- Simplify websocket session admission (`24b51e2`)
-- Preserve local saturation and child cleanup (`e956baf`)
-- Satisfy clippy argument lint (`38abfdc`)
-- Bound fresh profile admission and preserve Kiro models (`299a462`)
