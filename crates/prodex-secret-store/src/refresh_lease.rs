@@ -52,7 +52,13 @@ static HEARTBEAT_TEST_MAX_ACTIVE_WRITES: AtomicU64 = AtomicU64::new(0);
 static HEARTBEAT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 #[cfg(test)]
 static HEARTBEAT_TEST_STALL_IDS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
-
+#[cfg(test)]
+pub(crate) fn lock_heartbeat_test_state() -> std::sync::MutexGuard<'static, ()> {
+    HEARTBEAT_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 #[derive(Clone)]
 pub struct RefreshLeaseCoordinator {
     root: PathBuf,
@@ -1291,10 +1297,7 @@ mod tests {
 
     #[test]
     fn stalled_heartbeat_write_returns_bounded_unhealthy_error() {
-        let _test_lock = HEARTBEAT_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _test_lock = lock_heartbeat_test_state();
         let root = std::env::temp_dir().join(format!(
             "prodex-secret-store-heartbeat-stall-{}-{}",
             std::process::id(),
@@ -1349,10 +1352,7 @@ mod tests {
 
     #[test]
     fn stalled_heartbeat_writes_cannot_accumulate_workers() {
-        let _test_lock = HEARTBEAT_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _test_lock = lock_heartbeat_test_state();
         let root = std::env::temp_dir().join(format!(
             "prodex-secret-store-heartbeat-workers-{}-{}",
             std::process::id(),

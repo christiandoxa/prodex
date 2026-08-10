@@ -1273,7 +1273,7 @@ mod tests {
         write_sub_agent_overlay_with_executable(
             &root,
             &resolved,
-            PathBuf::from("/opt/Prodex Binary/prodex"),
+            env::temp_dir().join("Prodex Binary").join("prodex"),
         )
         .unwrap();
         let config = std::fs::read_to_string(root.join(SUB_AGENT_CONFIG_FILE)).unwrap();
