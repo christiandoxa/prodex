@@ -1,5 +1,19 @@
 [
   {
+    "id": "audited-super-child-tool-release-0.403.0",
+    "requiredSubjects": [
+      "fix(super): harden child tool launches",
+      "chore(release): release 0.403.0"
+    ],
+    "caps": {
+      "maxFiles": 39,
+      "maxBehaviorFiles": 22,
+      "maxLines": 1605,
+      "maxFileLines": 232
+    },
+    "reason": "Reviewed sub-agent transport, strict tool activation, native capability, and CI speed changes; exact caps cover the audited implementation plus its metadata release."
+  },
+  {
     "id": "audited-runtime-ci-completion-0.398.0",
     "requiredSubjects": [
       "fix: harden runtime paths and CI parallelism"
