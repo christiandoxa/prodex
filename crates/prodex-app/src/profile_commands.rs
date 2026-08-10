@@ -28,8 +28,9 @@ pub(crate) use self::import_export::{
 #[cfg(test)]
 use self::import_export::{build_profile_export_payload, import_profile_export_payload};
 pub(crate) use self::kiro::{
-    KIRO_MODEL_CATALOG_FILE, handle_import_kiro_profile, kiro_cli_data_dir_env,
-    parse_kiro_model_catalog_text, prepare_kiro_cli_data_dir, read_kiro_auth_secret,
+    KIRO_MODEL_CATALOG_FILE, ensure_kiro_codebase_memory_compatibility, handle_import_kiro_profile,
+    kiro_cli_data_dir_env, parse_kiro_model_catalog_text, prepare_kiro_cli_data_dir,
+    read_kiro_auth_secret,
 };
 pub(crate) use self::login::handle_codex_login;
 pub(crate) use self::logout::handle_codex_logout;

@@ -5,11 +5,24 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use crate::absolutize;
 use prodex_profile_export::{copilot_platform_label, parse_copilot_version};
 
 use super::COPILOT_KEYCHAIN_SERVICE;
+
+const COPILOT_CREDENTIAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const COPILOT_CREDENTIAL_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
+
+fn copilot_credential_command_output(command: &mut Command) -> Result<std::process::Output> {
+    crate::command_output_with_timeout(
+        command,
+        COPILOT_CREDENTIAL_COMMAND_TIMEOUT,
+        COPILOT_CREDENTIAL_OUTPUT_MAX_BYTES,
+        "Copilot credential command",
+    )
+}
 
 pub(super) fn read_copilot_keychain_token(account_key: &str) -> Result<Option<String>> {
     let keytar_path = discover_copilot_keytar_path()?;
@@ -20,13 +33,14 @@ keytar.getPassword(process.argv[2], process.argv[3]).then(
   err => { console.error(String(err)); process.exit(1); }
 );
 "#;
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg("-e")
         .arg(node_script)
         .arg(&keytar_path)
         .arg(COPILOT_KEYCHAIN_SERVICE)
-        .arg(account_key)
-        .output()
+        .arg(account_key);
+    let output = copilot_credential_command_output(&mut command)
         .with_context(|| format!("failed to execute node for {}", keytar_path.display()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -74,15 +88,16 @@ try {
   try { await client.stop(); } catch {}
 }
 "#;
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg("--input-type=module")
         .arg("-e")
         .arg(node_script)
         .arg(&sdk_path)
         .arg(copilot_bin)
         .arg(host)
-        .arg(login)
-        .output()
+        .arg(login);
+    let output = copilot_credential_command_output(&mut command)
         .context("failed to execute the Copilot SDK")?;
     if !output.status.success() {
         return Ok(None);
@@ -93,41 +108,25 @@ try {
 
 /// Read legacy Copilot OAuth entries from GNOME keyring via `secret-tool`.
 pub(super) fn read_copilot_libsecret_token(account_key: &str) -> Result<Option<String>> {
-    match Command::new("secret-tool")
-        .arg("lookup")
-        .arg("service")
-        .arg(COPILOT_KEYCHAIN_SERVICE)
-        .arg("username")
-        .arg(account_key)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !token.is_empty() {
-                return Ok(Some(token));
-            }
-        }
-        _ => {}
-    }
-
     // Copilot CLI ≤1.0.31 stored tokens with the `account` attribute
     // (keytar getPassword(service, account)).  Later versions use
     // `username` (rust-keyring).  Try both so old entries are not missed.
-    match Command::new("secret-tool")
-        .arg("lookup")
-        .arg("service")
-        .arg(COPILOT_KEYCHAIN_SERVICE)
-        .arg("account")
-        .arg(account_key)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
+    for attribute in ["username", "account"] {
+        let mut command = Command::new("secret-tool");
+        command
+            .arg("lookup")
+            .arg("service")
+            .arg(COPILOT_KEYCHAIN_SERVICE)
+            .arg(attribute)
+            .arg(account_key);
+        if let Ok(output) = copilot_credential_command_output(&mut command)
+            && output.status.success()
+        {
             let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !token.is_empty() {
                 return Ok(Some(token));
             }
         }
-        _ => {}
     }
 
     Ok(None)

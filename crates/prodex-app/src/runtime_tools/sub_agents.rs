@@ -15,9 +15,14 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
+
+#[path = "sub_agent_process.rs"]
+mod process;
+use process::*;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
 pub(crate) const SUB_AGENT_LAUNCHER_MARKER: &str = "PRODEX_SUB_AGENT_LAUNCHER";
@@ -430,7 +435,7 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
         ));
     }
     if !outcome.status.success() {
-        let code = sub_agent_child_exit_code(&outcome.status);
+        let code = crate::child_exit_code(&outcome.status);
         return Err(crate::command_dispatch::command_exit_error(
             code,
             if outcome.output_incomplete {
@@ -447,23 +452,6 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
         bail!("sub-agent child completed without output");
     }
     Ok(())
-}
-
-fn sub_agent_child_exit_code(status: &std::process::ExitStatus) -> i32 {
-    status
-        .code()
-        .or_else(|| {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-                status.signal().map(|signal| 128 + signal)
-            }
-            #[cfg(not(unix))]
-            {
-                None
-            }
-        })
-        .unwrap_or(1)
 }
 
 fn read_bounded_utf8(path: &Path, max_bytes: usize, label: &str) -> Result<String> {
@@ -585,132 +573,6 @@ fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
     args.push(OsString::from("exec"));
     args.push(OsString::from(task));
     args
-}
-
-struct SubAgentChildOutcome {
-    status: std::process::ExitStatus,
-    cancelled: bool,
-    output_incomplete: bool,
-    output_bytes: u64,
-}
-
-async fn run_child(
-    spec: &ChildLaunchSpec,
-    task: &str,
-    task_path: &Path,
-) -> Result<SubAgentChildOutcome> {
-    let mut command = tokio::process::Command::new(&spec.executable);
-    command
-        .args(child_argv(spec, task))
-        .env(SUB_AGENT_RECURSION_MARKER, "1")
-        .env_remove(SUB_AGENT_LAUNCHER_MARKER)
-        .kill_on_drop(true)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().context("failed to spawn sub-agent child")?;
-    if let Err(error) = fs::remove_file(task_path) {
-        let _ = child.start_kill();
-        let _ = child.wait().await;
-        return Err(error).context("failed to remove consumed task file");
-    }
-    let stdout = child.stdout.take().context("child stdout pipe missing")?;
-    let stderr = child.stderr.take().context("child stderr pipe missing")?;
-    let stdout_task = tokio::spawn(relay_child_output(stdout, tokio::io::stdout()));
-    let stderr_task = tokio::spawn(relay_child_output(stderr, tokio::io::stderr()));
-    let mut cancelled = false;
-    let status = tokio::select! {
-        status = child.wait() => status.context("failed to wait for sub-agent child")?,
-        signal = sub_agent_shutdown_signal() => {
-            signal?;
-            cancelled = true;
-            child.start_kill().context("failed to terminate cancelled sub-agent child")?;
-            tokio::time::timeout(SUB_AGENT_CHILD_REAP_TIMEOUT, child.wait())
-                .await
-                .context("timed out while reaping cancelled sub-agent child")?
-                .context("failed to reap cancelled sub-agent child")?
-        }
-    };
-    let output = drain_child_output_tasks(stdout_task, stderr_task).await;
-    let output_incomplete = output.is_err();
-    let output_bytes = output.unwrap_or_default();
-    Ok(SubAgentChildOutcome {
-        status,
-        cancelled,
-        output_incomplete,
-        output_bytes,
-    })
-}
-
-async fn drain_child_output_tasks(
-    mut stdout_task: tokio::task::JoinHandle<io::Result<u64>>,
-    mut stderr_task: tokio::task::JoinHandle<io::Result<u64>>,
-) -> Result<u64> {
-    let drained = tokio::time::timeout(SUB_AGENT_OUTPUT_DRAIN_TIMEOUT, async {
-        let (stdout, stderr) = tokio::join!(&mut stdout_task, &mut stderr_task);
-        let stdout = stdout.context("sub-agent stdout relay task failed")??;
-        let stderr = stderr.context("sub-agent stderr relay task failed")??;
-        Ok::<_, anyhow::Error>(stdout.saturating_add(stderr))
-    })
-    .await;
-    match drained {
-        Ok(result) => result,
-        Err(_) => {
-            stdout_task.abort();
-            stderr_task.abort();
-            if !stdout_task.is_finished() {
-                let _ = stdout_task.await;
-            }
-            if !stderr_task.is_finished() {
-                let _ = stderr_task.await;
-            }
-            bail!("sub-agent output drain timed out after child exit");
-        }
-    }
-}
-
-async fn relay_child_output<R, W>(mut reader: R, mut writer: W) -> io::Result<u64>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut buffer = [0_u8; 8_192];
-    let mut write_error = None;
-    let mut bytes_read = 0_u64;
-    loop {
-        let read = reader.read(&mut buffer).await?;
-        if read == 0 {
-            break;
-        }
-        bytes_read = bytes_read.saturating_add(read as u64);
-        if write_error.is_none()
-            && let Err(error) = writer.write_all(&buffer[..read]).await
-        {
-            write_error = Some(error);
-        }
-    }
-    if let Some(error) = write_error {
-        Err(error)
-    } else {
-        writer.flush().await.map(|()| bytes_read)
-    }
-}
-
-async fn sub_agent_shutdown_signal() -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result,
-            _ = terminate.recv() => Ok(()),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c().await
-    }
 }
 
 pub(crate) fn apply_sub_agent_recursion_marker(
@@ -988,11 +850,11 @@ mod tests {
         use std::os::unix::process::ExitStatusExt;
 
         assert_eq!(
-            sub_agent_child_exit_code(&std::process::ExitStatus::from_raw(9)),
+            crate::child_exit_code(&std::process::ExitStatus::from_raw(9)),
             137
         );
         assert_eq!(
-            sub_agent_child_exit_code(&std::process::ExitStatus::from_raw(7 << 8)),
+            crate::child_exit_code(&std::process::ExitStatus::from_raw(7 << 8)),
             7
         );
     }
@@ -1700,6 +1562,123 @@ mod tests {
         }
         assert!(started.elapsed() < Duration::from_secs(1));
         drop(acquire_sub_agent_slot(&spec).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_process_group_cleanup_reaches_descendants() {
+        let root = temp_test_root("sub-agent-process-group");
+        fs::create_dir_all(&root).unwrap();
+        let pid_file = root.join("descendant.pid");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut command = tokio::process::Command::new("sh");
+            command.args([
+                "-c",
+                "sleep 30 & echo $! > \"$1\"; wait",
+                "sh",
+                pid_file.to_str().unwrap(),
+            ]);
+            configure_sub_agent_child_process_group(&mut command);
+            let mut child = command.spawn().unwrap();
+            let process_group_id = child.id();
+            let mut descendant = None;
+            for _ in 0..100 {
+                descendant = fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<libc::pid_t>().ok());
+                if descendant.is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let descendant = descendant.expect("descendant pid should be written completely");
+
+            assert_eq!(
+                unsafe { libc::getpgid(descendant) },
+                process_group_id.unwrap() as libc::pid_t
+            );
+            terminate_sub_agent_child(&mut child, process_group_id).unwrap();
+            child.wait().await.unwrap();
+            for _ in 0..100 {
+                let absent = unsafe { libc::kill(descendant, 0) } != 0
+                    && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+                let zombie = fs::read_to_string(format!("/proc/{descendant}/stat"))
+                    .ok()
+                    .and_then(|stat| stat.rsplit_once(") ").map(|(_, rest)| rest.to_string()))
+                    .and_then(|rest| rest.split_whitespace().next().map(str::to_string))
+                    .is_some_and(|state| state == "Z");
+                if absent || zombie {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("descendant remained alive after process-group cleanup");
+        });
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn child_job_cleanup_reaches_descendants() {
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
+
+        let root = temp_test_root("sub-agent-job");
+        fs::create_dir_all(&root).unwrap();
+        let start_file = root.join("start");
+        let pid_file = root.join("descendant.pid");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let descendant = runtime.block_on(async {
+            let mut command = tokio::process::Command::new("powershell.exe");
+            command
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "while (-not (Test-Path -LiteralPath $env:PRODEX_TEST_START_FILE)) { Start-Sleep -Milliseconds 10 }; $child = Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -LiteralPath $env:PRODEX_TEST_PID_FILE -Value $child.Id",
+                ])
+                .env("PRODEX_TEST_START_FILE", &start_file)
+                .env("PRODEX_TEST_PID_FILE", &pid_file);
+            let mut child = command.spawn().unwrap();
+            let job = assign_sub_agent_child_job(&child).unwrap();
+            fs::write(&start_file, "start").unwrap();
+            assert!(child.wait().await.unwrap().success());
+            let descendant = fs::read_to_string(&pid_file)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap();
+            drop(job);
+            descendant
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, descendant) };
+            if handle.is_null() {
+                break;
+            }
+            // SAFETY: successful OpenProcess returns an owned process handle.
+            let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+            if unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } != WAIT_TIMEOUT {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "descendant remained alive"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

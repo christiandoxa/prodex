@@ -70,11 +70,37 @@ fn kiro_streaming_reader_times_out_while_the_worker_is_silent() {
         pending: Cursor::new(Vec::new()),
         finished: false,
         idle_timeout: Duration::from_millis(10),
+        cancelled: Arc::new(AtomicBool::new(false)),
     };
 
     let error = reader.read(&mut [0_u8; 1]).unwrap_err();
 
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+}
+
+#[test]
+fn dropping_kiro_streaming_reader_cancels_silent_worker() {
+    let (_sender, receiver) = mpsc::channel();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let reader = RuntimeKiroStreamingReader {
+        receiver,
+        pending: Cursor::new(Vec::new()),
+        finished: false,
+        idle_timeout: Duration::from_secs(5),
+        cancelled: Arc::clone(&cancelled),
+    };
+    let worker = std::thread::spawn(move || {
+        let (_line_sender, lines) = mpsc::channel();
+        runtime_kiro_next_stream_line(&lines, Duration::from_secs(5), &cancelled).unwrap_err()
+    });
+
+    std::thread::sleep(Duration::from_millis(20));
+    let started = std::time::Instant::now();
+    drop(reader);
+    let error = worker.join().unwrap();
+
+    assert!(error.to_string().contains("consumer disconnected"));
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]
@@ -177,28 +203,43 @@ fn kiro_chat_streaming_preserves_reasoning_chunks() {
 }
 
 #[test]
-fn kiro_streaming_total_timeout_is_bounded_without_reconnect_after_output() {
-    let (sender, _receiver) = mpsc::sync_channel(1);
-    let (_line_sender, line_receiver) = mpsc::channel::<io::Result<String>>();
+fn kiro_streaming_activity_resets_the_idle_timeout() {
+    let (sender, _receiver) = mpsc::sync_channel(64);
+    let (line_sender, line_receiver) = mpsc::channel::<io::Result<String>>();
     let mut state = RuntimeKiroStreamingState::new(1, Some("model-example"));
-    state.prompt_sent = true;
-    let started = std::time::Instant::now();
+    line_sender
+        .send(Ok(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-example"}}"#.to_string(),
+        ))
+        .unwrap();
+    let producer = std::thread::spawn(move || {
+        for _ in 0..15 {
+            std::thread::sleep(Duration::from_millis(20));
+            line_sender
+                .send(Ok(r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-example","update":{"sessionUpdate":"agent_message_chunk","messageId":"message-example","content":{"type":"text","text":"."}}}}"#.to_string()))
+                .unwrap();
+        }
+        line_sender
+            .send(Ok(
+                r#"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#.to_string(),
+            ))
+            .unwrap();
+    });
 
-    let error = runtime_kiro_receive_stream(
+    runtime_kiro_receive_stream(
         &sender,
         &mut Vec::new(),
         line_receiver,
         "prompt",
         &mut state,
         false,
-        Duration::from_secs(1),
-        Duration::from_millis(10),
+        Duration::from_millis(250),
     )
-    .unwrap_err();
+    .unwrap();
+    producer.join().unwrap();
 
-    assert!(started.elapsed() < Duration::from_secs(1));
-    assert!(error.to_string().contains("after output began"));
-    assert!(error.to_string().contains("did not reconnect or replay"));
+    assert!(state.prompt_response.is_some());
+    assert_eq!(state.assistant_text, ".".repeat(15));
 }
 
 #[test]

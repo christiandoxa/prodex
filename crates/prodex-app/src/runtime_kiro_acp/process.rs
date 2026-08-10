@@ -61,11 +61,7 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command_and_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .envs(extra_env.iter().cloned());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        process.process_group(0);
-    }
+    crate::configure_child_process_group(&mut process, runtime_kiro_owns_private_process_group());
     let mut child = process.spawn().with_context(|| {
         format!(
             "failed to start Kiro ACP agent {}",
@@ -133,11 +129,7 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .envs(extra_env.iter().cloned());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        process.process_group(0);
-    }
+    crate::configure_child_process_group(&mut process, runtime_kiro_owns_private_process_group());
     let mut child = process.spawn().with_context(|| {
         format!(
             "failed to start Kiro ACP agent {}",
@@ -150,17 +142,12 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
 }
 
 fn terminate_kiro_acp_child(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 {
-            unsafe {
-                libc::kill(-pid, libc::SIGKILL);
-            }
-        }
-    }
-    let _ = child.kill();
+    let _ = crate::terminate_child_process_tree(child, runtime_kiro_owns_private_process_group());
     let _ = child.wait();
+}
+
+fn runtime_kiro_owns_private_process_group() -> bool {
+    std::env::var_os(crate::SUB_AGENT_RECURSION_MARKER).is_none()
 }
 
 fn runtime_kiro_acp_bootstrap_child(
@@ -303,20 +290,18 @@ fn runtime_kiro_acp_prompt_turn_child(
         .take()
         .context("failed to capture Kiro ACP stdout")?;
     let lines = runtime_kiro_acp_line_receiver(stdout);
-    let deadline = Instant::now() + timeout;
     let mut initialize = None;
     let mut session = None;
     let mut prompt_response = None;
     let mut notifications = Vec::new();
     let mut prompt_sent = false;
     loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            bail!("Kiro ACP prompt turn timed out");
-        };
-        let line = match lines.recv_timeout(remaining) {
+        let line = match lines.recv_timeout(timeout) {
             Ok(Ok(line)) => line,
             Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
-            Err(mpsc::RecvTimeoutError::Timeout) => bail!("Kiro ACP prompt turn timed out"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                bail!("Kiro ACP prompt turn timed out waiting for output")
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         let current = line.trim();
