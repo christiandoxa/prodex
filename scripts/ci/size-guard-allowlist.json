@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
-    "maxLines": 1317,
+    "maxLines": 1315,
     "reason": "Cross-platform broker identity probing and bounded stale-process recovery remain colocated so PID reuse and termination decisions share one safety boundary; this cap records the audited macOS implementation and tests."
   },
   {
@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1116,
+    "maxLines": 1100,
     "reason": "Kiro ACP process lifecycle, bounded reconnect and idle handling, non-executable activity, streaming sequence state, and runtime metadata orchestration remain at one protocol boundary; cap ratcheted after process helpers moved out."
   },
   {
@@ -286,8 +286,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1839,
-    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, shell-free child execution, strict tool inheritance, process cleanup, recursion protection, output validation, and deterministic effective instruction injection form one audited launch-policy boundary."
+    "maxLines": 1818,
+    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, strict tool inheritance, recursion protection, output validation, and deterministic effective instruction injection form one audited launch-policy boundary; process supervision lives in a focused sibling module."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",

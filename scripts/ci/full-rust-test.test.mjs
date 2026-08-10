@@ -35,6 +35,15 @@ test("full Rust runner locks every direct cargo test command", () => {
   const cargoTestLines = result.stdout.split("\n").filter((line) => line.includes(": cargo test "));
   assert.ok(cargoTestLines.length > 0);
   assert.ok(cargoTestLines.every((line) => line.includes("cargo test --locked ")));
+  const workspaceLine = cargoTestLines.find((line) => line.includes("workspace:parallel-safe:"));
+  assert.match(
+    workspaceLine,
+    /--skip ping::ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit/,
+  );
+  assert.match(
+    workspaceLine,
+    /--skip ping::ping_openai_sends_ping_to_each_ready_openai_profile/,
+  );
 });
 
 test("no-prodex-app mode excludes prodex-app from workspace execution", () => {
@@ -98,7 +107,7 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });
 
-test("runtime proxy timing packs reduce runner pressure without losing filters", () => {
+test("runtime proxy logical suites fan out without losing filters", () => {
   const result = spawnSync(process.execPath, ["scripts/ci/runtime-proxy-ci-matrix.mjs", "--github-matrix"], {
     cwd: process.cwd(),
     encoding: "utf8",
@@ -107,8 +116,8 @@ test("runtime proxy timing packs reduce runner pressure without losing filters",
   assert.equal(result.status, 0, result.stderr);
   const matrix = JSON.parse(result.stdout);
   const filters = matrix.include.flatMap((entry) => entry.filters.split("\n"));
-  assert.equal(matrix.include.length, 14);
-  assert.equal(filters.length, 46);
+  assert.equal(matrix.include.length, 24);
+  assert.equal(filters.length, 48);
   assert.equal(new Set(filters).size, filters.length);
   const admissionCorePack = matrix.include.find((entry) =>
     entry.filters.includes(

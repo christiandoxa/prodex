@@ -139,6 +139,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
     "windows-prodex-app",
     "redis-integration",
     "backup-restore-drill",
+    "smart-context-evidence",
     "process-guard",
   ]) {
     assert.match(workflow, new RegExp(`^  ${job}:`, "m"), `${job} job missing`);
@@ -151,6 +152,23 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
   assert.match(processGuard, /mozilla-actions\/sccache-action@/);
   assert.match(processGuard, /Swatinem\/rust-cache@/);
+  assert.doesNotMatch(processGuard, /npm run docs:smart-context-evidence:check/);
+  assert.equal(
+    processGuard.match(/if: matrix\.lane == 'static' \|\| matrix\.lane == 'enterprise-storage'/g)
+      ?.length,
+    3,
+  );
+  const smartContextEvidence = workflow.match(
+    /\n  smart-context-evidence:\n([\s\S]*?)\n  process-guard:/,
+  )?.[1];
+  assert.ok(smartContextEvidence, "smart-context-evidence job missing");
+  assert.match(smartContextEvidence, /actions\/setup-node@/);
+  assert.match(smartContextEvidence, /dtolnay\/rust-toolchain@/);
+  assert.match(smartContextEvidence, /mozilla-actions\/sccache-action@/);
+  assert.match(smartContextEvidence, /Swatinem\/rust-cache@/);
+  assert.match(smartContextEvidence, /npm run docs:smart-context-evidence:check/);
+  const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)$/)?.[1];
+  assert.match(telemetry, /- smart-context-evidence/);
   for (const command of [
     "npm run docs:lint",
     "npm run ci:secret-boundary-guard",

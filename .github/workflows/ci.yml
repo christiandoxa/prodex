@@ -238,20 +238,7 @@ jobs:
         run: cargo +nightly-2026-07-11 fuzz build --fuzz-dir fuzz
 
       - name: Run bounded fuzz smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          for target in \
-            canonical_request_target \
-            oidc_endpoint_policy \
-            profile_export_envelope \
-            runtime_policy_parse \
-            governance_policy \
-            smart_context_inputs
-          do
-            cargo +nightly-2026-07-11 fuzz run "${target}" --fuzz-dir fuzz -- \
-              -max_total_time=10 -timeout=5 -rss_limit_mb=2048
-          done
+        run: node scripts/ci/fuzz-smoke.mjs
 
   docs-lint:
     runs-on: ubuntu-latest
@@ -558,6 +545,41 @@ jobs:
           RUST_BACKTRACE: "1"
         run: cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1
 
+  smart-context-evidence:
+    name: Smart Context evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-bin: false
+
+      - name: Check generated Smart Context evidence
+        run: npm run docs:smart-context-evidence:check
+
   process-guard:
     name: Process guard (${{ matrix.lane }})
     runs-on: ubuntu-latest
@@ -590,14 +612,17 @@ jobs:
           package-manager-cache: false
 
       - name: Install Rust toolchain
+        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.1
 
       - name: Install sccache
+        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Cache Rust dependencies
+        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-bin: false
@@ -661,10 +686,6 @@ jobs:
       - name: Enforce Smart Context correctness guard
         if: matrix.lane == 'static'
         run: npm run ci:smart-context-guard
-
-      - name: Check generated Smart Context evidence
-        if: matrix.lane == 'static'
-        run: npm run docs:smart-context-evidence:check
 
       - name: Validate full-test shard manifest
         if: matrix.lane == 'static'
@@ -1639,6 +1660,7 @@ jobs:
       - windows-workspace
       - windows-prodex-app
       - macos-workspace
+      - smart-context-evidence
       - process-guard
       - redis-integration
       - backup-restore-drill
