@@ -2,6 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.402.0 - 2026-08-10
+
+### Claude
+
+- Stabilize optional MCP cold startup (`e3d0f87`)
+
+### Deps
+
+- Bump debian from `7b140f3` to `abd67ff` (`b16425a`)
+- Bump rust from `77fac8b` to `14bc9c5` (`7fc6998`)
+- Bump the fuzz-cargo group in /fuzz with 2 updates (`00ee0c1`)
+- Bump the cargo group with 2 updates (`d4d1bd8`)
+
 ## 0.401.0 - 2026-08-09
 
 ### Claude
@@ -87,9 +100,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Merge pull request #47 from kbakdev/fix/install_on_windows (`41cf6c0`)
 - Improve architecture detection for Windows (`1c7bb25`)
-
-## 0.390.0 - 2026-08-07
-
-### CLI
-
-- Support trusted imports and Codex 0.147.0 (`1ac7b11`)
