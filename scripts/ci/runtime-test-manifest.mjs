@@ -342,6 +342,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback",
         label: "session-quota",
       },
+      {
+        id: "continuation-http-restarted-session-quota",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_restarted_session_only_affinity_rotates_after_quota",
+        label: "restarted-session-quota",
+      },
     ],
   },
   {
@@ -359,6 +365,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         filter:
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinity",
         label: "resume-metadata",
+      },
+      {
+        id: "continuation-http-journal-restart",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_restart_recovers_previous_response_affinity_from_journal",
+        label: "journal-restart",
       },
     ],
   },

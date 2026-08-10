@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { RUNTIME_CI_WORKFLOW_SHARDS } from "./runtime-test-manifest.mjs";
 
-const TARGET_MATRIX_JOBS = 14;
+const TARGET_MATRIX_JOBS = RUNTIME_CI_WORKFLOW_SHARDS.length;
 const DEFAULT_WEIGHT_SECONDS = 90;
 const WORKFLOW_SHARD_WEIGHT_SECONDS = Object.freeze({
   "admission-core": 105,
