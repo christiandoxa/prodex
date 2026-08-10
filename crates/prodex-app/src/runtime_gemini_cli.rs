@@ -1,12 +1,11 @@
 use crate::{
     PROVIDER_SECRET_ENV_KEYS, PreparedRuntimeLaunch, ResolvedSuperSubAgent, RuntimeLaunchRequest,
-    RuntimeLaunchStrategy, RuntimeOverlayCleanup, RuntimeProxyEndpoint, agy_bin,
-    apply_sub_agent_recursion_marker, clear_rtk_auto_wrap_control_env, copilot_bin,
-    ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
-    execute_runtime_launch, gemini_bin, kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir,
-    prepare_prodex_overlay_home, prepend_child_path, redact_super_session_args,
+    RuntimeLaunchStrategy, RuntimeProxyEndpoint, agy_bin, clear_rtk_auto_wrap_control_env,
+    copilot_bin, ensure_presidio_services_for_super_launch,
+    ensure_required_presidio_services_for_super_launch, execute_runtime_launch, gemini_bin,
+    kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir, redact_super_session_args,
     render_sub_agent_disabled_dry_run_report, render_sub_agent_dry_run_report,
-    resolve_runtime_optional_tool_plan, resolve_super_launch_target, write_sub_agent_overlay,
+    resolve_super_launch_target,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -69,25 +68,6 @@ struct SuperNativeCliLaunchStrategy {
     sub_agent: Option<ResolvedSuperSubAgent>,
 }
 
-fn resolve_super_native_tool_plan(
-    args: &SuperArgs,
-) -> Result<prodex_optional_tools::ToolActivationPlan> {
-    let mut selected = prodex_optional_tools::OptionalToolSet::super_defaults();
-    selected.remove(prodex_optional_tools::OptionalToolId::PlaywrightMcp);
-    for tool in args.tools.iter().chain(&args.required_tools) {
-        if *tool != prodex_optional_tools::OptionalToolId::Presidio {
-            selected.insert(*tool);
-        }
-    }
-    let required = args
-        .required_tools
-        .iter()
-        .copied()
-        .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
-        .collect();
-    resolve_runtime_optional_tool_plan(&selected, &required)
-}
-
 impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
@@ -130,7 +110,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        let tool_plan = resolve_super_native_tool_plan(&self.args)?;
+        validate_super_native_cli_capabilities(&self.args, self.agent)?;
         let presidio_enabled = self.presidio_enabled && self.agent == SuperCliAgent::Copilot;
         let required_presidio = self
             .args
@@ -156,33 +136,23 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
             return Ok(RuntimeLaunchPlan::new(child));
         }
 
-        let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
-        let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
-        if let Some(sub_agent) = self.sub_agent.as_ref() {
-            write_sub_agent_overlay(&overlay_home, sub_agent)?;
+        if self.sub_agent.is_some() {
+            bail!(
+                "--sub-agent is unsupported for native {agent:?} CLI launches",
+                agent = self.agent
+            );
         }
-        prodex_optional_tools::activate_optional_tools_for_codex(
-            &overlay_home,
-            &tool_plan,
-            presidio_enabled,
-        )?;
-        let child_home = if self.sub_agent.is_some() {
-            &overlay_home
-        } else {
-            &prepared.codex_home
-        };
         let mut child = build_super_native_child(
             self.agent,
             &self.args,
             runtime_proxy,
             &prepared.codex_home,
-            child_home,
+            &prepared.codex_home,
             launch_args,
         )?;
         if self.agent == SuperCliAgent::Copilot {
             crate::remove_provider_secret_env(&mut child);
         }
-        prepend_child_path(&mut child, overlay_home.join("bin"));
         clear_rtk_auto_wrap_control_env(&mut child);
         if presidio_enabled {
             child.extra_env.push((
@@ -190,8 +160,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
                 OsString::from("1"),
             ));
         }
-        apply_sub_agent_recursion_marker(&mut child, self.sub_agent.as_ref());
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
+        Ok(RuntimeLaunchPlan::new(child))
     }
 }
 
@@ -551,8 +520,16 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
         ));
     }
 
-    if let Some(option) = first_unsupported_native_presidio_option(args, agent) {
-        return Err(unsupported(option));
+    if let Some(option) = first_unsupported_native_tool_option(args, agent) {
+        return Err(unsupported(&option));
+    }
+    if args.presidio
+        && matches!(
+            agent,
+            SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy
+        )
+    {
+        return Err(unsupported("--presidio"));
     }
 
     if agent == SuperCliAgent::Agy
@@ -563,29 +540,20 @@ fn validate_super_native_cli_capabilities(args: &SuperArgs, agent: SuperCliAgent
     Ok(())
 }
 
-fn first_unsupported_native_presidio_option(
-    args: &SuperArgs,
-    agent: SuperCliAgent,
-) -> Option<&'static str> {
-    let presidio_required = args
-        .required_tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
-    let presidio_selected = args
-        .tools
-        .contains(&prodex_optional_tools::OptionalToolId::Presidio);
-    if (presidio_required || presidio_selected) && agent != SuperCliAgent::Copilot {
-        return Some(if presidio_required {
-            "--require-tool presidio"
-        } else {
-            "--tool presidio"
-        });
-    }
-    (args.presidio
-        && matches!(
-            agent,
-            SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy
-        ))
-    .then_some("--presidio")
+fn first_unsupported_native_tool_option(args: &SuperArgs, agent: SuperCliAgent) -> Option<String> {
+    let copilot_presidio = agent == SuperCliAgent::Copilot;
+    args.required_tools
+        .iter()
+        .find_map(|tool| {
+            (!copilot_presidio || *tool != prodex_optional_tools::OptionalToolId::Presidio)
+                .then(|| format!("--require-tool {tool}"))
+        })
+        .or_else(|| {
+            args.tools.iter().find_map(|tool| {
+                (!copilot_presidio || *tool != prodex_optional_tools::OptionalToolId::Presidio)
+                    .then(|| format!("--tool {tool}"))
+            })
+        })
 }
 
 fn first_unsupported_native_option(args: &SuperArgs) -> Option<&'static str> {
@@ -633,8 +601,6 @@ fn first_unsupported_native_option(args: &SuperArgs) -> Option<&'static str> {
 
 fn first_unsupported_agy_option(args: &SuperArgs) -> Option<&'static str> {
     [
-        (!args.required_tools.is_empty(), "--require-tool"),
-        (!args.tools.is_empty(), "--tool"),
         (args.auto_rotate, "--auto-rotate"),
         (args.auto_redeem, "--auto-redeem"),
         (args.skip_quota_check, "--skip-quota-check"),

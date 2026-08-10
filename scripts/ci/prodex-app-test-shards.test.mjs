@@ -124,6 +124,13 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(fullWorkflow, /fromJSON\(needs\.full_test_shards\.outputs\.matrix\)/);
   assert.match(fullWorkflow, /prodex-app shard matched no tests/);
   assert.match(fullWorkflow, /- name: Install Node\.js\n        if: matrix\.suite == 'workspace'/);
+  assert.match(fullWorkflow, /^  CARGO_PROFILE_DEV_DEBUG: "0"$/m);
+  assert.match(fullWorkflow, /^  CARGO_PROFILE_TEST_DEBUG: "0"$/m);
+
+  const macosWorkspace = workflow.match(/\n  macos-workspace:\n([\s\S]*?)\n  process-guard:/)?.[1];
+  assert.ok(macosWorkspace, "macOS workspace job missing");
+  assert.match(macosWorkspace, /CARGO_PROFILE_DEV_DEBUG: "0"/);
+  assert.match(macosWorkspace, /CARGO_PROFILE_TEST_DEBUG: "0"/);
 
   for (const job of [
     "docs-lint",

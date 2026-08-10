@@ -525,13 +525,8 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
     let mut extra_report = String::from("Optional tools:");
     for activation in &tool_plan.activations {
         extra_report.push_str(&format!(
-            "\n  {}: active ({})",
-            activation.tool.descriptor.id,
-            if activation.tool.path.is_some() {
-                "resolved executable"
-            } else {
-                "local service"
-            }
+            "\n  {}: resolved (activation deferred until launch)",
+            activation.tool.descriptor.id
         ));
     }
     for unavailable in &tool_plan.unavailable {
@@ -551,6 +546,7 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
             }
         ));
     }
+    extra_report.push_str("\nDry run: optional overlays and services are not started.\n");
     print_runtime_launch_dry_run(
         "optional-tools",
         request,
@@ -569,14 +565,23 @@ pub(crate) fn print_runtime_launch_dry_run(
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
+    let profile = if request.profile.is_some() {
+        "<configured>"
+    } else {
+        "(active/default)"
+    };
     let prepared = super::runtime_launch::prepare_runtime_launch_dry_run(request)?;
     let local_provider_bridge = prepared
         .runtime_proxy
         .as_ref()
         .and_then(|proxy| proxy.local_model_provider_id.as_deref())
         .is_some();
-    let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref());
     let child = profile_openai_compatible_dry_run_child(&prepared.codex_home, child)?;
+    let child_args = match &child {
+        RuntimeLaunchDryRunChild::Codex { codex_args }
+        | RuntimeLaunchDryRunChild::Caveman { codex_args } => codex_args,
+    };
+    let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref(), child_args);
     let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
         codex_bin(),
         &prepared.codex_home,
@@ -592,6 +597,7 @@ pub(crate) fn print_runtime_launch_dry_run(
         runtime_proxy,
         &plan,
     )?;
+    output.push_str(&format!("Profile: {profile}\n"));
     if let Some(extra_report) = extra_report {
         output.push_str(extra_report);
         output.push('\n');
@@ -602,9 +608,9 @@ pub(crate) fn print_runtime_launch_dry_run(
     output.push_str(&format!(
         "Presidio redaction: {}",
         if presidio_redaction_enabled {
-            "enabled"
+            "enabled (would start at launch)"
         } else {
-            "disabled"
+            "disabled (not started)"
         }
     ));
     output.push('\n');
@@ -738,14 +744,17 @@ fn profile_openai_compatible_dry_run_child(
     }
 }
 
-fn runtime_proxy_codex_endpoint(
-    runtime_proxy: Option<&RuntimeProxyEndpoint>,
-) -> Option<prodex_runtime_launch::RuntimeProxyCodexEndpoint<'_>> {
+fn runtime_proxy_codex_endpoint<'a>(
+    runtime_proxy: Option<&'a RuntimeProxyEndpoint>,
+    user_args: &[OsString],
+) -> Option<prodex_runtime_launch::RuntimeProxyCodexEndpoint<'a>> {
     runtime_proxy.map(|proxy| prodex_runtime_launch::RuntimeProxyCodexEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: &proxy.openai_mount_path,
         local_model_provider_id: proxy.local_model_provider_id.as_deref(),
-        force_http_responses: proxy.force_http_responses,
+        force_http_responses: crate::runtime_launch::runtime_proxy_force_http_responses(
+            proxy, user_args,
+        ),
         realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
         realtime_ws_model: proxy.realtime_ws_model.as_deref(),
     })

@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands.rs",
-    "maxLines": 1510,
-    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, resume affinity validation, and terminal restoration together; this ratcheted cap records the audited Super optional-tools and Presidio prompt flow."
+    "maxLines": 1578,
+    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, strict optional-tool inheritance, native Presidio eligibility, resume affinity validation, and terminal restoration together; this exact cap records the audited launch flow."
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
@@ -21,8 +21,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/presidio.rs",
-    "maxLines": 856,
-    "reason": "Presidio readiness policy, bounded Docker startup, and required-service failure behavior remain at one safety boundary; this narrow cap records the Sonar complexity decomposition without raising the global production limit."
+    "maxLines": 906,
+    "reason": "Presidio readiness policy, bounded Docker startup, required fail-closed service behavior, and focused regression coverage remain at one safety boundary; this exact cap avoids raising the global production limit."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
@@ -281,13 +281,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools.rs",
-    "maxLines": 884,
+    "maxLines": 880,
     "reason": "Runtime tool orchestration keeps temporary overlay lifecycle, native capability checks, apps-disabled Super launch ownership, and sub-agent rendering in focused child modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1754,
-    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, shell-free child execution, process cleanup, recursion protection, output validation, and deterministic effective instruction injection form one audited launch-policy boundary."
+    "maxLines": 1839,
+    "reason": "Typed sub-agent resolution, bounded interactive choices, cross-process slot leases, shell-free child execution, strict tool inheritance, process cleanup, recursion protection, output validation, and deterministic effective instruction injection form one audited launch-policy boundary."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",

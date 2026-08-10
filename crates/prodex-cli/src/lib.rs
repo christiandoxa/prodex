@@ -274,7 +274,8 @@ where
     } else {
         raw_args
     };
-    let mut command = Cli::try_parse_from(parse_args.clone())?.command;
+    let command = Cli::try_parse_from(parse_args.clone())?.command;
+    let mut command = rewrite_positioned_super_alias(&parse_args, command)?;
     restore_super_literal_boundary(&parse_args, &mut command);
     match &mut command {
         Commands::Caveman(args)
@@ -286,19 +287,87 @@ where
     Ok(command)
 }
 
-fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
-    if !matches!(
+fn rewrite_positioned_super_alias(
+    args: &[OsString],
+    command: Commands,
+) -> std::result::Result<Commands, clap::Error> {
+    if super_literal_boundary(args).is_some() {
+        return Ok(command);
+    }
+    let Commands::Super(mut super_args) = command else {
+        return Ok(command);
+    };
+    let Some(alias) = super_args.codex_args.first().and_then(|arg| arg.to_str()) else {
+        return Ok(Commands::Super(super_args));
+    };
+
+    match alias {
+        "doctor" => rewrite_positioned_super_command(
+            args,
+            &super_args.codex_args,
+            &["capability", "super-doctor"],
+        ),
+        "expose" => rewrite_positioned_super_command(args, &super_args.codex_args, &["expose"]),
+        "gemini" if super_args.provider.is_none() && super_args.url.is_none() => {
+            super_args.provider = Some(SuperExternalProvider::Gemini);
+            super_args.codex_args.remove(0);
+            Ok(Commands::Super(super_args))
+        }
+        "deepseek" if super_args.provider.is_none() && super_args.url.is_none() => {
+            super_args.provider = Some(SuperExternalProvider::DeepSeek);
+            super_args.codex_args.remove(0);
+            Ok(Commands::Super(super_args))
+        }
+        _ => Ok(Commands::Super(super_args)),
+    }
+}
+
+fn rewrite_positioned_super_command(
+    args: &[OsString],
+    codex_args: &[OsString],
+    replacement: &[&str],
+) -> std::result::Result<Commands, clap::Error> {
+    let Some(alias_index) = args
+        .windows(codex_args.len())
+        .rposition(|window| window == codex_args)
+    else {
+        return Ok(Cli::try_parse_from(args)?.command);
+    };
+
+    let mut rewritten = Vec::with_capacity(args.len() + replacement.len());
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.extend(replacement.iter().map(|value| OsString::from(*value)));
+    rewritten.extend(
+        args.iter()
+            .take(alias_index)
+            .skip(2)
+            .filter(|arg| *arg != "--no-presidio")
+            .cloned(),
+    );
+    rewritten.extend(args.iter().skip(alias_index + 1).cloned());
+    Ok(Cli::try_parse_from(rewritten)?.command)
+}
+
+fn super_literal_boundary(args: &[OsString]) -> Option<usize> {
+    matches!(
         args.get(1).and_then(|arg| arg.to_str()),
         Some("super" | "s")
-    ) {
-        return;
-    }
-    let Some(boundary_index) = args
-        .iter()
-        .enumerate()
-        .skip(2)
-        .find_map(|(index, arg)| (arg == "--").then_some(index))
-    else {
+    )
+    .then(|| {
+        args.iter()
+            .enumerate()
+            .skip(2)
+            .find_map(|(index, arg)| (arg == "--").then_some(index))
+    })
+    .flatten()
+}
+
+fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
+    let Some(boundary_index) = super_literal_boundary(args) else {
         return;
     };
     let Commands::Super(super_args) = command else {

@@ -31,6 +31,7 @@ fn configures_only_codebase_memory_server() -> Result<()> {
     let rendered = toml::to_string(&table).unwrap();
     assert!(rendered.contains("[mcp_servers.codebase-memory-mcp]"));
     assert!(rendered.contains("CBM_CACHE_DIR = \"/tmp/cbm\""));
+    assert!(rendered.contains("enabled = true"));
     for removed in [
         "prodex-sqz",
         "token-savior",
@@ -168,6 +169,185 @@ args = ["--headed"]
     assert!(rendered.contains("command = \"custom-playwright\""));
     assert!(rendered.contains("args = [\"--headed\"]"));
     assert!(!rendered.contains(PLAYWRIGHT_MCP_PACKAGE));
+}
+
+#[test]
+fn preserves_user_codebase_memory_server() {
+    let mut table = toml::from_str::<toml::Table>(
+        r#"
+[mcp_servers.codebase-memory-mcp]
+command = "custom-codebase-memory"
+args = ["serve"]
+enabled = false
+"#,
+    )
+    .unwrap();
+
+    configure_stdio_mcp_server(
+        &mut table,
+        "codebase-memory-mcp",
+        PathBuf::from("/bin/prodex"),
+        &[
+            "__mcp-jsonl-bridge".into(),
+            "/bin/codebase-memory-mcp".into(),
+        ],
+        &[("CBM_CACHE_DIR", "/tmp/cbm".into())],
+    )
+    .unwrap();
+
+    let rendered = toml::to_string(&table).unwrap();
+    assert!(rendered.contains("command = \"custom-codebase-memory\""));
+    assert!(rendered.contains("args = [\"serve\"]"));
+    assert!(rendered.contains("enabled = false"));
+}
+
+#[test]
+fn required_playwright_rejects_disabled_or_unverifiable_inherited_config() -> Result<()> {
+    let cases = [
+        (
+            "[mcp_servers.playwright]\nenabled = false\n",
+            "mcp_servers.playwright",
+        ),
+        (
+            "[mcp_servers.playwright]\ncommand = \"custom-playwright\"\nargs = [\"--headed\"]\n",
+            "custom or incomplete",
+        ),
+        (
+            "[mcp_servers.playwright]\nenabled = \"yes\"\n",
+            "cannot be safely verified",
+        ),
+    ];
+    for (index, (contents, expected)) in cases.into_iter().enumerate() {
+        let home = temp_dir(&format!("required-playwright-rejected-{index}"));
+        fs::create_dir_all(&home)?;
+        fs::write(home.join("config.toml"), contents)?;
+        let error = activate_optional_tools_for_codex(
+            &home,
+            &ToolActivationPlan {
+                activations: vec![ToolActivation {
+                    tool: ResolvedTool {
+                        descriptor: optional_tool_descriptor(OptionalToolId::PlaywrightMcp),
+                        source: ToolDiscoverySource::ManagedRoot,
+                        path: Some(PathBuf::from("/bin/npx")),
+                        version: None,
+                        digest: None,
+                    },
+                    required: true,
+                }],
+                unavailable: Vec::new(),
+            },
+            false,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(expected));
+        assert_eq!(fs::read_to_string(home.join("config.toml"))?, contents);
+        assert!(!home.join(SUPER_OPTIMIZERS_MD).exists());
+        fs::remove_dir_all(home)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn required_codebase_memory_rejects_disabled_inherited_config() -> Result<()> {
+    let home = temp_dir("required-codebase-memory-disabled");
+    fs::create_dir_all(&home)?;
+    let contents =
+        "[mcp_servers.codebase-memory-mcp]\nenabled = false\ncommand = \"custom-codebase\"\n";
+    fs::write(home.join("config.toml"), contents)?;
+
+    let error = activate_optional_tools_for_codex(
+        &home,
+        &ToolActivationPlan {
+            activations: vec![ToolActivation {
+                tool: ResolvedTool {
+                    descriptor: optional_tool_descriptor(OptionalToolId::CodebaseMemoryMcp),
+                    source: ToolDiscoverySource::ManagedRoot,
+                    path: Some(PathBuf::from("/bin/codebase-memory-mcp")),
+                    version: None,
+                    digest: None,
+                },
+                required: true,
+            }],
+            unavailable: Vec::new(),
+        },
+        false,
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("mcp_servers.codebase-memory-mcp")
+    );
+    assert!(error.to_string().contains("disabled"));
+    assert_eq!(fs::read_to_string(home.join("config.toml"))?, contents);
+    assert!(!home.join(SUPER_OPTIMIZERS_MD).exists());
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
+#[test]
+fn required_codebase_memory_rejects_unverifiable_inherited_config() {
+    let table = toml::from_str::<toml::Table>(
+        r#"
+[mcp_servers.codebase-memory-mcp]
+command = "custom-codebase-memory"
+args = ["serve"]
+enabled = true
+"#,
+    )
+    .unwrap();
+
+    let error = validate_required_mcp_servers(
+        Some(&table),
+        true,
+        false,
+        Some(Path::new("/bin/codebase-memory-mcp")),
+        None,
+        false,
+    )
+    .expect_err("required codebase memory must reject unverifiable configuration");
+
+    assert!(
+        error.to_string().contains("custom or incomplete"),
+        "{error}"
+    );
+}
+
+#[test]
+fn required_playwright_accepts_managed_inherited_config() -> Result<()> {
+    let home = temp_dir("required-playwright-managed");
+    fs::create_dir_all(&home)?;
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "[mcp_servers.playwright]\ncommand = \"/bin/npx\"\nargs = [\"--no-install\", \"{}\", \"--headless\", \"--isolated\"]\nenabled = true\n",
+            PLAYWRIGHT_MCP_PACKAGE
+        ),
+    )?;
+
+    activate_optional_tools_for_codex(
+        &home,
+        &ToolActivationPlan {
+            activations: vec![ToolActivation {
+                tool: ResolvedTool {
+                    descriptor: optional_tool_descriptor(OptionalToolId::PlaywrightMcp),
+                    source: ToolDiscoverySource::ManagedRoot,
+                    path: Some(PathBuf::from("/bin/npx")),
+                    version: None,
+                    digest: None,
+                },
+                required: true,
+            }],
+            unavailable: Vec::new(),
+        },
+        false,
+    )?;
+
+    assert!(home.join(SUPER_OPTIMIZERS_MD).exists());
+    fs::remove_dir_all(home)?;
+    Ok(())
 }
 
 #[test]

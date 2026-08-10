@@ -20,7 +20,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
-const SUB_AGENT_LAUNCHER_MARKER: &str = "PRODEX_SUB_AGENT_LAUNCHER";
+pub(crate) const SUB_AGENT_LAUNCHER_MARKER: &str = "PRODEX_SUB_AGENT_LAUNCHER";
 const SUB_AGENTS_FILE: &str = "SUB_AGENTS.md";
 const SUB_AGENT_CONFIG_FILE: &str = "sub-agent-launch.json";
 const SUB_AGENT_TASK_DIR: &str = "sub-agent-tasks";
@@ -62,6 +62,8 @@ pub(crate) struct ChildLaunchSpec {
     effort: Option<SubAgentReasoningEffort>,
     local_url: Option<String>,
     presidio_enabled: bool,
+    #[serde(default)]
+    required_tools: Vec<String>,
     max_concurrency: SubAgentMaxConcurrency,
     slot_dir: PathBuf,
     task_dir: PathBuf,
@@ -79,6 +81,7 @@ impl std::fmt::Debug for ChildLaunchSpec {
             .field("effort", &self.effort)
             .field("local_url_configured", &self.local_url.is_some())
             .field("presidio_enabled", &self.presidio_enabled)
+            .field("required_tools", &self.required_tools)
             .field("max_concurrency", &self.max_concurrency)
             .field("task_max_bytes", &self.task_max_bytes)
             .field("recursion_marker", &self.recursion_marker)
@@ -111,6 +114,7 @@ pub(crate) struct ResolvedSuperSubAgent {
     pub(crate) max_concurrency: SubAgentMaxConcurrency,
     pub(crate) target: SubAgentLaunchTarget,
     pub(crate) presidio_enabled: bool,
+    pub(crate) required_tools: Vec<prodex_optional_tools::OptionalToolId>,
     pub(crate) recursion_disabled: bool,
 }
 
@@ -139,6 +143,7 @@ impl std::fmt::Debug for ResolvedSuperSubAgent {
             .field("max_concurrency", &self.max_concurrency)
             .field("target", &sub_agent_target_label(&self.target))
             .field("presidio_enabled", &self.presidio_enabled)
+            .field("required_tools", &self.required_tools)
             .field("recursion_disabled", &self.recursion_disabled)
             .finish()
     }
@@ -211,6 +216,7 @@ pub(crate) fn resolve_super_sub_agent_config(
         max_concurrency: config.max_concurrency,
         target,
         presidio_enabled: false,
+        required_tools: Vec::new(),
         recursion_disabled: true,
     })
 }
@@ -288,6 +294,11 @@ fn write_sub_agent_overlay_with_executable(
         effort: sub_agent.effort,
         local_url: sub_agent.url.clone(),
         presidio_enabled: sub_agent.presidio_enabled,
+        required_tools: sub_agent
+            .required_tools
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         max_concurrency: sub_agent.max_concurrency,
         slot_dir,
         task_dir,
@@ -487,6 +498,10 @@ fn validate_child_launch_spec(spec: &ChildLaunchSpec) -> Result<()> {
     } else if spec.local_url.is_some() {
         bail!("child local URL is valid only for the local provider");
     }
+    for tool in &spec.required_tools {
+        tool.parse::<prodex_optional_tools::OptionalToolId>()
+            .map_err(|error| anyhow::anyhow!("invalid required optional tool {tool}: {error}"))?;
+    }
     Ok(())
 }
 
@@ -536,6 +551,10 @@ fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
     } else {
         "--no-presidio"
     }));
+    for tool in &spec.required_tools {
+        args.push(OsString::from("--require-tool"));
+        args.push(OsString::from(tool));
+    }
     match spec.provider {
         ProviderId::OpenAi => {
             args.push(OsString::from("-c"));
@@ -729,6 +748,11 @@ pub(crate) fn render_sub_agent_overlay(sub_agent: &ResolvedSuperSubAgent) -> Str
         effort: sub_agent.effort,
         local_url: sub_agent.url.clone(),
         presidio_enabled: sub_agent.presidio_enabled,
+        required_tools: sub_agent
+            .required_tools
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         max_concurrency: sub_agent.max_concurrency,
         slot_dir: PathBuf::from(SUB_AGENT_SLOT_DIR),
         task_dir,
@@ -853,8 +877,18 @@ pub(crate) fn render_sub_agent_dry_run_report(sub_agent: &ResolvedSuperSubAgent)
         .as_deref()
         .map(redaction::redaction_redact_secret_like_text)
         .unwrap_or_else(|| "provider default".into());
+    let required_tools = if sub_agent.required_tools.is_empty() {
+        "none".to_string()
+    } else {
+        sub_agent
+            .required_tools
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     format!(
-        "Sub-agent: enabled\nSub-agent provider: {}\nSub-agent model: {}\nSub-agent reasoning effort: {effort}\nMaximum active sub-agents: {} ({})\nSub-agent concurrency hard maximum: {}\nSub-agent concurrency enforcement: cross-process exclusive slot leases\nSub-agent inherited Presidio: {}\nSub-agent local URL: {}\nSub-agent launch target: {} (parent resume id is not inherited by children)\nSub-agent recursion disabled: {}\nSub-agent recursion marker: {SUB_AGENT_RECURSION_MARKER}=1\nSub-agent child launcher: shell-free internal command\nSub-agent overlay: {SUB_AGENTS_FILE} (temporary; full instructions injected into the effective AGENTS file)\n",
+        "Sub-agent: enabled\nSub-agent provider: {}\nSub-agent model: {}\nSub-agent reasoning effort: {effort}\nMaximum active sub-agents: {} ({})\nSub-agent concurrency hard maximum: {}\nSub-agent concurrency enforcement: cross-process exclusive slot leases\nSub-agent inherited Presidio: {}\nSub-agent inherited required tools: {required_tools}\nSub-agent local URL: {}\nSub-agent launch target: {} (parent resume id is not inherited by children)\nSub-agent recursion disabled: {}\nSub-agent recursion marker: {SUB_AGENT_RECURSION_MARKER}=1\nSub-agent child launcher: shell-free internal command\nSub-agent overlay: {SUB_AGENTS_FILE} (temporary; full instructions injected into the effective AGENTS file)\n",
         sub_agent.provider.label(),
         redacted_model,
         sub_agent.max_concurrency.get(),
@@ -989,6 +1023,7 @@ mod tests {
             effort: None,
             local_url: None,
             presidio_enabled: false,
+            required_tools: Vec::new(),
             max_concurrency: SubAgentMaxConcurrency::new(limit, SubAgentConcurrencySource::Custom)
                 .unwrap(),
             slot_dir,
@@ -1125,6 +1160,7 @@ mod tests {
             effort: None,
             local_url: None,
             presidio_enabled: false,
+            required_tools: Vec::new(),
             max_concurrency: SubAgentMaxConcurrency::default(),
             slot_dir: PathBuf::from("sub-agent-slots"),
             task_dir: PathBuf::from("sub-agent-tasks"),
@@ -1140,6 +1176,13 @@ mod tests {
         spec.model = Some("模型/β-🦀".to_string());
         spec.effort = Some(SubAgentReasoningEffort::XHigh);
         spec.presidio_enabled = true;
+        spec.required_tools = [
+            prodex_optional_tools::OptionalToolId::Rtk,
+            prodex_optional_tools::OptionalToolId::Ponytail,
+        ]
+        .into_iter()
+        .map(|tool| tool.to_string())
+        .collect();
         let args = child_argv(&spec, task);
         assert_eq!(args[0], "s");
         assert_eq!(args[1], "--no-sub-agent");
@@ -1152,6 +1195,15 @@ mod tests {
         assert!(
             args.windows(2)
                 .any(|pair| pair == ["--provider", "copilot"])
+        );
+        assert_eq!(
+            args.windows(2)
+                .filter(|pair| pair[0] == "--require-tool")
+                .collect::<Vec<_>>(),
+            vec![
+                [OsString::from("--require-tool"), OsString::from("rtk")],
+                [OsString::from("--require-tool"), OsString::from("ponytail")],
+            ]
         );
         assert!(args.windows(2).any(|pair| pair == ["--model", "模型/β-🦀"]));
         assert!(
@@ -1202,6 +1254,38 @@ mod tests {
                 .any(|pair| { pair == ["--url", "http://127.0.0.1:8131/v1"] })
         );
         assert!(!args.iter().any(|value| value == "--provider"));
+    }
+
+    #[test]
+    fn child_config_serializes_required_tools_and_rejects_unknown_names() {
+        let root = temp_test_root("sub-agent-required-tools");
+        create_private_directory(&root).unwrap();
+        let mut resolved =
+            resolve_super_sub_agent_config(SubAgentConfig::default(), SuperLaunchTarget::Fresh)
+                .unwrap();
+        resolved.required_tools = [
+            prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
+            prodex_optional_tools::OptionalToolId::Rtk,
+        ]
+        .into_iter()
+        .collect();
+
+        write_sub_agent_overlay_with_executable(
+            &root,
+            &resolved,
+            PathBuf::from("/opt/Prodex Binary/prodex"),
+        )
+        .unwrap();
+        let config = std::fs::read_to_string(root.join(SUB_AGENT_CONFIG_FILE)).unwrap();
+        let spec: ChildLaunchSpec = serde_json::from_str(&config).unwrap();
+        assert_eq!(spec.required_tools, vec!["codebase-memory-mcp", "rtk"]);
+        validate_child_launch_spec(&spec).unwrap();
+
+        let mut invalid = serde_json::to_value(&spec).unwrap();
+        invalid["required-tools"] = serde_json::json!(["not-a-tool"]);
+        let invalid: ChildLaunchSpec = serde_json::from_value(invalid).unwrap();
+        assert!(validate_child_launch_spec(&invalid).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1302,6 +1386,7 @@ mod tests {
         let report = render_sub_agent_dry_run_report(&resolved);
         let debug = format!("{resolved:?}");
         assert!(report.contains("Sub-agent local URL: configured"));
+        assert!(report.contains("Sub-agent inherited required tools: none"));
         assert!(report.contains("Sub-agent launch target: resume <SESSION_UUID>"));
         assert!(report.contains("Sub-agent recursion disabled: yes"));
         assert!(!report.contains(url));

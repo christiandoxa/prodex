@@ -70,6 +70,12 @@ pub(crate) fn ensure_required_presidio_services_for_super_launch(paths: &AppPath
 
 fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: bool) -> Result<()> {
     let config = load_presidio_config(paths)?.unwrap_or_default();
+    if required && !config.fail_mode.eq_ignore_ascii_case("closed") {
+        anyhow::bail!(
+            "--require-tool presidio requires fail_mode = \"closed\" in {}",
+            presidio_config_path(paths).display()
+        );
+    }
     let analyzer_url = &config.analyzer_url;
     let anonymizer_url = &config.anonymizer_url;
     print_launch_status(&format!(
@@ -841,6 +847,7 @@ mod tests {
                 enabled: true,
                 analyzer_url: "http://127.0.0.1:1".to_string(),
                 anonymizer_url: "http://127.0.0.1:1".to_string(),
+                fail_mode: "closed".to_string(),
                 ..Default::default()
             },
         )
@@ -850,6 +857,49 @@ mod tests {
             .expect_err("required Presidio must fail when services are unavailable");
         assert!(error.to_string().contains("required Presidio services"));
         assert!(error.to_string().contains("automatic startup is disabled"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn required_presidio_rejects_fail_open() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-presidio-required-fail-mode-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        save_presidio_config(
+            &paths,
+            &ProdexPresidioConfig {
+                enabled: true,
+                fail_mode: "open".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let error = ensure_required_presidio_services_for_super_launch(&paths)
+            .expect_err("required Presidio must reject fail-open mode");
+        assert!(
+            error.to_string().contains("fail_mode = \"closed\""),
+            "{error}"
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
