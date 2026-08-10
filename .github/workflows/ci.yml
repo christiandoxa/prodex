@@ -643,7 +643,9 @@ jobs:
              [ "${before}" != "0000000000000000000000000000000000000000" ] &&
              git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
              git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
-            npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
+            while IFS= read -r commit; do
+              npm run ci:churn-hygiene:check -- --base "${commit}^" --head "${commit}"
+            done < <(git rev-list --reverse --first-parent "${before}..${after}")
           else
             npm run ci:churn-hygiene:check
           fi

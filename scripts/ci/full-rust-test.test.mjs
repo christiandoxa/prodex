@@ -93,6 +93,18 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   }
 });
 
+test("push churn hygiene checks each pushed commit independently", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const job = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
+  const step = job?.match(/- name: Enforce churn hygiene([\s\S]*?)- name: Enforce release hygiene/)?.[1];
+
+  assert.ok(job, "process-guard job missing");
+  assert.ok(step, "churn hygiene step missing");
+  assert.match(step, /git rev-list --reverse --first-parent "\$\{before\}\.\.\$\{after\}"/);
+  assert.match(step, /--base "\$\{commit\}\^" --head "\$\{commit\}"/);
+  assert.doesNotMatch(step, /--base "\$\{before\}" --head "\$\{after\}"/);
+});
+
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const changes = workflow.match(/\n  changes:\n([\s\S]*?)\n  fmt:/)?.[1];
