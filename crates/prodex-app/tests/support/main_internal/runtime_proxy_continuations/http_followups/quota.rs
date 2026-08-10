@@ -134,3 +134,53 @@ fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fre
         "quota-blocked message follow-up must keep previous_response affinity: {log}"
     );
 }
+
+#[test]
+fn runtime_proxy_http_restarted_session_only_affinity_rotates_after_quota() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(),
+        "main",
+        &["main", "second"],
+        &[],
+        vec![("sess-restart".to_string(), "main")],
+    )
+    .restart();
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "session_id": "sess-restart",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "resume on a ready account",
+                }],
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("\"id\":\"resp-second\""),
+        "session-only resume should complete on the ready profile: {body}"
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()],
+        "pre-commit quota should release soft session affinity and retry once"
+    );
+
+    let continuations = wait_for_runtime_continuations(&fixture.paths, |continuations| {
+        continuations
+            .session_profile_bindings
+            .get("sess-restart")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations.session_profile_bindings["sess-restart"].profile_name,
+        "second"
+    );
+}

@@ -232,3 +232,45 @@ fn runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinit
         "successful resume continuation should preserve session binding: {log}"
     );
 }
+
+#[test]
+fn runtime_proxy_http_restart_recovers_previous_response_affinity_from_journal() {
+    let now = Local::now().timestamp();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    )
+    .restart_with_journal_continuations(RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    });
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "resume after restart"}],
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["second-account".to_string()],
+        "journal-only previous-response affinity must survive restart"
+    );
+}

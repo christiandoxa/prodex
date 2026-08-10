@@ -213,6 +213,11 @@ impl RuntimeResponsesAffinityState {
         }
     }
 
+    pub(super) fn candidate_has_hard_affinity(&self, candidate_name: &str) -> bool {
+        self.bound_profile.as_deref() == Some(candidate_name)
+            || runtime_candidate_has_hard_affinity(self.candidate_affinity(candidate_name))
+    }
+
     pub(super) fn quota_blocked_affinity_is_releasable(
         &self,
         profile_name: &str,
@@ -297,5 +302,18 @@ impl RuntimeResponsesAffinityState {
             )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bound_previous_response_stays_hard_when_continuation_status_is_untrusted() {
+        let state = RuntimeResponsesAffinityState::new(Some("main".to_string()), false, None);
+
+        assert!(state.candidate_has_hard_affinity("main"));
+        assert!(!state.candidate_has_hard_affinity("second"));
     }
 }

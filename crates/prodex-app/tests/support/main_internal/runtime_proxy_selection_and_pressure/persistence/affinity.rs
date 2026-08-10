@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn affinity_candidate_keeps_bound_current_session_owner_without_quota_data() {
+fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_websocket_fallback() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -100,7 +100,7 @@ fn affinity_candidate_keeps_bound_current_session_owner_without_quota_data() {
             },
         )
         .expect("candidate lookup should succeed"),
-        Some("main".to_string())
+        Some("second".to_string())
     );
 }
 

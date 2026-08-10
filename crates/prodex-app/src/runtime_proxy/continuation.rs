@@ -425,8 +425,17 @@ fn runtime_compact_followup_bound_profile_raw(
                 },
             )));
         }
-        prodex_runtime_state::RuntimeHardBindingOwner::Unbound
-        | prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => {}
+        prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name) => {
+            return Ok(Some((
+                profile_name,
+                if turn_state.is_some() {
+                    "turn_state"
+                } else {
+                    "session_id"
+                },
+            )));
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {}
     }
     let mut runtime = shared
         .runtime

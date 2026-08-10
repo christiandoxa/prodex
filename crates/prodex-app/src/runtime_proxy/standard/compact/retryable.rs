@@ -31,6 +31,7 @@ pub(super) struct RuntimeProxyCompactRetryableFailure<'a> {
     pub(super) response: tiny_http::ResponseBox,
     pub(super) overload: bool,
     pub(super) request_session_id: Option<&'a str>,
+    pub(super) request_turn_state: Option<&'a str>,
     pub(super) current_profile: &'a str,
     pub(super) compact_followup_profile: &'a mut Option<(String, &'static str)>,
     pub(super) session_profile: &'a mut Option<String>,
@@ -55,6 +56,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         response,
         overload,
         request_session_id,
+        request_turn_state,
         current_profile,
         compact_followup_profile,
         session_profile,
@@ -78,15 +80,6 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     )? {
         return Ok(RuntimeCompactFailureFlow::Retry);
     }
-
-    let (released_affinity, released_compact_lineage) = release_runtime_compact_quota_state(
-        shared,
-        &profile_name,
-        overload,
-        request_session_id,
-        compact_followup_profile,
-        session_profile,
-    )?;
 
     if runtime_compact_try_conservative_overload_retry(
         request_id,
@@ -114,6 +107,35 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         ),
     );
     mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+
+    if runtime_compact_quota_fallback_exhausted(
+        shared,
+        overload,
+        RuntimeProxyCompactAttemptFailureLog {
+            request_id,
+            exit: "quota_fallback_exhausted",
+            reason: "quota",
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            last_failure: last_failure.as_ref(),
+            saw_inflight_saturation,
+            saw_transport_failure,
+            profile_name: &profile_name,
+        },
+    )? {
+        return Ok(RuntimeCompactFailureFlow::Return(response));
+    }
+
+    let (released_affinity, released_compact_lineage) = release_runtime_compact_quota_state(
+        shared,
+        &profile_name,
+        overload,
+        request_session_id,
+        request_turn_state,
+        compact_followup_profile,
+        session_profile,
+    )?;
 
     if runtime_compact_hard_affinity_failure(
         shared,
@@ -157,24 +179,6 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     }
     if overload {
         runtime_compact_record_overload_penalty(shared, &profile_name);
-    }
-    if runtime_compact_quota_fallback_exhausted(
-        shared,
-        overload,
-        RuntimeProxyCompactAttemptFailureLog {
-            request_id,
-            exit: "quota_fallback_exhausted",
-            reason: "quota",
-            selection_attempts,
-            selection_started_at,
-            pressure_mode,
-            last_failure: last_failure.as_ref(),
-            saw_inflight_saturation,
-            saw_transport_failure,
-            profile_name: &profile_name,
-        },
-    )? {
-        return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
     excluded_profiles.insert(profile_name);
@@ -222,13 +226,21 @@ fn release_runtime_compact_quota_state(
     profile_name: &str,
     overload: bool,
     request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
     compact_followup_profile: &mut Option<(String, &'static str)>,
     session_profile: &mut Option<String>,
 ) -> Result<(bool, bool)> {
     if overload {
         return Ok((false, false));
     }
-    let released_affinity = release_runtime_quota_blocked_affinity(
+    let released_turn_state_affinity = release_runtime_quota_blocked_affinity(
+        shared,
+        profile_name,
+        None,
+        request_turn_state,
+        None,
+    )?;
+    let released_session_affinity = release_runtime_quota_blocked_affinity(
         shared,
         profile_name,
         None,
@@ -239,7 +251,7 @@ fn release_runtime_compact_quota_state(
         shared,
         profile_name,
         request_session_id,
-        None,
+        request_turn_state,
         "quota_blocked",
     )?;
     if session_profile.as_deref() == Some(profile_name) {
@@ -251,7 +263,10 @@ fn release_runtime_compact_quota_state(
     {
         *compact_followup_profile = None;
     }
-    Ok((released_affinity, released_compact_lineage))
+    Ok((
+        released_turn_state_affinity || released_session_affinity,
+        released_compact_lineage,
+    ))
 }
 
 fn runtime_compact_try_conservative_overload_retry(

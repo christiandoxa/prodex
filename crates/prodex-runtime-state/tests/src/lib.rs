@@ -193,6 +193,26 @@ fn schedule_plan_combines_sections_debounce_and_journal_need() {
     assert!(release.schedule.sections.continuations);
     assert!(release.schedule.requires_continuation_journal);
     assert_eq!(release.schedule.debounce, Duration::ZERO);
+
+    let owner = runtime_state_save_enqueue_plan(
+        &RuntimeStateMutation::PreviousResponseOwner("main".into()),
+        queued_at,
+        Duration::from_millis(150),
+    );
+    assert!(owner.schedule.requires_continuation_journal);
+    assert_eq!(owner.schedule.debounce, Duration::from_millis(150));
+
+    for mutation in [
+        RuntimeStateMutation::PreviousResponseRelease("main".into()),
+        RuntimeStateMutation::DeadResponseBindingClear("main".into()),
+        RuntimeStateMutation::QuotaRelease("main".into()),
+        RuntimeStateMutation::AuthFailedRelease("main".into()),
+    ] {
+        let release =
+            runtime_state_save_enqueue_plan(&mutation, queued_at, Duration::from_millis(150));
+        assert!(release.schedule.requires_continuation_journal);
+        assert_eq!(release.schedule.debounce, Duration::ZERO);
+    }
 }
 
 #[test]

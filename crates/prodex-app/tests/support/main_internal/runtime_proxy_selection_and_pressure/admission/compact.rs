@@ -353,6 +353,16 @@ fn compact_final_failure_logs_quota_terminal_reason() {
         log.contains("compact_final_failure exit=quota_fallback_exhausted reason=quota"),
         "compact quota terminal marker should identify quota exhaustion: {log}"
     );
+    assert_eq!(
+        shared
+            .runtime
+            .lock()
+            .expect("runtime state should lock")
+            .session_id_bindings["sess-main"]
+            .profile_name,
+        "main",
+        "failed compact without an alternate must retain its owning session binding"
+    );
 }
 
 #[test]
@@ -404,7 +414,24 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
             include_code_review: false,
             current_profile: "main".to_string(),
             profile_usage_auth: BTreeMap::new(),
-            turn_state_bindings: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::from([
+                (
+                    "turn-main".to_string(),
+                    ResponseProfileBinding {
+                        binding_identity: None,
+                        profile_name: "main".to_string(),
+                        bound_at: Local::now().timestamp(),
+                    },
+                ),
+                (
+                    runtime_compact_turn_state_lineage_key("turn-main"),
+                    ResponseProfileBinding {
+                        binding_identity: None,
+                        profile_name: "main".to_string(),
+                        bound_at: Local::now().timestamp(),
+                    },
+                ),
+            ]),
             session_id_bindings: BTreeMap::from([(
                 "sess-main".to_string(),
                 ResponseProfileBinding {
@@ -430,6 +457,7 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
         headers: vec![
             ("Content-Type".to_string(), "application/json".to_string()),
             ("session_id".to_string(), "sess-main".to_string()),
+            ("x-codex-turn-state".to_string(), "turn-main".to_string()),
             ("x-openai-subagent".to_string(), "compact".to_string()),
         ],
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
@@ -458,6 +486,15 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
     assert!(
         log.contains("compact_committed profile=second"),
         "compact should commit the later ready profile after quota rotation: {log}"
+    );
+    let runtime = shared.runtime.lock().expect("runtime state should lock");
+    assert!(!runtime.turn_state_bindings.contains_key("turn-main"));
+    assert!(!runtime
+        .turn_state_bindings
+        .contains_key(&runtime_compact_turn_state_lineage_key("turn-main")));
+    assert_eq!(
+        runtime.session_id_bindings["sess-main"].profile_name,
+        "second"
     );
 }
 

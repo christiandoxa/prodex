@@ -252,7 +252,7 @@ fn runtime_responses_candidate_saturated(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     candidate_name: &str,
 ) -> Result<bool> {
-    if runtime_candidate_has_hard_affinity(affinity_state.candidate_affinity(candidate_name))
+    if affinity_state.candidate_has_hard_affinity(candidate_name)
         || !runtime_profile_inflight_hard_limited_for_context(
             context.shared,
             candidate_name,
@@ -486,8 +486,7 @@ fn handle_runtime_responses_attempt(
     quota_last_chance_profile: &mut Option<String>,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<Option<RuntimeResponsesReply>> {
-    let hard_affinity =
-        runtime_candidate_has_hard_affinity(affinity_state.candidate_affinity(candidate_name));
+    let hard_affinity = affinity_state.candidate_has_hard_affinity(candidate_name);
     match attempt_runtime_responses_request(
         context.request_id,
         context.request,

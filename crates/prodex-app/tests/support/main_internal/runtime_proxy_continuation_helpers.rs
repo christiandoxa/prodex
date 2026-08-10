@@ -113,6 +113,7 @@ pub(super) fn codex_0135_compaction_turn_metadata() -> String {
 pub(super) struct RuntimeContinuationFixture {
     _temp_dir: TestDir,
     pub(super) backend: RuntimeProxyBackend,
+    pub(super) paths: AppPaths,
     proxy: RuntimeRotationProxy,
 }
 
@@ -192,11 +193,81 @@ pub(super) fn start_runtime_continuation_fixture(
     RuntimeContinuationFixture {
         _temp_dir: temp_dir,
         backend,
+        paths,
         proxy,
     }
 }
 
 impl RuntimeContinuationFixture {
+    pub(super) fn restart(self) -> Self {
+        let Self {
+            _temp_dir,
+            backend,
+            paths,
+            proxy,
+        } = self;
+        drop(proxy);
+        let state = AppState::load(&paths).expect("runtime state should reload after restart");
+        let active_profile = state
+            .active_profile
+            .as_deref()
+            .expect("reloaded runtime state should have an active profile");
+        let proxy = start_runtime_rotation_proxy(
+            &paths,
+            &state,
+            active_profile,
+            backend.base_url(),
+            false,
+        )
+        .expect("runtime proxy should restart");
+        Self {
+            _temp_dir,
+            backend,
+            paths,
+            proxy,
+        }
+    }
+
+    pub(super) fn restart_with_journal_continuations(
+        self,
+        continuations: RuntimeContinuationStore,
+    ) -> Self {
+        let Self {
+            _temp_dir,
+            backend,
+            paths,
+            proxy,
+        } = self;
+        drop(proxy);
+        wait_for_runtime_background_queues_idle();
+        let state = AppState::load(&paths).expect("runtime state should reload after restart");
+        save_runtime_continuation_journal_for_profiles(
+            &paths,
+            &continuations,
+            &state.profiles,
+            Local::now().timestamp(),
+        )
+        .expect("journal-only continuations should save");
+        let active_profile = state
+            .active_profile
+            .as_deref()
+            .expect("reloaded runtime state should have an active profile");
+        let proxy = start_runtime_rotation_proxy(
+            &paths,
+            &state,
+            active_profile,
+            backend.base_url(),
+            false,
+        )
+        .expect("runtime proxy should restart from continuation journal");
+        Self {
+            _temp_dir,
+            backend,
+            paths,
+            proxy,
+        }
+    }
+
     pub(super) fn post_json(
         &self,
         route: &str,
