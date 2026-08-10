@@ -205,47 +205,49 @@ fn validate_required_mcp_servers(
         bail!("mcp_servers must be a TOML table");
     };
 
-    for (name, required) in [
-        ("codebase-memory-mcp", required_codebase_memory),
-        ("playwright", required_playwright),
-    ] {
-        if !required {
-            continue;
-        }
-        let Some(value) = mcp_servers.get(name) else {
-            if require_presence {
-                bail!("required MCP server `mcp_servers.{name}` is not configured");
-            }
-            continue;
-        };
-        let Some(server) = value.as_table() else {
-            bail!("mcp_servers.{name} must be a TOML table");
-        };
-        validate_required_mcp_server_enabled(name, server)?;
-        if name == "codebase-memory-mcp" {
-            let Some((bridge, bridge_args)) =
-                codebase_memory_command.and_then(mcp_jsonl_bridge_command_args)
-            else {
-                bail!(
-                    "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: Prodex MCP bridge is unavailable"
-                );
-            };
-            validate_required_mcp_server_command(name, server, &bridge, &bridge_args)?;
-        } else {
-            let Some(npx_command) = npx_command else {
-                bail!(
-                    "required MCP server `mcp_servers.playwright` cannot be safely verified: resolved command is missing"
-                );
-            };
-            validate_required_mcp_server_command(
-                name,
-                server,
-                npx_command,
-                &playwright_mcp_args(),
-            )?;
-        }
+    if required_codebase_memory {
+        validate_required_mcp_server(mcp_servers, "codebase-memory-mcp", require_presence, || {
+            codebase_memory_command
+                    .and_then(mcp_jsonl_bridge_command_args)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: Prodex MCP bridge is unavailable"
+                        )
+                    })
+        })?;
+    }
+    if required_playwright {
+        validate_required_mcp_server(mcp_servers, "playwright", require_presence, || {
+            npx_command
+                    .map(|command| (command.to_path_buf(), playwright_mcp_args().to_vec()))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "required MCP server `mcp_servers.playwright` cannot be safely verified: resolved command is missing"
+                        )
+                    })
+        })?;
     }
     Ok(())
+}
+
+fn validate_required_mcp_server(
+    mcp_servers: &toml::Table,
+    name: &str,
+    require_presence: bool,
+    expected_command: impl FnOnce() -> Result<(PathBuf, Vec<String>)>,
+) -> Result<()> {
+    let Some(value) = mcp_servers.get(name) else {
+        if require_presence {
+            bail!("required MCP server `mcp_servers.{name}` is not configured");
+        }
+        return Ok(());
+    };
+    let Some(server) = value.as_table() else {
+        bail!("mcp_servers.{name} must be a TOML table");
+    };
+    validate_required_mcp_server_enabled(name, server)?;
+    let (command, args) = expected_command()?;
+    validate_required_mcp_server_command(name, server, &command, &args)
 }
 
 fn validate_required_mcp_server_enabled(name: &str, server: &toml::Table) -> Result<()> {

@@ -317,6 +317,7 @@ fn concurrent_refresh_leases_keep_single_owner_past_ttl() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
 
+    let _heartbeat_test_lock = lock_heartbeat_test_state();
     const WORKERS: usize = 8;
     let lease_ttl = Duration::from_millis(200);
     let root = temp_dir("refresh-lease-concurrency");

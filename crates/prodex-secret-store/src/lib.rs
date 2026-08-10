@@ -20,5 +20,8 @@ pub use self::refresh_lease::*;
 pub use self::selection::*;
 
 #[cfg(test)]
+pub(crate) use self::refresh_lease::lock_heartbeat_test_state;
+
+#[cfg(test)]
 #[path = "../tests/src/tests.rs"]
 mod tests;

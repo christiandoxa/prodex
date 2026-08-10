@@ -4,8 +4,8 @@ use crate::{
     SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
     SecretStoreErrorStatus, SecretValue, allow_insecure_file_access, auth_json_location,
     auth_json_path, decrypt_private_payload, encrypt_private_payload, ensure_private_directory,
-    plan_refresh_lease_error_response, plan_secret_error_response, read_private_file_bounded,
-    write_private_file_atomic,
+    lock_heartbeat_test_state, plan_refresh_lease_error_response, plan_secret_error_response,
+    read_private_file_bounded, write_private_file_atomic,
 };
 use std::fs;
 use std::path::PathBuf;
