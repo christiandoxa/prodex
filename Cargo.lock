@@ -3095,8 +3095,10 @@ name = "prodex-optional-tools"
 version = "0.404.0"
 dependencies = [
  "anyhow",
+ "libc",
  "prodex-core",
  "prodex-shared-codex-fs",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

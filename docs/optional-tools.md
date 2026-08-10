@@ -90,6 +90,16 @@ Ponytail uses the same manifest and tree-validation contract at
 - tree SHA-256: `727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d`
 
 RTK and Codebase Memory MCP resolve from managed roots first and then `PATH`.
+Codebase Memory MCP must be `0.9.1-rc.1` or newer (or a development build) and
+expose its native `daemon status` contract. Parallel Codex processes retain
+their own lightweight stdio frontends, while the daemon shares indexing jobs,
+watchers, and the graph cache; legacy builds that duplicate heavy per-session
+work fail the health check. Prodex leaves `CBM_CACHE_DIR` unset so parent and
+sub-agent sessions join the canonical account daemon, while an explicit user
+override is inherited unchanged.
+Kiro launches retain that shared server but add `check_index_coverage` to the
+server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
+Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned package to
 pass an offline probe; install the package and browser before launching Super.
 Presidio remains an explicit service selection and is checked by its existing

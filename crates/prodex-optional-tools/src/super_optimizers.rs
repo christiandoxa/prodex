@@ -2,7 +2,6 @@ use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::discovery;
 use crate::fs_ops::{read_text_file_limited, write_text_file};
 use crate::localization::ensure_agents_reference;
 use crate::toml_helpers::ensure_child_table;
@@ -13,8 +12,6 @@ use crate::{
 use crate::{PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
 mod ponytail;
-
-const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     configure_super_optimizer_codex_home_with_presidio(codex_home, false)
@@ -421,14 +418,7 @@ fn configure_super_mcp_servers(
         false,
     )?;
     if let Some((bridge, bridge_args)) = codebase_memory {
-        let env_vars = codebase_memory_mcp_env()?;
-        configure_stdio_mcp_server(
-            &mut table,
-            "codebase-memory-mcp",
-            bridge,
-            &bridge_args,
-            &env_vars,
-        )?;
+        configure_stdio_mcp_server(&mut table, "codebase-memory-mcp", bridge, &bridge_args, &[])?;
     }
     if let Some(command) = npx_command {
         configure_default_playwright_mcp_server(&mut table, command)?;
@@ -535,27 +525,6 @@ fn mcp_servers_table(table: &mut toml::Table) -> Result<&mut toml::Table> {
         Some(toml::Value::Table(table)) => Ok(table),
         _ => bail!("mcp_servers must be a TOML table"),
     }
-}
-
-fn codebase_memory_mcp_env() -> Result<Vec<(&'static str, String)>> {
-    let Some(prodex_home) = env::var_os(PRODEX_HOME_ENV)
-        .map(PathBuf::from)
-        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))
-    else {
-        return Ok(Vec::new());
-    };
-    let cache_dir = prepare_codebase_memory_cache_dir(&prodex_home)?;
-    Ok(vec![("CBM_CACHE_DIR", cache_dir.display().to_string())])
-}
-
-fn prepare_codebase_memory_cache_dir(prodex_home: &Path) -> Result<PathBuf> {
-    let optimizer_state = prodex_home.join("optimizer-state");
-    let codebase_memory = optimizer_state.join("codebase-memory");
-    let cache_dir = codebase_memory.join("cache");
-    for path in [&optimizer_state, &codebase_memory, &cache_dir] {
-        prodex_shared_codex_fs::create_codex_home_if_missing(path)?;
-    }
-    Ok(cache_dir)
 }
 
 fn find_prodex_binary() -> Option<PathBuf> {
