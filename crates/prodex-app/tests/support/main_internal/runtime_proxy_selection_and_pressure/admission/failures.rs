@@ -1,9 +1,10 @@
 use super::{
     Duration, ResponseProfileBinding, RuntimeProxyBackend, RuntimeProxyBackendFaultRoute,
     RuntimeProxyBackendFaultScript, RuntimeProxyBackendFaultStep, RuntimeProxyProfileHarness,
-    RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest, TestEnvVarGuard,
+    RuntimeProxyMarkerGuard, RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest,
+    TestEnvVarGuard,
     proxy_runtime_standard_request, quota_window_ready, read_runtime_proxy_test_log,
-    runtime_usage_snapshot,
+    register_runtime_proxy_persistence_mode, runtime_usage_snapshot,
     tiny_http_response_status_and_body,
 };
 use chrono::Local;
@@ -86,6 +87,8 @@ fn compact_transport_timeout_rotates_fresh_request_to_next_profile_once() {
         ]));
     let harness = two_ready_profiles(&backend);
     let shared = harness.shared();
+    let _marker_guard = RuntimeProxyMarkerGuard::new(&shared.log_path);
+    register_runtime_proxy_persistence_mode(&shared.log_path, false);
 
     let response = proxy_runtime_standard_request(45, &compact_request(None), shared)
         .expect("fresh compact transport failure should rotate before returning");
