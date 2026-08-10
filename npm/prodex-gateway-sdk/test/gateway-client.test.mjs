@@ -369,6 +369,32 @@ test("gateway JSON errors throw ProdexGatewayError", async () => {
   );
 });
 
+test("requests have a defaultable deadline", async () => {
+  const client = new ProdexGatewayClient({
+    timeoutMs: 20,
+    fetch: async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    }),
+  });
+
+  await assert.rejects(
+    () => client.listKeys(),
+    (error) => error instanceof ProdexGatewayError && error.code === "request_timeout",
+  );
+});
+
+test("non-stream responses are size bounded", async () => {
+  const client = new ProdexGatewayClient({
+    maxResponseBytes: 4,
+    fetch: async () => textResponse("12345"),
+  });
+
+  await assert.rejects(
+    () => client.metrics(),
+    (error) => error instanceof ProdexGatewayError && error.code === "response_too_large",
+  );
+});
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
