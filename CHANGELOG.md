@@ -8,6 +8,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Restore quota rotation and speed releases (`4d17333`)
 
+### Docs
+
+- Include fuzz lock in manual releases (`93f5c30`)
+
 ## 0.403.0 - 2026-08-10
 
 ### CLI
