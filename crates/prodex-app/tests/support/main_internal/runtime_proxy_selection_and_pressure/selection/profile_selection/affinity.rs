@@ -429,6 +429,30 @@ fn quota_blocked_affinity_release_blocks_session_scoped_empty_inputs() {
 }
 
 #[test]
+fn session_only_affinity_rotates_on_quota_outside_compact() {
+    for (route_kind, hard) in [
+        (RuntimeRouteKind::Responses, false),
+        (RuntimeRouteKind::Websocket, false),
+        (RuntimeRouteKind::Compact, true),
+    ] {
+        let affinity = RuntimeCandidateAffinity::new(
+            route_kind,
+            "main",
+            None,
+            None,
+            None,
+            Some("main"),
+            false,
+        );
+        assert_eq!(runtime_candidate_has_hard_affinity(affinity), hard);
+        assert_eq!(
+            runtime_quota_blocked_affinity_is_releasable(affinity, false, None),
+            !hard,
+        );
+    }
+}
+
+#[test]
 fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
     let temp_dir = TestDir::isolated();
     clear_runtime_prompt_cache_profile_bindings();
