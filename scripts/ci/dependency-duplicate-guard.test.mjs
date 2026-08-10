@@ -13,7 +13,19 @@ import {
 
 const SCRIPT_PATH = new URL("./dependency-duplicate-guard.mjs", import.meta.url).pathname;
 
-const CURRENT_TREE_OUTPUT = `block-buffer v0.10.4
+const CURRENT_TREE_OUTPUT = `aes v0.8.4
+    secret-service v5.1.0
+
+aes v0.9.2
+    aes-gcm-siv v0.12.0
+
+base64 v0.22.1
+    tiktoken-rs v0.12.0
+
+base64 v0.23.1
+    prodex-profile-export v0.402.0
+
+block-buffer v0.10.4
     digest v0.10.7
 
 block-buffer v0.12.0
@@ -43,6 +55,12 @@ cfg_aliases v0.1.1
 cfg_aliases v0.2.1
     nix v0.31.3
 
+cipher v0.4.4
+    secret-service v5.1.0
+
+cipher v0.5.2
+    aes-gcm-siv v0.12.0
+
 digest v0.10.7 (*)
 
 digest v0.11.3 (*)
@@ -70,6 +88,12 @@ hmac v0.12.1
 
 hmac v0.13.0
     pbkdf2 v0.13.0
+
+inout v0.1.4
+    cipher v0.4.4
+
+inout v0.2.2
+    cipher v0.5.2
 
 itertools v0.13.0
     criterion v0.8.2
@@ -128,8 +152,11 @@ test("default budget accepts current duplicate families", () => {
   assert.deepEqual(
     duplicateFamilies.map((entry) => [entry.name, entry.versions.length]),
     [
+      ["aes", 2],
+      ["base64", 2],
       ["block-buffer", 2],
       ["cfg_aliases", 2],
+      ["cipher", 2],
       ["const-oid", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
@@ -138,6 +165,7 @@ test("default budget accepts current duplicate families", () => {
       ["getrandom", 2],
       ["hashbrown", 2],
       ["hmac", 2],
+      ["inout", 2],
       ["itertools", 2],
       ["nix", 2],
       ["rand_core", 2],

@@ -6,6 +6,16 @@ import { repoRoot } from "../npm/common.mjs";
 
 export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
   {
+    name: "aes",
+    maxVersions: 2,
+    reason: "Secret Service still uses aes 0.8 while aes-gcm-siv 0.12 uses aes 0.9.",
+  },
+  {
+    name: "base64",
+    maxVersions: 2,
+    reason: "reqwest/tiktoken still use base64 0.22 while current Prodex dependencies use 0.23.",
+  },
+  {
     name: "block-buffer",
     maxVersions: 2,
     reason: "digest 0.10 and 0.11 are both present through sha1/sha2-era crypto crates.",
@@ -31,6 +41,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "Codex-compatible os_info metadata pulls nix 0.31 build tooling while portable PTY dependencies still use cfg_aliases 0.1.",
   },
   {
+    name: "cipher",
+    maxVersions: 2,
+    reason: "Secret Service still uses cipher 0.4 while aes-gcm-siv 0.12 uses cipher 0.5.",
+  },
+  {
     name: "digest",
     maxVersions: 2,
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
@@ -54,6 +69,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     name: "hmac",
     maxVersions: 2,
     reason: "the native Secret Service keyring backend and current export/PostgreSQL crypto resolve hmac 0.12 and 0.13.",
+  },
+  {
+    name: "inout",
+    maxVersions: 2,
+    reason: "The Secret Service and aes-gcm-siv cipher lines currently use inout 0.1 and 0.2.",
   },
   {
     name: "itertools",
