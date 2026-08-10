@@ -2,18 +2,6 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.406.0 - 2026-08-10
-
-- No grouped changes.
-
-## 0.405.0 - 2026-08-10
-
-- No grouped changes.
-
-## 0.404.0 - 2026-08-10
-
-- No grouped changes.
-
 ## 0.403.0 - 2026-08-10
 
 ### CLI
@@ -85,3 +73,24 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Set interactive window title (`93888f4`)
+
+## 0.394.0 - 2026-08-08
+
+### CLI
+
+- Preserve quota snapshots and aliases (`b5b6325`)
+
+## 0.393.0 - 2026-08-08
+
+### Runtime
+
+- Harden websocket and sub-agent execution (`3f699c0`)
+
+## 0.392.0 - 2026-08-07
+
+### Runtime
+
+- Simplify websocket session admission (`24b51e2`)
+- Preserve local saturation and child cleanup (`e956baf`)
+- Satisfy clippy argument lint (`38abfdc`)
+- Bound fresh profile admission and preserve Kiro models (`299a462`)
