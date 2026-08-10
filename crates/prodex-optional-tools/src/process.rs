@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
+const PROBE_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Debug)]
 pub(crate) struct ProbeOutput {
@@ -44,6 +45,11 @@ fn probe_command_inner(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     if sanitize_environment {
         command.env_clear();
         for key in [
@@ -87,10 +93,8 @@ fn probe_command_inner(
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
+            terminate_probe_process_tree(&mut child);
             let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
             bail!(
                 "{} health check timed out after {timeout:?}",
                 program.display()
@@ -98,6 +102,22 @@ fn probe_command_inner(
         }
         thread::sleep(Duration::from_millis(10));
     };
+    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
+        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
+        while !probe_readers_finished(&stdout_reader, &stderr_reader) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
+        terminate_probe_process_tree(&mut child);
+        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
+        while !probe_readers_finished(&stdout_reader, &stderr_reader) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
+        bail!("{} health check output did not close", program.display());
+    }
     let (stdout, stdout_truncated) = stdout_reader
         .join()
         .map_err(|_| anyhow::anyhow!("{} stdout reader panicked", program.display()))??;
@@ -110,6 +130,26 @@ fn probe_command_inner(
         stderr,
         truncated: stdout_truncated || stderr_truncated,
     })
+}
+
+fn probe_readers_finished<T, U>(
+    stdout: &thread::JoinHandle<T>,
+    stderr: &thread::JoinHandle<U>,
+) -> bool {
+    stdout.is_finished() && stderr.is_finished()
+}
+
+fn terminate_probe_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
+    let _ = child.kill();
 }
 
 fn read_bounded(mut reader: impl std::io::Read) -> std::io::Result<(Vec<u8>, bool)> {
@@ -189,13 +229,30 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn probe_times_out() {
+        let started = Instant::now();
         let error = probe_command(
             Path::new("/bin/sh"),
-            &["-c", "sleep 2"],
+            &["-c", "sleep 5"],
             Duration::from_millis(20),
         )
         .unwrap_err();
         assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_does_not_wait_for_inherited_output_pipes() {
+        let started = Instant::now();
+        let output = probe_command(
+            Path::new("/bin/sh"),
+            &["-c", "(sleep 5) & exit 0"],
+            Duration::from_secs(2),
+        )
+        .unwrap();
+
+        assert!(output.status.success());
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[cfg(unix)]

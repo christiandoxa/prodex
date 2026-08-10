@@ -232,10 +232,20 @@ prodex capability super-doctor
 Codebase Memory MCP:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --skip-config
-codebase-memory-mcp --help
+curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.9.1-rc.1/install.sh \
+  | CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.9.1-rc.1 \
+    bash -s -- --skip-config
+codebase-memory-mcp daemon status || true
 prodex capability super-doctor
 ```
+
+Prodex accepts daemon-capable Codebase Memory MCP builds (`0.9.1-rc.1` or newer, plus development
+builds) so parallel Codex sessions share one coordination daemon, indexing jobs, watchers, and cache.
+A separate lightweight stdio frontend per Codex process is expected; `daemon status` exits nonzero
+with `daemon: not running` before the first session starts it. Legacy builds that would duplicate
+heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` unset so parent and
+sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
+unchanged and must stay consistent across every CBM client.
 
 Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
 
@@ -780,7 +790,7 @@ prodex s --provider kiro --model claude-sonnet-4.5
 prodex super --cli kiro --profile kiro-main
 ```
 
-`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local text-only Kiro ACP adapter; ACP owns its tool inventory, while Prodex forwards the prompt, model, and supported reasoning effort and rejects generation controls that ACP cannot enforce. The Anthropic Messages compatibility route accepts its required token-limit field but cannot enforce that limit through ACP. `--cli kiro` launches the native Kiro CLI from the imported snapshot and forces its HTTP(S) transport through an authenticated loopback Prodex CONNECT tunnel; `--no-proxy` disables only an outer system proxy. Kiro's proprietary service payload remains end-to-end TLS encrypted, so native Kiro does not gain Smart Context, Presidio, response translation, or account rotation. Native Kiro rejects `--presidio` instead of silently ignoring it. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
+`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local text-only Kiro ACP adapter; ACP owns its tool inventory, while Prodex forwards the prompt, model, and supported reasoning effort and rejects generation controls that ACP cannot enforce. Before Kiro starts, Prodex preserves the shared Codebase Memory MCP server but disables its `check_index_coverage` tool in Kiro's MCP config because that tool's top-level JSON Schema composition is rejected by Kiro/Bedrock; the remaining Codebase Memory tools and canonical account daemon stay shared. The Anthropic Messages compatibility route accepts its required token-limit field but cannot enforce that limit through ACP. `--cli kiro` launches the native Kiro CLI from the imported snapshot and forces its HTTP(S) transport through an authenticated loopback Prodex CONNECT tunnel; `--no-proxy` disables only an outer system proxy. Kiro's proprietary service payload remains end-to-end TLS encrypted, so native Kiro does not gain Smart Context, Presidio, response translation, or account rotation. Native Kiro rejects `--presidio` instead of silently ignoring it. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
 
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 

@@ -296,12 +296,15 @@ function installExternalCodexWithNpm() {
   const result = spawnSync(npmCommand.command, ["install", "-g", CODEX_COMPATIBILITY.packageSpecifier], {
     stdio: "inherit",
     env: process.env,
+    timeout: 300_000,
   });
 
   if (result.error) {
     return {
       ok: false,
-      reason: `npm install failed to start: ${result.error.message}`,
+      reason: result.error.code === "ETIMEDOUT"
+        ? "npm install timed out after 5 minutes"
+        : `npm install failed to start: ${result.error.message}`,
     };
   }
   if (result.status !== 0) {
