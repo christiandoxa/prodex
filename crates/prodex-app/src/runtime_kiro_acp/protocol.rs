@@ -19,7 +19,10 @@ pub(crate) struct RuntimeKiroAcpEnvelope {
 
 impl RuntimeKiroAcpEnvelope {
     pub(crate) fn numeric_id(&self) -> Option<u64> {
-        self.id.as_ref().and_then(Value::as_u64)
+        self.id.as_ref().and_then(|id| {
+            id.as_u64()
+                .or_else(|| id.as_str().and_then(|id| id.parse().ok()))
+        })
     }
 
     pub(crate) fn parse(line: &str) -> Result<Self> {

@@ -328,14 +328,34 @@ fn resolve_copilot_account_token_from_config(
     login: &str,
 ) -> Result<String> {
     let account_key = copilot_account_key(host, login);
-    copilot_token_from_config(config, host, login)
-        .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
-        .or_else(|| read_copilot_libsecret_token(&account_key).ok().flatten())
-        .or_else(|| read_copilot_sdk_token(host, login).ok().flatten())
-        .context(format!(
-            "failed to resolve the stored Copilot token for {} from config or keychain",
-            account_key
-        ))
+    if let Some(token) = copilot_token_from_config(config, host, login) {
+        return Ok(token);
+    }
+    let mut failures = Vec::new();
+    for (backend, result) in [
+        ("keychain", read_copilot_keychain_token(&account_key)),
+        ("libsecret", read_copilot_libsecret_token(&account_key)),
+        ("SDK", read_copilot_sdk_token(host, login)),
+    ] {
+        match result {
+            Ok(Some(token)) => return Ok(token),
+            Ok(None) => {}
+            Err(error) => failures.push(format!(
+                "{backend}: {}",
+                redaction::redaction_redact_secret_like_text(&format!("{error:#}"))
+            )),
+        }
+    }
+    let detail = if failures.is_empty() {
+        String::new()
+    } else {
+        format!("; credential backend failures: {}", failures.join("; "))
+    };
+    bail!(
+        "failed to resolve the stored Copilot token for {} from config or keychain{}",
+        account_key,
+        detail
+    )
 }
 
 pub(crate) fn resolve_copilot_account_token(host: &str, login: &str) -> Result<String> {

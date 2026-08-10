@@ -57,6 +57,11 @@ third = json.loads(sys.stdin.readline())
 assert third["method"] == "session/prompt"
 assert third["params"]["sessionId"] == "session-1"
 assert third["params"]["prompt"][0]["text"] == "hello from prodex"
+if os.environ.get("SLOW_ACTIVITY"):
+    import time
+    for index in range(7):
+        time.sleep(0.1)
+        print(json.dumps({"jsonrpc":"2.0","method":"_kiro.dev/metadata","params":{"sessionId":"session-1","sequence":index}}), flush=True)
 if os.environ.get("SERVER_REQUEST"):
     print(json.dumps({"jsonrpc":"2.0","id":9,"method":"fs/read_text_file","params":{"path":"private.txt"}}), flush=True)
     rejection = json.loads(sys.stdin.readline())

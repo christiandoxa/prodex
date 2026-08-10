@@ -18,24 +18,14 @@ pub(super) fn runtime_kiro_streaming_command(
     acp_command
 }
 
-#[cfg(unix)]
 pub(super) fn runtime_kiro_configure_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    command.process_group(0);
+    crate::configure_child_process_group(command, runtime_kiro_owns_private_process_group());
 }
 
-#[cfg(not(unix))]
-pub(super) fn runtime_kiro_configure_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-pub(super) fn runtime_kiro_kill_process_group(child: &Child) {
-    let pid = child.id() as libc::pid_t;
-    if pid > 0 {
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
-    }
+pub(super) fn runtime_kiro_terminate_child(child: &mut Child) {
+    let _ = crate::terminate_child_process_tree(child, runtime_kiro_owns_private_process_group());
 }
 
-#[cfg(not(unix))]
-pub(super) fn runtime_kiro_kill_process_group(_child: &Child) {}
+fn runtime_kiro_owns_private_process_group() -> bool {
+    std::env::var_os(crate::SUB_AGENT_RECURSION_MARKER).is_none()
+}

@@ -3,8 +3,8 @@ mod request_validation;
 mod response;
 mod stream;
 use self::process::{
-    runtime_kiro_configure_process_group, runtime_kiro_kill_process_group,
-    runtime_kiro_streaming_command,
+    runtime_kiro_configure_process_group, runtime_kiro_streaming_command,
+    runtime_kiro_terminate_child,
 };
 use self::response::{runtime_kiro_anthropic_message_parts_from_response, runtime_kiro_json_parts};
 use self::stream::{
@@ -73,11 +73,10 @@ use std::io::{self, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
-
-const RUNTIME_KIRO_ACP_STREAM_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn runtime_kiro_rewrite_options() -> RuntimeDeepSeekRewriteOptions {
     RuntimeDeepSeekRewriteOptions {
@@ -625,7 +624,9 @@ fn runtime_kiro_streaming_reader(
             .stream_idle_timeout_ms,
     );
     let (sender, receiver) = mpsc::sync_channel(16);
+    let cancelled = Arc::new(AtomicBool::new(false));
     let error_sender = sender.clone();
+    let worker_cancelled = Arc::clone(&cancelled);
     schedule_runtime_kiro_blocking_work(&async_runtime, move || {
         let result = runtime_kiro_streaming_worker(
             sender,
@@ -642,6 +643,7 @@ fn runtime_kiro_streaming_reader(
                 chat_completions_route,
                 conversations,
                 idle_timeout,
+                cancelled: worker_cancelled,
             },
         );
         if let Err(err) = result {
@@ -655,6 +657,7 @@ fn runtime_kiro_streaming_reader(
         pending: Cursor::new(Vec::new()),
         finished: false,
         idle_timeout,
+        cancelled,
     })
 }
 
@@ -671,6 +674,7 @@ struct RuntimeKiroStreamingWorkerContext {
     chat_completions_route: bool,
     conversations: RuntimeDeepSeekConversationStore,
     idle_timeout: Duration,
+    cancelled: Arc<AtomicBool>,
 }
 
 fn runtime_kiro_streaming_worker(
@@ -690,6 +694,7 @@ fn runtime_kiro_streaming_worker(
         chat_completions_route,
         conversations,
         idle_timeout,
+        cancelled,
     } = context;
     let mut acp_command = runtime_kiro_streaming_command(
         &command,
@@ -718,11 +723,11 @@ fn runtime_kiro_streaming_worker(
             chat_completions_route,
             conversations,
             idle_timeout,
+            cancelled,
         },
         sender,
     );
-    runtime_kiro_kill_process_group(&child);
-    let _ = child.kill();
+    runtime_kiro_terminate_child(&mut child);
     let _ = child.wait();
     result
 }
@@ -737,6 +742,7 @@ struct RuntimeKiroStreamingContext<'a> {
     chat_completions_route: bool,
     conversations: RuntimeDeepSeekConversationStore,
     idle_timeout: Duration,
+    cancelled: Arc<AtomicBool>,
 }
 
 fn runtime_kiro_streaming_child(
@@ -754,6 +760,7 @@ fn runtime_kiro_streaming_child(
         chat_completions_route,
         conversations,
         idle_timeout,
+        cancelled,
     } = context;
     let mut stdin = BufWriter::new(
         child
@@ -786,6 +793,7 @@ fn runtime_kiro_streaming_child(
         .context("failed to capture Kiro ACP stdout")?;
     let lines = runtime_kiro_acp_line_receiver(stdout);
     let mut state = RuntimeKiroStreamingState::new(request_id, requested_model.as_deref());
+    state.cancelled = Arc::clone(&cancelled);
     runtime_kiro_receive_stream(
         &sender,
         &mut stdin,
@@ -794,7 +802,6 @@ fn runtime_kiro_streaming_child(
         &mut state,
         chat_completions_route,
         idle_timeout,
-        RUNTIME_KIRO_ACP_STREAM_TOTAL_TIMEOUT,
     )?;
     drop(stdin);
     runtime_kiro_finish_stream(
@@ -809,6 +816,7 @@ fn runtime_kiro_streaming_child(
             chat_completions_route,
             conversations,
             idle_timeout,
+            cancelled,
         },
         state,
     )
@@ -830,6 +838,7 @@ struct RuntimeKiroStreamingState {
     chat_delta_started: bool,
     chat_completion_id: String,
     stream_model: String,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl RuntimeKiroStreamingState {
@@ -854,11 +863,11 @@ impl RuntimeKiroStreamingState {
                 .filter(|model| !model.is_empty())
                 .unwrap_or("kiro-cli")
                 .to_string(),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_receive_stream(
     sender: &SyncSender<RuntimeKiroStreamingChunk>,
     stdin: &mut impl Write,
@@ -867,24 +876,9 @@ fn runtime_kiro_receive_stream(
     state: &mut RuntimeKiroStreamingState,
     chat_completions_route: bool,
     idle_timeout: Duration,
-    total_timeout: Duration,
 ) -> Result<()> {
-    let deadline = Instant::now() + total_timeout;
     loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            anyhow::bail!(runtime_kiro_stream_total_timeout_message(
-                state.prompt_sent,
-                total_timeout,
-            ));
-        };
-        let total_deadline_is_next = remaining <= idle_timeout;
-        let Some(line) = runtime_kiro_next_stream_line(
-            &lines,
-            idle_timeout.min(remaining),
-            total_deadline_is_next,
-            state.prompt_sent,
-            total_timeout,
-        )?
+        let Some(line) = runtime_kiro_next_stream_line(&lines, idle_timeout, &state.cancelled)?
         else {
             break;
         };
@@ -909,41 +903,24 @@ fn runtime_kiro_receive_stream(
 fn runtime_kiro_next_stream_line(
     lines: &Receiver<io::Result<String>>,
     timeout: Duration,
-    total_deadline_is_next: bool,
-    visible_output: bool,
-    total_timeout: Duration,
+    cancelled: &AtomicBool,
 ) -> Result<Option<String>> {
-    match lines.recv_timeout(timeout) {
-        Ok(Ok(line)) => Ok(Some(line)),
-        Ok(Err(error)) => Err(error).context("failed to read Kiro ACP stdout"),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            if total_deadline_is_next {
-                anyhow::bail!(runtime_kiro_stream_total_timeout_message(
-                    visible_output,
-                    total_timeout,
-                ));
-            }
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if cancelled.load(Ordering::Acquire) {
+            anyhow::bail!("Kiro ACP stream consumer disconnected");
+        }
+        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
             anyhow::bail!(
                 "Kiro ACP stream timed out waiting for output; no reconnect was attempted"
-            )
+            );
+        };
+        match lines.recv_timeout(remaining.min(Duration::from_millis(50))) {
+            Ok(Ok(line)) => return Ok(Some(line)),
+            Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(None),
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
-    }
-}
-
-fn runtime_kiro_stream_total_timeout_message(
-    visible_output: bool,
-    total_timeout: Duration,
-) -> String {
-    let seconds = total_timeout.as_secs_f64();
-    if visible_output {
-        format!(
-            "Kiro ACP stream exceeded its {seconds:.3}-second total limit after output began; Prodex did not reconnect or replay committed output"
-        )
-    } else {
-        format!(
-            "Kiro ACP stream exceeded its {seconds:.3}-second total limit before output; retry the request after checking the Kiro agent"
-        )
     }
 }
 
@@ -1080,6 +1057,13 @@ struct RuntimeKiroStreamingReader {
     pending: Cursor<Vec<u8>>,
     finished: bool,
     idle_timeout: Duration,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Drop for RuntimeKiroStreamingReader {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
 }
 
 impl Read for RuntimeKiroStreamingReader {

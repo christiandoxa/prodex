@@ -13,7 +13,7 @@ use command::run_kiro_metadata_command;
 #[path = "kiro_environment.rs"]
 mod environment;
 use environment::discover_kiro_database_path;
-pub(crate) use environment::kiro_cli_data_dir_env;
+pub(crate) use environment::{ensure_kiro_codebase_memory_compatibility, kiro_cli_data_dir_env};
 #[path = "kiro_store.rs"]
 mod store;
 pub(crate) use store::prepare_kiro_cli_data_dir;

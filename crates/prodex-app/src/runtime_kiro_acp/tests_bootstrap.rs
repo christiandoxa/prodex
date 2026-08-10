@@ -98,6 +98,12 @@ fn kiro_acp_accepts_string_request_ids() {
     .expect("string request id should parse");
     assert_eq!(envelope.id, Some(json!("permission-1")));
     assert_eq!(envelope.numeric_id(), None);
+
+    let numeric = RuntimeKiroAcpEnvelope::parse(
+        r#"{"jsonrpc":"2.0","id":"2","result":{"stopReason":"end_turn"}}"#,
+    )
+    .expect("numeric string response id should parse");
+    assert_eq!(numeric.numeric_id(), Some(2));
 }
 
 #[test]
@@ -337,6 +343,28 @@ fn kiro_acp_prompt_turn_times_out_and_terminates_the_agent() {
 
     assert!(error.to_string().contains("timed out"));
     assert!(started.elapsed() < Duration::from_secs(2));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn kiro_acp_prompt_turn_activity_resets_idle_timeout() {
+    let root = temp_dir("prompt-turn-active");
+    let fake_agent = write_fake_kiro_prompt_agent(&root);
+    let started = Instant::now();
+
+    let result = runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
+        fake_agent.as_os_str(),
+        &root,
+        &[(OsString::from("SLOW_ACTIVITY"), OsString::from("1"))],
+        None,
+        None,
+        "hello from prodex",
+        Duration::from_millis(500),
+    )
+    .expect("active prompt turn should not hit an absolute deadline");
+
+    assert_eq!(result.prompt_response.id, Some(json!(2)));
+    assert!(started.elapsed() > Duration::from_millis(500));
     let _ = fs::remove_dir_all(root);
 }
 
