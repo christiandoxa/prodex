@@ -237,7 +237,7 @@ async function assertVersionSynced(fixtureRoot, version) {
   assert(new RegExp(`^## ${version} - `, "m").test(changelog), `CHANGELOG.md missing ${version} release heading`);
 }
 
-async function testCutsReleaseAndIsIdempotent() {
+async function testCutsReleaseWithoutTagAndIsIdempotent() {
   const fixtureRoot = await setupFixtureRepo();
   try {
     const first = await releaseCut(fixtureRoot, "0.2.0");
@@ -247,14 +247,14 @@ async function testCutsReleaseAndIsIdempotent() {
 
     const head = await git(fixtureRoot, ["rev-parse", "HEAD"]);
     const subject = await git(fixtureRoot, ["log", "-1", "--format=%s", "HEAD"]);
-    const tagTarget = await git(fixtureRoot, ["rev-list", "-n", "1", "0.2.0"]);
+    const tagList = await git(fixtureRoot, ["tag", "--list", "0.2.0"]);
     const commitCount = await git(fixtureRoot, ["rev-list", "--count", "HEAD"]);
     const releaseFiles = (await git(fixtureRoot, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]))
       .split(/\r?\n/)
       .filter(Boolean);
 
     assert(subject === "chore(release): release 0.2.0", `unexpected release subject: ${subject}`);
-    assert(tagTarget === head, "release tag does not point at HEAD");
+    assert(tagList === "", "release cut created a tag instead of leaving it to standalone release");
     assert(releaseFiles.length > 0, "release cut created an empty commit");
     for (const expectedPath of ["Cargo.toml", "CHANGELOG.md", "README.md", "QUICKSTART.md", "npm/prodex/package.json"]) {
       assert(releaseFiles.includes(expectedPath), `release commit missing ${expectedPath}`);
@@ -262,25 +262,10 @@ async function testCutsReleaseAndIsIdempotent() {
 
     const second = await releaseCut(fixtureRoot, "0.2.0");
     assertExit(second, 0, "idempotent release cut");
-    assert(second.stdout.includes("already tagged at HEAD"), "idempotent release did not report existing tag at HEAD");
+    assert(second.stdout.includes("already committed at HEAD"), "idempotent release did not report existing commit");
     assert((await git(fixtureRoot, ["rev-parse", "HEAD"])) === head, "idempotent release changed HEAD");
     assert((await git(fixtureRoot, ["rev-list", "--count", "HEAD"])) === commitCount, "idempotent release added a commit");
     await assertClean(fixtureRoot, "idempotent release cut");
-  } finally {
-    await cleanupFixture(fixtureRoot);
-  }
-}
-
-async function testRejectsDuplicateTagOnDifferentCommit() {
-  const fixtureRoot = await setupFixtureRepo();
-  try {
-    await git(fixtureRoot, ["tag", "0.2.0"]);
-    const before = await git(fixtureRoot, ["rev-parse", "HEAD"]);
-    const result = await releaseCut(fixtureRoot, "0.2.0");
-    assertExit(result, 1, "duplicate tag release cut");
-    assert(result.stderr.includes("tag 0.2.0 already exists"), "duplicate tag error missing expected text");
-    assert((await git(fixtureRoot, ["rev-parse", "HEAD"])) === before, "duplicate tag failure changed HEAD");
-    await assertClean(fixtureRoot, "duplicate tag release cut");
   } finally {
     await cleanupFixture(fixtureRoot);
   }
@@ -331,8 +316,7 @@ async function cleanupFixture(fixtureRoot) {
 }
 
 const tests = [
-  ["cuts release and is idempotent", testCutsReleaseAndIsIdempotent],
-  ["rejects duplicate tag on different commit", testRejectsDuplicateTagOnDifferentCommit],
+  ["cuts release without tag and is idempotent", testCutsReleaseWithoutTagAndIsIdempotent],
   ["rejects dirty worktree before mutation", testRejectsDirtyWorktreeBeforeMutation],
   ["rejects ambiguous existing version", testRejectsAmbiguousExistingVersion],
 ];

@@ -312,7 +312,16 @@ export function validateReleaseContainerPublication(contents) {
     return [".github/workflows/standalone-release.yml: missing verify, build, container, or release publish job"];
   }
   const violations = [];
+  for (const marker of ["group: standalone-release", "cancel-in-progress: false"]) {
+    if (!contents.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release concurrency missing ${marker}`);
+    }
+  }
+  if (/\n\s+push:\s*\n\s+tags:/u.test(contents)) {
+    violations.push(".github/workflows/standalone-release.yml: release tags must be workflow-created");
+  }
   for (const marker of [
+    'if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]',
     "git fetch origin --tags --force",
     'release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"',
     "release tag ${version} targets ${release_tag_sha}, not ${target_sha}",
@@ -357,6 +366,8 @@ export function validateReleaseContainerPublication(contents) {
     "- sync-release-docs",
     "name: kubernetes-manifest",
     "cp artifacts/kubernetes-manifest/prodex-* release-assets/",
+    'git tag "${version}" "${TARGET_SHA}"',
+    'git push origin "refs/tags/${version}"',
   ]) {
     if (!release.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release publication missing ${marker}`);

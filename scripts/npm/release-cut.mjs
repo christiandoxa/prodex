@@ -17,7 +17,6 @@ function parseArgs(argv) {
   const args = {
     commit: true,
     dryRun: false,
-    tag: true,
     verify: true,
   };
 
@@ -34,11 +33,9 @@ function parseArgs(argv) {
     }
     if (value === "--no-commit") {
       args.commit = false;
-      args.tag = false;
       continue;
     }
     if (value === "--no-tag") {
-      args.tag = false;
       continue;
     }
     if (value === "--no-verify") {
@@ -74,7 +71,7 @@ function requiredValue(value, name) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: npm run release:cut -- --version <semver> [--dry-run] [--no-commit] [--no-tag] [--no-verify]",
+      "Usage: npm run release:cut -- --version <semver> [--dry-run] [--no-commit] [--no-verify]",
       "",
       "Cuts a deterministic release in one command. Prefer npm run release:run for normal releases.",
       "",
@@ -86,7 +83,7 @@ function printHelp() {
       "  - render CHANGELOG.md as a final release section",
       "  - run release metadata guards",
       "  - create chore(release): release <version>",
-      "  - tag the release with the plain <version> tag",
+      "  - leave tag creation to the standalone release workflow",
       "",
       "Use --dry-run to print the plan without mutating files.",
     ].join("\n") + "\n",
@@ -174,14 +171,6 @@ async function assertCleanWorktree() {
   }
 }
 
-async function tagTarget(tag) {
-  try {
-    return await gitOutput(["rev-list", "-n", "1", tag]);
-  } catch {
-    return null;
-  }
-}
-
 async function pathExists(relativePath) {
   try {
     await fs.access(path.join(repoRoot, relativePath));
@@ -199,10 +188,6 @@ async function existingReleaseCommitPaths() {
     }
   }
   return paths;
-}
-
-async function headRev() {
-  return gitOutput(["rev-parse", "HEAD"]);
 }
 
 async function headSubject() {
@@ -277,29 +262,11 @@ async function runReleaseMetadataGuards(version) {
   ]);
 }
 
-async function tagRelease(version, dryRun) {
-  const tag = version;
-  const existingTagTarget = await tagTarget(tag);
-  const head = await headRev();
-  if (existingTagTarget) {
-    if (existingTagTarget !== head) {
-      throw new Error(`tag ${tag} already exists at ${existingTagTarget}, not HEAD ${head}`);
-    }
-    process.stdout.write(`release tag ${tag}: already at HEAD\n`);
-    return;
-  }
-  await git(["tag", tag], { dryRun });
-}
-
 async function alreadyCut(version) {
   if ((await readCargoVersion()) !== version) {
     return false;
   }
-  const target = await tagTarget(version);
-  if (!target) {
-    return false;
-  }
-  return target === (await headRev());
+  return (await headSubject()) === releaseSubject(version);
 }
 
 async function releaseCut(args) {
@@ -309,21 +276,17 @@ async function releaseCut(args) {
     process.stdout.write(`dry-run: release-cut ${version}\n`);
     process.stdout.write("dry-run: would require clean worktree\n");
     process.stdout.write("dry-run: would bump Cargo/npm/docs metadata and regenerate changelog\n");
-    process.stdout.write("dry-run: would run release guards, commit, and tag unless disabled\n");
+    process.stdout.write("dry-run: would run release guards and commit; standalone release creates the tag\n");
     return;
   }
 
   if (await alreadyCut(version)) {
-    process.stdout.write(`release-cut: ${version} already tagged at HEAD\n`);
+    process.stdout.write(`release-cut: ${version} already committed at HEAD\n`);
     return;
   }
 
   await assertCleanWorktree();
   const currentVersion = await readCargoVersion();
-  const tag = await tagTarget(version);
-  if (tag) {
-    throw new Error(`tag ${version} already exists at ${tag}`);
-  }
 
   if (currentVersion !== version) {
     await setCargoPackageVersion(version);
@@ -353,9 +316,6 @@ async function releaseCut(args) {
 
   await git(["add", "--", ...(await existingReleaseCommitPaths())]);
   if (!(await hasStagedDiff())) {
-    if (args.tag) {
-      await tagRelease(version, args.dryRun);
-    }
     process.stdout.write(`release-cut: no metadata diff for ${version}\n`);
     return;
   }
@@ -379,15 +339,6 @@ async function releaseCut(args) {
     return;
   }
 
-  if (args.tag) {
-    await tagRelease(version, args.dryRun);
-    if (args.verify) {
-      await runNodeScript("release-tag-changelog-guard", "scripts/ci/release-tag-changelog-guard.mjs", [
-        "--rev",
-        "HEAD",
-      ]);
-    }
-  }
 }
 
 async function main() {
