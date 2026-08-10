@@ -2,11 +2,15 @@ export interface ProdexGatewayClientOptions {
   baseUrl?: string;
   token?: string;
   fetch?: typeof fetch;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
 }
 
 export interface ProdexGatewayRequestOptions {
   signal?: AbortSignal;
   headers?: HeadersInit;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
 }
 
 export interface ProdexGatewayResponseOptions extends ProdexGatewayRequestOptions {

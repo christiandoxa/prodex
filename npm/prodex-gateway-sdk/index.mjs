@@ -1,3 +1,6 @@
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
 export class ProdexGatewayError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -13,6 +16,11 @@ export class ProdexGatewayClient {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "http://127.0.0.1:4000");
     this.token = options.token ?? null;
     this.fetch = options.fetch ?? globalThis.fetch;
+    this.timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
+    this.maxResponseBytes = positiveInteger(
+      options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+      "maxResponseBytes",
+    );
     if (typeof this.fetch !== "function") {
       throw new TypeError("ProdexGatewayClient requires fetch; pass options.fetch on this runtime");
     }
@@ -155,11 +163,20 @@ export class ProdexGatewayClient {
     if (options.accept && !headers.has("accept")) {
       headers.set("accept", options.accept);
     }
+    const timeoutMs = positiveInteger(options.timeoutMs ?? this.timeoutMs, "timeoutMs");
+    const maxResponseBytes = positiveInteger(
+      options.maxResponseBytes ?? this.maxResponseBytes,
+      "maxResponseBytes",
+    );
+    const deadline = options.signal ? null : new AbortController();
+    const timeout = deadline
+      ? setTimeout(() => deadline.abort(), timeoutMs)
+      : null;
     const init = {
       method: options.method ?? "GET",
       headers,
       redirect: "error",
-      signal: options.signal,
+      signal: options.signal ?? deadline.signal,
     };
     if (options.body !== undefined) {
       if (!headers.has("content-type")) {
@@ -171,25 +188,37 @@ export class ProdexGatewayClient {
           : JSON.stringify(options.body);
     }
 
-    const response = await this.fetch(url, init);
-    if (options.parse === "stream" && response.ok) {
-      if (!response.body) {
-        throw new ProdexGatewayError("Prodex gateway returned an empty response stream", {
+    try {
+      const response = await this.fetch(url, init);
+      if (options.parse === "stream" && response.ok) {
+        if (!response.body) {
+          throw new ProdexGatewayError("Prodex gateway returned an empty response stream", {
+            status: response.status,
+          });
+        }
+        if (timeout !== null) clearTimeout(timeout);
+        return response.body;
+      }
+      const responseBody = await readResponseBody(response, options.parse, maxResponseBytes);
+      if (!response.ok) {
+        const error = responseBody?.error ?? {};
+        throw new ProdexGatewayError(error.message ?? `Prodex gateway request failed with ${response.status}`, {
           status: response.status,
+          code: error.code ?? null,
+          responseBody,
         });
       }
-      return response.body;
+      return responseBody;
+    } catch (error) {
+      if (deadline?.signal.aborted) {
+        throw new ProdexGatewayError(`Prodex gateway request timed out after ${timeoutMs}ms`, {
+          code: "request_timeout",
+        });
+      }
+      throw error;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
     }
-    const responseBody = await readResponseBody(response, options.parse);
-    if (!response.ok) {
-      const error = responseBody?.error ?? {};
-      throw new ProdexGatewayError(error.message ?? `Prodex gateway request failed with ${response.status}`, {
-        status: response.status,
-        code: error.code ?? null,
-        responseBody,
-      });
-    }
-    return responseBody;
   }
 }
 
@@ -205,15 +234,59 @@ function mutationOptions(options) {
   return { ...options, headers };
 }
 
-async function readResponseBody(response, parse) {
-  if (parse === "text") {
-    return response.text();
-  }
+async function readResponseBody(response, parse, maxBytes) {
+  const text = await readResponseText(response, maxBytes);
   const contentType = response.headers.get("content-type") ?? "";
   if (parse === "json" || contentType.includes("application/json")) {
-    return response.json();
+    return JSON.parse(text);
   }
-  return response.text();
+  return text;
+}
+
+async function readResponseText(response, maxBytes) {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw responseTooLarge(response.status, maxBytes);
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        void reader.cancel().catch(() => {});
+        throw responseTooLarge(response.status, maxBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function responseTooLarge(status, maxBytes) {
+  return new ProdexGatewayError(`Prodex gateway response exceeded ${maxBytes} bytes`, {
+    status,
+    code: "response_too_large",
+  });
+}
+
+function positiveInteger(value, name) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`ProdexGatewayClient ${name} must be a positive integer`);
+  }
+  return value;
 }
 
 function normalizeBaseUrl(value) {

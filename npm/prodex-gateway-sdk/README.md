@@ -37,3 +37,5 @@ const providers = await gateway.providers();
 The client covers the OpenAI-compatible `/v1/responses` gateway path plus Prodex admin endpoints for virtual keys, SCIM users, usage, billing ledger records and summaries, CSV exports, Prometheus metrics, provider contract discovery, observability and guardrail config, and OpenAPI discovery.
 
 Every high-level admin mutation helper requires a stable `idempotencyKey`. Reuse the same value when retrying the same logical mutation; raw `request` calls may provide the equivalent `Idempotency-Key` header.
+
+Non-stream requests default to a 30-second deadline and an 8 MiB response limit; override them with `timeoutMs` and `maxResponseBytes`, or pass an `AbortSignal` for caller-owned cancellation. Streaming requests apply the default deadline only until response headers arrive.
