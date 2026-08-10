@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.406.0 - 2026-08-10
+
+- No grouped changes.
+
 ## 0.405.0 - 2026-08-10
 
 - No grouped changes.
@@ -81,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Set interactive window title (`93888f4`)
-
-## 0.394.0 - 2026-08-08
-
-### CLI
-
-- Preserve quota snapshots and aliases (`b5b6325`)
