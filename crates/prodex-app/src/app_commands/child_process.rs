@@ -45,6 +45,9 @@ pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
     "GITHUB_COPILOT_API_KEYS",
     "GITHUB_COPILOT_API_KEY",
 ];
+#[path = "child_process_control.rs"]
+mod process_control;
+pub(crate) use process_control::*;
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)
@@ -95,7 +98,7 @@ fn run_child_plan_inner(
     for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
-    let private_process_group = !io::stdin().is_terminal();
+    let private_process_group = child_owns_private_process_group();
     configure_child_process_group(&mut command, private_process_group);
     reset_terminal_keyboard_enhancement_best_effort(plan);
     let mut child = command
@@ -118,6 +121,10 @@ fn run_child_plan_inner(
     }
     .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
+}
+
+fn child_owns_private_process_group() -> bool {
+    !io::stdin().is_terminal() && std::env::var_os(crate::SUB_AGENT_RECURSION_MARKER).is_none()
 }
 
 fn reset_terminal_keyboard_enhancement_best_effort(plan: &ChildProcessPlan) {
@@ -168,97 +175,6 @@ fn wait_for_child_termination(
         }
         thread::sleep(Duration::from_millis(50));
     }
-}
-
-pub(crate) fn configure_child_process_group(_command: &mut Command, private_process_group: bool) {
-    #[cfg(unix)]
-    if private_process_group {
-        // Non-interactive children use a private group for tree cleanup.
-        use std::os::unix::process::CommandExt;
-        _command.process_group(0);
-    }
-}
-
-fn terminate_child_process_group_best_effort(_child: &Child, private_process_group: bool) -> bool {
-    #[cfg(unix)]
-    if private_process_group {
-        return signal_child_process_group(_child, libc::SIGKILL).is_ok();
-    }
-    false
-}
-
-#[cfg(unix)]
-fn signal_child_process_group(child: &Child, signal: libc::c_int) -> io::Result<()> {
-    let pid = child.id() as libc::pid_t;
-    if pid <= 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "child process id must be positive",
-        ));
-    }
-    if unsafe { libc::kill(-pid, signal) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(unix)]
-fn terminate_child_gracefully(child: &mut Child, private_process_group: bool) -> io::Result<()> {
-    if (private_process_group && signal_child_process_group(child, libc::SIGTERM).is_ok())
-        || child.try_wait()?.is_some()
-    {
-        Ok(())
-    } else {
-        child.kill()
-    }
-}
-
-pub(crate) fn terminate_child_process_tree(
-    child: &mut Child,
-    private_process_group: bool,
-) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        if (private_process_group && signal_child_process_group(child, libc::SIGKILL).is_ok())
-            || child.try_wait()?.is_some()
-        {
-            return Ok(());
-        }
-    }
-    #[cfg(windows)]
-    {
-        let status = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
-        if status.success() || child.try_wait()?.is_some() {
-            return Ok(());
-        }
-    }
-    child.kill()
-}
-
-#[cfg(windows)]
-fn terminate_child_gracefully(child: &mut Child, _private_process_group: bool) -> io::Result<()> {
-    let status = Command::new("taskkill")
-        .args(["/PID", &child.id().to_string(), "/T"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if status.success() || child.try_wait()?.is_some() {
-        Ok(())
-    } else {
-        child.kill()
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn terminate_child_gracefully(child: &mut Child, _private_process_group: bool) -> io::Result<()> {
-    child.kill()
 }
 
 pub(crate) fn cleanup_codex_arg0_temp_dirs_best_effort(codex_home: &Path) {
@@ -474,8 +390,25 @@ pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
     )
 }
 
+pub(crate) fn child_exit_code(status: &ExitStatus) -> i32 {
+    status
+        .code()
+        .or_else(|| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                status.signal().map(|signal| 128 + signal)
+            }
+            #[cfg(not(unix))]
+            {
+                None
+            }
+        })
+        .unwrap_or(1)
+}
+
 pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
-    std::process::exit(status.code().unwrap_or(1));
+    std::process::exit(child_exit_code(&status));
 }
 
 pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> {

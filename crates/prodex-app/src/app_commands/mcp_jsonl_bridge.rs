@@ -13,11 +13,14 @@ const MCP_BRIDGE_STDERR_LIMIT: usize = 64 * 1024;
 type McpStderrReader = JoinHandle<io::Result<(Vec<u8>, bool)>>;
 
 pub(crate) fn handle_mcp_jsonl_bridge(args: McpJsonlBridgeArgs) -> Result<()> {
-    let mut child = Command::new(&args.command)
+    let mut command = Command::new(&args.command);
+    command
         .args(&args.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::configure_child_process_group(&mut command, true);
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to start MCP server {}", args.command.display()))?;
 
@@ -80,7 +83,7 @@ fn monitor_mcp_bridge(
         }
 
         if let Some(status) = poll_mcp_child(child)? {
-            return handle_exited_mcp_child(status, &mut output, &mut input, &mut stderr);
+            return handle_exited_mcp_child(child, status, &mut output, &mut input, &mut stderr);
         }
 
         if input.as_ref().is_some_and(JoinHandle::is_finished) {
@@ -134,11 +137,13 @@ fn handle_finished_mcp_output(
 }
 
 fn handle_exited_mcp_child(
+    child: &mut Child,
     status: ExitStatus,
     output: &mut Option<JoinHandle<Result<()>>>,
     input: &mut Option<JoinHandle<Result<()>>>,
     stderr: &mut Option<McpStderrReader>,
 ) -> Result<()> {
+    stop_mcp_child(child);
     let output = output.take().expect("output pump should exist");
     let deadline = Instant::now() + MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT;
     while !output.is_finished() && Instant::now() < deadline {
@@ -171,9 +176,11 @@ fn poll_mcp_child(child: &mut Child) -> Result<Option<ExitStatus>> {
 }
 
 fn join_mcp_bridge_pump(handle: JoinHandle<Result<()>>, name: &str) -> Result<()> {
-    handle
-        .join()
-        .map_err(|_| anyhow::anyhow!("MCP bridge {name} thread panicked"))?
+    crate::join_thread_with_timeout(
+        handle,
+        MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT,
+        &format!("MCP bridge {name}"),
+    )?
 }
 
 fn read_bounded_mcp_stderr(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)> {
@@ -194,18 +201,16 @@ fn read_bounded_mcp_stderr(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)>
 }
 
 fn join_mcp_stderr(stderr: &mut Option<McpStderrReader>) -> Result<(Vec<u8>, bool)> {
-    stderr
-        .take()
-        .expect("MCP stderr reader should exist")
-        .join()
-        .map_err(|_| anyhow::anyhow!("MCP bridge stderr thread panicked"))?
-        .context("failed to read MCP server stderr")
+    crate::join_thread_with_timeout(
+        stderr.take().expect("MCP stderr reader should exist"),
+        MCP_BRIDGE_OUTPUT_DRAIN_TIMEOUT,
+        "MCP bridge stderr",
+    )?
+    .context("failed to read MCP server stderr")
 }
 
 fn stop_mcp_child(child: &mut Child) {
-    if child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
-    }
+    let _ = crate::terminate_child_process_tree(child, true);
     let _ = child.wait();
 }
 
@@ -220,4 +225,36 @@ fn mcp_child_status_result(status: ExitStatus, stderr: (Vec<u8>, bool)) -> Resul
         bail!("MCP server exited with status {status}: {diagnostic}{suffix}");
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exited_mcp_parent_cleans_descendant_held_pipes() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        crate::configure_child_process_group(&mut command, true);
+        let mut child = command.spawn().unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut output = Some(std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes)?;
+            Ok(())
+        }));
+        let mut input = Some(std::thread::spawn(|| Ok(())));
+        let mut stderr = Some(std::thread::spawn(move || read_bounded_mcp_stderr(stderr)));
+        let status = child.wait().unwrap();
+        let started = Instant::now();
+
+        handle_exited_mcp_child(&mut child, status, &mut output, &mut input, &mut stderr).unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

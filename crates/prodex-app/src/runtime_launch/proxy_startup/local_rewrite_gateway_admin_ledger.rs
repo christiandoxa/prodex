@@ -74,20 +74,19 @@ pub(super) fn runtime_gateway_admin_ledger_response(
     } else {
         usize::from(page_request.page_request.limit)
     };
-    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, limit) {
-        Ok(records) => {
-            let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
-            runtime_gateway_admin_json_response(
-                200,
-                serde_json::json!({
-                    "object": "gateway.billing_ledger",
-                    "state_backend": shared.gateway_state_store.label(),
-                    "ledger_path": shared.gateway_state_store.ledger_path().display().to_string(),
-                    "limit": limit,
-                    "records": records,
-                }),
-            )
-        }
+    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, limit).and_then(
+        |records| runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth),
+    ) {
+        Ok(records) => runtime_gateway_admin_json_response(
+            200,
+            serde_json::json!({
+                "object": "gateway.billing_ledger",
+                "state_backend": shared.gateway_state_store.label(),
+                "ledger_path": shared.gateway_state_store.ledger_path().display().to_string(),
+                "limit": limit,
+                "records": records,
+            }),
+        ),
         Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_ledger_load_failed",
@@ -103,9 +102,10 @@ pub(super) fn runtime_gateway_admin_ledger_csv_response(
     match runtime_gateway_billing_ledger_load(
         &shared.gateway_state_store,
         RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
-    ) {
+    )
+    .and_then(|records| runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth))
+    {
         Ok(records) => {
-            let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
             runtime_gateway_admin_csv_response(runtime_gateway_billing_ledger_csv(&records))
         }
         Err(_err) => build_runtime_proxy_json_error_response(
@@ -123,14 +123,13 @@ pub(super) fn runtime_gateway_admin_ledger_summary_response(
     match runtime_gateway_billing_ledger_load(
         &shared.gateway_state_store,
         RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
-    ) {
-        Ok(records) => {
-            let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
-            runtime_gateway_admin_json_response(
-                200,
-                runtime_gateway_billing_summary_payload(shared, &records),
-            )
-        }
+    )
+    .and_then(|records| runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth))
+    {
+        Ok(records) => runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_billing_summary_payload(shared, &records),
+        ),
         Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_summary_load_failed",
@@ -146,13 +145,12 @@ pub(super) fn runtime_gateway_admin_ledger_summary_csv_response(
     match runtime_gateway_billing_ledger_load(
         &shared.gateway_state_store,
         RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
-    ) {
-        Ok(records) => {
-            let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
-            runtime_gateway_admin_csv_response(runtime_gateway_billing_summary_csv(
-                &runtime_gateway_billing_summary_payload(shared, &records),
-            ))
-        }
+    )
+    .and_then(|records| runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth))
+    {
+        Ok(records) => runtime_gateway_admin_csv_response(runtime_gateway_billing_summary_csv(
+            &runtime_gateway_billing_summary_payload(shared, &records),
+        )),
         Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_summary_load_failed",
@@ -165,16 +163,16 @@ fn runtime_gateway_admin_filter_ledger_records(
     records: Vec<RuntimeGatewayBillingLedgerEntry>,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
-) -> Vec<RuntimeGatewayBillingLedgerEntry> {
+) -> std::io::Result<Vec<RuntimeGatewayBillingLedgerEntry>> {
     let entries = shared
         .gateway_virtual_keys
         .lock()
-        .map(|entries| entries.clone())
-        .unwrap_or_default();
-    records
+        .map_err(|_| std::io::Error::other("gateway virtual key state is unavailable"))?
+        .clone();
+    Ok(records
         .into_iter()
         .filter(|record| runtime_gateway_admin_can_access_ledger_key(record, &entries, admin_auth))
-        .collect()
+        .collect())
 }
 
 fn runtime_gateway_admin_can_access_ledger_key(

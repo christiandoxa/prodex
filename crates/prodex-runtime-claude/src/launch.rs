@@ -3,7 +3,6 @@ use crate::paths::runtime_proxy_claude_config_value;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RuntimeProxyClaudeLaunchModes {
@@ -138,16 +137,6 @@ pub fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
         "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
         "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
     ]
-}
-
-pub fn runtime_proxy_claude_binary_version(binary: &OsString) -> Option<String> {
-    let output = Command::new(binary).arg("--version").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_runtime_proxy_claude_version_text(&String::from_utf8_lossy(&output.stdout)).or_else(
-        || parse_runtime_proxy_claude_version_text(&String::from_utf8_lossy(&output.stderr)),
-    )
 }
 
 pub fn parse_runtime_proxy_claude_version_text(text: &str) -> Option<String> {

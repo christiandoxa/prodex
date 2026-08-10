@@ -179,9 +179,9 @@ pub(crate) fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
 }
 
 pub(crate) fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
-    let output = Command::new("ps")
-        .args(["-Ao", "pid=,comm=,args="])
-        .output()
+    let mut command = Command::new("ps");
+    command.args(["-Ao", "pid=,comm=,args="]);
+    let output = crate::command_probe_output(&mut command, "process listing")
         .context("failed to execute ps for prodex process listing")?;
     if !output.status.success() {
         bail!("ps returned exit status {}", output.status);

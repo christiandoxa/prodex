@@ -14,7 +14,7 @@ use redaction::redaction_redact_secret_like_text;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 use terminal_ui::{
     print_panel, print_stdout_line, text_width, tui_border_style, tui_connected_header_block,
@@ -624,12 +624,10 @@ fn capability(
 }
 
 fn command_available_status(capability_name: &str, command: &OsStr) -> &'static str {
-    if Command::new(command)
-        .args(command_capability_probe_args(capability_name))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    let mut probe = Command::new(command);
+    probe.args(command_capability_probe_args(capability_name));
+    if crate::command_probe_output(&mut probe, capability_name)
+        .is_ok_and(|output| output.status.success())
     {
         "available"
     } else {
@@ -646,7 +644,9 @@ fn command_capability_probe_args(command: &str) -> &'static [&'static str] {
 
 fn command_version_status(command: impl AsRef<std::ffi::OsStr>, version_arg: &str) -> String {
     let command = command.as_ref();
-    match Command::new(command).arg(version_arg).output() {
+    let mut probe = Command::new(command);
+    probe.arg(version_arg);
+    match crate::command_probe_output(&mut probe, &command.to_string_lossy()) {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -659,15 +659,18 @@ fn command_version_status(command: impl AsRef<std::ffi::OsStr>, version_arg: &st
             format!("ok ({line})")
         }
         Ok(output) => format!("warn (exit {})", output.status),
-        Err(err) => format!("missing ({})", err.kind()),
+        Err(err) => format!("missing ({})", capability_redacted_detail(&err.to_string())),
     }
 }
 
 fn command_probe_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
-    match Command::new(command.as_ref()).args(args).output() {
+    let command = command.as_ref();
+    let mut probe = Command::new(command);
+    probe.args(args);
+    match crate::command_probe_output(&mut probe, &command.to_string_lossy()) {
         Ok(output) if output.status.success() => "ok (available)".to_string(),
         Ok(output) => format!("warn (exit {})", output.status),
-        Err(err) => format!("missing ({})", err.kind()),
+        Err(err) => format!("missing ({})", capability_redacted_detail(&err.to_string())),
     }
 }
 
@@ -751,10 +754,13 @@ fn presidio_health(client: &reqwest::blocking::Client, base_url: &str) -> (bool,
 }
 
 fn command_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
-    match Command::new(command.as_ref()).args(args).output() {
+    let command = command.as_ref();
+    let mut probe = Command::new(command);
+    probe.args(args);
+    match crate::command_probe_output(&mut probe, &command.to_string_lossy()) {
         Ok(output) if output.status.success() => "ok".to_string(),
         Ok(output) => format!("warn (exit {})", output.status),
-        Err(err) => format!("missing ({})", err.kind()),
+        Err(err) => format!("missing ({})", capability_redacted_detail(&err.to_string())),
     }
 }
 

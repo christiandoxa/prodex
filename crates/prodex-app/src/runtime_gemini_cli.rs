@@ -1,11 +1,11 @@
 use crate::{
     PROVIDER_SECRET_ENV_KEYS, PreparedRuntimeLaunch, ResolvedSuperSubAgent, RuntimeLaunchRequest,
     RuntimeLaunchStrategy, RuntimeProxyEndpoint, agy_bin, clear_rtk_auto_wrap_control_env,
-    copilot_bin, ensure_presidio_services_for_super_launch,
-    ensure_required_presidio_services_for_super_launch, execute_runtime_launch, gemini_bin,
-    kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir, redact_super_session_args,
-    render_sub_agent_disabled_dry_run_report, render_sub_agent_dry_run_report,
-    resolve_super_launch_target,
+    copilot_bin, ensure_kiro_codebase_memory_compatibility,
+    ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
+    execute_runtime_launch, gemini_bin, kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir,
+    redact_super_session_args, render_sub_agent_disabled_dry_run_report,
+    render_sub_agent_dry_run_report, resolve_super_launch_target,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -15,9 +15,8 @@ use prodex_cli::{
 use prodex_runtime_launch::{ChildProcessPlan, RuntimeLaunchPlan, local_proxy_bypass_env};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::io::ErrorKind;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 const PRODEX_COPILOT_PROXY_API_KEY: &str = "prodex-runtime-provider";
 const NATIVE_GEMINI_AUTH_ENV_KEYS: [&str; 4] = [
@@ -371,6 +370,8 @@ fn runtime_super_kiro_cli_profile_env(
     codex_home: &Path,
     proxy_url: &str,
 ) -> Result<Vec<(OsString, OsString)>> {
+    ensure_kiro_codebase_memory_compatibility()
+        .context("failed to prepare Kiro Codebase Memory MCP compatibility")?;
     let (data_dir, secret) = prepare_kiro_cli_data_dir(codex_home)?;
     let mut env = kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret.region.filter(|value| !value.trim().is_empty()) {
@@ -436,17 +437,11 @@ pub(super) fn validate_super_native_cli_preflight(args: &SuperArgs) -> Result<()
     if agent != SuperCliAgent::Agy {
         return Ok(());
     }
-    let status = Command::new(agy_bin())
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
+    let mut command = Command::new(agy_bin());
+    command.arg("--version");
+    match crate::command_probe_output(&mut command, "Antigravity CLI version probe") {
+        Ok(output) if output.status.success() => Ok(()),
         Ok(_) => bail!("native Antigravity CLI capability `agy` is unavailable"),
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            bail!("native Antigravity CLI capability `agy` is unavailable")
-        }
         Err(_) => bail!("native Antigravity CLI capability `agy` is unavailable"),
     }
 }

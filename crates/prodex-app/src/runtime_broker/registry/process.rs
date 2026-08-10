@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
 #[cfg(any(target_os = "macos", test))]
 use std::thread;
@@ -902,11 +902,9 @@ pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<St
 }
 
 pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<String> {
-    let output = Command::new(executable)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
+    let mut command = Command::new(executable);
+    command.arg("--version");
+    let output = crate::command_probe_output(&mut command, "Prodex version probe")
         .with_context(|| format!("failed to run {} --version", executable.display()))?;
     if !output.status.success() {
         bail!(

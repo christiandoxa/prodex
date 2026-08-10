@@ -85,16 +85,16 @@ pub(crate) fn codex_cli_version() -> Option<&'static str> {
 }
 
 fn resolve_codex_cli_version() -> Option<String> {
-    let output = Command::new(crate::codex_bin())
+    let mut command = Command::new(crate::codex_bin());
+    command
         .arg("--version")
         .env_remove("CODEX_HOME")
         .env_remove("TEST_CODEX_LOG")
         .env_remove("TEST_CODEX_LOG_APPEND")
         .env_remove("TEST_CODEX_ARGS_LOG")
         .env_remove("TEST_CODEX_ARGS_LOG_APPEND")
-        .env_remove("TEST_CODEX_STDIN_LOG")
-        .output()
-        .ok()?;
+        .env_remove("TEST_CODEX_STDIN_LOG");
+    let output = crate::command_probe_output(&mut command, "Codex version probe").ok()?;
     if !output.status.success() {
         return None;
     }
@@ -368,10 +368,9 @@ fn split_term_program_and_version(value: &str) -> (String, Option<String>) {
 }
 
 fn tmux_display_message(format: &str) -> Option<String> {
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", format])
-        .output()
-        .ok()?;
+    let mut command = Command::new("tmux");
+    command.args(["display-message", "-p", format]);
+    let output = crate::command_probe_output(&mut command, "tmux client probe").ok()?;
     if !output.status.success() {
         return None;
     }

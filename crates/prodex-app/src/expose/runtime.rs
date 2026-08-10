@@ -437,10 +437,14 @@ pub(super) struct CloudflaredTunnel {
 
 impl CloudflaredTunnel {
     pub(super) fn shutdown(&mut self) {
-        let _ = self.child.kill();
+        let _ = crate::terminate_child_process_tree(&mut self.child, true);
         let _ = self.child.wait();
         for thread in self.reader_threads.drain(..) {
-            let _ = thread.join();
+            let _ = crate::join_thread_with_timeout(
+                thread,
+                Duration::from_secs(1),
+                "cloudflared output reader",
+            );
         }
     }
 }
@@ -452,12 +456,13 @@ impl Drop for CloudflaredTunnel {
 }
 
 pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTunnel> {
-    let mut child = Command::new("cloudflared")
+    let mut command = Command::new("cloudflared");
+    command
         .args(["tunnel", "--protocol", "http2", "--url", local_url])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to spawn cloudflared")?;
+        .stderr(Stdio::piped());
+    crate::configure_child_process_group(&mut command, true);
+    let mut child = command.spawn().context("failed to spawn cloudflared")?;
     let (tx, rx) = channel();
     let mut reader_threads = Vec::new();
     if let Some(stdout) = child.stdout.take() {
