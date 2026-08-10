@@ -5,9 +5,9 @@ use super::{
 use crate::{
     AppState, KIRO_MODEL_CATALOG_FILE, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
     RuntimeCopilotProfileAuth, RuntimeGeminiOAuthProfileAuth, RuntimeKiroProfileAuth,
-    parse_kiro_model_catalog_text, read_provider_model_catalog_text,
-    refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
-    write_copilot_runtime_model_catalog,
+    ensure_kiro_codebase_memory_compatibility, parse_kiro_model_catalog_text,
+    read_provider_model_catalog_text, refresh_claude_oauth_secret_if_needed,
+    resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
 use redaction::redaction_redact_secret_like_text;
@@ -290,6 +290,8 @@ fn runtime_kiro_profile_auth(
     state: &AppState,
     selected_profile_name: &str,
 ) -> Result<RuntimeKiroProfileAuth> {
+    ensure_kiro_codebase_memory_compatibility()
+        .context("failed to prepare Kiro Codebase Memory MCP compatibility")?;
     let selected_profile = state
         .profiles
         .get(selected_profile_name)

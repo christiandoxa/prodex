@@ -171,6 +171,14 @@ fn runtime_state_save_mutation_only_journals_owner_changes() {
     assert!(runtime_state_save_requires_continuation_journal(
         &RuntimeStateMutation::CompactLineage("main".into())
     ));
+    for mutation in [
+        RuntimeStateMutation::PreviousResponseRelease("main".into()),
+        RuntimeStateMutation::DeadResponseBindingClear("main".into()),
+        RuntimeStateMutation::QuotaRelease("main".into()),
+        RuntimeStateMutation::AuthFailedRelease("main".into()),
+    ] {
+        assert!(runtime_state_save_requires_continuation_journal(&mutation));
+    }
     assert!(!runtime_state_save_requires_continuation_journal(
         &RuntimeStateMutation::ResponseTouch("main".into())
     ));

@@ -4,8 +4,7 @@ use super::{
     RUNTIME_PROFILE_BAD_PAIRING_PENALTY, RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
     RuntimeResponsesAffinityState, RuntimeResponsesReply, RuntimeRotationProxyShared,
     RuntimeRouteKind, RuntimeUpstreamFailureResponse, bump_runtime_profile_bad_pairing_score,
-    bump_runtime_profile_health_score, mark_runtime_profile_retry_backoff,
-    runtime_candidate_has_hard_affinity, runtime_proxy_log,
+    bump_runtime_profile_health_score, mark_runtime_profile_retry_backoff, runtime_proxy_log,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -55,7 +54,7 @@ pub(super) fn handle_runtime_responses_overloaded(
         "responses_overload",
     );
 
-    if runtime_candidate_has_hard_affinity(affinity_state.candidate_affinity(&profile_name)) {
+    if affinity_state.candidate_has_hard_affinity(&profile_name) {
         runtime_proxy_log(
             shared,
             format!(
