@@ -37,9 +37,12 @@ deny = [
 # Exact older transitive lines retained by upstream crates. Remove an entry as
 # soon as `cargo tree -i <crate>@<version>` no longer reports it.
 skip = [
+    { name = "aes", version = "0.8.4", reason = "Secret Service keyring backend compatibility stack" },
+    { name = "base64", version = "0.22.1", reason = "reqwest and tiktoken transitive compatibility stack" },
     { name = "bitflags", version = "1.3.2", reason = "portable-pty has not moved to bitflags 2" },
     { name = "block-buffer", version = "0.10.4", reason = "digest 0.10 compatibility stack" },
     { name = "cfg_aliases", version = "0.1.1", reason = "nix 0.28 build dependency" },
+    { name = "cipher", version = "0.4.4", reason = "Secret Service keyring backend compatibility stack" },
     { name = "const-oid", version = "0.9.6", reason = "x509-cert still uses const-oid 0.9" },
     { name = "core-foundation", version = "0.9.4", reason = "system-configuration transitive dependency" },
     { name = "cpufeatures", version = "0.2.17", reason = "AES, Argon2, Polyval, and SHA-1 compatibility stack" },
@@ -49,6 +52,7 @@ skip = [
     { name = "getrandom", version = "0.2.17", reason = "deadpool/JWT/rand_core 0.6 compatibility stack" },
     { name = "hashbrown", version = "0.16.1", reason = "kasuari and rsqlite-vfs transitive dependency" },
     { name = "hmac", version = "0.12.1", reason = "Secret Service keyring backend compatibility stack" },
+    { name = "inout", version = "0.1.4", reason = "Secret Service cipher compatibility stack" },
     { name = "nix", version = "0.28.0", reason = "portable-pty transitive dependency" },
     { name = "rand_core", version = "0.6.4", reason = "password-hash compatibility stack" },
     { name = "sha2", version = "0.10.9", reason = "Secret Service keyring backend compatibility stack" },
