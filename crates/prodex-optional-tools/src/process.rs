@@ -84,40 +84,8 @@ fn probe_command_inner(
         .context("probe stderr pipe is missing")?;
     let stdout_reader = thread::spawn(move || read_bounded(stdout));
     let stderr_reader = thread::spawn(move || read_bounded(stderr));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .with_context(|| format!("failed to wait for {}", program.display()))?
-        {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            terminate_probe_process_tree(&mut child);
-            let _ = child.wait();
-            bail!(
-                "{} health check timed out after {timeout:?}",
-                program.display()
-            );
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
-    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
-        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
-        while !probe_readers_finished(&stdout_reader, &stderr_reader) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
-        terminate_probe_process_tree(&mut child);
-        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
-        while !probe_readers_finished(&stdout_reader, &stderr_reader) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-    if !probe_readers_finished(&stdout_reader, &stderr_reader) {
-        bail!("{} health check output did not close", program.display());
-    }
+    let status = wait_for_probe_exit(&mut child, program, timeout)?;
+    drain_probe_output(&mut child, &stdout_reader, &stderr_reader, program)?;
     let (stdout, stdout_truncated) = stdout_reader
         .join()
         .map_err(|_| anyhow::anyhow!("{} stdout reader panicked", program.display()))??;
@@ -130,6 +98,56 @@ fn probe_command_inner(
         stderr,
         truncated: stdout_truncated || stderr_truncated,
     })
+}
+
+fn wait_for_probe_exit(
+    child: &mut std::process::Child,
+    program: &Path,
+    timeout: Duration,
+) -> Result<ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .with_context(|| format!("failed to wait for {}", program.display()))?
+        {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            terminate_probe_process_tree(child);
+            let _ = child.wait();
+            bail!(
+                "{} health check timed out after {timeout:?}",
+                program.display()
+            );
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn drain_probe_output<T, U>(
+    child: &mut std::process::Child,
+    stdout_reader: &thread::JoinHandle<T>,
+    stderr_reader: &thread::JoinHandle<U>,
+    program: &Path,
+) -> Result<()> {
+    if !probe_readers_finished(stdout_reader, stderr_reader) {
+        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
+        while !probe_readers_finished(stdout_reader, stderr_reader) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if !probe_readers_finished(stdout_reader, stderr_reader) {
+        terminate_probe_process_tree(child);
+        let deadline = Instant::now() + PROBE_OUTPUT_DRAIN_TIMEOUT;
+        while !probe_readers_finished(stdout_reader, stderr_reader) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if !probe_readers_finished(stdout_reader, stderr_reader) {
+        bail!("{} health check output did not close", program.display());
+    }
+    Ok(())
 }
 
 fn probe_readers_finished<T, U>(

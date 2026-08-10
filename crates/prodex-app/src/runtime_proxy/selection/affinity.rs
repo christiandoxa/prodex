@@ -134,34 +134,7 @@ pub(super) fn runtime_affinity_selection_decision(
     let Some(profile_name) = runtime_affinity_selection_profile(affinity_kind, selection) else {
         return Ok(RuntimeAffinitySelectionDecision::Continue);
     };
-    let bound_previous_response_affinity = affinity_kind == RuntimeAffinitySelectionKind::Pinned
-        && runtime_previous_response_affinity_is_bound(
-            shared,
-            selection.previous_response_id,
-            selection.pinned_profile,
-        )?;
-    let trusted_previous_response_affinity = if affinity_kind
-        == RuntimeAffinitySelectionKind::Pinned
-        && !bound_previous_response_affinity
-    {
-        runtime_previous_response_affinity_is_trusted(
-            shared,
-            selection.previous_response_id,
-            selection.pinned_profile,
-        )?
-    } else {
-        false
-    };
-    let hard_affinity = bound_previous_response_affinity
-        || runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind: selection.route_kind,
-            candidate_name: profile_name,
-            strict_affinity_profile: selection.strict_affinity_profile,
-            pinned_profile: selection.pinned_profile,
-            turn_state_profile: selection.turn_state_profile,
-            session_profile: selection.session_profile,
-            trusted_previous_response_affinity,
-        });
+    let hard_affinity = runtime_affinity_is_hard(shared, selection, affinity_kind, profile_name)?;
     let exact_binding = runtime_profile_has_exact_binding_identity(shared, profile_name)?;
     if exact_binding == Some(false) {
         return Ok(record_runtime_unavailable_affinity(
@@ -199,6 +172,16 @@ pub(super) fn runtime_affinity_selection_decision(
             runtime_selection_trace_affinity_kind(affinity_kind),
         ));
     }
+    runtime_soft_affinity_selection_decision(shared, selection, affinity_kind, profile_name, trace)
+}
+
+fn runtime_soft_affinity_selection_decision(
+    shared: &RuntimeRotationProxyShared,
+    selection: RuntimeResponseCandidateSelection<'_>,
+    affinity_kind: RuntimeAffinitySelectionKind,
+    profile_name: &str,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
+) -> Result<RuntimeAffinitySelectionDecision> {
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, selection.route_kind)?;
     let current_profile_matches_candidate = affinity_kind == RuntimeAffinitySelectionKind::Session
@@ -262,6 +245,42 @@ pub(super) fn runtime_affinity_selection_decision(
         },
     );
     Ok(RuntimeAffinitySelectionDecision::Continue)
+}
+
+fn runtime_affinity_is_hard(
+    shared: &RuntimeRotationProxyShared,
+    selection: RuntimeResponseCandidateSelection<'_>,
+    affinity_kind: RuntimeAffinitySelectionKind,
+    profile_name: &str,
+) -> Result<bool> {
+    let bound_previous_response_affinity = affinity_kind == RuntimeAffinitySelectionKind::Pinned
+        && runtime_previous_response_affinity_is_bound(
+            shared,
+            selection.previous_response_id,
+            selection.pinned_profile,
+        )?;
+    let trusted_previous_response_affinity = if affinity_kind
+        == RuntimeAffinitySelectionKind::Pinned
+        && !bound_previous_response_affinity
+    {
+        runtime_previous_response_affinity_is_trusted(
+            shared,
+            selection.previous_response_id,
+            selection.pinned_profile,
+        )?
+    } else {
+        false
+    };
+    Ok(bound_previous_response_affinity
+        || runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+            route_kind: selection.route_kind,
+            candidate_name: profile_name,
+            strict_affinity_profile: selection.strict_affinity_profile,
+            pinned_profile: selection.pinned_profile,
+            turn_state_profile: selection.turn_state_profile,
+            session_profile: selection.session_profile,
+            trusted_previous_response_affinity,
+        }))
 }
 
 fn runtime_soft_affinity_local_rejection_reason(
