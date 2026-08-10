@@ -1,5 +1,5 @@
 use super::{
-    RuntimeLaunchDryRunChild, configure_child_process_group,
+    RuntimeLaunchDryRunChild, configure_child_process_group, join_thread_with_timeout,
     profile_openai_compatible_dry_run_child, runtime_launch_dry_run_tui_text,
     runtime_launch_dry_run_value_color, runtime_launch_harness_dry_run_line,
     terminate_child_process_group_best_effort, terminate_child_process_tree,
@@ -7,6 +7,7 @@ use super::{
 use ratatui::style::Color;
 use std::fs;
 use std::process::Command;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -166,4 +167,23 @@ fn interactive_child_keeps_inherited_process_group() {
     let _ = child.wait();
 
     assert_eq!(process_group, parent_process_group);
+}
+
+#[test]
+fn sub_agent_child_inherits_the_launcher_process_group() {
+    let _marker = crate::test_support::TestEnvVarGuard::set(crate::SUB_AGENT_RECURSION_MARKER, "1");
+
+    assert!(!super::child_owns_private_process_group());
+}
+
+#[test]
+fn thread_join_timeout_is_bounded() {
+    let started = Instant::now();
+    let worker = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(100)));
+
+    let error =
+        join_thread_with_timeout(worker, Duration::from_millis(10), "test worker").unwrap_err();
+
+    assert!(error.to_string().contains("did not stop"));
+    assert!(started.elapsed() < Duration::from_secs(1));
 }

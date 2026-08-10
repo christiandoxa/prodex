@@ -13,6 +13,7 @@ use std::time::Duration;
 const LINUX_DESKTOP_PROJECT: &str = "https://github.com/ilysenko/codex-desktop-linux";
 const DESKTOP_HISTORY_REPAIR_PAGE_LIMIT: u64 = 100;
 const DESKTOP_HISTORY_REPAIR_TIMEOUT: Duration = Duration::from_secs(60);
+const DESKTOP_HISTORY_REPAIR_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub(crate) struct DesktopGuiCommand {
@@ -85,20 +86,21 @@ pub(crate) fn repair_desktop_thread_index(
     codex_home: &Path,
     sqlite_home: &Path,
 ) -> Result<()> {
-    let mut child = Command::new(codex_binary)
+    let mut command = Command::new(codex_binary);
+    command
         .arg("app-server")
         .env("CODEX_HOME", codex_home)
         .env("CODEX_SQLITE_HOME", sqlite_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to start {} app-server for Desktop history repair",
-                codex_binary.to_string_lossy()
-            )
-        })?;
+        .stderr(Stdio::null());
+    crate::configure_child_process_group(&mut command, true);
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start {} app-server for Desktop history repair",
+            codex_binary.to_string_lossy()
+        )
+    })?;
     let stdin = child
         .stdin
         .take()
@@ -120,7 +122,7 @@ pub(crate) fn repair_desktop_thread_index(
     let worker = match worker {
         Ok(worker) => worker,
         Err(error) => {
-            let _ = child.kill();
+            let _ = crate::terminate_child_process_tree(&mut child, true);
             let _ = child.wait();
             return Err(error).context("failed to start Desktop history repair worker");
         }
@@ -135,11 +137,13 @@ pub(crate) fn repair_desktop_thread_index(
             Err(anyhow::anyhow!("Desktop history repair worker stopped"))
         }
     };
-    let _ = child.kill();
+    let _ = crate::terminate_child_process_tree(&mut child, true);
     let _ = child.wait();
-    worker
-        .join()
-        .map_err(|_| anyhow::anyhow!("Desktop history repair worker panicked"))?;
+    crate::join_thread_with_timeout(
+        worker,
+        DESKTOP_HISTORY_REPAIR_CLEANUP_TIMEOUT,
+        "Desktop history repair worker",
+    )?;
     result
 }
 
@@ -361,19 +365,15 @@ fn desktop_gui_command_for_platform() -> Result<DesktopGuiCommand> {
 
 #[cfg(target_os = "macos")]
 fn macos_codex_app_is_running(binary: &Path) -> bool {
-    use std::process::{Command, Stdio};
+    use std::process::Command;
 
     let Some(name) = binary.file_name() else {
         return false;
     };
-    Command::new("/usr/bin/pgrep")
-        .arg("-x")
-        .arg(name)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    let mut command = Command::new("/usr/bin/pgrep");
+    command.arg("-x").arg(name);
+    crate::command_probe_output(&mut command, "Codex Desktop process probe")
+        .is_ok_and(|output| output.status.success())
 }
 
 #[cfg(target_os = "macos")]
@@ -394,21 +394,23 @@ fn macos_bundle_executable(app: &Path) -> Option<PathBuf> {
     use std::process::Command;
 
     let plist = app.join("Contents/Info.plist");
-    let bundle_id = Command::new("/usr/bin/plutil")
+    let mut bundle_id_command = Command::new("/usr/bin/plutil");
+    bundle_id_command
         .args(["-extract", "CFBundleIdentifier", "raw", "-o", "-"])
-        .arg(&plist)
-        .output()
-        .ok()?;
+        .arg(&plist);
+    let bundle_id =
+        crate::command_probe_output(&mut bundle_id_command, "Codex bundle probe").ok()?;
     if !bundle_id.status.success()
         || String::from_utf8_lossy(&bundle_id.stdout).trim() != "com.openai.codex"
     {
         return None;
     }
-    let executable = Command::new("/usr/bin/plutil")
+    let mut executable_command = Command::new("/usr/bin/plutil");
+    executable_command
         .args(["-extract", "CFBundleExecutable", "raw", "-o", "-"])
-        .arg(plist)
-        .output()
-        .ok()?;
+        .arg(plist);
+    let executable =
+        crate::command_probe_output(&mut executable_command, "Codex executable probe").ok()?;
     if !executable.status.success() {
         return None;
     }

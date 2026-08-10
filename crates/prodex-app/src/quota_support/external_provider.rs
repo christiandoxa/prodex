@@ -22,8 +22,7 @@ pub(super) fn fetch_agy_quota_info(account: Option<&str>) -> Result<ExternalQuot
         command.arg("--all-accounts");
     }
 
-    let output = command
-        .output()
+    let output = crate::command_probe_output(&mut command, "agy quota command")
         .context("failed to execute 'agy' CLI. Ensure it is installed and in your PATH.")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -14,9 +14,9 @@ pub use constants::{
 };
 pub use launch::{
     RuntimeProxyClaudeLaunchModes, parse_runtime_proxy_claude_version_text,
-    runtime_proxy_claude_binary_version, runtime_proxy_claude_extract_launch_modes,
-    runtime_proxy_claude_launch_args, runtime_proxy_claude_launch_env,
-    runtime_proxy_claude_launch_model, runtime_proxy_claude_removed_env,
+    runtime_proxy_claude_extract_launch_modes, runtime_proxy_claude_launch_args,
+    runtime_proxy_claude_launch_env, runtime_proxy_claude_launch_model,
+    runtime_proxy_claude_removed_env,
 };
 pub use launch_config::{
     ensure_runtime_proxy_claude_launch_config, ensure_runtime_proxy_claude_settings,

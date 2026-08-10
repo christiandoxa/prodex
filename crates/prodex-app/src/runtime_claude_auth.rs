@@ -190,20 +190,21 @@ pub(crate) fn refresh_claude_oauth_secret_if_needed(
     if !claude_oauth_secret_expired(&secret) {
         return Ok(secret);
     }
-    let _ = claude_auth_status(config_dir);
+    claude_auth_status(config_dir).context("failed to refresh expired Claude OAuth secret")?;
     read_claude_oauth_secret(config_dir)
 }
 
 pub(crate) fn claude_auth_status(config_dir: &Path) -> Result<ClaudeAuthStatus> {
-    let output = Command::new(claude_binary())
+    let mut command = Command::new(claude_binary());
+    command
         .arg("auth")
         .arg("status")
         .arg("--json")
         .env("CLAUDE_CONFIG_DIR", config_dir)
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("ANTHROPIC_AUTH_TOKEN")
-        .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
-        .output()
+        .env_remove("CLAUDE_CODE_OAUTH_TOKEN");
+    let output = crate::command_probe_output(&mut command, "Claude auth status")
         .with_context(|| format!("failed to execute {}", claude_binary()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

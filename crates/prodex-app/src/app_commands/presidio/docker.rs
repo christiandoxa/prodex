@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::time::Duration;
 
 pub(super) const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 pub(super) const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
@@ -7,15 +8,14 @@ pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/pre
 pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1";
 const PRESIDIO_MANAGED_LABEL: &str = "com.prodex.presidio.managed";
 const PRESIDIO_SERVICE_LABEL: &str = "com.prodex.presidio.service";
+const PRESIDIO_DOCKER_TIMEOUT: Duration = Duration::from_secs(300);
+const PRESIDIO_DOCKER_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
 pub(super) fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    let mut command = Command::new("docker");
+    command.arg("version");
+    crate::command_probe_output(&mut command, "Docker version probe")
+        .is_ok_and(|output| output.status.success())
 }
 
 pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str) -> Result<()> {
@@ -28,15 +28,17 @@ pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str
         {
             return Ok(());
         }
-        let status = Command::new("docker")
-            .args(["start", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .with_context(|| format!("failed to start Presidio container {name}"))?;
-        if !status.success() {
-            bail!("docker start {name} failed with {status}");
+        let mut command = Command::new("docker");
+        command.args(["start", name]);
+        let output = crate::command_output_with_timeout(
+            &mut command,
+            PRESIDIO_DOCKER_TIMEOUT,
+            PRESIDIO_DOCKER_OUTPUT_MAX_BYTES,
+            "Presidio docker start",
+        )
+        .with_context(|| format!("failed to start Presidio container {name}"))?;
+        if !output.status.success() {
+            bail!("docker start {name} failed with {}", output.status);
         }
         return Ok(());
     }
@@ -44,36 +46,37 @@ pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str
     let published_port = format!("127.0.0.1:{host_port}:3000");
     let managed_label = format!("{PRESIDIO_MANAGED_LABEL}=true");
     let service_label = format!("{PRESIDIO_SERVICE_LABEL}={name}");
-    let status = Command::new("docker")
-        .args([
-            "run",
-            "-d",
-            "--name",
-            name,
-            "--label",
-            &managed_label,
-            "--label",
-            &service_label,
-            "-p",
-            &published_port,
-            image,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .with_context(|| format!("failed to run Presidio container {name}"))?;
-    if !status.success() {
-        bail!("docker run {name} failed with {status}");
+    let mut command = Command::new("docker");
+    command.args([
+        "run",
+        "-d",
+        "--name",
+        name,
+        "--label",
+        &managed_label,
+        "--label",
+        &service_label,
+        "-p",
+        &published_port,
+        image,
+    ]);
+    let output = crate::command_output_with_timeout(
+        &mut command,
+        PRESIDIO_DOCKER_TIMEOUT,
+        PRESIDIO_DOCKER_OUTPUT_MAX_BYTES,
+        "Presidio docker run",
+    )
+    .with_context(|| format!("failed to run Presidio container {name}"))?;
+    if !output.status.success() {
+        bail!("docker run {name} failed with {}", output.status);
     }
     Ok(())
 }
 
 fn inspect_presidio_container(name: &str) -> Result<Option<serde_json::Value>> {
-    let output = Command::new("docker")
-        .args(["container", "inspect", "--format", "{{json .}}", name])
-        .stdin(Stdio::null())
-        .output()
+    let mut command = Command::new("docker");
+    command.args(["container", "inspect", "--format", "{{json .}}", name]);
+    let output = crate::command_probe_output(&mut command, "Presidio docker inspect")
         .with_context(|| format!("failed to inspect Presidio container {name}"))?;
     if output.status.success() {
         return serde_json::from_slice(&output.stdout)
