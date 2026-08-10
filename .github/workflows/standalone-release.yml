@@ -848,7 +848,6 @@ jobs:
           set -euo pipefail
           tag="${{ steps.release.outputs.tag }}"
           version="${{ steps.release.outputs.version }}"
-          target_sha="${{ steps.release.outputs.target_sha }}"
           title="${version}"
           notes_file="$(mktemp)"
           cat > "${notes_file}" <<EOF
@@ -880,7 +879,6 @@ jobs:
             gh release upload "${tag}" release-assets/* --clobber
           else
             gh release create "${tag}" release-assets/* \
-              --target "${target_sha}" \
               --title "${title}" \
               --notes-file "${notes_file}" \
               --latest
