@@ -1,11 +1,16 @@
 use super::{
-    RuntimeLaunchDryRunChild, configure_child_process_group, join_thread_with_timeout,
-    profile_openai_compatible_dry_run_child, runtime_launch_dry_run_tui_text,
-    runtime_launch_dry_run_value_color, runtime_launch_harness_dry_run_line,
-    terminate_child_process_group_best_effort, terminate_child_process_tree,
+    RuntimeLaunchDryRunChild, join_thread_with_timeout, profile_openai_compatible_dry_run_child,
+    runtime_launch_dry_run_tui_text, runtime_launch_dry_run_value_color,
+    runtime_launch_harness_dry_run_line,
+};
+#[cfg(unix)]
+use super::{
+    configure_child_process_group, terminate_child_process_group_best_effort,
+    terminate_child_process_tree,
 };
 use ratatui::style::Color;
 use std::fs;
+#[cfg(unix)]
 use std::process::Command;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
