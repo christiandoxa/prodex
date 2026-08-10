@@ -16,10 +16,23 @@ pub(crate) fn runtime_proxy_codex_passthrough_args(
             listen_addr: proxy.listen_addr,
             openai_mount_path: &proxy.openai_mount_path,
             local_model_provider_id: proxy.local_model_provider_id.as_deref(),
-            force_http_responses: proxy.force_http_responses,
+            force_http_responses: runtime_proxy_force_http_responses(proxy, user_args),
             realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
             realtime_ws_model: proxy.realtime_ws_model.as_deref(),
         }),
         user_args,
     )
+}
+
+pub(crate) fn runtime_proxy_force_http_responses(
+    proxy: &RuntimeProxyEndpoint,
+    user_args: &[OsString],
+) -> bool {
+    proxy.force_http_responses || sub_agent_exec_requires_http_response_transport(user_args)
+}
+
+fn sub_agent_exec_requires_http_response_transport(user_args: &[OsString]) -> bool {
+    std::env::var_os(crate::SUB_AGENT_RECURSION_MARKER).is_some()
+        && std::env::var_os(crate::SUB_AGENT_LAUNCHER_MARKER).is_none()
+        && prodex_runtime_launch::is_codex_exec_invocation(user_args)
 }

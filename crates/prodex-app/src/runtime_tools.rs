@@ -9,8 +9,9 @@ mod overlay;
 mod sub_agents;
 #[path = "runtime_tools/super_trust.rs"]
 mod super_trust;
+#[cfg(test)]
 pub(super) use overlay::prepare_prodex_overlay_home;
-pub(crate) use overlay::{RuntimeOverlayCleanup, resolve_runtime_optional_tool_plan};
+pub(crate) use overlay::resolve_runtime_optional_tool_plan;
 pub(crate) use sub_agents::*;
 pub(crate) use super_trust::trusted_workspace_codex_args;
 const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
@@ -330,13 +331,8 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     let mut extra_report = String::from("Optional tools:");
     for activation in &tool_plan.activations {
         extra_report.push_str(&format!(
-            "\n  {}: active ({})",
-            activation.tool.descriptor.id,
-            if activation.tool.path.is_some() {
-                "resolved executable"
-            } else {
-                "local service"
-            }
+            "\n  {}: resolved (activation deferred until launch)",
+            activation.tool.descriptor.id
         ));
     }
     for unavailable in &tool_plan.unavailable {
@@ -356,7 +352,7 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
             }
         ));
     }
-    extra_report.push('\n');
+    extra_report.push_str("\nDry run: optional overlays and services are not started.\n");
     if let Some(sub_agent) = sub_agent {
         extra_report.push_str(&render_sub_agent_dry_run_report(sub_agent));
     } else {

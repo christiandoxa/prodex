@@ -42,9 +42,9 @@ Linux partitions, retaining parallel execution while avoiding five duplicate
 Windows compilations and late hosted-runner queueing. Windows keeps the measured
 admission bottleneck in two disjoint groups, with commands attached to admission
 core; the split adds one test-binary link to shorten the critical path. One group
-writes the shared dependency cache. Windows CI test binaries disable incremental
-artifacts and test/dev debug symbols so sccache remains effective and linking is
-faster.
+writes the shared dependency cache. High-fanout app, full-test, Windows, and
+macOS lanes disable incremental artifacts and test/dev debug symbols so sccache
+remains effective and linking is faster.
 
 ## CI Impact Gating
 

@@ -452,12 +452,12 @@ fn run() -> Result<()> {
 }
 
 fn run_command(command: Commands) -> Result<()> {
-    let native_dry_run = command_dispatch::command_is_native_dry_run(&command);
-    if !native_dry_run && let Commands::Super(args) = &command {
+    let super_dry_run = command_dispatch::command_is_super_dry_run(&command);
+    if !super_dry_run && let Commands::Super(args) = &command {
         runtime_gemini_cli::validate_super_native_cli_preflight(args)?;
     }
     let minimal_startup = command_uses_minimal_startup(&command);
-    if !native_dry_run && !minimal_startup {
+    if !super_dry_run && !minimal_startup {
         create_codex_home_if_missing(&AppPaths::discover()?.root)?;
         if command_dispatch::command_should_show_update_notice(&command) {
             let _ = show_update_notice_if_available(&command);
@@ -470,15 +470,17 @@ fn run_command(command: Commands) -> Result<()> {
         };
         return handle_setup(args);
     }
-    if !native_dry_run && !minimal_startup {
+    if !super_dry_run && !minimal_startup {
         schedule_prodex_auto_runtime_housekeeping(&command);
     }
     command_dispatch::execute_command(command)
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    matches!(command, Commands::McpJsonlBridge(_))
-        || matches!(command, Commands::Setup(args) if args.dry_run)
+    matches!(
+        command,
+        Commands::McpJsonlBridge(_) | Commands::Capability(_)
+    ) || matches!(command, Commands::Setup(args) if args.dry_run)
         || matches!(
             command,
             Commands::Doctor(args)
@@ -504,9 +506,12 @@ mod minimal_startup_tests {
             parse_cli_command_from(["prodex", "doctor", "--install", "--runtime"]).unwrap();
         let bridge =
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "mcp-server"]).unwrap();
+        let super_doctor =
+            parse_cli_command_from(["prodex", "s", "--no-presidio", "doctor"]).unwrap();
 
         assert!(command_uses_minimal_startup(&install));
         assert!(command_uses_minimal_startup(&bridge));
+        assert!(command_uses_minimal_startup(&super_doctor));
         assert!(!command_uses_minimal_startup(&combined));
     }
 

@@ -93,7 +93,14 @@ RTK and Codebase Memory MCP resolve from managed roots first and then `PATH`.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned package to
 pass an offline probe; install the package and browser before launching Super.
 Presidio remains an explicit service selection and is checked by its existing
-doctor path.
+doctor path. `--require-tool presidio` additionally requires healthy services
+and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
+redaction.
+
+Native Gemini, Copilot, Kiro, and Antigravity frontends do not consume Codex
+overlays, so they reject `--tool` and `--require-tool` instead of claiming the
+Codex-only optimizer stack is active. Native Copilot remains the exception for
+explicit Presidio redaction through its local provider bridge.
 
 ## Security And Launch Semantics
 

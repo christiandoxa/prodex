@@ -127,7 +127,10 @@ fn resolve_super_launch_decisions_with_prompts(
     ) -> Result<ResolvedMainAgentConfig>,
     prompt_sub_agent: impl FnOnce(&SuperArgs) -> Result<Option<SubAgentConfig>>,
 ) -> Result<(bool, ResolvedMainAgentConfig, Option<ResolvedSuperSubAgent>)> {
-    let use_presidio = if matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
+    let use_presidio = if matches!(
+        args.cli,
+        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+    ) {
         false
     } else {
         match args.presidio_preference() {
@@ -386,7 +389,15 @@ fn resolve_super_sub_agent_with_prompt(
     };
 
     debug_assert!(explicitly_enabled || interactive);
-    resolve_super_sub_agent_config(config, resolve_super_launch_target(&args.codex_args)).map(Some)
+    let mut sub_agent =
+        resolve_super_sub_agent_config(config, resolve_super_launch_target(&args.codex_args))?;
+    let required_tools = args
+        .required_tools
+        .iter()
+        .copied()
+        .collect::<prodex_optional_tools::OptionalToolSet>();
+    sub_agent.required_tools = required_tools.iter().collect();
+    Ok(Some(sub_agent))
 }
 
 fn prompt_super_sub_agent_configuration(_args: &SuperArgs) -> Result<Option<SubAgentConfig>> {
@@ -1274,6 +1285,37 @@ mod sub_agent_prompt_tests {
     }
 
     #[test]
+    fn resolved_sub_agent_inherits_required_optional_tools() {
+        let _marker =
+            crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
+        let command = crate::parse_cli_command_from([
+            "prodex",
+            "s",
+            "--sub-agent",
+            "--require-tool",
+            "rtk",
+            "--require-tool",
+            "playwright",
+        ])
+        .expect("configured sub-agent command should parse");
+        let crate::Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+
+        let resolved = resolve_super_sub_agent(&args, false)
+            .expect("configured sub-agent should resolve")
+            .expect("configured sub-agent should be enabled");
+
+        assert_eq!(
+            resolved.required_tools,
+            vec![
+                prodex_optional_tools::OptionalToolId::Rtk,
+                prodex_optional_tools::OptionalToolId::PlaywrightMcp,
+            ]
+        );
+    }
+
+    #[test]
     fn pure_interactive_resolution_prompts_presidio_before_resumed_sub_agent_config() {
         let _marker =
             crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
@@ -1418,6 +1460,32 @@ mod sub_agent_prompt_tests {
                 session_id: SESSION_ID.to_string()
             }
         );
+    }
+
+    #[test]
+    fn native_gemini_skips_unavailable_presidio_prompt() {
+        let _marker =
+            crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
+        let mut args = super_args(&["--cli", "gemini", "--provider", "gemini"]);
+        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
+            &mut args,
+            true,
+            || panic!("native Gemini must not prompt for unavailable Presidio"),
+            |_| Ok(None),
+            |_, _| {
+                Ok(ResolvedMainAgentConfig {
+                    provider: ProviderId::Gemini,
+                    model: None,
+                    local_url: None,
+                })
+            },
+            |_| Ok(None),
+        )
+        .expect("native Gemini should resolve without Presidio");
+
+        assert!(!presidio);
+        assert_eq!(main_agent.provider, ProviderId::Gemini);
+        assert!(sub_agent.is_none());
     }
 
     #[test]

@@ -132,6 +132,9 @@ fn runtime_proxy_passthrough_args_preserve_user_args_without_proxy() {
 
 #[test]
 fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _marker = TestEnvVarGuard::unset(SUB_AGENT_RECURSION_MARKER);
+    let _launcher_marker = TestEnvVarGuard::unset(SUB_AGENT_LAUNCHER_MARKER);
     let temp_dir = TestDir::isolated();
     let endpoint = RuntimeProxyEndpoint {
         listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
@@ -161,6 +164,72 @@ fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
         "openai_base_url=\"http://127.0.0.1:4455/backend-api/prodex/v0.2.99\""
     );
     assert_eq!(&rendered[4..], ["exec", "hello"]);
+}
+
+#[test]
+fn runtime_proxy_sub_agent_exec_uses_http_streaming() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _marker = TestEnvVarGuard::set(SUB_AGENT_RECURSION_MARKER, "1");
+    let _launcher_marker = TestEnvVarGuard::unset(SUB_AGENT_LAUNCHER_MARKER);
+    let temp_dir = TestDir::isolated();
+    let endpoint = RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
+        force_http_responses: false,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
+        lease_dir: temp_dir.path.join("leases"),
+        broker_session_affinity_control: None,
+        _lease: None,
+        _direct_proxy: None,
+        _kiro_connect_proxy: None,
+    };
+
+    let rendered = runtime_proxy_codex_passthrough_args(
+        Some(&endpoint),
+        &[OsString::from("exec"), OsString::from("hello")],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert!(rendered.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.supports_websockets=false"
+    }));
+}
+
+#[test]
+fn runtime_proxy_sub_agent_launcher_exec_keeps_websockets() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _marker = TestEnvVarGuard::set(SUB_AGENT_RECURSION_MARKER, "1");
+    let _launcher_marker = TestEnvVarGuard::set(SUB_AGENT_LAUNCHER_MARKER, "1");
+    let temp_dir = TestDir::isolated();
+    let endpoint = RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
+        force_http_responses: false,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
+        lease_dir: temp_dir.path.join("leases"),
+        broker_session_affinity_control: None,
+        _lease: None,
+        _direct_proxy: None,
+        _kiro_connect_proxy: None,
+    };
+
+    let rendered = runtime_proxy_codex_passthrough_args(
+        Some(&endpoint),
+        &[OsString::from("exec"), OsString::from("hello")],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert!(!rendered.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.supports_websockets=false"
+    }));
 }
 
 #[test]

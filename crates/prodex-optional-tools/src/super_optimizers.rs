@@ -39,11 +39,32 @@ pub fn activate_optional_tools_for_codex(
             .iter()
             .any(|activation| activation.tool.descriptor.id == id)
     };
-    validate_optimizer_config_shapes(
+    let required = |id| {
+        plan.activations
+            .iter()
+            .any(|activation| activation.tool.descriptor.id == id && activation.required)
+    };
+    let resolved_path = |id| {
+        plan.activations
+            .iter()
+            .find(|activation| activation.tool.descriptor.id == id)
+            .and_then(|activation| activation.tool.path.as_deref())
+    };
+    let codebase_memory_command = resolved_path(OptionalToolId::CodebaseMemoryMcp);
+    let npx_command = resolved_path(OptionalToolId::PlaywrightMcp);
+    let config = validate_optimizer_config_shapes(
         codex_home,
         selected(OptionalToolId::CodebaseMemoryMcp),
         selected(OptionalToolId::PlaywrightMcp),
         selected(OptionalToolId::Ponytail),
+    )?;
+    validate_required_mcp_servers(
+        config.as_ref(),
+        required(OptionalToolId::CodebaseMemoryMcp),
+        required(OptionalToolId::PlaywrightMcp),
+        codebase_memory_command,
+        npx_command,
+        false,
     )?;
     for activation in &plan.activations {
         match activation.tool.descriptor.id {
@@ -65,16 +86,16 @@ fn validate_optimizer_config_shapes(
     validate_codebase_memory: bool,
     validate_playwright: bool,
     validate_ponytail: bool,
-) -> Result<()> {
+) -> Result<Option<toml::Table>> {
     if !validate_codebase_memory && !validate_playwright && !validate_ponytail {
-        return Ok(());
+        return Ok(None);
     }
     let config_path = codex_home.join("config.toml");
     let Some(contents) = read_text_file_limited(&config_path)? else {
-        return Ok(());
+        return Ok(None);
     };
     if contents.trim().is_empty() {
-        return Ok(());
+        return Ok(Some(toml::Table::new()));
     }
     let table = match toml::from_str::<toml::Value>(&contents)
         .with_context(|| format!("failed to parse {}", config_path.display()))?
@@ -87,16 +108,21 @@ fn validate_optimizer_config_shapes(
         validate_ponytail_config_shapes(&table)?;
     }
     if !validate_codebase_memory && !validate_playwright {
-        return Ok(());
+        return Ok(Some(table));
     }
     let Some(mcp_servers) = table.get("mcp_servers") else {
-        return Ok(());
+        return Ok(Some(table));
     };
     let mcp_servers = match mcp_servers {
         toml::Value::Table(table) => table,
         _ => bail!("mcp_servers must be a TOML table"),
     };
-    validate_selected_mcp_server_shapes(mcp_servers, validate_codebase_memory, validate_playwright)
+    validate_selected_mcp_server_shapes(
+        mcp_servers,
+        validate_codebase_memory,
+        validate_playwright,
+    )?;
+    Ok(Some(table))
 }
 
 fn validate_ponytail_config_shapes(table: &toml::Table) -> Result<()> {
@@ -141,6 +167,117 @@ fn validate_selected_mcp_server_shapes(
     Ok(())
 }
 
+fn validate_required_mcp_servers(
+    table: Option<&toml::Table>,
+    required_codebase_memory: bool,
+    required_playwright: bool,
+    codebase_memory_command: Option<&Path>,
+    npx_command: Option<&Path>,
+    require_presence: bool,
+) -> Result<()> {
+    if !required_codebase_memory && !required_playwright {
+        return Ok(());
+    }
+    if required_codebase_memory && codebase_memory_command.is_none() {
+        bail!(
+            "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: resolved command is missing"
+        );
+    }
+    if required_playwright && npx_command.is_none() {
+        bail!(
+            "required MCP server `mcp_servers.playwright` cannot be safely verified: resolved command is missing"
+        );
+    }
+
+    let Some(table) = table else {
+        if require_presence {
+            bail!("required MCP server configuration is missing");
+        }
+        return Ok(());
+    };
+    let Some(mcp_servers) = table.get("mcp_servers") else {
+        if require_presence {
+            bail!("required MCP server configuration `mcp_servers` is missing");
+        }
+        return Ok(());
+    };
+    let Some(mcp_servers) = mcp_servers.as_table() else {
+        bail!("mcp_servers must be a TOML table");
+    };
+
+    for (name, required) in [
+        ("codebase-memory-mcp", required_codebase_memory),
+        ("playwright", required_playwright),
+    ] {
+        if !required {
+            continue;
+        }
+        let Some(value) = mcp_servers.get(name) else {
+            if require_presence {
+                bail!("required MCP server `mcp_servers.{name}` is not configured");
+            }
+            continue;
+        };
+        let Some(server) = value.as_table() else {
+            bail!("mcp_servers.{name} must be a TOML table");
+        };
+        validate_required_mcp_server_enabled(name, server)?;
+        if name == "codebase-memory-mcp" {
+            let Some((bridge, bridge_args)) =
+                codebase_memory_command.and_then(mcp_jsonl_bridge_command_args)
+            else {
+                bail!(
+                    "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: Prodex MCP bridge is unavailable"
+                );
+            };
+            validate_required_mcp_server_command(name, server, &bridge, &bridge_args)?;
+        } else {
+            let Some(npx_command) = npx_command else {
+                bail!(
+                    "required MCP server `mcp_servers.playwright` cannot be safely verified: resolved command is missing"
+                );
+            };
+            validate_required_mcp_server_command(
+                name,
+                server,
+                npx_command,
+                &playwright_mcp_args(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_mcp_server_enabled(name: &str, server: &toml::Table) -> Result<()> {
+    match server.get("enabled") {
+        Some(toml::Value::Boolean(false)) => bail!(
+            "required MCP server `mcp_servers.{name}` is disabled (`enabled = false`); refusing to override user configuration"
+        ),
+        Some(toml::Value::Boolean(true)) | None => Ok(()),
+        Some(_) => bail!(
+            "required MCP server `mcp_servers.{name}` cannot be safely verified: `enabled` must be a boolean"
+        ),
+    }
+}
+
+fn validate_required_mcp_server_command(
+    name: &str,
+    server: &toml::Table,
+    command: &Path,
+    args: &[String],
+) -> Result<()> {
+    let expected_command = command.display().to_string();
+    let expected_args = toml::Value::Array(args.iter().cloned().map(toml::Value::String).collect());
+    if server.get("command").and_then(toml::Value::as_str) != Some(expected_command.as_str())
+        || server.get("args") != Some(&expected_args)
+    {
+        bail!(
+            "required MCP server `mcp_servers.{name}` cannot be safely verified: inherited configuration is custom or incomplete; refusing to replace user configuration"
+        );
+    }
+    Ok(())
+}
+
 fn configure_selected_optimizer_codex_home(
     codex_home: &Path,
     activations: &[ToolActivation],
@@ -160,6 +297,11 @@ fn configure_selected_optimizer_codex_home(
         .iter()
         .find(|activation| activation.tool.descriptor.id == OptionalToolId::Ponytail);
     let ponytail_checkout = ponytail.and_then(|activation| activation.tool.path.as_deref());
+    let required = |id| {
+        activations
+            .iter()
+            .any(|activation| activation.tool.descriptor.id == id && activation.required)
+    };
 
     if rtk_command.is_none()
         && codebase_memory_command.is_none()
@@ -179,7 +321,13 @@ fn configure_selected_optimizer_codex_home(
     );
     write_text_file(&optimizers_path, &awareness)?;
     ensure_agents_reference(codex_home, &optimizers_path)?;
-    configure_super_mcp_servers(codex_home, codebase_memory_command, npx_command)?;
+    configure_super_mcp_servers(
+        codex_home,
+        codebase_memory_command,
+        npx_command,
+        required(OptionalToolId::CodebaseMemoryMcp),
+        required(OptionalToolId::PlaywrightMcp),
+    )?;
     if let Some(activation) = ponytail {
         ponytail::install_ponytail_plugin(codex_home, &activation.tool)?;
     }
@@ -228,7 +376,19 @@ fn configure_super_mcp_servers(
     codex_home: &Path,
     codebase_memory_command: Option<&Path>,
     npx_command: Option<&Path>,
+    required_codebase_memory: bool,
+    required_playwright: bool,
 ) -> Result<()> {
+    if required_codebase_memory && codebase_memory_command.is_none() {
+        bail!(
+            "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: resolved command is missing"
+        );
+    }
+    if required_playwright && npx_command.is_none() {
+        bail!(
+            "required MCP server `mcp_servers.playwright` cannot be safely verified: resolved command is missing"
+        );
+    }
     if codebase_memory_command.is_none() && npx_command.is_none() {
         return Ok(());
     }
@@ -244,9 +404,21 @@ fn configure_super_mcp_servers(
             _ => anyhow::bail!("{} did not parse as a TOML table", config_path.display()),
         }
     };
-    if let Some((bridge, bridge_args)) =
-        codebase_memory_command.and_then(mcp_jsonl_bridge_command_args)
-    {
+    let codebase_memory = codebase_memory_command.and_then(mcp_jsonl_bridge_command_args);
+    if required_codebase_memory && codebase_memory.is_none() {
+        bail!(
+            "required MCP server `mcp_servers.codebase-memory-mcp` cannot be safely verified: Prodex MCP bridge is unavailable"
+        );
+    }
+    validate_required_mcp_servers(
+        Some(&table),
+        required_codebase_memory,
+        required_playwright,
+        codebase_memory_command,
+        npx_command,
+        false,
+    )?;
+    if let Some((bridge, bridge_args)) = codebase_memory {
         let env_vars = codebase_memory_mcp_env()?;
         configure_stdio_mcp_server(
             &mut table,
@@ -259,6 +431,14 @@ fn configure_super_mcp_servers(
     if let Some(command) = npx_command {
         configure_default_playwright_mcp_server(&mut table, command)?;
     }
+    validate_required_mcp_servers(
+        Some(&table),
+        required_codebase_memory,
+        required_playwright,
+        codebase_memory_command,
+        npx_command,
+        true,
+    )?;
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Super optimizer config overlay")?;
     write_text_file(&config_path, &rendered)
@@ -273,17 +453,8 @@ fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Pa
     }
     let server = ensure_child_table(mcp_servers, "playwright")
         .with_context(|| "mcp_servers.playwright must be a TOML table")?;
-    configure_stdio_mcp_server_fields(
-        server,
-        command.to_path_buf(),
-        &[
-            "--no-install".to_string(),
-            PLAYWRIGHT_MCP_PACKAGE.to_string(),
-            "--headless".to_string(),
-            "--isolated".to_string(),
-        ],
-        &[],
-    );
+    let args = playwright_mcp_args();
+    configure_stdio_mcp_server_fields(server, command.to_path_buf(), &args, &[]);
     server.insert("enabled".to_string(), toml::Value::Boolean(true));
     server.insert("startup_timeout_sec".to_string(), toml::Value::Integer(60));
     server.insert(
@@ -291,6 +462,15 @@ fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Pa
         toml::Value::String("writes".to_string()),
     );
     Ok(())
+}
+
+fn playwright_mcp_args() -> [String; 4] {
+    [
+        "--no-install".to_string(),
+        PLAYWRIGHT_MCP_PACKAGE.to_string(),
+        "--headless".to_string(),
+        "--isolated".to_string(),
+    ]
 }
 
 fn configure_stdio_mcp_server(
@@ -301,9 +481,15 @@ fn configure_stdio_mcp_server(
     env_vars: &[(&str, String)],
 ) -> Result<()> {
     let mcp_servers = mcp_servers_table(table)?;
+    match mcp_servers.get(name) {
+        Some(toml::Value::Table(_)) => return Ok(()),
+        Some(_) => bail!("mcp_servers.{name} must be a TOML table"),
+        None => {}
+    }
     let server = ensure_child_table(mcp_servers, name)
         .with_context(|| format!("mcp_servers.{name} must be a TOML table"))?;
     configure_stdio_mcp_server_fields(server, command, args, env_vars);
+    server.insert("enabled".to_string(), toml::Value::Boolean(true));
     Ok(())
 }
 

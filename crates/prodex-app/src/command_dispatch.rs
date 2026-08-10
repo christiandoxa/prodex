@@ -28,52 +28,24 @@ pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyho
 }
 
 pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
-    !command_is_native_dry_run(command)
+    !command_is_super_dry_run(command)
         && !matches!(
             command,
             Commands::RuntimeBroker(_)
                 | Commands::Update(_)
+                | Commands::Capability(_)
                 | Commands::GeminiCompatRefresh(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
 }
 
-pub(crate) fn command_is_native_dry_run(command: &Commands) -> bool {
+pub(crate) fn command_is_super_dry_run(command: &Commands) -> bool {
     matches!(
         command,
         Commands::Super(args)
-            if (args.dry_run || prodex_dry_run_requested(&args.codex_args))
-                && (args
-                    .cli
-                    .is_some_and(|agent| agent != SuperCliAgent::Codex)
-                    || super_tail_requests_native_cli(&args.codex_args))
+            if args.dry_run || prodex_dry_run_requested(&args.codex_args)
     )
-}
-
-fn super_tail_requests_native_cli(args: &[std::ffi::OsString]) -> bool {
-    let mut index = 0;
-    while index < args.len() {
-        let Some(value) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        if value == "--" {
-            return false;
-        }
-        let cli = value.strip_prefix("--cli=").or_else(|| {
-            if value == "--cli" {
-                args.get(index + 1).and_then(|value| value.to_str())
-            } else {
-                None
-            }
-        });
-        if cli.is_some_and(|cli| matches!(cli, "gemini" | "copilot" | "kiro" | "agy")) {
-            return true;
-        }
-        index += 1;
-    }
-    false
 }
 
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
@@ -132,12 +104,13 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
 }
 
 fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
-    !command_is_native_dry_run(command)
+    !command_is_super_dry_run(command)
         && !matches!(
             command,
             Commands::Profile(ProfileCommands::Remove(_))
                 | Commands::Cleanup(_)
                 | Commands::Doctor(_)
+                | Commands::Capability(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
@@ -225,12 +198,12 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_is_native_dry_run, command_runs_profile_lifecycle_recovery,
+        command_is_super_dry_run, command_runs_profile_lifecycle_recovery,
         command_should_show_update_notice, execute_command, parse_cli_command_from,
     };
 
     #[test]
-    fn native_dry_run_skips_startup_side_effects() {
+    fn super_dry_run_skips_startup_side_effects() {
         let native = parse_cli_command_from(["prodex", "super", "--cli", "gemini", "--dry-run"])
             .expect("native dry-run should parse");
         let codex = parse_cli_command_from(["prodex", "super", "--dry-run"])
@@ -245,14 +218,13 @@ mod tests {
         ])
         .expect("native tail dry-run should parse");
 
-        assert!(command_is_native_dry_run(&native));
-        assert!(command_is_native_dry_run(&native_tail));
+        assert!(command_is_super_dry_run(&native));
+        assert!(command_is_super_dry_run(&native_tail));
         assert!(!command_should_show_update_notice(&native));
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&native));
-        assert!(!command_is_native_dry_run(&codex));
-        assert!(crate::housekeeping::command_runs_auto_runtime_housekeeping(
-            &codex
-        ));
+        assert!(command_is_super_dry_run(&codex));
+        assert!(!command_should_show_update_notice(&codex));
+        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&codex));
     }
 
     #[test]
@@ -327,5 +299,14 @@ mod tests {
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "codebase-memory-mcp"])
                 .unwrap();
         assert!(!command_runs_profile_lifecycle_recovery(&command));
+    }
+
+    #[test]
+    fn capability_commands_skip_startup_notifications() {
+        let command = parse_cli_command_from(["prodex", "s", "--no-presidio", "doctor"])
+            .expect("Super doctor should parse");
+
+        assert!(!command_should_show_update_notice(&command));
+        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 }

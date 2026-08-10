@@ -208,7 +208,7 @@ fn native_agy_rejects_sub_agent_detail_extracted_after_positional() {
 }
 
 #[test]
-fn native_frontends_reject_codex_features_and_presidio_tool_aliases() {
+fn native_frontends_reject_codex_features_and_unsupported_optional_tools() {
     for (agent, provider) in [
         (SuperCliAgent::Gemini, Some(SuperExternalProvider::Gemini)),
         (SuperCliAgent::Copilot, Some(SuperExternalProvider::Copilot)),
@@ -220,6 +220,29 @@ fn native_frontends_reject_codex_features_and_presidio_tool_aliases() {
         feature.codex_features.current_time_reminder = true;
         let error = validate_super_native_cli_preflight(&feature).unwrap_err();
         assert!(error.to_string().contains("--current-time-reminder"));
+    }
+
+    for (agent, provider) in [
+        (SuperCliAgent::Gemini, Some(SuperExternalProvider::Gemini)),
+        (SuperCliAgent::Copilot, Some(SuperExternalProvider::Copilot)),
+        (SuperCliAgent::Kiro, None),
+        (SuperCliAgent::Agy, Some(SuperExternalProvider::Gemini)),
+    ] {
+        let mut tool = native_cli_super_args();
+        tool.cli = Some(agent);
+        tool.provider = provider;
+        tool.tools.push(prodex_optional_tools::OptionalToolId::Rtk);
+        let error = validate_super_native_cli_preflight(&tool).unwrap_err();
+        assert!(error.to_string().contains("--tool rtk"));
+
+        let mut required_tool = native_cli_super_args();
+        required_tool.cli = Some(agent);
+        required_tool.provider = provider;
+        required_tool
+            .required_tools
+            .push(prodex_optional_tools::OptionalToolId::Ponytail);
+        let error = validate_super_native_cli_preflight(&required_tool).unwrap_err();
+        assert!(error.to_string().contains("--require-tool ponytail"));
     }
 
     for (agent, provider) in [
@@ -444,6 +467,13 @@ fn native_gemini_cli_dry_run_does_not_probe_optional_tools() {
         assert!(report.contains("Provider: gemini"));
         assert!(report.contains("native Gemini CLI owns transport and authentication"));
     }
+
+    let mut required_tool = args.clone();
+    required_tool
+        .required_tools
+        .push(prodex_optional_tools::OptionalToolId::Rtk);
+    let error = super_native_cli_dry_run_report(&required_tool, None).unwrap_err();
+    assert!(error.to_string().contains("--require-tool rtk"));
 
     assert!(!marker.exists(), "dry-run must not execute optional tools");
     std::fs::remove_dir_all(root).unwrap();
@@ -694,7 +724,7 @@ fn native_copilot_cli_runtime_request_enables_provider_proxy() {
 }
 
 #[test]
-fn native_copilot_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() {
+fn native_gemini_cli_build_plan_uses_base_home_without_optional_tool_overlay() {
     let root = std::env::temp_dir()
         .canonicalize()
         .expect("temporary directory should resolve")
@@ -710,16 +740,14 @@ fn native_copilot_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() 
     let shared_home = root.join("shared");
     std::fs::create_dir_all(&base_home).expect("base home should exist");
     std::fs::create_dir_all(&shared_home).expect("shared home should exist");
-    std::fs::write(base_home.join("config.toml"), "model = \"fixture\"\n")
-        .expect("config should be written");
-
     let mut args = native_cli_super_args();
-    args.cli = Some(SuperCliAgent::Copilot);
-    args.provider = Some(SuperExternalProvider::Copilot);
+    args.profile = None;
+    args.cli = Some(SuperCliAgent::Gemini);
+    args.provider = Some(SuperExternalProvider::Gemini);
     let strategy = SuperNativeCliLaunchStrategy {
         args,
         presidio_enabled: false,
-        agent: SuperCliAgent::Copilot,
+        agent: SuperCliAgent::Gemini,
         sub_agent: None,
     };
     let paths = AppPaths {
@@ -736,19 +764,30 @@ fn native_copilot_cli_build_plan_cleans_overlay_when_runtime_proxy_is_missing() 
         runtime_proxy: None,
     };
 
-    let error = strategy.build_plan(&prepared, None).unwrap_err();
+    let mut unsupported_args = native_cli_super_args();
+    unsupported_args.profile = None;
+    unsupported_args.cli = Some(SuperCliAgent::Gemini);
+    unsupported_args.provider = Some(SuperExternalProvider::Gemini);
+    unsupported_args
+        .required_tools
+        .push(prodex_optional_tools::OptionalToolId::Rtk);
+    let unsupported_strategy = SuperNativeCliLaunchStrategy {
+        args: unsupported_args,
+        presidio_enabled: false,
+        agent: SuperCliAgent::Gemini,
+        sub_agent: None,
+    };
+    let error = unsupported_strategy
+        .build_plan(&prepared, None)
+        .expect_err("native launch plans must reject Codex-only required tools");
+    assert!(error.to_string().contains("--require-tool rtk"));
 
-    assert!(
-        error
-            .to_string()
-            .contains("Copilot CLI launch requires a local runtime proxy")
-    );
-    assert!(
-        std::fs::read_dir(&prepared.paths.managed_profiles_root)
-            .expect("managed profile root should exist")
-            .next()
-            .is_none(),
-        "failed build must remove temporary overlay"
-    );
+    let plan = strategy
+        .build_plan(&prepared, None)
+        .expect("native launch plan should build");
+
+    assert_eq!(plan.child.codex_home, prepared.codex_home);
+    assert!(plan.cleanup_paths.is_empty());
+    assert!(!prepared.paths.managed_profiles_root.exists());
     std::fs::remove_dir_all(root).expect("test root should be removed");
 }

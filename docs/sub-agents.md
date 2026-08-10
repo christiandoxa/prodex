@@ -1,6 +1,6 @@
 # Super sub-agents
 
-`prodex super` (also `prodex s`) can configure bounded child Prodex processes for a Codex main agent. The model decides which work to delegate; Prodex supplies effective instructions, a shell-free child launcher, recursion prevention, Presidio inheritance, and a cross-process concurrency limit.
+`prodex super` (also `prodex s`) can configure bounded child Prodex processes for a Codex main agent. The model decides which work to delegate; Prodex supplies effective instructions, a shell-free child launcher, recursion prevention, Presidio and strict optional-tool inheritance, and a cross-process concurrency limit.
 
 ## Interactive flow
 
@@ -149,7 +149,7 @@ exec
 <exact task as one argument>
 ```
 
-Exactly one of `--presidio` or `--no-presidio` is inherited. `--no-sub-agent` plus `PRODEX_SUB_AGENT=1` prevents grandchildren. The launcher keeps stdout and stderr separate, preserves the real child status, consumes bounded task input, and never depends on `prodex` being in `PATH`.
+Exactly one of `--presidio` or `--no-presidio` is inherited, along with every parent `--require-tool` selection. `--no-sub-agent` plus `PRODEX_SUB_AGENT=1` prevents grandchildren. The launcher keeps stdout and stderr separate, preserves the real child status, consumes bounded task input, and never depends on `prodex` being in `PATH`.
 
 ## Dry run
 
@@ -165,6 +165,6 @@ Maximum active sub-agents: 23 (custom)
 
 ## MVP boundary
 
-Implemented behavior covers configuration, provider/model/effort selection, effective instruction injection, deterministic child launch, cross-process active-child limits, Presidio inheritance, recursion prevention, and stdout/stderr/status propagation.
+Implemented behavior covers configuration, provider/model/effort selection, effective instruction injection, deterministic child launch, cross-process active-child limits, Presidio and strict optional-tool inheritance, recursion prevention, and stdout/stderr/status propagation.
 
 Prodex does not yet provide a centralized semantic scheduler, automatic work decomposition, runtime-enforced file ownership, a global cancellation tree, distributed supervision, remote model discovery, A2A child transport, or automatic worktree allocation. The main model remains responsible for choosing narrow tasks, avoiding overlapping edits, verifying child output, integrating results, and running final validation.
