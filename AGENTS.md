@@ -310,6 +310,7 @@ If you changed dependencies or release metadata, refresh the lockfile before pub
 
 ```bash
 cargo update
+cargo update --manifest-path fuzz/Cargo.toml
 ```
 
 ## Editing Guidance
