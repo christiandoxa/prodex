@@ -69,21 +69,7 @@ impl RuntimeResponsesAffinityState {
                 session_profile: &mut self.route_affinity.session_profile,
                 pinned_profile: &mut self.route_affinity.pinned_profile,
             },
-        )?;
-        if matches!(
-            runtime_request_hard_binding_owner(
-                input.shared,
-                input.previous_response_id,
-                input.request_turn_state,
-                input.request_session_id,
-            )?,
-            prodex_runtime_state::RuntimeHardBindingOwner::Conflict
-                | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_)
-        ) {
-            self.route_affinity.pinned_profile =
-                Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string());
-        }
-        Ok(())
+        )
     }
 
     pub(super) fn compact_followup_profile(&self) -> Option<(&str, &'static str)> {

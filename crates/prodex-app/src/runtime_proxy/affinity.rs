@@ -184,6 +184,10 @@ pub(crate) fn derive_runtime_response_route_affinity_for_request(
             .map(|session_id| runtime_session_bound_profile(shared, session_id))
             .transpose()?
             .flatten()
+            // Responses and WebSocket session affinity is soft; compact validates it separately.
+            .filter(|profile_name| {
+                profile_name != prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+            })
     } else {
         None
     };

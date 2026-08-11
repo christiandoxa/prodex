@@ -228,6 +228,31 @@ impl RuntimeContinuationFixture {
         }
     }
 
+    pub(super) fn restart_with_stale_session_binding(
+        self,
+        session_id: &str,
+        profile_name: &str,
+    ) -> Self {
+        wait_for_runtime_background_queues_idle();
+        let mut state = AppState::load(&self.paths).expect("runtime state should load");
+        let binding_identity = prodex_provider_core::RuntimeProviderBindingIdentity::from_profile(
+            prodex_provider_core::ProviderId::OpenAi,
+            profile_name,
+            "https://stale.example.com/v1",
+        )
+        .expect("stale binding identity should resolve");
+        state.session_profile_bindings.insert(
+            session_id.to_string(),
+            ResponseProfileBinding {
+                binding_identity: Some(binding_identity),
+                profile_name: profile_name.to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+        state.save(&self.paths).expect("runtime state should save");
+        self.restart()
+    }
+
     pub(super) fn restart_with_journal_continuations(
         self,
         continuations: RuntimeContinuationStore,

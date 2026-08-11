@@ -184,3 +184,35 @@ fn runtime_proxy_http_restarted_session_only_affinity_rotates_after_quota() {
         "second"
     );
 }
+
+#[test]
+fn runtime_proxy_http_stale_session_binding_rotates_as_fresh() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(),
+        "second",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    )
+    .restart_with_stale_session_binding("sess-stale", "main");
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "session_id": "sess-stale",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "continue on a healthy account",
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(body.contains("\"id\":\"resp-second\""), "{body}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+}
