@@ -253,6 +253,28 @@ impl RuntimeContinuationFixture {
         self.restart()
     }
 
+    pub(super) fn restart_with_transport_backoff(
+        self,
+        profile_name: &str,
+        route_kind: RuntimeRouteKind,
+    ) -> Self {
+        wait_for_runtime_background_queues_idle();
+        save_runtime_profile_backoffs(
+            &self.paths,
+            &RuntimeProfileBackoffs {
+                updated_at: BTreeMap::new(),
+                retry_backoff_until: BTreeMap::new(),
+                transport_backoff_until: BTreeMap::from([(
+                    runtime_profile_transport_backoff_key(profile_name, route_kind),
+                    Local::now().timestamp() + 60,
+                )]),
+                route_circuit_open_until: BTreeMap::new(),
+            },
+        )
+        .expect("transport backoff should save");
+        self.restart()
+    }
+
     pub(super) fn restart_with_journal_continuations(
         self,
         continuations: RuntimeContinuationStore,

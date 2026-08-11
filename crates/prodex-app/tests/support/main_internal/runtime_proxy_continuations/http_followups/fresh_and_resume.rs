@@ -125,6 +125,48 @@ fn runtime_proxy_http_fresh_sse_quota_after_output_item_added_rotates_before_mod
 }
 
 #[test]
+fn runtime_proxy_http_transport_backoff_rotation_rebinds_soft_session() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(),
+        "main",
+        &["main", "second"],
+        &[],
+        vec![("sess-transport-rotation".to_string(), "main")],
+    )
+    .restart_with_transport_backoff("main", RuntimeRouteKind::Responses);
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "session_id": "sess-transport-rotation",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "resume after the original owner entered transport backoff",
+            }],
+        }),
+    );
+    assert_eq!(response.status().as_u16(), 200);
+    assert!(
+        response
+            .text()
+            .expect("resume body should decode")
+            .contains("\"id\":\"resp-second\"")
+    );
+
+    let continuations = wait_for_runtime_continuations(&fixture.paths, |continuations| {
+        continuations
+            .session_profile_bindings
+            .get("sess-transport-rotation")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations.session_profile_bindings["sess-transport-rotation"].profile_name,
+        "second"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinity() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_previous_response_needs_turn_state(),

@@ -354,6 +354,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_stale_session_binding_rotates_as_fresh",
         label: "stale-session",
       },
+      {
+        id: "continuation-http-transport-session-rotation",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_transport_backoff_rotation_rebinds_soft_session",
+        label: "transport-session-rotation",
+      },
     ],
   },
   {

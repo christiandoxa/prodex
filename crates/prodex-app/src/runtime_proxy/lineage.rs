@@ -16,7 +16,8 @@ pub(crate) use lookup::{
 pub(crate) use release::{
     clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,
     release_runtime_compact_lineage, release_runtime_previous_response_affinity,
-    release_runtime_quota_blocked_affinity, release_runtime_session_affinity,
+    release_runtime_quota_blocked_affinity, release_runtime_rotated_session_affinity,
+    release_runtime_session_affinity,
 };
 #[cfg(test)]
 pub(crate) use remember::remember_runtime_response_ids;

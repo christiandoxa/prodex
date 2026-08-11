@@ -231,19 +231,28 @@ fn runtime_responses_next_candidate(
     loop_state: &RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     quota_last_chance_profile: &mut Option<String>,
 ) -> Result<Option<String>> {
-    if let Some(profile_name) = quota_last_chance_profile.take() {
-        return Ok(Some(profile_name));
-    }
-    select_runtime_response_candidate_for_route_with_request(
+    let session_profile = affinity_state.session_profile().map(str::to_owned);
+    let selected_profile = if let Some(profile_name) = quota_last_chance_profile.take() {
+        Some(profile_name)
+    } else {
+        select_runtime_response_candidate_for_route_with_request(
+            context.shared,
+            affinity_state.candidate_selection(
+                &loop_state.excluded_profiles,
+                context.previous_response_id,
+                context.prompt_cache_key,
+            ),
+            Some(context.request_id),
+            context.request_model_name,
+        )?
+    };
+    let _ = release_runtime_rotated_session_affinity(
         context.shared,
-        affinity_state.candidate_selection(
-            &loop_state.excluded_profiles,
-            context.previous_response_id,
-            context.prompt_cache_key,
-        ),
-        Some(context.request_id),
-        context.request_model_name,
-    )
+        session_profile.as_deref(),
+        selected_profile.as_deref(),
+        context.request_session_id,
+    )?;
+    Ok(selected_profile)
 }
 
 fn runtime_responses_candidate_saturated(
