@@ -345,6 +345,12 @@ export function validateReleaseContainerPublication(contents) {
       violations.push(`.github/workflows/standalone-release.yml: release build pin missing ${marker}`);
     }
   }
+  const nativeClientRetryFlags = "--retry 5 --retry-all-errors --retry-delay 2";
+  if (build.split(nativeClientRetryFlags).length - 1 !== 4) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: every native client download must retry transient failures",
+    );
+  }
   for (const marker of [
     "- build",
     "packages: write",

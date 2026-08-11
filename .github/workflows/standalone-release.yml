@@ -293,13 +293,13 @@ jobs:
           unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           mkdir -p "${HOME}/.local/bin"
           npm install --global --ignore-scripts @google/gemini-cli@0.53.0
-          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/kiro-install.sh" https://cli.kiro.dev/install
-          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install
-          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/kiro-install.sh" https://cli.kiro.dev/install
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
           echo "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
           echo "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
           echo "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
-          kiro_manifest_version="$(curl --proto '=https' --tlsv1.2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          kiro_manifest_version="$(curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
           test "${kiro_manifest_version}" = "${KIRO_CLI_VERSION}"
           bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
           VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
