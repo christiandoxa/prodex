@@ -8,69 +8,19 @@ This file applies to the entire repository.
 `CODEX_HOME` profiles. The root package also builds dedicated `prodex-gateway` and
 `prodex-control-plane` entrypoints.
 
-The codebase is now a Cargo workspace split across focused crates and modules:
+The Cargo workspace is split across focused crates and modules. `Cargo.toml` is the source of
+truth for membership and package boundaries. Keep this summary limited to paths agents commonly
+need:
 
-- `src/main.rs`: binary entrypoint
-- `src/lib.rs`: root facade that re-exports `prodex_app` plus dedicated-server helpers
+- `src/main.rs`: thin binary composition root
+- `src/lib.rs`: root facade and dedicated-server helpers
 - `src/bin/`: dedicated gateway and control-plane composition roots
-- `crates/prodex-app/`: application orchestration, command routing, Prodex-owned command handlers, profile flows, and runtime integration glue
-- `crates/prodex-app-reports/`: reusable application report rendering helpers
-- `crates/prodex-application/`: enterprise application use cases and ports
-- `crates/prodex-audit-log/`: audit log append, query, and rendering helpers
-- `crates/prodex-authn/`: enterprise authentication boundary
-- `crates/prodex-authz/`: enterprise authorization boundary
-- `crates/prodex-bench-support/`: benchmark support helpers
-- `crates/prodex-optional-tools/`: optional-tool discovery, validation, health, and temporary-overlay activation
-- `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
-- `crates/prodex-codex-config/`: reusable Codex config parsing helpers
-- `crates/prodex-config/`: typed enterprise deployment configuration
-- `crates/prodex-control-plane/`: enterprise control-plane domain/application surface
-- `crates/prodex-context/`: context audit and compression helpers
-- `crates/prodex-core/`: common path discovery and core filesystem helpers
-- `crates/prodex-domain/`: side-effect-free enterprise domain models and decisions
-- `crates/prodex-gateway-core/`: gateway request/response and policy contracts
-- `crates/prodex-gateway-http/`: HTTP gateway adaptation
-- `crates/prodex-gateway-server/`: async gateway server composition
-- `crates/prodex-housekeeping/`: cleanup and duplicate-detection helpers
-- `crates/prodex-mcp-stdio/`: MCP stdio boundary
-- `crates/prodex-observability/`: enterprise metrics, trace, and log contracts
-- `crates/prodex-presidio/`: Presidio integration boundary
-- `crates/prodex-profile-export/`: encrypted profile export/import envelope helpers
-- `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
-- `crates/prodex-provider-core/`: built-in provider metadata and protocol bridges
-- `crates/prodex-provider-spi/`: provider plugin contracts
-- `crates/prodex-proxy-config/`: reusable upstream proxy/client configuration helpers
-- `crates/prodex-quota/`: quota API models and quota classification helpers
-- `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
-- `crates/prodex-secret-store/`: reusable secret storage backend primitives
-- `crates/prodex-runtime-anthropic/`: Anthropic compatibility translation helpers
-- `crates/prodex-runtime-broker/`: side-effect-free runtime broker registry, health, and metrics DTOs
-- `crates/prodex-runtime-broker-log/`: runtime broker log parsing and rendering helpers
-- `crates/prodex-runtime-capabilities/`: runtime request compatibility surface detection
-- `crates/prodex-runtime-claude/`: Claude Code runtime launch configuration helpers
-- `crates/prodex-runtime-cookies/`: runtime proxy profile-scoped cookie relay helpers
-- `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
-- `crates/prodex-runtime-gemini-cli-compat/`: native Gemini CLI checkpoint and resume compatibility helpers
-- `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
-- `crates/prodex-runtime-log/`: runtime log path and marker helpers
-- `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
-- `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
-- `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, path/log parsing, payload parsing, and transport helper logic
-- `crates/prodex-runtime-quota/`: runtime quota adapter, snapshot, summary, and sort-key helpers
-- `crates/prodex-runtime-state/`: runtime state, lane admission counters, and scheduled-save data structures
-- `crates/prodex-runtime-store/`: runtime store merge and compaction helpers
-- `crates/prodex-runtime-tuning/`: runtime tuning snapshot types, override parsing, and fault-injection counters
-- `crates/prodex-session-store/`: persisted session metadata helpers
-- `crates/prodex-shared-codex-fs/`: shared Codex home file operations
-- `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
-- `crates/prodex-state/`: state models and merge/compaction helpers
-- `crates/prodex-storage/`: backend-neutral enterprise storage contracts
-- `crates/prodex-storage-{sqlite,postgres,redis}/`: backend configuration and migrations
-- `crates/prodex-storage-{sqlite,postgres,redis}-runtime/`: runtime repository adapters
-- `crates/prodex-terminal-ui/`: reusable terminal layout and printing helpers
-- `crates/prodex-update-notice/`: GitHub latest-version update notice cache and rendering helpers
-- `README.md`: full user-facing documentation
-- `QUICKSTART.md`: shorter installation and usage guide
+- `crates/prodex-app/`: application orchestration, command routing, profile flows, and runtime glue
+- `crates/prodex-runtime-*/`: runtime proxy, state, policy, quota, launch, and diagnostics code
+- `crates/prodex-gateway-*/`: gateway contracts, HTTP adaptation, and server composition
+- `crates/prodex-storage-*/`: storage contracts, backend configuration, migrations, and adapters
+- other `crates/prodex-*/`: focused reusable boundaries; inspect the owning crate before editing
+- `README.md` and `QUICKSTART.md`: user-facing documentation
 
 ## Core Principles
 
@@ -107,6 +57,30 @@ When changing `prodex`, keep these invariants intact:
    - Use reserved domains such as `example.com`, generic paths such as `/home/test-user`, generic profile names, and synthetic UUIDs or tokens in docs, tests, fixtures, and examples.
    - Never copy real email-derived profile names, home or `CODEX_HOME` paths, overlay IDs, attachment IDs, session IDs, logs, auth data, or credentials into the repository.
    - Preserve intentional public project ownership metadata. Git commit authors may use the maintainer identity configured locally, including a real name and verified email address; continue to scan the tracked diff for secrets and PII before release.
+
+## Before Coding
+
+- State assumptions and material ambiguities before implementation; ask only when no safe default exists.
+- Find existing helpers, types, and patterns before adding new ones.
+- Trace all callers and the end-to-end flow before changing shared logic; fix the root cause at the shared boundary.
+- Put new logic in its owning crate or module. Keep `src/main.rs` and `src/bin/` as thin composition roots.
+- For upstream compatibility changes, inspect the relevant upstream implementation and compatibility fixtures/tests before changing behavior.
+- Prefer the minimum behavior-preserving change. Avoid speculative abstractions, configurability, dependencies, and drive-by refactors.
+- Do not assume existing code or patterns are correct; prioritize correctness, security, performance, readability, and maintainability in that order.
+
+## Code and Comments
+
+- Write comments only for non-obvious invariants, security or transport behavior, `unsafe` code, tool directives, deliberate `ponytail:` trade-offs, or TODO/FIXME items with a concrete reason and follow-up reference.
+- Keep comments concise and do not remove unrelated existing comments during a focused change.
+- Prefer Rust idioms: typed errors with `Result`, exhaustive `match`, and explicit handling at trust boundaries. Avoid unjustified `unwrap()` or `expect()` in production paths.
+- Use the standard library and existing dependencies before adding a new dependency; record the reason when a new dependency is necessary.
+
+## Workflow and Supply-Chain Safety
+
+- Never pipe a remote script into a shell. Download artifacts to a file, verify checksums, then install.
+- Pin external CI actions and tools to immutable full SHAs or explicit versions; never use `latest` or `stable` for downloaded artifacts.
+- Never print, copy, commit, or publish secrets, auth data, customer names, private incident identifiers, or real operational identifiers.
+- Never commit or push changes unless explicitly requested.
 
 ## Runtime Proxy Rules
 
@@ -268,12 +242,45 @@ If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value before 
 Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers suggest a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
+## Tests and Verification
+
+- Every feature or bug fix needs a meaningful test that checks observable behavior, not coverage alone.
+- A regression test should fail before the fix and pass only when the broken behavior is corrected.
+- Extend the nearest existing test module by default; create a new test file only when no suitable mapped test exists.
+- Use deterministic local mocks or fixtures for network-facing proof. Live provider calls require explicit approval because they can expose credentials and incur cost.
+- Report the exact verification commands and relevant redacted output for user-visible or transport-facing changes.
+- Use the narrowest checks that cover the change. Use the full suite, Clippy gate, and release build for cross-crate, release, or CI-sensitive changes.
+
 ## Key Commands
 
 Format:
 
 ```bash
 cargo fmt
+```
+
+Check formatting without modifying files:
+
+```bash
+cargo fmt --check
+```
+
+Run cheap checks selected from changed paths:
+
+```bash
+npm run test:changed
+```
+
+Run documentation checks after changing Markdown or user-facing docs:
+
+```bash
+npm run docs:lint
+```
+
+Run the CI Clippy gate:
+
+```bash
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 ```
 
 Run the focused runtime proxy tests:
@@ -306,7 +313,9 @@ Build the local binary after runtime changes:
 cargo build --release --locked
 ```
 
-If you changed dependencies or release metadata, refresh the lockfile before publishing:
+If you changed dependencies or release metadata, refresh and review the lockfile before publishing.
+Prefer the release scripts for version metadata, use targeted updates where possible, and use a
+broad `cargo update` only when intentionally refreshing the dependency graph:
 
 ```bash
 cargo update
@@ -315,7 +324,8 @@ cargo update --manifest-path fuzz/Cargo.toml
 
 ## Editing Guidance
 
-- Prefer narrow, behavior-preserving changes in `src/main.rs`.
+- Prefer narrow, behavior-preserving changes in the owning crate or module.
+- Update `README.md`, `QUICKSTART.md`, CLI help, or other relevant docs in the same change when user-visible behavior changes.
 - Add regression tests for every runtime proxy bug fix.
 - When touching runtime persistence, add or update tests for multi-process-safe merge behavior.
 - When touching transport recovery, add or update tests for both quota backoff and transport backoff behavior.
@@ -334,11 +344,8 @@ cargo update --manifest-path fuzz/Cargo.toml
 
 This project has been released frequently.
 
-Release versioning on the `0.x` line is incremental by the minor component unless explicitly requested otherwise:
-
-1. `0.3.0`
-2. `0.4.0`
-3. `0.5.0`
+Release versioning on the `0.x` line follows the current release plan. Do not encode historical
+version examples in this file as release rules.
 
 After bumping `Cargo.toml`, sync workspace version metadata with:
 
@@ -358,6 +365,6 @@ Do not publish to npm or crates.io in the default release path.
 The workspace currently requires publishing many internal `prodex-*` crates before the root `prodex` crate, which can hit crates.io new-crate rate limits and create partial releases.
 Keep release publishing GitHub-only unless another registry is explicitly re-enabled with a deliberate plan.
 
-The `.github/workflows/standalone-release.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
+The `.github/workflows/standalone-release.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, matching the tag, rather than `prodex v<version>`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.
