@@ -81,6 +81,28 @@ fn quota_summary_for_route_matches_usage_windows() {
 }
 
 #[test]
+fn unknown_five_hour_usage_does_not_exhaust_known_weekly_quota() {
+    let now = Local::now().timestamp();
+    let mut usage = usage_response(0, 20, now);
+    usage
+        .rate_limit
+        .as_mut()
+        .expect("test usage should have main windows")
+        .primary_window
+        .as_mut()
+        .expect("test usage should have a 5h window")
+        .used_percent = None;
+
+    let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
+
+    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.five_hour.remaining_percent, 100);
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.weekly.remaining_percent, 80);
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
+}
+
+#[test]
 fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
     let now = Local::now().timestamp();
     let mut usage = usage_response(100, 100, now);

@@ -32,6 +32,26 @@ fn cold_start_candidate_probe_is_queued_without_blocking_selection() {
 }
 
 #[test]
+fn cold_start_candidate_is_allowed_without_cached_auth() {
+    let temp_dir = TestDir::isolated();
+    let (listener, base_url) = unresponsive_loopback_backend_listener();
+    let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, base_url);
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_probe_cache
+        .clear();
+
+    let candidate = next_runtime_response_candidate(&shared, &BTreeSet::new())
+        .expect("candidate lookup should succeed");
+    assert_eq!(candidate, Some("second".to_string()));
+
+    drop(listener);
+    wait_for_runtime_background_queues_idle();
+}
+
+#[test]
 fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
     assert!(!runtime_proxy_sync_probe_pressure_mode_for_route(
         RuntimeRouteKind::Responses,

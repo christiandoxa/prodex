@@ -392,13 +392,13 @@ fn push_wrapped_line(lines: &mut Vec<String>, text: &str, width: usize) {
     lines.extend(render_text_body(text, width));
 }
 
-struct ParsedRuntimeLogLine {
-    timestamp: String,
-    event: Option<String>,
-    fields: BTreeMap<String, String>,
+pub(super) struct ParsedRuntimeLogLine {
+    pub(super) timestamp: String,
+    pub(super) event: Option<String>,
+    pub(super) fields: BTreeMap<String, String>,
 }
 
-fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine> {
+pub(super) fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine> {
     if line.trim_start().starts_with('{') {
         let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
         let timestamp = value

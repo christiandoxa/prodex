@@ -110,19 +110,19 @@ pub enum LogMode {
     /// Show the most recent transcript text and token usage event and exit.
     #[default]
     Last,
-    /// Follow session/runtime logs and print transcript text plus token usage events.
+    /// Follow session/runtime logs and print live text, tool calls, and token usage events.
     Stream,
-    /// Follow post-Prodex HTTP upstream payload snapshots sent toward the backend.
+    /// Follow redacted, bounded upstream payload snapshots sent toward the backend.
     Upstream,
 }
 
 #[derive(Args, Debug, Default)]
 pub struct LogArgs {
-    /// Output mode. Omit for the latest event, use `stream` for live raw transcript/token logs,
+    /// Output mode. Omit for the latest event, use `stream` for live transcript/tool/token logs,
     /// or `upstream` for processed backend-bound payload snapshots.
     #[arg(value_enum, default_value_t)]
     pub mode: LogMode,
-    /// Emit machine-readable JSON. Stream mode emits token events; upstream mode emits HTTP payload events.
+    /// Emit machine-readable JSON. Stream mode emits text/tool/token events; upstream mode emits payload events.
     #[arg(long)]
     pub json: bool,
 }
