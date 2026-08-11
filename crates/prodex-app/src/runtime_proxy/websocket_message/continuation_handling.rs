@@ -52,8 +52,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             );
         }
         if retry_same_profile_with_fresh_connect {
-            self.websocket_reuse_fresh_retry_profiles
-                .insert(profile_name.clone());
+            self.schedule_websocket_reuse_fresh_retry(&profile_name);
             runtime_proxy_log(
                 self.shared,
                 runtime_proxy_structured_log_message(
@@ -95,8 +94,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         {
             return false;
         }
-        self.websocket_reuse_fresh_retry_profiles
-            .insert(profile_name.to_string());
+        self.schedule_websocket_reuse_fresh_retry(profile_name);
         runtime_proxy_log(
             self.shared,
             runtime_proxy_structured_log_message(
@@ -120,8 +118,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             .websocket_reuse_fresh_retry_profiles
             .contains(profile_name)
         {
-            self.websocket_reuse_fresh_retry_profiles
-                .insert(profile_name.to_string());
+            self.schedule_websocket_reuse_fresh_retry(profile_name);
             runtime_proxy_log(
                 self.shared,
                 runtime_proxy_structured_log_message(
@@ -197,8 +194,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             .websocket_reuse_fresh_retry_profiles
             .contains(profile_name)
         {
-            self.websocket_reuse_fresh_retry_profiles
-                .insert(profile_name.to_string());
+            self.schedule_websocket_reuse_fresh_retry(profile_name);
             runtime_proxy_log(
                 self.shared,
                 runtime_proxy_structured_log_message(
@@ -249,6 +245,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         Err(anyhow::anyhow!(
             "runtime websocket upstream closed before response.completed for previous_response_id continuation without replayable turn_state: profile={profile_name} event={event}"
         ))
+    }
+
+    fn schedule_websocket_reuse_fresh_retry(&mut self, profile_name: &str) {
+        self.websocket_reuse_fresh_retry_profiles
+            .insert(profile_name.to_string());
+        self.websocket_reuse_fresh_retry_pending = true;
     }
 
     pub(super) fn handle_previous_response_not_found(

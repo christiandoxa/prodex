@@ -30,11 +30,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.shared,
                 RuntimeRouteKind::Websocket,
             );
-            if runtime_proxy_precommit_budget_exhausted_for_route(
-                self.shared,
+            if self.precommit_budget_exhausted(
                 selection_started_at,
                 selection_attempts,
-                self.has_continuation_priority(),
                 pressure_mode,
             )? {
                 match self.handle_precommit_budget_exhausted(
@@ -68,6 +66,24 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
             }
         }
+    }
+
+    fn precommit_budget_exhausted(
+        &mut self,
+        selection_started_at: Instant,
+        selection_attempts: usize,
+        pressure_mode: bool,
+    ) -> Result<bool> {
+        if std::mem::take(&mut self.websocket_reuse_fresh_retry_pending) {
+            return Ok(false);
+        }
+        runtime_proxy_precommit_budget_exhausted_for_route(
+            self.shared,
+            selection_started_at,
+            selection_attempts,
+            self.has_continuation_priority(),
+            pressure_mode,
+        )
     }
 
     pub(super) fn handle_precommit_budget_exhausted(
