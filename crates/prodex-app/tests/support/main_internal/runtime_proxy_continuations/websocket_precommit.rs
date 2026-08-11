@@ -170,6 +170,45 @@ fn runtime_proxy_websocket_restarted_session_only_affinity_rotates_after_quota()
 }
 
 #[test]
+fn runtime_proxy_websocket_stale_session_binding_rotates_as_fresh() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "second",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    )
+    .restart_with_stale_session_binding("sess-ws-stale", "main");
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "session_id": "sess-ws-stale",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "continue on a healthy account",
+            }],
+        }),
+    );
+
+    let (_, completed) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"response.completed\"")
+    });
+    let _ = socket.close(None);
+
+    assert!(completed.contains("\"response\":{\"id\":\"resp-second\"}"));
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+}
+
+#[test]
 fn runtime_proxy_websocket_keepalive_before_content_does_not_commit_or_block_forwarding() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
