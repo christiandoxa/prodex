@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.3 - 2026-08-11
+
+### Runtime
+
+- Improve proxy recovery and payload logging (`57c2e3c`)
+
 ## 0.407.2 - 2026-08-11
 
 ### Runtime
@@ -99,15 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Enable all Super optional tools (`1298966`)
-
-## 0.398.0 - 2026-08-09
-
-### Runtime
-
-- Harden runtime paths and CI parallelism (`fc97b65`)
-
-### Misc
-
-- Ratchet presidio size guard (`76bcc08`)
-- Satisfy sonar complexity gates (`3c877b2`)
-- Satisfy clippy quality gates (`db4d929`)
