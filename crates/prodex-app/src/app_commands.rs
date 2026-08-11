@@ -661,16 +661,15 @@ fn configured_sub_agent_model_ids(
         if models.len() >= model_limit {
             break;
         }
-        let Some(id) = entry
-            .get("id")
-            .or_else(|| entry.get("slug"))
-            .or_else(|| entry.get("model"))
+        let Some(id) = ["id", "model_id", "slug", "model"]
+            .into_iter()
+            .find_map(|key| entry.get(key))
             .and_then(serde_json::Value::as_str)
         else {
             continue;
         };
         if !id.trim().is_empty() && seen.insert(id.trim().to_ascii_lowercase()) {
-            models.push(id.to_string());
+            models.push(id.trim().to_string());
         }
     }
 }
@@ -1218,9 +1217,10 @@ mod sub_agent_prompt_tests {
         configured_sub_agent_model_ids(
             &serde_json::json!({
                 "models": [
-                    {"id": "profile-only-model"},
-                    {"slug": "slug-only-model"},
-                    {"model": "model-only-model"},
+                    {"id": "profile-model"},
+                    {"model_id": " kiro-model "},
+                    {"slug": "slug-model"},
+                    {"model": "model-model"},
                     {"id": "   "}
                 ]
             }),
@@ -1232,7 +1232,7 @@ mod sub_agent_prompt_tests {
             &configured,
             None,
         );
-        for expected in ["profile-only-model", "slug-only-model", "model-only-model"] {
+        for expected in ["profile-model", "kiro-model", "slug-model", "model-model"] {
             assert!(choices.iter().any(|choice| matches!(
                 choice,
                 prodex_provider_core::ProviderModelChoice::Model(model) if model == expected

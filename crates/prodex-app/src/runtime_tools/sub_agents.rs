@@ -5,9 +5,7 @@ use prodex_cli::{
     SuperLaunchTarget,
 };
 use prodex_provider_core::{
-    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice, ProviderReasoningEffort,
-    provider_catalog_entry, provider_implementation_registry, provider_model_spec,
-    resolve_provider_model_choices,
+    ProviderId, ProviderReasoningEffort, provider_catalog_entry, provider_model_spec,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 use serde::{Deserialize, Serialize};
@@ -23,6 +21,9 @@ use std::time::Duration;
 #[path = "sub_agent_process.rs"]
 mod process;
 use process::*;
+#[path = "sub_agent_catalog.rs"]
+mod catalog;
+pub(crate) use catalog::*;
 
 pub(crate) const SUB_AGENT_RECURSION_MARKER: &str = "PRODEX_SUB_AGENT";
 pub(crate) const SUB_AGENT_LAUNCHER_MARKER: &str = "PRODEX_SUB_AGENT_LAUNCHER";
@@ -224,50 +225,6 @@ pub(crate) fn resolve_super_sub_agent_config(
         required_tools: Vec::new(),
         recursion_disabled: true,
     })
-}
-
-pub(crate) fn canonical_sub_agent_providers() -> &'static [ProviderId] {
-    PROVIDER_IMPLEMENTATION_ORDER
-}
-
-pub(crate) fn canonical_sub_agent_model_choices(
-    provider: ProviderId,
-    current_model: Option<&str>,
-) -> Vec<ProviderModelChoice> {
-    resolve_provider_model_choices(provider, &[], current_model)
-}
-
-pub(crate) fn canonical_sub_agent_efforts(
-    provider: ProviderId,
-    model: Option<&str>,
-) -> Vec<SubAgentReasoningEffort> {
-    let Some(catalog_efforts) = model
-        .and_then(|model| provider_catalog_entry(provider, model))
-        .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
-    else {
-        return SubAgentReasoningEffort::ALL.to_vec();
-    };
-
-    catalog_efforts
-        .iter()
-        .filter_map(|effort| match effort {
-            ProviderReasoningEffort::None => Some(SubAgentReasoningEffort::None),
-            ProviderReasoningEffort::Minimal => Some(SubAgentReasoningEffort::Minimal),
-            ProviderReasoningEffort::Low => Some(SubAgentReasoningEffort::Low),
-            ProviderReasoningEffort::Medium => Some(SubAgentReasoningEffort::Medium),
-            ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
-            ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
-            ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
-            ProviderReasoningEffort::Unknown => None,
-        })
-        .collect()
-}
-
-pub(crate) fn provider_display_name(provider: ProviderId) -> &'static str {
-    provider_implementation_registry()
-        .get(provider)
-        .map(|descriptor| descriptor.display_name())
-        .unwrap_or(provider.label())
 }
 
 pub(crate) fn sub_agent_recursion_policy() -> SubAgentRecursionPolicy {
