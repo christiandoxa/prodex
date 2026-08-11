@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.1 - 2026-08-11
+
+### Runtime
+
+- Rebind rotated sessions (`a531a87`)
+
 ## 0.407.0 - 2026-08-11
 
 ### Runtime
@@ -109,10 +115,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Use local Ponytail marketplace source (`87cf504`)
-
-## 0.396.0 - 2026-08-08
-
-### Misc
-
-- Satisfy clippy test ordering (`0e6c609`)
-- Skip ponytail when node is unavailable (`625c4ae`)
