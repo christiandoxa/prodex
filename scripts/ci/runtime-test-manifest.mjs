@@ -348,6 +348,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_restarted_session_only_affinity_rotates_after_quota",
         label: "restarted-session-quota",
       },
+      {
+        id: "continuation-http-stale-session",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_stale_session_binding_rotates_as_fresh",
+        label: "stale-session",
+      },
     ],
   },
   {
