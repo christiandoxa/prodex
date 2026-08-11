@@ -49,3 +49,24 @@ fn direct_current_profile_fallback_requires_fresh_request_context() {
         assert_eq!(flow.allows_direct_current_profile_fallback(), expected);
     }
 }
+
+#[test]
+fn pending_websocket_reuse_retry_bypasses_expired_budget_once() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("loop-reuse-retry-budget");
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.websocket_reuse_fresh_retry_pending = true;
+    let expired = Instant::now() - std::time::Duration::from_secs(60);
+
+    assert!(
+        !flow
+            .precommit_budget_exhausted(expired, usize::MAX, false)
+            .expect("scheduled fresh retry should bypass the expired budget")
+    );
+    assert!(
+        flow.precommit_budget_exhausted(expired, usize::MAX, false)
+            .expect("budget should apply again after the one retry")
+    );
+}

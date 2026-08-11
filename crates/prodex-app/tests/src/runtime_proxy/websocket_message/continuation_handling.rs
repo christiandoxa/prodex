@@ -53,28 +53,32 @@ fn stale_continuation_action_sends_error_frame_and_finishes() {
 }
 
 #[test]
-fn connection_limit_retries_same_profile_with_fresh_socket() {
+fn locked_affinity_watchdog_schedules_fresh_owner_retry() {
     let _guard = acquire_test_runtime_lock();
-    let shared = test_runtime_shared("continuation-connection-limit");
+    let shared = test_runtime_shared("continuation-locked-watchdog");
     let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
     let mut websocket_session = RuntimeWebsocketSessionState::default();
     let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.previous_response_id = Some("resp-owner".to_string());
+    flow.bound_profile = Some("main".to_string());
+    flow.request_requires_previous_response_affinity = true;
 
     let action = flow
         .handle_reuse_watchdog_tripped(
             "main".to_string(),
-            "connection_limit_reached",
+            "upstream_read_error",
             /*turn_state_override*/ None,
         )
-        .expect("connection limit should retry a fresh websocket once");
+        .expect("locked continuation should retry its owner with a fresh websocket once");
 
     assert!(matches!(
         action,
         RuntimeWebsocketMessageLoopAction::Continue
     ));
     assert!(flow.websocket_reuse_fresh_retry_profiles.contains("main"));
+    assert!(flow.websocket_reuse_fresh_retry_pending);
     assert!(
         !flow.excluded_profiles.contains("main"),
-        "connection limit is socket expiry, not profile failure"
+        "hard affinity must keep the owner for the fresh retry"
     );
 }

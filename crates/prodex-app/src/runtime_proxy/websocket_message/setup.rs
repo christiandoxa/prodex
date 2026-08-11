@@ -145,6 +145,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             saw_inflight_saturation: false,
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
+            websocket_reuse_fresh_retry_pending: false,
         };
         flow.recompute_route_affinity("initial")?;
         Ok(flow)
