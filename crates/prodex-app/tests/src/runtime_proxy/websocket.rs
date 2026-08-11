@@ -224,3 +224,71 @@ fn websocket_presidio_fail_open_preserves_text_when_local_inspection_hits_limits
     assert!(log.contains("fail_mode=open"));
     crate::runtime_proxy::unregister_runtime_presidio_redaction_proxy_state(&shared.log_path);
 }
+
+#[test]
+fn websocket_runtime_log_contains_plain_stream_payload_text() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        for payload in [
+            r#"{"type":"response.output_item.added","item":{"type":"function_call","call_id":"call-1","name":"exec"}}"#,
+            r#"{"type":"response.function_call_arguments.delta","call_id":"call-1","delta":"const r = await tools.web__run({}); text(r);"}"#,
+            r#"{"type":"response.output_text.delta","delta":"done"}"#,
+            r#"{"type":"response.completed","response":{"id":"resp-1"}}"#,
+        ] {
+            socket
+                .send(WsMessage::Text(payload.into()))
+                .expect("upstream websocket should send response frame");
+        }
+    });
+
+    let shared = websocket_test_shared_with_main_profile("stream-payload", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 901,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("websocket response should complete");
+
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "stream_payload");
+    assert!(
+        log.contains("source=tool-call:exec")
+            && log.contains("tools.web__run")
+            && log.contains("source=assistant")
+    );
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+    let _ = client_socket.close(None);
+    let _ = std::fs::remove_file(&shared.log_path);
+}

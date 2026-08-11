@@ -201,10 +201,10 @@ pub(super) fn select_runtime_cold_start_candidate(
             continue;
         };
         if !entry.supports_codex_runtime()
-            || !entry
+            || entry
                 .cached_auth_summary
                 .as_ref()
-                .is_some_and(|auth| auth.quota_compatible)
+                .is_some_and(|auth| !auth.quota_compatible)
             || entry
                 .cached_probe_entry
                 .as_ref()

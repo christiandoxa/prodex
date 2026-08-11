@@ -6,7 +6,7 @@ use crate::app_commands::log_format::local_log_timestamp;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct TranscriptEvent {
     pub(crate) timestamp: String,
     pub(crate) source: String,

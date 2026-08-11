@@ -3,10 +3,10 @@ pub(super) use self::render::log_snapshot_items;
 pub(super) use self::render::log_stream_tui_text;
 use super::{
     FollowedLog, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
-    collect_new_runtime_log_stream_items, collect_new_transcript_events, latest_transcript_event,
-    local_token_usage_event, print_token_usage_event, print_transcript_event,
-    print_upstream_payload_event, read_new_runtime_log_events, read_new_transcript_events,
-    recent_session_log_paths,
+    collect_new_runtime_log_stream_items, collect_new_transcript_events,
+    latest_runtime_stream_payload_event, latest_transcript_event, local_token_usage_event,
+    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
+    read_new_runtime_log_events, read_new_transcript_events, recent_session_log_paths,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -135,15 +135,24 @@ fn stream_token_usage_events_tui() -> Result<()> {
 }
 
 fn print_initial_token_usage_events(json: bool) -> Result<()> {
+    let mut found_event = false;
     if !json && let Some(event) = latest_transcript_event()? {
         print_transcript_event(&event)?;
+        found_event = true;
+    }
+    if !json && let Some(event) = latest_runtime_stream_payload_event() {
+        print_transcript_event(&event)?;
+        found_event = true;
     }
     if !json && let Some(event) = latest_upstream_payload_event() {
         print_upstream_payload_event(&event)?;
+        found_event = true;
     }
     if let Some(event) = latest_token_usage_event() {
         print_token_usage_event(&event, json)?;
-    } else {
+        found_event = true;
+    }
+    if !found_event {
         eprintln!("Waiting for transcript, upstream payload, or token usage events...");
     }
     Ok(())
@@ -199,6 +208,9 @@ fn read_token_usage_events_tick(
 fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
     let mut items = VecDeque::new();
     if let Some(event) = latest_transcript_event()? {
+        push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
+    }
+    if let Some(event) = latest_runtime_stream_payload_event() {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
     }
     if let Some(event) = latest_upstream_payload_event() {

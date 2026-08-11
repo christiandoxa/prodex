@@ -9,6 +9,7 @@ mod precommit;
 mod previous_response;
 mod quota_gate;
 mod session;
+mod stream_payload;
 mod terminal;
 mod upstream_send;
 use commit::*;
@@ -19,6 +20,7 @@ pub(crate) use precommit::*;
 use previous_response::*;
 use quota_gate::*;
 use session::*;
+use stream_payload::*;
 use terminal::*;
 use upstream_send::*;
 
@@ -171,6 +173,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         precommit_hold_count: 0,
         precommit_hold_bytes: 0,
         precommit_hold_promotion_event_seen: false,
+        stream_payload_state: RuntimeWebsocketStreamState::default(),
         promote_committed_profile,
     })
 }
@@ -205,6 +208,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     precommit_hold_count: usize,
     precommit_hold_bytes: usize,
     precommit_hold_promotion_event_seen: bool,
+    stream_payload_state: RuntimeWebsocketStreamState,
 }
 
 struct RuntimeWebsocketTextTerminal {
@@ -249,6 +253,7 @@ fn run_runtime_websocket_response_loop(
 impl RuntimeWebsocketResponseLoop<'_> {
     fn handle_text(&mut self, text: String) -> Result<RuntimeWebsocketTextResult> {
         self.mark_text_progress()?;
+        let stream_payload = self.stream_payload_state.payload_from_text(&text);
         let inspected = self.inspect_text(&text)?;
         if let Some(attempt) = self.retry_attempt(&inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));
@@ -265,6 +270,15 @@ impl RuntimeWebsocketResponseLoop<'_> {
             }
         }
         let committed_previous_response_not_found = self.record_text(&inspected)?;
+        if let Some(payload) = stream_payload {
+            log_runtime_stream_payload(RuntimeStreamPayloadLog {
+                shared: self.shared,
+                request_id: self.request_id,
+                profile_name: self.profile_name,
+                source: &payload.source,
+                message: &payload.message,
+            });
+        }
         self.forward_text(&text)?;
         if inspected.terminal_event {
             let reset_upstream_socket = !self.realtime_websocket

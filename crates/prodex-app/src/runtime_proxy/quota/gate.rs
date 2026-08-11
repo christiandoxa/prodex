@@ -171,12 +171,8 @@ pub(crate) fn runtime_precommit_quota_gate(
         | runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired => {}
     }
 
-    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
-        shared,
-        profile_name,
-        &BTreeSet::new(),
-        route_kind,
-    )?;
+    let has_alternative_quota_profile =
+        runtime_has_route_ready_quota_fallback(shared, profile_name, &BTreeSet::new(), route_kind)?;
     let force_live_probe = runtime_precommit_quota_gate_forces_live_probe(
         initial_quota_source,
         route_kind,

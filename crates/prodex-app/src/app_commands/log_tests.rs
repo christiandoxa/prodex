@@ -376,6 +376,44 @@ fn collects_websocket_payload_and_usage_from_runtime_log() {
 }
 
 #[test]
+fn collects_websocket_stream_payload_as_plain_tool_call_text() {
+    let root = env::temp_dir().join(format!(
+        "prodex-runtime-stream-payload-follow-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("runtime.log");
+    fs::write(
+        &path,
+        r#"[2026-07-01 21:52:36.710 +07:00] stream_payload request=28 route=websocket transport=websocket profile=main source=tool-call:exec stream="const r = await tools.web__run({}); text(r);"
+"#,
+    )
+    .unwrap();
+
+    let items = collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default()).unwrap();
+
+    assert_eq!(items.len(), 1);
+    let LogStreamItem::Transcript(event) = &items[0] else {
+        panic!("stream payload should render as transcript");
+    };
+    assert_eq!(event.source, "tool-call:exec");
+    assert_eq!(event.text, "const r = await tools.web__run({}); text(r);");
+    let rendered = log_stream_tui_text(&VecDeque::from(items), 10, 100)
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    assert!(rendered.contains("stream tool-call:exec"));
+    assert!(rendered.contains("tools.web__run"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn dedupes_consecutive_equivalent_transcript_events() {
     let root = env::temp_dir().join(format!(
         "prodex-transcript-dedupe-{}-{}",

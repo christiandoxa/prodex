@@ -326,6 +326,8 @@ fn runtime_proxy_log_key_is_known_safe(key: &str) -> bool {
             | "signaled"
             | "soft_limit"
             | "sync_probe_jobs"
+            | "payload_b64"
+            | "stream"
             | "trace"
             | "transport"
             | "useful"

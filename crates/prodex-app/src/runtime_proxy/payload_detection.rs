@@ -5,7 +5,10 @@ use super::{
 };
 use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
 use prodex_runtime_state::RuntimeRouteKind;
-use redaction::{redaction_redacted_body_snippet, redaction_redacted_headers_debug};
+use redaction::{
+    redaction_redact_json, redaction_redact_secret_like_text, redaction_redacted_body_snippet,
+    redaction_redacted_headers_debug,
+};
 use runtime_proxy_crate::{
     RuntimeTokenUsage, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -75,6 +78,51 @@ pub(crate) struct RuntimeTokenUsageLog<'a> {
     pub(crate) prompt_cache_key: Option<&'a str>,
     pub(crate) model_name: Option<&'a str>,
     pub(crate) usage: Option<RuntimeTokenUsage>,
+}
+
+pub(crate) struct RuntimeStreamPayloadLog<'a> {
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) request_id: u64,
+    pub(crate) profile_name: &'a str,
+    pub(crate) source: &'a str,
+    pub(crate) message: &'a str,
+}
+
+pub(crate) fn log_runtime_stream_payload(input: RuntimeStreamPayloadLog<'_>) {
+    let RuntimeStreamPayloadLog {
+        shared,
+        request_id,
+        profile_name,
+        source,
+        message,
+    } = input;
+    if message.trim().is_empty() {
+        return;
+    }
+    let message = runtime_stream_log_text(message);
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "stream_payload",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("route", "websocket"),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("source", source),
+                runtime_proxy_log_field("stream", message),
+            ],
+        ),
+    );
+}
+
+fn runtime_stream_log_text(message: &str) -> String {
+    let message = redaction_redact_secret_like_text(message);
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&message) else {
+        return message;
+    };
+    redaction_redact_json(&mut value);
+    serde_json::to_string(&value).unwrap_or(message)
 }
 
 pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
@@ -157,5 +205,14 @@ mod tests {
         assert!(!runtime_proxy_body_indicates_token_invalidated(
             b"temporary server unavailable"
         ));
+    }
+
+    #[test]
+    fn stream_log_text_redacts_json_credentials() {
+        let redacted = runtime_stream_log_text(r#"{"access_token":"secret","text":"hello"}"#);
+
+        assert!(redacted.contains("<redacted>"));
+        assert!(redacted.contains("hello"));
+        assert!(!redacted.contains("secret"));
     }
 }
