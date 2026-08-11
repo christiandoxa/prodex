@@ -170,6 +170,51 @@ fn runtime_proxy_websocket_restarted_session_only_affinity_rotates_after_quota()
 }
 
 #[test]
+fn runtime_proxy_websocket_transport_backoff_rotation_rebinds_soft_session() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "main",
+        &["main", "second"],
+        &[],
+        vec![("sess-ws-transport-rotation".to_string(), "main")],
+    )
+    .restart_with_transport_backoff("main", RuntimeRouteKind::Websocket);
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "session_id": "sess-ws-transport-rotation",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "resume after the original owner entered transport backoff",
+            }],
+        }),
+    );
+
+    let (_, completed) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"response.completed\"")
+    });
+    let _ = socket.close(None);
+    assert!(completed.contains("\"response\":{\"id\":\"resp-second\"}"));
+
+    let continuations = wait_for_runtime_continuations(&fixture.paths, |continuations| {
+        continuations
+            .session_profile_bindings
+            .get("sess-ws-transport-rotation")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations.session_profile_bindings["sess-ws-transport-rotation"].profile_name,
+        "second"
+    );
+}
+
+#[test]
 fn runtime_proxy_websocket_stale_session_binding_rotates_as_fresh() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =

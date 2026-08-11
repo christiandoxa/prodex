@@ -346,6 +346,7 @@ pub(crate) fn release_runtime_session_affinity(
 enum RuntimeAffinityReleaseReason {
     Quota,
     AuthFailed,
+    SessionRotation,
 }
 
 impl RuntimeAffinityReleaseReason {
@@ -353,6 +354,7 @@ impl RuntimeAffinityReleaseReason {
         match self {
             Self::Quota => "quota",
             Self::AuthFailed => "auth_failed",
+            Self::SessionRotation => "session_rotation",
         }
     }
 
@@ -360,8 +362,34 @@ impl RuntimeAffinityReleaseReason {
         match self {
             Self::Quota => RuntimeStateMutation::QuotaRelease(profile_name.to_string()),
             Self::AuthFailed => RuntimeStateMutation::AuthFailedRelease(profile_name.to_string()),
+            Self::SessionRotation => {
+                RuntimeStateMutation::SessionAffinityRelease("selection_rotation".to_string())
+            }
         }
     }
+}
+
+pub(crate) fn release_runtime_rotated_session_affinity(
+    shared: &RuntimeRotationProxyShared,
+    previous_profile: Option<&str>,
+    selected_profile: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<bool> {
+    let (Some(previous_profile), Some(selected_profile)) = (previous_profile, selected_profile)
+    else {
+        return Ok(false);
+    };
+    if previous_profile == selected_profile {
+        return Ok(false);
+    }
+    release_runtime_profile_affinity(
+        shared,
+        previous_profile,
+        None,
+        None,
+        session_id,
+        RuntimeAffinityReleaseReason::SessionRotation,
+    )
 }
 
 pub(crate) fn release_runtime_quota_blocked_affinity(
