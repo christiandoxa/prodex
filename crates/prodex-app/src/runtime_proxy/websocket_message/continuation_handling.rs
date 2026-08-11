@@ -311,8 +311,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         match action {
-            RuntimePreviousResponseNotFoundAction::RetryOwner
-            | RuntimePreviousResponseNotFoundAction::Rotate => {
+            RuntimePreviousResponseNotFoundAction::RetryOwner => {
+                self.websocket_reuse_fresh_retry_pending = true;
+                self.last_failure =
+                    Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                Ok(RuntimeWebsocketMessageLoopAction::Continue)
+            }
+            RuntimePreviousResponseNotFoundAction::Rotate => {
                 self.last_failure =
                     Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                 Ok(RuntimeWebsocketMessageLoopAction::Continue)

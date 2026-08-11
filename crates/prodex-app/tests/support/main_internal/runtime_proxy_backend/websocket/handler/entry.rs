@@ -7,7 +7,12 @@ pub(super) fn handle_runtime_proxy_backend_websocket(
     websocket_requests: &Arc<Mutex<Vec<String>>>,
     mode: RuntimeProxyBackendMode,
 ) {
-    let accepted = accepted::accept_runtime_proxy_backend_websocket(stream, mode);
+    let first_connection = responses_accounts
+        .lock()
+        .expect("responses_accounts poisoned")
+        .is_empty();
+    let accepted =
+        accepted::accept_runtime_proxy_backend_websocket(stream, mode, first_connection);
     let mut websocket = accepted.websocket;
     let account_id = accepted.account_id;
     let mut effective_turn_state = accepted.request_turn_state;
