@@ -127,7 +127,7 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   const matrix = JSON.parse(result.stdout);
   const filters = matrix.include.flatMap((entry) => entry.filters.split("\n"));
   assert.equal(matrix.include.length, 24);
-  assert.equal(filters.length, 50);
+  assert.equal(filters.length, 51);
   assert.equal(new Set(filters).size, filters.length);
   const admissionCorePack = matrix.include.find((entry) =>
     entry.filters.includes(
