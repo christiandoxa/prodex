@@ -164,6 +164,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         precommit_started_at,
         committed: false,
         first_upstream_frame_seen: false,
+        first_upstream_text_seen: false,
         buffered_precommit_text_frames: Vec::new(),
         committed_response_ids: BTreeSet::new(),
         previous_response_owner_recorded: false,
@@ -197,6 +198,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     promote_committed_profile: bool,
     committed: bool,
     first_upstream_frame_seen: bool,
+    first_upstream_text_seen: bool,
     buffered_precommit_text_frames: Vec<RuntimeBufferedWebsocketTextFrame>,
     committed_response_ids: BTreeSet<String>,
     previous_response_owner_recorded: bool,
@@ -512,9 +514,10 @@ impl RuntimeWebsocketResponseLoop<'_> {
     }
 
     fn mark_text_progress(&mut self) -> Result<()> {
+        self.first_upstream_frame_seen = true;
         mark_runtime_websocket_upstream_frame_seen(
             &mut self.upstream_socket,
-            &mut self.first_upstream_frame_seen,
+            &mut self.first_upstream_text_seen,
             self.shared.runtime_config.tuning.stream_idle_timeout_ms,
         )
     }

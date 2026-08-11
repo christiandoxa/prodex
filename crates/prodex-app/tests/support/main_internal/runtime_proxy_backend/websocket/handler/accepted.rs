@@ -11,6 +11,7 @@ pub(super) struct AcceptedWebsocket {
 pub(super) fn accept_runtime_proxy_backend_websocket(
     stream: TcpStream,
     mode: RuntimeProxyBackendMode,
+    first_connection: bool,
 ) -> AcceptedWebsocket {
     let account_id = Arc::new(Mutex::new(String::new()));
     let request_turn_state = Arc::new(Mutex::new(None::<String>));
@@ -59,6 +60,10 @@ pub(super) fn accept_runtime_proxy_backend_websocket(
             .get("ChatGPT-Account-Id")
             .and_then(|value| value.to_str().ok())
             == Some("second-account")
+            && (!matches!(
+                mode,
+                RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
+            ) || !first_connection)
         {
             response.headers_mut().insert(
                 tungstenite::http::header::HeaderName::from_static("x-codex-turn-state"),

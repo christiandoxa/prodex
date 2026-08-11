@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "runtime_proxy_continuations/websocket_precommit.rs"]
 mod websocket_precommit;
+#[path = "runtime_proxy_continuations/websocket_recovery.rs"]
+mod websocket_recovery;
 #[path = "runtime_proxy_continuations/http_followups.rs"]
 mod http_followups;
 #[path = "runtime_proxy_continuations/http_tool_and_compact.rs"]

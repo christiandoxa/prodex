@@ -70,11 +70,6 @@
     "reason": "App-server protocol fixture, schema drift, replay, lifecycle, affinity, and redaction regressions remain capped after stdio validation coverage moved to a focused child module; the narrow increase normalizes generated text fixtures across line-ending conventions."
   },
   {
-    "file": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs",
-    "maxLines": 1020,
-    "reason": "WebSocket precommit hold regressions now include oversized response-created quota retry boundaries; capped until sideband and terminal suites split."
-  },
-  {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
     "maxLines": 1026,
     "reason": "HTTP continuation, tool-output, compact session affinity, and hard binding identity regressions remain capped in the shared route harness."
