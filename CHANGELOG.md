@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.0 - 2026-08-11
+
+### Runtime
+
+- Recover stale session bindings (`e0221f6`)
+
+### Misc
+
+- Show provider models (`344f3d6`)
+
 ## 0.406.0 - 2026-08-11
 
 ### Runtime
@@ -106,9 +116,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy clippy test ordering (`0e6c609`)
 - Skip ponytail when node is unavailable (`625c4ae`)
-
-## 0.395.0 - 2026-08-08
-
-### Misc
-
-- Set interactive window title (`93888f4`)
