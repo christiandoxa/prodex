@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.2 - 2026-08-11
+
+### Runtime
+
+- Preserve websocket owner recovery (`42d4643`)
+
 ## 0.407.1 - 2026-08-11
 
 ### Runtime
@@ -105,13 +111,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Ratchet presidio size guard (`76bcc08`)
 - Satisfy sonar complexity gates (`3c877b2`)
 - Satisfy clippy quality gates (`db4d929`)
-
-## 0.397.0 - 2026-08-08
-
-### Docs
-
-- Document lockfile refresh on workspace releases (`55beda1`)
-
-### Misc
-
-- Use local Ponytail marketplace source (`87cf504`)
