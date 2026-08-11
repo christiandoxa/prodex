@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.406.0 - 2026-08-11
+
+### Runtime
+
+- Honor fresh websocket owner retry (`553f27a`)
+
+### Docs
+
+- Strengthen agent guidance (`171c206`)
+
 ## 0.405.0 - 2026-08-11
 
 ### Runtime
@@ -102,9 +112,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Set interactive window title (`93888f4`)
-
-## 0.394.0 - 2026-08-08
-
-### CLI
-
-- Preserve quota snapshots and aliases (`b5b6325`)
