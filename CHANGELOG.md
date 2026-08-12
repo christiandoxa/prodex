@@ -2,10 +2,11 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.407.4 - 2026-08-12
+## 0.407.5 - 2026-08-12
 
 ### Runtime
 
+- Persist quota readiness across profiles (`20c4bf7`)
 - Recover healthy profile selection (`4c68738`)
 
 ## 0.407.3 - 2026-08-11
