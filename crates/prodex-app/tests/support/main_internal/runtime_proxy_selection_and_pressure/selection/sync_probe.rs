@@ -50,3 +50,35 @@ sync_probe_pressure_pause_ms = 2
 
     clear_runtime_policy_cache();
 }
+
+#[test]
+fn fresh_selection_retries_after_scheduled_cold_start_probe() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _pause_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS", "400");
+    clear_runtime_policy_cache();
+
+    let _probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeProxyBackend::start();
+    let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, backend.base_url());
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_usage_snapshots
+        .insert(
+            "second".to_string(),
+            ready_runtime_usage_snapshot(Local::now().timestamp(), 0),
+        );
+
+    let candidate = next_runtime_response_candidate(&shared, &BTreeSet::new())
+        .expect("candidate lookup should succeed");
+    assert_eq!(candidate, Some("second".to_string()));
+    assert_eq!(backend.usage_accounts(), vec!["second-account".to_string()]);
+
+    drop(shared);
+    drop(backend);
+    wait_for_runtime_background_queues_idle();
+    clear_runtime_policy_cache();
+}

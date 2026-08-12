@@ -352,13 +352,18 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
                 recovered_from_backup: false,
             },
         );
-    let persisted_usage_snapshots =
+    let startup_now = Local::now().timestamp();
+    let persisted_usage_snapshots = restore_quota_watch_runtime_usage_snapshots(
+        paths,
+        &restored_state.profiles,
         load_runtime_usage_snapshots_with_recovery(paths, &restored_state.profiles).unwrap_or(
             RecoveredLoad {
                 value: BTreeMap::new(),
                 recovered_from_backup: false,
             },
-        );
+        ),
+        startup_now,
+    );
     let mut persisted_backoffs =
         load_runtime_profile_backoffs_with_recovery(paths, &restored_state.profiles).unwrap_or(
             RecoveredLoad {
@@ -366,7 +371,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
                 recovered_from_backup: false,
             },
         );
-    let startup_now = Local::now().timestamp();
     let persisted_backoffs_softened = runtime_soften_persisted_backoffs_for_startup(
         &mut persisted_backoffs.value,
         &persisted_profile_scores.value,
@@ -591,10 +595,92 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     })
 }
 
+fn restore_quota_watch_runtime_usage_snapshots(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    persisted: RecoveredLoad<BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    now: i64,
+) -> RecoveredLoad<BTreeMap<String, RuntimeProfileUsageSnapshot>> {
+    let Some(cache) = load_live_quota_watch_runtime_usage_cache(paths, profiles, now) else {
+        return persisted;
+    };
+    RecoveredLoad {
+        value: merge_runtime_usage_snapshots(&persisted.value, &cache.snapshots, profiles),
+        recovered_from_backup: persisted.recovered_from_backup,
+    }
+}
+
 #[cfg(test)]
 mod url_boundary_tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn startup_restores_fresh_quota_watch_snapshot_into_runtime_state() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-quota-watch-restore-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let profiles = BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: root.join("profiles/main"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        )]);
+        let fetched_at = Local::now().timestamp();
+        save_quota_watch_runtime_usage_cache(
+            &paths,
+            &[QuotaReport {
+                name: "main".to_string(),
+                active: true,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                provider: ProfileProvider::Openai,
+                workspace_id: None,
+                workspace_name: None,
+                result: Ok(ProviderQuotaSnapshot::OpenAi(UsageResponse {
+                    email: Some("test@example.com".to_string()),
+                    plan_type: Some("plus".to_string()),
+                    rate_limit: None,
+                    code_review_rate_limit: None,
+                    rate_limit_reset_credits: None,
+                    additional_rate_limits: Vec::new(),
+                })),
+                fetched_at,
+            }],
+            Duration::from_secs(5),
+        );
+
+        let restored = restore_quota_watch_runtime_usage_snapshots(
+            &paths,
+            &profiles,
+            RecoveredLoad {
+                value: BTreeMap::new(),
+                recovered_from_backup: false,
+            },
+            fetched_at,
+        );
+
+        assert_eq!(restored.value["main"].checked_at, fetched_at);
+        assert_eq!(restored.value["main"].plan_type.as_deref(), Some("plus"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn runtime_proxy_rejects_url_secret_before_creating_log() {

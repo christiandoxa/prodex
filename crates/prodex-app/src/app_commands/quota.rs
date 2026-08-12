@@ -5,7 +5,8 @@ use crate::{
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
     fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
     render_all_quota_reports_once_tui, render_profile_quota_once_tui, render_quota_reports,
-    resolve_profile_name, watch_all_quotas, watch_quota,
+    resolve_profile_name, save_openai_quota_runtime_usage_snapshot,
+    save_openai_quota_runtime_usage_snapshots, watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
@@ -37,7 +38,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         );
     }
 
-    handle_profile_quota(&state, &args)
+    handle_profile_quota(&paths, &state, &args)
 }
 
 fn handle_all_quota(
@@ -90,10 +91,11 @@ fn handle_all_quota(
     } else {
         print_stdout_text(&render_quota_reports(&reports, args.detail))?;
     }
+    save_openai_quota_runtime_usage_snapshots(paths, &state.profiles, &reports);
     Ok(())
 }
 
-fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
+fn handle_profile_quota(paths: &AppPaths, state: &AppState, args: &QuotaArgs) -> Result<()> {
     let profile_name = resolve_profile_name(state, args.profile.as_deref())?;
     let profile = state
         .profiles
@@ -134,6 +136,7 @@ fn handle_profile_quota(state: &AppState, args: &QuotaArgs) -> Result<()> {
             ),
         )?;
     }
+    save_openai_quota_runtime_usage_snapshot(paths, &state.profiles, &profile_name, &quota);
     Ok(())
 }
 

@@ -1,8 +1,10 @@
 use super::DEFAULT_WATCH_INTERVAL_SECONDS;
 use super::{ProviderQuotaSnapshot, QuotaReport};
 use crate::{
-    AppPaths, ProfileEntry, RuntimeProfileUsageSnapshot, last_good_file_path,
-    read_versioned_json_file_with_backup, save_versioned_json_file_with_fence,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RuntimeProfileUsageSnapshot,
+    last_good_file_path, load_runtime_usage_snapshots, merge_runtime_usage_snapshots,
+    read_versioned_json_file_with_backup, runtime_sidecar_generation_error_is_stale,
+    save_runtime_usage_snapshots_for_profiles, save_versioned_json_file_with_fence,
 };
 use chrono::Local;
 use serde::{Deserialize, Serialize};
@@ -56,6 +58,9 @@ pub(crate) fn save_quota_watch_runtime_usage_cache(
         .iter()
         .filter_map(quota_report_runtime_usage_snapshot)
         .collect::<BTreeMap<_, _>>();
+    if let Ok(state) = AppState::load(paths) {
+        persist_openai_runtime_usage_snapshots(paths, &state.profiles, &snapshots);
+    }
     let now = Local::now().timestamp();
     let refresh_seconds = i64::try_from(refresh_interval.as_secs())
         .unwrap_or(i64::MAX / 2)
@@ -70,6 +75,56 @@ pub(crate) fn save_quota_watch_runtime_usage_cache(
     };
     let path = quota_watch_runtime_usage_cache_path(paths);
     let _ = save_versioned_json_file_with_fence(&path, &last_good_file_path(&path), &cache);
+}
+
+pub(crate) fn save_openai_quota_runtime_usage_snapshots(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    reports: &[QuotaReport],
+) {
+    let snapshots = reports
+        .iter()
+        .filter_map(quota_report_runtime_usage_snapshot)
+        .collect::<BTreeMap<_, _>>();
+    persist_openai_runtime_usage_snapshots(paths, profiles, &snapshots);
+}
+
+pub(crate) fn save_openai_quota_runtime_usage_snapshot(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    profile_name: &str,
+    quota: &ProviderQuotaSnapshot,
+) {
+    let Some(snapshot) = provider_quota_runtime_usage_snapshot(quota, Local::now().timestamp())
+    else {
+        return;
+    };
+    persist_openai_runtime_usage_snapshots(
+        paths,
+        profiles,
+        &BTreeMap::from([(profile_name.to_string(), snapshot)]),
+    );
+}
+
+fn persist_openai_runtime_usage_snapshots(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    incoming: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+) {
+    if incoming.is_empty() {
+        return;
+    }
+    for _ in 0..2 {
+        let Ok(existing) = load_runtime_usage_snapshots(paths, profiles) else {
+            return;
+        };
+        let merged = merge_runtime_usage_snapshots(&existing, incoming, profiles);
+        match save_runtime_usage_snapshots_for_profiles(paths, &merged, profiles) {
+            Ok(()) => return,
+            Err(error) if runtime_sidecar_generation_error_is_stale(&error) => continue,
+            Err(_) => return,
+        }
+    }
 }
 
 pub(crate) fn load_live_quota_watch_runtime_usage_cache(
@@ -108,13 +163,22 @@ fn quota_watch_runtime_usage_cache_path(paths: &AppPaths) -> PathBuf {
 fn quota_report_runtime_usage_snapshot(
     report: &QuotaReport,
 ) -> Option<(String, RuntimeProfileUsageSnapshot)> {
-    match &report.result {
-        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => Some((
-            report.name.clone(),
-            prodex_runtime_quota::runtime_profile_usage_snapshot_from_usage(usage),
-        )),
-        Ok(_) | Err(_) => None,
-    }
+    Some((
+        report.name.clone(),
+        provider_quota_runtime_usage_snapshot(report.result.as_ref().ok()?, report.fetched_at)?,
+    ))
+}
+
+fn provider_quota_runtime_usage_snapshot(
+    quota: &ProviderQuotaSnapshot,
+    checked_at: i64,
+) -> Option<RuntimeProfileUsageSnapshot> {
+    let ProviderQuotaSnapshot::OpenAi(usage) = quota else {
+        return None;
+    };
+    let mut snapshot = prodex_runtime_quota::runtime_profile_usage_snapshot_from_usage(usage);
+    snapshot.checked_at = checked_at;
+    Some(snapshot)
 }
 
 pub(crate) fn quota_watch_detail_refresh_interval_for_cached_openai(
@@ -186,6 +250,7 @@ fn quota_watch_jittered_interval_seconds(seconds: u64, now: i64) -> u64 {
 mod tests {
     use super::*;
     use crate::{ProfileProvider, RuntimeQuotaWindowStatus};
+    use prodex_quota::UsageResponse;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -228,6 +293,29 @@ mod tests {
             weekly_remaining_percent: 80,
             weekly_reset_at: i64::MAX,
         }
+    }
+
+    #[test]
+    fn one_shot_openai_quota_updates_runtime_usage_snapshot() {
+        let paths = test_paths();
+        let profiles = BTreeMap::from([("main".to_string(), profile(&paths))]);
+        let checked_at = Local::now().timestamp();
+        let quota = ProviderQuotaSnapshot::OpenAi(UsageResponse {
+            email: Some("test@example.com".to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: None,
+            code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
+            additional_rate_limits: Vec::new(),
+        });
+
+        save_openai_quota_runtime_usage_snapshot(&paths, &profiles, "main", &quota);
+
+        let snapshots = load_runtime_usage_snapshots(&paths, &profiles).unwrap();
+        let saved = snapshots.get("main").expect("snapshot should be saved");
+        assert!(saved.checked_at >= checked_at);
+        assert_eq!(saved.plan_type.as_deref(), Some("plus"));
+        let _ = fs::remove_dir_all(paths.root);
     }
 
     #[test]
