@@ -67,44 +67,13 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
-    let cached_usage_snapshots = state.persisted_usage_snapshots();
-
     let mut waitable_profiles = BTreeSet::new();
-    let mut reports = Vec::new();
-    for (order_index, name) in active_profile_selection_order_with_view(
-        runtime_route_selection_view(&state),
-        &state.current_profile,
-    )
-    .into_iter()
-    .enumerate()
+    for candidate in build_runtime_response_probe_plan(&state, excluded_profiles, route_kind, now)
+        .ready_candidates
     {
-        if excluded_profiles.contains(&name) {
+        if wait_affinity_owner.is_some_and(|owner| owner != candidate.name) {
             continue;
         }
-        if wait_affinity_owner.is_some_and(|owner| owner != name) {
-            continue;
-        }
-        let Some(entry) = state.entry(&name) else {
-            continue;
-        };
-        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
-            continue;
-        };
-        reports.push(RunProfileProbeReport {
-            name,
-            order_index,
-            auth: probe_entry.auth.clone(),
-            result: probe_entry.result.clone(),
-        });
-    }
-
-    for candidate in ready_profile_candidates_with_view(
-        &reports,
-        state.include_code_review,
-        Some(state.current_profile.as_str()),
-        runtime_route_selection_view(&state),
-        Some(&cached_usage_snapshots),
-    ) {
         if excluded_profiles.contains(&candidate.name) {
             continue;
         }
@@ -151,40 +120,9 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
-    let cached_usage_snapshots = state.persisted_usage_snapshots();
-
-    let mut reports = Vec::new();
-    for (order_index, name) in active_profile_selection_order_with_view(
-        runtime_route_selection_view(&state),
-        &state.current_profile,
-    )
-    .into_iter()
-    .enumerate()
+    for candidate in build_runtime_response_probe_plan(&state, &BTreeSet::new(), route_kind, now)
+        .ready_candidates
     {
-        if !waited_profiles.contains(&name) {
-            continue;
-        }
-        let Some(entry) = state.entry(&name) else {
-            continue;
-        };
-        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
-            continue;
-        };
-        reports.push(RunProfileProbeReport {
-            name,
-            order_index,
-            auth: probe_entry.auth.clone(),
-            result: probe_entry.result.clone(),
-        });
-    }
-
-    for candidate in ready_profile_candidates_with_view(
-        &reports,
-        state.include_code_review,
-        Some(state.current_profile.as_str()),
-        runtime_route_selection_view(&state),
-        Some(&cached_usage_snapshots),
-    ) {
         if !waited_profiles.contains(&candidate.name) {
             continue;
         }

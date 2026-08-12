@@ -371,7 +371,9 @@ fn runtime_hard_binding_conflict(selection: RuntimeResponseCandidateSelection<'_
         selection.strict_affinity_profile,
         selection.pinned_profile,
         selection.turn_state_profile,
-        selection.session_profile,
+        selection
+            .session_profile
+            .filter(|_| selection.route_kind == RuntimeRouteKind::Compact),
     ]
     .into_iter()
     .flatten()
