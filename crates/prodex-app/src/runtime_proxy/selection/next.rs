@@ -33,72 +33,103 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     prompt_cache_key: Option<&str>,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
-    let mut prepared = prepare_runtime_response_selection(shared, excluded_profiles, route_kind)?;
     let prompt_cache_owner = runtime_prompt_cache_bound_profile(prompt_cache_key);
-    let candidate_plan = build_runtime_response_candidate_execution_plan(
-        &prepared.selection_state,
-        excluded_profiles,
-        route_kind,
-        prepared.inflight_soft_limit,
-        std::mem::take(&mut prepared.ready_candidates),
-        runtime_response_candidate_execution_options(
-            prompt_cache_key,
-            prompt_cache_owner.as_deref(),
-            |name| runtime_profile_selection_jitter(shared, name, route_kind),
-        ),
-    );
-    log_runtime_response_selection_plan(
-        shared,
-        excluded_profiles,
-        route_kind,
-        prompt_cache_owner.as_deref(),
-        &prepared,
-        &candidate_plan,
-    );
-    let candidate_record_count = record_runtime_response_candidates(trace, &candidate_plan);
-    let RuntimeResponseCandidateExecutionPlan {
-        ready_candidates,
-        fallback_candidates,
-    } = candidate_plan;
+    let selection_started_at = Instant::now();
+    let mut waited_for_cold_start_probe = false;
 
-    if let Some(candidate) = select_runtime_response_candidate(
-        shared,
-        route_kind,
-        ready_candidates,
-        RuntimeResponseCandidatePass::Ready,
-        trace,
-    )? {
-        return Ok(Some(candidate));
+    loop {
+        let mut prepared =
+            prepare_runtime_response_selection(shared, excluded_profiles, route_kind)?;
+        let candidate_plan = build_runtime_response_candidate_execution_plan(
+            &prepared.selection_state,
+            excluded_profiles,
+            route_kind,
+            prepared.inflight_soft_limit,
+            std::mem::take(&mut prepared.ready_candidates),
+            runtime_response_candidate_execution_options(
+                prompt_cache_key,
+                prompt_cache_owner.as_deref(),
+                |name| runtime_profile_selection_jitter(shared, name, route_kind),
+            ),
+        );
+        log_runtime_response_selection_plan(
+            shared,
+            excluded_profiles,
+            route_kind,
+            prompt_cache_owner.as_deref(),
+            &prepared,
+            &candidate_plan,
+        );
+        let candidate_record_count = record_runtime_response_candidates(trace, &candidate_plan);
+        let RuntimeResponseCandidateExecutionPlan {
+            ready_candidates,
+            fallback_candidates,
+        } = candidate_plan;
+
+        if let Some(candidate) = select_runtime_response_candidate(
+            shared,
+            route_kind,
+            ready_candidates,
+            RuntimeResponseCandidatePass::Ready,
+            trace,
+        )? {
+            return Ok(Some(candidate));
+        }
+        if let Some(candidate) = select_runtime_response_candidate(
+            shared,
+            route_kind,
+            fallback_candidates,
+            RuntimeResponseCandidatePass::Fallback,
+            trace,
+        )? {
+            return Ok(Some(candidate));
+        }
+        if let Some(candidate) = select_runtime_auto_redeem_candidate(
+            shared,
+            excluded_profiles,
+            route_kind,
+            candidate_record_count,
+            trace,
+        )? {
+            return Ok(Some(candidate));
+        }
+        if let Some(candidate) = select_runtime_cold_start_candidate(
+            shared,
+            &prepared.selection_state,
+            excluded_profiles,
+            route_kind,
+            prepared.inflight_soft_limit,
+            candidate_record_count,
+            trace,
+        )? {
+            return Ok(Some(candidate));
+        }
+
+        if !waited_for_cold_start_probe
+            && prepared.has_cold_start_probe_jobs()
+            && !prepared.sync_probe_pressure_mode
+            && let Some(observed_probe_revision) = prepared.probe_refresh_revision
+        {
+            waited_for_cold_start_probe = true;
+            let (_, precommit_budget) =
+                runtime_proxy_precommit_budget(false, prepared.pressure_mode);
+            let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
+            let wait_budget =
+                Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms)
+                    .min(remaining_budget);
+            if !wait_budget.is_zero()
+                && !matches!(
+                    runtime_probe_refresh_wait_outcome_since(wait_budget, observed_probe_revision,),
+                    RuntimeProfileInFlightWaitOutcome::Timeout
+                )
+            {
+                continue;
+            }
+        }
+
+        break;
     }
-    if let Some(candidate) = select_runtime_response_candidate(
-        shared,
-        route_kind,
-        fallback_candidates,
-        RuntimeResponseCandidatePass::Fallback,
-        trace,
-    )? {
-        return Ok(Some(candidate));
-    }
-    if let Some(candidate) = select_runtime_auto_redeem_candidate(
-        shared,
-        excluded_profiles,
-        route_kind,
-        candidate_record_count,
-        trace,
-    )? {
-        return Ok(Some(candidate));
-    }
-    if let Some(candidate) = select_runtime_cold_start_candidate(
-        shared,
-        &prepared.selection_state,
-        excluded_profiles,
-        route_kind,
-        prepared.inflight_soft_limit,
-        candidate_record_count,
-        trace,
-    )? {
-        return Ok(Some(candidate));
-    }
+
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(

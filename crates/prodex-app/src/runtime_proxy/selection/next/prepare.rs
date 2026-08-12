@@ -7,7 +7,14 @@ pub(super) struct RuntimeResponseSelectionPrepared {
     pub(super) selection_state: RuntimeRouteSelectionCatalog,
     pub(super) ready_candidates: Vec<ReadyProfileCandidate>,
     pub(super) report_count: usize,
+    pub(super) probe_refresh_revision: Option<u64>,
     probe_counts: RuntimeResponseProbeCounts,
+}
+
+impl RuntimeResponseSelectionPrepared {
+    pub(super) fn has_cold_start_probe_jobs(&self) -> bool {
+        self.probe_counts.cold_start_jobs > 0
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -44,6 +51,8 @@ pub(super) fn prepare_runtime_response_selection(
         stale_refreshes: probe_plan.stale_probe_refreshes.len(),
         cold_start_jobs: probe_plan.cold_start_probe_jobs.len(),
     };
+    let probe_refresh_revision =
+        (!probe_plan.cold_start_probe_jobs.is_empty()).then(runtime_probe_refresh_revision);
     for refresh in &probe_plan.stale_probe_refreshes {
         schedule_runtime_probe_refresh(shared, &refresh.name, &refresh.codex_home);
     }
@@ -57,6 +66,7 @@ pub(super) fn prepare_runtime_response_selection(
         selection_state,
         ready_candidates: probe_plan.ready_candidates,
         report_count: probe_plan.reports.len(),
+        probe_refresh_revision,
         probe_counts,
     })
 }
