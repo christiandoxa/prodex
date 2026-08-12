@@ -140,6 +140,10 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
+    openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_limit)
+}
+
+fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {
     if usage
         .rate_limit
         .as_ref()
@@ -454,7 +458,7 @@ pub fn collect_blocked_limits(
 ) -> Vec<BlockedLimit> {
     let mut blocked = Vec::new();
 
-    if !openai_quota_has_ready_limit(usage) {
+    if !openai_quota_has_ready_runtime_limit(usage) {
         if let Some(main) = usage.rate_limit.as_ref() {
             push_main_window_if_present(&mut blocked, main, "5h");
             push_main_window_if_present(&mut blocked, main, "weekly");
