@@ -200,3 +200,27 @@ fn precommit_budget_keeps_base_limit_for_small_pool() {
     assert_eq!(attempt_limit, base_attempt_limit);
     assert_eq!(budget, base_budget);
 }
+
+#[test]
+fn precommit_elapsed_budget_does_not_cut_off_first_profile_pass() {
+    let profile_count = 2;
+    let (_, budget) = runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
+    let expired = Instant::now()
+        .checked_sub(budget + Duration::from_millis(1))
+        .expect("expired instant");
+
+    assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        expired,
+        profile_count - 1,
+        false,
+        false,
+        profile_count,
+    ));
+    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        expired,
+        profile_count,
+        false,
+        false,
+        profile_count,
+    ));
+}
