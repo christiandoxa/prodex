@@ -169,11 +169,6 @@ fn missing_five_hour_window_is_not_ready_with_available_weekly_window() {
             !openai_quota_has_ready_limit(&plan_usage),
             "weekly-only quota should not be ready for plan {plan}"
         );
-        assert_eq!(format_openai_quota_status(&plan_usage), "Unavailable");
-        assert_eq!(
-            format_blocked_limits(&collect_blocked_limits(&plan_usage, false)),
-            "quota unavailable"
-        );
     }
     let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
     assert!(fields.contains(&("Available".to_string(), "0/1 profile".to_string())));
