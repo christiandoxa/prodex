@@ -8,7 +8,10 @@ use candidates::{
     select_runtime_auto_redeem_candidate, select_runtime_cold_start_candidate,
     select_runtime_response_candidate,
 };
-use prepare::{log_runtime_response_selection_plan, prepare_runtime_response_selection};
+use prepare::{
+    RuntimeResponseSelectionPrepared, log_runtime_response_selection_plan,
+    prepare_runtime_response_selection,
+};
 
 #[cfg(test)]
 pub(crate) fn next_runtime_response_candidate_for_route(
@@ -105,26 +108,13 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             return Ok(Some(candidate));
         }
 
-        if !waited_for_cold_start_probe
-            && prepared.has_cold_start_probe_jobs()
-            && !prepared.sync_probe_pressure_mode
-            && let Some(observed_probe_revision) = prepared.probe_refresh_revision
-        {
-            waited_for_cold_start_probe = true;
-            let (_, precommit_budget) =
-                runtime_proxy_precommit_budget(false, prepared.pressure_mode);
-            let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
-            let wait_budget =
-                Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms)
-                    .min(remaining_budget);
-            if !wait_budget.is_zero()
-                && !matches!(
-                    runtime_probe_refresh_wait_outcome_since(wait_budget, observed_probe_revision,),
-                    RuntimeProfileInFlightWaitOutcome::Timeout
-                )
-            {
-                continue;
-            }
+        if wait_for_cold_start_probe(
+            shared,
+            &prepared,
+            selection_started_at,
+            &mut waited_for_cold_start_probe,
+        ) {
+            continue;
         }
 
         break;
@@ -143,6 +133,34 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
         ),
     );
     Ok(None)
+}
+
+fn wait_for_cold_start_probe(
+    shared: &RuntimeRotationProxyShared,
+    prepared: &RuntimeResponseSelectionPrepared,
+    selection_started_at: Instant,
+    waited_for_cold_start_probe: &mut bool,
+) -> bool {
+    if *waited_for_cold_start_probe
+        || prepared.sync_probe_pressure_mode
+        || !prepared.has_cold_start_probe_jobs()
+    {
+        return false;
+    }
+    let Some(observed_probe_revision) = prepared.probe_refresh_revision else {
+        return false;
+    };
+
+    *waited_for_cold_start_probe = true;
+    let (_, precommit_budget) = runtime_proxy_precommit_budget(false, prepared.pressure_mode);
+    let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
+    let wait_budget = Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms)
+        .min(remaining_budget);
+    !wait_budget.is_zero()
+        && !matches!(
+            runtime_probe_refresh_wait_outcome_since(wait_budget, observed_probe_revision),
+            RuntimeProfileInFlightWaitOutcome::Timeout
+        )
 }
 
 pub(crate) fn runtime_quota_last_chance_profile_for_route(
