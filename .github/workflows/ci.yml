@@ -31,6 +31,7 @@ jobs:
       prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.matrix }}
       windows_prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.windows_matrix }}
       runtime_proxy_matrix: ${{ steps.runtime-matrix.outputs.matrix }}
+      runtime_stress_matrix: ${{ steps.runtime-matrix.outputs.stress_matrix }}
 
     steps:
       - name: Check out repository
@@ -89,6 +90,8 @@ jobs:
           set -euo pipefail
           matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          stress_matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-stress-matrix --event-name '${{ github.event_name }}')"
+          echo "stress_matrix=${stress_matrix}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate prodex-app test shard matrix
         id: prodex-app-matrix
@@ -120,7 +123,7 @@ jobs:
   prodex-app-lib:
     name: prodex-app library tests (${{ matrix.label }})
     needs: changes
-    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'schedule' && (needs.changes.outputs.heavy == 'true' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -165,15 +168,19 @@ jobs:
             skip_args+=(--skip "${filter}")
           done <<< "${PRODEX_APP_SKIP_FILTERS}"
           if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
+            status=0
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                "${filter}" -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
+              if ! cargo test --locked -q -p prodex-app --lib --all-features \
+                "${filter}" -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"; then
+                status=1
+              fi
               if grep -Fq 'running 0 tests' "${test_log}"; then
                 echo "prodex-app filter matched no tests: ${filter}"
-                exit 1
+                status=1
               fi
             done <<< "${PRODEX_APP_FILTERS}"
+            exit "${status}"
           else
             cargo test --locked -q -p prodex-app --lib --all-features \
               -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
@@ -344,9 +351,6 @@ jobs:
           - suite: root-tests
             label: root non-sharded tests
             save_cache: false
-          - suite: installer
-            label: Windows installer
-            save_cache: false
 
     steps:
       - name: Check out repository
@@ -367,7 +371,7 @@ jobs:
           save-if: ${{ matrix.save_cache }}
 
       - name: Install Node.js
-        if: matrix.suite == 'root-0' || matrix.suite == 'root-1' || matrix.suite == 'installer'
+        if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -418,11 +422,11 @@ jobs:
         run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
       - name: Build Windows installer fixture binary
-        if: matrix.suite == 'installer'
+        if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
         run: cargo build --locked --bin prodex
 
       - name: Test Windows installer
-        if: matrix.suite == 'installer'
+        if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
         run: npm run installer:test
 
   windows-prodex-app:
@@ -478,15 +482,19 @@ jobs:
             --skip rtk::tests::
           )
           if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
+            status=0
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
-              cargo test --locked -q -p prodex-app --lib --all-features \
-                "${filter}" -- --test-threads=1 "${windows_skips[@]}" 2>&1 | tee "${test_log}"
+              if ! cargo test --locked -q -p prodex-app --lib --all-features \
+                "${filter}" -- --test-threads=1 "${windows_skips[@]}" 2>&1 | tee "${test_log}"; then
+                status=1
+              fi
               if grep -Fq 'running 0 tests' "${test_log}"; then
                 echo "prodex-app filter matched no Windows tests: ${filter}"
-                exit 1
+                status=1
               fi
             done <<< "${PRODEX_APP_FILTERS}"
+            exit "${status}"
           else
             shard_skips=()
             while IFS= read -r filter; do
@@ -626,6 +634,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-bin: false
+          save-if: ${{ matrix.lane == 'static' }}
 
       - name: Enforce churn hygiene
         if: matrix.lane == 'hygiene'
@@ -692,6 +701,10 @@ jobs:
       - name: Validate full-test shard manifest
         if: matrix.lane == 'static'
         run: npm run ci:full-test-shards
+
+      - name: Validate runtime CI manifest
+        if: matrix.lane == 'static'
+        run: npm run ci:runtime-manifest
 
       - name: Enforce Rust super wildcard guard
         if: matrix.lane == 'static'
@@ -1223,7 +1236,7 @@ jobs:
 
   auto-rotate:
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -1258,7 +1271,7 @@ jobs:
 
   profile-commands-internal:
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -1286,7 +1299,7 @@ jobs:
   main-internal-core:
     name: Main internal core (${{ matrix.label }})
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -1298,18 +1311,23 @@ jobs:
           - shard: 0
             shard_count: 5
             label: weighted shard 1 of 5
+            save_cache: true
           - shard: 1
             shard_count: 5
             label: weighted shard 2 of 5
+            save_cache: false
           - shard: 2
             shard_count: 5
             label: weighted shard 3 of 5
+            save_cache: false
           - shard: 3
             shard_count: 5
             label: weighted shard 4 of 5
+            save_cache: false
           - shard: 4
             shard_count: 5
             label: weighted shard 5 of 5
+            save_cache: false
 
     steps:
       - name: Check out repository
@@ -1325,6 +1343,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ matrix.save_cache }}
 
       - name: Run main internal core tests ${{ matrix.label }}
         shell: bash
@@ -1366,7 +1386,7 @@ jobs:
   main-internal-runtime-proxy:
     name: Main internal runtime proxy (${{ matrix.label }})
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -1392,15 +1412,14 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Validate runtime CI manifest
-        if: matrix.validate_manifest == 'true'
-        run: npm run ci:runtime-manifest
+        with:
+          save-if: ${{ matrix.save_cache }}
 
       - name: Run runtime proxy internal test shard ${{ matrix.label }}
         shell: bash
         run: |
           set -euo pipefail
+          status=0
           while IFS= read -r shard; do
             if [ -z "${shard}" ]; then
               continue
@@ -1411,11 +1430,14 @@ jobs:
               echo "Invalid runtime proxy shard entry: ${shard}"
               exit 1
             fi
-            node scripts/ci/runtime-proxy-shard.mjs \
+            if ! node scripts/ci/runtime-proxy-shard.mjs \
               --filter "${filter}" \
               --test-threads 1 \
-              --artifact-dir "${RUNTIME_PROXY_ARTIFACT_DIR}/${shard_label}"
+              --artifact-dir "${RUNTIME_PROXY_ARTIFACT_DIR}/${shard_label}"; then
+              status=1
+            fi
           done <<< "${{ matrix.filters }}"
+          exit "${status}"
 
       - name: Upload runtime proxy shard diagnostics
         if: failure()
@@ -1503,53 +1525,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - suite: stress
-            id: stress-1
-            label: weighted broad shard 1 of 5
-            shard: 0
-            shard_count: 5
-          - suite: stress
-            id: stress-2
-            label: weighted broad shard 2 of 5
-            shard: 1
-            shard_count: 5
-          - suite: stress
-            id: stress-3
-            label: weighted broad shard 3 of 5
-            shard: 2
-            shard_count: 5
-          - suite: stress
-            id: stress-4
-            label: weighted broad shard 4 of 5
-            shard: 3
-            shard_count: 5
-          - suite: stress
-            id: stress-5
-            label: weighted broad shard 5 of 5
-            shard: 4
-            shard_count: 5
-          - suite: serialized
-            id: serialized-1
-            label: serialized shard 1 of 2
-            shard: 0
-            shard_count: 2
-          - suite: serialized
-            id: serialized-2
-            label: serialized shard 2 of 2
-            shard: 1
-            shard_count: 2
-          - suite: continuation
-            id: continuation-1
-            label: continuation shard 1 of 2
-            shard: 0
-            shard_count: 2
-          - suite: continuation
-            id: continuation-2
-            label: continuation shard 2 of 2
-            shard: 1
-            shard_count: 2
+      matrix: ${{ fromJSON(needs.changes.outputs.runtime_stress_matrix) }}
     env:
       RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.id }}
       PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
@@ -1571,6 +1547,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ matrix.save_cache }}
 
       - name: Prepare runtime stress diagnostics
         shell: bash

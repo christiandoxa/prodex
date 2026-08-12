@@ -157,15 +157,14 @@ jobs:
                 cargo test --locked -q -p prodex-app --lib --all-features \
                   "${filter}" -- --test-threads=1 \
                   > "${filter_log}" 2>&1
-                status=$?
+                filter_status=$?
                 cat "${filter_log}" >> "${cargo_log}"
-                if [ "${status}" -ne 0 ]; then
-                  break
+                if [ "${filter_status}" -ne 0 ]; then
+                  status=1
                 fi
                 if grep -Fq 'running 0 tests' "${filter_log}"; then
                   echo "prodex-app filter matched no tests: ${filter}" >> "${cargo_log}"
                   status=1
-                  break
                 fi
               done <<< "${PRODEX_APP_FILTERS}"
               ;;
@@ -224,6 +223,22 @@ jobs:
           fi
 
           exit "${status}"
+
+      - name: Test temp-backed state with a symlinked TMPDIR
+        if: matrix.suite == 'remainder'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_root="$(mktemp -d)"
+          trap 'find "${tmp_root}" -depth -delete' EXIT
+          mkdir -m 700 "${tmp_root}/real"
+          ln -s "${tmp_root}/real" "${tmp_root}/alias"
+          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1
+          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+            --lib --all-features \
+            'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
+            -- --test-threads=1
 
       - name: Upload full-test diagnostics
         if: failure()

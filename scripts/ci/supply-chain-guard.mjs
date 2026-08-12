@@ -306,12 +306,77 @@ export function validateReleaseMalwareGate(contents) {
 export function validateReleaseContainerPublication(contents) {
   const verify = workflowJob(contents, "verify-ci");
   const build = workflowJob(contents, "build");
+  const attestBinaries = workflowJob(contents, "attest-binaries");
   const container = workflowJob(contents, "publish-container");
+  const prepare = workflowJob(contents, "prepare-release");
+  const syncDocs = workflowJob(contents, "sync-release-docs");
   const release = workflowJob(contents, "publish-github-release");
-  if (!verify || !build || !container || !release) {
-    return [".github/workflows/standalone-release.yml: missing verify, build, container, or release publish job"];
+  if (!verify || !build || !attestBinaries || !container || !prepare || !syncDocs || !release) {
+    return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
+  const workflowHeader = contents.slice(0, contents.indexOf("\njobs:"));
+  if (/^\s*(?:artifact-metadata|attestations|id-token):\s*write\s*$/mu.test(workflowHeader)) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: privileged permissions must be scoped to owning jobs",
+    );
+  }
+  if (/^\s+(?:artifact-metadata|attestations|id-token|packages|contents):\s*write\s*$/mu.test(build)) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: release build must not hold write or OIDC permissions",
+    );
+  }
+  if (attestBinaries.includes("actions/checkout@")) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: binary attestation job must not execute checked-out code",
+    );
+  }
+  for (const [name, job, timeout] of [
+    ["build", build, 120],
+    ["attest-binaries", attestBinaries, 15],
+    ["prepare-release", prepare, 30],
+    ["sync-release-docs", syncDocs, 15],
+    ["publish-github-release", release, 60],
+  ]) {
+    if (!job.includes(`timeout-minutes: ${timeout}`)) {
+      violations.push(`.github/workflows/standalone-release.yml: ${name} timeout must be ${timeout} minutes`);
+    }
+  }
+  for (const marker of [
+    "- build",
+    "- verify-ci",
+    "artifact-metadata: write",
+    "attestations: write",
+    "contents: read",
+    "id-token: write",
+    "actions/download-artifact@",
+    "actions/attest-build-provenance@",
+  ]) {
+    if (!attestBinaries.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: binary attestation missing ${marker}`);
+    }
+  }
+  for (const marker of ["target_sha:", "version:", "required: true"]) {
+    if (!workflowHeader.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release dispatch input missing ${marker}`);
+    }
+  }
+  for (const [name, job] of [
+    ["verify-ci", verify],
+    ["build", build],
+    ["publish-container", container],
+    ["prepare-release", prepare],
+    ["sync-release-docs", syncDocs],
+    ["publish-github-release", release],
+  ]) {
+    const checkoutCount = job.split("uses: actions/checkout@").length - 1;
+    const protectedCheckoutCount = job.split("persist-credentials: false").length - 1;
+    if (checkoutCount === 0 || checkoutCount !== protectedCheckoutCount) {
+      violations.push(
+        `.github/workflows/standalone-release.yml: ${name} checkouts must not persist credentials`,
+      );
+    }
+  }
   for (const marker of ["group: standalone-release", "cancel-in-progress: false"]) {
     if (!contents.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release concurrency missing ${marker}`);
@@ -322,9 +387,16 @@ export function validateReleaseContainerPublication(contents) {
   }
   for (const marker of [
     'if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]',
+    "RELEASE_TARGET_SHA: ${{ inputs.target_sha }}",
+    "RELEASE_VERSION: ${{ inputs.version }}",
+    '[[ ! "${target_sha}" =~ ^[0-9a-f]{40}$ ]]',
+    '[ "${GITHUB_SHA}" != "${target_sha}" ]',
+    '[ "${version}" != "${RELEASE_VERSION}" ]',
     "git fetch origin --tags --force",
     'release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"',
     "release tag ${version} targets ${release_tag_sha}, not ${target_sha}",
+    "git tag --list '[0-9]*' --sort=-version:refname",
+    "release version ${version} must be newer than ${latest_version}",
   ]) {
     if (!verify.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release target safety missing ${marker}`);
@@ -333,6 +405,7 @@ export function validateReleaseContainerPublication(contents) {
   for (const marker of [
     "persist-credentials: false",
     "cargo install cross --version 0.2.5 --locked",
+    "RUSTC_WRAPPER=sccache cargo test --release --locked",
     "unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
     "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
     "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908",
@@ -349,6 +422,11 @@ export function validateReleaseContainerPublication(contents) {
   if (build.split(nativeClientRetryFlags).length - 1 !== 4) {
     violations.push(
       ".github/workflows/standalone-release.yml: every native client download must retry transient failures",
+    );
+  }
+  if (!prepare.includes("- attest-binaries")) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: release preparation must wait for binary attestations",
     );
   }
   for (const marker of [
@@ -372,8 +450,10 @@ export function validateReleaseContainerPublication(contents) {
     "- sync-release-docs",
     "name: kubernetes-manifest",
     "cp artifacts/kubernetes-manifest/prodex-* release-assets/",
+    "subject-path: release-assets/SHA256SUMS",
+    "find release-assets -maxdepth 1 -type f -print0",
     'git tag "${version}" "${TARGET_SHA}"',
-    'git push origin "refs/tags/${version}"',
+    'push origin "refs/tags/${version}"',
   ]) {
     if (!release.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release publication missing ${marker}`);

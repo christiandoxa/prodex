@@ -36,7 +36,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 13);
   assert.equal(ciMatrix.include.length, 9);
   assert.equal(fullMatrix.include.length, 14);
-  assert.equal(windowsMatrix.include.length, 8);
+  assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);

@@ -36,16 +36,17 @@ refs:
 
 | Input | Readable ref | Commit |
 | --- | --- | --- |
-| `actions/checkout` | `v7` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` |
-| `actions/setup-node` | `v6` | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` |
+| `actions/checkout` | `v7` | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `actions/setup-node` | `v7` | `820762786026740c76f36085b0efc47a31fe5020` |
 | `actions/cache` | `v6` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
 | `actions/upload-artifact` | `v7` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
 | `actions/download-artifact` | `v8` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` |
-| `actions/attest-build-provenance` | `v4` | `0f67c3f4856b2e3261c31976d6725780e5e4c373` |
+| `actions/attest-build-provenance` | `v4` | `4d101475d8b20a2381f78447822ac1eab6504dd8` |
 | `dtolnay/rust-toolchain` | `stable` | `4be7066ada62dd38de10e7b70166bc74ed198c30` |
-| `Swatinem/rust-cache` | `v2` | `e18b497796c12c097a38f9edb9d0641fb99eee32` |
-| `mozilla-actions/sccache-action` | `v0.0.10` | `9e7fa8a12102821edf02ca5dbea1acd0f89a2696` |
-| `SonarSource/sonarqube-scan-action` | `v8.1.0` | `7006c4492b2e0ee0f816d36501671557c97f5995` |
+| `Swatinem/rust-cache` | `v2` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
+| `mozilla-actions/sccache-action` | `v0.0.11` | `fc920bf0ec8de6ee65d409111f7ec508035751ba` |
+| `SonarSource/sonarqube-scan-action` | `v8.2.1` | `22918119ff8e1ca75a623e15c8296b6ea4fbe28f` |
+| `hugoalh/scan-virus-ghaction/clamav` | `v0.20.1` | `99c81e8991ad1074a14e5f22a21bce9be035e14e` |
 
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
@@ -68,6 +69,7 @@ Primary pin sources:
 - [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain)
 - [Swatinem/rust-cache](https://github.com/Swatinem/rust-cache)
 - [mozilla-actions/sccache-action](https://github.com/mozilla-actions/sccache-action)
+- [hugoalh/scan-virus-ghaction](https://github.com/hugoalh/scan-virus-ghaction)
 - [SonarQube Docker Official Image](https://hub.docker.com/_/sonarqube)
 - [SonarQube for VS Code supported languages](https://docs.sonarsource.com/sonarqube-for-vs-code/using/rules/)
 - [Docker Official Images](https://github.com/docker-library/official-images)
@@ -124,11 +126,12 @@ transitive owner, and its removal condition.
 
 The release workflow:
 
-1. builds with `Cargo.lock` and `--locked`;
-2. attests every binary and the SPDX JSON SBOM;
-3. downloads the staged assets and verifies their GitHub attestations;
-4. generates and verifies `SHA256SUMS`; and
-5. scans and attests the GHCR image, renders the Kubernetes manifest with its
+1. requires an exact `main` commit and version, then verifies CI for that commit;
+2. builds with read-only permissions, `Cargo.lock`, and `--locked`;
+3. attests every binary in checkout-free jobs and attests the SPDX JSON SBOM;
+4. downloads the staged assets and verifies their GitHub attestations;
+5. generates, verifies, and attests `SHA256SUMS`; and
+6. scans and attests the GHCR image, renders the Kubernetes manifest with its
    registry digest, and publishes that manifest plus the vulnerability report
    with the binaries, SBOM, and checksum file.
 

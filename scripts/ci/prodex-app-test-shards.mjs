@@ -143,17 +143,26 @@ const WORKSPACE_SHARD = Object.freeze({
 });
 
 const WINDOWS_SHARD_GROUPS = Object.freeze([
-  { suite: "selection-support", label: "prodex-app selection and support", members: ["selection", "support"] },
   {
-    suite: "admission-core-commands",
-    label: "prodex-app admission core and commands",
-    members: ["admission-core", "commands"],
+    suite: "commands-gemini",
+    label: "prodex-app commands and Gemini runtime",
+    members: ["commands", "launch-gemini"],
   },
-  { suite: "admission-affinity", label: "prodex-app admission guards and affinity", members: ["admission-affinity"] },
-  { suite: "local-runtime", label: "prodex-app local rewrite and runtime", members: ["launch-local", "runtime"] },
-  { suite: "providers-brokers", label: "prodex-app providers and brokers", members: ["launch-providers", "brokers"] },
-  { suite: "gateway-gemini", label: "prodex-app gateway and Gemini", members: ["launch-gateway", "launch-gemini"] },
-  { suite: "profiles", label: "prodex-app profiles", members: ["profiles"] },
+  {
+    suite: "local-brokers-profiles",
+    label: "prodex-app local rewrite, brokers, and profiles",
+    members: ["launch-local", "brokers", "profiles"],
+  },
+  {
+    suite: "gateway-support-affinity",
+    label: "prodex-app gateway, support, and affinity",
+    members: ["launch-gateway", "support", "admission-affinity"],
+  },
+  {
+    suite: "selection-providers-runtime",
+    label: "prodex-app selection, providers, and runtime",
+    members: ["selection", "admission-core", "launch-providers", "runtime"],
+  },
 ]);
 
 function collectDuplicates(values) {
@@ -346,7 +355,7 @@ function printHelp() {
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
-      "--windows-github-matrix emits fewer balanced Windows groups to avoid duplicate compilation.",
+      "--windows-github-matrix emits five grouped Windows partitions to avoid duplicate compilation.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );
