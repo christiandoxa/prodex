@@ -478,6 +478,66 @@ fn session_only_affinity_rotates_on_quota_outside_compact() {
 }
 
 #[test]
+fn session_conflict_sentinel_allows_quota_ready_fallback_outside_compact() {
+    for (route_kind, expected) in [
+        (RuntimeRouteKind::Responses, Some("second")),
+        (RuntimeRouteKind::Websocket, Some("second")),
+        (RuntimeRouteKind::Compact, None),
+    ] {
+        let temp_dir = TestDir::isolated();
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        let selected = select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some(
+                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE,
+                ),
+                ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), route_kind)
+            },
+        )
+        .expect("selection should succeed");
+
+        assert_eq!(selected.as_deref(), expected, "{route_kind:?} selection");
+    }
+}
+
+#[test]
+fn expired_quota_observation_does_not_hide_profile_after_reset() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    let checked_at = now - RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS - 1;
+    let expired_usage = usage_with_main_windows(0, -60, 0, -60);
+    let mut expired_snapshot = runtime_profile_usage_snapshot_from_usage(&expired_usage);
+    expired_snapshot.checked_at = checked_at;
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime.upstream_base_url = "http://127.0.0.1:1/backend-api".to_string();
+        let probe = runtime
+            .profile_probe_cache
+            .get_mut("second")
+            .expect("second probe should exist");
+        probe.checked_at = checked_at;
+        probe.result = Ok(expired_usage);
+        runtime
+            .profile_usage_snapshots
+            .insert("second".to_string(), expired_snapshot);
+    }
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection::fresh(
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+        ),
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+    wait_for_runtime_background_queues_idle();
+}
+
+#[test]
 fn session_only_affinity_rotates_past_excluded_owner_outside_compact() {
     for (route_kind, expected) in [
         (RuntimeRouteKind::Responses, Some("second")),

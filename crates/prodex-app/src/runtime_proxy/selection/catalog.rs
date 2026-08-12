@@ -4,7 +4,8 @@ use super::{
     RuntimeSelectionProfileEntry, runtime_profile_auth_failure_active_with_auth_cache,
     runtime_profile_backoff_sort_key, runtime_profile_cached_auth_summary_from_maps_for_selection,
     runtime_profile_health_sort_key, runtime_profile_inflight_sort_key,
-    runtime_profile_name_in_selection_backoff,
+    runtime_profile_name_in_selection_backoff, runtime_profile_usage_cache_is_fresh,
+    runtime_usage_snapshot_is_usable,
 };
 
 pub(crate) fn runtime_profile_selection_catalog(
@@ -56,8 +57,16 @@ pub(crate) fn runtime_route_selection_catalog(
                     &runtime.profile_usage_auth,
                     &runtime.profile_probe_cache,
                 ),
-                cached_probe_entry: runtime.profile_probe_cache.get(&profile.name).cloned(),
-                cached_usage_snapshot: runtime.profile_usage_snapshots.get(&profile.name).cloned(),
+                cached_probe_entry: runtime
+                    .profile_probe_cache
+                    .get(&profile.name)
+                    .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
+                    .cloned(),
+                cached_usage_snapshot: runtime
+                    .profile_usage_snapshots
+                    .get(&profile.name)
+                    .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+                    .cloned(),
                 auth_failure_active: has_auth_failure_health
                     && runtime_profile_auth_failure_active_with_auth_cache(
                         &runtime.profile_health,
