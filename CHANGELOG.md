@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.6 - 2026-08-12
+
+### CLI
+
+- Restore weekly-only availability (`ee3d4f1`)
+
 ## 0.407.5 - 2026-08-12
 
 ### Runtime
@@ -99,9 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Bump rust from `77fac8b` to `14bc9c5` (`7fc6998`)
 - Bump the fuzz-cargo group in /fuzz with 2 updates (`00ee0c1`)
 - Bump the cargo group with 2 updates (`d4d1bd8`)
-
-## 0.401.0 - 2026-08-09
-
-### Claude
-
-- Harden optional MCP startup probes (`4815d05`)
