@@ -136,7 +136,7 @@ fn missing_main_window_does_not_block_available_window() {
 }
 
 #[test]
-fn missing_five_hour_window_is_not_ready_with_available_weekly_window() {
+fn missing_five_hour_window_does_not_block_available_weekly_window() {
     let usage = UsageResponse {
         email: None,
         plan_type: None,
@@ -166,21 +166,21 @@ fn missing_five_hour_window_is_not_ready_with_available_weekly_window() {
         let mut plan_usage = usage.clone();
         plan_usage.plan_type = Some(plan.to_string());
         assert!(
-            !openai_quota_has_ready_limit(&plan_usage),
-            "weekly-only quota should not be ready for plan {plan}"
+            openai_quota_has_ready_limit(&plan_usage),
+            "weekly-only quota should be ready for plan {plan}"
         );
     }
     let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
-    assert!(fields.contains(&("Available".to_string(), "0/1 profile".to_string())));
-    assert!(fields.contains(&("Usable now".to_string(), "Unavailable".to_string())));
+    assert!(fields.contains(&("Available".to_string(), "1/1 profile".to_string())));
+    assert!(fields.contains(&(
+        "Usable now".to_string(),
+        "weekly 100% across 1 ready profile(s)".to_string(),
+    )));
     assert!(fields.contains(&("5h remaining pool".to_string(), "Unavailable".to_string(),)));
-    assert!(fields.iter().any(|(label, value)| {
-        label == "Weekly remaining pool" && value.starts_with("100% across 1 profile(s)")
-    }));
 }
 
 #[test]
-fn unknown_five_hour_usage_is_not_ready_with_known_weekly_quota() {
+fn unknown_five_hour_usage_keeps_weekly_display_ready_but_blocks_runtime() {
     let usage = UsageResponse {
         email: None,
         plan_type: Some("plus".to_string()),
@@ -201,8 +201,8 @@ fn unknown_five_hour_usage_is_not_ready_with_known_weekly_quota() {
         additional_rate_limits: Vec::new(),
     };
 
-    assert!(!openai_quota_has_ready_limit(&usage));
-    assert_eq!(format_openai_quota_status(&usage), "Unavailable");
+    assert!(openai_quota_has_ready_limit(&usage));
+    assert_eq!(format_openai_quota_status(&usage), "Ready");
     assert_eq!(
         format_blocked_limits(&collect_blocked_limits(&usage, false)),
         "5h quota unknown"
