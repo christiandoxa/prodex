@@ -28,20 +28,32 @@ pub(crate) fn read_new_runtime_log_events(
     json: bool,
 ) -> Result<()> {
     for event in collect_new_runtime_log_stream_items(path, state)? {
-        match event {
-            LogStreamItem::TokenUsage(event) => print_token_usage_event(&event, json)?,
-            LogStreamItem::UpstreamPayload(event) if !json => print_upstream_payload_event(&event)?,
-            LogStreamItem::Transcript(event) if json => {
-                println!("{}", serde_json::to_string(&event)?);
-                io::stdout()
-                    .flush()
-                    .context("failed to flush transcript log output")?;
-            }
-            LogStreamItem::Transcript(event) => print_transcript_event(&event)?,
-            LogStreamItem::UpstreamPayload(_) => {}
-        }
+        print_log_stream_item(&event, json)?;
     }
     Ok(())
+}
+
+pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result<()> {
+    if json {
+        println!("{}", log_stream_item_json(event)?);
+        return io::stdout()
+            .flush()
+            .context("failed to flush JSON log output");
+    }
+    match event {
+        LogStreamItem::Transcript(event) => print_transcript_event(event),
+        LogStreamItem::TokenUsage(event) => print_token_usage_event(event, false),
+        LogStreamItem::UpstreamPayload(event) => print_upstream_payload_event(event),
+    }
+}
+
+pub(crate) fn log_stream_item_json(event: &LogStreamItem) -> Result<String> {
+    match event {
+        LogStreamItem::Transcript(event) => serde_json::to_string(event),
+        LogStreamItem::TokenUsage(event) => serde_json::to_string(event),
+        LogStreamItem::UpstreamPayload(event) => serde_json::to_string(event),
+    }
+    .context("failed to serialize JSON log event")
 }
 
 #[cfg(test)]

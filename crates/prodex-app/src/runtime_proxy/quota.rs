@@ -15,7 +15,7 @@ use crate::{
     RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind, UsageResponse,
     active_profile_selection_order, apply_runtime_profile_probe_result,
     fetch_usage_with_proxy_policy, run_runtime_probe_jobs_inline,
-    runtime_profile_auth_failure_active, runtime_profile_auth_failure_active_with_auth_cache,
+    runtime_profile_auth_failure_active, runtime_profile_auth_failure_active_from_map,
     runtime_profile_route_circuit_open_until, runtime_profile_transport_backoff_until_from_map,
     runtime_proxy_log, runtime_proxy_responses_quota_critical_floor_percent,
     schedule_runtime_state_save_from_runtime,

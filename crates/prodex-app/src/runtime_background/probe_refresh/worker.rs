@@ -62,12 +62,17 @@ fn execute_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
             )],
         ),
     );
-    RuntimeProbeRefreshAttempt::collect(
+    let attempt = RuntimeProbeRefreshAttempt::collect(
         &job.codex_home,
         job.upstream_base_url.as_str(),
         job.shared.upstream_no_proxy,
-    )
-    .execute(
+    );
+    apply_runtime_profile_usage_auth_revalidation(
+        &job.shared,
+        &job.profile_name,
+        load_runtime_profile_usage_auth_cache_entry(&job.codex_home),
+    );
+    attempt.execute(
         RuntimeProbeExecutionMode::Queued {
             apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
         },

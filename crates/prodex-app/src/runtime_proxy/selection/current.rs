@@ -77,9 +77,8 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
                 now,
                 route_kind,
             ),
-            runtime_profile_auth_failure_active_with_auth_cache(
+            runtime_profile_auth_failure_active_from_map(
                 &runtime.profile_health,
-                &runtime.profile_usage_auth,
                 &runtime.current_profile,
                 now,
             ),

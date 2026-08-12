@@ -12,7 +12,7 @@ use super::{
     RuntimeRouteKind, prune_runtime_profile_selection_backoff,
     reserve_runtime_profile_route_circuit_half_open_probe, runtime_affinity_selection_profile,
     runtime_candidate_has_hard_affinity, runtime_has_route_eligible_quota_fallback,
-    runtime_profile_auth_failure_active_with_auth_cache, runtime_profile_name_in_selection_backoff,
+    runtime_profile_auth_failure_active_from_map, runtime_profile_name_in_selection_backoff,
     runtime_profile_quota_summary_for_route, runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_log_field, runtime_proxy_responses_quota_critical_floor_percent,
     runtime_proxy_structured_log_message, runtime_request_hard_binding_owner,
@@ -51,9 +51,8 @@ pub(crate) fn runtime_previous_response_affinity_is_trusted(
         ),
         prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name)
             if profile_name == bound_profile
-                && !runtime_profile_auth_failure_active_with_auth_cache(
+                && !runtime_profile_auth_failure_active_from_map(
                     &runtime.profile_health,
-                    &runtime.profile_usage_auth,
                     &profile_name,
                     now,
                 )
@@ -322,9 +321,8 @@ fn runtime_profile_is_usable_for_hard_binding(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     Ok(runtime.state.profiles.contains_key(profile_name)
-        && !runtime_profile_auth_failure_active_with_auth_cache(
+        && !runtime_profile_auth_failure_active_from_map(
             &runtime.profile_health,
-            &runtime.profile_usage_auth,
             profile_name,
             Local::now().timestamp(),
         ))

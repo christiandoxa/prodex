@@ -378,7 +378,7 @@ fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapsho
 }
 
 #[test]
-fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_changes() {
+fn optimistic_current_candidate_waits_for_background_auth_revalidation() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -451,7 +451,23 @@ fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_cha
             &BTreeSet::new(),
             RuntimeRouteKind::Standard,
         )
-        .expect("candidate lookup should succeed after auth.json changes"),
+        .expect("candidate lookup should remain disk-free after auth.json changes"),
+        None
+    );
+
+    apply_runtime_profile_usage_auth_revalidation(
+        &shared,
+        "main",
+        load_runtime_profile_usage_auth_cache_entry(&main_home),
+    );
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Standard,
+        )
+        .expect("candidate lookup should succeed after background auth revalidation"),
         Some("main".to_string())
     );
 }

@@ -1,7 +1,7 @@
 use super::{
     RuntimeProfileSelectionCatalog, RuntimeRotationState, RuntimeRouteKind,
     RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
-    RuntimeSelectionProfileEntry, runtime_profile_auth_failure_active_with_auth_cache,
+    RuntimeSelectionProfileEntry, runtime_profile_auth_failure_active_from_map,
     runtime_profile_backoff_sort_key, runtime_profile_cached_auth_summary_from_maps_for_selection,
     runtime_profile_health_sort_key, runtime_profile_inflight_sort_key,
     runtime_profile_name_in_selection_backoff, runtime_profile_usage_cache_is_fresh,
@@ -68,9 +68,8 @@ pub(crate) fn runtime_route_selection_catalog(
                     .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
                     .cloned(),
                 auth_failure_active: has_auth_failure_health
-                    && runtime_profile_auth_failure_active_with_auth_cache(
+                    && runtime_profile_auth_failure_active_from_map(
                         &runtime.profile_health,
-                        &runtime.profile_usage_auth,
                         &profile.name,
                         now,
                     ),

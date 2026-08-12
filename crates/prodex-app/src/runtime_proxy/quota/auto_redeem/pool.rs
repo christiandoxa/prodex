@@ -3,7 +3,7 @@
 use super::super::{
     RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT, RuntimeRotationProxyShared, RuntimeRouteKind,
     active_profile_selection_order, prune_runtime_profile_selection_backoff,
-    run_runtime_probe_jobs_inline, runtime_profile_auth_failure_active_with_auth_cache,
+    run_runtime_probe_jobs_inline, runtime_profile_auth_failure_active_from_map,
     runtime_profile_health_score, runtime_profile_inflight_soft_limit_for_shared,
     runtime_profile_inflight_sort_key, runtime_profile_name_in_selection_backoff,
     runtime_profile_route_circuit_open_until, runtime_profile_transport_backoff_until_from_map,
@@ -65,12 +65,8 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
                 if !matches!(profile.provider, crate::ProfileProvider::Openai) {
                     return None;
                 }
-                if runtime_profile_auth_failure_active_with_auth_cache(
-                    &runtime.profile_health,
-                    &runtime.profile_usage_auth,
-                    &name,
-                    now,
-                ) {
+                if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &name, now)
+                {
                     return None;
                 }
                 if runtime_profile_name_in_selection_backoff(
@@ -141,12 +137,8 @@ pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
                 if !matches!(profile.provider, crate::ProfileProvider::Openai) {
                     return false;
                 }
-                if runtime_profile_auth_failure_active_with_auth_cache(
-                    &runtime.profile_health,
-                    &runtime.profile_usage_auth,
-                    name,
-                    now,
-                ) {
+                if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now)
+                {
                     return false;
                 }
                 if runtime_profile_transport_backoff_until_from_map(
@@ -206,12 +198,7 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
             if !matches!(profile.provider, crate::ProfileProvider::Openai) {
                 return None;
             }
-            if runtime_profile_auth_failure_active_with_auth_cache(
-                &runtime.profile_health,
-                &runtime.profile_usage_auth,
-                &name,
-                now,
-            ) {
+            if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &name, now) {
                 return None;
             }
             if runtime_profile_transport_backoff_until_from_map(

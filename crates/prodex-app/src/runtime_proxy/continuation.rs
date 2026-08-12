@@ -269,9 +269,8 @@ fn runtime_compact_binding_lookup(
     if binding.is_some_and(|binding| {
         binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
             || !runtime.state.profiles.contains_key(&binding.profile_name)
-            || runtime_profile_auth_failure_active_with_auth_cache(
+            || runtime_profile_auth_failure_active_from_map(
                 &runtime.profile_health,
-                &runtime.profile_usage_auth,
                 &binding.profile_name,
                 now,
             )

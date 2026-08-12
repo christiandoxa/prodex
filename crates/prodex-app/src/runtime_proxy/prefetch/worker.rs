@@ -82,20 +82,22 @@ async fn runtime_prefetch_send_with_wait(
         {
             return outcome;
         }
+        if chunk_bytes > 0 {
+            shared.queued_bytes.fetch_add(chunk_bytes, Ordering::SeqCst);
+        }
         match sender.try_send(pending) {
             Ok(()) => {
-                if chunk_bytes > 0 {
-                    shared.queued_bytes.fetch_add(chunk_bytes, Ordering::SeqCst);
-                }
                 return RuntimePrefetchSendOutcome::Sent {
                     wait_ms: started_at.elapsed().as_millis(),
                     retries,
                 };
             }
             Err(TrySendError::Disconnected(_)) => {
+                runtime_prefetch_release_queued_bytes(shared, chunk_bytes);
                 return RuntimePrefetchSendOutcome::Disconnected;
             }
             Err(TrySendError::Full(returned)) => {
+                runtime_prefetch_release_queued_bytes(shared, chunk_bytes);
                 match runtime_prefetch_retry_after_full(
                     returned,
                     started_at,
@@ -413,6 +415,29 @@ mod tests {
             receiver.recv().expect("oversized chunk should be queued"),
             RuntimePrefetchChunk::Data(bytes) if bytes == vec![b'x'; 8]
         ));
+        assert_eq!(shared.queued_bytes.load(Ordering::SeqCst), 8);
+        runtime_prefetch_release_queued_bytes(&shared, 8);
+        assert_eq!(shared.queued_bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn prefetch_disconnected_send_releases_reserved_bytes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("prefetch test runtime should build");
+        let shared = RuntimePrefetchSharedState::default();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+
+        let outcome = runtime.block_on(runtime_prefetch_send_with_wait(
+            &sender,
+            &shared,
+            RuntimePrefetchChunk::Data(vec![b'x'; 8]),
+        ));
+
+        assert_eq!(outcome, RuntimePrefetchSendOutcome::Disconnected);
+        assert_eq!(shared.queued_bytes.load(Ordering::SeqCst), 0);
     }
 
     #[test]

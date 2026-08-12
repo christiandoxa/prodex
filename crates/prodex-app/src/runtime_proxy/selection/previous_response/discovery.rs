@@ -126,12 +126,7 @@ fn bound_previous_response_owner<'a>(
         };
     };
     if excluded_profiles.contains(&owner)
-        || runtime_profile_auth_failure_active_with_auth_cache(
-            &runtime.profile_health,
-            &runtime.profile_usage_auth,
-            &owner,
-            now,
-        )
+        || runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &owner, now)
         || runtime_previous_response_negative_cache_active(
             &runtime.profile_health,
             response_id,
@@ -251,12 +246,7 @@ fn runtime_previous_response_candidate_eligibility(
     {
         return Err(RuntimePreviousResponseRejection::NegativeCache);
     }
-    if runtime_profile_auth_failure_active_with_auth_cache(
-        &runtime.profile_health,
-        &runtime.profile_usage_auth,
-        name,
-        now,
-    ) {
+    if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now) {
         return Err(RuntimePreviousResponseRejection::AuthFailure);
     }
     let (quota_summary, _) =

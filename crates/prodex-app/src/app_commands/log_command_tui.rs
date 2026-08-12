@@ -5,8 +5,9 @@ use super::{
     FollowedLog, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
     collect_new_runtime_log_stream_items, collect_new_transcript_events,
     latest_runtime_stream_payload_event, latest_transcript_event, local_token_usage_event,
-    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
-    read_new_runtime_log_events, read_new_transcript_events, recent_session_log_paths,
+    print_log_stream_item, print_token_usage_event, print_transcript_event,
+    print_upstream_payload_event, read_new_runtime_log_events, read_new_transcript_events,
+    recent_session_log_paths,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -38,16 +39,19 @@ const LOG_TUI_EVENT_LIMIT: usize = 200;
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
     match args.mode {
         LogMode::Last => {
-            if args.json {
-                let Some(event) = latest_token_usage_event() else {
-                    println!("No token usage events found.");
-                    return Ok(());
-                };
-                return print_token_usage_event(&event, true);
-            }
             let transcript = latest_transcript_event()?;
             let upstream_payload = latest_upstream_payload_event();
             let token_usage = latest_token_usage_event();
+            if args.json {
+                for item in log_snapshot_items(
+                    transcript.as_ref(),
+                    upstream_payload.as_ref(),
+                    token_usage.as_ref(),
+                ) {
+                    print_log_stream_item(&item, true)?;
+                }
+                return Ok(());
+            }
             print_log_snapshot(
                 transcript.as_ref(),
                 upstream_payload.as_ref(),
@@ -90,11 +94,7 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
     print_initial_token_usage_events(json)?;
     let mut followed_runtime_logs =
         followed_logs(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
-    let mut followed_session_logs = if json {
-        BTreeMap::new()
-    } else {
-        followed_logs(recent_session_log_paths()?)
-    };
+    let mut followed_session_logs = followed_logs(recent_session_log_paths()?);
     follow_token_usage_events(json, &mut followed_runtime_logs, &mut followed_session_logs)
 }
 
@@ -135,25 +135,13 @@ fn stream_token_usage_events_tui() -> Result<()> {
 }
 
 fn print_initial_token_usage_events(json: bool) -> Result<()> {
-    let mut found_event = false;
-    if !json && let Some(event) = latest_transcript_event()? {
-        print_transcript_event(&event)?;
-        found_event = true;
-    }
-    if !json && let Some(event) = latest_runtime_stream_payload_event() {
-        print_transcript_event(&event)?;
-        found_event = true;
-    }
-    if !json && let Some(event) = latest_upstream_payload_event() {
-        print_upstream_payload_event(&event)?;
-        found_event = true;
-    }
-    if let Some(event) = latest_token_usage_event() {
-        print_token_usage_event(&event, json)?;
-        found_event = true;
-    }
-    if !found_event {
+    let items = initial_log_stream_items()?;
+    if items.is_empty() {
         eprintln!("Waiting for transcript, upstream payload, or token usage events...");
+        return Ok(());
+    }
+    for item in items {
+        print_log_stream_item(&item, json)?;
     }
     Ok(())
 }
@@ -196,9 +184,13 @@ fn read_token_usage_events_tick(
         let state = followed_runtime_logs.entry(path.clone()).or_default();
         read_new_runtime_log_events(&path, state, json)?;
     }
-    if !json {
-        for path in recent_session_log_paths()? {
-            let state = followed_session_logs.entry(path.clone()).or_default();
+    for path in recent_session_log_paths()? {
+        let state = followed_session_logs.entry(path.clone()).or_default();
+        if json {
+            for event in collect_new_transcript_events(&path, state)? {
+                print_log_stream_item(&LogStreamItem::Transcript(event), true)?;
+            }
+        } else {
             read_new_transcript_events(&path, state)?;
         }
     }
