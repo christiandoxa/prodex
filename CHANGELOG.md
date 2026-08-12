@@ -7,6 +7,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Persist quota readiness across profiles (`20c4bf7`)
+
+## 0.407.4 - 2026-08-12
+
+### Runtime
+
 - Recover healthy profile selection (`4c68738`)
 
 ## 0.407.3 - 2026-08-11
@@ -100,9 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Claude
 
 - Harden optional MCP startup probes (`4815d05`)
-
-## 0.400.0 - 2026-08-09
-
-### Misc
-
-- Keep interactive TUI in terminal foreground group (`6718f56`)
