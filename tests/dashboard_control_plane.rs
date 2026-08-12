@@ -50,7 +50,7 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
     assert_eq!(health["status"], "ok");
     assert_eq!(health["service"], "prodex-dashboard");
 
-    let logs = get_json(port, "/api/logs");
+    let logs = wait_for_log_lines(port, 2);
     assert!(logs["lines"].as_array().unwrap().len() >= 2);
     let logs_text = serde_json::to_string(&logs).unwrap();
     assert!(logs_text.contains("runtime_ready"));
@@ -437,6 +437,20 @@ fn wait_for_json(port: u16, path: &str) -> Value {
         thread::sleep(Duration::from_millis(50));
     }
     panic!("dashboard did not serve {path}");
+}
+
+fn wait_for_log_lines(port: u16, minimum: usize) -> Value {
+    for _ in 0..80 {
+        if let Ok(value) = try_get_json(port, "/api/logs")
+            && value["lines"]
+                .as_array()
+                .is_some_and(|lines| lines.len() >= minimum)
+        {
+            return value;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    get_json(port, "/api/logs")
 }
 
 fn get_json(port: u16, path: &str) -> Value {
