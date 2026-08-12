@@ -289,6 +289,7 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "release-run: bump (0.2.0)",
       "dry-run: bump Cargo.toml 0.1.0 -> 0.2.0",
       "release-run: sync (0.2.0)",
+      "dry-run: git fetch origin --tags",
       "dry-run: npm run npm:sync-version",
       "dry-run: npm run changelog -- --release-version 0.2.0",
       "dry-run: node scripts/npm/changelog.mjs --check --release-version 0.2.0",
