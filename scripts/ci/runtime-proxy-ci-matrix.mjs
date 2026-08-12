@@ -1,8 +1,23 @@
 #!/usr/bin/env node
 import { RUNTIME_CI_WORKFLOW_SHARDS } from "./runtime-test-manifest.mjs";
 
-const TARGET_MATRIX_JOBS = RUNTIME_CI_WORKFLOW_SHARDS.length;
+const TARGET_MATRIX_JOBS = 8;
 const DEFAULT_WEIGHT_SECONDS = 90;
+const RUNTIME_STRESS_BROAD_SHARDS = Object.freeze(
+  Array.from({ length: 5 }, (_, shard) => ({
+    suite: "stress",
+    id: `stress-${shard + 1}`,
+    label: `weighted broad shard ${shard + 1} of 5`,
+    shard,
+    shard_count: 5,
+  })),
+);
+const RUNTIME_STRESS_QUARANTINE_SHARDS = Object.freeze([
+  { suite: "serialized", id: "serialized-1", label: "serialized shard 1 of 2", shard: 0, shard_count: 2 },
+  { suite: "serialized", id: "serialized-2", label: "serialized shard 2 of 2", shard: 1, shard_count: 2 },
+  { suite: "continuation", id: "continuation-1", label: "continuation shard 1 of 2", shard: 0, shard_count: 2 },
+  { suite: "continuation", id: "continuation-2", label: "continuation shard 2 of 2", shard: 1, shard_count: 2 },
+]);
 const WORKFLOW_SHARD_WEIGHT_SECONDS = Object.freeze({
   "admission-core": 105,
   "admission-affinity": 94,
@@ -37,6 +52,16 @@ function parseArgs(argv) {
       args.githubMatrix = true;
       continue;
     }
+    if (value === "--github-stress-matrix") {
+      args.githubStressMatrix = true;
+      continue;
+    }
+    if (value === "--event-name") {
+      index += 1;
+      if (!argv[index]) throw new Error("--event-name requires a value");
+      args.eventName = argv[index];
+      continue;
+    }
     if (value === "--help" || value === "-h") {
       args.help = true;
       continue;
@@ -50,6 +75,7 @@ function printHelp() {
   process.stdout.write(
     [
       "Usage: node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix",
+      "       node scripts/ci/runtime-proxy-ci-matrix.mjs --github-stress-matrix --event-name <name>",
       "",
       "Prints the GitHub Actions matrix for the main-internal-runtime-proxy job.",
     ].join("\n") + "\n",
@@ -89,7 +115,7 @@ function matrixEntry(shard, index) {
   return {
     suite,
     label,
-    validate_manifest: suite === "root" ? "true" : "false",
+    save_cache: suite === "root",
     filters: shardFilters(shard, index).join("\n"),
   };
 }
@@ -109,8 +135,15 @@ function packedMatrixEntries(shards, targetJobs = TARGET_MATRIX_JOBS) {
     weightSeconds: 0,
   }));
 
-  for (const shard of [...packableShards].sort((left, right) => shardWeightSeconds(right) - shardWeightSeconds(left))) {
-    packs.sort((left, right) => left.weightSeconds - right.weightSeconds);
+  for (const shard of [...packableShards].sort(
+    (left, right) =>
+      shardWeightSeconds(right) - shardWeightSeconds(left) || left.suite.localeCompare(right.suite),
+  )) {
+    packs.sort(
+      (left, right) =>
+        left.weightSeconds - right.weightSeconds ||
+        left.suites.join("\n").localeCompare(right.suites.join("\n")),
+    );
     const pack = packs[0];
     pack.filters.push(...shardFilters(shard, shards.indexOf(shard)));
     pack.labels.push(shard.label);
@@ -131,7 +164,7 @@ function packedMatrixEntries(shards, targetJobs = TARGET_MATRIX_JOBS) {
       entries.push({
         suite: `pack-${String(oneBasedIndex).padStart(2, "0")}`,
         label: pack.labels.length === 1 ? pack.labels[0] : `packed shard ${oneBasedIndex}`,
-        validate_manifest: "false",
+        save_cache: false,
         filters: pack.filters.join("\n"),
       });
     });
@@ -145,11 +178,27 @@ function githubMatrix() {
   };
 }
 
+function githubStressMatrix(eventName) {
+  if (!new Set(["push", "pull_request", "schedule", "workflow_dispatch"]).has(eventName)) {
+    throw new Error(`unsupported CI event name: ${eventName ?? "missing"}`);
+  }
+  const broad = eventName === "schedule" || eventName === "workflow_dispatch";
+  const shards = [
+    ...(broad ? RUNTIME_STRESS_BROAD_SHARDS : []),
+    ...RUNTIME_STRESS_QUARANTINE_SHARDS,
+  ];
+  return {
+    include: shards.map((shard, index) => ({ ...shard, save_cache: index === 0 })),
+  };
+}
+
 const args = parseArgs(process.argv);
 if (args.help) {
   printHelp();
 } else if (args.githubMatrix) {
   process.stdout.write(`${JSON.stringify(githubMatrix())}\n`);
+} else if (args.githubStressMatrix) {
+  process.stdout.write(`${JSON.stringify(githubStressMatrix(args.eventName))}\n`);
 } else {
-  throw new Error("missing required --github-matrix");
+  throw new Error("missing required matrix mode");
 }

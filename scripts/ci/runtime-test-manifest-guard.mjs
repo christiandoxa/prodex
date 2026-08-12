@@ -457,6 +457,15 @@ function validateBroadShardFilters(broadShardFilters, cargoTestNames, issues) {
     issues.push(`duplicate broad shard filter "${duplicate.value}" in indexes ${duplicate.indexes.join(", ")}`);
   }
 
+  for (const testName of cargoTestNames) {
+    const owners = validShards.filter((shard) => testName.includes(shard.filter));
+    if (owners.length > 1) {
+      issues.push(
+        `runtime test "${testName}" matches multiple broad shard filters: ${owners.map((owner) => owner.id).join(", ")}`,
+      );
+    }
+  }
+
   return validShards;
 }
 

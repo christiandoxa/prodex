@@ -20,31 +20,35 @@ Prodex test speed should come from process-level sharding first, not from making
 - Push/PR CI runs nine generic `prodex-app` partitions. Dedicated parallel jobs
   own every `main_internal_tests::` and `profile_commands_internal_tests::`
   test, so the generic remainder excludes those namespaces instead of rerunning
-  them. Scheduled full-test and Windows matrices retain their canonical coverage.
+  them. The weekly CI schedule skips those duplicate Ubuntu owners because the
+  daily full-test workflow already runs their canonical coverage; Windows and
+  the schedule-only stress, fuzz, security, and integration lanes still run.
 - The generated runtime-proxy matrix uses weighted packs and keeps the two
   admission process groups in separate packs; every runtime command remains
   internally serial with `--test-threads=1`.
+- Push and pull-request CI keep serialized and continuation stress quarantine.
+  The five broad stress replay shards run only on scheduled or manual CI,
+  avoiding duplicate execution of the normal runtime-proxy matrix.
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
 Native macOS omits the large `prodex-app` library test binary; Linux owns its
 full serial suite. Windows preserves its existing `prodex-app` coverage in a
 separate parallel partition instead of serializing it behind other workspace
-members. The Linux job also cheaply reruns the overlay and Smart Context
+members. The Linux push and daily full-test remainder jobs also cheaply rerun
+the overlay and Smart Context
 persistence regressions through a private symlinked `TMPDIR`, matching the
 macOS temp-path alias that previously exposed non-canonical test fixture paths.
 
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds
 the installer fixture, avoiding a second full Windows binary build. Large
-`prodex-app` coverage uses eight balanced Windows groups instead of the thirteen
-Linux partitions, retaining parallel execution while avoiding five duplicate
-Windows compilations and late hosted-runner queueing. Windows keeps the measured
-admission bottleneck in two disjoint groups, with commands attached to admission
-core; the split adds one test-binary link to shorten the critical path. One group
-writes the shared dependency cache. High-fanout app, full-test, Windows, and
-macOS lanes disable incremental artifacts and test/dev debug symbols so sccache
-remains effective and linking is faster.
+`prodex-app` coverage uses five balanced Windows groups instead of the thirteen
+Linux partitions, retaining parallel execution while avoiding repeated Windows
+compilations and late hosted-runner queueing. One group writes the shared
+dependency cache. High-fanout app, full-test, Windows, and macOS lanes disable
+incremental artifacts and test/dev debug symbols so sccache remains effective
+and linking is faster.
 
 ## CI Impact Gating
 

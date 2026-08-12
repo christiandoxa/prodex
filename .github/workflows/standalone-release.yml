@@ -2,17 +2,22 @@ name: standalone release
 
 on:
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact main commit to release
+        required: true
+        type: string
+      version:
+        description: Exact Cargo package version to release
+        required: true
+        type: string
 
 concurrency:
   group: standalone-release
   cancel-in-progress: false
 
 permissions:
-  actions: read
   contents: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
 
 env:
   CARGO_INCREMENTAL: "0"
@@ -26,23 +31,37 @@ jobs:
     name: Verify CI is green
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      target_sha: ${{ steps.target.outputs.target_sha }}
+      version: ${{ steps.target.outputs.version }}
 
     steps:
       - name: Check out release ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release target
         id: target
+        env:
+          RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
-          target_sha="${GITHUB_SHA}"
+          target_sha="${RELEASE_TARGET_SHA}"
           if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
             echo "workflow_dispatch release runs must target main" >&2
+            exit 1
+          fi
+          if [[ ! "${target_sha}" =~ ^[0-9a-f]{40}$ ]] || [ "${GITHUB_SHA}" != "${target_sha}" ]; then
+            echo "release target must be the exact dispatched main commit" >&2
             exit 1
           fi
           version="$(python - <<'PY'
@@ -51,13 +70,29 @@ jobs:
               print(tomllib.load(handle)["package"]["version"])
           PY
           )"
+          if [ "${version}" != "${RELEASE_VERSION}" ]; then
+            echo "release version ${RELEASE_VERSION} does not match Cargo.toml ${version}" >&2
+            exit 1
+          fi
           git fetch origin --tags --force
           if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
             && [ "${release_tag_sha}" != "${target_sha}" ]; then
             echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
             exit 1
           fi
-          echo "target_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+          if ! git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
+            latest_version="$(git tag --list '[0-9]*' --sort=-version:refname | head -n1)"
+            if [ -n "${latest_version}" ] \
+              && { [ "${version}" = "${latest_version}" ] \
+                || [ "$(printf '%s\n%s\n' "${latest_version}" "${version}" | sort -V | tail -n1)" != "${version}" ]; }; then
+              echo "release version ${version} must be newer than ${latest_version}" >&2
+              exit 1
+            fi
+          fi
+          {
+            echo "target_sha=${target_sha}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Wait for CI success
         env:
@@ -115,6 +150,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -176,7 +214,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Install sccache
-        if: ${{ matrix.use-cross == false }}
+        if: ${{ matrix.use-cross == false || matrix.can-native-smoke }}
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install cross
@@ -208,7 +246,7 @@ jobs:
       - name: Test native desktop launcher
         if: ${{ matrix.can-native-smoke }}
         shell: bash
-        run: cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
+        run: RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
 
       - name: Build prodex
         shell: bash
@@ -263,11 +301,6 @@ jobs:
           set -euo pipefail
           mkdir -p "dist/${{ matrix.artifact-name }}"
           cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
-
-      - name: Attest binary artifact provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -397,6 +430,37 @@ jobs:
           fi
           grep -q -- "--presidio is unsupported" "${RUNNER_TEMP}/presidio-error.txt"
 
+  attest-binaries:
+    name: Attest binaries
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - verify-ci
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download binary artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+
+      - name: Attest binary artifact provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            artifacts/x86_64-unknown-linux-gnu/prodex
+            artifacts/aarch64-unknown-linux-gnu/prodex
+            artifacts/x86_64-apple-darwin/prodex
+            artifacts/aarch64-apple-darwin/prodex
+            artifacts/x86_64-pc-windows-msvc/prodex.exe
+            artifacts/aarch64-pc-windows-msvc/prodex.exe
+
   publish-container:
     name: Publish container and deployment manifest
     runs-on: ubuntu-latest
@@ -414,18 +478,15 @@ jobs:
     steps:
       - name: Check out release ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Resolve release version
         id: release
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python - <<'PY'
-          import tomllib
-          with open("Cargo.toml", "rb") as handle:
-              print(tomllib.load(handle)["package"]["version"])
-          PY
-          )"
+          version="${{ needs.verify-ci.outputs.version }}"
           if [ "${GITHUB_REPOSITORY,,}" != "christiandoxa/prodex" ]; then
             echo "container publication is restricted to christiandoxa/prodex" >&2
             exit 1
@@ -531,12 +592,21 @@ jobs:
     name: Prepare release SBOM
     runs-on: ubuntu-latest
     needs:
+      - attest-binaries
       - verify-ci
       - build
+    timeout-minutes: 30
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Download built binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -580,29 +650,21 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare-release
+      - verify-ci
+    timeout-minutes: 15
     permissions:
       contents: write
 
     steps:
-      - name: Check out release ref
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
       - name: Resolve release metadata
         id: release
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python - <<'PY'
-          import tomllib
-          with open("Cargo.toml", "rb") as handle:
-              print(tomllib.load(handle)["package"]["version"])
-          PY
-          )"
+          version="${{ needs.verify-ci.outputs.version }}"
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
-          target_sha="${GITHUB_SHA}"
+          target_sha="${{ needs.verify-ci.outputs.target_sha }}"
           if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
             echo "workflow_dispatch release runs must target main" >&2
             exit 1
@@ -618,6 +680,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -626,6 +689,7 @@ jobs:
           package-manager-cache: false
 
       - name: Sync documentation version metadata
+        id: docs
         shell: bash
         run: |
           set -euo pipefail
@@ -639,13 +703,24 @@ jobs:
           node scripts/npm/sync-docs-version.mjs --version "${version}"
           if git diff --quiet -- README.md QUICKSTART.md; then
             echo "docs already synced"
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md QUICKSTART.md
           git commit -m "docs(release): sync version snippets for ${version}"
-          git push origin HEAD:main
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Push synchronized documentation
+        if: steps.docs.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 --wrap=0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" push origin HEAD:main
 
   publish-github-release:
     name: Publish GitHub release
@@ -654,7 +729,10 @@ jobs:
       - prepare-release
       - publish-container
       - sync-release-docs
+      - verify-ci
+    timeout-minutes: 60
     permissions:
+      artifact-metadata: write
       attestations: write
       contents: write
       id-token: write
@@ -664,21 +742,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release metadata
         id: release
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python - <<'PY'
-          import tomllib
-          with open("Cargo.toml", "rb") as handle:
-              print(tomllib.load(handle)["package"]["version"])
-          PY
-          )"
+          version="${{ needs.verify-ci.outputs.version }}"
           ref_name="${GITHUB_REF_NAME}"
           ref_type="${GITHUB_REF_TYPE:-branch}"
-          target_sha="${GITHUB_SHA}"
+          target_sha="${{ needs.verify-ci.outputs.target_sha }}"
           if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
             echo "workflow_dispatch release runs must target main" >&2
             exit 1
@@ -737,6 +811,11 @@ jobs:
             sha256sum install.sh install.ps1 prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
+
+      - name: Attest release checksum manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: release-assets/SHA256SUMS
 
       - name: Prepare antivirus engine health check
         shell: bash
@@ -814,10 +893,11 @@ jobs:
           set -euo pipefail
           while IFS= read -r -d '' asset; do
             gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}"
-          done < <(find release-assets -maxdepth 1 -type f ! -name SHA256SUMS -print0)
+          done < <(find release-assets -maxdepth 1 -type f -print0)
 
       - name: Create release tag
         env:
+          GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.release.outputs.target_sha }}
         shell: bash
         run: |
@@ -833,7 +913,8 @@ jobs:
             exit 0
           fi
           git tag "${version}" "${TARGET_SHA}"
-          git push origin "refs/tags/${version}"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 --wrap=0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" push origin "refs/tags/${version}"
 
       - name: Publish GitHub release
         env:
@@ -897,6 +978,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { RUNTIME_CI_BROAD_SHARD_FILTERS } from "./runtime-test-manifest.mjs";
 
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
   const result = spawnSync(
@@ -72,6 +73,9 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
   assert.match(workflow, /matrix\.skip_filters/);
   assert.match(workflow, /--test-threads=1/);
+  assert.match(workflow, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
+  assert.match(workflow, /filter_status=\$\?/);
+  assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);
 });
 
 test("push CI reuses the disjoint prodex-app library partitions", () => {
@@ -126,9 +130,12 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   assert.equal(result.status, 0, result.stderr);
   const matrix = JSON.parse(result.stdout);
   const filters = matrix.include.flatMap((entry) => entry.filters.split("\n"));
-  assert.equal(matrix.include.length, 24);
-  assert.equal(filters.length, 51);
-  assert.equal(new Set(filters).size, filters.length);
+  const expectedFilters = RUNTIME_CI_BROAD_SHARD_FILTERS.map(
+    ({ label, filter }) => `${label}|${filter}`,
+  );
+  assert.equal(matrix.include.length, 8);
+  assert.equal(matrix.include.filter((entry) => entry.save_cache).length, 1);
+  assert.deepEqual(new Set(filters), new Set(expectedFilters));
   const admissionCorePack = matrix.include.find((entry) =>
     entry.filters.includes(
       "|main_internal_tests::runtime_proxy_selection_and_pressure::admission::compact::",
@@ -142,4 +149,75 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   assert.ok(admissionCorePack, "admission core filter missing from runtime matrix");
   assert.ok(admissionAffinityPack, "admission affinity filter missing from runtime matrix");
   assert.notEqual(admissionCorePack.suite, admissionAffinityPack.suite);
+});
+
+test("push CI keeps runtime quarantine while broad stress stays scheduled", () => {
+  const matrix = (eventName) => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/ci/runtime-proxy-ci-matrix.mjs",
+        "--github-stress-matrix",
+        "--event-name",
+        eventName,
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout).include;
+  };
+
+  const push = matrix("push");
+  const schedule = matrix("schedule");
+  assert.deepEqual(new Set(push.map((entry) => entry.suite)), new Set(["serialized", "continuation"]));
+  assert.equal(push.length, 4);
+  assert.equal(schedule.length, 9);
+  assert.equal(push.filter((entry) => entry.save_cache).length, 1);
+  assert.equal(schedule.filter((entry) => entry.save_cache).length, 1);
+
+  const invalid = spawnSync(
+    process.execPath,
+    ["scripts/ci/runtime-proxy-ci-matrix.mjs", "--github-stress-matrix"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr, /unsupported CI event name: missing/);
+
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  assert.match(workflow, /runtime_stress_matrix: \$\{\{ steps\.runtime-matrix\.outputs\.stress_matrix \}\}/);
+  assert.match(workflow, /fromJSON\(needs\.changes\.outputs\.runtime_stress_matrix\)/);
+});
+
+test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  for (const [jobName, nextJob] of [
+    ["prodex-app-lib", "fuzz-build"],
+    ["auto-rotate", "profile-commands-internal"],
+    ["profile-commands-internal", "main-internal-core"],
+    ["main-internal-core", "env-sensitive-parallel-guard"],
+    ["main-internal-runtime-proxy", "runtime-proxy-bench-smoke"],
+  ]) {
+    const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
+    assert.ok(job, `${jobName} job missing`);
+    assert.match(job, /github\.event_name != 'schedule'/);
+  }
+
+  const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
+  assert.match(processGuard, /Validate runtime CI manifest[\s\S]*?npm run ci:runtime-manifest/);
+});
+
+test("large CI matrices use one cache writer and retain failure diagnostics", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const core = workflow.match(/\n  main-internal-core:\n([\s\S]*?)\n  env-sensitive-parallel-guard:/)?.[1];
+  const runtime = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-proxy-bench-smoke:/)?.[1];
+  const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
+  const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
+
+  assert.equal(core?.match(/save_cache: true/g)?.length, 1);
+  assert.match(core, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  assert.match(runtime, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  assert.match(stress, /fromJSON\(needs\.changes\.outputs\.runtime_stress_matrix\)/);
+  assert.match(stress, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  assert.match(processGuard, /save-if: \$\{\{ matrix\.lane == 'static' \}\}/);
+  assert.match(runtime, /status=0[\s\S]*?status=1[\s\S]*?exit "\$\{status\}"/);
 });

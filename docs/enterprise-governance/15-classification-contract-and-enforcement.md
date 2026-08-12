@@ -3,8 +3,9 @@
 ## Scope and Status
 
 This document defines the Phase 2 classification and obligation contract and
-records how much of it is in the production path as of 2026-07-13. It is not a
-certification claim.
+records its integration in the current production path. It is not a
+certification claim; the repository evidence below is authoritative for this
+revision.
 
 The repository has typed bounded request inspection, monotonic four-level
 classification, revisioned classification-rule snapshots, typed policy

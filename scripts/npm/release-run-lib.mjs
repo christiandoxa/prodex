@@ -724,7 +724,11 @@ async function triggerPublish(repo, version, args) {
   }
   await ghApi(`/repos/${repo}/actions/workflows/${args.publishWorkflow}/dispatches`, {
     method: "POST",
-    fields: { ref: args.branch },
+    fields: {
+      ref: args.branch,
+      "inputs[target_sha]": headSha,
+      "inputs[version]": version,
+    },
     retries: args.ghRetries,
     dryRun: args.dryRun,
   });

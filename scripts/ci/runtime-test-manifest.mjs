@@ -444,6 +444,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::",
         label: "lane-and-launch",
       },
+      {
+        id: "anthropic-launch-config",
+        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::launch_config::",
+        label: "launch-config",
+      },
     ],
   },
   {
