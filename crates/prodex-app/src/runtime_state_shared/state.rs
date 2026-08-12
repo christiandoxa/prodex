@@ -27,6 +27,6 @@ pub(crate) struct RuntimeRotationState {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeProfileUsageAuthCacheEntry {
     pub(crate) auth: UsageAuth,
-    pub(crate) location: secret_store::SecretLocation,
-    pub(crate) revision: Option<secret_store::SecretRevision>,
+    pub(crate) checked_at: i64,
+    pub(crate) generation: u64,
 }

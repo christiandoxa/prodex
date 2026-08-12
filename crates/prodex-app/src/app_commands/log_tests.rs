@@ -279,7 +279,7 @@ fn preserves_real_provider_and_effort_values() {
 }
 
 #[test]
-fn log_snapshot_items_preserve_transcript_and_usage_order() {
+fn log_snapshot_json_preserves_complete_event_order() {
     let transcript = TranscriptEvent {
         timestamp: "2026-06-20 08:00:01".to_string(),
         source: "assistant".to_string(),
@@ -296,12 +296,44 @@ fn log_snapshot_items_preserve_transcript_and_usage_order() {
         output_tokens: 4,
         reasoning_tokens: 1,
     };
+    let upstream = crate::app_commands::log_upstream_payload::UpstreamPayloadEvent {
+        timestamp: "2026-06-20 08:00:01".to_string(),
+        request: Some(7),
+        transport: "http".to_string(),
+        route: "responses".to_string(),
+        profile: "main".to_string(),
+        bytes: 17,
+        logged_bytes: 17,
+        truncated: false,
+        payload: r#"{"input":"hello"}"#.to_string(),
+    };
 
-    let items = log_snapshot_items(Some(&transcript), None, Some(&usage));
+    let items = log_snapshot_items(Some(&transcript), Some(&upstream), Some(&usage));
 
-    assert_eq!(items.len(), 2);
+    assert_eq!(items.len(), 3);
     assert!(matches!(items[0], LogStreamItem::Transcript(_)));
-    assert!(matches!(items[1], LogStreamItem::TokenUsage(_)));
+    assert!(matches!(items[1], LogStreamItem::UpstreamPayload(_)));
+    assert!(matches!(items[2], LogStreamItem::TokenUsage(_)));
+
+    let json = items
+        .iter()
+        .map(log_stream_item_json)
+        .collect::<Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(json.len(), 3);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json[0]).unwrap()["text"],
+        "Hello user."
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json[1]).unwrap()["payload"],
+        r#"{"input":"hello"}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json[2]).unwrap()["profile"],
+        "main"
+    );
+    assert!(log_snapshot_items(None, None, None).is_empty());
 }
 
 #[test]

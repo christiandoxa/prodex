@@ -3,10 +3,12 @@ pub(crate) use self::log_command_tui::handle_log;
 use self::log_command_tui::{log_snapshot_items, log_stream_tui_text};
 pub(crate) use self::log_follow::{FollowedLog, collect_new_followed_lines};
 use self::log_paths::recent_session_log_paths;
+#[cfg(test)]
+use self::log_stream::log_stream_item_json;
 pub(crate) use self::log_stream::{
     LogStreamItem, collect_new_runtime_log_stream_items, latest_runtime_stream_payload_event,
-    local_token_usage_event, print_token_usage_event, print_transcript_event,
-    print_upstream_payload_event, read_new_runtime_log_events,
+    local_token_usage_event, print_log_stream_item, print_token_usage_event,
+    print_transcript_event, print_upstream_payload_event, read_new_runtime_log_events,
 };
 pub(crate) use self::log_transcript::{TranscriptEvent, transcript_events_from_session_line};
 #[cfg(test)]

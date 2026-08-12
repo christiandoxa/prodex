@@ -39,9 +39,8 @@ fn runtime_has_route_quota_fallback(
         if candidate_name == profile_name || excluded_profiles.contains(candidate_name) {
             continue;
         }
-        if runtime_profile_auth_failure_active_with_auth_cache(
+        if runtime_profile_auth_failure_active_from_map(
             &runtime.profile_health,
-            &runtime.profile_usage_auth,
             candidate_name,
             now,
         ) || runtime_profile_name_in_selection_backoff(

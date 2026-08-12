@@ -173,7 +173,6 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         precommit_hold_count: 0,
         precommit_hold_bytes: 0,
         precommit_hold_promotion_event_seen: false,
-        stream_payload_state: RuntimeWebsocketStreamState::default(),
         promote_committed_profile,
     })
 }
@@ -208,7 +207,6 @@ struct RuntimeWebsocketResponseLoop<'a> {
     precommit_hold_count: usize,
     precommit_hold_bytes: usize,
     precommit_hold_promotion_event_seen: bool,
-    stream_payload_state: RuntimeWebsocketStreamState,
 }
 
 struct RuntimeWebsocketTextTerminal {
@@ -253,7 +251,7 @@ fn run_runtime_websocket_response_loop(
 impl RuntimeWebsocketResponseLoop<'_> {
     fn handle_text(&mut self, text: String) -> Result<RuntimeWebsocketTextResult> {
         self.mark_text_progress()?;
-        let stream_payload = self.stream_payload_state.payload_from_text(&text);
+        let stream_payload = runtime_websocket_stream_payload_from_text(&text);
         let inspected = self.inspect_text(&text)?;
         if let Some(attempt) = self.retry_attempt(&inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));

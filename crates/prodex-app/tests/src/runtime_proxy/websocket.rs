@@ -133,6 +133,7 @@ pub(super) fn websocket_test_shared_with_main_profile(
             },
         );
         let auth_location = secret_store::auth_json_location(&codex_home);
+        let now = Local::now().timestamp();
         runtime.profile_usage_auth.insert(
             "main".to_string(),
             RuntimeProfileUsageAuthCacheEntry {
@@ -143,11 +144,10 @@ pub(super) fn websocket_test_shared_with_main_profile(
                     expires_at: None,
                     last_refresh: None,
                 },
-                location: auth_location.clone(),
-                revision: None,
+                checked_at: now,
+                generation: 0,
             },
         );
-        let now = Local::now().timestamp();
         runtime.profile_usage_snapshots.insert(
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
@@ -226,7 +226,7 @@ fn websocket_presidio_fail_open_preserves_text_when_local_inspection_hits_limits
 }
 
 #[test]
-fn websocket_runtime_log_contains_plain_stream_payload_text() {
+fn websocket_runtime_log_emits_only_completed_stream_payloads() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
@@ -243,8 +243,14 @@ fn websocket_runtime_log_contains_plain_stream_payload_text() {
             .expect("upstream websocket should receive request");
         for payload in [
             r#"{"type":"response.output_item.added","item":{"type":"function_call","call_id":"call-1","name":"exec"}}"#,
-            r#"{"type":"response.function_call_arguments.delta","call_id":"call-1","delta":"const r = await tools.web__run({}); text(r);"}"#,
-            r#"{"type":"response.output_text.delta","delta":"done"}"#,
+            r#"{"type":"response.function_call_arguments.delta","call_id":"call-1","delta":"const r = await "}"#,
+            r#"{"type":"response.function_call_arguments.delta","call_id":"call-1","delta":"tools.web__run({}); text(r);"}"#,
+            r#"{"type":"response.function_call_arguments.done","call_id":"call-1","arguments":"const r = await tools.web__run({}); text(r);"}"#,
+            r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call-1","name":"exec","arguments":"const r = await tools.web__run({}); text(r);"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"do"}"#,
+            r#"{"type":"response.output_text.delta","delta":"ne"}"#,
+            r#"{"type":"response.output_text.done","text":"done"}"#,
+            r#"{"type":"response.output_item.done","item":{"type":"message","role":"assistant","id":"msg-1","content":[{"type":"output_text","text":"done"}]}}"#,
             r#"{"type":"response.completed","response":{"id":"resp-1"}}"#,
         ] {
             socket
@@ -280,11 +286,16 @@ fn websocket_runtime_log_contains_plain_stream_payload_text() {
     .expect("websocket response should complete");
 
     assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
-    let log = read_websocket_test_log_after_marker(&shared.log_path, "stream_payload");
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "terminal_event");
+    let stream_payload_count = log
+        .lines()
+        .filter(|line| line.contains("] stream_payload request=901"))
+        .count();
+    assert_eq!(stream_payload_count, 2, "{log}");
     assert!(
-        log.contains("source=tool-call:exec")
-            && log.contains("tools.web__run")
-            && log.contains("source=assistant")
+        log.contains(
+            "source=tool-call:exec stream=\"const r = await tools.web__run({}); text(r);\""
+        ) && log.contains("source=assistant stream=done")
     );
     upstream
         .join()

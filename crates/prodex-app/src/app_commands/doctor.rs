@@ -236,7 +236,7 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         import_auth_journal_count,
         repaired_import_auth_journals,
         runtime_config,
-        ..
+        runtime_config_error,
     } = context;
     let summary_fields = vec![
         ("Prodex root".to_string(), paths.root.display().to_string()),
@@ -283,6 +283,10 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         (
             "Runtime policy".to_string(),
             doctor_runtime_policy_status(policy_summary, policy_summary_error),
+        ),
+        (
+            "Runtime configuration".to_string(),
+            doctor_runtime_configuration_status(runtime_config_error),
         ),
         (
             "Runtime proxy contract".to_string(),
@@ -351,6 +355,12 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
 
     print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
+}
+
+fn doctor_runtime_configuration_status(error: Option<&str>) -> String {
+    error
+        .map(|error| format!("Invalid: {error}"))
+        .unwrap_or_else(|| "Valid".to_string())
 }
 
 fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
@@ -597,5 +607,14 @@ mod install_only_tests {
         assert!(panel.fields.iter().any(|(name, value)| {
             name == "Migration" && value.contains("Gemini API key") && value.contains("Vertex AI")
         }));
+    }
+
+    #[test]
+    fn human_doctor_surfaces_invalid_runtime_configuration() {
+        assert_eq!(doctor_runtime_configuration_status(None), "Valid");
+        assert_eq!(
+            doctor_runtime_configuration_status(Some("worker count must be greater than zero")),
+            "Invalid: worker count must be greater than zero"
+        );
     }
 }

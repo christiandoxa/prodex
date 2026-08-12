@@ -1,18 +1,20 @@
 use super::{
     AppState, RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE, RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
-    RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS, RuntimeProfileHealth,
-    RuntimeProfileUsageAuthCacheEntry, RuntimeRotationProxyShared, RuntimeRotationState,
-    read_usage_auth, runtime_profile_effective_score_from_map, runtime_proxy_log,
-    runtime_route_kind_label, schedule_runtime_state_save_from_runtime,
-    sync_usage_auth_from_disk_or_refresh_with_proxy_policy, usage_auth_needs_proactive_refresh,
-    usage_auth_sync_source_label,
+    RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS, RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
+    RuntimeProfileHealth, RuntimeProfileUsageAuthCacheEntry, RuntimeRotationProxyShared,
+    RuntimeRotationState, read_usage_auth, runtime_profile_effective_score_from_map,
+    runtime_proxy_log, runtime_route_kind_label, schedule_runtime_probe_refresh,
+    schedule_runtime_state_save_from_runtime, usage_auth_needs_proactive_refresh,
 };
 use anyhow::{Context, Result};
 use chrono::Local;
-use prodex_quota::{UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
+use prodex_quota::UsageAuth;
 use prodex_runtime_state::{RuntimeRouteKind, RuntimeStateMutation};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static RUNTIME_PROFILE_USAGE_AUTH_CACHE_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn read_auth_json_text(codex_home: &Path) -> Result<Option<String>> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
@@ -20,86 +22,16 @@ pub(crate) fn read_auth_json_text(codex_home: &Path) -> Result<Option<String>> {
         .map_err(anyhow::Error::new)
 }
 
-pub(crate) fn probe_auth_secret_revision(
-    codex_home: &Path,
-) -> Result<Option<secret_store::SecretRevision>> {
-    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
-        .probe_revision(&secret_store::auth_json_location(codex_home))
-        .map_err(anyhow::Error::new)
-}
-
 pub(crate) fn load_runtime_profile_usage_auth_cache_entry(
     codex_home: &Path,
 ) -> Result<RuntimeProfileUsageAuthCacheEntry> {
-    let location = secret_store::auth_json_location(codex_home);
-    let revision = probe_auth_secret_revision(codex_home)?;
+    let generation = RUNTIME_PROFILE_USAGE_AUTH_CACHE_GENERATION.fetch_add(1, Ordering::Relaxed);
     let auth = read_usage_auth(codex_home)?;
     Ok(RuntimeProfileUsageAuthCacheEntry {
         auth,
-        location,
-        revision,
+        checked_at: Local::now().timestamp(),
+        generation,
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeProfileUsageAuthCacheFreshness {
-    Fresh,
-    Stale,
-    Unknown,
-}
-
-impl RuntimeProfileUsageAuthCacheFreshness {
-    fn resolve_cached_entry(
-        self,
-        shared: &RuntimeRotationProxyShared,
-        profile_name: &str,
-        codex_home: &Path,
-        previous_auth: Option<&UsageAuth>,
-        entry: RuntimeProfileUsageAuthCacheEntry,
-    ) -> Result<UsageAuth> {
-        match self {
-            Self::Fresh => runtime_profile_usage_auth_from_fresh_cache_entry(
-                shared,
-                profile_name,
-                codex_home,
-                entry,
-            ),
-            Self::Stale => {
-                reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
-            }
-            Self::Unknown => {
-                reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
-                    .or(Ok(entry.auth))
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeProfileUsageAuthLookup {
-    cached_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
-    cached_previous_auth: Option<UsageAuth>,
-    codex_home: PathBuf,
-}
-
-pub(crate) fn runtime_profile_usage_auth_cache_entry_freshness(
-    entry: &RuntimeProfileUsageAuthCacheEntry,
-) -> RuntimeProfileUsageAuthCacheFreshness {
-    let revision = match &entry.location {
-        secret_store::SecretLocation::File(path) => match std::fs::metadata(path) {
-            Ok(metadata) => Some(secret_store::SecretRevision::from_metadata(&metadata)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return RuntimeProfileUsageAuthCacheFreshness::Unknown,
-        },
-        secret_store::SecretLocation::Keyring { .. } => {
-            return RuntimeProfileUsageAuthCacheFreshness::Unknown;
-        }
-    };
-    if revision == entry.revision {
-        RuntimeProfileUsageAuthCacheFreshness::Fresh
-    } else {
-        RuntimeProfileUsageAuthCacheFreshness::Stale
-    }
 }
 
 pub(crate) fn load_runtime_profile_usage_auth_cache(
@@ -124,8 +56,14 @@ pub(crate) fn update_runtime_profile_usage_auth_cache_entry(
     reason: &str,
 ) -> UsageAuth {
     let auth = entry.auth.clone();
-    let auth_changed = previous_auth.is_some_and(|previous_auth| previous_auth != &auth);
+    let mut auth_changed = previous_auth.is_some_and(|previous_auth| previous_auth != &auth);
     if let Ok(mut runtime) = shared.runtime.lock() {
+        if let Some(current) = runtime.profile_usage_auth.get(profile_name) {
+            if current.generation > entry.generation {
+                return current.auth.clone();
+            }
+            auth_changed = current.auth != auth;
+        }
         runtime
             .profile_usage_auth
             .insert(profile_name.to_string(), entry);
@@ -140,101 +78,72 @@ pub(crate) fn runtime_profile_usage_auth(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<UsageAuth> {
-    let RuntimeProfileUsageAuthLookup {
-        cached_entry,
-        cached_previous_auth,
-        codex_home,
-    } = load_runtime_profile_usage_auth_lookup(shared, profile_name)?;
+    let now = Local::now().timestamp();
+    let (cached_entry, codex_home) = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let profile = runtime
+            .state
+            .profiles
+            .get(profile_name)
+            .with_context(|| format!("profile '{}' is missing", profile_name))?;
+        (
+            runtime.profile_usage_auth.get(profile_name).cloned(),
+            profile.codex_home.clone(),
+        )
+    };
 
     if let Some(entry) = cached_entry {
-        return runtime_profile_usage_auth_from_cached_entry(
-            shared,
-            profile_name,
-            &codex_home,
-            cached_previous_auth.as_ref(),
-            entry,
-        );
+        let revalidation_due = now < entry.checked_at
+            || now.saturating_sub(entry.checked_at) >= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
+            || usage_auth_needs_proactive_refresh(&entry.auth, now);
+        let auth = entry.auth;
+        if revalidation_due {
+            schedule_runtime_probe_refresh(shared, profile_name, &codex_home);
+        }
+        return Ok(auth);
     }
 
-    reload_runtime_profile_usage_auth(
-        shared,
-        profile_name,
-        &codex_home,
-        cached_previous_auth.as_ref(),
-    )
+    reload_runtime_profile_usage_auth(shared, profile_name, &codex_home)
 }
 
-fn load_runtime_profile_usage_auth_lookup(
+pub(crate) fn apply_runtime_profile_usage_auth_revalidation(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
-) -> Result<RuntimeProfileUsageAuthLookup> {
-    let runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let profile = runtime
-        .state
-        .profiles
-        .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let cached_entry = runtime.profile_usage_auth.get(profile_name).cloned();
-    let cached_previous_auth = cached_entry.as_ref().map(|entry| entry.auth.clone());
-
-    Ok(RuntimeProfileUsageAuthLookup {
-        cached_entry,
-        cached_previous_auth,
-        codex_home: profile.codex_home.clone(),
-    })
-}
-
-fn runtime_profile_usage_auth_from_cached_entry(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    codex_home: &Path,
-    previous_auth: Option<&UsageAuth>,
-    entry: RuntimeProfileUsageAuthCacheEntry,
-) -> Result<UsageAuth> {
-    runtime_profile_usage_auth_cache_entry_freshness(&entry).resolve_cached_entry(
-        shared,
-        profile_name,
-        codex_home,
-        previous_auth,
-        entry,
-    )
-}
-
-fn runtime_profile_usage_auth_from_fresh_cache_entry(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    codex_home: &Path,
-    entry: RuntimeProfileUsageAuthCacheEntry,
-) -> Result<UsageAuth> {
-    let now = Local::now().timestamp();
-    if !usage_auth_needs_proactive_refresh(&entry.auth, now) {
-        return Ok(entry.auth);
-    }
-
-    match sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
-        codex_home,
-        Some(&entry.auth),
-        shared.upstream_no_proxy,
-    ) {
-        Ok(outcome) => {
-            log_runtime_profile_proactive_sync(shared, profile_name, &outcome);
-            reload_runtime_profile_usage_auth_after_sync(
+    result: Result<RuntimeProfileUsageAuthCacheEntry>,
+) {
+    match result {
+        Ok(entry) => {
+            let previous_auth = shared.runtime.lock().ok().and_then(|runtime| {
+                runtime
+                    .profile_usage_auth
+                    .get(profile_name)
+                    .map(|entry| entry.auth.clone())
+            });
+            update_runtime_profile_usage_auth_cache_entry(
                 shared,
                 profile_name,
-                codex_home,
-                &entry.auth,
-                outcome.source,
-            )
+                previous_auth.as_ref(),
+                entry,
+                "auth_background_refresh",
+            );
         }
         Err(err) => {
+            if let Ok(mut runtime) = shared.runtime.lock()
+                && let Some(entry) = runtime.profile_usage_auth.get_mut(profile_name)
+            {
+                entry.checked_at = Local::now().timestamp();
+            }
             runtime_proxy_log(
                 shared,
-                format!("profile_auth_proactive_sync_failed profile={profile_name} error={err}"),
+                format!(
+                    "profile_auth_background_refresh_failed profile={profile_name} error={}",
+                    redaction::redaction_redact_secret_like_text(&format!("{err:#}"))
+                        .replace('\n', " ")
+                ),
             );
-            Ok(entry.auth)
         }
     }
 }
@@ -243,48 +152,15 @@ fn reload_runtime_profile_usage_auth(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     codex_home: &Path,
-    previous_auth: Option<&UsageAuth>,
 ) -> Result<UsageAuth> {
     let entry = load_runtime_profile_usage_auth_cache_entry(codex_home)?;
     Ok(update_runtime_profile_usage_auth_cache_entry(
         shared,
         profile_name,
-        previous_auth,
+        None,
         entry,
         "auth_changed",
     ))
-}
-
-fn reload_runtime_profile_usage_auth_after_sync(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    codex_home: &Path,
-    previous_auth: &UsageAuth,
-    source: UsageAuthSyncSource,
-) -> Result<UsageAuth> {
-    let refreshed_entry = load_runtime_profile_usage_auth_cache_entry(codex_home)?;
-    Ok(update_runtime_profile_usage_auth_cache_entry(
-        shared,
-        profile_name,
-        Some(previous_auth),
-        refreshed_entry,
-        &format!("auth_{}", usage_auth_sync_source_label(source)),
-    ))
-}
-
-fn log_runtime_profile_proactive_sync(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    outcome: &UsageAuthSyncOutcome,
-) {
-    runtime_proxy_log(
-        shared,
-        format!(
-            "profile_auth_proactive_sync profile={profile_name} source={} changed={}",
-            usage_auth_sync_source_label(outcome.source),
-            outcome.auth_changed,
-        ),
-    );
 }
 
 pub(crate) fn runtime_profile_auth_failure_key(profile_name: &str) -> String {
@@ -307,35 +183,12 @@ pub(crate) fn runtime_profile_auth_failure_active_from_map(
     ) > 0
 }
 
-pub(crate) fn runtime_profile_auth_failure_active_with_auth_cache(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
-    profile_name: &str,
-    now: i64,
-) -> bool {
-    if !runtime_profile_auth_failure_active_from_map(profile_health, profile_name, now) {
-        return false;
-    }
-    let Some(entry) = profile_usage_auth.get(profile_name) else {
-        return true;
-    };
-    matches!(
-        runtime_profile_usage_auth_cache_entry_freshness(entry),
-        RuntimeProfileUsageAuthCacheFreshness::Fresh
-    )
-}
-
 pub(crate) fn runtime_profile_auth_failure_active(
     runtime: &RuntimeRotationState,
     profile_name: &str,
     now: i64,
 ) -> bool {
-    runtime_profile_auth_failure_active_with_auth_cache(
-        &runtime.profile_health,
-        &runtime.profile_usage_auth,
-        profile_name,
-        now,
-    )
+    runtime_profile_auth_failure_active_from_map(&runtime.profile_health, profile_name, now)
 }
 
 pub(crate) fn runtime_profile_auth_failure_score(status: u16) -> u32 {
@@ -382,6 +235,11 @@ pub(crate) fn note_runtime_profile_auth_failure(
         Ok(runtime) => runtime,
         Err(_) => return,
     };
+    let codex_home = runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .map(|profile| profile.codex_home.clone());
     let now = Local::now().timestamp();
     let next_score = runtime_profile_effective_score_from_map(
         &runtime.profile_health,
@@ -412,4 +270,8 @@ pub(crate) fn note_runtime_profile_auth_failure(
         &runtime,
         RuntimeStateMutation::ProfileAuthBackoff(profile_name.to_string()),
     );
+    drop(runtime);
+    if let Some(codex_home) = codex_home {
+        schedule_runtime_probe_refresh(shared, profile_name, &codex_home);
+    }
 }

@@ -77,26 +77,91 @@ include!("main_internal_body.rs");
 include!("claude_model_selector_body.rs");
 
 #[test]
-fn runtime_profile_usage_auth_cache_entry_freshness_detects_auth_json_changes() {
+fn runtime_profile_usage_auth_uses_warm_cache_without_disk_access() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
     let auth_path = profile_home.join("auth.json");
-    write_auth_json(&auth_path, "second-account");
+    write_auth_json(&auth_path, "main-account");
 
-    let cached = load_runtime_profile_usage_auth_cache_entry(&profile_home)
-        .expect("auth cache entry should load");
-    assert!(
-        runtime_profile_usage_auth_cache_entry_freshness(&cached)
-            == RuntimeProfileUsageAuthCacheFreshness::Fresh
+    let mut runtime = RuntimeProxyFixtureBuilder::new().build_runtime(&temp_dir);
+    runtime.state.active_profile = Some("main".to_string());
+    runtime.state.profiles.insert(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
+        },
     );
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, 1);
+    fs::remove_file(auth_path).expect("auth fixture should be removable after cache warmup");
 
-    std::thread::sleep(std::time::Duration::from_millis(5));
-    write_auth_json(&auth_path, "third-account");
+    let auth = runtime_profile_usage_auth(&shared, "main")
+        .expect("warm auth cache should not depend on synchronous disk access");
 
-    assert!(
-        runtime_profile_usage_auth_cache_entry_freshness(&cached)
-            == RuntimeProfileUsageAuthCacheFreshness::Stale
+    assert_eq!(auth.account_id.as_deref(), Some("main-account"));
+}
+
+#[test]
+fn runtime_profile_usage_auth_revalidates_in_background_and_rejects_late_stale_reads() {
+    let probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    let auth_path = profile_home.join("auth.json");
+    write_auth_json(&auth_path, "old-account");
+
+    let mut runtime = RuntimeProxyFixtureBuilder::new().build_runtime(&temp_dir);
+    runtime.upstream_base_url = "http://127.0.0.1:1/backend-api".to_string();
+    runtime.state.profiles.insert(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
+        },
     );
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, 1);
+    write_auth_json(&auth_path, "new-account");
+    let stale_entry = {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        let entry = runtime
+            .profile_usage_auth
+            .get_mut("main")
+            .expect("auth cache should be warm");
+        entry.checked_at = 0;
+        entry.clone()
+    };
+
+    let cached = runtime_profile_usage_auth(&shared, "main")
+        .expect("stale auth should remain immediately available");
+    assert_eq!(cached.account_id.as_deref(), Some("old-account"));
+    assert!(wait_for_runtime_probe_refresh_since(
+        ci_timing_upper_bound_ms(5_000, 10_000),
+        probe_refresh.observed_revision(),
+    ));
+
+    let refreshed = runtime_profile_usage_auth(&shared, "main")
+        .expect("background auth revalidation should update the cache");
+    assert_eq!(refreshed.account_id.as_deref(), Some("new-account"));
+    let refreshed_generation = shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_usage_auth
+        .get("main")
+        .expect("refreshed auth cache entry should exist")
+        .generation;
+    assert!(stale_entry.generation < refreshed_generation);
+    let retained = update_runtime_profile_usage_auth_cache_entry(
+        &shared,
+        "main",
+        Some(&cached),
+        stale_entry,
+        "stale_background_result",
+    );
+    assert_eq!(retained.account_id.as_deref(), Some("new-account"));
 }
 
 #[test]
