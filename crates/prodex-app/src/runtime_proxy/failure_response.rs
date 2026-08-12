@@ -46,14 +46,15 @@ pub(crate) fn runtime_proxy_precommit_budget_exhausted_for_route(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         runtime.state.profiles.len().max(1)
     };
-    let (attempt_limit, budget) =
-        runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
+    Ok(
+        runtime_proxy_crate::runtime_proxy_precommit_budget_exhausted_for_profile_count(
+            started_at,
+            attempts,
             continuation,
             pressure_mode,
             profile_count,
-        );
-
-    Ok(attempts >= attempt_limit || started_at.elapsed() >= budget)
+        ),
+    )
 }
 
 pub(crate) fn runtime_proxy_final_retryable_http_failure_response(

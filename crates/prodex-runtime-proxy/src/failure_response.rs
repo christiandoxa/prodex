@@ -101,8 +101,9 @@ pub fn runtime_proxy_precommit_budget_exhausted_for_profile_count(
         pressure_mode,
         profile_count,
     );
+    let first_pass_attempts = profile_count.max(1).min(attempt_limit);
 
-    attempts >= attempt_limit || started_at.elapsed() >= budget
+    attempts >= attempt_limit || (attempts >= first_pass_attempts && started_at.elapsed() >= budget)
 }
 
 pub fn runtime_websocket_error_payload_is_previous_response_not_found(
