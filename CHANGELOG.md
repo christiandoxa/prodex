@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.407.4 - 2026-08-12
+
+### Runtime
+
+- Recover healthy profile selection (`4c68738`)
+
 ## 0.407.3 - 2026-08-11
 
 ### Runtime
@@ -99,9 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Keep interactive TUI in terminal foreground group (`6718f56`)
-
-## 0.399.0 - 2026-08-09
-
-### Misc
-
-- Enable all Super optional tools (`1298966`)
