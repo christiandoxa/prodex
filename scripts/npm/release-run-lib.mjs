@@ -614,7 +614,7 @@ async function bumpVersion(version, dryRun) {
 }
 
 async function syncReleaseMetadata(version, args) {
-  await runCommand("git", ["fetch", args.remote, "--tags"], args);
+  await runCommand("git", ["fetch", args.remote, "--prune", "--prune-tags", "--tags"], args);
   await runCommand("npm", ["run", "npm:sync-version"], args);
   await runCommand("npm", ["run", "changelog", "--", "--release-version", version], args);
   await runCommand("node", ["scripts/npm/changelog.mjs", "--check", "--release-version", version], args);
