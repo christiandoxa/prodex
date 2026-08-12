@@ -85,26 +85,48 @@ fn mcp_jsonl_bridge_stops_child_when_client_stdin_closes() {
 #[test]
 fn mcp_jsonl_bridge_stops_child_after_malformed_output() {
     let started_at = Instant::now();
-    let output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prodex"))
         .args([
             "__mcp-jsonl-bridge",
             "sh",
             "-c",
             "printf 'not-json\\n'; exec sleep 30",
         ])
-        .stdin(Stdio::null())
-        .output()
-        .expect("bridge should run");
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("bridge should start");
+    let held_stdin = child.stdin.take().expect("bridge stdin should be piped");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("bridge status should be readable") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("bridge did not stop after malformed output");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .expect("bridge stderr should be piped")
+        .read_to_string(&mut stderr)
+        .expect("bridge stderr should be readable");
+    drop(held_stdin);
 
-    assert!(!output.status.success());
+    assert!(!status.success());
     assert!(
         started_at.elapsed() < Duration::from_secs(3),
         "bridge should stop a child whose output is malformed"
     );
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("failed to parse MCP JSON line"),
-        "unexpected stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        stderr.contains("failed to parse MCP JSON line"),
+        "unexpected stderr: {stderr}"
     );
 }
 
