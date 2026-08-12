@@ -2,23 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.1 - 2026-08-12
+
+### Runtime
+
+- Harden log completion and auth caching (`85b98d4`)
+
 ## 0.408.0 - 2026-08-12
 
 ### Runtime
 
 - Preserve first-pass profile rotation (`53dd38b`)
-
-## 0.407.6 - 2026-08-12
+- Persist quota readiness across profiles (`20c4bf7`)
 
 ### CLI
 
 - Restore weekly-only availability (`ee3d4f1`)
-
-## 0.407.5 - 2026-08-12
-
-### Runtime
-
-- Persist quota readiness across profiles (`20c4bf7`)
 
 ## 0.407.4 - 2026-08-12
 
@@ -98,3 +97,16 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Harden child tool launches (`8e2f274`)
+
+## 0.402.0 - 2026-08-10
+
+### Claude
+
+- Stabilize optional MCP cold startup (`e3d0f87`)
+
+### Deps
+
+- Bump debian from `7b140f3` to `abd67ff` (`b16425a`)
+- Bump rust from `77fac8b` to `14bc9c5` (`7fc6998`)
+- Bump the fuzz-cargo group in /fuzz with 2 updates (`00ee0c1`)
+- Bump the cargo group with 2 updates (`d4d1bd8`)
