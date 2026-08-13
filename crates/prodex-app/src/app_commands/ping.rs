@@ -5,7 +5,7 @@ use prodex_cli::{PingCommands, PingOpenaiArgs};
 use prodex_core::AppPaths;
 use prodex_quota::{openai_quota_has_ready_limit, usage_has_spark_limit};
 use prodex_runtime_quota::{runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot};
-use prodex_state::{AppState, ProfileProvider};
+use prodex_state::{AppState, ProfileEntry, ProfileProvider};
 use std::ffi::OsString;
 use std::path::Path;
 use terminal_ui::print_stdout_line;
@@ -29,8 +29,35 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load_and_repair(&paths)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
-    let usage_snapshots = load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
+    let ready_profiles = ready_openai_profiles(&paths, &state, &args);
+    if ready_profiles.is_empty() {
+        print_stdout_line("No ready OpenAI profiles.")?;
+        return Ok(());
+    }
 
+    let mut failures = Vec::new();
+    for (profile_name, usage) in ready_profiles {
+        let Some(profile) = state.profiles.get(&profile_name) else {
+            continue;
+        };
+        failures.extend(ping_openai_profile(&profile_name, profile, &usage)?);
+    }
+
+    if failures.is_empty() {
+        print_stdout_line("Ping complete.")?;
+        return Ok(());
+    }
+
+    let summary = failures.join(", ");
+    bail!("ping failed for {summary}")
+}
+
+fn ready_openai_profiles(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &PingOpenaiArgs,
+) -> Vec<(String, crate::UsageResponse)> {
+    let usage_snapshots = load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
     let profile_names = state
         .profiles
         .iter()
@@ -39,7 +66,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         .collect::<Vec<_>>();
     let now = Local::now().timestamp();
     let mut ready_profiles = collect_run_profile_reports(
-        &state,
+        state,
         profile_names,
         args.base_url.as_deref(),
         args.no_proxy,
@@ -67,57 +94,44 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     })
     .collect::<Vec<_>>();
     ready_profiles.sort_by(|left, right| left.0.cmp(&right.0));
+    ready_profiles
+}
 
-    if ready_profiles.is_empty() {
-        print_stdout_line("No ready OpenAI profiles.")?;
-        return Ok(());
-    }
-
+fn ping_openai_profile(
+    profile_name: &str,
+    profile: &ProfileEntry,
+    usage: &crate::UsageResponse,
+) -> Result<Vec<String>> {
     let mut failures = Vec::new();
-    for (profile_name, usage) in ready_profiles {
-        let Some(profile) = state.profiles.get(&profile_name) else {
-            continue;
+    let models = match ping_openai_models_for_usage(&profile.codex_home, usage) {
+        Ok(models) => models,
+        Err(err) => return Ok(vec![format!("{profile_name}: {err}")]),
+    };
+    for model in models {
+        let ping_name = match model {
+            Some(model) => format!("{profile_name} ({model})"),
+            None => profile_name.to_string(),
         };
-        let models = match ping_openai_models_for_usage(&profile.codex_home, &usage) {
-            Ok(models) => models,
+        print_stdout_line(&format!("Pinging {ping_name}..."))?;
+        let plan = match ping_openai_child_plan(profile.codex_home.clone(), model) {
+            Ok(plan) => plan,
             Err(err) => {
-                failures.push(format!("{profile_name}: {err}"));
+                failures.push(format!("{ping_name}: {err}"));
                 continue;
             }
         };
-        for model in models {
-            let ping_name = match model {
-                Some(model) => format!("{profile_name} ({model})"),
-                None => profile_name.clone(),
-            };
-            print_stdout_line(&format!("Pinging {ping_name}..."))?;
-            let plan = match ping_openai_child_plan(profile.codex_home.clone(), model) {
-                Ok(plan) => plan,
-                Err(err) => {
-                    failures.push(format!("{ping_name}: {err}"));
-                    continue;
-                }
-            };
-            let status = match run_child_plan(&plan, None) {
-                Ok(status) => status,
-                Err(err) => {
-                    failures.push(format!("{ping_name}: {err}"));
-                    continue;
-                }
-            };
-            if !status.success() {
-                failures.push(format!("{ping_name} exited {}", status.code().unwrap_or(1)));
+        let status = match run_child_plan(&plan, None) {
+            Ok(status) => status,
+            Err(err) => {
+                failures.push(format!("{ping_name}: {err}"));
+                continue;
             }
+        };
+        if !status.success() {
+            failures.push(format!("{ping_name} exited {}", status.code().unwrap_or(1)));
         }
     }
-
-    if failures.is_empty() {
-        print_stdout_line("Ping complete.")?;
-        return Ok(());
-    }
-
-    let summary = failures.join(", ");
-    bail!("ping failed for {summary}")
+    Ok(failures)
 }
 
 fn ping_openai_models_for_usage(
