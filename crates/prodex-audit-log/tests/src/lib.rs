@@ -418,6 +418,12 @@ fn append_audit_event_redacts_secrets_and_secures_file() {
         serde_json::json!({
             "authorization": "Bearer secret-token",
             "nested": {"api_key": "sensitive"},
+            "email": "user@example.com",
+            "github_login": "fixture-login",
+            "profile_arn": "arn:example:profile",
+            "profile_name_upstream": "fixture-upstream-profile",
+            "start_url": "https://example.com/start",
+            "auth_key": "fixture-auth-key",
         }),
     )
     .unwrap();
@@ -425,6 +431,12 @@ fn append_audit_event_redacts_secrets_and_secures_file() {
     let content = fs::read_to_string(&path).unwrap();
     assert!(!content.contains("secret-token"));
     assert!(!content.contains("sensitive"));
+    assert!(!content.contains("user@example.com"));
+    assert!(!content.contains("fixture-login"));
+    assert!(!content.contains("arn:example:profile"));
+    assert!(!content.contains("fixture-upstream-profile"));
+    assert!(!content.contains("https://example.com/start"));
+    assert!(!content.contains("fixture-auth-key"));
     assert!(content.contains("<redacted>"));
 
     #[cfg(unix)]

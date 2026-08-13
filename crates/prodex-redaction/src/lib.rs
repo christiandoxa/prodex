@@ -125,6 +125,7 @@ pub fn redaction_key_looks_sensitive(name: &str) -> bool {
         "authorization"
             | "apikey"
             | "xapikey"
+            | "authkey"
             | "cookie"
             | "setcookie"
             | "token"
@@ -135,6 +136,11 @@ pub fn redaction_key_looks_sensitive(name: &str) -> bool {
             | "password"
             | "credential"
             | "credentials"
+            | "email"
+            | "githublogin"
+            | "profilearn"
+            | "profilenameupstream"
+            | "starturl"
             | "accountid"
             | "chatgptaccountid"
     ) || normalized == "proxyauthorization"
@@ -163,7 +169,7 @@ fn redaction_redact_json_value(value: &mut serde_json::Value) {
             }
         }
         serde_json::Value::String(value) => {
-            *value = redaction_redact_secret_like_text(value);
+            *value = redaction_redact_gateway_text(value);
         }
         _ => {}
     }
