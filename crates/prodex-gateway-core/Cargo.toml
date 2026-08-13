@@ -14,11 +14,13 @@ path = "src/lib.rs"
 prodex_authz = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_observability = { workspace = true }
-prodex_provider_core = { workspace = true }
 prodex_provider_spi = { workspace = true }
 prodex_storage = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+prodex_provider_core = { workspace = true }
 
 [lints]
 workspace = true
