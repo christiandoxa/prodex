@@ -480,7 +480,8 @@ fn command_uses_minimal_startup(command: &Commands) -> bool {
     matches!(
         command,
         Commands::McpJsonlBridge(_) | Commands::Capability(_)
-    ) || matches!(command, Commands::Setup(args) if args.dry_run)
+    ) || matches!(command, Commands::Gateway(args) if args.command.is_some())
+        || matches!(command, Commands::Setup(args) if args.dry_run)
         || matches!(
             command,
             Commands::Doctor(args)
@@ -513,6 +514,14 @@ mod minimal_startup_tests {
         assert!(command_uses_minimal_startup(&bridge));
         assert!(command_uses_minimal_startup(&super_doctor));
         assert!(!command_uses_minimal_startup(&combined));
+    }
+
+    #[test]
+    fn gateway_catalog_commands_skip_runtime_startup() {
+        let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
+
+        assert!(!command.launches_runtime());
+        assert!(command_uses_minimal_startup(&command));
     }
 
     #[test]
