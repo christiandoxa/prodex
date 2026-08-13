@@ -14,13 +14,12 @@ const ALLOWED_DEPENDENCIES = new Set([
   "prodex_authz",
   "prodex_domain",
   "prodex_observability",
-  "prodex_provider_core",
   "prodex_provider_spi",
   "prodex_storage",
   "serde",
   "sha2",
 ]);
-const ALLOWED_DEV_DEPENDENCIES = new Set([]);
+const ALLOWED_DEV_DEPENDENCIES = new Set(["prodex_provider_core"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
   "axum",
@@ -137,11 +136,13 @@ name = "prodex-gateway-core"
 prodex_authz = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_observability = { workspace = true }
-prodex_provider_core = { workspace = true }
 prodex_provider_spi = { workspace = true }
 prodex_storage = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+prodex_provider_core = { workspace = true }
 `;
   assertSelfTest(validateGatewayCoreManifest(valid, "valid/Cargo.toml").length === 0, "valid manifest rejected");
   assertSelfTest(
@@ -151,6 +152,13 @@ sha2 = { workspace = true }
   assertSelfTest(
     validateGatewayCoreManifest(`${valid}\nserde_json = "1"\n`, "invalid-extra/Cargo.toml").some((error) => error.includes("serde_json")),
     "extra dependency accepted",
+  );
+  assertSelfTest(
+    validateGatewayCoreManifest(
+      `${valid}\n[dependencies]\nprodex_provider_core = { workspace = true }\n`,
+      "invalid-production-provider-core/Cargo.toml",
+    ).some((error) => error.includes("prodex_provider_core")),
+    "provider-core production dependency accepted",
   );
   assertSelfTest(
     validateGatewayCoreManifest(`${valid}\n[target.'cfg(unix)'.dependencies]\ntokio = "1"\n`, "invalid-target/Cargo.toml").some((error) => error.includes("target-specific")),
