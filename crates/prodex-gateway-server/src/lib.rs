@@ -4,33 +4,27 @@
 use std::{
     convert::Infallible,
     error::Error,
-    fmt,
     future::Future,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, RwLock},
+    sync::Arc,
     time::Duration,
 };
 
 use anyhow::{Context as _, Result, ensure};
-use arc_swap::ArcSwap;
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, Limited, combinators::UnsyncBoxBody};
 use hyper::{
-    Request, Response, StatusCode, Uri,
-    body::{Body, Incoming},
-    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderName, HeaderValue},
+    Request, Response, StatusCode,
+    body::Incoming,
+    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue},
     upgrade,
 };
-use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
-    rt::{TokioExecutor, TokioIo},
-};
+use hyper_util::rt::TokioIo;
 use prodex_gateway_http::{
     CanonicalRequestTarget, GatewayAdminRoute, GatewayEdgeSecurityError, GatewayEdgeSecurityPolicy,
     GatewayHttpHeader, GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane,
     classify_request_target, parse_gateway_admin_route, validate_gateway_edge_security,
 };
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -41,25 +35,37 @@ use tokio::{
 };
 
 mod channel_body;
+mod compatibility;
 mod connection;
+mod handler;
 mod in_process_upgrade;
 mod ingress;
+mod security;
 
+#[cfg(test)]
+use compatibility::LoopbackBackend;
 use connection::serve_connection;
 use ingress::*;
 
 pub use channel_body::{
     GatewayResponseBodySender, bounded_response_body, bounded_response_body_with_guard,
 };
+pub use compatibility::{serve, serve_with_handler, serve_with_handler_reloadable};
+pub use handler::{
+    GatewayHandlerError, GatewayHandlerRequest, GatewayHandlerResponse, GatewayHandlerResult,
+    GatewayHandlerUpgrade,
+};
 pub use in_process_upgrade::{
     GatewayInProcessUpgrade, GatewayInProcessUpgradeHandoff, bounded_in_process_upgrade,
+};
+pub use security::{
+    GatewayServerBrowserSecurity, GatewayServerEdgeSecurity, GatewayServerReloadHandle,
+    GatewayServerTlsConfig,
 };
 
 pub type GatewayBoxError = Box<dyn Error + Send + Sync>;
 pub type GatewayRequestBody = Limited<Incoming>;
 pub type GatewayResponseBody = UnsyncBoxBody<Bytes, GatewayBoxError>;
-
-type ProxyClient = Client<HttpConnector, GatewayRequestBody>;
 
 const ROUTE_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"route_not_available","message":"route is not available"}}"#;
@@ -99,311 +105,6 @@ pub struct GatewayServerConfig {
     pub edge_security: GatewayServerEdgeSecurity,
     pub tls: Option<GatewayServerTlsConfig>,
 }
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GatewayServerTlsConfig {
-    identity_pem: Vec<u8>,
-    client_ca_pem: Option<Vec<u8>>,
-    require_client_certificate: bool,
-}
-
-impl fmt::Debug for GatewayServerTlsConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GatewayServerTlsConfig")
-            .field("identity_pem", &"<redacted>")
-            .field(
-                "client_ca_pem",
-                &self.client_ca_pem.as_ref().map(|_| "<redacted>"),
-            )
-            .field(
-                "require_client_certificate",
-                &self.require_client_certificate,
-            )
-            .finish()
-    }
-}
-
-impl GatewayServerTlsConfig {
-    pub fn new(
-        identity_pem: Vec<u8>,
-        client_ca_pem: Option<Vec<u8>>,
-        require_client_certificate: bool,
-    ) -> Result<Self> {
-        ensure!(!identity_pem.is_empty(), "gateway TLS identity is empty");
-        ensure!(
-            !require_client_certificate || client_ca_pem.is_some(),
-            "gateway mTLS requires a client CA"
-        );
-        let config = Self {
-            identity_pem,
-            client_ca_pem,
-            require_client_certificate,
-        };
-        config.server_config()?;
-        Ok(config)
-    }
-
-    fn server_config(&self) -> Result<rustls::ServerConfig> {
-        let certificates = CertificateDer::pem_slice_iter(&self.identity_pem)
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("failed to parse gateway TLS certificate chain")?;
-        ensure!(
-            !certificates.is_empty(),
-            "gateway TLS certificate chain is empty"
-        );
-        let private_key = PrivateKeyDer::from_pem_slice(&self.identity_pem)
-            .context("failed to parse gateway TLS private key")?;
-        let builder = rustls::ServerConfig::builder();
-        let mut server = if let Some(client_ca_pem) = self.client_ca_pem.as_ref() {
-            let mut roots = rustls::RootCertStore::empty();
-            for certificate in CertificateDer::pem_slice_iter(client_ca_pem) {
-                roots
-                    .add(certificate.context("failed to parse gateway mTLS client CA")?)
-                    .context("failed to load gateway mTLS client CA")?;
-            }
-            ensure!(!roots.is_empty(), "gateway mTLS client CA is empty");
-            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots));
-            let verifier = if self.require_client_certificate {
-                verifier.build()
-            } else {
-                verifier.allow_unauthenticated().build()
-            }
-            .context("failed to build gateway mTLS client verifier")?;
-            builder
-                .with_client_cert_verifier(verifier)
-                .with_single_cert(certificates, private_key)
-        } else {
-            builder
-                .with_no_client_auth()
-                .with_single_cert(certificates, private_key)
-        }
-        .context("failed to build gateway TLS server configuration")?;
-        server.alpn_protocols = vec![b"http/1.1".to_vec()];
-        Ok(server)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GatewayServerEdgeSecurity {
-    pub trusted_proxies: Vec<IpAddr>,
-    pub expected_host: String,
-    pub browser: Option<GatewayServerBrowserSecurity>,
-}
-
-impl fmt::Debug for GatewayServerEdgeSecurity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GatewayServerEdgeSecurity")
-            .field("trusted_proxies", &self.trusted_proxies)
-            .field("expected_host", &"<redacted>")
-            .field("browser", &self.browser)
-            .finish()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GatewayServerBrowserSecurity {
-    pub expected_origin: String,
-    pub expected_csrf_token: Option<String>,
-}
-
-struct GatewayServerRuntimeSecurity {
-    edge_security: Arc<GatewayServerEdgeSecurity>,
-    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
-}
-
-#[derive(Clone)]
-pub struct GatewayServerReloadHandle {
-    security: Arc<ArcSwap<GatewayServerRuntimeSecurity>>,
-    transition: Arc<RwLock<()>>,
-}
-
-impl fmt::Debug for GatewayServerReloadHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GatewayServerReloadHandle")
-            .finish_non_exhaustive()
-    }
-}
-
-impl GatewayServerReloadHandle {
-    pub fn new(config: &GatewayServerConfig) -> Result<Self> {
-        config.validate()?;
-        Ok(Self {
-            security: Arc::new(ArcSwap::from_pointee(gateway_server_runtime_security(
-                config,
-            )?)),
-            transition: Arc::new(RwLock::new(())),
-        })
-    }
-
-    pub fn reload(&self, config: &GatewayServerConfig) -> Result<()> {
-        self.reload_with_activation(config, || ())
-    }
-
-    /// Publishes transport security and dependent handler state under one request barrier.
-    pub fn reload_with_activation<T>(
-        &self,
-        config: &GatewayServerConfig,
-        activate: impl FnOnce() -> T,
-    ) -> Result<T> {
-        config.validate()?;
-        let security = Arc::new(gateway_server_runtime_security(config)?);
-        let _transition = self
-            .transition
-            .write()
-            .map_err(|_| anyhow::anyhow!("gateway server reload lock is poisoned"))?;
-        self.security.store(security);
-        Ok(activate())
-    }
-
-    fn load(&self) -> Arc<GatewayServerRuntimeSecurity> {
-        self.security.load_full()
-    }
-}
-
-fn gateway_server_runtime_security(
-    config: &GatewayServerConfig,
-) -> Result<GatewayServerRuntimeSecurity> {
-    let tls_acceptor = config
-        .tls
-        .as_ref()
-        .map(GatewayServerTlsConfig::server_config)
-        .transpose()?
-        .map(Arc::new)
-        .map(tokio_rustls::TlsAcceptor::from);
-    Ok(GatewayServerRuntimeSecurity {
-        edge_security: Arc::new(config.edge_security.clone()),
-        tls_acceptor,
-    })
-}
-
-impl fmt::Debug for GatewayServerBrowserSecurity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GatewayServerBrowserSecurity")
-            .field("expected_origin", &"<redacted>")
-            .field("expected_csrf_token", &"<redacted>")
-            .finish()
-    }
-}
-
-/// Canonical, route-classified request delivered to an in-process gateway handler.
-pub struct GatewayHandlerRequest {
-    pub peer_addr: SocketAddr,
-    pub client_ip: IpAddr,
-    pub peer_is_trusted_proxy: bool,
-    pub mtls_peer_certificate_sha256: Option<[u8; 32]>,
-    pub target: CanonicalRequestTarget,
-    pub route: GatewayHttpRouteKind,
-    pub request: Request<GatewayRequestBody>,
-}
-
-/// Streaming response returned by an in-process gateway handler.
-pub struct GatewayHandlerResponse {
-    pub response: Response<GatewayResponseBody>,
-    pub backend_upgrade: Option<GatewayHandlerUpgrade>,
-}
-
-pub enum GatewayHandlerUpgrade {
-    Backend(upgrade::OnUpgrade),
-    InProcess(GatewayInProcessUpgradeHandoff),
-}
-
-impl GatewayHandlerResponse {
-    pub fn new<B>(response: Response<B>) -> Self
-    where
-        B: Body<Data = Bytes> + Send + 'static,
-        B::Error: Error + Send + Sync + 'static,
-    {
-        Self {
-            response: response.map(|body| {
-                body.map_err(|error| Box::new(error) as GatewayBoxError)
-                    .boxed_unsync()
-            }),
-            backend_upgrade: None,
-        }
-    }
-
-    pub fn with_backend_upgrade<B>(
-        response: Response<B>,
-        backend_upgrade: upgrade::OnUpgrade,
-    ) -> Self
-    where
-        B: Body<Data = Bytes> + Send + 'static,
-        B::Error: Error + Send + Sync + 'static,
-    {
-        let mut handled = Self::new(response);
-        handled.backend_upgrade = Some(GatewayHandlerUpgrade::Backend(backend_upgrade));
-        handled
-    }
-
-    pub fn with_in_process_upgrade<B>(
-        response: Response<B>,
-        upgrade: GatewayInProcessUpgradeHandoff,
-    ) -> Self
-    where
-        B: Body<Data = Bytes> + Send + 'static,
-        B::Error: Error + Send + Sync + 'static,
-    {
-        let mut handled = Self::new(response);
-        handled.backend_upgrade = Some(GatewayHandlerUpgrade::InProcess(upgrade));
-        handled
-    }
-
-    pub fn from_parts(
-        status: u16,
-        headers: Vec<(String, Vec<u8>)>,
-        content_length: Option<usize>,
-        body: GatewayResponseBody,
-    ) -> GatewayHandlerResult {
-        let mut response = Response::new(body);
-        *response.status_mut() =
-            StatusCode::from_u16(status).map_err(|_| GatewayHandlerError::Unavailable)?;
-        for (name, value) in headers {
-            let name = HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| GatewayHandlerError::Unavailable)?;
-            let value =
-                HeaderValue::from_bytes(&value).map_err(|_| GatewayHandlerError::Unavailable)?;
-            response.headers_mut().append(name, value);
-        }
-        if let Some(content_length) = content_length {
-            response.headers_mut().insert(
-                CONTENT_LENGTH,
-                HeaderValue::from_str(&content_length.to_string())
-                    .map_err(|_| GatewayHandlerError::Unavailable)?,
-            );
-        }
-        Ok(Self {
-            response,
-            backend_upgrade: None,
-        })
-    }
-
-    pub fn with_in_process_upgrade_handoff(
-        mut self,
-        upgrade: GatewayInProcessUpgradeHandoff,
-    ) -> Self {
-        self.backend_upgrade = Some(GatewayHandlerUpgrade::InProcess(upgrade));
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GatewayHandlerError {
-    InvalidRequest,
-    InvalidRequestTarget,
-    RequestBodyTooLarge,
-    Overloaded,
-    Unavailable,
-}
-
-impl fmt::Display for GatewayHandlerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "gateway handler failed")
-    }
-}
-
-impl Error for GatewayHandlerError {}
-
-pub type GatewayHandlerResult = std::result::Result<GatewayHandlerResponse, GatewayHandlerError>;
 
 impl GatewayServerConfig {
     pub fn production(listen_addr: SocketAddr, mode: GatewayServerMode) -> Self {
@@ -484,121 +185,6 @@ impl GatewayServerConfig {
             tls.server_config()?;
         }
         Ok(())
-    }
-}
-
-/// Runs the compatibility front until SIGINT or SIGTERM, then drains open connections.
-pub fn serve(config: GatewayServerConfig, backend_addr: SocketAddr) -> Result<()> {
-    let backend = LoopbackBackend::new(backend_addr)?;
-    serve_with_handler(config, move |request| {
-        let backend = backend.clone();
-        async move { backend.handle(request).await }
-    })
-}
-
-/// Runs the gateway with an in-process request handler until SIGINT or SIGTERM.
-pub fn serve_with_handler<H, Fut>(config: GatewayServerConfig, handler: H) -> Result<()>
-where
-    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
-{
-    config.validate()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("failed to initialize gateway server runtime")?;
-    runtime.block_on(async move {
-        let listener = TcpListener::bind(config.listen_addr)
-            .await
-            .context("failed to bind gateway server listener")?;
-        run_with_handler(listener, config, handler, shutdown_signal()).await
-    })
-}
-
-pub fn serve_with_handler_reloadable<H, Fut>(
-    config: GatewayServerConfig,
-    reload: GatewayServerReloadHandle,
-    handler: H,
-) -> Result<()>
-where
-    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
-{
-    config.validate()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("failed to initialize gateway server runtime")?;
-    runtime.block_on(async move {
-        let listener = TcpListener::bind(config.listen_addr)
-            .await
-            .context("failed to bind gateway server listener")?;
-        run_with_handler_reloadable(listener, config, reload, handler, shutdown_signal()).await
-    })
-}
-
-#[derive(Clone)]
-struct LoopbackBackend {
-    authority: hyper::http::uri::Authority,
-    host: HeaderValue,
-    client: ProxyClient,
-}
-
-impl LoopbackBackend {
-    fn new(backend_addr: SocketAddr) -> Result<Self> {
-        let backend = backend_addr.to_string();
-        Ok(Self {
-            authority: backend
-                .parse()
-                .context("failed to prepare gateway backend authority")?,
-            host: HeaderValue::from_str(&backend)
-                .context("failed to prepare gateway backend host header")?,
-            client: Client::builder(TokioExecutor::new()).build_http(),
-        })
-    }
-
-    async fn handle(&self, request: GatewayHandlerRequest) -> GatewayHandlerResult {
-        let GatewayHandlerRequest {
-            peer_addr: _,
-            client_ip: _,
-            peer_is_trusted_proxy: _,
-            mtls_peer_certificate_sha256: _,
-            target,
-            route: _,
-            request,
-        } = request;
-        let (mut parts, body) = request.into_parts();
-        let mut uri_parts = parts.uri.into_parts();
-        uri_parts.scheme = Some(hyper::http::uri::Scheme::HTTP);
-        uri_parts.authority = Some(self.authority.clone());
-        uri_parts.path_and_query = Some(
-            target
-                .path_and_query()
-                .parse()
-                .map_err(|_| GatewayHandlerError::InvalidRequestTarget)?,
-        );
-        parts.uri = Uri::from_parts(uri_parts).map_err(|_| GatewayHandlerError::InvalidRequest)?;
-        parts.headers.insert(HOST, self.host.clone());
-
-        let mut response = self
-            .client
-            .request(Request::from_parts(parts, body))
-            .await
-            .map_err(|error| {
-                if caused_by_length_limit(&error) {
-                    GatewayHandlerError::RequestBodyTooLarge
-                } else {
-                    GatewayHandlerError::Unavailable
-                }
-            })?;
-        let backend_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
-            .then(|| upgrade::on(&mut response));
-        let (parts, body) = response.into_parts();
-        let response = Response::from_parts(parts, body);
-        Ok(match backend_upgrade {
-            Some(upgrade) => GatewayHandlerResponse::with_backend_upgrade(response, upgrade),
-            None => GatewayHandlerResponse::new(response),
-        })
     }
 }
 
