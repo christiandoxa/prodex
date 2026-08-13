@@ -235,11 +235,6 @@
     "reason": "The pure governance PDP keeps typed authentication conditions, obligations, conflict analysis, and deterministic default-deny evaluation together after bounded principal attributes and compiled-policy methods moved to focused modules."
   },
   {
-    "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 1125,
-    "reason": "The async gateway server owns transport peer trust, metrics-only data-plane exposure, atomic edge/application reload barriers, bounded upgrade lifetimes, and graceful drain after ingress parsing and browser edge validation moved to a focused module."
-  },
-  {
     "file": "crates/prodex-gateway-server/src/tests.rs",
     "maxLines": 1022,
     "reason": "Gateway server integration coverage keeps canonical targets, metrics-only data-plane exposure, streaming limits, overload, trusted proxy, forwarding privacy, atomic live edge/application reload, Host/Origin/CSRF, and expected-host cases in one harness."

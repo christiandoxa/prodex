@@ -1,90 +1,74 @@
 # AGENTS.md
 
-This file applies to the entire repository.
+This file applies to the entire repository. Keep agent guidance actionable and
+repository-specific; the maintained documents linked below own detailed architecture,
+policy, threat-model, and test contracts.
 
-## Project Summary
+## Scope and source of truth
 
-`prodex` is a Rust workspace whose primary CLI wraps `codex` and manages multiple isolated
-`CODEX_HOME` profiles. The root package also builds dedicated `prodex-gateway` and
-`prodex-control-plane` entrypoints.
+When rules conflict, use this order:
 
-The Cargo workspace is split across focused crates and modules. `Cargo.toml` is the source of
-truth for membership and package boundaries. Keep this summary limited to paths agents commonly
-need:
+1. Current repository behavior and safety invariants.
+2. Enforced CI guards, test runners, and `package.json` scripts.
+3. Maintained Prodex documentation: [architecture](docs/architecture.md),
+   [testing](docs/testing.md), [runtime policy](docs/runtime-policy.md), and
+   [threat model](docs/threat-model.md).
+4. This file.
+5. Transferable lessons from upstream Codex guidance.
+6. Generic Rust preferences.
 
-- `src/main.rs`: thin binary composition root
-- `src/lib.rs`: root facade and dedicated-server helpers
-- `src/bin/`: dedicated gateway and control-plane composition roots
-- `crates/prodex-app/`: application orchestration, command routing, profile flows, and runtime glue
-- `crates/prodex-runtime-*/`: runtime proxy, state, policy, quota, launch, and diagnostics code
-- `crates/prodex-gateway-*/`: gateway contracts, HTTP adaptation, and server composition
-- `crates/prodex-storage-*/`: storage contracts, backend configuration, migrations, and adapters
-- other `crates/prodex-*/`: focused reusable boundaries; inspect the owning crate before editing
-- `README.md` and `QUICKSTART.md`: user-facing documentation
+`Cargo.toml` and each crate manifest define workspace membership and dependency ownership.
+Do not infer a boundary from a directory name alone. Repository prose, comments, examples,
+fixtures, and new documentation must be in English.
 
-## Core Principles
+## Project summary and ownership
 
-When changing `prodex`, keep these invariants intact:
+Prodex is a Rust workspace whose CLI wraps Codex and manages isolated `CODEX_HOME` profiles.
+It also builds dedicated gateway and control-plane entrypoints. Keep composition roots thin:
 
-1. The runtime proxy should be as transport-transparent as possible.
-   - Let `codex` own reconnect, WebSocket fallback, and stream UX.
-   - Do not invent new stream semantics unless strictly necessary.
+- `src/main.rs`, `src/bin/`, and `src/lib.rs` wire entrypoints and compatibility facades.
+- `prodex-cli` owns Clap parsing, help, defaults, and command normalization.
+- `prodex-app` owns CLI command routing, application composition, profile flows, runtime
+  launch, and live orchestration. It must not become the home for reusable domain, storage,
+  rendering, provider, or transport-neutral logic.
+- `prodex-application` owns side-effect-free use-case plans and ports. Concrete transports,
+  providers, and storage adapters belong in composition roots.
+- `prodex-domain` owns pure identifiers, security context, policy, accounting, and governance
+  decisions. It must not depend on HTTP, CLI, database drivers, filesystem/process APIs,
+  providers, or network clients.
+- `prodex-runtime-proxy` owns proxy boundary types, classifiers, affinity/health/admission
+  helpers, compatibility transforms, and bounded transport executors. Keep it hot-path-safe;
+  live launch and app orchestration remain in `prodex-app`.
+- `prodex-runtime-*` crates own focused runtime policy, state, quota, launch, diagnostics,
+  broker, and provider-runtime boundaries; inspect the owning crate before editing.
+- `prodex-gateway-core` owns HTTP-neutral admission/routing contracts; `prodex-gateway-http`
+  owns framework-neutral HTTP policy; `prodex-gateway-server` owns bounded async Hyper/TLS
+  serving. Do not move policy into the server adapter.
+- `prodex-storage` owns adapter-neutral commands and contracts. Driver-free SQL/plans belong
+  in `prodex-storage-postgres`, `prodex-storage-redis`, or `prodex-storage-sqlite`; async or
+  blocking execution belongs in the matching `*-runtime` adapter. DDL and migrations stay out
+  of request-serving paths.
+- `prodex-terminal-ui` stays generic: terminal dimensions, layout, text, and rendering helpers;
+  app- or runtime-specific report models stay in report crates or `prodex-app`.
 
-2. Auto-rotate must remain built in to the proxy.
-   - Profile/account selection is a `prodex` responsibility.
-   - Transport behavior should remain as close as possible to upstream Codex.
-   - Reliability improvements must not weaken affinity or allow mid-stream rotation.
+Focused crates must not depend upward on `prodex-app`. Reuse an existing inward crate before
+adding a new one. Introduce a crate only for a durable ownership boundary with more than one
+real consumer and a useful dependency-direction benefit; otherwise add a focused private
+module in the owning crate.
 
-3. Do not redefine upstream ChatGPT errors unless the proxy itself failed before any upstream response existed.
-   - Prefer pass-through for upstream HTTP status, body, and stream payloads.
+## Before changing code
 
-4. Do not print anything to the terminal while the Codex TUI is running.
-   - Preflight output before launch is fine.
-   - Runtime notices must go to log files, not stdout/stderr.
-
-5. Repository prose must stay in English.
-
-6. Runtime hot paths must stay non-blocking as much as possible.
-   - Do not reintroduce disk I/O, broad file reads, or unbounded thread spawning into the request/stream hot path.
-   - Prefer async transport and bounded background work over ad hoc blocking behavior.
-
-7. Prodex-owned screens should be terminal-responsive.
-   - Prefer adapting to the current terminal width instead of assuming a fixed 110-character layout.
-   - Live views may also adapt to terminal height when that improves readability without hiding critical state silently.
-   - If a live view refreshes in place, keep the previous snapshot visible until the next snapshot is ready to render.
-
-8. Tracked content must not contain real personal or operational identifiers.
-   - Use reserved domains such as `example.com`, generic paths such as `/home/test-user`, generic profile names, and synthetic UUIDs or tokens in docs, tests, fixtures, and examples.
-   - Never copy real email-derived profile names, home or `CODEX_HOME` paths, overlay IDs, attachment IDs, session IDs, logs, auth data, or credentials into the repository.
-   - Preserve intentional public project ownership metadata. Git commit authors may use the maintainer identity configured locally, including a real name and verified email address; continue to scan the tracked diff for secrets and PII before release.
-
-## Before Coding
-
-- State assumptions and material ambiguities before implementation; ask only when no safe default exists.
-- Find existing helpers, types, and patterns before adding new ones.
-- Trace all callers and the end-to-end flow before changing shared logic; fix the root cause at the shared boundary.
-- Put new logic in its owning crate or module. Keep `src/main.rs` and `src/bin/` as thin composition roots.
-- For upstream compatibility changes, inspect the relevant upstream implementation and compatibility fixtures/tests before changing behavior.
-- Prefer the minimum behavior-preserving change. Avoid speculative abstractions, configurability, dependencies, and drive-by refactors.
-- Do not assume existing code or patterns are correct; prioritize correctness, security, performance, readability, and maintainability in that order.
-
-## Code and Comments
-
-- Write comments only for non-obvious invariants, security or transport behavior, `unsafe` code, tool directives, deliberate `ponytail:` trade-offs, or TODO/FIXME items with a concrete reason and follow-up reference.
-- Keep comments concise and do not remove unrelated existing comments during a focused change.
-- Prefer Rust idioms: typed errors with `Result`, exhaustive `match`, and explicit handling at trust boundaries. Avoid unjustified `unwrap()` or `expect()` in production paths.
-- Use the standard library and existing dependencies before adding a new dependency; record the reason when a new dependency is necessary.
-
-## Workflow and Supply-Chain Safety
-
-- Never pipe a remote script into a shell. Download artifacts to a file, verify checksums, then install.
-- Pin external CI actions and tools to immutable full SHAs or explicit versions; never use `latest` or `stable` for downloaded artifacts.
-- Never print, copy, commit, or publish secrets, auth data, customer names, private incident identifiers, or real operational identifiers.
-- Never commit or push changes unless explicitly requested.
+- Find existing helpers, types, tests, and the owning boundary before writing new code.
+- Trace callers and the end-to-end flow before changing shared logic; fix the shared root cause.
+- State material assumptions, then make the smallest behavior-preserving change. Avoid
+  speculative abstractions, configurability, dependencies, and drive-by refactors.
+- Keep new modules private by default and re-export only deliberate public contracts.
+- When extracting code, move its tests, invariants, and module/type documentation with it.
 
 ## Runtime Proxy Rules
 
-The runtime proxy is the most sensitive part of the project.
+The runtime proxy is the most sensitive part of the project. Preserve the detailed contract in
+`docs/architecture.md` and `docs/runtime-policy.md`.
 
 ### Required affinity behavior
 
@@ -121,6 +105,8 @@ Keep proxy behavior close to upstream Codex:
 - WebSocket upstream sessions should be reused where appropriate.
 - HTTP/SSE should stream as directly as possible.
 - If upstream transport breaks, prefer letting Codex observe a natural transport failure.
+- Pass through upstream status, body, headers, and streaming payload after a response exists.
+- If Prodex fails before any upstream response, return local `503 service_unavailable` rather than synthetic quota `429`.
 
 ### Reliability guardrails
 
@@ -140,12 +126,14 @@ The runtime proxy should remain conservative and durable under poor networks and
 - Endpoint-specific health penalties must not globally poison unrelated fresh routes unless there is a deliberate reason to do so.
 - Do not treat a generic upstream `429 Too Many Requests` body as account-specific quota unless the upstream payload explicitly identifies a quota/rate-limit error code such as `insufficient_quota` or `rate_limit_exceeded`.
 - If pre-commit selection fails before any upstream response exists, prefer a local `503 service_unavailable` over a synthetic `429 insufficient_quota`.
+- Keep request and stream hot paths non-blocking: do not add disk I/O, broad reads, mutex-held I/O, or unbounded blocking/thread work; use async transport and bounded background work.
 - Do not let transport backoff override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary profile health penalties override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary in-flight load heuristics override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let the per-profile in-flight hard cap override hard affinity for an in-flight continuation that already owns a profile.
 - Keep pre-commit candidate selection bounded in both time and attempts so the proxy fails fast when the whole pool is unhealthy.
 - Runtime state saves must not block request/stream commit paths.
+- Do not print runtime notices while the Codex TUI runs; send them to the resolved runtime log directory instead.
 - Cross-process state persistence should remain merge-safe for:
   - `active_profile`
   - `last_run_selected_at`
@@ -242,129 +230,141 @@ If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value before 
 Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers suggest a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
-## Tests and Verification
+## Rust readability and API design
 
-- Every feature or bug fix needs a meaningful test that checks observable behavior, not coverage alone.
-- A regression test should fail before the fix and pass only when the broken behavior is corrected.
-- Extend the nearest existing test module by default; create a new test file only when no suitable mapped test exists.
-- Use deterministic local mocks or fixtures for network-facing proof. Live provider calls require explicit approval because they can expose credentials and incur cost.
-- Report the exact verification commands and relevant redacted output for user-visible or transport-facing changes.
-- Use the narrowest checks that cover the change. Use the full suite, Clippy gate, and release build for cross-crate, release, or CI-sensitive changes.
+- Prefer Clippy-supported inline `format!` arguments, collapsed conditionals, and method
+  references when they improve clarity; do not churn equivalent code without a benefit.
+- Prefer exhaustive `match` at domain, protocol, security, persistence, and compatibility
+  boundaries. Do not hide new cases behind broad wildcard arms.
+- Avoid opaque positional booleans, numbers, and ambiguous `Option` values. Prefer enums,
+  newtypes, named methods, builders, or typed option structs that make call sites explicit.
+- Newly introduced public traits require documentation of their role, contract, and expected
+  implementation behavior. Prefer native Rust trait futures with an explicit `Send` contract
+  when the toolchain and API shape support it; do not add `async_trait` merely for convenience.
+- Use typed `Result` errors and explicit trust-boundary validation. Do not add unjustified
+  `unwrap()`, `expect()`, `panic!()`, `todo!()`, or `unimplemented!()` to production paths.
+- Do not add a one-call-site helper unless it encodes a real invariant. Put async tracing on
+  the owning function/method where practical, after checking delegated instrumentation.
+- Keep public crate APIs minimal. Avoid test-only public APIs and production helpers created
+  solely to make a test compile. Use the standard library and existing dependencies first.
 
-## Key Commands
+## Module and change-size discipline
 
-Format:
+`size-guard.mjs`, `size-guard-allowlist.json`, `churn-hygiene.mjs`, and their CI wiring are
+the source of truth. Current default size limits are 850 lines for production Rust, 860 for
+tests/benches, and 770 as the production cohesion threshold; the near-limit budget is 32
+files and a directory may have at most 9 near-limit production siblings.
 
-```bash
-cargo fmt
-```
+- Prefer new production modules under roughly 700 lines, excluding tests.
+- Treat files at or above the 770-line cohesion threshold as extraction candidates. Do not add
+  substantial behavior to an oversized allowlisted file without first evaluating extraction.
+- Allowlist caps are narrow, reviewed ratchets, not permanent architecture approval. Lower or
+  remove stale caps after splits; never weaken the guard merely to pass CI.
+- Churn hygiene defaults are 35 changed files, 25 behavior files, 1200 changed lines, and 500
+  changed lines in the largest file. Use the guard’s actual range and defaults; do not import
+  upstream thresholds. Divide large non-mechanical work into coherent behavior-preserving
+  stages. Large structural extraction must remain clearly mechanical and satisfy the guard’s
+  declaration rules.
 
-Check formatting without modifying files:
+## Security, secrets, and supply chain
 
-```bash
-cargo fmt --check
-```
+- Treat HTTP, CLI, configuration, provider, storage, and credential input as untrusted. Validate
+  at the boundary, use typed plans/IDs, and preserve authorization and tenant isolation.
+- Keep secret values out of domain models, logs, errors, fixtures, environment-derived examples,
+  persisted diagnostics, and provider debug output. Production gateway credentials use typed
+  `SecretRef`/projected resolution; secret or JWKS network fetches must not occur on request
+  paths. Do not put prompts, request bodies, cookies, bearer values, credentials, tenant
+  secrets, or filesystem paths in route traces or metric labels.
+- PostgreSQL is durable enterprise accounting state; Redis is for rate limiting, short-lived
+  cache, and rebuildable coordination, not the billing ledger. Keep migrations/DDL explicit and
+  outside request handling.
+- Tracked examples and tests must use reserved domains (`example.com`), generic paths such as
+  `/home/test-user`, synthetic profile names, and fake IDs/tokens. Never copy real emails,
+  paths, overlay/session/attachment IDs, logs, auth data, credentials, or customer identifiers.
+- Never pipe a remote script into a shell. Pin external CI actions and downloaded tools to full
+  immutable SHAs or explicit versions. Review dependency and lockfile changes; add no dependency
+  when an existing crate or the standard library is sufficient.
+- Do not commit or push unless explicitly authorized.
 
-Run cheap checks selected from changed paths:
+## Testing strategy
 
-```bash
-npm run test:changed
-```
+- Every behavior change needs meaningful observable regression coverage. Prefer integration or
+  boundary tests when behavior crosses crates, processes, protocols, persistence, CLI surfaces,
+  gateway contracts, or runtime proxy transport.
+- Prefer whole-object equality when it states the contract clearly. Do not add tests that only
+  restate static constants or deleted behavior. Keep substantial new test modules in focused
+  sibling files; do not grow an oversized test file for convenience.
+- Avoid process-global environment mutation. Prefer injection or explicit context. When it is
+  unavoidable, use the existing `TestEnvVarGuard`/`EnvGuard` plus the shared environment lock;
+  never add ad hoc unguarded `set_var`/`remove_var`.
+- Use deterministic local mocks and the existing terminal renderer/width-aware assertions for
+  output. Do not add a snapshot dependency merely to copy upstream practice.
+- Runtime tests must isolate temp homes, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, runtime log paths,
+  ports, broker state, and continuation state. Keep global-env/runtime/continuation cases in
+  serialized process shards with `--test-threads=1`; prefer independent processes for parallel
+  coverage. Keep runtime test manifests in sync with `npm run ci:runtime-manifest`.
+- Live provider, credential-bearing, network, or cost-bearing tests require explicit
+  authorization. Use deterministic fixtures or the offline compatibility gate by default.
 
-Run documentation checks after changing Markdown or user-facing docs:
+## Compatibility and platform review
 
-```bash
-npm run docs:lint
-```
+Before changing a shared or public contract, search for breakage across:
 
-Run the CI Clippy gate:
+- CLI flags, defaults, help, exit status, and terminal output;
+- `policy.toml`, environment variables, serialized state, and persisted affinity/bindings;
+- gateway/control-plane HTTP status, headers, bodies, routes, pagination, and auth behavior;
+- provider translations, upstream Responses/compact/SSE/WebSocket semantics, and preserved
+  metadata;
+- public Rust crate APIs and the npm gateway SDK;
+- log markers, metric names, diagnostics, release/install behavior, and versioned docs.
 
-```bash
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-```
+For upstream compatibility changes, run the local offline baseline and replay checks. Use the
+network watch only when current upstream drift is relevant; never use live provider traffic as a
+compatibility fixture. Supported behavior must remain correct on Linux, macOS, and Windows
+unless explicitly platform-specific. Account for path and filesystem semantics, permissions
+and secure file handling, process identity/termination, terminal behavior, line endings, shell
+assumptions, and executable resolution. Use the native CI lanes when local validation cannot
+cover another OS.
 
-Run the focused runtime proxy tests:
+## Validation command matrix
 
-```bash
-cargo test -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1
-```
+Use the narrowest meaningful checks first, then broaden for shared or high-risk changes. Report
+exact commands and results; do not claim a skipped or failed command passed.
 
-Run the full test suite:
+- Markdown or repository-guidance changes: `npm run docs:lint`, `npm run test:changed`, and
+  `git diff --check`.
+- Rust module/API changes: `cargo fmt --check`, a focused `cargo test --locked -q -p <crate>`
+  command, and `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+  when shared/API or CI-sensitive code is touched.
+- Runtime proxy changes: `npm run test:runtime-smoke`,
+  `cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1`,
+  `npm run ci:runtime-hotpath-guard`, `npm run ci:runtime-manifest`, and
+  `npm run compat:offline-gate`; add bounded load smoke for admission/latency changes.
+- Dependency or boundary changes: `npm run ci:crate-boundary` plus the owning domain,
+  gateway, storage, auth, provider, or application boundary guard.
+- Broad, release-adjacent, or high-risk changes: `npm run ci:preflight`; add
+  `npm run test:serial -- --suite all` when global state/runtime paths changed and
+  `npm run test:full -- --timings` when full workspace evidence is required.
+- Release metadata: after changing `Cargo.toml`, run `npm run npm:sync-version`, review
+  `Cargo.lock`, and use `npm run release:prepare` or the dry-run release flow before publishing.
 
-```bash
-npm run test:full -- --timings
-```
+## Documentation and release behavior
 
-Summarize the latest runtime log:
+Keep detailed contracts in the canonical docs above; do not turn this file into a full
+architecture manual. Update README/QUICKSTART, CLI help, compatibility fixtures, or the owning
+docs when user-visible behavior changes. Quota is a Prodex-owned screen: human views refresh
+every 5 seconds by default, `--raw` and `--once` are one-shot modes, the prior snapshot remains
+visible during refresh, and `--all` preserves sort order while reporting hidden rows; snapshot
+style tests should use `--once`.
 
-```bash
-prodex doctor --runtime
-```
+For an authorized release, follow the repository release scripts and
+`.github/workflows/standalone-release.yml`: synchronize version metadata, lockfiles, tests, and
+docs as required by their guards. The default release path is GitHub/container artifacts, not
+npm or crates.io publication. Do not publish, tag, commit, or push without explicit authorization.
 
-Show quota as a one-shot snapshot:
+## Agent handoff
 
-```bash
-prodex quota --all --once
-```
-
-Build the local binary after runtime changes:
-
-```bash
-cargo build --release --locked
-```
-
-If you changed dependencies or release metadata, refresh and review the lockfile before publishing.
-Prefer the release scripts for version metadata, use targeted updates where possible, and use a
-broad `cargo update` only when intentionally refreshing the dependency graph:
-
-```bash
-cargo update
-cargo update --manifest-path fuzz/Cargo.toml
-```
-
-## Editing Guidance
-
-- Prefer narrow, behavior-preserving changes in the owning crate or module.
-- Update `README.md`, `QUICKSTART.md`, CLI help, or other relevant docs in the same change when user-visible behavior changes.
-- Add regression tests for every runtime proxy bug fix.
-- When touching runtime persistence, add or update tests for multi-process-safe merge behavior.
-- When touching transport recovery, add or update tests for both quota backoff and transport backoff behavior.
-- When touching runtime candidate selection, add or update tests for:
-  - hard affinity preservation
-  - transport backoff handling
-  - temporary profile health handling
-  - bounded pre-commit retry/selection behavior
-- When touching proxy logic, compare behavior against upstream Codex in:
-  - `codex-rs/core/src/client.rs`
-  - `codex-rs/core/src/compact_remote.rs`
-  - `codex-rs/codex-api/src/sse/responses.rs`
-  - `codex-rs/codex-api/src/endpoint/responses_websocket.rs`
-
-## Release Notes
-
-This project has been released frequently.
-
-Release versioning on the `0.x` line follows the current release plan. Do not encode historical
-version examples in this file as release rules.
-
-After bumping `Cargo.toml`, sync workspace version metadata with:
-
-```bash
-npm run npm:sync-version
-```
-
-If asked to publish:
-
-1. bump `Cargo.toml`
-2. run `npm run npm:sync-version`
-3. update `Cargo.lock`
-4. run tests
-5. publish the standalone binaries through `.github/workflows/standalone-release.yml`
-
-Do not publish to npm or crates.io in the default release path.
-The workspace currently requires publishing many internal `prodex-*` crates before the root `prodex` crate, which can hit crates.io new-crate rate limits and create partial releases.
-Keep release publishing GitHub-only unless another registry is explicitly re-enabled with a deliberate plan.
-
-The `.github/workflows/standalone-release.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, matching the tag, rather than `prodex v<version>`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
-
-If asked to commit, use a conventional commit message.
+Report the outcome first, then changed files, adopted compatibility/safety decisions, exact
+validation commands with pass/fail/skip results, redacted failure evidence and remaining risk.
+State material assumptions or ambiguity. Confirm whether a commit or push occurred; without
+explicit authorization, it must not have occurred.
