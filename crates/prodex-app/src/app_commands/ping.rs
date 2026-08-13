@@ -1,16 +1,18 @@
 use anyhow::{Result, bail};
+use chrono::Local;
 use codex_config::codex_config_value;
 use prodex_cli::{PingCommands, PingOpenaiArgs};
 use prodex_core::AppPaths;
-use prodex_quota::usage_has_spark_limit;
+use prodex_quota::{openai_quota_has_ready_limit, usage_has_spark_limit};
+use prodex_runtime_quota::{runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot};
 use prodex_state::{AppState, ProfileProvider};
 use std::ffi::OsString;
 use std::path::Path;
 use terminal_ui::print_stdout_line;
 
 use super::{
-    codex_child_plan, collect_run_profile_reports, prepare_codex_launch_args,
-    ready_profile_candidates, run_child_plan, runtime_launch_openai_spark_context_codex_args,
+    codex_child_plan, collect_run_profile_reports, prepare_codex_launch_args, run_child_plan,
+    runtime_launch_openai_spark_context_codex_args,
 };
 use crate::app_state::{AppStateIoExt, repair_missing_active_profile_and_save};
 use crate::load_runtime_usage_snapshots;
@@ -35,20 +37,34 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         .filter(|(_, profile)| matches!(profile.provider, ProfileProvider::Openai))
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
-    let mut ready_profiles = ready_profile_candidates(
-        &collect_run_profile_reports(
-            &state,
-            profile_names,
-            args.base_url.as_deref(),
-            args.no_proxy,
-        ),
-        false,
-        None,
+    let now = Local::now().timestamp();
+    let mut ready_profiles = collect_run_profile_reports(
         &state,
-        Some(&usage_snapshots),
+        profile_names,
+        args.base_url.as_deref(),
+        args.no_proxy,
     )
     .into_iter()
-    .map(|candidate| (candidate.name, candidate.usage))
+    .filter_map(|report| {
+        if !report.auth.quota_compatible {
+            return None;
+        }
+        let usage = match report.result {
+            Ok(usage) => usage,
+            Err(_) => {
+                let snapshot = usage_snapshots.get(&report.name)?;
+                if !runtime_usage_snapshot_is_usable(
+                    snapshot,
+                    now,
+                    crate::RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+                ) {
+                    return None;
+                }
+                usage_from_runtime_usage_snapshot(snapshot)
+            }
+        };
+        openai_quota_has_ready_limit(&usage).then_some((report.name, usage))
+    })
     .collect::<Vec<_>>();
     ready_profiles.sort_by(|left, right| left.0.cmp(&right.0));
 

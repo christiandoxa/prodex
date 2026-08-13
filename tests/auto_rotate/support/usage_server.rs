@@ -141,6 +141,9 @@ fn handle_usage_request(
                 (Some("Bearer test-token"), Some("third-account")) => {
                     ("HTTP/1.1 200 OK", third_usage_body())
                 }
+                (Some("Bearer test-token"), Some("weekly-only-account")) => {
+                    ("HTTP/1.1 200 OK", weekly_only_usage_body())
+                }
                 (Some("Bearer test-token"), Some("spark-account")) => {
                     ("HTTP/1.1 200 OK", spark_usage_body())
                 }
@@ -273,6 +276,21 @@ fn third_usage_body() -> String {
                 "reset_at": future_epoch(14_400),
                 "limit_window_seconds": 18_000
             },
+            "secondary_window": {
+                "used_percent": 10,
+                "reset_at": future_epoch(259_200),
+                "limit_window_seconds": 604_800
+            }
+        }
+    })
+    .to_string()
+}
+
+fn weekly_only_usage_body() -> String {
+    json!({
+        "email": "weekly-only@example.com",
+        "plan_type": "plus",
+        "rate_limit": {
             "secondary_window": {
                 "used_percent": 10,
                 "reset_at": future_epoch(259_200),
