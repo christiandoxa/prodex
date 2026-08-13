@@ -1,35 +1,17 @@
 #![forbid(unsafe_code)]
 //! Bounded async HTTP/1 front for in-process or compatibility gateway handlers.
 
-use std::{
-    convert::Infallible,
-    error::Error,
-    future::Future,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
+use std::{error::Error, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, ensure};
 use bytes::Bytes;
-use http_body_util::{BodyExt as _, Full, Limited, combinators::UnsyncBoxBody};
-use hyper::{
-    Request, Response, StatusCode,
-    body::Incoming,
-    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue},
-    upgrade,
-};
-use hyper_util::rt::TokioIo;
-use prodex_gateway_http::{
-    CanonicalRequestTarget, GatewayAdminRoute, GatewayEdgeSecurityError, GatewayEdgeSecurityPolicy,
-    GatewayHttpHeader, GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane,
-    classify_request_target, parse_gateway_admin_route, validate_gateway_edge_security,
-};
+use http_body_util::{Limited, combinators::UnsyncBoxBody};
+use hyper::body::Incoming;
+use prodex_gateway_http::GatewayHttpPolicy;
 use sha2::{Digest, Sha256};
 use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpListener,
-    sync::{OwnedSemaphorePermit, Semaphore, watch},
+    sync::{Semaphore, watch},
     task::JoinSet,
     time::{Instant, timeout, timeout_at},
 };
@@ -40,12 +22,12 @@ mod connection;
 mod handler;
 mod in_process_upgrade;
 mod ingress;
+mod request;
 mod security;
 
 #[cfg(test)]
 use compatibility::LoopbackBackend;
 use connection::serve_connection;
-use ingress::*;
 
 pub use channel_body::{
     GatewayResponseBodySender, bounded_response_body, bounded_response_body_with_guard,
@@ -67,22 +49,6 @@ pub type GatewayBoxError = Box<dyn Error + Send + Sync>;
 pub type GatewayRequestBody = Limited<Incoming>;
 pub type GatewayResponseBody = UnsyncBoxBody<Bytes, GatewayBoxError>;
 
-const ROUTE_UNAVAILABLE: &[u8] =
-    br#"{"error":{"code":"route_not_available","message":"route is not available"}}"#;
-const INVALID_REQUEST: &[u8] =
-    br#"{"error":{"code":"invalid_request","message":"request is invalid"}}"#;
-const INVALID_REQUEST_TARGET: &[u8] =
-    br#"{"error":{"code":"invalid_request_target","message":"request target is invalid"}}"#;
-const BODY_TOO_LARGE: &[u8] = br#"{"error":{"code":"request_body_too_large","message":"request body exceeds the configured limit"}}"#;
-const BACKEND_TIMEOUT: &[u8] =
-    br#"{"error":{"code":"backend_timeout","message":"gateway backend timed out"}}"#;
-const SERVICE_UNAVAILABLE: &[u8] =
-    br#"{"error":{"code":"service_unavailable","message":"gateway backend is unavailable"}}"#;
-const LOCAL_OVERLOAD: &[u8] =
-    br#"{"error":{"code":"service_unavailable","message":"gateway is temporarily overloaded"}}"#;
-const EDGE_REQUEST_DENIED: &[u8] =
-    br#"{"error":{"code":"edge_request_denied","message":"gateway edge request is denied"}}"#;
-const MAX_FORWARDED_FOR_HOPS: usize = 16;
 const DEFAULT_REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_MAX_CONNECTION_AGE: Duration = Duration::from_secs(300);
 
@@ -331,363 +297,6 @@ where
         }
     }
     stop_result
-}
-
-async fn handle_ingress_request<H, Fut>(
-    mut request: Request<Incoming>,
-    peer_addr: SocketAddr,
-    mtls_peer_certificate_sha256: Option<[u8; 32]>,
-    state: ServerState<H>,
-    permit: Arc<OwnedSemaphorePermit>,
-) -> Result<Response<GatewayResponseBody>, Infallible>
-where
-    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
-{
-    let (target, route, plane, headers) = match parse_ingress_request(&request, state.mode) {
-        Ok(parsed) => parsed,
-        Err(response) => return Ok(*response),
-    };
-    let Ok(reload_transition) = state.reload.transition.try_read() else {
-        return Ok(json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD));
-    };
-    let edge_security = Arc::clone(&state.reload.load().edge_security);
-    let (client_ip, peer_is_trusted_proxy) =
-        match validate_ingress_security(&request, plane, peer_addr, &edge_security, &headers) {
-            Ok(metadata) => metadata,
-            Err(response) => return Ok(*response),
-        };
-    if let Err(response) = validate_request_size(&request, state.max_request_body_bytes) {
-        return Ok(*response);
-    }
-
-    let frontend_upgrade = request
-        .headers()
-        .contains_key(hyper::header::UPGRADE)
-        .then(|| upgrade::on(&mut request));
-    strip_forwarding_headers(&mut request);
-    let (parts, body) = request.into_parts();
-    let request = GatewayHandlerRequest {
-        peer_addr,
-        client_ip,
-        peer_is_trusted_proxy,
-        mtls_peer_certificate_sha256,
-        target,
-        route,
-        request: Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes)),
-    };
-    // Reload-coupled handler state must be snapshotted while this read barrier is held.
-    let handled = (state.handler.as_ref())(request);
-    drop(reload_transition);
-    let handled = match timeout(state.response_header_timeout, handled).await {
-        Err(_) => return Ok(json_error(StatusCode::GATEWAY_TIMEOUT, BACKEND_TIMEOUT)),
-        Ok(Err(error)) => return Ok(handler_error_response(error)),
-        Ok(Ok(handled)) => handled,
-    };
-    let GatewayHandlerResponse {
-        response,
-        backend_upgrade,
-    } = handled;
-    if response.status() == StatusCode::SWITCHING_PROTOCOLS
-        && let (Some(frontend_upgrade), Some(backend_upgrade)) = (frontend_upgrade, backend_upgrade)
-    {
-        match backend_upgrade {
-            GatewayHandlerUpgrade::Backend(backend_upgrade) => {
-                tokio::spawn(tunnel_upgrades(
-                    frontend_upgrade,
-                    backend_upgrade,
-                    state.shutdown.clone(),
-                    state.max_connection_age,
-                    permit,
-                ));
-            }
-            GatewayHandlerUpgrade::InProcess(upgrade) => {
-                tokio::spawn(tunnel_in_process_upgrade(
-                    frontend_upgrade,
-                    upgrade,
-                    state.shutdown.clone(),
-                    state.max_connection_age,
-                    permit,
-                ));
-            }
-        }
-    }
-    Ok(response)
-}
-
-fn gateway_http_headers(request: &Request<Incoming>) -> Option<Vec<GatewayHttpHeader>> {
-    request
-        .headers()
-        .iter()
-        .map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| GatewayHttpHeader::new(name.as_str(), value))
-        })
-        .collect()
-}
-
-/// Derives client network metadata only from the authenticated transport peer.
-/// The right-most untrusted address defeats caller-prepended spoofed hops.
-fn derive_gateway_client_ip(
-    peer_addr: SocketAddr,
-    trusted_proxies: &[IpAddr],
-    headers: &[GatewayHttpHeader],
-) -> Result<IpAddr, GatewayEdgeSecurityError> {
-    let peer_is_trusted_proxy = trusted_proxies.contains(&peer_addr.ip());
-    let has_forwarding_metadata = headers.iter().any(|header| {
-        matches!(
-            header.normalized_name().as_str(),
-            "forwarded"
-                | "x-forwarded-for"
-                | "x-forwarded-host"
-                | "x-forwarded-proto"
-                | "x-real-ip"
-        )
-    });
-    if has_forwarding_metadata && !peer_is_trusted_proxy {
-        return Err(GatewayEdgeSecurityError::ForwardedHeaderFromUntrustedPeer);
-    }
-    let mut values = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "x-forwarded-for")
-        .map(|header| header.value.as_str());
-    let Some(value) = values.next() else {
-        return Ok(peer_addr.ip());
-    };
-    if values.next().is_some() {
-        return Err(GatewayEdgeSecurityError::ForwardedClientAddressInvalid);
-    }
-    let hops = value
-        .split(',')
-        .map(str::trim)
-        .map(str::parse::<IpAddr>)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| GatewayEdgeSecurityError::ForwardedClientAddressInvalid)?;
-    if hops.is_empty() || hops.len() > MAX_FORWARDED_FOR_HOPS {
-        return Err(GatewayEdgeSecurityError::ForwardedClientAddressInvalid);
-    }
-    Ok(hops
-        .iter()
-        .rev()
-        .find(|address| !trusted_proxies.contains(address))
-        .copied()
-        .unwrap_or(hops[0]))
-}
-
-fn loopback_compatible_expected_host<'a>(
-    configured: &'a str,
-    headers: &'a [GatewayHttpHeader],
-) -> &'a str {
-    let Ok(expected) = configured.parse::<SocketAddr>() else {
-        return configured;
-    };
-    if !expected.ip().is_loopback() {
-        return configured;
-    }
-    let mut hosts = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "host")
-        .map(|header| header.value.as_str());
-    let Some(host) = hosts.next() else {
-        return configured;
-    };
-    if hosts.next().is_some() {
-        return configured;
-    }
-    let Ok(authority) = host.parse::<hyper::http::uri::Authority>() else {
-        return configured;
-    };
-    if authority.port_u16().unwrap_or(80) != expected.port() {
-        return configured;
-    }
-    let name = authority.host().trim_matches(['[', ']']);
-    if name.eq_ignore_ascii_case("localhost")
-        || name
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
-    {
-        host
-    } else {
-        configured
-    }
-}
-
-fn browser_capable_request(request: &Request<Incoming>) -> bool {
-    [
-        "origin",
-        "cookie",
-        "sec-fetch-site",
-        "sec-fetch-mode",
-        "sec-fetch-dest",
-        "x-csrf-token",
-    ]
-    .into_iter()
-    .any(|name| request.headers().contains_key(name))
-}
-
-fn state_changing_method(method: &hyper::Method) -> bool {
-    !matches!(
-        *method,
-        hyper::Method::GET | hyper::Method::HEAD | hyper::Method::OPTIONS
-    )
-}
-
-fn handler_error_response(error: GatewayHandlerError) -> Response<GatewayResponseBody> {
-    match error {
-        GatewayHandlerError::InvalidRequest => json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST),
-        GatewayHandlerError::InvalidRequestTarget => {
-            json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET)
-        }
-        GatewayHandlerError::RequestBodyTooLarge => {
-            json_error(StatusCode::PAYLOAD_TOO_LARGE, BODY_TOO_LARGE)
-        }
-        GatewayHandlerError::Overloaded => {
-            json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD)
-        }
-        GatewayHandlerError::Unavailable => {
-            json_error(StatusCode::SERVICE_UNAVAILABLE, SERVICE_UNAVAILABLE)
-        }
-    }
-}
-
-fn route_allowed(
-    mode: GatewayServerMode,
-    target: &CanonicalRequestTarget,
-    plane: GatewayHttpRoutePlane,
-) -> bool {
-    matches!(plane, GatewayHttpRoutePlane::Health)
-        || matches!(
-            (mode, plane),
-            (
-                GatewayServerMode::DataPlane,
-                GatewayHttpRoutePlane::DataPlane
-            ) | (
-                GatewayServerMode::ControlPlane,
-                GatewayHttpRoutePlane::ControlPlane
-            )
-        )
-        || (mode == GatewayServerMode::DataPlane
-            && plane == GatewayHttpRoutePlane::ControlPlane
-            && matches!(
-                gateway_admin_route(target),
-                Some(GatewayAdminRoute::Metrics)
-            ))
-}
-
-fn gateway_admin_route(target: &CanonicalRequestTarget) -> Option<GatewayAdminRoute<'_>> {
-    parse_gateway_admin_route("", target.path())
-        .or_else(|| parse_gateway_admin_route("/v1", target.path()))
-}
-
-fn content_length(request: &Request<Incoming>) -> Result<Option<u64>, ()> {
-    request
-        .headers()
-        .get(CONTENT_LENGTH)
-        .map(|value| value.to_str().map_err(|_| ())?.parse().map_err(|_| ()))
-        .transpose()
-}
-
-fn caused_by_length_limit(error: &(dyn Error + 'static)) -> bool {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if error.is::<http_body_util::LengthLimitError>() {
-            return true;
-        }
-        source = error.source();
-    }
-    false
-}
-
-fn json_error(status: StatusCode, body: &'static [u8]) -> Response<GatewayResponseBody> {
-    let mut response = Response::new(
-        Full::new(Bytes::from_static(body))
-            .map_err(|error: Infallible| -> GatewayBoxError { match error {} })
-            .boxed_unsync(),
-    );
-    *response.status_mut() = status;
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("application/json; charset=utf-8"),
-    );
-    response
-        .headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
-}
-
-async fn tunnel_upgrades(
-    frontend: upgrade::OnUpgrade,
-    backend: upgrade::OnUpgrade,
-    mut shutdown: watch::Receiver<bool>,
-    max_connection_age: Duration,
-    _permit: Arc<OwnedSemaphorePermit>,
-) {
-    let upgrades = async {
-        let frontend = frontend.await?;
-        let backend = backend.await?;
-        Ok::<_, hyper::Error>((frontend, backend))
-    };
-    let Ok((frontend, backend)) = (tokio::select! {
-        _ = shutdown.changed() => return,
-        upgrades = upgrades => upgrades,
-    }) else {
-        return;
-    };
-    let mut frontend = TokioIo::new(frontend);
-    let mut backend = TokioIo::new(backend);
-    tokio::select! {
-        _ = shutdown.changed() => {}
-        _ = tokio::time::sleep(max_connection_age) => {}
-        _ = tokio::io::copy_bidirectional(&mut frontend, &mut backend) => {}
-    }
-}
-
-async fn tunnel_in_process_upgrade(
-    frontend: upgrade::OnUpgrade,
-    handoff: GatewayInProcessUpgradeHandoff,
-    mut shutdown: watch::Receiver<bool>,
-    max_connection_age: Duration,
-    _permit: Arc<OwnedSemaphorePermit>,
-) {
-    let Ok(frontend) = (tokio::select! {
-        _ = shutdown.changed() => return,
-        frontend = frontend => frontend,
-    }) else {
-        return;
-    };
-    let (to_application, mut from_application, _request_guard) = handoff.into_channels();
-    let frontend = TokioIo::new(frontend);
-    let (mut frontend_read, mut frontend_write) = tokio::io::split(frontend);
-    let upload = async move {
-        let mut buffer = [0_u8; 8192];
-        loop {
-            let read = frontend_read.read(&mut buffer).await?;
-            if read == 0 {
-                break;
-            }
-            if to_application
-                .send(Bytes::copy_from_slice(&buffer[..read]))
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
-        Result::<(), std::io::Error>::Ok(())
-    };
-    let download = async move {
-        while let Some(bytes) = from_application.recv().await {
-            frontend_write.write_all(&bytes).await?;
-        }
-        frontend_write.shutdown().await
-    };
-    tokio::select! {
-        _ = shutdown.changed() => {}
-        _ = tokio::time::sleep(max_connection_age) => {}
-        _ = async { let _ = tokio::try_join!(upload, download); } => {}
-    }
 }
 
 #[cfg(unix)]

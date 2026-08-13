@@ -50,12 +50,12 @@ fn data_plane_allows_only_the_metrics_admin_route() {
     let metrics = CanonicalRequestTarget::parse("/v1/prodex/gateway/metrics").unwrap();
     let keys = CanonicalRequestTarget::parse("/v1/prodex/gateway/keys").unwrap();
 
-    assert!(super::route_allowed(
+    assert!(super::ingress::route_allowed(
         GatewayServerMode::DataPlane,
         &metrics,
         GatewayHttpRoutePlane::ControlPlane,
     ));
-    assert!(!super::route_allowed(
+    assert!(!super::ingress::route_allowed(
         GatewayServerMode::DataPlane,
         &keys,
         GatewayHttpRoutePlane::ControlPlane,

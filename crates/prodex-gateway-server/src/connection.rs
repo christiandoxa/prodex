@@ -1,4 +1,6 @@
-use super::{GatewayHandlerRequest, GatewayHandlerResult, ServerState, handle_ingress_request};
+use super::{
+    GatewayHandlerRequest, GatewayHandlerResult, ServerState, request::handle_ingress_request,
+};
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use hyper::{server::conn::http1, service::service_fn};
