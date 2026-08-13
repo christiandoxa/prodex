@@ -80,11 +80,6 @@
     "reason": "Profile import regression fixtures cover cross-provider identity handling and transactional rollback; lifecycle and committed-journal recovery cases moved to a focused sibling module."
   },
   {
-    "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1194,
-    "reason": "Provider-aware runtime, gateway, Super parent/child separation, resume, and bounded concurrency argument parsing remains capped after typed validation moved to focused modules."
-  },
-  {
     "file": "crates/prodex-quota/tests/src/render.rs",
     "maxLines": 867,
     "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, reset metadata, and error snapshots in one fixture matrix."
