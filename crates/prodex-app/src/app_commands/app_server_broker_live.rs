@@ -144,6 +144,7 @@ fn wait_for_app_server_broker(
             Err(mpsc::RecvTimeoutError::Timeout) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
         }
         if let Some(status) = child.try_wait()? {
+            let _ = terminate_child_process_tree(child, true);
             return Ok((status, first_error));
         }
         if input_finished_at.is_some_and(|at| at.elapsed() >= Duration::from_secs(5)) {
@@ -153,5 +154,62 @@ fn wait_for_app_server_broker(
             let _ = terminate_child_process_tree(child, true);
             return Ok((child.wait()?, first_error));
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::wait_for_app_server_broker;
+    use crate::{
+        configure_child_process_group, join_thread_with_timeout, terminate_child_process_tree,
+    };
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn exited_app_server_parent_cleans_descendant_held_pipes() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_child_process_group(&mut command, true);
+        let mut child = command.spawn().unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let output = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).unwrap();
+        });
+        let (_completion_tx, completion_rx) = mpsc::channel();
+        let started = Instant::now();
+
+        let (status, first_error) = wait_for_app_server_broker(&mut child, &completion_rx).unwrap();
+        let output_finished = {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !output.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            output.is_finished()
+        };
+        let _ = terminate_child_process_tree(&mut child, true);
+        let _ = child.wait();
+        join_thread_with_timeout(
+            output,
+            Duration::from_secs(2),
+            "app-server broker output worker",
+        )
+        .unwrap();
+
+        assert!(
+            output_finished,
+            "output worker did not drain after child exit"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(status.success());
+        assert!(first_error.is_none());
     }
 }
