@@ -1,10 +1,5 @@
 [
   {
-    "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 877,
-    "reason": "Core runtime preparation still owns provider selection, harness resolution, proxy startup, session entry planning, and the bounded Super child-launch handoff; this cap records the audited 0.384.0 boundary."
-  },
-  {
     "file": "crates/prodex-app/src/app_commands.rs",
     "maxLines": 1578,
     "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, strict optional-tool inheritance, native Presidio eligibility, resume affinity validation, and terminal restoration together; this exact cap records the audited launch flow."
