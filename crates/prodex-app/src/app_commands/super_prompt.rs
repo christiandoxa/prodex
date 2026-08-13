@@ -1,10 +1,24 @@
-use super::*;
+use super::ResolvedMainAgentConfig;
+use crate::{
+    AppPaths, AppState, AppStateIoExt, COPILOT_RUNTIME_MODEL_CATALOG_FILE, KIRO_MODEL_CATALOG_FILE,
+    ProfileProvider, ResolvedSuperSubAgent, SUB_AGENT_RECURSION_MARKER, SubAgentRecursionPolicy,
+    canonical_sub_agent_efforts, canonical_sub_agent_model_choices, canonical_sub_agent_providers,
+    provider_display_name, resolve_super_launch_target, resolve_super_sub_agent_config,
+    sub_agent_recursion_policy,
+};
+use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use prodex_cli::{
+    DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
+    SubAgentMaxConcurrency, SubAgentPreference, SuperArgs, SuperCliAgent,
+};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::io::{IsTerminal, Read as IoRead};
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::{self, IsTerminal, Read as IoRead};
 use terminal_ui::{
     fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
     tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
