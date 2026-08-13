@@ -13,6 +13,7 @@ use super::{
     ready_profile_candidates, run_child_plan, runtime_launch_openai_spark_context_codex_args,
 };
 use crate::app_state::{AppStateIoExt, repair_missing_active_profile_and_save};
+use crate::load_runtime_usage_snapshots;
 
 const OPENAI_CODEX_SPARK_MODEL: &str = "gpt-5.3-codex-spark";
 
@@ -26,6 +27,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load_and_repair(&paths)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
+    let usage_snapshots = load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
 
     let profile_names = state
         .profiles
@@ -43,7 +45,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         false,
         None,
         &state,
-        None,
+        Some(&usage_snapshots),
     )
     .into_iter()
     .map(|candidate| (candidate.name, candidate.usage))
