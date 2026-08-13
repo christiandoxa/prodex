@@ -46,6 +46,36 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
 }
 
 #[test]
+fn ping_openai_includes_profile_that_is_ready_on_weekly_quota_only() {
+    let fixture = setup_fixture();
+    let weekly_home = add_managed_profile(&fixture, "weekly-only", "weekly-only-account");
+    let home_log = fixture._temp_dir.path.join("ping-weekly-only-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "prodex ping openai failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(home_log)
+            .expect("weekly-ready profile should be pinged")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec![
+            fixture.second_home.to_string_lossy().to_string(),
+            weekly_home.to_string_lossy().to_string(),
+        ]
+    );
+}
+
+#[test]
 fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
     let fixture = setup_fixture();
     let third_home = add_managed_profile(&fixture, "third", "third-account");
