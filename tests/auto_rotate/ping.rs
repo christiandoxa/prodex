@@ -46,6 +46,32 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
 }
 
 #[test]
+fn ping_openai_continues_after_one_ready_profile_child_error() {
+    let fixture = setup_fixture();
+    let broken_home = add_managed_profile(&fixture, "broken", "third-account");
+    fs::write(broken_home.join("sessions"), b"not a directory")
+        .expect("failed to create broken sessions path");
+    let home_log = fixture._temp_dir.path.join("ping-error-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ping failed for broken"));
+    assert_eq!(
+        fs::read_to_string(home_log)
+            .expect("later ready profile should still be pinged")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec![fixture.second_home.to_string_lossy().to_string()]
+    );
+}
+
+#[test]
 fn ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit() {
     let fixture = setup_fixture();
     let spark_home = add_managed_profile(&fixture, "spark", "spark-account");

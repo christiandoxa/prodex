@@ -60,22 +60,35 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         let Some(profile) = state.profiles.get(&profile_name) else {
             continue;
         };
-        let models = ping_openai_models_for_usage(&profile.codex_home, &usage)?;
+        let models = match ping_openai_models_for_usage(&profile.codex_home, &usage) {
+            Ok(models) => models,
+            Err(err) => {
+                failures.push(format!("{profile_name}: {err}"));
+                continue;
+            }
+        };
         for model in models {
-            match model {
-                Some(model) => print_stdout_line(&format!("Pinging {profile_name} ({model})...")),
-                None => print_stdout_line(&format!("Pinging {profile_name}...")),
-            }?;
-            let plan = ping_openai_child_plan(profile.codex_home.clone(), model)?;
-            let status = run_child_plan(&plan, None)?;
+            let ping_name = match model {
+                Some(model) => format!("{profile_name} ({model})"),
+                None => profile_name.clone(),
+            };
+            print_stdout_line(&format!("Pinging {ping_name}..."))?;
+            let plan = match ping_openai_child_plan(profile.codex_home.clone(), model) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    failures.push(format!("{ping_name}: {err}"));
+                    continue;
+                }
+            };
+            let status = match run_child_plan(&plan, None) {
+                Ok(status) => status,
+                Err(err) => {
+                    failures.push(format!("{ping_name}: {err}"));
+                    continue;
+                }
+            };
             if !status.success() {
-                failures.push((
-                    match model {
-                        Some(model) => format!("{profile_name} ({model})"),
-                        None => profile_name.clone(),
-                    },
-                    status.code().unwrap_or(1),
-                ));
+                failures.push(format!("{ping_name} exited {}", status.code().unwrap_or(1)));
             }
         }
     }
@@ -85,11 +98,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         return Ok(());
     }
 
-    let summary = failures
-        .into_iter()
-        .map(|(name, code)| format!("{name} exited {code}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let summary = failures.join(", ");
     bail!("ping failed for {summary}")
 }
 
