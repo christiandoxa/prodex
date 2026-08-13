@@ -24,7 +24,10 @@ impl fmt::Debug for ImportedExistingProfileAuthUpdate {
             .field("profile_name", &self.profile_name)
             .field("codex_home", &self.codex_home)
             .field("previous_auth_json", &"<redacted>")
-            .field("previous_email", &self.previous_email)
+            .field(
+                "previous_email",
+                &self.previous_email.as_ref().map(|_| "<redacted>"),
+            )
             .field("journal_path", &self.journal_path)
             .field("restore_auth_json", &self.restore_auth_json)
             .field("previous_provider_json", &"<redacted>")
@@ -163,13 +166,19 @@ impl fmt::Debug for ImportedExistingProfileAuthUpdateJournal {
             .field("version", &self.version)
             .field("profile_name", &self.profile_name)
             .field("codex_home", &self.codex_home)
-            .field("previous_email", &self.previous_email)
+            .field(
+                "previous_email",
+                &self.previous_email.as_ref().map(|_| "<redacted>"),
+            )
             .field("previous_auth_json", &"<redacted>")
             .field("restore_auth_json", &self.restore_auth_json)
             .field("previous_provider_json", &"<redacted>")
             .field("previous_secret_files", &"<redacted>")
             .field("state_after_known", &self.state_after_known)
-            .field("next_email", &self.next_email)
+            .field(
+                "next_email",
+                &self.next_email.as_ref().map(|_| "<redacted>"),
+            )
             .field("next_auth_json", &"<redacted>")
             .field("next_provider_json", &"<redacted>")
             .field("next_secret_files", &"<redacted>")

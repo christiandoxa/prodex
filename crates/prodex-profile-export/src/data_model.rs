@@ -117,7 +117,7 @@ impl<Provider> fmt::Debug for ExportedProfile<Provider> {
         formatter
             .debug_struct("ExportedProfile")
             .field("name", &self.name)
-            .field("email", &self.email)
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
             .field("source_managed", &self.source_managed)
             .field("provider", &"<redacted>")
             .field("auth_json", &"<redacted>")
@@ -323,7 +323,7 @@ impl fmt::Debug for ProfileImportAuthUpdatePlan {
         formatter
             .debug_struct("ProfileImportAuthUpdatePlan")
             .field("target_profile_name", &self.target_profile_name)
-            .field("email", &self.email)
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
             .field("auth_json", &"<redacted>")
             .finish()
     }

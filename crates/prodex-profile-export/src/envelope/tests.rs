@@ -341,7 +341,11 @@ fn secret_debug_output_is_redacted() {
     let payload_debug = format!("{payload:?}");
     assert!(!payload_debug.contains("bearer-secret-value"));
     assert!(!payload_debug.contains("nested-secret-value"));
+    assert!(!payload_debug.contains("fixture@example.com"));
     assert!(payload_debug.contains("<redacted>"));
+
+    let profile_debug = format!("{:?}", payload.profiles[0]);
+    assert!(!profile_debug.contains("fixture@example.com"));
 
     let envelope = argon2_envelope(
         PROFILE_EXPORT_ARGON2_MEMORY_KIB,
