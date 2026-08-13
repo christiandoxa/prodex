@@ -13,6 +13,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Preserve UUID identifiers (`4815838`)
 - Clean live broker descendants (`eaa5bcf`)
 - Scope provider-core to tests (`c0e0c17`)
 - Close diagnostic secret boundary leaks (`821ad97`)
