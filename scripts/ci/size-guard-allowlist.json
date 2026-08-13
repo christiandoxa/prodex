@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands.rs",
-    "maxLines": 1578,
-    "reason": "Application command routing keeps the interactive Super state machine, explicit parent/child provider separation, strict optional-tool inheritance, native Presidio eligibility, resume affinity validation, and terminal restoration together; this exact cap records the audited launch flow."
+    "maxLines": 851,
+    "reason": "Application command routing keeps Super launch orchestration, provider/session affinity validation, and characterization coverage together after Super prompt configuration moved to a focused sibling; this exact cap records the audited command flow."
   },
   {
     "file": "crates/prodex-app/src/runtime_broker/registry/process.rs",
