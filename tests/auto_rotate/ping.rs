@@ -46,6 +46,47 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
 }
 
 #[test]
+fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
+    let fixture = setup_fixture();
+    let third_home = add_managed_profile(&fixture, "third", "third-account");
+    let quota = run_prodex(&fixture, &["quota", "--all", "--once"]);
+    assert!(
+        quota.status.success(),
+        "failed to seed quota snapshots: {}",
+        String::from_utf8_lossy(&quota.stderr)
+    );
+    let home_log = fixture._temp_dir.path.join("ping-snapshot-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &[
+            "ping",
+            "openai",
+            "--base-url",
+            "http://127.0.0.1:1/backend-api",
+        ],
+        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "prodex ping openai failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(home_log)
+            .expect("ready snapshot profiles should be pinged")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec![
+            fixture.second_home.to_string_lossy().to_string(),
+            third_home.to_string_lossy().to_string(),
+        ]
+    );
+}
+
+#[test]
 fn ping_openai_continues_after_one_ready_profile_child_error() {
     let fixture = setup_fixture();
     let broken_home = add_managed_profile(&fixture, "broken", "third-account");
