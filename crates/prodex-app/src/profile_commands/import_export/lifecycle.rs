@@ -484,7 +484,7 @@ fn save_rolled_back_lifecycle_state(
     removed_profiles: &[String],
 ) -> Result<()> {
     let _lock = crate::acquire_state_file_lock(paths)?;
-    let existing = AppState::load(paths)?;
+    let existing = AppState::load_with_recovery_unlocked(paths)?.value;
     let mut merged = prodex_state::merge_app_state_for_save(existing, state);
     for profile_name in removed_profiles {
         merged.profiles.remove(profile_name);

@@ -12,7 +12,7 @@ pub(super) fn maintain_shared_codex_sessions_after_child_exit() {
 pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
     let _lock = acquire_state_file_lock(&paths)?;
-    let mut state = AppState::load(&paths)?;
+    let mut state = AppState::load_with_recovery_unlocked(&paths)?.value;
     let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
     let now = chrono::Local::now().timestamp();
     clear_codex_session_continuation_sidecars(

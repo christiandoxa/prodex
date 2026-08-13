@@ -144,7 +144,7 @@ pub(crate) fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Pa
     if !primary_exists && !backup_exists {
         return Ok(0);
     }
-    let loaded = read_json_file_with_backup_impl(path, backup_path, |content| {
+    let loaded = read_json_file_with_backup_unlocked(path, backup_path, |content| {
         runtime_sidecar_generation_from_content(content)
     })?;
     Ok(loaded.value)
@@ -160,16 +160,12 @@ where
     }
 }
 
-fn read_json_file_with_backup_impl<T>(
+fn read_json_file_with_backup_unlocked<T>(
     path: &Path,
     backup_path: &Path,
     parse: impl Fn(&str) -> Result<T>,
 ) -> Result<RecoveredLoad<T>> {
-    let primary = read_json_file_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))
-        .and_then(|content| {
-            parse(&content).with_context(|| format!("failed to parse {}", path.display()))
-        });
+    let primary = read_json_file_primary(path, &parse);
     match primary {
         Ok(value) => Ok(RecoveredLoad {
             value,
@@ -195,6 +191,29 @@ fn read_json_file_with_backup_impl<T>(
     }
 }
 
+fn read_json_file_primary<T>(path: &Path, parse: &impl Fn(&str) -> Result<T>) -> Result<T> {
+    read_json_file_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))
+        .and_then(|content| {
+            parse(&content).with_context(|| format!("failed to parse {}", path.display()))
+        })
+}
+
+fn read_json_file_with_backup<T>(
+    path: &Path,
+    backup_path: &Path,
+    parse: impl Fn(&str) -> Result<T>,
+) -> Result<RecoveredLoad<T>> {
+    if let Ok(value) = read_json_file_primary(path, &parse) {
+        return Ok(RecoveredLoad {
+            value,
+            recovered_from_backup: false,
+        });
+    }
+    let _lock = acquire_json_file_lock(path)?;
+    read_json_file_with_backup_unlocked(path, backup_path, parse)
+}
+
 pub(crate) fn read_versioned_json_file_with_backup<T>(
     path: &Path,
     backup_path: &Path,
@@ -202,7 +221,7 @@ pub(crate) fn read_versioned_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let loaded = read_json_file_with_backup_impl(path, backup_path, |content| {
+    let loaded = read_json_file_with_backup(path, backup_path, |content| {
         parse_versioned_json_or_raw::<T>(content)
     })?;
     let (value, generation) = loaded.value;
@@ -427,6 +446,18 @@ fn open_private_file(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
+pub(crate) fn load_json_file_with_backup_unlocked<T>(
+    path: &Path,
+    backup_path: &Path,
+) -> Result<RecoveredLoad<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    read_json_file_with_backup_unlocked(path, backup_path, |content| {
+        Ok(serde_json::from_str::<T>(content)?)
+    })
+}
+
 pub(crate) fn load_json_file_with_backup<T>(
     path: &Path,
     backup_path: &Path,
@@ -434,7 +465,7 @@ pub(crate) fn load_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    read_json_file_with_backup_impl(path, backup_path, |content| {
+    read_json_file_with_backup(path, backup_path, |content| {
         Ok(serde_json::from_str::<T>(content)?)
     })
 }
@@ -562,29 +593,6 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("test root should be created");
         root
-    }
-
-    #[test]
-    fn last_good_recovery_repairs_missing_or_corrupt_primary() {
-        for (name, primary) in [("missing", None), ("corrupt", Some("{broken"))] {
-            let root = temp_root(name);
-            let path = root.join("state.json");
-            let backup_path = root.join("state.last-good.json");
-            let backup = r#"{"source":"last-good"}"#;
-            fs::write(&backup_path, backup).expect("backup should be writable");
-            if let Some(primary) = primary {
-                fs::write(&path, primary).expect("primary should be writable");
-            }
-
-            let loaded = load_json_file_with_backup::<serde_json::Value>(&path, &backup_path)
-                .expect("valid backup should recover primary");
-
-            assert!(loaded.recovered_from_backup);
-            assert_eq!(loaded.value["source"], "last-good");
-            assert_eq!(fs::read_to_string(&path).unwrap(), backup);
-            assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
-            let _ = fs::remove_dir_all(root);
-        }
     }
 
     #[test]
@@ -830,3 +838,7 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+#[cfg(test)]
+#[path = "io_tests.rs"]
+mod lock_tests;

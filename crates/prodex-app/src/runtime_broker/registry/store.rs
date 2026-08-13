@@ -8,9 +8,10 @@ mod legacy;
 
 use crate::{
     AppPaths, RuntimeBrokerRegistry, acquire_json_file_lock, delete_runtime_secret,
-    load_json_file_with_backup, read_runtime_secret_bounded, runtime_broker_capability_file_path,
-    runtime_broker_registry_file_path, runtime_broker_registry_last_good_file_path,
-    write_json_file_with_backup, write_runtime_secret_bounded,
+    load_json_file_with_backup_unlocked, read_runtime_secret_bounded,
+    runtime_broker_capability_file_path, runtime_broker_registry_file_path,
+    runtime_broker_registry_last_good_file_path, write_json_file_with_backup,
+    write_runtime_secret_bounded,
 };
 use prodex_runtime_broker::{RuntimeBrokerCapability, RuntimeBrokerSecret};
 use secret_store::SecretValue;
@@ -64,7 +65,7 @@ fn load_runtime_broker_registry_unlocked(
         legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
-    let current = load_json_file_with_backup::<RuntimeBrokerRegistry>(&path, &backup_path);
+    let current = load_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(&path, &backup_path);
     match current {
         Ok(loaded) => Ok(Some(loaded.value)),
         Err(_err) if !path.exists() && !backup_path.exists() => Ok(None),

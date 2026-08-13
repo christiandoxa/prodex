@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::{
     AppPaths, AuthSummary, RecoveredLoad, acquire_state_file_lock, compact_app_state,
-    load_json_file_with_backup, merge_app_state_for_save, read_auth_summary,
-    state_last_good_file_path, write_state_json_atomic,
+    load_json_file_with_backup, load_json_file_with_backup_unlocked, merge_app_state_for_save,
+    read_auth_summary, state_last_good_file_path, write_state_json_atomic,
 };
 
 pub(crate) use prodex_state::{
@@ -47,6 +47,7 @@ impl ProfileProviderExt for ProfileProvider {
 
 pub(crate) trait AppStateIoExt: Sized {
     fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>>;
+    fn load_with_recovery_unlocked(paths: &AppPaths) -> Result<RecoveredLoad<Self>>;
     fn load(paths: &AppPaths) -> Result<Self>;
     fn load_and_repair(paths: &AppPaths) -> Result<Self>;
     fn save(&self, paths: &AppPaths) -> Result<()>;
@@ -61,8 +62,25 @@ impl AppStateIoExt for AppState {
                 recovered_from_backup: false,
             });
         }
-
         let loaded = load_json_file_with_backup::<Self>(
+            &paths.state_file,
+            &state_last_good_file_path(paths),
+        )?;
+        Ok(RecoveredLoad {
+            value: compact_app_state(loaded.value, Local::now().timestamp()),
+            recovered_from_backup: loaded.recovered_from_backup,
+        })
+    }
+
+    fn load_with_recovery_unlocked(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
+        if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
+            return Ok(RecoveredLoad {
+                value: Self::default(),
+                recovered_from_backup: false,
+            });
+        }
+
+        let loaded = load_json_file_with_backup_unlocked::<Self>(
             &paths.state_file,
             &state_last_good_file_path(paths),
         )?;
@@ -80,12 +98,8 @@ impl AppStateIoExt for AppState {
         if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
             return Ok(Self::default());
         }
-
         let _lock = acquire_state_file_lock(paths)?;
-        let loaded = load_json_file_with_backup::<Self>(
-            &paths.state_file,
-            &state_last_good_file_path(paths),
-        )?;
+        let loaded = Self::load_with_recovery_unlocked(paths)?;
         let compacted = compact_app_state(loaded.value.clone(), Local::now().timestamp());
         if loaded.recovered_from_backup || compacted != loaded.value {
             let json = serde_json::to_string_pretty(&compacted)
@@ -106,7 +120,7 @@ impl AppStateIoExt for AppState {
 
 fn save_app_state(state: &AppState, paths: &AppPaths, removed: &[String]) -> Result<()> {
     let _lock = acquire_state_file_lock(paths)?;
-    let mut existing = AppState::load(paths)?;
+    let mut existing = AppState::load_with_recovery_unlocked(paths)?.value;
     let mut desired = state.clone();
     for profile_name in removed {
         existing.profiles.remove(profile_name);

@@ -10,7 +10,7 @@ use super::{
     remove_runtime_broker_registry_files_checked,
 };
 use crate::{
-    AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup,
+    AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup_unlocked,
     runtime_broker_capability_file_path,
 };
 
@@ -40,7 +40,8 @@ pub(super) fn remove_artifacts_unlocked(
     path: &Path,
     backup_path: &Path,
 ) -> Result<()> {
-    if let Ok(legacy) = load_json_file_with_backup::<LegacyRuntimeBrokerRegistry>(path, backup_path)
+    if let Ok(legacy) =
+        load_json_file_with_backup_unlocked::<LegacyRuntimeBrokerRegistry>(path, backup_path)
     {
         let LegacyRuntimeBrokerRegistry {
             instance_token,
