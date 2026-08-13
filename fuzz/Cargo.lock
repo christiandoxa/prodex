@@ -1289,7 +1289,6 @@ dependencies = [
  "prodex-authz",
  "prodex-domain",
  "prodex-observability",
- "prodex-provider-core",
  "prodex-provider-spi",
  "prodex-storage",
  "serde",
