@@ -116,8 +116,9 @@ const TEST_PATH = /(?:^|\/)(?:tests?|fixtures?|[^/]+_tests?)(?:\/|$)|(?:^|\/)(?:
 
 // Compatibility debt only: new occurrences exhaust these per-file budgets and fail.
 const LEGACY_SECRET_FLAG_BUDGET = new Map([
-  ["crates/prodex-cli/src/runtime_args.rs:api-key", 2],
+  ["crates/prodex-cli/src/runtime_args.rs:api-key", 1],
   ["crates/prodex-cli/src/runtime_args.rs:auth-token", 1],
+  ["crates/prodex-cli/src/runtime_args/launch_args.rs:api-key", 1],
   ["crates/prodex-cli/src/runtime_args/super_tail_extract.rs:api-key", 3],
   ["crates/prodex-app/src/app_commands/runtime_launch/providers_env.rs:api-key", 4],
 ]);
