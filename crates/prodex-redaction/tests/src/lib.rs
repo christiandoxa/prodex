@@ -217,6 +217,23 @@ fn redaction_gateway_body_masks_pii_and_secret_like_content() {
 }
 
 #[test]
+fn redaction_preserves_uuid_identifiers_while_masking_card_numbers() {
+    let tenant_id = "019ffa02-3993-7e50-b331-5604955720ad";
+    let mut value = serde_json::json!({
+        "tenant_id": tenant_id,
+        "message": format!("tenant {tenant_id} card=4111-1111-1111-1111"),
+    });
+
+    redaction_redact_json(&mut value);
+
+    assert_eq!(value["tenant_id"], tenant_id);
+    assert_eq!(
+        value["message"],
+        format!("tenant {tenant_id} card={REDACTED}")
+    );
+}
+
+#[test]
 fn redaction_cli_args_mask_sensitive_flags_and_inline_values() {
     let api_value = fake_named_secret("cli_flag");
     let config_token = fake_named_secret("config_token");
