@@ -116,13 +116,19 @@ jobs:
           if not runs:
               print("not-found")
               sys.exit(3)
-          for run in runs:
-              if run.get("status") == "completed":
-                  print(f"{run.get('conclusion')} {run.get('url')}")
-                  sys.exit(0)
+          successful = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "success"]
+          if successful:
+              run = successful[0]
+              print(f"{run.get('conclusion')} {run.get('url')}")
+              sys.exit(0)
+          pending = [run for run in runs if run.get("status") != "completed"]
+          if pending:
+              run = pending[0]
+              print(f"{run.get('status')}/{run.get('conclusion') or 'pending'} {run.get('url')}")
+              sys.exit(2)
           run = runs[0]
-          print(f"{run.get('status')}/{run.get('conclusion') or 'pending'} {run.get('url')}")
-          sys.exit(2)
+          print(f"{run.get('conclusion')} {run.get('url')}")
+          sys.exit(0)
           PY
             )"
             status=$?

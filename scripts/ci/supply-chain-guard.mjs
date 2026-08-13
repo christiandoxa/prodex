@@ -303,6 +303,23 @@ export function validateReleaseMalwareGate(contents) {
   return violations;
 }
 
+const releaseCiPollingMarkers = [
+  'successful = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "success"]',
+  "if successful:",
+  "run = successful[0]",
+  'pending = [run for run in runs if run.get("status") != "completed"]',
+  "if pending:",
+  "run = pending[0]",
+];
+
+export function validateReleaseCiPolling(contents) {
+  const verify = workflowJob(contents, "verify-ci");
+  if (!verify) return [".github/workflows/standalone-release.yml: missing verify-ci job"];
+  return releaseCiPollingMarkers
+    .filter((marker) => !verify.includes(marker))
+    .map((marker) => `.github/workflows/standalone-release.yml: CI polling missing ${marker}`);
+}
+
 export function validateReleaseContainerPublication(contents) {
   const verify = workflowJob(contents, "verify-ci");
   const build = workflowJob(contents, "build");
@@ -315,6 +332,7 @@ export function validateReleaseContainerPublication(contents) {
     return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
+  violations.push(...validateReleaseCiPolling(contents));
   const workflowHeader = contents.slice(0, contents.indexOf("\njobs:"));
   if (/^\s*(?:artifact-metadata|attestations|id-token):\s*write\s*$/mu.test(workflowHeader)) {
     violations.push(
@@ -850,6 +868,22 @@ sonar.qualitygate.wait=true
     1,
   );
   assert.equal(validateReleaseMalwareGate("jobs:\n  other:\n").length, 1);
+  const releaseCiPollingFixture = `jobs:
+  verify-ci:
+    steps:
+      - run: |
+          successful = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "success"]
+          if successful:
+              run = successful[0]
+          pending = [run for run in runs if run.get("status") != "completed"]
+          if pending:
+              run = pending[0]
+`;
+  assert.deepEqual(validateReleaseCiPolling(releaseCiPollingFixture), []);
+  assert.equal(
+    validateReleaseCiPolling(releaseCiPollingFixture.replace("run = pending[0]", "run = runs[0]")).length,
+    1,
+  );
   assert.equal(validateReleaseContainerPublication("jobs:\n  other:\n").length, 1);
 }
 
