@@ -10,8 +10,9 @@ use tokio::net::TcpListener;
 
 use super::{
     GatewayHandlerError, GatewayHandlerRequest, GatewayHandlerResponse, GatewayHandlerResult,
-    GatewayRequestBody, GatewayServerConfig, GatewayServerReloadHandle, caused_by_length_limit,
-    run_with_handler, run_with_handler_reloadable, shutdown_signal,
+    GatewayRequestBody, GatewayServerConfig, GatewayServerReloadHandle,
+    request::caused_by_length_limit, run_with_handler, run_with_handler_reloadable,
+    shutdown_signal,
 };
 
 type ProxyClient = Client<HttpConnector, GatewayRequestBody>;
