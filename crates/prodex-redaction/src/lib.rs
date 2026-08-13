@@ -274,12 +274,7 @@ fn redaction_redact_long_digit_tokens(value: &str) -> String {
         }
         if redaction_digit_group_byte(bytes[index]) {
             let start = index;
-            while index < bytes.len() && redaction_digit_group_byte(bytes[index]) {
-                if index > start && redaction_canonical_uuid_end(bytes, index).is_some() {
-                    break;
-                }
-                index += 1;
-            }
+            index = redaction_digit_group_end(bytes, start);
             let token = &value[start..index];
             if (13..=19).contains(&token.bytes().filter(u8::is_ascii_digit).count()) {
                 redacted.push_str(REDACTED);
@@ -295,6 +290,17 @@ fn redaction_redact_long_digit_tokens(value: &str) -> String {
         index += ch.len_utf8();
     }
     redacted
+}
+
+fn redaction_digit_group_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() && redaction_digit_group_byte(bytes[end]) {
+        if end > start && redaction_canonical_uuid_end(bytes, end).is_some() {
+            break;
+        }
+        end += 1;
+    }
+    end
 }
 
 fn redaction_canonical_uuid_end(bytes: &[u8], start: usize) -> Option<usize> {
