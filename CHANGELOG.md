@@ -2,6 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.2 - 2026-08-13
+
+### CLI
+
+- Skip catalog startup (`1bb3220`)
+- Include weekly-ready OpenAI profiles (`a3c5b5d`)
+- Use ready quota snapshots (`0375a53`)
+- Continue after profile launch errors (`169ac6b`)
+
+### Misc
+
+- Clean live broker descendants (`eaa5bcf`)
+- Scope provider-core to tests (`c0e0c17`)
+- Close diagnostic secret boundary leaks (`821ad97`)
+- Serialize backup recovery repairs (`ba002e0`)
+
 ## 0.408.1 - 2026-08-12
 
 ### Runtime
