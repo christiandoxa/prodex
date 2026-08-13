@@ -263,10 +263,64 @@ fn redaction_redact_email_tokens(value: &str) -> String {
 }
 
 fn redaction_redact_long_digit_tokens(value: &str) -> String {
-    redaction_redact_matching_tokens(value, redaction_digit_group_byte, |token| {
-        let digit_count = token.bytes().filter(u8::is_ascii_digit).count();
-        (13..=19).contains(&digit_count)
-    })
+    let mut redacted = String::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if let Some(end) = redaction_canonical_uuid_end(bytes, index) {
+            redacted.push_str(&value[index..end]);
+            index = end;
+            continue;
+        }
+        if redaction_digit_group_byte(bytes[index]) {
+            let start = index;
+            while index < bytes.len() && redaction_digit_group_byte(bytes[index]) {
+                if index > start && redaction_canonical_uuid_end(bytes, index).is_some() {
+                    break;
+                }
+                index += 1;
+            }
+            let token = &value[start..index];
+            if (13..=19).contains(&token.bytes().filter(u8::is_ascii_digit).count()) {
+                redacted.push_str(REDACTED);
+            } else {
+                redacted.push_str(token);
+            }
+            continue;
+        }
+        let Some(ch) = value[index..].chars().next() else {
+            break;
+        };
+        redacted.push(ch);
+        index += ch.len_utf8();
+    }
+    redacted
+}
+
+fn redaction_canonical_uuid_end(bytes: &[u8], start: usize) -> Option<usize> {
+    const UUID_LEN: usize = 36;
+    const HYPHENS: [usize; 4] = [8, 13, 18, 23];
+
+    let end = start.checked_add(UUID_LEN)?;
+    let candidate = bytes.get(start..end)?;
+    if start > 0 && bytes[start - 1].is_ascii_alphanumeric()
+        || bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    candidate
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| {
+            if HYPHENS.contains(&index) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+        .then_some(end)
 }
 
 fn redaction_redact_matching_tokens<F, G>(value: &str, token_byte: F, should_redact: G) -> String
