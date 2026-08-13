@@ -159,7 +159,7 @@ fn prepare_runtime_state_selected_snapshot_save(
     let continuation_policy = runtime_continuation_compaction_policy();
     let prepare_plan = prodex_runtime_store::runtime_state_selected_snapshot_prepare_plan(snapshot);
     let existing_state = if prepare_plan.load.needs_existing_state {
-        Some(AppState::load(&snapshot.paths)?)
+        Some(AppState::load_with_recovery_unlocked(&snapshot.paths)?.value)
     } else {
         None
     };
@@ -254,7 +254,7 @@ fn merge_runtime_state_and_continuations_for_save(
     snapshot: &AppState,
     continuations: &RuntimeContinuationStore,
 ) -> Result<(AppState, RuntimeContinuationStore)> {
-    let existing = AppState::load(paths)?;
+    let existing = AppState::load_with_recovery_unlocked(paths)?.value;
     let now = Local::now().timestamp();
     let state_for_profiles = prodex_runtime_store::merge_runtime_state_snapshot_for_save(
         existing.clone(),
