@@ -114,6 +114,7 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
+        && !matches!(command, Commands::Gateway(args) if args.command.is_some())
 }
 
 fn profile_command_requests_insecure(command: &Commands) -> bool {
@@ -300,6 +301,13 @@ mod tests {
         let command =
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "codebase-memory-mcp"])
                 .unwrap();
+        assert!(!command_runs_profile_lifecycle_recovery(&command));
+    }
+
+    #[test]
+    fn gateway_catalog_commands_skip_profile_recovery() {
+        let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
+
         assert!(!command_runs_profile_lifecycle_recovery(&command));
     }
 

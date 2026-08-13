@@ -212,7 +212,7 @@ impl Commands {
                 | Self::Ponytail(_)
                 | Self::Super(_)
                 | Self::Expose(_)
-                | Self::Gateway(_)
+                | Self::Gateway(GatewayArgs { command: None, .. })
                 | Self::Claude(_)
                 | Self::RuntimeBroker(_)
         )
