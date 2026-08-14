@@ -614,7 +614,7 @@ fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
 }
 
 #[test]
-fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snapshot() {
+fn precommit_quota_gate_uses_cached_continuation_quota_and_schedules_refresh() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
@@ -640,6 +640,8 @@ fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snap
             panic!("weekly exhausted snapshot should not pre-send block: {reason:?}")
         }
     }
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("websocket_precommit_reprobe_scheduled profile=main"));
 }
 
 #[test]

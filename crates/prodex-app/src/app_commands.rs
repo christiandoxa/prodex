@@ -19,6 +19,8 @@ mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
 mod mcp_jsonl_bridge;
+#[cfg(test)]
+mod native_cli_tests;
 mod ping;
 mod presidio;
 mod quota;
@@ -285,6 +287,8 @@ fn apply_resolved_main_agent(
             prodex_cli::parse_super_local_url(url).map_err(anyhow::Error::msg)?;
             args.url = Some(url.to_string());
         }
+        prodex_provider_core::ProviderId::Kiro
+            if args.cli == Some(SuperCliAgent::Kiro) && args.provider.is_none() => {}
         provider => {
             args.provider = SuperExternalProvider::from_provider_id(provider);
         }
@@ -308,7 +312,7 @@ mod sub_agent_prompt_tests {
         super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
     };
     use super::{
-        ResolvedMainAgentConfig, codex_cli_config_override_value,
+        ResolvedMainAgentConfig, SUB_AGENT_RECURSION_MARKER, codex_cli_config_override_value,
         resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent, runtime_launch,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
@@ -737,21 +741,14 @@ mod sub_agent_prompt_tests {
 
     #[test]
     fn native_gemini_skips_unavailable_presidio_prompt() {
-        let _marker =
-            crate::test_support::TestEnvVarGuard::unset(super::SUB_AGENT_RECURSION_MARKER);
+        let _marker = crate::test_support::TestEnvVarGuard::unset(SUB_AGENT_RECURSION_MARKER);
         let mut args = super_args(&["--cli", "gemini", "--provider", "gemini"]);
         let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
             &mut args,
             true,
             || panic!("native Gemini must not prompt for unavailable Presidio"),
             |_| Ok(None),
-            |_, _| {
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::Gemini,
-                    model: None,
-                    local_url: None,
-                })
-            },
+            |_, _| panic!("explicit native Gemini must skip the picker"),
             |_| Ok(None),
         )
         .expect("native Gemini should resolve without Presidio");
@@ -759,6 +756,9 @@ mod sub_agent_prompt_tests {
         assert!(!presidio);
         assert_eq!(main_agent.provider, ProviderId::Gemini);
         assert!(sub_agent.is_none());
+        assert!(args.provider.is_some());
+        assert!(args.url.is_none());
+        crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args).unwrap();
     }
 
     #[test]

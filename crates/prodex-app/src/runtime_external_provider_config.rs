@@ -5,6 +5,7 @@ use crate::{
     codex_effective_config_value,
 };
 use anyhow::{Context, Result, bail};
+use catalog_model::external_catalog_model;
 use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
@@ -13,12 +14,15 @@ use prodex_cli::{
     SUPER_KIRO_DEFAULT_CONTEXT_WINDOW, SUPER_KIRO_DEFAULT_MODEL, SUPER_KIRO_PROVIDER_ID,
     super_copilot_prompt_token_limit_for_model,
 };
+use prodex_provider_core::ProviderId;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+mod catalog_model;
 
 const EXTERNAL_MODEL_CATALOG_FILE: &str = "prodex-external-provider-model-catalog.json";
 pub(crate) const COPILOT_RUNTIME_MODEL_CATALOG_FILE: &str =
@@ -371,73 +375,15 @@ fn copilot_catalog_entry_prompt_token_limit(model: &serde_json::Value) -> Option
         .filter(|tokens| *tokens > 1)
 }
 
-fn external_catalog_model(
-    provider: ExternalCatalogProvider,
-    slug: &str,
-    display_name: &str,
-    description: &str,
-    priority: usize,
-    context_window: u64,
-    auto_compact_token_limit: u64,
-) -> serde_json::Value {
-    let kiro = matches!(provider, ExternalCatalogProvider::Kiro);
-    json!({
-        "slug": slug,
-        "display_name": display_name,
-        "description": description,
-        "default_reasoning_level": "high",
-        "supported_reasoning_levels": [
-            {
-                "effort": "low",
-                "description": "Low reasoning effort"
-            },
-            {
-                "effort": "medium",
-                "description": "Medium reasoning effort"
-            },
-            {
-                "effort": "high",
-                "description": "High reasoning effort"
-            },
-            {
-                "effort": "xhigh",
-                "description": "Max reasoning effort"
-            }
-        ],
-        "shell_type": "shell_command",
-        "visibility": "list",
-        "supported_in_api": true,
-        "priority": priority,
-        "additional_speed_tiers": [],
-        "service_tiers": [],
-        "default_service_tier": null,
-        "availability_nux": null,
-        "upgrade": null,
-        "base_instructions": "",
-        "supports_reasoning_summaries": !kiro,
-        "supports_reasoning_summary_parameter": !kiro,
-        "default_reasoning_summary": "none",
-        "support_verbosity": false,
-        "default_verbosity": null,
-        "apply_patch_tool_type": "freeform",
-        "web_search_tool_type": "text",
-        "truncation_policy": {
-            "mode": "tokens",
-            "limit": 10000
-        },
-        "supports_parallel_tool_calls": true,
-        "supports_image_detail_original": false,
-        "context_window": context_window,
-        "max_context_window": context_window,
-        "auto_compact_token_limit": auto_compact_token_limit,
-        "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
-        "input_modalities": (if kiro { json!(["text"]) } else { json!(["text", "image"]) }),
-        "supports_search_tool": !kiro
-    })
-}
-
 impl ExternalCatalogProvider {
+    fn provider_id(self) -> ProviderId {
+        match self {
+            Self::Anthropic => ProviderId::Anthropic,
+            Self::Copilot => ProviderId::Copilot,
+            Self::Kiro => ProviderId::Kiro,
+        }
+    }
+
     fn default_model(self) -> &'static str {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_MODEL,
@@ -641,11 +587,18 @@ impl ExternalCatalogProvider {
                     "Legacy GPT-5.1 Codex entry kept for GitHub Copilot compatibility.",
                 ),
             ],
-            Self::Kiro => &[(
-                "auto",
-                "Kiro Auto",
-                "Kiro selects the model for the task using the imported account catalog.",
-            )],
+            Self::Kiro => &[
+                (
+                    "auto",
+                    "Kiro Auto",
+                    "Kiro selects the model for the task using the imported account catalog.",
+                ),
+                (
+                    "gpt-5.6-luna",
+                    "GPT-5.6 Luna",
+                    "GPT-5.6 Luna model exposed through Kiro CLI.",
+                ),
+            ],
         }
     }
 
@@ -779,6 +732,18 @@ mod tests {
         assert_eq!(model["supports_search_tool"], false);
         assert_eq!(model["supports_reasoning_summaries"], false);
         assert_eq!(model["supports_reasoning_summary_parameter"], false);
+        let luna = &catalog["models"][2];
+        assert_eq!(luna["slug"], "gpt-5.6-luna");
+        assert_eq!(luna["default_reasoning_level"], "medium");
+        assert_eq!(
+            luna["supported_reasoning_levels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|level| level["effort"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["none", "low", "medium", "high", "xhigh", "max"]
+        );
     }
 
     #[test]

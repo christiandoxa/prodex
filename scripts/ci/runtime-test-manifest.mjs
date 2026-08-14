@@ -617,6 +617,10 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 
 export const RUNTIME_CI_TEST_CASES = [
   {
+    name: "weekly_exhausted_profile_is_not_a_ready_quota_fallback",
+    tags: [TAGS.parallelSafe],
+  },
+  {
     id: "anthropic-request-translation",
     filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
     label: "parallel-safe-anthropic-request-translation",

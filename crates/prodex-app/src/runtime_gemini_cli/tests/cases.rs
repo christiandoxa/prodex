@@ -600,6 +600,26 @@ fn native_kiro_cli_injects_chat_model_when_needed() {
 }
 
 #[test]
+fn native_kiro_cli_maps_resume_session_id() {
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    assert_eq!(
+        runtime_super_native_cli_launch_args(
+            SuperCliAgent::Kiro,
+            &[OsString::from(session_id), OsString::from("continue")],
+            Some("gpt-5.6-luna"),
+        ),
+        vec![
+            OsString::from("chat"),
+            OsString::from("--resume-id"),
+            OsString::from(session_id),
+            OsString::from("--model"),
+            OsString::from("gpt-5.6-luna"),
+            OsString::from("continue"),
+        ]
+    );
+}
+
+#[test]
 fn native_kiro_cli_keeps_explicit_model_flag() {
     let args = [OsString::from("--model"), OsString::from("existing-model")];
     assert_eq!(

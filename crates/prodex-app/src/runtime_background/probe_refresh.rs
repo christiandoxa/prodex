@@ -26,7 +26,7 @@ pub(crate) use queue::{
 };
 #[cfg(test)]
 pub(crate) use startup::runtime_profiles_needing_startup_probe_refresh;
-pub(crate) use startup::{run_runtime_probe_jobs_inline, schedule_runtime_startup_probe_warmup};
+pub(crate) use startup::schedule_runtime_startup_probe_warmup;
 #[cfg(test)]
 pub(crate) use worker::runtime_probe_refresh_take_next_job;
 

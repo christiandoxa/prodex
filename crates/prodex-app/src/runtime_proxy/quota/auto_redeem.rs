@@ -43,7 +43,7 @@ pub(crate) fn refresh_runtime_auto_redeem_pool_missing_quota(
     route_kind: RuntimeRouteKind,
     excluded_profiles: &BTreeSet<String>,
     context: &str,
-) -> Result<()> {
+) -> Result<bool> {
     pool::refresh_runtime_auto_redeem_pool_missing_quota(
         shared,
         route_kind,
@@ -64,12 +64,21 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
     }
     if prefer_best_pool_profile {
         let excluded_profiles = BTreeSet::new();
-        refresh_runtime_auto_redeem_pool_missing_quota(
+        if refresh_runtime_auto_redeem_pool_missing_quota(
             shared,
             route_kind,
             &excluded_profiles,
             context,
-        )?;
+        )? {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "{context}_auto_redeem_deferred profile={profile_name} route={} reason=pool_probe_pending",
+                    runtime_route_kind_label(route_kind),
+                ),
+            );
+            return Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
+        }
         if let Some(weekly_profile_name) = runtime_auto_redeem_pool_has_weekly_remaining_profile(
             shared,
             route_kind,

@@ -688,7 +688,7 @@ mod tests {
     fn effort_suggestions_fall_back_for_dynamic_models() {
         assert_eq!(
             canonical_sub_agent_efforts(ProviderId::Kiro, Some("account-only-model")),
-            SubAgentReasoningEffort::ALL.to_vec()
+            canonical_sub_agent_efforts(ProviderId::Kiro, None)
         );
     }
 

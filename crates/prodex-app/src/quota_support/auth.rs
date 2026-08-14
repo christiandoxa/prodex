@@ -617,9 +617,23 @@ fn refresh_usage_auth_file(
     refresh_token: &str,
     upstream_no_proxy: bool,
 ) -> Result<()> {
-    let mut auth_json = read_auth_json_value(codex_home)?;
     let refreshed =
         request_chatgpt_auth_refresh_with_lease(codex_home, refresh_token, upstream_no_proxy)?;
+    commit_chatgpt_refresh_if_current(codex_home, refresh_token, refreshed)
+}
+
+fn commit_chatgpt_refresh_if_current(
+    codex_home: &Path,
+    refresh_token: &str,
+    refreshed: prodex_quota::ChatgptRefreshResponse,
+) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let _lock = crate::profile_commands::acquire_profile_lifecycle_lock(&paths)?;
+    let latest = read_usage_auth(codex_home)?;
+    if latest.refresh_token.as_deref() != Some(refresh_token) {
+        return Ok(());
+    }
+    let mut auth_json = read_auth_json_value(codex_home)?;
     apply_chatgpt_refresh(&mut auth_json, refreshed)?;
     write_auth_json_value(codex_home, &auth_json)
 }
@@ -715,11 +729,7 @@ fn request_chatgpt_auth_refresh_direct(
         "failed to read auth refresh body",
     )?);
     if !status.is_success() {
-        bail!(
-            "failed to refresh ChatGPT auth (HTTP {}): {}",
-            status.as_u16(),
-            body.as_str()
-        );
+        bail!("failed to refresh ChatGPT auth (HTTP {})", status.as_u16());
     }
 
     serde_json::from_str(&body).context("failed to parse auth refresh JSON")
