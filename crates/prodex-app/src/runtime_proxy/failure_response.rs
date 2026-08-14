@@ -70,14 +70,7 @@ pub(crate) fn runtime_proxy_final_retryable_http_failure_response(
         }
     };
     match last_failure {
-        Some((response, false)) => Some(response),
-        Some((_, true)) => {
-            let message = runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
-                saw_inflight_saturation,
-                runtime_proxy_local_selection_failure_message(),
-            );
-            Some(service_unavailable(message))
-        }
+        Some((response, _)) => Some(response),
         None if saw_inflight_saturation => {
             let message = runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
                 saw_inflight_saturation,
@@ -94,7 +87,7 @@ pub(crate) fn runtime_proxy_final_responses_failure_reply(
     saw_inflight_saturation: bool,
 ) -> RuntimeResponsesReply {
     match last_failure {
-        Some((failure, false)) => match failure {
+        Some((failure, _)) => match failure {
             RuntimeUpstreamFailureResponse::Http(response) => match response {
                 RuntimeResponsesReply::Buffered(parts) => RuntimeResponsesReply::Buffered(
                     runtime_proxy_translate_previous_response_http_parts(parts),
@@ -126,7 +119,7 @@ pub(crate) fn send_runtime_proxy_final_websocket_failure(
     saw_inflight_saturation: bool,
 ) -> Result<()> {
     match last_failure {
-        Some((failure, false)) => match failure {
+        Some((failure, _)) => match failure {
             RuntimeUpstreamFailureResponse::Websocket(payload)
                 if runtime_websocket_error_payload_is_previous_response_not_found(&payload) =>
             {
@@ -163,4 +156,42 @@ pub(crate) fn send_runtime_proxy_stale_continuation_websocket_error(
         "stale_continuation",
         runtime_proxy_stale_continuation_message(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_exhaustion_preserves_an_existing_upstream_quota_response() {
+        let response = build_runtime_proxy_text_response(429, "upstream quota");
+        let response =
+            runtime_proxy_final_retryable_http_failure_response(Some((response, true)), true, true)
+                .expect("upstream response should be preserved");
+        assert_eq!(response.status_code().0, 429);
+
+        let reply = runtime_proxy_final_responses_failure_reply(
+            Some((
+                RuntimeUpstreamFailureResponse::Http(RuntimeResponsesReply::Buffered(
+                    build_runtime_proxy_json_error_parts(
+                        429,
+                        "insufficient_quota",
+                        "upstream quota",
+                    ),
+                )),
+                true,
+            )),
+            true,
+        );
+        let RuntimeResponsesReply::Buffered(parts) = reply else {
+            panic!("quota response should remain buffered");
+        };
+        assert_eq!(parts.status, 429);
+        assert!(
+            parts
+                .body
+                .windows(14)
+                .any(|window| window == b"upstream quota")
+        );
+    }
 }

@@ -16,6 +16,8 @@ mod helpers;
 mod pre_send;
 #[path = "admission/pressure_budget.rs"]
 mod pressure_budget;
+#[path = "admission/quota_fallback.rs"]
+mod quota_fallback;
 #[path = "admission/previous_response.rs"]
 mod previous_response;
 #[path = "admission/response_affinity.rs"]

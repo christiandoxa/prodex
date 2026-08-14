@@ -21,8 +21,11 @@ pub(crate) fn canonical_sub_agent_efforts(
     model: Option<&str>,
 ) -> Vec<SubAgentReasoningEffort> {
     let Some(catalog_efforts) = model
-        .or_else(|| provider_runtime_metadata(provider).map(|metadata| metadata.default_model))
         .and_then(|model| provider_catalog_entry(provider, model))
+        .or_else(|| {
+            provider_runtime_metadata(provider)
+                .and_then(|metadata| provider_catalog_entry(provider, metadata.default_model))
+        })
         .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
     else {
         return SubAgentReasoningEffort::ALL.to_vec();

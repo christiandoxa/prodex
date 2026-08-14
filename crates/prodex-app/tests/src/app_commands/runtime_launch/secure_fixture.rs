@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn temp_dir(name: &str) -> PathBuf {
-    let dir = env::temp_dir().join(format!(
+    let dir = env::temp_dir().canonicalize().unwrap().join(format!(
         "prodex-runtime-launch-{name}-{}-{}",
         std::process::id(),
         SystemTime::now()

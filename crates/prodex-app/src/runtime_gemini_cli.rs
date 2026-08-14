@@ -331,6 +331,27 @@ fn runtime_super_native_cli_launch_args(
 }
 
 fn runtime_super_kiro_cli_launch_args(args: &[OsString], model: Option<&str>) -> Vec<OsString> {
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(args);
+    if let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized)
+        && let Some(target_index) = normalized
+            .iter()
+            .position(|arg| arg.to_str() == Some(session_id))
+    {
+        let mut launch_args = vec![
+            OsString::from("chat"),
+            OsString::from("--resume-id"),
+            OsString::from(session_id),
+        ];
+        if let Some(model) = model
+            && !normalized[target_index + 1..]
+                .iter()
+                .any(runtime_cli_arg_sets_model)
+        {
+            launch_args.extend([OsString::from("--model"), OsString::from(model)]);
+        }
+        launch_args.extend(normalized[target_index + 1..].iter().cloned());
+        return launch_args;
+    }
     if model.is_none() || args.iter().any(runtime_cli_arg_sets_model) {
         return args.to_vec();
     }

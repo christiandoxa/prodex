@@ -3,12 +3,12 @@
 use super::super::{
     RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT, RuntimeRotationProxyShared, RuntimeRouteKind,
     active_profile_selection_order, prune_runtime_profile_selection_backoff,
-    run_runtime_probe_jobs_inline, runtime_profile_auth_failure_active_from_map,
-    runtime_profile_health_score, runtime_profile_inflight_soft_limit_for_shared,
-    runtime_profile_inflight_sort_key, runtime_profile_name_in_selection_backoff,
-    runtime_profile_route_circuit_open_until, runtime_profile_transport_backoff_until_from_map,
-    runtime_proxy_log, runtime_proxy_pressure_mode_active_for_route,
-    runtime_quota_summary_for_route, runtime_route_kind_label,
+    runtime_profile_auth_failure_active_from_map, runtime_profile_health_score,
+    runtime_profile_inflight_soft_limit_for_shared, runtime_profile_inflight_sort_key,
+    runtime_profile_name_in_selection_backoff, runtime_profile_route_circuit_open_until,
+    runtime_profile_transport_backoff_until_from_map, runtime_proxy_log,
+    runtime_proxy_pressure_mode_active_for_route, runtime_quota_summary_for_route,
+    runtime_route_kind_label, schedule_runtime_probe_refresh,
 };
 use super::summary::{
     runtime_auto_redeem_quota_summary_has_weekly_remaining,
@@ -44,7 +44,7 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
     route_kind: RuntimeRouteKind,
     excluded_profiles: &BTreeSet<String>,
     context: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
@@ -94,18 +94,21 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
             .collect::<Vec<_>>()
     };
 
-    if !jobs.is_empty() {
+    let scheduled = !jobs.is_empty();
+    if scheduled {
         runtime_proxy_log(
             shared,
             format!(
-                "{context}_auto_redeem_pool_probe_start route={} jobs={}",
+                "{context}_auto_redeem_pool_probe_scheduled route={} jobs={}",
                 runtime_route_kind_label(route_kind),
                 jobs.len(),
             ),
         );
-        run_runtime_probe_jobs_inline(shared, jobs, &format!("{context}_auto_redeem_pool_probe"));
+        for (profile_name, codex_home) in jobs {
+            schedule_runtime_probe_refresh(shared, &profile_name, &codex_home);
+        }
     }
-    Ok(())
+    Ok(scheduled)
 }
 
 pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(

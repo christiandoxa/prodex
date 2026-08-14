@@ -216,7 +216,10 @@ fn runtime_responses_auto_redeems_reset_credit_before_rotating() {
             assert_eq!(response.status, 200);
         }
     }
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "main-account".to_string()]
+    );
     let consume_bodies = backend.reset_credit_consume_bodies();
     assert_eq!(consume_bodies.len(), 1);
     let consume_body: serde_json::Value =
@@ -229,7 +232,7 @@ fn runtime_responses_auto_redeems_reset_credit_before_rotating() {
     );
     assert!(
         crate::read_runtime_proxy_test_log(&shared.log_path)
-            .contains("responses_precommit_reprobe_auto_redeem_result")
+            .contains("responses_quota_blocked_auto_redeem_result")
     );
     let runtime = shared.runtime.lock().expect("runtime lock should succeed");
     let cached_usage = runtime
@@ -434,7 +437,7 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string()]
+        vec!["main-account".to_string(), "main-account".to_string()]
     );
     assert!(
         backend
@@ -444,13 +447,13 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
         "Plus account should be probed before redeem when its quota cache is missing"
     );
     assert!(
-        log.contains("selection_pick route=responses profile=main mode=auto_redeem"),
+        log.contains("selection_pre_rank_auto_redeem_pool_probe_scheduled"),
         "{log}"
     );
-    assert!(!log.contains("candidate=second"), "{log}");
+    assert!(log.contains("committed profile=main"), "{log}");
 }
 #[test]
-fn runtime_auto_redeem_waits_while_another_profile_has_weekly_remaining() {
+fn runtime_auto_redeem_defers_while_pool_quota_probe_is_pending() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_auto_redeem();
     let second_home = temp_dir.path.join("homes/second");
@@ -539,18 +542,12 @@ fn runtime_auto_redeem_waits_while_another_profile_has_weekly_remaining() {
     .expect("auto-redeem decision should succeed");
     assert_eq!(outcome, RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
     assert!(
-        backend
-            .usage_accounts()
-            .iter()
-            .any(|account| account == "third-account"),
-        "profile with weekly remaining should be probed before deciding whether redeem is allowed"
-    );
-    assert!(
         backend.reset_credit_consume_accounts().is_empty(),
-        "redeem must not consume a credit while another profile still has weekly quota"
+        "redeem must not consume a credit while another profile's quota is loading"
     );
     let log = crate::read_runtime_proxy_test_log(&shared.log_path);
-    assert!(log.contains("reason=weekly_pool_profile"));
+    assert!(log.contains("auto_redeem_pool_probe_scheduled"));
+    assert!(log.contains("reason=pool_probe_pending"));
 }
 #[test]
 fn read_auth_summary_classifies_api_key_auth() {

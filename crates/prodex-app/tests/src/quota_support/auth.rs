@@ -244,8 +244,76 @@ fn usage_request_retries_one_transient_disconnect() {
     server.join().unwrap();
 }
 
+#[test]
+fn refresh_commit_does_not_overwrite_a_new_login() {
+    let root = temp_dir("refresh-login-race");
+    let codex_home = root.join("profiles/main/codex");
+    secret_store::ensure_private_directory(&codex_home).unwrap();
+    let _home = crate::test_support::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    write_auth_json_value(
+        &codex_home,
+        &serde_json::json!({
+            "tokens": {
+                "access_token": "new-login-access",
+                "refresh_token": "new-login-refresh"
+            }
+        }),
+    )
+    .unwrap();
+
+    commit_chatgpt_refresh_if_current(
+        &codex_home,
+        "old-refresh",
+        prodex_quota::ChatgptRefreshResponse {
+            id_token: None,
+            access_token: Some("stale-refresh-access".to_string()),
+            refresh_token: Some("stale-refresh-token".to_string()),
+        },
+    )
+    .unwrap();
+
+    let stored = fs::read_to_string(secret_store::auth_json_path(&codex_home)).unwrap();
+    assert!(stored.contains("new-login-access"));
+    assert!(!stored.contains("stale-refresh-access"));
+}
+
+#[test]
+fn auth_refresh_http_error_does_not_expose_provider_body() {
+    let root = temp_dir("refresh-error-redaction");
+    fs::create_dir_all(&root).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).unwrap();
+        let body = b"provider-secret-sentinel";
+        write!(
+            stream,
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        stream.write_all(body).unwrap();
+    });
+    let _env_lock = crate::test_support::TestEnvVarGuard::lock();
+    let _endpoint = crate::test_support::TestEnvVarGuard::set(
+        CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV,
+        &format!("http://{address}/refresh"),
+    );
+
+    let error = request_chatgpt_auth_refresh_direct(&root, "test-refresh-token", true)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("HTTP 400"), "{error}");
+    assert!(!error.contains("provider-secret-sentinel"), "{error}");
+    assert!(!error.contains("test-refresh-token"), "{error}");
+    server.join().unwrap();
+}
+
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = env::temp_dir().join(format!(
+    let dir = env::temp_dir().canonicalize().unwrap().join(format!(
         "prodex-auth-summary-{name}-{}-{}",
         std::process::id(),
         SystemTime::now()

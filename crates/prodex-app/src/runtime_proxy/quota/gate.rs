@@ -73,14 +73,14 @@ fn runtime_has_route_quota_fallback(
             route_kind,
             now,
         );
-        if source.is_some() && runtime_quota_precommit_guard_reason(summary, route_kind).is_none() {
+        if runtime_quota_summary_allows_soft_affinity(summary, source, route_kind) {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-pub(crate) fn refresh_runtime_profile_quota_inline(
+pub(crate) fn schedule_runtime_profile_quota_refresh(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     context: &str,
@@ -88,34 +88,31 @@ pub(crate) fn refresh_runtime_profile_quota_inline(
     let Some(codex_home) = runtime_profile_codex_home(shared, profile_name)? else {
         return Ok(());
     };
-    runtime_proxy_log(shared, format!("{context}_start profile={profile_name}"));
-    run_runtime_probe_jobs_inline(
+    runtime_proxy_log(
         shared,
-        vec![(profile_name.to_string(), codex_home)],
-        context,
+        format!("{context}_scheduled profile={profile_name}"),
     );
+    schedule_runtime_probe_refresh(shared, profile_name, &codex_home);
     Ok(())
 }
 
-pub(crate) fn ensure_runtime_profile_precommit_quota_ready(
+pub(crate) fn runtime_profile_precommit_quota_summary(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     route_kind: RuntimeRouteKind,
     context: &str,
-    force_live_probe: bool,
+    schedule_live_probe: bool,
 ) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
-    let (mut quota_summary, mut quota_source) =
+    let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-    if force_live_probe
+    if schedule_live_probe
         || runtime_quota_summary_requires_precommit_live_probe(
             quota_summary,
             quota_source,
             route_kind,
         )
     {
-        refresh_runtime_profile_quota_inline(shared, profile_name, context)?;
-        (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        schedule_runtime_profile_quota_refresh(shared, profile_name, context)?;
     }
     Ok((quota_summary, quota_source))
 }
@@ -172,17 +169,17 @@ pub(crate) fn runtime_precommit_quota_gate(
 
     let has_alternative_quota_profile =
         runtime_has_route_ready_quota_fallback(shared, profile_name, &BTreeSet::new(), route_kind)?;
-    let force_live_probe = runtime_precommit_quota_gate_forces_live_probe(
+    let schedule_live_probe = runtime_precommit_quota_gate_schedules_live_probe(
         initial_quota_source,
         route_kind,
         has_continuation_context,
     );
-    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
+    let (quota_summary, quota_source) = runtime_profile_precommit_quota_summary(
         shared,
         profile_name,
         route_kind,
         reprobe_context,
-        force_live_probe,
+        schedule_live_probe,
     )?;
 
     match prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
@@ -204,7 +201,7 @@ pub(crate) fn runtime_precommit_quota_gate(
                 )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
             {
                 let (redeemed_quota_summary, redeemed_quota_source) =
-                    ensure_runtime_profile_precommit_quota_ready(
+                    runtime_profile_precommit_quota_summary(
                         shared,
                         profile_name,
                         route_kind,
@@ -233,7 +230,7 @@ pub(crate) fn runtime_precommit_quota_gate(
     Ok(RuntimePrecommitQuotaGateDecision::Proceed)
 }
 
-fn runtime_precommit_quota_gate_forces_live_probe(
+fn runtime_precommit_quota_gate_schedules_live_probe(
     source: Option<RuntimeQuotaSource>,
     route_kind: RuntimeRouteKind,
     has_continuation_context: bool,
@@ -251,13 +248,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn continuation_main_routes_force_live_quota_probe_without_live_source() {
-        assert!(runtime_precommit_quota_gate_forces_live_probe(
+    fn continuation_main_routes_schedule_live_quota_probe_without_live_source() {
+        assert!(runtime_precommit_quota_gate_schedules_live_probe(
             Some(RuntimeQuotaSource::PersistedSnapshot),
             RuntimeRouteKind::Websocket,
             true,
         ));
-        assert!(runtime_precommit_quota_gate_forces_live_probe(
+        assert!(runtime_precommit_quota_gate_schedules_live_probe(
             None,
             RuntimeRouteKind::Responses,
             true,
@@ -265,18 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn precommit_live_probe_force_skips_fresh_or_non_continuation_routes() {
-        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+    fn precommit_live_probe_schedule_skips_fresh_or_non_continuation_routes() {
+        assert!(!runtime_precommit_quota_gate_schedules_live_probe(
             Some(RuntimeQuotaSource::LiveProbe),
             RuntimeRouteKind::Websocket,
             true,
         ));
-        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+        assert!(!runtime_precommit_quota_gate_schedules_live_probe(
             Some(RuntimeQuotaSource::PersistedSnapshot),
             RuntimeRouteKind::Standard,
             true,
         ));
-        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+        assert!(!runtime_precommit_quota_gate_schedules_live_probe(
             Some(RuntimeQuotaSource::PersistedSnapshot),
             RuntimeRouteKind::Responses,
             false,
