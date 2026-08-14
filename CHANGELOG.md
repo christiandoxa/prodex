@@ -2,10 +2,11 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.408.3 - 2026-08-14
+## 0.408.4 - 2026-08-14
 
 ### CLI
 
+- Align Kiro effort and persisted quota fallback (`88286e5`)
 - Preserve model and quota readiness across profiles (`554bc5a`)
 
 ## 0.408.2 - 2026-08-13
