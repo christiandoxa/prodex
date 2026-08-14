@@ -104,6 +104,26 @@ fn exact_cli_override_preserves_empty_and_quoted_whitespace() {
 }
 
 #[test]
+fn repeated_cli_overrides_use_the_last_value_before_literal_boundary() {
+    let args = [
+        OsString::from("-c"),
+        OsString::from("model='first'"),
+        OsString::from("--config=model='last'"),
+        OsString::from("--"),
+        OsString::from("--config=model='ignored'"),
+    ];
+
+    assert_eq!(
+        codex_cli_config_override_value(&args, "model").as_deref(),
+        Some("last")
+    );
+    assert_eq!(
+        codex_cli_config_override_exact_value(&args, "model").as_deref(),
+        Some("last")
+    );
+}
+
+#[test]
 fn cli_override_takes_precedence_over_config_file() {
     let root = temp_dir("cli-override-precedence");
     fs::create_dir_all(&root).unwrap();
@@ -221,6 +241,36 @@ fn profile_v2_config_is_used_for_args_when_no_cli_override_exists() {
     assert_eq!(
         provider.source,
         CodexModelProviderSource::ProfileV2ConfigFile
+    );
+}
+
+#[test]
+fn effective_config_helpers_include_profile_v2_overlays() {
+    let root = temp_dir("profile-v2-effective");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        "model = 'base-model'\nmodel_context_window = '128000'\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("selected.config.toml"),
+        "model = 'profile-model'\nmodel_context_window = ''\n",
+    )
+    .unwrap();
+    let args = [OsString::from("--profile=selected")];
+
+    assert_eq!(
+        codex_effective_config_value(&root, &args, "model")
+            .unwrap()
+            .as_deref(),
+        Some("profile-model")
+    );
+    assert_eq!(
+        codex_effective_config_exact_value(&root, &args, "model_context_window")
+            .unwrap()
+            .as_deref(),
+        Some("")
     );
 }
 

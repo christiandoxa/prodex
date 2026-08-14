@@ -104,7 +104,7 @@ fn runtime_launch_preflight_error_message_redacts_secret_like_chain() {
 }
 
 #[test]
-fn persisted_weekly_only_snapshot_blocks_launch_preflight() {
+fn persisted_weekly_only_snapshot_allows_launch_preflight() {
     let usage = runtime_launch_usage_from_snapshot(&RuntimeProfileUsageSnapshot {
         checked_at: Local::now().timestamp(),
         plan_type: None,
@@ -117,10 +117,7 @@ fn persisted_weekly_only_snapshot_blocks_launch_preflight() {
     });
 
     assert!(usage.rate_limit.as_ref().unwrap().primary_window.is_none());
-    assert_eq!(
-        format_blocked_limits(&collect_blocked_limits(&usage, false)),
-        "quota unavailable"
-    );
+    assert!(collect_blocked_limits(&usage, false).is_empty());
 }
 
 #[test]

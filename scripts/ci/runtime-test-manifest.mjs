@@ -675,7 +675,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "runtime_proxy_waits_for_responses_inflight_relief_then_succeeds",
+    name: "runtime_proxy_waits_for_one_responses_slot_then_succeeds_past_soft_limit",
     tags: SERIALIZED_TAGS,
   },
   {

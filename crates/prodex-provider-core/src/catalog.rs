@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn copilot_luna_and_kiro_auto_expose_verified_efforts() {
+    fn copilot_and_kiro_luna_expose_verified_efforts() {
         let copilot = provider_catalog_entry(ProviderId::Copilot, "gpt-5.6-luna").unwrap();
         assert!(
             copilot
@@ -332,11 +332,12 @@ mod tests {
                 .as_ref()
                 .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Max))
         );
-        let kiro = provider_catalog_entry(ProviderId::Kiro, "auto").unwrap();
+        let kiro = provider_catalog_entry(ProviderId::Kiro, "gpt-5.6-luna").unwrap();
         assert_eq!(
             kiro.supported_reasoning_efforts.as_deref(),
             Some(
                 [
+                    ProviderReasoningEffort::None,
                     ProviderReasoningEffort::Low,
                     ProviderReasoningEffort::Medium,
                     ProviderReasoningEffort::High,

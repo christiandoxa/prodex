@@ -583,7 +583,7 @@ fn quota_watch_snapshot_with_auth_backoff(
     };
     let mut reports = reports.clone();
     for report in &mut reports {
-        if auth_backoff_profiles.contains(&report.name) {
+        if report.result.is_err() && auth_backoff_profiles.contains(&report.name) {
             report.result = Err(format!(
                 "unauthorized: runtime saw token invalidated for {}; run `prodex login {}` again",
                 report.name, report.name

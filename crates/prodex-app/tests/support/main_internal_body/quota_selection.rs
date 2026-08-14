@@ -59,7 +59,7 @@ fn allows_available_main_window_when_weekly_window_is_missing() {
 }
 
 #[test]
-fn does_not_allow_available_weekly_window_when_five_hour_window_is_missing() {
+fn allows_available_weekly_window_when_five_hour_window_is_missing() {
     let usage = UsageResponse {
         email: None,
         plan_type: None,
@@ -76,10 +76,7 @@ fn does_not_allow_available_weekly_window_when_five_hour_window_is_missing() {
         additional_rate_limits: Vec::new(),
     };
 
-    assert_eq!(
-        format_blocked_limits(&collect_blocked_limits(&usage, false)),
-        "quota unavailable"
-    );
+    assert!(collect_blocked_limits(&usage, false).is_empty());
 }
 
 #[test]

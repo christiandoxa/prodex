@@ -1874,6 +1874,44 @@
   {
     "provider": "kiro",
     "owned_by": "kiro-cli",
+    "id": "gpt-5.6-luna",
+    "display_name": "GPT-5.6 Luna",
+    "description": "GPT-5.6 Luna model exposed through Kiro CLI.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "luna"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
     "id": "auto",
     "display_name": "Kiro Auto",
     "description": "Kiro alias routed through the imported runtime model selection.",

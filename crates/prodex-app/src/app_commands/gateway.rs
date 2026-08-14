@@ -299,10 +299,11 @@ mod tests {
 
         let models =
             gateway_kiro_model_catalog_json_from_paths(&paths).expect("catalog should load");
-        assert_eq!(models.len(), 3);
-        assert_eq!(models[0]["id"], "auto");
-        assert_eq!(models[1]["id"], "claude-sonnet-4");
-        assert_eq!(models[2]["id"], "claude-sonnet-4.5");
+        assert_eq!(models.len(), 4);
+        assert_eq!(models[0]["id"], "gpt-5.6-luna");
+        assert_eq!(models[1]["id"], "auto");
+        assert_eq!(models[2]["id"], "claude-sonnet-4");
+        assert_eq!(models[3]["id"], "claude-sonnet-4.5");
 
         fs::write(
             first_home.join(KIRO_MODEL_CATALOG_FILE),
@@ -366,7 +367,7 @@ mod tests {
         assert_eq!(spec["provider"], "kiro");
         assert_eq!(spec["supports_streaming"], true);
         assert_eq!(spec["transform_status"], "translated");
-        assert_eq!(spec["model_count"], 2);
+        assert_eq!(spec["model_count"], 3);
         assert_eq!(spec["endpoint_status"][2]["endpoint"], "chat-completions");
         assert_eq!(spec["endpoint_status"][2]["streaming"], true);
         assert_eq!(spec["endpoint_status"][2]["tested"], true);

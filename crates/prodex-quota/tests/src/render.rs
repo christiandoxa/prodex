@@ -169,6 +169,7 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
             openai_quota_has_ready_limit(&plan_usage),
             "weekly-only quota should be ready for plan {plan}"
         );
+        assert!(collect_blocked_limits(&plan_usage, false).is_empty());
     }
     let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
     assert!(fields.contains(&("Available".to_string(), "1/1 profile".to_string())));
@@ -180,7 +181,7 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
 }
 
 #[test]
-fn unknown_five_hour_usage_keeps_weekly_display_ready_but_blocks_runtime() {
+fn unknown_five_hour_usage_does_not_block_available_weekly_runtime() {
     let usage = UsageResponse {
         email: None,
         plan_type: Some("plus".to_string()),
@@ -203,10 +204,7 @@ fn unknown_five_hour_usage_keeps_weekly_display_ready_but_blocks_runtime() {
 
     assert!(openai_quota_has_ready_limit(&usage));
     assert_eq!(format_openai_quota_status(&usage), "Ready");
-    assert_eq!(
-        format_blocked_limits(&collect_blocked_limits(&usage, false)),
-        "5h quota unknown"
-    );
+    assert!(collect_blocked_limits(&usage, false).is_empty());
 }
 
 #[test]
