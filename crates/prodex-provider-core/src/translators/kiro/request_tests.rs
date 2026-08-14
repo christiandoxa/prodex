@@ -89,6 +89,20 @@ fn kiro_provider_core_rejects_unenforceable_responses_controls() {
 }
 
 #[test]
+fn kiro_provider_core_accepts_catalogued_none_reasoning_effort() {
+    let request = json!({
+        "model": "gpt-5.6-luna",
+        "input": "hello",
+        "reasoning": {"effort": "none"}
+    });
+    let body =
+        kiro_provider_core_responses_request_body(&serde_json::to_vec(&request).unwrap(), false)
+            .unwrap();
+
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), request);
+}
+
+#[test]
 fn kiro_provider_core_validates_responses_shaped_chat_requests() {
     let missing =
         kiro_provider_core_chat_completions_request_body(br#"{"model":"auto"}"#).unwrap_err();

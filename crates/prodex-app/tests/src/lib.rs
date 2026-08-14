@@ -37,6 +37,17 @@ fn provider_default_efforts_follow_catalog_for_every_provider() {
             SubAgentReasoningEffort::Max,
         ]
     );
+    assert_eq!(
+        canonical_sub_agent_efforts(ProviderId::Kiro, Some("gpt-5.6-luna")),
+        [
+            SubAgentReasoningEffort::None,
+            SubAgentReasoningEffort::Low,
+            SubAgentReasoningEffort::Medium,
+            SubAgentReasoningEffort::High,
+            SubAgentReasoningEffort::XHigh,
+            SubAgentReasoningEffort::Max,
+        ]
+    );
 }
 
 #[test]

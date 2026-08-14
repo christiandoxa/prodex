@@ -62,18 +62,22 @@ pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot)
         email: None,
         plan_type: snapshot.plan_type.clone(),
         rate_limit: Some(WindowPair {
-            primary_window: Some(UsageWindow {
-                used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
-                reset_at: (snapshot.five_hour_reset_at != i64::MAX)
-                    .then_some(snapshot.five_hour_reset_at),
-                limit_window_seconds: Some(18_000),
-            }),
-            secondary_window: Some(UsageWindow {
-                used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
-                reset_at: (snapshot.weekly_reset_at != i64::MAX)
-                    .then_some(snapshot.weekly_reset_at),
-                limit_window_seconds: Some(604_800),
-            }),
+            primary_window: (snapshot.five_hour_status != RuntimeQuotaWindowStatus::Unknown).then(
+                || UsageWindow {
+                    used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
+                    reset_at: (snapshot.five_hour_reset_at != i64::MAX)
+                        .then_some(snapshot.five_hour_reset_at),
+                    limit_window_seconds: Some(18_000),
+                },
+            ),
+            secondary_window: (snapshot.weekly_status != RuntimeQuotaWindowStatus::Unknown).then(
+                || UsageWindow {
+                    used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
+                    reset_at: (snapshot.weekly_reset_at != i64::MAX)
+                        .then_some(snapshot.weekly_reset_at),
+                    limit_window_seconds: Some(604_800),
+                },
+            ),
         }),
         code_review_rate_limit: None,
         rate_limit_reset_credits: None,

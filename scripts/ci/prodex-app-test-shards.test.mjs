@@ -131,6 +131,15 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.ok(macosWorkspace, "macOS workspace job missing");
   assert.match(macosWorkspace, /CARGO_PROFILE_DEV_DEBUG: "0"/);
   assert.match(macosWorkspace, /CARGO_PROFILE_TEST_DEBUG: "0"/);
+  assert.match(macosWorkspace, /Run native macOS Kiro selector and resume tests/);
+  for (const filter of [
+    "provider_default_efforts_follow_catalog_for_every_provider",
+    "pure_interactive_resolution_prompts_presidio_before_resumed_sub_agent_config",
+    "resume_provider_bridge_leaves_the_session_model_authoritative",
+    "runtime_kiro_streaming_command_forwards_model_and_effort",
+  ]) {
+    assert.match(macosWorkspace, new RegExp(filter));
+  }
 
   for (const job of [
     "docs-lint",

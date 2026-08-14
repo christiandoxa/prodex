@@ -390,7 +390,10 @@ fn kiro_validate_response_reasoning(
         .and_then(|reasoning| reasoning.get("effort"))
         .or_else(|| object.get("reasoning_effort"))
         .and_then(Value::as_str)
-        && !matches!(effort.trim(), "low" | "medium" | "high" | "xhigh" | "max")
+        && !matches!(
+            effort.trim(),
+            "none" | "low" | "medium" | "high" | "xhigh" | "max"
+        )
     {
         return Err(KiroProviderCoreRequestError::new(
             format!("Kiro ACP does not support reasoning effort `{effort}`"),
