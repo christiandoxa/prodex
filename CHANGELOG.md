@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.408.4 - 2026-08-14
+## 0.408.3 - 2026-08-14
 
 ### CLI
 
