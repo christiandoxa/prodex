@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -6,7 +5,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn temp_dir(name: &str) -> PathBuf {
-    let dir = env::temp_dir().canonicalize().unwrap().join(format!(
+    let dir = crate::test_support::test_temp_root().join(format!(
         "prodex-runtime-launch-{name}-{}-{}",
         std::process::id(),
         SystemTime::now()
@@ -29,7 +28,7 @@ pub(super) fn write_runtime_launch_auth(
         fs::create_dir_all(parent).expect("failed to create runtime launch auth parent");
         #[cfg(unix)]
         {
-            let temp_root = env::temp_dir();
+            let temp_root = crate::test_support::test_temp_root();
             let mut directory = Some(parent);
             while let Some(current) = directory.filter(|current| *current != temp_root) {
                 fs::set_permissions(current, fs::Permissions::from_mode(0o700))

@@ -33,6 +33,18 @@ pub(crate) fn acquire_test_env_lock() -> TestEnvLockGuard {
     TestEnvLockGuard { _guard: guard }
 }
 
+pub(crate) fn test_temp_root() -> std::path::PathBuf {
+    let root = env::temp_dir();
+    #[cfg(target_os = "macos")]
+    {
+        return root
+            .canonicalize()
+            .expect("macOS test temp root should resolve");
+    }
+    #[cfg(not(target_os = "macos"))]
+    root
+}
+
 pub(crate) struct TestEnvVarGuard {
     _lock: Option<TestEnvLockGuard>,
     key: Option<&'static str>,

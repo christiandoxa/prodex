@@ -616,15 +616,15 @@ impl ExternalCatalogProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use {super::*, crate::test_support::test_temp_root};
 
     fn temp_codex_home(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("prodex-external-provider-config-{name}-{stamp}"))
+        test_temp_root().join(format!("prodex-external-provider-config-{name}-{stamp}"))
     }
 
     #[test]
