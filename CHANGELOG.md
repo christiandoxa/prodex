@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.408.3 - 2026-08-14
 
+### Runtime
+
+- Harden runtime rotation and provider selection (`5516be2`)
+
 ### CLI
 
 - Align Kiro effort and persisted quota fallback (`88286e5`)
