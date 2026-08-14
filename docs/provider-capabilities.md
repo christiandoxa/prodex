@@ -9,7 +9,7 @@ Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prod
 | copilot | 26 | passthrough | true | true | 10/5/2 | native | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | deepseek | 4 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | gemini | 19 | translated | true | true | 18/14/3 | translated | emulated | passthrough | passthrough | emulated | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
-| kiro | 1 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| kiro | 2 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | emulated | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
 
 Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.

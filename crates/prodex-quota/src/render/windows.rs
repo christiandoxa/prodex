@@ -111,13 +111,6 @@ pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
             .all(|used_percent| used_percent < 100)
 }
 
-fn main_window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    find_main_window(pair, "5h")
-        .and_then(|window| window.used_percent)
-        .is_some()
-        && window_pair_has_ready_limit(pair)
-}
-
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
     if usage
         .rate_limit
@@ -147,7 +140,7 @@ fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {
     if usage
         .rate_limit
         .as_ref()
-        .is_some_and(main_window_pair_has_ready_limit)
+        .is_some_and(window_pair_has_ready_limit)
     {
         return true;
     }

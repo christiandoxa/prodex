@@ -27,14 +27,14 @@ fn kiro_models_endpoint_augments_canonical_models_and_serves_each_entry() {
     let list = runtime_kiro_models_buffered_response(&auth, "GET", "/v1/models").unwrap();
     let body: Value = serde_json::from_slice(&list.body).unwrap();
     let models = body["data"].as_array().unwrap();
-    assert_eq!(models[0]["id"], "auto");
+    assert_eq!(models[0]["id"], "gpt-5.6-luna");
     assert!(
         models
             .iter()
             .any(|model| model["id"] == "account-only-model")
     );
 
-    for model_id in ["auto", "account-only-model"] {
+    for model_id in ["gpt-5.6-luna", "auto", "account-only-model"] {
         let response =
             runtime_kiro_models_buffered_response(&auth, "GET", &format!("/v1/models/{model_id}"))
                 .unwrap();

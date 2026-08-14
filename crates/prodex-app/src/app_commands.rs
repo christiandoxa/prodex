@@ -85,10 +85,8 @@ pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     ) {
         return crate::runtime_gemini_cli::handle_super_native_cli(args, use_presidio, sub_agent);
     }
-    handle_super_runtime_tools(
-        args.into_runtime_tool_args_with_presidio(use_presidio),
-        sub_agent,
-    )
+    let args = runtime_launch::resolved_super_runtime_tool_args(args, use_presidio);
+    handle_super_runtime_tools(args, sub_agent)
 }
 
 pub(super) fn resolve_super_sub_agent(
@@ -310,8 +308,8 @@ mod sub_agent_prompt_tests {
         super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
     };
     use super::{
-        ResolvedMainAgentConfig, resolve_super_launch_decisions_with_prompts,
-        resolve_super_sub_agent,
+        ResolvedMainAgentConfig, codex_cli_config_override_value,
+        resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent, runtime_launch,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
@@ -678,6 +676,8 @@ mod sub_agent_prompt_tests {
         assert!(!presidio);
         assert_eq!(main_agent.provider, ProviderId::Kiro);
         assert!(sub_agent.is_none());
+        let runtime_args = runtime_launch::resolved_super_runtime_tool_args(args, false);
+        assert!(codex_cli_config_override_value(&runtime_args.codex_args, "model").is_none());
     }
 
     #[test]

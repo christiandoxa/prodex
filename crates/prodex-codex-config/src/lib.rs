@@ -212,6 +212,22 @@ pub fn codex_config_value_for_args(
     codex_config_value_with_profile_v2(codex_home, key, profile_v2_name.as_deref())
 }
 
+fn codex_config_exact_value_for_args(
+    codex_home: &Path,
+    args: &[OsString],
+    key: &str,
+) -> CodexConfigResult<Option<String>> {
+    if let Some(value) = codex_cli_profile_v2_name(args)
+        .and_then(|name| codex_profile_v2_config_path(codex_home, &name))
+        .map(|path| codex_config_file_exact_value(&path, key))
+        .transpose()?
+        .flatten()
+    {
+        return Ok(Some(value));
+    }
+    codex_config_exact_value(codex_home, key)
+}
+
 pub fn codex_configured_model_provider(codex_home: &Path) -> CodexConfigResult<Option<String>> {
     codex_config_value(codex_home, "model_provider")
 }
@@ -225,6 +241,7 @@ pub fn codex_configured_model_provider_with_profile_v2(
 
 pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<String> {
     let mut index = 0;
+    let mut found = None;
     while index < args.len() {
         let Some(arg) = args[index].to_str() else {
             index += 1;
@@ -235,7 +252,7 @@ pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<S
         }
         let assignment = if matches!(arg, "-c" | "--config") {
             index += 1;
-            args.get(index)?.to_str()
+            args.get(index).and_then(|value| value.to_str())
         } else if let Some(value) = arg.strip_prefix("--config=") {
             Some(value)
         } else if let Some(value) = arg.strip_prefix("-c") {
@@ -244,15 +261,16 @@ pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<S
             None
         };
         if let Some(value) = assignment.and_then(|value| parse_config_override_string(value, key)) {
-            return Some(value);
+            found = Some(value);
         }
         index += 1;
     }
-    None
+    found
 }
 
 pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Option<String> {
     let mut index = 0;
+    let mut found = None;
     while index < args.len() {
         let Some(arg) = args[index].to_str() else {
             index += 1;
@@ -263,7 +281,7 @@ pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Op
         }
         let assignment = if matches!(arg, "-c" | "--config") {
             index += 1;
-            args.get(index)?.to_str()
+            args.get(index).and_then(|value| value.to_str())
         } else if let Some(value) = arg.strip_prefix("--config=") {
             Some(value)
         } else if let Some(value) = arg.strip_prefix("-c") {
@@ -274,11 +292,11 @@ pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Op
         if let Some(value) =
             assignment.and_then(|value| parse_config_override_exact_string(value, key))
         {
-            return Some(value);
+            found = Some(value);
         }
         index += 1;
     }
-    None
+    found
 }
 
 pub fn codex_effective_config_value(
@@ -288,7 +306,7 @@ pub fn codex_effective_config_value(
 ) -> CodexConfigResult<Option<String>> {
     match codex_cli_config_override_value(args, key) {
         Some(value) => Ok(Some(value)),
-        None => codex_config_value(codex_home, key),
+        None => codex_config_value_for_args(codex_home, args, key),
     }
 }
 
@@ -299,7 +317,7 @@ pub fn codex_effective_config_exact_value(
 ) -> CodexConfigResult<Option<String>> {
     match codex_cli_config_override_exact_value(args, key) {
         Some(value) => Ok(Some(value)),
-        None => codex_config_exact_value(codex_home, key),
+        None => codex_config_exact_value_for_args(codex_home, args, key),
     }
 }
 

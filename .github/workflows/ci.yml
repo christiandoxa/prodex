@@ -706,6 +706,10 @@ jobs:
         if: matrix.lane == 'static'
         run: npm run ci:runtime-manifest
 
+      - name: Enforce runtime hot-path guard
+        if: matrix.lane == 'static'
+        run: npm run ci:runtime-hotpath-guard
+
       - name: Enforce Rust super wildcard guard
         if: matrix.lane == 'static'
         run: npm run ci:super-wildcard-guard

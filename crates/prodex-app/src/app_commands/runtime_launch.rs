@@ -72,6 +72,35 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     }
 }
 
+pub(super) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
+    let preserve_session_model = args.local_model.is_none()
+        && codex_cli_config_override_value(&args.codex_args, "model").is_none()
+        && prodex_runtime_launch::codex_resume_session_id(&normalized).is_some();
+    let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio);
+    if preserve_session_model {
+        remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
+    }
+    runtime_args
+}
+
+pub(super) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {
+    let mut index = 0;
+    while index + 1 < args.len() {
+        let is_config_flag = matches!(args[index].to_str(), Some("-c" | "--config"));
+        let matches_key = args[index + 1]
+            .to_str()
+            .and_then(|assignment| assignment.split_once('='))
+            .is_some_and(|(candidate, _)| candidate.trim() == key);
+        if is_config_flag && matches_key {
+            args.drain(index..=index + 1);
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
 pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let backend = start_gateway_backend(args)?;
     print_gateway_status(

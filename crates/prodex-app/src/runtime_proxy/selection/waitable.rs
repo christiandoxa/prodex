@@ -55,9 +55,6 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
     wait_affinity_owner: Option<&str>,
 ) -> Result<BTreeSet<String>> {
     let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit =
-        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
         let mut runtime = shared
@@ -91,7 +88,11 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         {
             continue;
         }
-        if entry.inflight_count >= inflight_soft_limit {
+        if runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            &candidate.name,
+            runtime_route_kind_inflight_context(route_kind),
+        )? {
             waitable_profiles.insert(candidate.name.clone());
         }
     }
@@ -108,9 +109,6 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         return Ok(false);
     }
     let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit =
-        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
         let mut runtime = shared
@@ -140,7 +138,11 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         {
             continue;
         }
-        if entry.inflight_count < inflight_soft_limit {
+        if !runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            &candidate.name,
+            runtime_route_kind_inflight_context(route_kind),
+        )? {
             return Ok(true);
         }
     }

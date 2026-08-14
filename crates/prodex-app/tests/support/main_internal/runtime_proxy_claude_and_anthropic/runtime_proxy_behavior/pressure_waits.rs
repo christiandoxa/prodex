@@ -252,7 +252,7 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
 }
 
 #[test]
-fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
+fn runtime_proxy_waits_for_one_responses_slot_then_succeeds_past_soft_limit() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(40, 250);
 
     let temp_dir = TestDir::isolated();
@@ -262,7 +262,7 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
 
     let usage = usage_with_main_windows(90, 3600, 90, 604_800);
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
-    let shared = runtime_rotation_proxy_shared(
+    let mut shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
             paths: AppPaths {
@@ -315,11 +315,19 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
         usize::MAX,
     );
 
-    let inflight_guard = acquire_runtime_profile_inflight_guard(&shared, "main", "responses_http")
-        .expect("inflight guard should be acquired");
+    let tuning = &mut Arc::make_mut(&mut shared.runtime_config).tuning;
+    tuning.profile_inflight_soft_limit = 4;
+    tuning.profile_inflight_hard_limit = 8;
+    let mut inflight_guards = (0..4)
+        .map(|_| {
+            acquire_runtime_profile_inflight_guard(&shared, "main", "responses_http")
+                .expect("inflight guard should be acquired")
+        })
+        .collect::<Vec<_>>();
+    let released_guard = inflight_guards.pop().expect("one guard should be released");
     let release = thread::spawn(move || {
         thread::sleep(Duration::from_millis(25));
-        drop(inflight_guard);
+        drop(released_guard);
     });
 
     let request = RuntimeProxyRequest {
@@ -347,6 +355,7 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
     );
 
     release.join().expect("release thread should join");
+    drop(inflight_guards);
 
     let log = read_runtime_proxy_test_log(&shared.log_path);
     assert!(

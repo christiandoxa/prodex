@@ -7,7 +7,8 @@ use super::{
     is_codex_command_server_subcommand, isolate_auto_external_provider_child_env,
     maintain_shared_codex_sessions_after_child_exit, prepare_codex_launch_args,
     prepare_goal_usage_limit_monitor, prepare_provider_capability_codex_args,
-    profile_openai_compatible_codex_args, remove_upstream_proxy_env, repair_resume_session_in_home,
+    profile_openai_compatible_codex_args, remove_first_codex_config_override_pair,
+    remove_upstream_proxy_env, repair_resume_session_in_home,
     repair_resume_session_metadata_prefix_from_codex_args, resolve_codex_delete_session_id,
     runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
@@ -67,7 +68,7 @@ impl RunCommandStrategy {
                 .to_string()
         });
         if let Some(provider) = auto_external_provider {
-            let provider_args = super_external_provider_codex_args(
+            let mut provider_args = super_external_provider_codex_args(
                 provider,
                 auto_external_provider_base_url
                     .as_deref()
@@ -76,6 +77,7 @@ impl RunCommandStrategy {
                 None,
                 None,
             );
+            remove_first_codex_config_override_pair(&mut provider_args, "model");
             let mut next_args = Vec::with_capacity(provider_args.len() + codex_args.len());
             next_args.extend(provider_args);
             next_args.extend(codex_args);

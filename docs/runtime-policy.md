@@ -526,6 +526,9 @@ Runtime proxy numeric environment overrides are exact values: unset means use po
 - Pre-commit retry and fallback paths must stay bounded per request.
 - Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
 - Quota, budget, transport, and local pressure signals must stay classified separately.
+- An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
+- Resume launches preserve the session's last model unless the user supplies an explicit model override.
+- A fresh successful quota fetch is authoritative over historical authentication-backoff diagnostics.
 - Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
 - Upstream HTTP/WebSocket connection reuse should be preserved where it does not change Codex semantics.
 - Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.

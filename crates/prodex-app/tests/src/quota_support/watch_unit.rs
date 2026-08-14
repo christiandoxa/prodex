@@ -374,7 +374,7 @@
     }
 
     #[test]
-    fn quota_watch_auth_backoff_overlay_replaces_stale_success() {
+    fn quota_watch_auth_backoff_does_not_replace_fresh_success() {
         let snapshot = AllQuotaWatchSnapshot::Reports {
             updated: "2026-06-26 10:00:00 UTC".to_string(),
             profile_count: 1,
@@ -389,7 +389,28 @@
         let AllQuotaWatchSnapshot::Reports { reports, .. } = overlay else {
             panic!("expected reports snapshot");
         };
-        assert!(reports[0].result.as_ref().unwrap_err().contains("unauthorized"));
+        assert!(reports[0].result.is_ok());
+    }
+
+    #[test]
+    fn quota_watch_auth_backoff_replaces_failed_refresh() {
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report(
+                "main",
+                Err("quota refresh failed".to_string()),
+            )],
+        };
+
+        let overlay = quota_watch_snapshot_with_auth_backoff(
+            &snapshot,
+            &std::collections::BTreeSet::from(["main".to_string()]),
+        );
+
+        let AllQuotaWatchSnapshot::Reports { reports, .. } = overlay else {
+            panic!("expected reports snapshot");
+        };
         assert!(
             reports[0]
                 .result
