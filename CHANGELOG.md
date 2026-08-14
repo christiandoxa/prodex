@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.3 - 2026-08-14
+
+### CLI
+
+- Preserve model and quota readiness across profiles (`554bc5a`)
+
 ## 0.408.2 - 2026-08-13
 
 ### CLI
