@@ -29,3 +29,29 @@ pub(super) fn runtime_kiro_terminate_child(child: &mut Child) {
 fn runtime_kiro_owns_private_process_group() -> bool {
     std::env::var_os(crate::SUB_AGENT_RECURSION_MARKER).is_none()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn runtime_kiro_streaming_command_forwards_model_and_effort() {
+        let command = runtime_kiro_streaming_command(
+            Path::new("kiro-cli"),
+            Some(" gpt-5.6-luna "),
+            Some(" none "),
+        );
+
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                OsStr::new("acp"),
+                OsStr::new("--model"),
+                OsStr::new("gpt-5.6-luna"),
+                OsStr::new("--effort"),
+                OsStr::new("none"),
+            ]
+        );
+    }
+}

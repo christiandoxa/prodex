@@ -553,6 +553,21 @@ jobs:
           RUST_BACKTRACE: "1"
         run: cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1
 
+      - name: Run native macOS Kiro selector and resume tests
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          for filter in \
+            provider_default_efforts_follow_catalog_for_every_provider \
+            pure_interactive_resolution_prompts_presidio_before_resumed_sub_agent_config \
+            resume_provider_bridge_leaves_the_session_model_authoritative \
+            runtime_kiro_streaming_command_forwards_model_and_effort
+          do
+            cargo test --locked -q -p prodex-app --lib --all-features \
+              "${filter}" -- --test-threads=1
+          done
+
   smart-context-evidence:
     name: Smart Context evidence
     runs-on: ubuntu-latest

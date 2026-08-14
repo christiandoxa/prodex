@@ -1,5 +1,7 @@
 use super::*;
-use prodex_shared_types::{ReadyProfileCandidate, RuntimeQuotaSource};
+use prodex_quota::AuthSummary;
+use prodex_shared_types::{ReadyProfileCandidate, RunProfileProbeReport, RuntimeQuotaSource};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 struct SelectionView<'a> {
@@ -141,6 +143,59 @@ fn scheduler_preserves_cooldown_and_provider_priority() {
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>(),
         ["ready", "recent", "lower-provider"]
+    );
+}
+
+#[test]
+fn failed_probe_keeps_weekly_only_persisted_snapshot_ready() {
+    let now = Local::now().timestamp();
+    let selection = SelectionView {
+        entries: &[SelectionEntry {
+            name: "weekly-only",
+            provider_priority: 0,
+            last_run_selected_at: None,
+        }],
+    };
+    let reports = [RunProfileProbeReport {
+        name: "weekly-only".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Err("probe unavailable".to_string()),
+    }];
+    let snapshots = BTreeMap::from([(
+        "weekly-only".to_string(),
+        RuntimeProfileUsageSnapshot {
+            checked_at: now,
+            plan_type: None,
+            five_hour_status: RuntimeQuotaWindowStatus::Unknown,
+            five_hour_remaining_percent: 0,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: now + 86_400,
+        },
+    )]);
+
+    let candidates =
+        ready_profile_candidates_with_view(&reports, false, None, selection, Some(&snapshots), 900);
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].name, "weekly-only");
+    assert_eq!(
+        candidates[0].quota_source,
+        RuntimeQuotaSource::PersistedSnapshot
+    );
+    let windows = candidates[0].usage.rate_limit.as_ref().unwrap();
+    assert!(windows.primary_window.is_none());
+    assert_eq!(
+        windows
+            .secondary_window
+            .as_ref()
+            .and_then(|window| window.used_percent),
+        Some(20)
     );
 }
 
