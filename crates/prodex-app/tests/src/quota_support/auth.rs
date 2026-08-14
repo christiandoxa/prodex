@@ -313,7 +313,7 @@ fn auth_refresh_http_error_does_not_expose_provider_body() {
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = env::temp_dir().canonicalize().unwrap().join(format!(
+    let dir = crate::test_support::test_temp_root().join(format!(
         "prodex-auth-summary-{name}-{}-{}",
         std::process::id(),
         SystemTime::now()
