@@ -153,6 +153,20 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
         "first bind should schedule one persistence update"
     );
 
+    // The test persistence path is synchronous and can cross the one-second
+    // test re-verification interval on slower Windows runners. Freeze the
+    // already-verified status so this assertion measures duplicate binding,
+    // not elapsed-time refresh behavior.
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime state should be available");
+        runtime
+            .continuation_statuses
+            .response
+            .get_mut("resp-1")
+            .expect("first bind should verify the response")
+            .last_verified_at = Some(i64::MAX);
+    }
+
     remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
         .expect("duplicate response id bind should succeed");
     remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
