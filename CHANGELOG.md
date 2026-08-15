@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.4 - 2026-08-15
+
+### Misc
+
+- Harden gateway headers and release tooling (`4709593`)
+
 ## 0.408.3 - 2026-08-14
 
 ### Runtime
