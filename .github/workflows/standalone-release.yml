@@ -24,7 +24,7 @@ env:
   CARGO_HTTP_MULTIPLEXING: "false"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
-  KIRO_CLI_VERSION: "2.18.0"
+  KIRO_CLI_VERSION: "2.18.1"
 
 jobs:
   verify-ci:
