@@ -795,6 +795,10 @@ jobs:
         if: matrix.lane == 'static'
         run: npm run ci:full-test-shards
 
+      - name: Check provider capability matrix
+        if: matrix.lane == 'static'
+        run: npm run docs:provider-capabilities:check
+
       - name: Validate runtime CI manifest
         if: matrix.lane == 'static'
         run: npm run ci:runtime-manifest

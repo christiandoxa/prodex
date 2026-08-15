@@ -3,19 +3,30 @@ use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
     prepare_desktop_overlay_home, prepare_runtime_overlay_home, repair_desktop_thread_index,
 };
+#[path = "runtime_tools/child_env.rs"]
+mod child_env;
 #[path = "runtime_tools/overlay.rs"]
 mod overlay;
+#[path = "runtime_tools/provider_auth.rs"]
+mod provider_auth;
 #[path = "runtime_tools/sub_agents.rs"]
 mod sub_agents;
+#[path = "runtime_tools/super_dry_run.rs"]
+mod super_dry_run;
 #[path = "runtime_tools/super_trust.rs"]
 mod super_trust;
+pub(super) use child_env::{clear_rtk_auto_wrap_control_env, prepend_child_path};
 #[cfg(test)]
 pub(super) use overlay::prepare_prodex_overlay_home;
 pub(crate) use overlay::resolve_runtime_optional_tool_plan;
+#[cfg(test)]
+pub(crate) use provider_auth::PRODEX_PROVIDER_CODEX_API_KEY;
+pub(crate) use provider_auth::{
+    force_codex_api_key_auth_for_provider_runtime, write_provider_runtime_codex_auth,
+};
 pub(crate) use sub_agents::*;
+pub(crate) use super_dry_run::handle_super_runtime_tools_dry_run;
 pub(crate) use super_trust::trusted_workspace_codex_args;
-const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
-
 pub(crate) struct RuntimeToolLaunchStrategy {
     args: RuntimeToolArgs,
     codex_args: Vec<OsString>,
@@ -210,55 +221,6 @@ impl RuntimeToolLaunchStrategy {
     }
 }
 
-fn force_codex_api_key_auth_for_provider_runtime(child: &mut ChildProcessPlan) {
-    let key = OsString::from("OPENAI_API_KEY");
-    if let Some((_, value)) = child.extra_env.iter_mut().find(|(name, _)| name == &key) {
-        *value = OsString::from(PRODEX_PROVIDER_CODEX_API_KEY);
-    } else {
-        child
-            .extra_env
-            .push((key, OsString::from(PRODEX_PROVIDER_CODEX_API_KEY)));
-    }
-}
-
-fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()> {
-    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
-    let auth_path = codex_home.join("auth.json");
-    let auth_json = serde_json::json!({
-        "auth_mode": "apikey",
-        "OPENAI_API_KEY": PRODEX_PROVIDER_CODEX_API_KEY,
-        "tokens": null,
-        "last_refresh": null,
-        "agent_identity": null
-    });
-    let text = serde_json::to_string_pretty(&auth_json)?;
-    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
-        .write_text(&secret_store::SecretLocation::file(&auth_path), text)
-        .map_err(anyhow::Error::new)
-        .with_context(|| format!("failed to write {}", auth_path.display()))?;
-    Ok(())
-}
-
-pub(super) fn clear_rtk_auto_wrap_control_env(child: &mut ChildProcessPlan) {
-    let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());
-    removed.insert(OsString::from("PRODEX_RTK_AUTO_WRAP_DEPTH"));
-    removed.insert(OsString::from("PRODEX_RTK_DISABLE_AUTO_WRAP"));
-    child.removed_env = removed.into_iter().collect();
-}
-
-pub(super) fn prepend_child_path(child: &mut ChildProcessPlan, path: PathBuf) {
-    if !path.is_dir() {
-        return;
-    }
-    let mut paths = vec![path];
-    if let Some(existing) = env::var_os("PATH") {
-        paths.extend(env::split_paths(&existing));
-    }
-    if let Ok(joined) = env::join_paths(paths) {
-        child.extra_env.push((OsString::from("PATH"), joined));
-    }
-}
-
 pub(super) fn handle_runtime_tools(args: RuntimeToolArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
@@ -276,95 +238,6 @@ pub(crate) fn handle_super_runtime_tools(
     execute_runtime_launch(RuntimeToolLaunchStrategy::new_with_sub_agent(
         args, sub_agent,
     ))
-}
-
-pub(crate) fn handle_super_runtime_tools_dry_run(
-    args: SuperArgs,
-    presidio: bool,
-    sub_agent: Option<&ResolvedSuperSubAgent>,
-) -> Result<()> {
-    let args = args.into_runtime_tool_args_with_presidio(presidio);
-    if let Some(base_url) = args.base_url.as_deref() {
-        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
-    }
-    let selected_tools = args.selected_tool_set();
-    let required_tools = args.required_tool_set();
-    let presidio_enabled =
-        args.presidio || selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
-    let tool_plan = resolve_runtime_optional_tool_plan(&selected_tools, &required_tools)?;
-    let codex_args = args.codex_args_with_feature_overrides();
-    let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
-    let (codex_args, include_code_review) =
-        prepare_codex_launch_args(&codex_args, args.full_access);
-    let codex_args = if args.super_mode {
-        trusted_workspace_codex_args(&std::env::current_dir()?, &codex_args)
-    } else {
-        codex_args
-    };
-    let codex_args = redact_super_session_args(&codex_args);
-    let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
-    let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
-    let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
-    let gemini_thinking_budget_tokens =
-        runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
-    let resolved_harness = prodex_provider_core::resolve_harness_mode(args.harness, None);
-    let request = RuntimeLaunchRequest {
-        profile: args.profile.as_deref(),
-        allow_auto_rotate: !args.no_auto_rotate,
-        auto_redeem: args.auto_redeem,
-        skip_quota_check: args.skip_quota_check,
-        base_url: args.base_url.as_deref(),
-        upstream_no_proxy: args.no_proxy,
-        include_code_review,
-        smart_context_enabled: args.smart_context,
-        presidio_redaction_enabled: presidio_enabled,
-        model_context_window_tokens,
-        gemini_thinking_budget_tokens,
-        force_runtime_proxy: false,
-        model_provider_override: model_provider_override.as_deref(),
-        profile_v2_name: profile_v2_name.as_deref(),
-        external_provider: args
-            .external_provider
-            .map(crate::SuperExternalProvider::as_str),
-        external_provider_api_key: args.external_provider_api_key.as_deref(),
-    };
-    let mut extra_report = String::from("Optional tools:");
-    for activation in &tool_plan.activations {
-        extra_report.push_str(&format!(
-            "\n  {}: resolved (activation deferred until launch)",
-            activation.tool.descriptor.id
-        ));
-    }
-    for unavailable in &tool_plan.unavailable {
-        extra_report.push_str(&format!(
-            "\n  {}: skipped ({})",
-            unavailable.id,
-            redaction::redaction_redact_secret_like_text(&unavailable.detail)
-        ));
-    }
-    if selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio) {
-        extra_report.push_str(&format!(
-            "\n  presidio: {}",
-            if presidio_enabled {
-                "requested"
-            } else {
-                "disabled"
-            }
-        ));
-    }
-    extra_report.push_str("\nDry run: optional overlays and services are not started.\n");
-    if let Some(sub_agent) = sub_agent {
-        extra_report.push_str(&render_sub_agent_dry_run_report(sub_agent));
-    } else {
-        extra_report.push_str(&render_sub_agent_disabled_dry_run_report(presidio_enabled));
-    }
-    print_runtime_launch_dry_run(
-        "optional-tools",
-        request,
-        RuntimeLaunchDryRunChild::Caveman { codex_args },
-        Some(resolved_harness),
-        Some(&extra_report),
-    )
 }
 
 pub(super) fn handle_desktop_gui(

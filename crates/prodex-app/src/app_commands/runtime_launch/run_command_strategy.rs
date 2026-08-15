@@ -10,10 +10,11 @@ use super::{
     profile_openai_compatible_codex_args, remove_first_codex_config_override_pair,
     remove_upstream_proxy_env, repair_resume_session_in_home,
     repair_resume_session_metadata_prefix_from_codex_args, resolve_codex_delete_session_id,
-    runtime_launch_cli_gemini_thinking_budget_tokens,
-    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
-    runtime_proxy_codex_passthrough_args, runtime_resume_external_provider_from_codex_args,
-    super_external_provider_codex_args,
+    restore_resume_session_settings, runtime_launch_cli_gemini_thinking_budget_tokens,
+    runtime_launch_cli_model, runtime_launch_cli_model_context_window_tokens,
+    runtime_launch_openai_spark_context_codex_args, runtime_proxy_codex_passthrough_args,
+    runtime_resume_external_provider_from_codex_args,
+    runtime_resume_session_settings_from_codex_args, super_external_provider_codex_args,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -56,6 +57,17 @@ impl RunCommandStrategy {
         if !dry_run {
             repair_resume_session_metadata_prefix_from_codex_args(&codex_args)?;
         }
+        let session_settings = runtime_resume_session_settings_from_codex_args(&codex_args);
+        let model_is_explicit = runtime_launch_cli_model(&codex_args).is_some()
+            || codex_cli_config_override_value(&codex_args, "model").is_some();
+        let effort_is_explicit =
+            codex_cli_config_override_value(&codex_args, "model_reasoning_effort").is_some();
+        restore_resume_session_settings(
+            &mut codex_args,
+            session_settings.as_ref(),
+            model_is_explicit,
+            effort_is_explicit,
+        );
         let auto_external_provider = if model_provider_override.is_none() {
             runtime_resume_external_provider_from_codex_args(&codex_args)?
         } else {

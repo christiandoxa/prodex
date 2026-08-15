@@ -395,7 +395,9 @@ pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile> {
     let key_index = runtime_gateway_redis_key_store_key_index(redis_key);
     let names: Vec<String> = conn.smembers(&key_index)?;
-    if names.is_empty() {
+    let user_index = runtime_gateway_redis_key_store_scim_index(redis_key);
+    let user_ids: Vec<String> = conn.smembers(&user_index)?;
+    if names.is_empty() && user_ids.is_empty() {
         let payload: Option<String> = conn.get(redis_key)?;
         let Some(payload) = payload else {
             return Ok(RuntimeGatewayVirtualKeyStoreFile::default());
@@ -415,8 +417,6 @@ pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
         }
     }
 
-    let user_index = runtime_gateway_redis_key_store_scim_index(redis_key);
-    let user_ids: Vec<String> = conn.smembers(&user_index)?;
     let mut scim_users = Vec::new();
     for id in user_ids {
         let fields: std::collections::BTreeMap<String, String> =

@@ -1,4 +1,8 @@
-use super::{acquire_json_file_lock, load_json_file_with_backup, write_private_file_atomic};
+use super::{
+    acquire_json_file_lock, load_json_file_with_backup, parse_versioned_json_or_raw,
+    read_versioned_json_file_with_backup, runtime_sidecar_generation_from_disk,
+    write_private_file_atomic,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,6 +42,57 @@ fn last_good_recovery_repairs_missing_or_corrupt_primary() {
         assert_eq!(fs::read_to_string(&backup_path).unwrap(), backup);
         let _ = fs::remove_dir_all(root);
     }
+}
+
+#[test]
+fn malformed_versioned_sidecar_does_not_fallback_to_raw_json() {
+    let error = parse_versioned_json_or_raw::<serde_json::Value>(r#"{"generation":7}"#)
+        .expect_err("missing versioned value must remain invalid");
+
+    assert!(error.to_string().contains("versioned runtime sidecar"));
+}
+
+#[test]
+fn malformed_versioned_sidecar_recovers_from_last_good() {
+    let root = temp_root("malformed-versioned-recovery");
+    let path = root.join("runtime.json");
+    let backup_path = root.join("runtime.json.last-good");
+    fs::write(&path, r#"{"generation":9}"#).expect("malformed primary should write");
+    fs::write(
+        &backup_path,
+        r#"{"generation":8,"value":{"source":"last-good"}}"#,
+    )
+    .expect("valid backup should write");
+
+    let loaded = read_versioned_json_file_with_backup::<serde_json::Value>(&path, &backup_path)
+        .expect("valid backup should recover malformed primary");
+
+    assert!(loaded.recovered_from_backup);
+    assert_eq!(loaded.generation, 8);
+    assert_eq!(loaded.value["source"], "last-good");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        fs::read_to_string(&backup_path).unwrap()
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn sidecar_generation_recovery_rejects_malformed_primary_envelope() {
+    let root = temp_root("malformed-generation-recovery");
+    let path = root.join("runtime.json");
+    let backup_path = root.join("runtime.json.last-good");
+    fs::write(&path, r#"{"generation":9}"#).expect("malformed primary should write");
+    let backup = r#"{"generation":8,"value":{"source":"last-good"}}"#;
+    fs::write(&backup_path, backup).expect("valid backup should write");
+
+    assert_eq!(
+        runtime_sidecar_generation_from_disk(&path, &backup_path)
+            .expect("valid backup generation should recover"),
+        8
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), backup);
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

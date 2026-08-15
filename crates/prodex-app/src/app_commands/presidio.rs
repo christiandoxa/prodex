@@ -3,10 +3,6 @@ use crate::{
     PresidioRedactArgs, print_launch_status,
 };
 use anyhow::{Context, Result, bail};
-use docker::{
-    PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_CONTAINER,
-    PRESIDIO_ANONYMIZER_IMAGE, docker_available, ensure_presidio_container,
-};
 use prodex_presidio::{
     PresidioAnalyzerResult, PresidioBlockingClient, PresidioHealth,
     ProdexPresidioRuntimeFileConfig, validate_presidio_file_config, validate_presidio_url,
@@ -21,8 +17,6 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::thread;
-use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
 use terminal_ui::{
     tui_border_style, tui_connected_header_block, tui_error_style, tui_primary_style,
@@ -30,6 +24,7 @@ use terminal_ui::{
 };
 
 mod docker;
+mod startup;
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -90,7 +85,8 @@ fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: b
         return Ok(());
     }
 
-    if let Some((message, reason)) = presidio_startup_blocker(analyzer_url, anonymizer_url) {
+    if let Some((message, reason)) = startup::presidio_startup_blocker(analyzer_url, anonymizer_url)
+    {
         if required {
             return required_presidio_services_error(&analyzer, &anonymizer, reason);
         }
@@ -98,83 +94,39 @@ fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: b
         return Ok(());
     }
 
-    start_presidio_containers(&analyzer, &anonymizer)?;
+    let changes = match startup::start_presidio_containers(&analyzer, &anonymizer) {
+        Ok(changes) => changes,
+        Err(error) => {
+            return startup::presidio_startup_failure(required, &config.fail_mode, error);
+        }
+    };
 
     print_launch_status("waiting for Presidio services to become ready...");
-    if wait_for_presidio_services(&client, analyzer_url, anonymizer_url) {
+    if startup::wait_for_presidio_services(&client, analyzer_url, anonymizer_url) {
         print_launch_status("Presidio services are ready.");
         return Ok(());
     }
 
+    let cleanup_error = startup::rollback_presidio_containers(&changes).err();
     if required {
-        return required_presidio_services_error(
-            &analyzer,
-            &anonymizer,
-            "services did not become healthy before launch",
-        );
+        let reason = cleanup_error
+            .map(|error| {
+                format!("services did not become healthy before launch; cleanup failed: {error}")
+            })
+            .unwrap_or_else(|| "services did not become healthy before launch".to_string());
+        return required_presidio_services_error(&analyzer, &anonymizer, &reason);
+    }
+    if let Some(error) = cleanup_error {
+        print_launch_status(&format!(
+            "Presidio startup cleanup failed; continuing with runtime fail_mode={}: {error}",
+            config.fail_mode
+        ));
     }
     print_launch_status(&format!(
-        "Presidio services did not become healthy before launch; continuing with runtime fail_mode={}.",
+        "Presidio services did not become healthy before launch; continuing with runtime fail_mode={}",
         config.fail_mode
     ));
     Ok(())
-}
-
-fn presidio_startup_blocker(
-    analyzer_url: &str,
-    anonymizer_url: &str,
-) -> Option<(&'static str, &'static str)> {
-    if presidio_auto_start_disabled() {
-        return Some((
-            "Presidio auto-start disabled by PRODEX_PRESIDIO_AUTO_START=0; continuing with configured endpoints.",
-            "automatic startup is disabled",
-        ));
-    }
-    if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
-        || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
-    {
-        return Some((
-            "Presidio uses custom endpoints; not starting Docker containers automatically.",
-            "custom endpoints are not started automatically",
-        ));
-    }
-    (!docker_available()).then_some((
-        "Docker is unavailable, so Presidio containers were not started.",
-        "Docker is unavailable",
-    ))
-}
-
-fn start_presidio_containers(analyzer: &PresidioHealth, anonymizer: &PresidioHealth) -> Result<()> {
-    if !analyzer.ok {
-        print_launch_status("starting Presidio Analyzer Docker container...");
-        ensure_presidio_container(PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, "5002")?;
-    }
-    if !anonymizer.ok {
-        print_launch_status("starting Presidio Anonymizer Docker container...");
-        ensure_presidio_container(
-            PRESIDIO_ANONYMIZER_CONTAINER,
-            PRESIDIO_ANONYMIZER_IMAGE,
-            "5001",
-        )?;
-    }
-    Ok(())
-}
-
-fn wait_for_presidio_services(
-    client: &PresidioBlockingClient,
-    analyzer_url: &str,
-    anonymizer_url: &str,
-) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(90);
-    while Instant::now() < deadline {
-        let analyzer = client.probe_health(analyzer_url);
-        let anonymizer = client.probe_health(anonymizer_url);
-        if analyzer.ok && anonymizer.ok {
-            return true;
-        }
-        thread::sleep(Duration::from_secs(2));
-    }
-    false
 }
 
 fn required_presidio_services_error(

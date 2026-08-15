@@ -55,11 +55,13 @@ For an eligible request Prodex:
 5. expands inline references and validates protocol fields, critical signals,
    JSON shape, and the safety margin;
 6. returns the original bytes on any failure;
-7. commits the pending state only after all checks pass.
+7. commits the pending rewrite state only after all checks pass.
 
-Exact, canary-out, shadow, rejected, and fallback requests have zero Smart
-Context state mutations. No lock is held while parsing, scanning, hashing,
-serializing, tokenizing, or doing file I/O.
+Explicit exact, canary-out, shadow, rejected, and fallback requests have zero
+Smart Context state mutations. An ordinary active pass-through, or an
+affinity-protected exact pass-through, may commit only static-context
+fingerprints; successful rewrites commit their planned state. No lock is held
+while parsing, scanning, hashing, serializing, tokenizing, or doing file I/O.
 
 ## Scope and Persistence
 
@@ -119,6 +121,12 @@ Evidence levels are separate:
    reported with provenance;
 3. optional live-model evaluation: non-deterministic and never treated as CI
    proof.
+
+When the report advertises allocation counts, the evidence checker validates
+that each `allocation_bytes` value is a non-negative integer. Allocation counts
+are machine- and allocator-dependent, so the checker does not require exact
+byte-for-byte equality across runs. Reports without allocation support must use
+`null` for those fields.
 
 ## Migration
 

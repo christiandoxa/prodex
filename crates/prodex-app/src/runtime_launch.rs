@@ -328,7 +328,7 @@ fn runtime_launch_openai_model_context_from_models_cache(
         })
 }
 
-fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
+pub(crate) fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
     let mut index = 0;
     while index < args.len() {
         let Some(arg) = args[index].to_str() else {

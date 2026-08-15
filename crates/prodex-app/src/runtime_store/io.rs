@@ -126,12 +126,7 @@ pub(crate) fn last_good_file_path(path: &Path) -> PathBuf {
 }
 
 pub(crate) fn runtime_sidecar_generation_from_content(content: &str) -> Result<u64> {
-    let value: serde_json::Value =
-        serde_json::from_str(content).context("failed to parse runtime sidecar json")?;
-    Ok(value
-        .get("generation")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0))
+    parse_versioned_json_or_raw::<serde_json::Value>(content).map(|(_, generation)| generation)
 }
 
 pub(crate) fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Path) -> Result<u64> {
@@ -154,10 +149,20 @@ pub(crate) fn parse_versioned_json_or_raw<T>(content: &str) -> Result<(T, u64)>
 where
     T: for<'de> Deserialize<'de>,
 {
-    match serde_json::from_str::<VersionedJson<T>>(content) {
-        Ok(versioned) => Ok((versioned.value, versioned.generation)),
-        Err(_) => Ok((serde_json::from_str::<T>(content)?, 0)),
+    let value: serde_json::Value =
+        serde_json::from_str(content).context("failed to parse runtime sidecar json")?;
+    if is_versioned_json_envelope(&value) {
+        let versioned = serde_json::from_value::<VersionedJson<T>>(value)
+            .context("failed to parse versioned runtime sidecar")?;
+        return Ok((versioned.value, versioned.generation));
     }
+    Ok((serde_json::from_value::<T>(value)?, 0))
+}
+
+fn is_versioned_json_envelope(value: &serde_json::Value) -> bool {
+    value
+        .as_object()
+        .is_some_and(|object| object.contains_key("generation") || object.contains_key("value"))
 }
 
 fn read_json_file_with_backup_unlocked<T>(

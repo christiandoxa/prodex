@@ -1,11 +1,13 @@
 use super::{
     RunCommandStrategy, active_profile_selection_order, clear_codex_session_binding,
-    find_ready_profiles, goal_resume_line_has_usage_limit,
+    codex_cli_config_override_value, find_ready_profiles, goal_resume_line_has_usage_limit,
+    remove_first_codex_config_override_pair, restore_resume_session_settings,
+    runtime_launch_cli_model, runtime_resume_external_provider_from_codex_args,
+    runtime_resume_session_settings_from_codex_args, super_external_provider_codex_args,
 };
 use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use crate::{
-    AppPaths, AppState, codex_cli_config_override_exact_value, codex_cli_config_override_value,
-    codex_profile_v2_config_path,
+    AppPaths, AppState, codex_cli_config_override_exact_value, codex_profile_v2_config_path,
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::OptionalExtension;
@@ -111,13 +113,53 @@ impl RunCommandStrategy {
         &mut self,
         plan: GoalResumeRelaunchPlan,
     ) -> Result<()> {
+        let had_resume_session = self.resume_session_id().is_some();
         clear_codex_session_binding(&plan.session_id)?;
         self.goal_resume_session_affinity_release = Some(plan.session_id.clone());
-        if self.resume_session_id().is_none() {
+        if !had_resume_session {
             self.codex_args = prodex_runtime_launch::retarget_codex_tui_resume_args(
                 &self.codex_args,
                 &plan.session_id,
             );
+
+            let session_settings =
+                runtime_resume_session_settings_from_codex_args(&self.codex_args);
+            let model_is_explicit = runtime_launch_cli_model(&self.codex_args).is_some()
+                || codex_cli_config_override_value(&self.codex_args, "model").is_some();
+            let effort_is_explicit =
+                codex_cli_config_override_value(&self.codex_args, "model_reasoning_effort")
+                    .is_some();
+            restore_resume_session_settings(
+                &mut self.codex_args,
+                session_settings.as_ref(),
+                model_is_explicit,
+                effort_is_explicit,
+            );
+
+            if self.model_provider_override.is_none()
+                && let Some(provider) =
+                    runtime_resume_external_provider_from_codex_args(&self.codex_args)?
+            {
+                let base_url = self
+                    .args
+                    .base_url
+                    .as_deref()
+                    .unwrap_or_else(|| provider.default_base_url());
+                let mut provider_args =
+                    super_external_provider_codex_args(provider, base_url, None, None, None);
+                remove_first_codex_config_override_pair(&mut provider_args, "model");
+                let mut next_args = Vec::with_capacity(provider_args.len() + self.codex_args.len());
+                next_args.extend(provider_args);
+                next_args.extend(std::mem::take(&mut self.codex_args));
+                self.codex_args = next_args;
+                self.auto_external_provider = Some(provider);
+                self.auto_external_provider_base_url = Some(base_url.to_string());
+                self.model_provider_override = Some(provider.model_provider_id().to_string());
+                self.model_context_window_tokens =
+                    super::runtime_launch_cli_model_context_window_tokens(&self.codex_args);
+                self.gemini_thinking_budget_tokens =
+                    super::runtime_launch_cli_gemini_thinking_budget_tokens(&self.codex_args);
+            }
         }
         self.auto_goal_resume_attempted_profiles
             .insert(plan.profile_name.clone());

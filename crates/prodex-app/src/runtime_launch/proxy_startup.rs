@@ -115,6 +115,7 @@ mod provider_models;
 mod provider_sse_events;
 mod provider_sse_reader;
 mod provider_tools;
+mod recovery;
 mod workers;
 pub(crate) use anthropic_rewrite::{
     RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
@@ -144,6 +145,7 @@ pub(crate) use local_rewrite_gateway_credentials::{
     RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
 };
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
+use recovery::runtime_startup_recovery_or_default;
 use workers::spawn_runtime_rotation_proxy_workers;
 
 #[cfg(test)]
@@ -300,25 +302,28 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         websocket: runtime_config.tuning.lane_limits.websocket,
         standard: runtime_config.tuning.lane_limits.standard,
     });
-    let persisted_state = AppState::load_with_recovery(paths).unwrap_or(RecoveredLoad {
-        value: state.clone(),
-        recovered_from_backup: false,
-    });
+    let persisted_state = runtime_startup_recovery_or_default(
+        &log_path,
+        "state",
+        AppState::load_with_recovery(paths),
+        "provided_state",
+        state.clone(),
+    );
     let mut restored_state = merge_runtime_state_snapshot(state.clone(), &persisted_state.value);
-    let persisted_continuations =
-        load_runtime_continuations_with_recovery(paths, &restored_state.profiles).unwrap_or(
-            RecoveredLoad {
-                value: RuntimeContinuationStore::default(),
-                recovered_from_backup: false,
-            },
-        );
-    let continuation_journal =
-        load_runtime_continuation_journal_with_recovery(paths, &restored_state.profiles).unwrap_or(
-            RecoveredLoad {
-                value: RuntimeContinuationJournal::default(),
-                recovered_from_backup: false,
-            },
-        );
+    let persisted_continuations = runtime_startup_recovery_or_default(
+        &log_path,
+        "continuations",
+        load_runtime_continuations_with_recovery(paths, &restored_state.profiles),
+        "empty",
+        RuntimeContinuationStore::default(),
+    );
+    let continuation_journal = runtime_startup_recovery_or_default(
+        &log_path,
+        "continuation_journal",
+        load_runtime_continuation_journal_with_recovery(paths, &restored_state.profiles),
+        "empty",
+        RuntimeContinuationJournal::default(),
+    );
     let fallback_continuations = runtime_continuation_store_from_app_state(&restored_state);
     let restored_continuations = merge_runtime_continuation_store(
         &merge_runtime_continuation_store(
@@ -345,32 +350,33 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     restored_state.response_profile_bindings =
         restored_continuations.response_profile_bindings.clone();
     restored_state.session_profile_bindings = restored_session_id_bindings.clone();
-    let persisted_profile_scores =
-        load_runtime_profile_scores_with_recovery(paths, &restored_state.profiles).unwrap_or(
-            RecoveredLoad {
-                value: BTreeMap::new(),
-                recovered_from_backup: false,
-            },
-        );
+    let persisted_profile_scores = runtime_startup_recovery_or_default(
+        &log_path,
+        "profile_scores",
+        load_runtime_profile_scores_with_recovery(paths, &restored_state.profiles),
+        "empty",
+        BTreeMap::new(),
+    );
     let startup_now = Local::now().timestamp();
     let persisted_usage_snapshots = restore_quota_watch_runtime_usage_snapshots(
         paths,
         &restored_state.profiles,
-        load_runtime_usage_snapshots_with_recovery(paths, &restored_state.profiles).unwrap_or(
-            RecoveredLoad {
-                value: BTreeMap::new(),
-                recovered_from_backup: false,
-            },
+        runtime_startup_recovery_or_default(
+            &log_path,
+            "usage_snapshots",
+            load_runtime_usage_snapshots_with_recovery(paths, &restored_state.profiles),
+            "empty",
+            BTreeMap::new(),
         ),
         startup_now,
     );
-    let mut persisted_backoffs =
-        load_runtime_profile_backoffs_with_recovery(paths, &restored_state.profiles).unwrap_or(
-            RecoveredLoad {
-                value: RuntimeProfileBackoffs::default(),
-                recovered_from_backup: false,
-            },
-        );
+    let mut persisted_backoffs = runtime_startup_recovery_or_default(
+        &log_path,
+        "backoffs",
+        load_runtime_profile_backoffs_with_recovery(paths, &restored_state.profiles),
+        "empty",
+        RuntimeProfileBackoffs::default(),
+    );
     let persisted_backoffs_softened = runtime_soften_persisted_backoffs_for_startup(
         &mut persisted_backoffs.value,
         &persisted_profile_scores.value,

@@ -1,13 +1,14 @@
 use super::{
-    RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL, RUNTIME_GATEWAY_SCHEMA_VERSION,
-    RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS, runtime_gateway_schema_key,
-    runtime_gateway_schema_mark_ensured, runtime_gateway_schema_should_ensure,
-    runtime_gateway_sqlite_create_current_schema_for_tests,
+    RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL, RUNTIME_GATEWAY_REDIS_COMMAND_TIMEOUT,
+    RUNTIME_GATEWAY_REDIS_CONNECTION_TIMEOUT, RUNTIME_GATEWAY_REDIS_LOCK_WAIT,
+    RUNTIME_GATEWAY_SCHEMA_VERSION, RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS,
+    runtime_gateway_schema_key, runtime_gateway_schema_mark_ensured,
+    runtime_gateway_schema_should_ensure, runtime_gateway_sqlite_create_current_schema_for_tests,
     runtime_gateway_sqlite_migrate_compatibility_state, runtime_gateway_sqlite_open,
 };
 use rusqlite::Connection;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     let stamp = SystemTime::now()
@@ -281,12 +282,49 @@ fn sqlite_compatibility_migrations_are_versioned_and_idempotent() {
 }
 
 #[test]
+fn sqlite_compatibility_migrations_reject_a_ledger_gap() {
+    let root = temp_dir("sqlite-version-gap");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.sqlite");
+
+    runtime_gateway_sqlite_migrate_compatibility_state(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "DELETE FROM prodex_gateway_schema_migrations WHERE version = 3",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let error = runtime_gateway_sqlite_migrate_compatibility_state(&path).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("compatibility migration ledger contains a version gap")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn postgres_migrations_use_one_bounded_advisory_lock() {
     assert!(RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL.contains("lock_timeout = '30s'"));
     assert!(
         RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL
             .contains("pg_advisory_lock(hashtextextended('prodex.gateway.schema.migrations', 0))")
     );
+}
+
+#[test]
+fn synchronous_redis_backend_uses_bounded_connection_command_and_lock_waits() {
+    assert!(RUNTIME_GATEWAY_REDIS_COMMAND_TIMEOUT <= RUNTIME_GATEWAY_REDIS_CONNECTION_TIMEOUT);
+    assert!(RUNTIME_GATEWAY_REDIS_LOCK_WAIT > Duration::ZERO);
+
+    let source = include_str!("local_rewrite_gateway_backend_connection.rs");
+    assert!(source.contains("get_connection_with_timeout"));
+    assert!(source.contains("set_read_timeout(Some"));
+    assert!(source.contains("set_write_timeout(Some"));
+    assert!(source.contains("RUNTIME_GATEWAY_REDIS_LOCK_WAIT"));
 }
 
 #[test]

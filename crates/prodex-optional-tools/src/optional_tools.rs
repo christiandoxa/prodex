@@ -13,9 +13,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
+#[path = "codebase_memory.rs"]
+mod codebase_memory;
+
 const MAX_EXECUTABLE_DIGEST_BYTES: u64 = 512 * 1024 * 1024;
 const TOOL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const CODEBASE_MEMORY_SHARED_DAEMON_MIN_VERSION: &str = "0.9.1-rc.1";
 const PONYTAIL_SOURCE: &str = "https://github.com/DietrichGebert/ponytail";
 const TOOL_MANIFEST: &str = "prodex-tool.json";
 const PLAYWRIGHT_MCP_PROBE_ARGS: [&str; 3] =
@@ -477,29 +479,11 @@ fn resolved_command_tool(
     );
     let version = probe_first_line(&output)?;
     if id == OptionalToolId::CodebaseMemoryMcp {
-        anyhow::ensure!(
-            codebase_memory_has_shared_daemon(&version),
-            "codebase-memory-mcp lacks shared daemon coordination; update to {CODEBASE_MEMORY_SHARED_DAEMON_MIN_VERSION} or newer"
-        );
+        codebase_memory::validate_version(&version)?;
+        codebase_memory::validate_daemon(program)?;
     }
     tool.version = Some(version);
     Ok(tool)
-}
-
-fn codebase_memory_has_shared_daemon(version_line: &str) -> bool {
-    let Some(version) = version_line.strip_prefix("codebase-memory-mcp ") else {
-        return false;
-    };
-    if version == "dev" {
-        return true;
-    }
-    let (Ok(version), Ok(minimum)) = (
-        semver::Version::parse(version),
-        semver::Version::parse(CODEBASE_MEMORY_SHARED_DAEMON_MIN_VERSION),
-    ) else {
-        return false;
-    };
-    version >= minimum
 }
 
 fn probe_first_line(output: &crate::process::ProbeOutput) -> Result<String> {
@@ -714,21 +698,6 @@ pub(crate) fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn codebase_memory_probe_requires_shared_daemon_release() {
-        assert!(codebase_memory_has_shared_daemon(
-            "codebase-memory-mcp 0.9.1-rc.1"
-        ));
-        assert!(codebase_memory_has_shared_daemon(
-            "codebase-memory-mcp 0.9.1"
-        ));
-        assert!(codebase_memory_has_shared_daemon("codebase-memory-mcp dev"));
-        assert!(!codebase_memory_has_shared_daemon(
-            "codebase-memory-mcp 0.9.0"
-        ));
-        assert!(!codebase_memory_has_shared_daemon("unexpected output"));
-    }
 
     #[test]
     fn ponytail_is_missing_when_node_is_not_on_path() {

@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/presidio.rs",
-    "maxLines": 906,
-    "reason": "Presidio readiness policy, bounded Docker startup, required fail-closed service behavior, and focused regression coverage remain at one safety boundary; this exact cap avoids raising the global production limit."
+    "maxLines": 858,
+    "reason": "Presidio readiness policy and required fail-closed service behavior remain at one safety boundary after bounded Docker startup and rollback moved to a focused sibling; cap ratcheted to the audited current size."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
@@ -253,11 +253,6 @@
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
     "maxLines": 1123,
     "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_tools.rs",
-    "maxLines": 880,
-    "reason": "Runtime tool orchestration keeps temporary overlay lifecycle, native capability checks, apps-disabled Super launch ownership, and sub-agent rendering in focused child modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",

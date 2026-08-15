@@ -6,6 +6,12 @@ use prodex_provider_core::ProviderId;
 use prodex_state::AppState;
 use std::ffi::OsString;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RuntimeResumeSessionSettings {
+    pub(super) model: Option<String>,
+    pub(super) reasoning_effort: Option<String>,
+}
+
 pub(super) fn runtime_resume_external_provider_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<SuperExternalProvider>> {
@@ -16,6 +22,27 @@ pub(super) fn runtime_resume_external_provider_from_codex_args(
 pub(in crate::app_commands) fn runtime_resume_provider_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<ProviderId>> {
+    let Some(report) = runtime_resume_session_report_from_codex_args(codex_args)? else {
+        return Ok(None);
+    };
+    resolve_bound_provider_identity(report.model_provider.as_deref())
+}
+
+pub(super) fn runtime_resume_session_settings_from_codex_args(
+    codex_args: &[OsString],
+) -> Option<RuntimeResumeSessionSettings> {
+    runtime_resume_session_report_from_codex_args(codex_args)
+        .ok()
+        .flatten()
+        .map(|report| RuntimeResumeSessionSettings {
+            model: report.last_model().map(ToOwned::to_owned),
+            reasoning_effort: report.last_reasoning_effort().map(ToOwned::to_owned),
+        })
+}
+
+fn runtime_resume_session_report_from_codex_args(
+    codex_args: &[OsString],
+) -> Result<Option<prodex_session_store::SessionReport>> {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
     let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) else {
         return Ok(None);
@@ -33,7 +60,7 @@ pub(in crate::app_commands) fn runtime_resume_provider_from_codex_args(
             bail!("resume target is ambiguous; use the full session UUID")
         }
     };
-    resolve_bound_provider_identity(report.model_provider.as_deref())
+    Ok(Some(report))
 }
 
 fn resolve_bound_provider_identity(value: Option<&str>) -> Result<Option<ProviderId>> {
