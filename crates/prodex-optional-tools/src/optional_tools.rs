@@ -335,7 +335,6 @@ fn command_tool_status(id: OptionalToolId, command: &str) -> ToolHealth {
                 candidate,
                 ToolDiscoverySource::Path,
                 command_probe_args(id),
-                false,
             )
             .map(ToolHealth::installed)
             .unwrap_or_else(|error| invalid_tool(id, error));
@@ -349,7 +348,6 @@ fn command_tool_status(id: OptionalToolId, command: &str) -> ToolHealth {
                     candidate,
                     ToolDiscoverySource::Path,
                     command_probe_args(id),
-                    false,
                 )
                 .map(ToolHealth::installed)
                 .unwrap_or_else(|error| invalid_tool(id, error));
@@ -405,7 +403,6 @@ fn playwright_tool_status() -> ToolHealth {
         npx,
         ToolDiscoverySource::Path,
         &PLAYWRIGHT_MCP_PROBE_ARGS,
-        true,
     )
     .map(ToolHealth::installed)
     .unwrap_or_else(|error| invalid_tool(id, error))
@@ -442,7 +439,7 @@ fn resolved_managed_command(
         root.display()
     );
     let root = root.canonicalize()?;
-    let tool = resolved_command_tool(id, path, ToolDiscoverySource::ManagedRoot, args, false)?;
+    let tool = resolved_command_tool(id, path, ToolDiscoverySource::ManagedRoot, args)?;
     anyhow::ensure!(
         tool.path
             .as_deref()
@@ -458,18 +455,13 @@ fn resolved_command_tool(
     path: PathBuf,
     source: ToolDiscoverySource,
     args: &[&str],
-    sanitize_environment: bool,
 ) -> Result<ResolvedTool> {
     let mut tool = resolved_file_tool(id, path, source)?;
     let program = tool
         .path
         .as_deref()
         .context("resolved command has no path")?;
-    let output = if sanitize_environment {
-        crate::process::probe_command_without_secrets(program, args, TOOL_PROBE_TIMEOUT)?
-    } else {
-        crate::process::probe_command(program, args, TOOL_PROBE_TIMEOUT)?
-    };
+    let output = crate::process::probe_command(program, args, TOOL_PROBE_TIMEOUT)?;
     anyhow::ensure!(
         output.status.success(),
         "{} health check exited with {}: {}",

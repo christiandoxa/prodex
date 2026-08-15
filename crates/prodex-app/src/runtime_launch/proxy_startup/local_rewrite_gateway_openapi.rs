@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "baa7ab07a83f121f8c6407c3867ae20f57b35ebab1667e386139676d7e9eb168";
+        "b3cb2871bc03d29d7f09d14edbb6863a11021281133b6e345ebbc1cedf944a4b";
     const DOCUMENT_DIGEST: &str =
-        "36043a8e3c6ea3278b1c1dccf2594c12b1b3069ce0b9ffac0bd82a4ae57c8062";
+        "5f2f50deecc025eb4e5b4bc43fa179b251810f603218291231c73a3f47239427";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -146,6 +146,60 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::json!("reserved_tokens"))
         );
+    }
+
+    #[test]
+    fn openapi_documents_provider_contract_catalog() {
+        let spec = runtime_gateway_openapi_spec_for_mount(CANONICAL_MOUNT_PATH);
+        let schemas = &spec["components"]["schemas"];
+
+        for schema in [
+            "GatewayHarnessMode",
+            "GatewayProviderContract",
+            "GatewayProviderEndpointContract",
+            "GatewayProviders",
+        ] {
+            assert!(schemas[schema].is_object(), "missing schema {schema}");
+        }
+        for field in [
+            "supported_harness_modes",
+            "default_harness_mode",
+            "resolved_harness_mode",
+            "harness_modes",
+            "providers",
+        ] {
+            assert!(
+                schemas["GatewayProviders"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(field))
+            );
+        }
+        for field in ["transform_status", "endpoint_status"] {
+            assert!(
+                schemas["GatewayProviderContract"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(field))
+            );
+        }
+        assert_eq!(
+            schemas["GatewayProviderContract"]["properties"]["endpoint_status"]["items"]["$ref"],
+            "#/components/schemas/GatewayProviderEndpointContract"
+        );
+        for field in [
+            "request_shaping",
+            "response_shaping",
+            "stream_shaping",
+            "supported_canonical_request_routes",
+        ] {
+            assert!(
+                schemas["GatewayHarnessMode"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(field))
+            );
+        }
     }
 
     #[test]

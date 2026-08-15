@@ -11,6 +11,7 @@ import {
   cargoPublishPlanLines,
   isGhTimeoutError,
   parseArgs,
+  parseGitHubRepo,
   pendingStepsForRun,
   releaseSteps,
   releaseSubject,
@@ -115,6 +116,20 @@ test("parseArgs supports dry-run resume and bounded step selection", () => {
   assert.equal(args.version, "0.93.0");
   assert.deepEqual(args.steps, ["watch-ci", "trigger-publish", "watch-publish", "verify"]);
   assert.equal(args.pollSeconds, 1);
+});
+
+test("unsupported remote diagnostics redact URL userinfo", () => {
+  const remoteUrl = "https://synthetic-user:synthetic-secret@forge.example.invalid/acme/prodex.git";
+
+  assert.throws(
+    () => parseGitHubRepo(remoteUrl),
+    (error) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /https:\/\/forge\.example\.invalid\/acme\/prodex\.git/);
+      assert.doesNotMatch(error.message, /synthetic-user|synthetic-secret/);
+      return true;
+    },
+  );
 });
 
 test("selectSteps keeps --only steps in canonical order", () => {

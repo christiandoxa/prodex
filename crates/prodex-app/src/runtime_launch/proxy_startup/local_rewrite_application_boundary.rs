@@ -107,7 +107,11 @@ pub(super) fn runtime_gateway_application_data_plane_authorization<'a>(
         .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
     let authorized = plan_application_data_plane_authorization(authenticated);
     crate::record_runtime_authorization(
-        prodex_observability::AuthzBoundaryKind::DataPlaneInference,
+        if request.route() == prodex_gateway_http::GatewayHttpRouteKind::DataPlaneQuota {
+            prodex_observability::AuthzBoundaryKind::DataPlaneQuota
+        } else {
+            prodex_observability::AuthzBoundaryKind::DataPlaneInference
+        },
         &authorized,
     );
     authorized.map_err(RuntimeGatewayApplicationBoundaryError::Authorization)

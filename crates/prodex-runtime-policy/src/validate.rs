@@ -567,13 +567,14 @@ fn validate_bank_gateway_mode(policy: &RuntimePolicyFile, path: &Path) -> Result
         || sso.oidc_issuer.is_none()
         || sso.oidc_audience.is_none()
         || sso.required_scope.as_deref() != Some("control_plane")
+        || sso.require_tenant != Some(true)
         || sso.authentication_strength.as_deref() != Some("phishing_resistant")
         || sso
             .reauthentication_max_age_seconds
             .is_none_or(|seconds| seconds > 900)
     {
         bail!(
-            "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
+            "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, tenant requirement, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
             path.display()
         );
     }

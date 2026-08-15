@@ -14,7 +14,8 @@ use super::super::local_rewrite_application_data_plane::runtime_gateway_applicat
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::super::local_rewrite_search_fallback::runtime_local_rewrite_remember_accepted_model;
 use super::super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_gemini_openai_compatible_upstream_url,
+    send_runtime_local_rewrite_prepared_request,
 };
 use super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteBindingContext, runtime_local_rewrite_attach_accepted_binding,
@@ -98,6 +99,7 @@ struct RuntimeGeminiAttemptContext<'a> {
     conversations: &'a RuntimeDeepSeekConversationStore,
     model_scope: Option<&'a str>,
     requested_model: &'a str,
+    endpoint: ProviderEndpoint,
     responses_route: bool,
     application_streaming: bool,
     thinking_budget_tokens: Option<u64>,
@@ -242,6 +244,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
             conversations: &conversations,
             model_scope: model_scope.as_deref(),
             requested_model: &requested_model,
+            endpoint,
             responses_route,
             application_streaming,
             thinking_budget_tokens,
@@ -472,27 +475,29 @@ enum RuntimeGeminiModelAttempt {
 fn runtime_gemini_send_model_attempt(
     context: &mut RuntimeGeminiModelAttemptContext<'_, '_>,
 ) -> Result<RuntimeGeminiModelAttempt> {
-    let upstream_url = runtime_gemini_request_upstream_url(
+    let upstream_url = runtime_gemini_upstream_url_for_endpoint(
         &context.attempt.shared.upstream_base_url,
         &context.selected.auth,
         &context.attempt.request.path_and_query,
         &context.translated.model,
         context.translated.stream,
-        context.attempt.responses_route,
+        context.attempt.endpoint,
     );
     let mut rate_limit_retry_index = 0;
     let mut invalid_stream_retry_index = 0;
     let mut auth_refresh_attempted = false;
     loop {
+        let prepared_auth = runtime_gemini_prepared_auth_for_endpoint(
+            &context.selected.auth,
+            context.attempt.endpoint,
+        );
         let response = send_runtime_local_rewrite_prepared_request(
             context.attempt.request_id,
             context.attempt.request,
             context.attempt.shared,
             &upstream_url,
             context.translated.body.clone(),
-            RuntimeLocalRewritePreparedAuth::Gemini {
-                auth: &context.selected.auth,
-            },
+            prepared_auth,
         )?;
         let status = response.status().as_u16();
         if status >= 400 {
@@ -540,6 +545,54 @@ fn runtime_gemini_send_model_attempt(
     }
 }
 
+fn runtime_gemini_upstream_url_for_endpoint(
+    base_url: &str,
+    auth: &RuntimeGeminiAuth,
+    path_and_query: &str,
+    model: &str,
+    stream: bool,
+    endpoint: ProviderEndpoint,
+) -> String {
+    if endpoint == ProviderEndpoint::ChatCompletions
+        && matches!(
+            auth,
+            RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected
+        )
+    {
+        runtime_gemini_openai_compatible_upstream_url(base_url)
+    } else {
+        runtime_gemini_request_upstream_url(
+            base_url,
+            auth,
+            path_and_query,
+            model,
+            stream,
+            endpoint == ProviderEndpoint::Responses,
+        )
+    }
+}
+
+fn runtime_gemini_prepared_auth_for_endpoint<'a>(
+    auth: &'a RuntimeGeminiAuth,
+    endpoint: ProviderEndpoint,
+) -> RuntimeLocalRewritePreparedAuth<'a> {
+    if endpoint == ProviderEndpoint::ChatCompletions {
+        match auth {
+            RuntimeGeminiAuth::ApiKey { api_key } => {
+                RuntimeLocalRewritePreparedAuth::GeminiOpenAi {
+                    api_key: Some(api_key.as_str()),
+                }
+            }
+            RuntimeGeminiAuth::Projected => {
+                RuntimeLocalRewritePreparedAuth::GeminiOpenAi { api_key: None }
+            }
+            RuntimeGeminiAuth::OAuth { .. } => RuntimeLocalRewritePreparedAuth::Gemini { auth },
+        }
+    } else {
+        RuntimeLocalRewritePreparedAuth::Gemini { auth }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +608,33 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("gemini-token"));
         assert!(!message.contains("gemini-key"));
+    }
+
+    #[test]
+    fn gemini_chat_route_uses_openai_compatible_url_and_auth() {
+        let auth = RuntimeGeminiAuth::ApiKey {
+            api_key: "fixture-gemini-key".to_string(),
+        };
+        assert_eq!(
+            runtime_gemini_upstream_url_for_endpoint(
+                "https://generativelanguage.googleapis.com/v1beta",
+                &auth,
+                "/v1/chat/completions",
+                "gemini-2.5-pro",
+                false,
+                ProviderEndpoint::ChatCompletions,
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert!(matches!(
+            runtime_gemini_prepared_auth_for_endpoint(&auth, ProviderEndpoint::ChatCompletions),
+            RuntimeLocalRewritePreparedAuth::GeminiOpenAi {
+                api_key: Some("fixture-gemini-key")
+            }
+        ));
+        assert!(matches!(
+            runtime_gemini_prepared_auth_for_endpoint(&auth, ProviderEndpoint::Responses),
+            RuntimeLocalRewritePreparedAuth::Gemini { .. }
+        ));
     }
 }

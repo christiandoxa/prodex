@@ -187,3 +187,89 @@ fn bank_control_plane_uses_transport_mtls_and_projected_maker_checker() {
         "{error:#}"
     );
 }
+
+#[test]
+fn bank_governance_deployment_matrix_fails_closed() {
+    let valid = complete_bank_policy();
+    validate_runtime_policy_file(&parse_policy(&valid), Path::new("policy.toml"))
+        .expect("complete bank deployment should validate");
+
+    for (from, to, expected) in [
+        (
+            "expected_host = \"gateway.example.com\"",
+            "expected_host = \"gateway.example.com/path\"",
+            "bounded exact HTTP authority",
+        ),
+        (
+            "listen_addr = \"10.0.0.10:4317\"",
+            "listen_addr = \"0.0.0.0:4317\"",
+            "private gateway listen address",
+        ),
+        (
+            "restricted_egress = true",
+            "restricted_egress = false",
+            "restricted egress",
+        ),
+        (
+            "replica_count = 2",
+            "replica_count = 1",
+            "highly available gateway",
+        ),
+        (
+            "backend = \"postgres\"",
+            "backend = \"sqlite\"",
+            "shared PostgreSQL state",
+        ),
+        (
+            "remote_human = true",
+            "remote_human = false",
+            "remote human OIDC",
+        ),
+        (
+            "require_tenant = true",
+            "require_tenant = false",
+            "tenant requirement",
+        ),
+        (
+            "required_scope = \"control_plane\"",
+            "required_scope = \"data_plane\"",
+            "control_plane scope",
+        ),
+        (
+            "authentication_strength = \"phishing_resistant\"",
+            "authentication_strength = \"mfa\"",
+            "phishing_resistant",
+        ),
+        (
+            "reauthentication_max_age_seconds = 300",
+            "reauthentication_max_age_seconds = 901",
+            "reauthentication within 900 seconds",
+        ),
+        (
+            "required_scope = \"data_plane\"",
+            "required_scope = \"control_plane\"",
+            "data_plane workload identity",
+        ),
+        (
+            "mtls_required = true",
+            "mtls_required = false",
+            "mTLS SecretRefs",
+        ),
+        (
+            "classification_default = \"restricted\"",
+            "classification_default = \"confidential\"",
+            "restricted default classification",
+        ),
+        (
+            "idle_timeout_seconds = 900",
+            "idle_timeout_seconds = 7200",
+            "idle_timeout_seconds",
+        ),
+    ] {
+        let candidate = valid.replacen(from, to, 1);
+        let error =
+            validate_runtime_policy_file(&parse_policy(&candidate), Path::new("policy.toml"))
+                .expect_err("insecure bank deployment combination must fail closed");
+        assert!(error.to_string().contains(expected), "{error:#}");
+    }
+}

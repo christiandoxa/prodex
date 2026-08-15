@@ -4,9 +4,40 @@ use super::{
     RuntimeProviderBridgeKind, runtime_anthropic_messages_upstream_url,
     runtime_deepseek_anthropic_messages_upstream_url,
     runtime_gemini_openai_compatible_upstream_url,
-    runtime_local_rewrite_api_key_attempts_from_start, runtime_local_rewrite_log_url,
+    runtime_local_rewrite_api_key_attempts_from_start,
+    runtime_local_rewrite_apply_direct_api_key_auth, runtime_local_rewrite_log_url,
     runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
 };
+
+#[test]
+fn native_messages_api_key_auth_uses_x_api_key_and_chat_auth_uses_bearer() {
+    let native = runtime_local_rewrite_apply_direct_api_key_auth(
+        reqwest::Client::new().post("https://api.deepseek.com/anthropic/v1/messages"),
+        "fixture-deepseek-key",
+        true,
+    )
+    .build()
+    .unwrap();
+    assert_eq!(native.headers()["x-api-key"], "fixture-deepseek-key");
+    assert!(
+        !native
+            .headers()
+            .contains_key(reqwest::header::AUTHORIZATION)
+    );
+
+    let chat = runtime_local_rewrite_apply_direct_api_key_auth(
+        reqwest::Client::new().post("https://api.deepseek.com/v1/chat/completions"),
+        "fixture-deepseek-key",
+        false,
+    )
+    .build()
+    .unwrap();
+    assert_eq!(
+        chat.headers()[reqwest::header::AUTHORIZATION],
+        "Bearer fixture-deepseek-key"
+    );
+    assert!(!chat.headers().contains_key("x-api-key"));
+}
 
 #[test]
 fn openai_standard_provider_upstream_url_uses_contract_formats() {

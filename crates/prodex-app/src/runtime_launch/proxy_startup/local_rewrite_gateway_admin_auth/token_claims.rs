@@ -232,6 +232,11 @@ fn runtime_gateway_verified_oidc_token(
     let expires_at_unix_ms = runtime_gateway_oidc_numeric_date_ms(&claims, "exp")?
         .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing expiration"))?;
     let not_before_unix_ms = runtime_gateway_oidc_numeric_date_ms(&claims, "nbf")?;
+    runtime_gateway_oidc_token_age_satisfied(
+        &claims,
+        config.reauthentication_max_age_seconds,
+        now_unix_ms,
+    )?;
     let policy = runtime_gateway_oidc_validation_policy(config)?;
     let assurance = if require_authentication_strength {
         runtime_gateway_oidc_assurance(
@@ -358,6 +363,25 @@ fn runtime_gateway_oidc_reauthentication_satisfied(
     Ok(true)
 }
 
+pub(super) fn runtime_gateway_oidc_token_age_satisfied(
+    claims: &BTreeMap<String, serde_json::Value>,
+    max_age_seconds: Option<u64>,
+    now_unix_ms: u64,
+) -> Result<()> {
+    let Some(max_age_seconds) = max_age_seconds else {
+        return Ok(());
+    };
+    let issued_at_unix_ms = runtime_gateway_oidc_numeric_date_ms(claims, "iat")?
+        .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing issued-at time"))?;
+    let age = now_unix_ms
+        .checked_sub(issued_at_unix_ms)
+        .ok_or_else(|| anyhow::anyhow!("gateway OIDC token issued-at time is in the future"))?;
+    if age > max_age_seconds.saturating_mul(1_000) {
+        bail!("gateway OIDC token exceeds maximum age");
+    }
+    Ok(())
+}
+
 fn runtime_gateway_oidc_numeric_date_ms(
     claims: &BTreeMap<String, serde_json::Value>,
     field: &str,
@@ -480,6 +504,21 @@ pub(super) fn runtime_gateway_oidc_claim_string_vec(
         .ok_or(())
 }
 
+pub(super) fn runtime_gateway_oidc_scope_claim_contains(
+    value: Option<&serde_json::Value>,
+    required: &str,
+) -> bool {
+    value.is_some_and(|value| {
+        value.as_str().is_some_and(|scopes| {
+            scopes
+                .split_ascii_whitespace()
+                .any(|scope| scope == required)
+        }) || value.as_array().is_some_and(|scopes| {
+            scopes.len() <= 64 && scopes.iter().any(|scope| scope.as_str() == Some(required))
+        })
+    })
+}
+
 pub(super) fn runtime_gateway_parse_sso_prefixes(value: &str) -> Option<Vec<String>> {
     value
         .split([',', ';', '\n'])
@@ -545,5 +584,46 @@ mod authentication_strength_tests {
         assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).is_err());
         claims.insert("auth_time".to_string(), serde_json::json!(2_001));
         assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).is_err());
+    }
+
+    #[test]
+    fn oidc_scope_accepts_supported_shapes_and_rejects_missing_or_wrong_scope() {
+        let string_scope = serde_json::json!("openid control_plane");
+        assert!(runtime_gateway_oidc_scope_claim_contains(
+            Some(&string_scope),
+            "control_plane"
+        ));
+
+        let array_scope = serde_json::json!(["openid", "control_plane"]);
+        assert!(runtime_gateway_oidc_scope_claim_contains(
+            Some(&array_scope),
+            "control_plane"
+        ));
+
+        let wrong_scope = serde_json::json!("openid data_plane");
+        assert!(!runtime_gateway_oidc_scope_claim_contains(
+            Some(&wrong_scope),
+            "control_plane"
+        ));
+        assert!(!runtime_gateway_oidc_scope_claim_contains(
+            None,
+            "control_plane"
+        ));
+    }
+
+    #[test]
+    fn oidc_token_age_rejects_missing_stale_and_future_iat() {
+        let now = 2_000_000;
+        let mut claims = BTreeMap::new();
+        assert!(runtime_gateway_oidc_token_age_satisfied(&claims, Some(300), now).is_err());
+
+        claims.insert("iat".to_string(), serde_json::json!(1_699));
+        assert!(runtime_gateway_oidc_token_age_satisfied(&claims, Some(300), now).is_err());
+
+        claims.insert("iat".to_string(), serde_json::json!(2_001));
+        assert!(runtime_gateway_oidc_token_age_satisfied(&claims, Some(300), now).is_err());
+
+        claims.insert("iat".to_string(), serde_json::json!(1_700));
+        runtime_gateway_oidc_token_age_satisfied(&claims, Some(300), now).unwrap();
     }
 }

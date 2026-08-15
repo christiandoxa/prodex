@@ -162,6 +162,23 @@ test("providers helper reads adapter contract matrix", async () => {
       calls.push({ url: String(url), init });
       return jsonResponse({
         object: "gateway.providers",
+        supported_harness_modes: ["native", "minimal", "evaluated"],
+        default_harness_mode: "native",
+        resolved_harness_mode: "native",
+        harness_modes: [
+          {
+            mode: "native",
+            id: "native",
+            display_label: "Native",
+            description: "Preserves existing bridge behavior without harness shaping.",
+            selectable: true,
+            default_effective_mode: "native",
+            supported_canonical_request_routes: ["responses", "responses/compact", "chat_completions", "messages", "models"],
+            request_shaping: false,
+            response_shaping: false,
+            stream_shaping: false,
+          },
+        ],
         providers: [
           {
             provider: "openai",
@@ -172,7 +189,17 @@ test("providers helper reads adapter contract matrix", async () => {
             model_list_endpoint: "/v1/models",
             supports_streaming: true,
             supports_model_fallback: false,
+            transform_status: "lossless",
             supported_endpoints: ["responses", "models"],
+            endpoint_status: [
+              {
+                endpoint: "responses",
+                status: "supported",
+                streaming: true,
+                tested: true,
+                unsupported_params: [],
+              },
+            ],
             model_count: 4,
             replay_case_count: 1,
           },
@@ -183,8 +210,12 @@ test("providers helper reads adapter contract matrix", async () => {
 
   const providers = await client.providers();
 
+  assert.deepEqual(providers.supported_harness_modes, ["native", "minimal", "evaluated"]);
+  assert.equal(providers.harness_modes[0].request_shaping, false);
   assert.equal(providers.providers[0].provider, "openai");
   assert.equal(providers.providers[0].client_request_format, "openai-responses");
+  assert.equal(providers.providers[0].transform_status, "lossless");
+  assert.equal(providers.providers[0].endpoint_status[0].tested, true);
   assert.equal(providers.providers[0].replay_case_count, 1);
   assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/providers");
 });

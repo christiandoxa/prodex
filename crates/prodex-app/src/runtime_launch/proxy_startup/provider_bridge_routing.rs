@@ -21,7 +21,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthro
     let Some(route) = runtime_provider_route_kind(path) else {
         return true;
     };
-    if matches!(kind, RuntimeProviderBridgeKind::OpenAiResponses) {
+    if matches!(kind, RuntimeProviderBridgeKind::OpenAiResponses)
+        && !matches!(route, RuntimeProviderRouteKind::ResponsesCompact)
+    {
         return true;
     }
     let Some(endpoint) = runtime_provider_route_endpoint(route) else {

@@ -464,6 +464,10 @@ fn provider_native_passthrough_is_explicit() {
         RuntimeProviderBridgeKind::OpenAiResponses,
         "/v1/responses"
     ));
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        "/v1/responses/compact?reason=remote"
+    ));
     assert_eq!(
         runtime_provider_label(RuntimeProviderBridgeKind::Kiro),
         "kiro"
