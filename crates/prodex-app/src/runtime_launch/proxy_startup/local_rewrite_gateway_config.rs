@@ -71,6 +71,20 @@ impl fmt::Debug for RuntimeGatewaySsoConfig {
     }
 }
 
+impl RuntimeGatewaySsoConfig {
+    pub(super) fn is_configured_header(&self, name: &str) -> bool {
+        [
+            self.token_header.as_str(),
+            self.user_header.as_str(),
+            self.role_header.as_str(),
+            self.tenant_header.as_str(),
+            self.key_prefixes_header.as_str(),
+        ]
+        .into_iter()
+        .any(|configured| !configured.is_empty() && configured.eq_ignore_ascii_case(name))
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct RuntimeGatewayBrowserConfig {
     pub(crate) authorization_url: String,
@@ -567,6 +581,9 @@ mod tests {
                 "prodex_role",
             ],
         );
+        assert!(sso.is_configured_header("X-PRODEX-SSO-TOKEN"));
+        assert!(sso.is_configured_header("x-prodex-sso-user"));
+        assert!(!sso.is_configured_header("x-codex-turn-state"));
 
         let state = RuntimeGatewayStateStore::Postgres {
             url: "postgres://prodex:secret@db.example.test/prodex".to_string(),

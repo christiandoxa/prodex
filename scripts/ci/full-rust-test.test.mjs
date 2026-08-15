@@ -133,7 +133,7 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   const expectedFilters = RUNTIME_CI_BROAD_SHARD_FILTERS.map(
     ({ label, filter }) => `${label}|${filter}`,
   );
-  assert.equal(matrix.include.length, 8);
+  assert.equal(matrix.include.length, 10);
   assert.equal(matrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(new Set(filters), new Set(expectedFilters));
   const admissionCorePack = matrix.include.find((entry) =>

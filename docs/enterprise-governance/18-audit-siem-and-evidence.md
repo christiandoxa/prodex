@@ -282,7 +282,16 @@ break glass, session revocation, and other defined high-risk actions.
 
 ## API, CLI, and Control-Plane Surface
 
-The checked OpenAPI target includes authorized, tenant-scoped capabilities for:
+The capabilities below define the target contract; they are not a claim that
+every listed operation is currently exposed. The current checked OpenAPI
+document exposes bounded audit export, audit-chain integrity, SIEM outbox
+health/claim, and legal-hold/retention-purge routes. It does not yet expose
+paginated audit query, export status/download, range or manifest verification,
+dead-letter administration, or evidence-restore endpoints. The domain and
+storage plans for those operations must not be presented as live HTTP features.
+
+The checked OpenAPI target is intended to include authorized, tenant-scoped
+capabilities for:
 
 - paginated audit query and event metadata retrieval;
 - start/status/download of a bounded export;
@@ -300,7 +309,8 @@ from retention, hold, dead-letter, and sink-administration permissions. A
 tenant administrator cannot query another tenant or infer it from errors,
 cursors, counts, unique conflicts, or delivery status.
 
-The CLI should provide equivalent versioned JSON and human output, for example:
+When the missing control-plane transport exists, the CLI should provide
+equivalent versioned JSON and human output, for example:
 
 ~~~text
 prodex audit query ...

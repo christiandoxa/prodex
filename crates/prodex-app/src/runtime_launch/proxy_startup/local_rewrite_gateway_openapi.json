@@ -13,6 +13,17 @@
       }
     },
     "schemas": {
+      "GovernanceAuditLegalHold": {
+        "properties": {
+          "audit_event_id": {"type": "string"},
+          "expires_at_unix_ms": {"type": ["integer", "null"], "minimum": 0},
+          "object": {"type": "string", "enum": ["governance.audit_legal_hold"]},
+          "reason_code": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "required": ["object", "audit_event_id", "reason_code", "expires_at_unix_ms"],
+        "type": "object",
+        "additionalProperties": false
+      },
       "GatewayBillingLedger": {
         "properties": {
           "ledger_path": {
@@ -2709,6 +2720,117 @@
         },
         "security": [{"GatewayBearerAuth": []}],
         "summary": "Export bounded tenant audit records and append an immutable export audit event"
+      }
+    },
+    "/v1/prodex/gateway/audit/retention/holds": {
+      "get": {
+        "operationId": "listAuditRetentionHolds",
+        "responses": {
+          "200": {
+            "description": "Tenant-scoped legal holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data"],
+                  "properties": {
+                    "object": {"type": "string", "enum": ["governance.audit_legal_hold.list"]},
+                    "data": {"type": "array", "items": {"$ref": "#/components/schemas/GovernanceAuditLegalHold"}}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "List tenant audit legal holds"
+      },
+      "post": {
+        "operationId": "createAuditRetentionHold",
+        "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["audit_event_id", "reason_code"],
+                "properties": {
+                  "audit_event_id": {"type": "string"},
+                  "reason_code": {"type": "string", "minLength": 1, "maxLength": 64},
+                  "expires_at_unix_ms": {"type": ["integer", "null"], "minimum": 0}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Created tenant audit legal hold", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GovernanceAuditLegalHold"}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Create or replace a tenant audit legal hold"
+      }
+    },
+    "/v1/prodex/gateway/audit/retention/holds/{audit_event_id}": {
+      "delete": {
+        "operationId": "deleteAuditRetentionHold",
+        "parameters": [
+          {"in": "path", "name": "audit_event_id", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Deleted tenant audit legal hold", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Delete one tenant audit legal hold"
+      }
+    },
+    "/v1/prodex/gateway/audit/retention/purge": {
+      "delete": {
+        "operationId": "purgeAuditRetention",
+        "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["approval_id", "audit_event_ids"],
+                "properties": {
+                  "approval_id": {"type": "string"},
+                  "audit_event_ids": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"type": "string"}},
+                  "retention_days": {"type": "integer", "minimum": 30, "maximum": 3650}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Bounded tenant audit retention purge result", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Purge a bounded, approved tenant audit batch"
       }
     },
     "/v1/prodex/gateway/governance/outbox": {
