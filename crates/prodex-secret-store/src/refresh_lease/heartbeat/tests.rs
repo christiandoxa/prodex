@@ -62,6 +62,12 @@ fn stalled_heartbeat_write_returns_bounded_unhealthy_error() {
         })
     ));
     assert_eq!(HEARTBEAT_TEST_WRITE_CALLS.load(Ordering::SeqCst), 1);
+    match RefreshLeaseCoordinator::new(&root).acquire("heartbeat-stall-test") {
+        Ok(RefreshLeaseDecision::Follower { result_json }) => {
+            assert_eq!(result_json.as_str(), "{\"access_token\":\"stall\"}");
+        }
+        other => panic!("bounded heartbeat failure must still publish result, got {other:?}"),
+    }
     let _ = fs::remove_dir_all(root);
 }
 

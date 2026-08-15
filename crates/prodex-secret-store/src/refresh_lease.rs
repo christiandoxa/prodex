@@ -260,11 +260,11 @@ impl RefreshLeaseOwner {
     }
 
     pub fn commit_result(mut self, result_json: impl AsRef<str>) -> Result<(), RefreshLeaseError> {
-        self.stop_heartbeat()?;
+        let heartbeat_error = self.stop_heartbeat().err();
         self.verify_ownership()?;
         write_result(&self.result_path, &self.fence_token, result_json.as_ref())?;
         self.release()?;
-        Ok(())
+        heartbeat_error.map_or(Ok(()), Err)
     }
 
     pub fn release(&mut self) -> Result<(), RefreshLeaseError> {
