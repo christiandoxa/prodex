@@ -357,9 +357,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.2"
+version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d262e149917187838d5b42777c8253bcb64500067342904e7d429499a6f277e"
+checksum = "509591b7bcd67f4ef775afad7662703b4935daaa6ec0e5605cfb1090b32a2b6d"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -637,9 +637,9 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
+checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
 name = "form_urlencoded"
@@ -997,9 +997,9 @@ dependencies = [
 
 [[package]]
 name = "libredox"
-version = "0.1.19"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2026a5056764a10b2bf5d56488cba40da507f5493a6a429340e2004d9ed085fa"
+checksum = "28d0a00925a9f930d679b6789b721e3a7f9ed110f41b86d2497caa780c3a070a"
 dependencies = [
  "libc",
 ]
@@ -1235,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1243,14 +1243,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "serde",
  "sha2 0.11.0",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1307,14 +1307,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1350,14 +1350,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "base64 0.23.1",
  "prodex-gateway-core",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -1397,11 +1397,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.408.3"
+version = "0.408.4"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -1415,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.408.3"
+version = "0.408.4"
 dependencies = [
  "prodex-domain",
 ]
@@ -1914,9 +1914,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.24.0"
+version = "1.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
