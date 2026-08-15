@@ -1,4 +1,8 @@
-use super::*;
+use super::ChildProcessPlan;
+use std::collections::BTreeSet;
+use std::env;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 pub(crate) fn clear_rtk_auto_wrap_control_env(child: &mut ChildProcessPlan) {
     let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());

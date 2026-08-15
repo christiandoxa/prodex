@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    RecoveredLoad, runtime_proxy_log_field, runtime_proxy_log_to_path,
+    runtime_proxy_structured_log_message,
+};
+use anyhow::Result;
 
 pub(super) fn runtime_startup_recovery_or_default<T>(
     log_path: &std::path::Path,
@@ -34,7 +38,7 @@ pub(super) fn runtime_startup_recovery_or_default<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::runtime_startup_recovery_or_default;
     use std::collections::BTreeMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
