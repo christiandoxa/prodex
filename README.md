@@ -136,18 +136,18 @@ Runtime proxy design contract:
 
 ## Installation
 
-Choose a published `<version>` from [GitHub Releases](https://github.com/christiandoxa/prodex/releases), then run the matching installer.
+Install the latest published release (`0.408.6`):
 
 macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/<version>/install.sh | sh -s -- --release <version>
+curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.sh | sh -s -- --release 0.408.6
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:PRODEX_RELEASE='<version>'; irm https://github.com/christiandoxa/prodex/releases/download/<version>/install.ps1 | iex
+$env:PRODEX_RELEASE='0.408.6'; irm https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.ps1 | iex
 ```
 
 Managed profiles require Windows symbolic-link permission. Enable Developer
@@ -158,18 +158,18 @@ profile state and reports an actionable error when permission is unavailable.
 <details>
 <summary>Installer verification, alternate source, and legacy migration</summary>
 
-Both installers download the selected binary and verify its `SHA256SUMS` entry. The release workflow malware-scans final assets and verifies installer provenance. If your policy disallows pipe-to-shell, download the matching installer, inspect it, then run it locally:
+Both installers download the selected binary and verify its `SHA256SUMS` entry. The release workflow malware-scans final assets and verifies installer provenance. If your policy disallows pipe-to-shell, download the `0.408.6` installer, inspect it, then run it locally:
 
 ```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/<version>/install.sh -o install.sh
+curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.sh -o install.sh
 less install.sh
-sh install.sh --release <version>
+sh install.sh --release 0.408.6
 ```
 
 ```powershell
-irm https://github.com/christiandoxa/prodex/releases/download/<version>/install.ps1 -OutFile .\install.ps1
+irm https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.ps1 -OutFile .\install.ps1
 Get-Content .\install.ps1
-.\install.ps1 -Release <version>
+.\install.ps1 -Release 0.408.6
 ```
 
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available. Existing npm or Cargo installations can run `prodex update` once to migrate.

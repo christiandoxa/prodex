@@ -15,11 +15,10 @@ Windows must permit symbolic-link creation for managed profiles. Enable
 Developer Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an
 administrator before importing or creating a profile.
 
-Install Prodex with a version-pinned release installer. Replace `<version>` with
-the release you want:
+Install the latest published release (`0.408.6`):
 
 ```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/<version>/install.sh | sh -s -- --release <version>
+curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.sh | sh -s -- --release 0.408.6
 prodex --version
 codex --version
 ```
@@ -27,7 +26,7 @@ codex --version
 Windows PowerShell:
 
 ```powershell
-$env:PRODEX_RELEASE='<version>'; irm https://github.com/christiandoxa/prodex/releases/download/<version>/install.ps1 | iex
+$env:PRODEX_RELEASE='0.408.6'; irm https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.ps1 | iex
 prodex --version
 codex --version
 ```
