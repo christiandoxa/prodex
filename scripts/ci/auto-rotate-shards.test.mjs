@@ -40,7 +40,7 @@ test("auto-rotate CI shards are disjoint and cover every group", () => {
   const allIds = shardIds(full.stdout);
   const firstIds = shardIds(first.stdout);
   const secondIds = shardIds(second.stdout);
-  assert.equal(allIds.size, 14);
+  assert.equal(allIds.size, 23);
   assert.deepEqual(firstIds.intersection(secondIds), new Set());
   assert.deepEqual(firstIds.union(secondIds), allIds);
 });

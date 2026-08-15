@@ -7,6 +7,30 @@ import {
   runStep,
 } from "./main-internal-test-runner.mjs";
 
+const LOGIN_TESTS = Object.freeze([
+  ["interactive", "interactive login", "interactive_login_prompts_before_starting_chatgpt_browser_flow"],
+  ["api-key", "API key login", "login_with_api_key_and_base_url_creates_openai_compatible_profile"],
+  ["suffix", "login profile suffix", "login_without_profile_adds_suffix_when_email_name_is_taken"],
+  ["create", "login profile creation", "login_without_profile_creates_profile_from_email"],
+  [
+    "other-email",
+    "login profile email isolation",
+    "login_without_profile_does_not_reuse_email_derived_profile_name_for_other_email",
+  ],
+  ["usage-email", "login usage email fallback", "login_without_profile_falls_back_to_usage_email_when_id_token_is_missing"],
+  ["parallel-lookup", "login parallel profile lookup", "login_without_profile_looks_up_existing_profiles_in_parallel"],
+  ["reuse", "login profile reuse", "login_without_profile_reuses_existing_profile_for_same_email"],
+  ["token", "login token update", "login_without_profile_updates_token_only_for_duplicate_email"],
+  ["auth-email", "login auth email precedence", "login_without_profile_uses_auth_email_before_quota_lookup"],
+]);
+
+const LOGIN_SHARDS = LOGIN_TESTS.map(([id, label, filter]) => ({
+  id: `login-${id}`,
+  label,
+  filters: [`login::${filter}`],
+  timeoutMs: 120_000,
+}));
+
 const AUTO_ROTATE_SHARDS = Object.freeze([
   {
     id: "run-blocked-current",
@@ -43,11 +67,7 @@ const AUTO_ROTATE_SHARDS = Object.freeze([
       "run::run_preflight_checks_fallback_profiles_in_parallel",
     ],
   },
-  {
-    id: "login",
-    label: "login",
-    filters: ["login::"],
-  },
+  ...LOGIN_SHARDS,
   {
     id: "quota-doctor",
     label: "quota doctor",
@@ -177,15 +197,19 @@ function filterLabel(filter) {
 }
 
 function shardSteps(shard, options) {
-  return shard.filters.map((filter) =>
-    cargoIntegrationTestFilterStep(
+  return shard.filters.map((filter) => {
+    const step = cargoIntegrationTestFilterStep(
       `auto-rotate:${shard.id}:${filterLabel(filter)}`,
       "auto_rotate",
       filter,
       ["--test-threads=1"],
       options,
-    ),
-  );
+    );
+    if (shard.timeoutMs) {
+      step.timeoutMs = shard.timeoutMs;
+    }
+    return step;
+  });
 }
 
 async function runShard(shard, options) {

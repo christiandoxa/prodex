@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,7 +19,7 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
     prompt: &str,
     answer: &str,
 ) -> PtyRunOutput {
-    let (child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
+    let (mut child, mut master) = spawn_prodex_with_pty(fixture, args, extra_env);
     let mut tty_output = String::new();
     read_until_prompt(&mut master, prompt, &mut tty_output);
     master
@@ -29,9 +29,8 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
         .flush()
         .expect("failed to flush prompt answer to pty");
 
-    let output = child
-        .wait_with_output()
-        .expect("failed to wait for prodex output");
+    let status = wait_for_pty_child(&mut child, &mut master, &mut tty_output);
+    let output = empty_output(status);
     read_available(&mut master, &mut tty_output);
     PtyRunOutput { output, tty_output }
 }
@@ -50,11 +49,10 @@ pub(crate) fn run_prodex_with_pty_until_prompt(
         .expect("failed to inspect prodex after prompt")
         .is_none()
     {
-        child.kill().expect("failed to stop prodex after prompt");
+        terminate_pty_process_group(&mut child);
     }
-    let output = child
-        .wait_with_output()
-        .expect("failed to wait for prodex after prompt");
+    let status = wait_for_pty_child(&mut child, &mut master, &mut tty_output);
+    let output = empty_output(status);
     read_available(&mut master, &mut tty_output);
     PtyRunOutput { output, tty_output }
 }
@@ -73,6 +71,9 @@ fn spawn_prodex_with_pty(
     let stderr_slave = slave_file
         .try_clone()
         .expect("failed to clone pty slave for stderr");
+    let stdout_slave = slave_file
+        .try_clone()
+        .expect("failed to clone pty slave for stdout");
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_prodex"));
     command
@@ -93,7 +94,7 @@ fn spawn_prodex_with_pty(
         .envs(extra_env.iter().copied())
         .args(args)
         .stdin(Stdio::from(stdin_slave))
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(stdout_slave))
         .stderr(Stdio::from(stderr_slave));
     // SAFETY: `setsid` is async-signal-safe and does not access parent-process memory.
     unsafe {
@@ -109,6 +110,45 @@ fn spawn_prodex_with_pty(
         .expect("failed to spawn prodex with detached pty");
     drop(slave_file);
     (child, master)
+}
+
+fn empty_output(status: ExitStatus) -> Output {
+    Output {
+        status,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    }
+}
+
+fn wait_for_pty_child(child: &mut Child, master: &mut File, output: &mut String) -> ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        read_available(master, output);
+        if let Some(status) = child
+            .try_wait()
+            .expect("failed to inspect prodex while draining pty")
+        {
+            return status;
+        }
+        if Instant::now() >= deadline {
+            terminate_pty_process_group(child);
+            panic!("timed out waiting for prodex exit; output was {output:?}");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn terminate_pty_process_group(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            // SAFETY: the PTY child creates its own session and process group in pre_exec.
+            let _ = unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn open_pty() -> (File, RawFd) {
