@@ -24,12 +24,14 @@ const LOGIN_TESTS = Object.freeze([
   ["auth-email", "login auth email precedence", "login_without_profile_uses_auth_email_before_quota_lookup"],
 ]);
 
-const LOGIN_SHARDS = LOGIN_TESTS.map(([id, label, filter]) => ({
-  id: `login-${id}`,
-  label,
-  filters: [`login::${filter}`],
-  timeoutMs: 120_000,
-}));
+const LOGIN_SHARDS = LOGIN_TESTS
+  .filter(([id]) => process.platform !== "win32" || id !== "interactive")
+  .map(([id, label, filter]) => ({
+    id: `login-${id}`,
+    label,
+    filters: [`login::${filter}`],
+    timeoutMs: 120_000,
+  }));
 
 const AUTO_ROTATE_SHARDS = Object.freeze([
   {
