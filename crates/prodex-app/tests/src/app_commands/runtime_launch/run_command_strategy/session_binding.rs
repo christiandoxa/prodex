@@ -15,7 +15,12 @@ fn resume_provider_bridge_leaves_the_session_model_authoritative() {
     fs::create_dir_all(&sessions).unwrap();
     fs::write(
         sessions.join("rollout.jsonl"),
-        session_meta_line(session_id, &root, Some("prodex-kiro")),
+        format!(
+            "{}{}",
+            session_meta_line(session_id, &root, Some("prodex-kiro")),
+            r#"{"timestamp":"2026-06-05T01:01:00Z","type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"max"}}
+"#
+        ),
     )
     .unwrap();
 
@@ -38,7 +43,14 @@ fn resume_provider_bridge_leaves_the_session_model_authoritative() {
         strategy.auto_external_provider,
         Some(SuperExternalProvider::Kiro)
     );
-    assert!(codex_cli_config_override_value(&strategy.codex_args, "model").is_none());
+    assert_eq!(
+        codex_cli_config_override_value(&strategy.codex_args, "model").as_deref(),
+        Some("gpt-5.6-luna")
+    );
+    assert_eq!(
+        codex_cli_config_override_value(&strategy.codex_args, "model_reasoning_effort").as_deref(),
+        Some("max")
+    );
 }
 
 #[test]

@@ -482,6 +482,7 @@ fn configure_stdio_mcp_server(
         .with_context(|| format!("mcp_servers.{name} must be a TOML table"))?;
     configure_stdio_mcp_server_fields(server, command, args, env_vars);
     server.insert("enabled".to_string(), toml::Value::Boolean(true));
+    server.insert("startup_timeout_sec".to_string(), toml::Value::Integer(60));
     Ok(())
 }
 

@@ -14,6 +14,8 @@ const corpus = "crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_
 const outputRoot = path.join(repoRoot, "docs", "generated");
 const jsonPath = path.join(outputRoot, "smart-context-replay-report.json");
 const markdownPath = path.join(outputRoot, "smart-context-replay-report.md");
+const ALLOCATION_EVIDENCE_LEVEL = "deterministic_correctness_with_tokenizer_and_allocation_counts";
+const TOKENIZER_EVIDENCE_LEVEL = "deterministic_correctness_with_tokenizer_counts";
 const commit = runChecked("git", ["rev-parse", "HEAD"], { cwd: repoRoot }).stdout.trim();
 const rustToolchain = runChecked("rustc", ["--version"], { cwd: repoRoot }).stdout.trim();
 const report = runCheckedJson(
@@ -26,6 +28,26 @@ const report = runCheckedJson(
     env: { ...process.env, PRODEX_GIT_COMMIT: commit, PRODEX_RUST_TOOLCHAIN: rustToolchain },
   },
 );
+
+function validateAllocationEvidence(value) {
+  const hasAllocationEvidence = value.evidence_level === ALLOCATION_EVIDENCE_LEVEL;
+  if (!hasAllocationEvidence && value.evidence_level !== TOKENIZER_EVIDENCE_LEVEL) {
+    throw new Error(`unsupported Smart Context evidence level: ${value.evidence_level}`);
+  }
+  for (const scenario of value.scenarios) {
+    for (const turn of scenario.turns) {
+      if (hasAllocationEvidence) {
+        if (!Number.isSafeInteger(turn.allocation_bytes) || turn.allocation_bytes < 0) {
+          throw new Error(`invalid allocation evidence for ${scenario.id} turn ${turn.turn}`);
+        }
+      } else if (turn.allocation_bytes !== null) {
+        throw new Error(`unsupported allocation evidence for ${scenario.id} turn ${turn.turn}`);
+      }
+    }
+  }
+}
+
+validateAllocationEvidence(report);
 
 function renderMarkdown(value) {
   const lines = [
@@ -52,7 +74,11 @@ function renderMarkdown(value) {
     );
   }
   lines.push("");
-  lines.push("This is deterministic correctness, tokenizer-count, and optimized-rewrite allocation evidence. It is not live-model quality evidence.");
+  lines.push(
+    value.evidence_level === ALLOCATION_EVIDENCE_LEVEL
+      ? "This is deterministic correctness, tokenizer-count, and optimized-rewrite allocation evidence. It is not live-model quality evidence."
+      : "This is deterministic correctness and tokenizer-count evidence. It is not live-model quality evidence.",
+  );
   lines.push("");
   return lines.join("\n");
 }
@@ -87,6 +113,7 @@ if (write) {
 } else {
   const checkedJson = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
   const checkedMarkdown = fs.readFileSync(markdownPath, "utf8");
+  validateAllocationEvidence(checkedJson);
   if (normalizedReport(checkedJson) !== normalizedReport(report)) {
     throw new Error("Smart Context replay JSON is stale; run npm run docs:smart-context-evidence");
   }

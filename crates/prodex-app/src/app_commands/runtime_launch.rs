@@ -34,8 +34,11 @@ use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_confi
 use gateway_startup::start_gateway_backend;
 use gateway_status::print_gateway_status;
 use goal_resume::*;
-use resume_provider::runtime_resume_external_provider_from_codex_args;
 pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
+use resume_provider::{
+    RuntimeResumeSessionSettings, runtime_resume_external_provider_from_codex_args,
+    runtime_resume_session_settings_from_codex_args,
+};
 use run_command_strategy::RunCommandStrategy;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
@@ -72,16 +75,73 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     }
 }
 
-pub(super) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
+pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
-    let preserve_session_model = args.local_model.is_none()
-        && codex_cli_config_override_value(&args.codex_args, "model").is_none()
-        && prodex_runtime_launch::codex_resume_session_id(&normalized).is_some();
+    let is_resume = prodex_runtime_launch::codex_resume_session_id(&normalized).is_some();
+    let model_is_explicit = args.local_model.is_some()
+        || codex_cli_config_override_value(&args.codex_args, "model").is_some();
+    let effort_is_explicit =
+        codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort").is_some();
+    let session_settings = is_resume
+        .then(|| runtime_resume_session_settings_from_codex_args(&normalized))
+        .flatten();
     let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio);
-    if preserve_session_model {
+    if is_resume && !model_is_explicit {
         remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
     }
+    restore_resume_session_settings(
+        &mut runtime_args.codex_args,
+        session_settings.as_ref(),
+        model_is_explicit,
+        effort_is_explicit,
+    );
     runtime_args
+}
+
+pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<()> {
+    let Some(session_provider) = runtime_resume_provider_from_codex_args(&args.codex_args)? else {
+        return Ok(());
+    };
+    super::resolve_super_main_agent_with_prompt(args, false, Some(session_provider), |_, _| {
+        bail!("Super provider prompt is unavailable during dry-run")
+    })
+    .map(|_| ())
+}
+
+fn restore_resume_session_settings(
+    codex_args: &mut Vec<OsString>,
+    settings: Option<&RuntimeResumeSessionSettings>,
+    model_is_explicit: bool,
+    effort_is_explicit: bool,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    for (key, value, is_explicit) in [
+        ("model", settings.model.as_deref(), model_is_explicit),
+        (
+            "model_reasoning_effort",
+            settings.reasoning_effort.as_deref(),
+            effort_is_explicit,
+        ),
+    ] {
+        if is_explicit {
+            continue;
+        }
+        let Some(value) = value else {
+            continue;
+        };
+        codex_args.splice(
+            0..0,
+            [
+                OsString::from("-c"),
+                OsString::from(format!(
+                    "{key}={}",
+                    crate::runtime_catalog_config::toml_string_literal(value)
+                )),
+            ],
+        );
+    }
 }
 
 pub(super) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {

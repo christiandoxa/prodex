@@ -63,4 +63,14 @@ mod tests {
         assert!(html.contains(r#"cookie("prodex_gateway_csrf")"#));
         assert!(html.contains(r#"h["x-csrf-token"]=csrf"#));
     }
+
+    #[test]
+    fn dashboard_mutations_include_idempotency_keys() {
+        let html = include_str!("gateway_admin_dashboard.html");
+
+        assert!(html.contains("function mutation(path, options={})"));
+        assert!(html.contains(r#""Idempotency-Key":crypto.randomUUID()"#));
+        assert!(html.contains("mutation(\"/keys\""));
+        assert!(html.contains("mutation(\"/scim/v2/Users\""));
+    }
 }

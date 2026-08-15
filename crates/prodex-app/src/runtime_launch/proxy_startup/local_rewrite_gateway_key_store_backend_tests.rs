@@ -70,6 +70,17 @@ fn redis_stored_key_rejects_padded_identity_fields() {
 }
 
 #[test]
+fn redis_indexed_scim_records_prevent_legacy_store_fallback() {
+    let source = include_str!("local_rewrite_gateway_key_store_backend.rs");
+    let user_index = source.find("let user_index").unwrap();
+    let fallback = source
+        .find("if names.is_empty() && user_ids.is_empty()")
+        .unwrap();
+
+    assert!(user_index < fallback);
+}
+
+#[test]
 fn redis_exact_json_vec_rejects_whitespace_entries() {
     let fields = BTreeMap::from([
         (

@@ -33,7 +33,8 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl")),
         concat!(
             "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":",
-            "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\",\"cwd\":\"/tmp/test\"}}\n",
+            "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\",\"cwd\":\"/tmp/test\",\"model_provider\":\"prodex-kiro\"}}\n",
+            "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\",\"effort\":\"max\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"thread\",\"payload\":{\"thread_id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:01Z\",\"type\":\"message\",\"payload\":{\"role\":\"assistant\",\"content\":\"partial answer\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{\"message\":\"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.\"}}\n"
@@ -201,6 +202,19 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     );
     assert_eq!(fresh_strategy.resume_session_id(), Some(session_id));
     assert_eq!(fresh_strategy.session_affinity_release(), Some(session_id));
+    assert_eq!(
+        fresh_strategy.auto_external_provider,
+        Some(SuperExternalProvider::Kiro)
+    );
+    assert_eq!(
+        codex_cli_config_override_value(&fresh_strategy.codex_args, "model").as_deref(),
+        Some("gpt-5.6-luna")
+    );
+    assert_eq!(
+        codex_cli_config_override_value(&fresh_strategy.codex_args, "model_reasoning_effort")
+            .as_deref(),
+        Some("max")
+    );
     assert!(codex_args_include_goal_resume(&fresh_strategy.codex_args));
     assert_eq!(
         fresh_strategy.codex_args.last(),

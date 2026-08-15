@@ -223,14 +223,6 @@ fn prepare_runtime_smart_context_body_input(
             request.body.len(),
             "unsupported_tokenizer",
         );
-        if static_context.state_changed {
-            let _ = commit_runtime_smart_context_proxy_state_for_scope(
-                shared,
-                &scope,
-                state_generation,
-                planned_state,
-            );
-        }
         return Ok(None);
     }
     let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs_in_store(
@@ -359,7 +351,6 @@ fn finish_runtime_smart_context_body<'a>(
     } = context;
     let mut stats = outcome.stats;
     let Ok(body) = serde_json::to_vec(&prepared.value) else {
-        let _ = commit_runtime_smart_context_static_context_observation(shared, &mut prepared);
         return Ok(Cow::Borrowed(&request.body));
     };
     let body_token_count = runtime_proxy_crate::smart_context_count_serialized_request(
@@ -436,7 +427,6 @@ fn finish_runtime_smart_context_body<'a>(
             token_count_after: &prepared.request_token_count,
             self_check: fallback_reason,
         });
-        let _ = commit_runtime_smart_context_static_context_observation(shared, &mut prepared);
         return Ok(Cow::Borrowed(&request.body));
     }
     if started_at.elapsed() > Duration::from_millis(SMART_CONTEXT_REWRITE_DEADLINE_MS) {
@@ -457,7 +447,6 @@ fn finish_runtime_smart_context_body<'a>(
             token_count_after: &prepared.request_token_count,
             self_check: "pass_through_exact",
         });
-        let _ = commit_runtime_smart_context_static_context_observation(shared, &mut prepared);
         return Ok(Cow::Borrowed(&request.body));
     }
     if rollout.computes_shadow() {
@@ -478,7 +467,6 @@ fn finish_runtime_smart_context_body<'a>(
             token_count_after: &body_token_count,
             self_check,
         });
-        let _ = commit_runtime_smart_context_static_context_observation(shared, &mut prepared);
         return Ok(Cow::Borrowed(&request.body));
     }
     observe_runtime_smart_context_rewrite_safety_with_state(

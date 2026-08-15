@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-runtime-continuity-ci-feature-0.408.6",
+    "requiredSubjects": [
+      "fix: close audited runtime continuity and CI gaps"
+    ],
+    "caps": {
+      "maxFiles": 50,
+      "maxBehaviorFiles": 45,
+      "maxLines": 2500,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the bounded 0.408.6 audit covering session model and reasoning restoration, persistence recovery diagnostics, Presidio rollback, gateway migration and dashboard mutation safety, optional-tool readiness, Smart Context state semantics, release-note installation UX, disjoint CI fan-out, and focused size-guard module splits; exact caps cover this implementation while the default churn thresholds remain unchanged."
+  },
+  {
+    "id": "audited-runtime-continuity-ci-release-0.408.6",
+    "requiredSubjects": [
+      "fix: close audited runtime continuity and CI gaps",
+      "chore(release): release 0.408.6"
+    ],
+    "caps": {
+      "maxFiles": 55,
+      "maxBehaviorFiles": 45,
+      "maxLines": 2800,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the same bounded 0.408.6 implementation plus synchronized release metadata; the allowance is tied to both exact subjects and does not bypass source tests, release guards, or the standalone publication workflow."
+  },
+  {
     "id": "audited-super-child-tool-release-0.403.0",
     "requiredSubjects": [
       "fix(super): harden child tool launches",

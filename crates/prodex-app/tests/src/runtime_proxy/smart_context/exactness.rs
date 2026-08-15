@@ -77,6 +77,7 @@ fn smart_context_subthreshold_rewrite_discards_planned_state() {
     smart_context_observe_minimal_budget(&shared);
     let repeated = "x".repeat(SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES + 476);
     let request = smart_context_test_request(serde_json::json!({
+        "instructions": "Keep this static instruction.",
         "input": [
             {"role": "user", "content": repeated},
             {"role": "user", "content": repeated}

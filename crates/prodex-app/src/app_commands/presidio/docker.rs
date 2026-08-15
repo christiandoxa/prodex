@@ -11,6 +11,12 @@ const PRESIDIO_SERVICE_LABEL: &str = "com.prodex.presidio.service";
 const PRESIDIO_DOCKER_TIMEOUT: Duration = Duration::from_secs(300);
 const PRESIDIO_DOCKER_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PresidioContainerChange {
+    Started,
+    Created,
+}
+
 pub(super) fn docker_available() -> bool {
     let mut command = Command::new("docker");
     command.arg("version");
@@ -18,7 +24,11 @@ pub(super) fn docker_available() -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str) -> Result<()> {
+pub(super) fn ensure_presidio_container(
+    name: &str,
+    image: &str,
+    host_port: &str,
+) -> Result<Option<PresidioContainerChange>> {
     if let Some(container) = inspect_presidio_container(name)? {
         validate_presidio_container(&container, name, image, host_port)?;
         if container
@@ -26,7 +36,7 @@ pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
-            return Ok(());
+            return Ok(None);
         }
         let mut command = Command::new("docker");
         command.args(["start", name]);
@@ -40,7 +50,7 @@ pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str
         if !output.status.success() {
             bail!("docker start {name} failed with {}", output.status);
         }
-        return Ok(());
+        return Ok(Some(PresidioContainerChange::Started));
     }
 
     let published_port = format!("127.0.0.1:{host_port}:3000");
@@ -70,7 +80,38 @@ pub(super) fn ensure_presidio_container(name: &str, image: &str, host_port: &str
     if !output.status.success() {
         bail!("docker run {name} failed with {}", output.status);
     }
+    Ok(Some(PresidioContainerChange::Created))
+}
+
+pub(super) fn cleanup_presidio_container(
+    name: &str,
+    change: PresidioContainerChange,
+) -> Result<()> {
+    let args = cleanup_presidio_container_args(name, change);
+    let action = match change {
+        PresidioContainerChange::Started => "stop",
+        PresidioContainerChange::Created => "remove",
+    };
+    let mut command = Command::new("docker");
+    command.args(&args);
+    let output = crate::command_output_with_timeout(
+        &mut command,
+        PRESIDIO_DOCKER_TIMEOUT,
+        PRESIDIO_DOCKER_OUTPUT_MAX_BYTES,
+        &format!("Presidio docker {action}"),
+    )
+    .with_context(|| format!("failed to {action} Presidio container {name}"))?;
+    if !output.status.success() {
+        bail!("docker {action} {name} failed with {}", output.status);
+    }
     Ok(())
+}
+
+fn cleanup_presidio_container_args(name: &str, change: PresidioContainerChange) -> Vec<&str> {
+    match change {
+        PresidioContainerChange::Started => vec!["stop", name],
+        PresidioContainerChange::Created => vec!["rm", "--force", name],
+    }
 }
 
 fn inspect_presidio_container(name: &str) -> Result<Option<serde_json::Value>> {
@@ -134,6 +175,18 @@ fn validate_presidio_container(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn container_changes_distinguish_restore_from_remove() {
+        assert_eq!(
+            cleanup_presidio_container_args("presidio-analyzer", PresidioContainerChange::Started),
+            ["stop", "presidio-analyzer"],
+        );
+        assert_eq!(
+            cleanup_presidio_container_args("presidio-analyzer", PresidioContainerChange::Created),
+            ["rm", "--force", "presidio-analyzer"],
+        );
+    }
 
     #[test]
     fn managed_presidio_container_contract_rejects_unowned_or_mismatched_containers() {

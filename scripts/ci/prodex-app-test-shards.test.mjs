@@ -6,6 +6,7 @@ import {
   ciGithubMatrix,
   githubMatrix,
   PRODEX_APP_LIB_FILTERS,
+  PRODEX_APP_FULL_TEST_SHARDS,
   PRODEX_APP_LIB_SHARDS,
   validateShards,
   windowsGithubMatrix,
@@ -20,7 +21,9 @@ function runPlanner(...args) {
 
 test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(), []);
+  assert.deepEqual(validateShards(PRODEX_APP_FULL_TEST_SHARDS), []);
   assert.equal(PRODEX_APP_LIB_SHARDS.length, 13);
+  assert.equal(PRODEX_APP_FULL_TEST_SHARDS.length, 20);
   assert.deepEqual(
     PRODEX_APP_LIB_SHARDS.filter((shard) => shard.filters).flatMap((shard) => shard.filters),
     PRODEX_APP_LIB_FILTERS,
@@ -34,10 +37,11 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 13);
-  assert.equal(ciMatrix.include.length, 9);
-  assert.equal(fullMatrix.include.length, 14);
+  assert.equal(ciMatrix.include.length, 16);
+  assert.equal(fullMatrix.include.length, 21);
   assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
+  assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include[0].suite, "workspace");
@@ -61,6 +65,10 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   }
   const fullFilters = fullMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
   assert.deepEqual(new Set(fullFilters), new Set(PRODEX_APP_LIB_FILTERS));
+  assert.equal(
+    fullMatrix.include.filter((entry) => entry.suite.startsWith("launch-providers-")).length,
+    8,
+  );
   const windowsFilters = windowsMatrix.include
     .flatMap((entry) => entry.filters.split("\n"))
     .filter(Boolean);
@@ -79,7 +87,7 @@ test("shard planner dry-run and matrix output are compile-free", () => {
 
   const dryRun = runPlanner("--dry-run");
   assert.equal(dryRun.status, 0, dryRun.stderr);
-  assert.match(dryRun.stdout, /dry-run: 14 full-test shard\(s\)/);
+  assert.match(dryRun.stdout, /dry-run: 21 full-test shard\(s\)/);
   assert.match(dryRun.stdout, /selection: cargo test .*--test-threads=1/);
   assert.match(dryRun.stdout, /remainder: cargo test .*--skip/);
 
@@ -161,6 +169,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
   assert.match(processGuard, /mozilla-actions\/sccache-action@/);
   assert.match(processGuard, /Swatinem\/rust-cache@/);
+  assert.match(processGuard, /npm run docs:provider-capabilities:check/);
   assert.doesNotMatch(processGuard, /npm run docs:smart-context-evidence:check/);
   assert.equal(
     processGuard.match(/if: matrix\.lane == 'static' \|\| matrix\.lane == 'enterprise-storage'/g)

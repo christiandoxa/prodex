@@ -32,6 +32,7 @@ fn configures_only_codebase_memory_server() -> Result<()> {
     assert!(rendered.contains("[mcp_servers.codebase-memory-mcp]"));
     assert!(rendered.contains("CBM_CACHE_DIR = \"/tmp/cbm\""));
     assert!(rendered.contains("enabled = true"));
+    assert!(rendered.contains("startup_timeout_sec = 60"));
     for removed in [
         "prodex-sqz",
         "token-savior",

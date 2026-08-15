@@ -119,14 +119,34 @@ export const PRODEX_APP_LIB_SHARDS = Object.freeze([
   },
 ]);
 
+// Provider runtime filters are disjoint. Give each its own runner while keeping
+// every cargo process serial; Windows stays grouped below to avoid recompiling
+// the same workspace for each provider.
+function splitIndependentShards(shards) {
+  return shards.flatMap((shard) => {
+    if (shard.suite !== "launch-providers") return [shard];
+    return shard.filters.map((filter, index) => {
+      const split = {
+        suite: `${shard.suite}-${index + 1}`,
+        label: `${shard.label} ${index + 1}/${shard.filters.length}`,
+        filters: [filter],
+      };
+      if (shard.skipFilters) split.skipFilters = shard.skipFilters;
+      return split;
+    });
+  });
+}
+
+export const PRODEX_APP_FULL_TEST_SHARDS = Object.freeze(splitIndependentShards(PRODEX_APP_LIB_SHARDS));
+
 // Dedicated Ubuntu jobs own all main-internal and profile-command-internal tests.
-// Windows and full-test keep the canonical app partition unchanged.
+// Windows keeps the canonical app partition unchanged.
 const CI_TARGETED_SHARDS = Object.freeze(
-  TARGETED_SHARDS.map((shard) => ({
+  splitIndependentShards(TARGETED_SHARDS.map((shard) => ({
     ...shard,
     filters: shard.filters.filter((filter) => !filter.startsWith(MAIN_INTERNAL_FILTER)),
     skipFilters: [MAIN_INTERNAL_FILTER, PROFILE_COMMANDS_INTERNAL_FILTER],
-  })).filter((shard) => shard.filters.length > 0),
+  })).filter((shard) => shard.filters.length > 0)),
 );
 const CI_REMAINDER_SHARD = Object.freeze({
   ...PRODEX_APP_LIB_SHARDS.at(-1),
@@ -261,7 +281,8 @@ function matrixEntry(shard, index) {
 }
 
 export function githubMatrix({ includeWorkspace = false } = {}) {
-  const include = PRODEX_APP_LIB_SHARDS.map((shard, index) =>
+  const shards = includeWorkspace ? PRODEX_APP_FULL_TEST_SHARDS : PRODEX_APP_LIB_SHARDS;
+  const include = shards.map((shard, index) =>
     matrixEntry(shard, includeWorkspace ? index + 1 : index),
   );
   if (includeWorkspace) {
@@ -380,7 +401,7 @@ function main() {
     );
   }
 
-  const issues = validateShards();
+  const issues = [...validateShards(), ...validateShards(PRODEX_APP_FULL_TEST_SHARDS)];
   if (issues.length > 0) {
     throw new Error(issues.join("\n"));
   }
@@ -401,7 +422,7 @@ function main() {
     return;
   }
 
-  const shards = args.dryRun ? [WORKSPACE_SHARD, ...PRODEX_APP_LIB_SHARDS] : [];
+  const shards = args.dryRun ? [WORKSPACE_SHARD, ...PRODEX_APP_FULL_TEST_SHARDS] : [];
   process.stdout.write(`dry-run: ${shards.length} full-test shard(s)\n`);
   for (const shard of shards) {
     process.stdout.write(`  ${shard.suite}: ${stepCommand(shard)}\n`);

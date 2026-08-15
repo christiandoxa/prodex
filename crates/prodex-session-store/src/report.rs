@@ -15,6 +15,10 @@ pub struct SessionReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_thread_id: Option<String>,
     #[serde(skip)]
+    last_model: Option<String>,
+    #[serde(skip)]
+    last_reasoning_effort: Option<String>,
+    #[serde(skip)]
     updated_sort_key: i64,
     #[serde(skip)]
     cwd_path: Option<PathBuf>,
@@ -31,6 +35,8 @@ impl SessionReport {
             model_provider: None,
             path: path.display().to_string(),
             parent_thread_id: None,
+            last_model: None,
+            last_reasoning_effort: None,
             updated_sort_key: modified_epoch,
             cwd_path: None,
         }
@@ -42,6 +48,14 @@ impl SessionReport {
 
     pub fn set_model_provider(&mut self, model_provider: Option<String>) {
         self.model_provider = model_provider;
+    }
+
+    pub fn last_model(&self) -> Option<&str> {
+        self.last_model.as_deref()
+    }
+
+    pub fn last_reasoning_effort(&self) -> Option<&str> {
+        self.last_reasoning_effort.as_deref()
     }
 
     pub fn matches_current_dir(&self, current_dir: &Path) -> bool {
@@ -91,6 +105,23 @@ pub fn apply_session_json_line(report: &mut SessionReport, line: &str) {
 }
 
 pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value) {
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("turn_context") {
+        if let Some(model) = first_string_value(value, &[&["payload", "model"], &["model"]]) {
+            report.last_model = Some(model);
+        }
+        if let Some(effort) = first_string_value(
+            value,
+            &[
+                &["payload", "effort"],
+                &["payload", "reasoning_effort"],
+                &["effort"],
+                &["reasoning_effort"],
+            ],
+        ) {
+            report.last_reasoning_effort = Some(effort);
+        }
+    }
+
     if let Some(id) = first_string_value(
         value,
         &[

@@ -1,12 +1,16 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use postgres::Client as PostgresClient;
 use rusqlite::{Connection, OptionalExtension};
 
 const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 5;
+const RUNTIME_GATEWAY_REDIS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
+const RUNTIME_GATEWAY_REDIS_COMMAND_TIMEOUT: Duration = Duration::from_millis(250);
+const RUNTIME_GATEWAY_REDIS_LOCK_WAIT: Duration = Duration::from_secs(1);
 const RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL: &str = r#"
     SET lock_timeout = '30s';
     SELECT pg_advisory_lock(hashtextextended('prodex.gateway.schema.migrations', 0));
@@ -26,6 +30,7 @@ const RUNTIME_GATEWAY_POSTGRES_SCHEMA_MIGRATIONS_TABLE_SQL: &str = r#"
             "#;
 
 mod compatibility_columns;
+mod compatibility_ledger;
 mod enterprise_migration;
 #[cfg(test)]
 #[path = "local_rewrite_gateway_backend_connection/enterprise_migration/tests.rs"]
@@ -39,6 +44,10 @@ use compatibility_columns::{
     runtime_gateway_sqlite_add_ledger_scope_columns,
     runtime_gateway_sqlite_add_scim_organization_columns,
     runtime_gateway_sqlite_add_virtual_key_id_column,
+};
+use compatibility_ledger::{
+    runtime_gateway_postgres_compatibility_migration_version,
+    runtime_gateway_sqlite_compatibility_migration_version,
 };
 pub(crate) use enterprise_migration::{
     runtime_gateway_postgres_migrate_enterprise_state,
@@ -324,7 +333,8 @@ pub(super) fn runtime_gateway_sqlite_create_current_schema_for_tests(path: &Path
 fn runtime_gateway_sqlite_apply_compatibility_migrations(conn: &Connection) -> Result<()> {
     conn.execute_batch(RUNTIME_GATEWAY_SQLITE_SCHEMA_MIGRATIONS_TABLE_SQL)
         .context("failed to ensure gateway sqlite schema migrations table")?;
-    let observed_version = runtime_gateway_sqlite_observed_schema_version(conn)?.unwrap_or(0);
+    let observed_version =
+        runtime_gateway_sqlite_compatibility_migration_version(conn)?.unwrap_or(0);
     for migration in RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS {
         if migration.version <= observed_version {
             continue;
@@ -366,7 +376,8 @@ fn runtime_gateway_postgres_apply_compatibility_migrations(
     client
         .batch_execute(RUNTIME_GATEWAY_POSTGRES_SCHEMA_MIGRATIONS_TABLE_SQL)
         .context("failed to ensure gateway postgres schema migrations table")?;
-    let observed_version = runtime_gateway_postgres_observed_schema_version(client)?.unwrap_or(0);
+    let observed_version =
+        runtime_gateway_postgres_compatibility_migration_version(client)?.unwrap_or(0);
     for migration in RUNTIME_GATEWAY_POSTGRES_COMPATIBILITY_MIGRATIONS {
         if migration.version <= observed_version {
             continue;
@@ -631,9 +642,14 @@ fn runtime_gateway_schema_ensured_keys() -> &'static Mutex<BTreeSet<String>> {
 }
 pub(super) fn runtime_gateway_redis_connection(url: &str) -> Result<redis::Connection> {
     let client = redis::Client::open(url).context("failed to open gateway redis client")?;
-    client
-        .get_connection()
-        .context("failed to connect to gateway redis state")
+    let conn = client
+        .get_connection_with_timeout(RUNTIME_GATEWAY_REDIS_CONNECTION_TIMEOUT)
+        .context("failed to connect to gateway redis state")?;
+    conn.set_read_timeout(Some(RUNTIME_GATEWAY_REDIS_COMMAND_TIMEOUT))
+        .context("failed to configure gateway redis read timeout")?;
+    conn.set_write_timeout(Some(RUNTIME_GATEWAY_REDIS_COMMAND_TIMEOUT))
+        .context("failed to configure gateway redis write timeout")?;
+    Ok(conn)
 }
 
 pub(super) fn runtime_gateway_redis_with_lock_token<F, G, T>(
@@ -649,7 +665,11 @@ where
     let token = token_generator()?;
     let mut conn = runtime_gateway_redis_connection(url)?;
     let mut acquired = false;
+    let lock_deadline = Instant::now() + RUNTIME_GATEWAY_REDIS_LOCK_WAIT;
     for _ in 0..50 {
+        if Instant::now() >= lock_deadline {
+            break;
+        }
         let result: Option<String> = redis::cmd("SET")
             .arg(lock_key)
             .arg(&token)
@@ -661,7 +681,11 @@ where
             acquired = true;
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        let remaining = lock_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(20)));
     }
     if !acquired {
         bail!("timed out waiting for redis lock {lock_key}");

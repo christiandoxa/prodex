@@ -27,6 +27,22 @@ fn parses_subagent_parent_thread_id() {
 }
 
 #[test]
+fn remembers_the_latest_turn_model_and_reasoning_effort() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/session-settings.jsonl"), 0);
+    apply_session_json_lines(
+        &mut report,
+        [
+            r#"{"timestamp":"2026-04-29T12:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2-codex","effort":"medium"}}"#,
+            r#"{"timestamp":"2026-04-29T12:02:00Z","type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"max"}}"#,
+            r#"{"timestamp":"2026-04-29T12:03:00Z","type":"response_item","payload":{"model":"should-not-win"}}"#,
+        ],
+    );
+
+    assert_eq!(report.last_model(), Some("gpt-5.6-luna"));
+    assert_eq!(report.last_reasoning_effort(), Some("max"));
+}
+
+#[test]
 fn sorting_is_stable_for_equal_timestamps() {
     let mut reports = [
         SessionReport::from_path(Path::new("/tmp/b.jsonl"), 10),
