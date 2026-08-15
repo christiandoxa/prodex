@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.5 - 2026-08-15
+
+### Runtime
+
+- Close audited runtime security UX and CI gaps (`5d3e509`)
+
 ## 0.408.4 - 2026-08-15
 
 ### Misc
