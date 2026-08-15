@@ -254,6 +254,9 @@ fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
 }
 
 pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
+    if args.dry_run && args.verify_tools {
+        bail!("--dry-run cannot be combined with --verify-tools");
+    }
     let paths = AppPaths::discover()?;
     let install_rows = if args.dry_run {
         collect_install_check_rows_passive(&paths)

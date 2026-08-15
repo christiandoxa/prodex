@@ -46,6 +46,7 @@ fn start_anthropic_harness_proxy(
     paths: &crate::AppPaths,
     upstream_base_url: String,
     harness: prodex_provider_core::HarnessMode,
+    gateway_sso: RuntimeGatewaySsoConfig,
 ) -> crate::RuntimeRotationProxy {
     start_runtime_local_rewrite_proxy_with_harness(
         RuntimeLocalRewriteProxyStartOptions {
@@ -64,7 +65,7 @@ fn start_anthropic_harness_proxy(
             preferred_listen_addr: Some("127.0.0.1:0"),
             gateway_auth_token_hash: None,
             gateway_admin_tokens: Vec::new(),
-            gateway_sso: RuntimeGatewaySsoConfig::default(),
+            gateway_sso,
             gateway_state_store: RuntimeGatewayStateStore::file(paths),
             gateway_virtual_keys: Vec::new(),
             gateway_route_aliases: Vec::new(),
@@ -141,7 +142,7 @@ fn native_harness_preserves_exact_request_bytes_through_local_bridge() {
 }
 
 #[test]
-fn evaluated_anthropic_uses_native_messages_transport_and_translates_response() {
+fn evaluated_anthropic_preserves_safe_caller_metadata_through_native_transport() {
     let root = temp_root("harness-evaluated-anthropic");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n_with_response_body(
@@ -152,10 +153,41 @@ fn evaluated_anthropic_uses_native_messages_transport_and_translates_response() 
         &paths,
         format!("http://{}/v1", upstream.addr),
         prodex_provider_core::HarnessMode::Evaluated,
+        RuntimeGatewaySsoConfig {
+            token_header: "x-auth-token".to_string(),
+            user_header: "x-auth-user".to_string(),
+            role_header: "x-auth-role".to_string(),
+            tenant_header: "x-auth-tenant".to_string(),
+            key_prefixes_header: "x-auth-prefixes".to_string(),
+            ..RuntimeGatewaySsoConfig::default()
+        },
     );
 
     let response = reqwest::blocking::Client::new()
         .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth("caller-secret")
+        .header("ChatGPT-Account-Id", "caller-account")
+        .header(reqwest::header::USER_AGENT, "codex-cli/0.1-test")
+        .header("session_id", "session-123")
+        .header("x-openai-subagent", "subagent-123")
+        .header("x-codex-turn-state", "turn-state-123")
+        .header("x-codex-turn-metadata", "turn-metadata-123")
+        .header("x-codex-beta-features", "beta-123")
+        .header("x-safe-end-to-end", "keep-me")
+        .header(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        )
+        .header("tracestate", "prodex=test")
+        .header("baggage", "tenant_tier=premium")
+        .header("x-auth-token", "fixture-sso-token")
+        .header("x-auth-user", "fixture-user")
+        .header("x-auth-role", "fixture-role")
+        .header("x-auth-tenant", "fixture-tenant")
+        .header("x-auth-prefixes", "team-a-")
+        .header("connection", "x-hop-by-hop")
+        .header("x-hop-by-hop", "strip-me")
+        .header("x-prodex-internal-test", "strip-me")
         .json(&serde_json::json!({
             "instructions": "Be concise.",
             "input": "hello",
@@ -194,7 +226,49 @@ fn evaluated_anthropic_uses_native_messages_transport_and_translates_response() 
             .iter()
             .any(|(name, value)| { name == "anthropic-version" && value == "2023-06-01" })
     );
-    assert!(!headers.iter().any(|(name, _)| name == "authorization"));
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find_map(|(key, value)| key.eq_ignore_ascii_case(name).then_some(value.as_str()))
+    };
+    assert_eq!(header("user-agent"), Some("codex-cli/0.1-test"));
+    for (name, value) in [
+        ("session_id", "session-123"),
+        ("x-openai-subagent", "subagent-123"),
+        ("x-codex-turn-state", "turn-state-123"),
+        ("x-codex-turn-metadata", "turn-metadata-123"),
+        ("x-codex-beta-features", "beta-123"),
+        ("x-safe-end-to-end", "keep-me"),
+        (
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        ),
+        ("tracestate", "prodex=test"),
+        ("baggage", "tenant_tier=premium"),
+    ] {
+        assert_eq!(
+            header(name),
+            Some(value),
+            "safe caller header was lost: {name}"
+        );
+    }
+    for name in [
+        "authorization",
+        "chatgpt-account-id",
+        "x-auth-token",
+        "x-auth-user",
+        "x-auth-role",
+        "x-auth-tenant",
+        "x-auth-prefixes",
+        "x-hop-by-hop",
+        "x-prodex-internal-test",
+    ] {
+        assert_eq!(
+            header(name),
+            None,
+            "filtered header reached provider: {name}"
+        );
+    }
     let request: serde_json::Value = serde_json::from_slice(
         &upstream
             .body_rx

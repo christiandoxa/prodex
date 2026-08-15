@@ -124,7 +124,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         runtime_local_rewrite_apply_prepared_auth(upstream_request, request, shared, &body, auth)?;
     if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
         upstream_request =
-            runtime_local_rewrite_trace_context_headers(upstream_request, request, shared);
+            runtime_local_rewrite_copy_openai_headers(request, shared, upstream_request, true);
     }
     runtime_proxy_log(
         &shared.runtime_shared,
@@ -671,21 +671,6 @@ fn runtime_local_rewrite_header_if_allowed<'a>(
     (!shared.gateway_sso.is_configured_header(expected_name))
         .then(|| runtime_local_rewrite_header(request, expected_name))
         .flatten()
-}
-
-fn runtime_local_rewrite_trace_context_headers(
-    mut upstream_request: reqwest::RequestBuilder,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> reqwest::RequestBuilder {
-    for header_name in ["traceparent", "tracestate", "baggage"] {
-        if let Some(header_value) =
-            runtime_local_rewrite_header_if_allowed(request, shared, header_name)
-        {
-            upstream_request = upstream_request.header(header_name, header_value);
-        }
-    }
-    upstream_request
 }
 
 fn should_skip_runtime_local_rewrite_request_header(

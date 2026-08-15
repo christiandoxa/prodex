@@ -58,6 +58,39 @@ fn bind_session(harness: &RuntimeProxyProfileHarness, session_id: &str, profile_
         );
 }
 
+fn bind_response(harness: &RuntimeProxyProfileHarness, response_id: &str, profile_name: &str) {
+    harness
+        .shared()
+        .runtime
+        .lock()
+        .unwrap()
+        .state
+        .response_profile_bindings
+        .insert(
+            response_id.to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: profile_name.to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+}
+
+fn compact_request_with_previous_response(previous_response_id: &str) -> RuntimeProxyRequest {
+    RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: format!(
+            r#"{{"input":[],"instructions":"compact","previous_response_id":"{previous_response_id}"}}"#
+        )
+        .into_bytes(),
+    }
+}
+
 #[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -71,6 +104,74 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
         backend.responses_accounts(),
         vec!["second-account".to_string()]
     );
+}
+
+#[test]
+fn previous_response_affinity_bypasses_compact_profile_inflight_limit() {
+    let backend = RuntimeProxyBackend::start();
+    let harness = two_ready_profiles(&backend);
+    bind_response(&harness, "resp-main", "main");
+    let hard_limit = harness.shared().runtime_config.tuning.profile_inflight_hard_limit;
+    harness
+        .shared()
+        .lane_admission
+        .set_profile_inflight("main", hard_limit);
+
+    proxy_runtime_standard_request(
+        50,
+        &compact_request_with_previous_response("resp-main"),
+        harness.shared(),
+    )
+    .expect("previous-response-bound compact request should succeed");
+
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+    let bound_profile = harness
+        .shared()
+        .runtime
+        .lock()
+        .unwrap()
+        .state
+        .response_profile_bindings
+        .get("resp-main")
+        .map(|binding| binding.profile_name.clone());
+    assert_eq!(bound_profile.as_deref(), Some("main"));
+}
+
+#[test]
+fn previous_response_affined_compact_quota_does_not_rotate_or_release_binding() {
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let harness = two_ready_profiles(&backend);
+    bind_response(&harness, "resp-main", "main");
+    let shared = harness.shared();
+
+    let response = proxy_runtime_standard_request(
+        51,
+        &compact_request_with_previous_response("resp-main"),
+        shared,
+    )
+    .expect("previous-response-affined compact quota should pass through");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let accounts = backend.responses_accounts();
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+
+    assert_eq!(status, 429, "{log}");
+    assert_eq!(accounts, vec!["main-account".to_string()]);
+    assert!(
+        log.contains("compact_final_failure exit=hard_affinity_retryable_failure reason=quota"),
+        "{log}"
+    );
+    let bound_profile = shared
+        .runtime
+        .lock()
+        .unwrap()
+        .state
+        .response_profile_bindings
+        .get("resp-main")
+        .map(|binding| binding.profile_name.clone());
+    assert_eq!(bound_profile.as_deref(), Some("main"));
 }
 
 #[test]

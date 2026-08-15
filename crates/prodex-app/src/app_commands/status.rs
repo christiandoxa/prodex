@@ -586,6 +586,34 @@ mod tests {
     }
 
     #[test]
+    fn status_fields_mark_proc_resources_unavailable_instead_of_zero() {
+        let overview = StatusOverview {
+            updated_at: "now".to_string(),
+            active_profile: "main".to_string(),
+            runtime_profile: "main".to_string(),
+            profile_count: 1,
+            quota: StatusQuotaSummary::default(),
+            five_hour_runway: None,
+            weekly_runway: None,
+            token_summary: InfoTokenUsageSummary::default(),
+            token_history: Vec::new(),
+            token_first_at: None,
+            token_last_at: None,
+            runtime_load: crate::InfoRuntimeLoadSummary::default(),
+            runtime_process_count: 0,
+        };
+        let fields = status_fields(&overview, &StatusResourceSnapshot::default());
+
+        for label in ["Processes", "Memory", "Network", "Disk I/O"] {
+            let value = fields
+                .iter()
+                .find_map(|(field, value)| (field == label).then_some(value))
+                .expect("status resource field should exist");
+            assert_eq!(value, "unavailable");
+        }
+    }
+
+    #[test]
     fn quota_summary_keeps_weekly_window_when_five_hour_is_absent() {
         let now = 1_000;
         let reports = vec![crate::RunProfileProbeReport {

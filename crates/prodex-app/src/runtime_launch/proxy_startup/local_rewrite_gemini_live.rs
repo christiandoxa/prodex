@@ -17,8 +17,8 @@ use crate::{
 use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_live_provider_stream_error;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 const GEMINI_LIVE_WEBSOCKET_URL: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
@@ -224,6 +224,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
                 .live_url
                 .as_deref(),
             shared,
+            request.headers(),
         ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));
@@ -355,6 +356,8 @@ fn runtime_gemini_live_redacted_log_text(_value: &str) -> String {
     "gemini_live_stream_failed".to_string()
 }
 
+// tungstenite's server callback contract fixes the large ErrorResponse type.
+#[allow(clippy::result_large_err)]
 fn handle_runtime_gemini_live_tcp_stream(
     request_id: u64,
     stream: TcpStream,
@@ -366,9 +369,33 @@ fn handle_runtime_gemini_live_tcp_stream(
     stream
         .set_write_timeout(Some(GEMINI_LIVE_HANDSHAKE_TIMEOUT))
         .context("failed to configure Gemini Live local handshake write timeout")?;
-    let mut local_socket =
-        tungstenite::accept_with_config(stream, Some(runtime_gemini_live_websocket_config()))
-            .context("failed to accept Gemini Live sidecar websocket")?;
+    let captured_headers = Arc::new(Mutex::new(Vec::new()));
+    let capture = Arc::clone(&captured_headers);
+    let mut local_socket = tungstenite::accept_hdr_with_config(
+        stream,
+        move |request: &tungstenite::handshake::server::Request, response| {
+            let headers = request
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_string(), value.to_string()))
+                })
+                .collect();
+            *capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = headers;
+            Ok(response)
+        },
+        Some(runtime_gemini_live_websocket_config()),
+    )
+    .context("failed to accept Gemini Live sidecar websocket")?;
+    let caller_headers = captured_headers
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     local_socket
         .get_mut()
         .set_read_timeout(Some(GEMINI_LIVE_PUMP_TIMEOUT))
@@ -395,6 +422,7 @@ fn handle_runtime_gemini_live_tcp_stream(
                 .live_url
                 .as_deref(),
             shared,
+            &caller_headers,
         ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));

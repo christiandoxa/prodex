@@ -102,7 +102,7 @@ mod tests {
     fn browser_logout_requires_post_and_session_bound_double_submit_csrf() {
         let csrf = "synthetic-csrf-token";
         let session = RuntimeGatewayBrowserSession {
-            id_token: "fixture.id.token".to_string(),
+            protected_id_token: "fixture.protected.id.token".to_string(),
             csrf_digest: Sha256::digest(csrf.as_bytes()).into(),
             logout_keys: Vec::new(),
             expires_at_unix_ms: 456,

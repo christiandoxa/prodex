@@ -1,10 +1,10 @@
 use super::super::super::{
-    RuntimeCandidateAffinity, build_runtime_proxy_json_error_response,
-    commit_runtime_proxy_profile_selection_with_notice, runtime_candidate_has_hard_affinity,
+    build_runtime_proxy_json_error_response, commit_runtime_proxy_profile_selection_with_notice,
     runtime_proxy_final_retryable_http_failure_response,
     runtime_proxy_local_selection_failure_message,
 };
 use super::super::attempt_runtime_standard_request;
+use super::affinity::runtime_compact_candidate_has_hard_affinity;
 use super::logging::{
     RuntimeProxyCompactFinalFailureLog, log_runtime_proxy_compact_final_failure,
     runtime_proxy_compact_final_failure_reason, runtime_proxy_compact_last_failure_kind,
@@ -20,6 +20,8 @@ pub(super) struct RuntimeProxyCompactSelectionExhausted<'a> {
     pub(super) request: &'a RuntimeProxyRequest,
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) compact_owner_profile: &'a str,
+    pub(super) previous_response_id: Option<&'a str>,
+    pub(super) previous_response_profile: Option<&'a str>,
     pub(super) strict_affinity_profile: Option<&'a str>,
     pub(super) session_profile: Option<&'a str>,
     pub(super) selection_attempts: usize,
@@ -66,7 +68,9 @@ pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
         );
         return Ok(response);
     }
-    if exhausted.strict_affinity_profile.is_some()
+    if exhausted.previous_response_id.is_some()
+        || exhausted.previous_response_profile.is_some()
+        || exhausted.strict_affinity_profile.is_some()
         || exhausted.session_profile.is_some()
         || exhausted.saw_transport_failure
     {
@@ -103,15 +107,12 @@ fn attempt_runtime_compact_owner_fallback(
     last_failure_kind: &'static str,
     saw_inflight_saturation: bool,
 ) -> Result<tiny_http::ResponseBox> {
-    let hard_affinity = runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-        route_kind: RuntimeRouteKind::Compact,
-        candidate_name: exhausted.compact_owner_profile,
-        strict_affinity_profile: exhausted.strict_affinity_profile,
-        pinned_profile: None,
-        turn_state_profile: None,
-        session_profile: exhausted.session_profile,
-        trusted_previous_response_affinity: false,
-    });
+    let hard_affinity = runtime_compact_candidate_has_hard_affinity(
+        exhausted.compact_owner_profile,
+        exhausted.strict_affinity_profile,
+        exhausted.previous_response_profile,
+        exhausted.session_profile,
+    );
     match attempt_runtime_standard_request(
         exhausted.request_id,
         exhausted.request,

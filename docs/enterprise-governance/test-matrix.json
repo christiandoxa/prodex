@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "artifact_status": "source-release-evidence-matrix",
   "scope": "This matrix verifies checked-in source controls. Target-environment IdP, PKI, pager, SIEM, CNI, managed failover, capacity, SLO, and recovery acceptance is tracked by deployment owners.",
   "status_definitions": {
@@ -12,6 +12,9 @@
   "tests": [
     {
       "id": "SEC-ID-001",
+      "test_command": "cargo test --locked --workspace -- edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-001/",
+      "owner": "prodex-gateway",
       "phase": 5,
       "threat": "Caller forges forwarded identity, role, tenant, or client address headers.",
       "control": "Exact expected Host, trusted-proxy canonicalization, forwarding-header stripping and server-side identity/tenant binding.",
@@ -31,6 +34,9 @@
     },
     {
       "id": "SEC-ID-002",
+      "test_command": "npm run ci:storage-postgres-proof",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-002/",
+      "owner": "prodex-storage",
       "phase": 5,
       "threat": "Authenticated principal crosses tenant boundaries or exploits missing database isolation.",
       "control": "Single tenant binding plus PostgreSQL RLS and transaction-local tenant context.",
@@ -41,11 +47,14 @@
       "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants.",
       "evidence": [
         "npm run ci:storage-postgres-proof",
-        "live PostgreSQL/RLS cross-tenant and four-kind governance lifecycle proof"
+        "external: deployment PostgreSQL/RLS cross-tenant and governance lifecycle proof"
       ]
     },
     {
       "id": "SEC-ID-003",
+      "test_command": "cargo test --locked --workspace -- session_context_propagates_age_idle_classification_and_affinity",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-003/",
+      "owner": "prodex-session",
       "phase": 5,
       "threat": "Session fixation, replay, stale privilege, or incomplete multi-replica revocation.",
       "control": "Opaque bound sessions, rotation, expiry, credential/policy epochs, and durable revocation.",
@@ -59,12 +68,15 @@
         "session_reuse_with_another_principal_is_revoked",
         "configured_timeouts_and_concurrency_fail_closed",
         "governance_sessions_are_monotonic_bounded_and_revocable",
-        "gateway_policy_http_revocation_invalidates_cache_and_lkg hash/current-session revoke assertions",
+        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly"
       ]
     },
     {
       "id": "SEC-INS-001",
+      "test_command": "cargo test --locked --workspace -- walker_inspects_supported_nested_fields_without_retaining_argument_keys",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-001/",
+      "owner": "prodex-inspection",
       "phase": 1,
       "threat": "Unicode detector offsets are applied as bytes incorrectly, masking the wrong content.",
       "control": "Per-field Unicode-scalar to UTF-8 byte-range conversion with bounded typed findings.",
@@ -81,6 +93,9 @@
     },
     {
       "id": "SEC-INS-002",
+      "test_command": "cargo test --locked --workspace -- walker_reports_unsupported_modalities_and_depth_limits",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-002/",
+      "owner": "prodex-inspection",
       "phase": 1,
       "threat": "Adversarial JSON causes unbounded inspection work or false full coverage.",
       "control": "Depth, value, byte, finding, detector, reason and tag limits with explicit coverage.",
@@ -98,6 +113,9 @@
     },
     {
       "id": "SEC-INS-003",
+      "test_command": "cargo test --locked --workspace -- application_inspection_is_unsupported_without_detector_evidence",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-003/",
+      "owner": "prodex-inspection",
       "phase": 2,
       "threat": "Unsupported modality or unavailable detector silently bypasses sensitive-data controls.",
       "control": "Explicit partial/unsupported coverage with mode- and policy-specific enforcement.",
@@ -117,6 +135,9 @@
     },
     {
       "id": "SEC-INS-004",
+      "test_command": "cargo test --locked --workspace -- incremental_inspector_finds_every_chunk_boundary",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-004/",
+      "owner": "prodex-inspection",
       "phase": 2,
       "threat": "Sensitive output spans stream chunks and escapes a per-chunk detector.",
       "control": "Incremental bounded literal inspection with overlap, plus bounded full precommit inspection for bank text/SSE.",
@@ -137,6 +158,9 @@
     },
     {
       "id": "SEC-POL-001",
+      "test_command": "cargo test --locked --workspace -- explicit_deny_wins_and_drops_obligations",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-001/",
+      "owner": "prodex-policy",
       "phase": 3,
       "threat": "Policy result changes with rule order, hash-map iteration, or missing attributes.",
       "control": "Pure deterministic typed PDP with stable precedence and reason codes.",
@@ -156,6 +180,9 @@
     },
     {
       "id": "SEC-POL-002",
+      "test_command": "cargo test --locked --workspace -- allow_tool_obligations_form_one_allow_set",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-002/",
+      "owner": "prodex-policy",
       "phase": 3,
       "threat": "Conflicting obligations weaken a deny, region, retention, tool, audit, or provider constraint.",
       "control": "Most-restrictive effect precedence and typed obligation conflict resolution.",
@@ -172,6 +199,9 @@
     },
     {
       "id": "SEC-POL-003",
+      "test_command": "cargo test --locked --workspace -- malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-003/",
+      "owner": "prodex-policy",
       "phase": 3,
       "threat": "Invalid, stale or revoked policy snapshot is served from cache or LKG.",
       "control": "Checksum validation, atomic activation, revisioned cache keys and invalidation precedence.",
@@ -184,7 +214,7 @@
         "malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
         "gateway_policy_http_revocation_invalidates_cache_and_lkg",
         "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
-        "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL",
+        "external: live PostgreSQL governance lifecycle run",
         "governance_invalidation_notification_is_delivered_only_after_commit",
         "governance_invalidation_outbox_is_bounded_tenant_scoped_and_transactional",
         "notify_payload_is_only_a_bounded_wakeup_hint",
@@ -194,6 +224,9 @@
     },
     {
       "id": "SEC-POL-004",
+      "test_command": "cargo test --locked --workspace -- detached_signature_binds_artifact_and_identity",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-004/",
+      "owner": "prodex-governance",
       "phase": 3,
       "threat": "A valid governance artifact is replaced, replayed for another tenant/revision/kind, or published by an untrusted actor.",
       "control": "Detached Ed25519 authenticity binds tenant, artifact kind, revision ID, and SHA-256 checksum to a locally configured verifier key.",
@@ -206,12 +239,15 @@
         "detached_signature_binds_artifact_and_identity",
         "unsigned_artifacts_are_legacy_only",
         "artifact_authenticity_round_trips_through_activation_and_snapshot_validation",
-        "gateway_policy_http_revocation_invalidates_cache_and_lkg signing-payload and unknown-key assertions",
-        "PostgreSQL governance activation and snapshot callbacks revalidate persisted authenticity"
+        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
+        "external: PostgreSQL authenticity callback validation"
       ]
     },
     {
       "id": "SEC-APR-001",
+      "test_command": "cargo test --locked --workspace -- maker_checker_quorum_and_activation_are_enforced",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-001/",
+      "owner": "prodex-approvals",
       "phase": 3,
       "threat": "Maker self-approves, replays, races, or approves a changed policy revision.",
       "control": "Independent quorum bound to immutable checksum with transactional activation.",
@@ -230,6 +266,9 @@
     },
     {
       "id": "SEC-APR-002",
+      "test_command": "cargo test --locked --workspace -- execution_fingerprint_is_stable_and_bound_to_the_request_context",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-002/",
+      "owner": "prodex-approvals",
       "phase": 3,
       "threat": "Execution approval is replayed for a changed request, tenant, policy, provider or operation.",
       "control": "Decision/input/revision-bound approval with atomic expiry/use/idempotency consumption.",
@@ -246,6 +285,9 @@
     },
     {
       "id": "SEC-APR-003",
+      "test_command": "cargo test --locked --workspace -- break_glass_requires_separate_scope_reason_expiry_and_audit",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-003/",
+      "owner": "prodex-approvals",
       "phase": 3,
       "threat": "Break-glass becomes a broad persistent bypass or exceeds its retention scope.",
       "control": "Retention-purge-only independent approval with a one-hour TTL ceiling, explicit revocation, bounded purge batches and mandatory audit.",
@@ -265,6 +307,9 @@
     },
     {
       "id": "SEC-RTE-001",
+      "test_command": "cargo test --locked --workspace -- governed_routing_enforces_every_hard_eligibility_gate",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-001/",
+      "owner": "prodex-routing",
       "phase": 4,
       "threat": "A high soft score restores a provider excluded by classification, region, retention or approval.",
       "control": "Hard compliance filter before deterministic eligible-set-only scoring.",
@@ -275,13 +320,16 @@
       "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions.",
       "evidence": [
         "governed_routing_enforces_every_hard_eligibility_gate",
-        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallback",
+        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallbacks",
         "governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks",
         "provider_registry_resolves_selected_heterogeneous_projected_adapter"
       ]
     },
     {
       "id": "SEC-RTE-002",
+      "test_command": "cargo test --locked --workspace -- governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-002/",
+      "owner": "prodex-routing",
       "phase": 4,
       "threat": "Floating-point, iteration or replica variance makes routing unauditable.",
       "control": "Bounded integer/fixed-point components and stable tie-break ordering.",
@@ -292,11 +340,14 @@
       "evidence_required": "Cross-process golden vectors and permutation properties.",
       "evidence": [
         "governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider",
-        "governance_hot_paths governed-routing maximum-bound benchmark"
+        "cargo bench --locked --bench governance_hot_paths"
       ]
     },
     {
       "id": "SEC-RTE-003",
+      "test_command": "cargo test --locked --workspace -- governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-003/",
+      "owner": "prodex-routing",
       "phase": 4,
       "threat": "Load, transport backoff or health heuristics break a hard continuation binding.",
       "control": "Hard affinity precedes fresh heuristics; explicit revocation alone overrides eligibility.",
@@ -306,13 +357,16 @@
       "implementation_status": "tested",
       "evidence_required": "Existing runtime affinity regressions extended with tenant and governance epochs.",
       "evidence": [
-        "governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score",
-        "governed_routing_does_not_preserve_affinity_after_revocation",
+        "governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation",
+        "governed_routing_rejects_when_the_bound_affinity_route_is_revoked",
         "explicit_provider_revocation_overrides_continuation_affinity"
       ]
     },
     {
       "id": "SEC-RTE-004",
+      "test_command": "cargo test --locked --workspace -- explicit_quota_codes_rotate_only_before_commit",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-004/",
+      "owner": "prodex-runtime",
       "phase": 4,
       "threat": "Proxy retries or rotates after model output has begun.",
       "control": "One response commitment boundary and no postcommit retry/rotation.",
@@ -331,6 +385,9 @@
     },
     {
       "id": "SEC-AUD-001",
+      "test_command": "cargo test --locked --workspace -- audit_failure_rolls_back_activation_fail_closed",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-001/",
+      "owner": "prodex-audit",
       "phase": 5,
       "threat": "Governance mutation succeeds while its mandatory audit or SIEM outbox record is lost.",
       "control": "One database transaction for business state, audit chain head/event and outbox.",
@@ -341,12 +398,15 @@
       "evidence_required": "SQLite and PostgreSQL transactional fault matrix.",
       "evidence": [
         "audit_failure_rolls_back_activation_fail_closed",
-        "atomic session revoke plus audit/outbox SQLite and live PostgreSQL coverage",
+        "external: SQLite and live PostgreSQL transactional fault evidence",
         "npm run ci:storage-postgres-proof"
       ]
     },
     {
       "id": "SEC-AUD-002",
+      "test_command": "cargo test --locked --workspace -- audit_chain_digest_matches_canonical_vector",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-002/",
+      "owner": "prodex-audit",
       "phase": 5,
       "threat": "Audit events are deleted, reordered, altered, forked or contain raw sensitive data.",
       "control": "Versioned content-free schema, per-partition hash chain and deterministic verification.",
@@ -359,12 +419,15 @@
         "audit_chain_digest_matches_canonical_vector",
         "audit_integrity_health_detects_missing_same_tenant_parent",
         "decision_context_is_bounded_explainable_and_content_free",
-        "bounded tenant audit export storage and HTTP assertions",
+        "external: bounded tenant audit export acceptance evidence",
         "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
       ]
     },
     {
       "id": "SEC-AUD-003",
+      "test_command": "cargo test --locked --workspace -- outbox_retries_with_stable_id_then_dead_letters",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-003/",
+      "owner": "prodex-audit",
       "phase": 5,
       "threat": "SIEM retries duplicate, lose, poison or indefinitely lease events.",
       "control": "Transactional outbox, idempotent event IDs, bounded leases/retries and visible dead-letter state.",
@@ -378,12 +441,15 @@
         "outbox_worker_delivers_through_the_bounded_exporter_port",
         "outbox_worker_claims_once_across_repository_instances",
         "expired_outbox_claim_is_reclaimed_and_stale_finalize_is_rejected",
-        "PostgreSQL claim-token lease and separate finalize transactions passed live",
-        "SQLite exporter outage, retry and dead-letter tests"
+        "external: PostgreSQL claim-token lease and separate finalize transactions",
+        "external: SQLite exporter outage, retry and dead-letter evidence"
       ]
     },
     {
       "id": "SEC-AUD-004",
+      "test_command": "cargo test --locked --workspace -- enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-004/",
+      "owner": "prodex-audit",
       "phase": 5,
       "threat": "A committed response loses its mandatory outcome audit while the gateway continues admitting unauditable work or retries the provider.",
       "control": "Bounded durable reconciliation with an availability latch that degrades readiness and fails new governed data-plane admission closed; reconciliation overflow stays poisoned until restart.",
@@ -400,6 +466,9 @@
     },
     {
       "id": "SEC-SEC-001",
+      "test_command": "cargo test --locked --workspace -- governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_reference",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-SEC-001/",
+      "owner": "prodex-security",
       "phase": 5,
       "threat": "Secret values enter config, policy, logs, audit, errors or diagnostics.",
       "control": "Opaque secret references, redacted types and repository/runtime canary scans.",
@@ -417,6 +486,9 @@
     },
     {
       "id": "SEC-SEC-002",
+      "test_command": "cargo test --locked --workspace -- production_projected_provider_is_external_versioned_and_rotation_aware",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-SEC-002/",
+      "owner": "prodex-secrets",
       "phase": 5,
       "threat": "A projected secret escapes its configured provider namespace, survives a requested-version mismatch, or is read through an unsafe filesystem path.",
       "control": "Purpose-owned configuration selects the provider namespace; the bounded projected-secret adapter enforces provider name, exact version, anchored private files and atomic projection generations.",
@@ -435,6 +507,9 @@
     },
     {
       "id": "SEC-STO-001",
+      "test_command": "cargo test --locked --workspace -- all_governance_artifact_kinds_use_revisioned_authority",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-STO-001/",
+      "owner": "prodex-storage",
       "phase": 5,
       "threat": "Migration or rollback mixes incompatible schemas or loses tenant/audit/policy state.",
       "control": "Versioned migrations plus authenticated AES-256-GCM backup, isolated restore and governance-link verification.",
@@ -445,15 +520,18 @@
       "evidence_required": "SQLite/PostgreSQL forward/back compatibility and encrypted logical dump/restore evidence. Target-environment WAL/PITR and approved RPO evidence remain required.",
       "evidence": [
         "all_governance_artifact_kinds_use_revisioned_authority",
-        "governance migration catalog tests",
+        "external: governance migration catalog acceptance evidence",
         "postgres_validation_migration_is_append_only_and_complete",
         "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
         "postgres_migrator_fails_closed_before_recording_constraint_validation",
-        "npm run ci:backup-restore-drill: encrypted logical dump/restore, post-backup exclusion marker, recovery-point age, restore time, governance fingerprint and audit-link verification"
+        "npm run ci:backup-restore-drill"
       ]
     },
     {
       "id": "SEC-STO-002",
+      "test_command": "cargo test --locked --workspace -- two_repositories_reserve_and_reconcile_idempotently",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-STO-002/",
+      "owner": "prodex-storage",
       "phase": 5,
       "threat": "Replica race or Redis loss creates split-brain activation, approval use or session state.",
       "control": "PostgreSQL durable authority, optimistic concurrency/leases and rebuildable Redis coordination.",
@@ -464,13 +542,16 @@
       "evidence_required": "Concurrent activation, accounting, revocation, and two-executor Redis coordination tests.",
       "evidence": [
         "concurrent_activation_uses_etag_compare_and_swap",
-        "two live PostgreSQL repositories enforce atomic reservation/accounting",
+        "two_repositories_reserve_and_reconcile_idempotently",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "required CI Redis service proves two-executor atomic request and dual request/token limits without overshoot"
+        "external: CI Redis service two-executor atomic request and dual request/token limit proof"
       ]
     },
     {
       "id": "SEC-GWY-001",
+      "test_command": "cargo test --locked --workspace -- provider_route_mapping_covers_forwarded_data_plane_routes",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-GWY-001/",
+      "owner": "prodex-gateway",
       "phase": 5,
       "threat": "HTTP, SSE, WebSocket, compatibility or Gemini paths bypass governed inspection/policy/audit.",
       "control": "One application admission/decision boundary plus architecture dependency guards.",
@@ -491,6 +572,9 @@
     },
     {
       "id": "SEC-GWY-002",
+      "test_command": "cargo test --locked --workspace -- generic_429_passes_through_without_explicit_quota_code",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-GWY-002/",
+      "owner": "prodex-runtime",
       "phase": 5,
       "threat": "Local proxy converts upstream errors into misleading quota/governance errors.",
       "control": "Pass-through after upstream response; local stable errors only for pre-upstream local failure.",
@@ -508,6 +592,9 @@
     },
     {
       "id": "SEC-OBS-001",
+      "test_command": "cargo test --locked --workspace -- prometheus_text_aggregates_keys_without_high_cardinality_labels",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-OBS-001/",
+      "owner": "prodex-observability",
       "phase": 5,
       "threat": "Caller-controlled tenant, key, epoch, route or content values create unbounded metrics cardinality or leak identifiers.",
       "control": "Aggregate gateway counters with fixed metric names and no caller-controlled labels.",
@@ -519,11 +606,14 @@
       "evidence": [
         "prometheus_text_aggregates_keys_without_high_cardinality_labels",
         "registry_renders_closed_labels_as_prometheus_counters",
-        "deployment observability dashboard and alert guard"
+        "external: deployment observability dashboard and alert acceptance"
       ]
     },
     {
       "id": "SEC-BNK-001",
+      "test_command": "cargo test --locked --workspace -- bank_governance_deployment_matrix_fails_closed",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-BNK-001/",
+      "owner": "prodex-bank-mode",
       "phase": 5,
       "threat": "Bank label starts with a public listener, bypass, missing mandatory dependency, raw secret or broad egress.",
       "control": "Typed bank startup validator and deployment security policy.",
@@ -544,6 +634,9 @@
     },
     {
       "id": "SEC-BNK-002",
+      "test_command": "cargo test --locked --workspace -- bank_snapshot_denies_unsupported_inspection",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-BNK-002/",
+      "owner": "prodex-bank-mode",
       "phase": 5,
       "threat": "Bank runtime fails open when identity, inspection, policy, registry, audit or secret dependencies fail.",
       "control": "Mandatory fail-closed runtime matrix with no generic break-glass override.",
@@ -566,6 +659,9 @@
     },
     {
       "id": "SEC-DEP-001",
+      "test_command": "cargo test --locked --workspace -- hardened_container_and_complete_artifacts_are_compliant",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-DEP-001/",
+      "owner": "prodex-release",
       "phase": 5,
       "threat": "Container privilege, writable root, public bind or unrestricted egress bypasses application controls.",
       "control": "Non-root/read-only runtime, private exposure, least privilege and allow-listed provider/secret/SIEM egress.",
@@ -577,11 +673,14 @@
       "evidence": [
         "hardened_container_and_complete_artifacts_are_compliant",
         "deployment-security-guard.mjs",
-        "standalone release fails closed on fixable high/critical findings with digest-pinned Trivy and publishes the attested scan report"
+        "external: standalone release vulnerability and attestation scan evidence"
       ]
     },
     {
       "id": "SEC-PERF-001",
+      "test_command": "npm run ci:runtime-load-smoke",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-PERF-001/",
+      "owner": "prodex-performance",
       "phase": 5,
       "threat": "Governance creates unbounded latency, allocation, cardinality or concurrency pressure.",
       "control": "Immutable local snapshots, bounded stages/admission/labels and declared p99 budgets.",
@@ -594,7 +693,7 @@
         "cargo bench --locked --bench governance_hot_paths",
         "npm run ci:runtime-load-smoke",
         "npm run ci:runtime-stress",
-        "bounded histogram, queue, admission, and cardinality tests"
+        "external: bounded histogram, queue, admission, and cardinality acceptance evidence"
       ]
     }
   ]

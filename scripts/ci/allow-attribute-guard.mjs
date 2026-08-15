@@ -9,7 +9,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 1,
   "unused_imports": 3,
   "clippy::large_enum_variant": 10,
-  "clippy::result_large_err": 2,
+  "clippy::result_large_err": 3,
   "clippy::too_many_arguments": 38,
   "clippy::type_complexity": 1,
 });
@@ -33,6 +33,8 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs|pub(super) enum RuntimeLocalRewriteUpstreamResponse {",
   "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(",
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
+  // tungstenite fixes the server callback error shape to an unboxed HTTP response.
+  "clippy::result_large_err|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs|fn handle_runtime_gemini_live_tcp_stream(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs|pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs|pub(super) fn runtime_kiro_stream_notification(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs|fn runtime_kiro_stream_text(",

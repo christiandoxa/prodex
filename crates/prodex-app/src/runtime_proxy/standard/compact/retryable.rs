@@ -30,6 +30,7 @@ pub(super) struct RuntimeProxyCompactRetryableFailure<'a> {
     pub(super) profile_name: String,
     pub(super) response: tiny_http::ResponseBox,
     pub(super) overload: bool,
+    pub(super) previous_response_profile: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
     pub(super) current_profile: &'a str,
@@ -55,6 +56,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         profile_name,
         response,
         overload,
+        previous_response_profile,
         request_session_id,
         request_turn_state,
         current_profile,
@@ -91,6 +93,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             compact_followup_profile: compact_followup_profile
                 .as_ref()
                 .map(|(profile_name, _)| profile_name.as_str()),
+            previous_response_profile,
             session_profile: session_profile.as_deref(),
         },
         conservative_overload_retried_profiles,
@@ -127,6 +130,33 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
+    if previous_response_profile == Some(profile_name.as_str())
+        && runtime_compact_hard_affinity_failure(
+            shared,
+            RuntimeCompactAffinityOwners {
+                compact_followup_profile: compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                previous_response_profile,
+                session_profile: session_profile.as_deref(),
+            },
+            RuntimeProxyCompactAttemptFailureLog {
+                request_id,
+                exit: "hard_affinity_retryable_failure",
+                reason: if overload { "overload" } else { "quota" },
+                selection_attempts,
+                selection_started_at,
+                pressure_mode,
+                last_failure: last_failure.as_ref(),
+                saw_inflight_saturation,
+                saw_transport_failure,
+                profile_name: &profile_name,
+            },
+        )
+    {
+        return Ok(RuntimeCompactFailureFlow::Return(response));
+    }
+
     let (released_affinity, released_compact_lineage) = release_runtime_compact_quota_state(
         shared,
         &profile_name,
@@ -143,6 +173,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             compact_followup_profile: compact_followup_profile
                 .as_ref()
                 .map(|(profile_name, _)| profile_name.as_str()),
+            previous_response_profile,
             session_profile: session_profile.as_deref(),
         },
         RuntimeProxyCompactAttemptFailureLog {
@@ -188,6 +219,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
 
 struct RuntimeCompactAffinityOwners<'a> {
     compact_followup_profile: Option<&'a str>,
+    previous_response_profile: Option<&'a str>,
     session_profile: Option<&'a str>,
 }
 
@@ -279,6 +311,7 @@ fn runtime_compact_try_conservative_overload_retry(
     retried_profiles: &mut BTreeSet<String>,
 ) -> Result<bool> {
     let owner_match = owners.compact_followup_profile == Some(profile_name)
+        || owners.previous_response_profile == Some(profile_name)
         || owners.session_profile == Some(profile_name)
         || current_profile == profile_name;
     if !overload || retried_profiles.contains(profile_name) || !owner_match {
@@ -309,6 +342,7 @@ fn runtime_compact_hard_affinity_failure(
     if !runtime_compact_candidate_has_hard_affinity(
         failure.profile_name,
         owners.compact_followup_profile,
+        owners.previous_response_profile,
         owners.session_profile,
     ) {
         return false;

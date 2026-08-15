@@ -1,4 +1,6 @@
+    use ratatui::backend::TestBackend;
     use ratatui::style::Color;
+    use ratatui::Terminal;
 
     #[test]
     fn quota_watch_overview_height_has_no_extra_spacer_line() {
@@ -64,6 +66,52 @@
         assert!(frame.footer.contains("u update"));
         assert!(frame.footer.contains("sort current"));
         assert!(frame.footer.contains("filter all"));
+    }
+
+    #[test]
+    fn quota_once_tui_does_not_render_live_controls() {
+        let reports = vec![test_openai_quota_report(test_openai_usage_with_windows(
+            20,
+            10,
+            1_700_001_800,
+        ))];
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("test terminal");
+        terminal
+            .draw(|frame| render_all_quota_reports_once_tui(frame, &reports, false))
+            .expect("all quota once TUI should render");
+        let output = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(!output.contains("u update"));
+        assert!(!output.contains("refresh 5s"));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                render_profile_quota_once_tui(
+                    frame,
+                    "main",
+                    reports[0]
+                        .result
+                        .clone()
+                        .expect("test report should be successful"),
+                    false,
+                )
+            })
+            .expect("profile quota once TUI should render");
+        let output = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(!output.contains("refresh 5s"));
+        assert!(!output.contains("q quit"));
     }
 
     #[test]
