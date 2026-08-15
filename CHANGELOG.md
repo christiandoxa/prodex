@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.6 - 2026-08-15
+
+### Runtime
+
+- Close audited runtime continuity and CI gaps (`8df9654`)
+
 ## 0.408.5 - 2026-08-15
 
 ### Runtime
