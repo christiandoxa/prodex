@@ -74,3 +74,15 @@ test("targeted steps reject zero tests across output chunks", async () => {
     /fragmented-zero-test matched no tests/,
   );
 });
+
+test("timed-out steps terminate their process group and report the timeout", async () => {
+  await assert.rejects(
+    runStep({
+      label: "timed-out-step",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000);"],
+      timeoutMs: 200,
+    }),
+    /timed-out-step timed out after 200 ms/,
+  );
+});

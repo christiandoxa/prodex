@@ -156,9 +156,61 @@ function createPrefixForwarder(label, writer) {
   };
 }
 
+function terminateChildProcessTree(child) {
+  if (!child.pid) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.on("error", () => {
+      try {
+        child.kill();
+      } catch {
+        // The child may have exited while taskkill was starting.
+      }
+    });
+    return;
+  }
+
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // The child may have exited while the timeout handler was running.
+    }
+  }
+
+  const forceKillTimer = setTimeout(() => {
+    if (child.exitCode !== null) {
+      return;
+    }
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The child may have exited after the SIGTERM.
+      }
+    }
+  }, 1000);
+  forceKillTimer.unref();
+}
+
 async function runStepOnce(step) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
+    const timeoutMs = step.timeoutMs ?? null;
+    if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+      reject(new Error(`${step.label} has an invalid timeoutMs`));
+      return;
+    }
     process.stdout.write(`${step.label}: ${formatStep(step)}\n`);
     const child = spawn(step.command, step.args, {
       cwd: process.cwd(),
@@ -169,10 +221,19 @@ async function runStepOnce(step) {
         ...(step.env ?? {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
+      ...(timeoutMs !== null && process.platform !== "win32" ? { detached: true } : {}),
     });
 
     let sawZeroTests = false;
     let probeTail = "";
+    let timedOut = false;
+    const timeoutHandle =
+      timeoutMs === null
+        ? null
+        : setTimeout(() => {
+            timedOut = true;
+            terminateChildProcessTree(child);
+          }, timeoutMs);
     const inspectOutput = (chunk) => {
       const text = probeTail + chunk;
       if (ZERO_TESTS_PATTERN.test(text)) {
@@ -194,11 +255,23 @@ async function runStepOnce(step) {
       inspectOutput(chunk);
       stderr.write(chunk);
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+      reject(error);
+    });
     child.on("close", (code, signal) => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       stdout.flush();
       stderr.flush();
       const elapsedMs = Date.now() - startedAt;
+      if (timedOut) {
+        reject(new Error(`${step.label} timed out after ${timeoutMs} ms`));
+        return;
+      }
       if (signal) {
         reject(new Error(`${step.label} exited with signal ${signal}`));
         return;
