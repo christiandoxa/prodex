@@ -4,8 +4,9 @@ use super::super::{
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_proxy_should_shed_fresh_compact_request,
-    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_request_session_id,
-    runtime_request_turn_state, runtime_session_bound_profile,
+    runtime_remaining_sync_probe_cold_start_profiles_for_route,
+    runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
+    runtime_response_bound_profile, runtime_session_bound_profile,
     runtime_smart_context_model_name_from_body,
     select_runtime_response_candidate_for_route_with_request,
 };
@@ -47,8 +48,16 @@ pub(super) fn proxy_runtime_compact_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
     let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
+    let request_previous_response_id = runtime_request_previous_response_id(request);
     let request_session_id = runtime_request_session_id(request);
     let request_turn_state = runtime_request_turn_state(request);
+    let previous_response_profile = request_previous_response_id
+        .as_deref()
+        .map(|response_id| {
+            runtime_response_bound_profile(shared, response_id, RuntimeRouteKind::Compact)
+        })
+        .transpose()?
+        .flatten();
     let mut session_profile = request_session_id
         .as_deref()
         .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -65,14 +74,20 @@ pub(super) fn proxy_runtime_compact_request(
         shared,
         compact_followup_profile.as_ref(),
     );
-    let initial_compact_affinity_profile = compact_followup_profile
-        .as_ref()
-        .map(|(profile_name, _)| profile_name.as_str())
+    let initial_compact_affinity_profile = previous_response_profile
+        .as_deref()
+        .or(compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.as_str()))
         .or(session_profile.as_deref());
-    let compact_owner_profile = compact_followup_profile
-        .as_ref()
-        .map(|(profile_name, _)| profile_name.clone())
-        .or(session_profile.clone())
+    let compact_owner_profile = previous_response_profile
+        .clone()
+        .or_else(|| {
+            compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.clone())
+        })
+        .or_else(|| session_profile.clone())
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Compact);
@@ -102,7 +117,10 @@ pub(super) fn proxy_runtime_compact_request(
             shared,
             selection_started_at,
             selection_attempts,
-            compact_followup_profile.is_some() || session_profile.is_some(),
+            request_previous_response_id.is_some()
+                || request_turn_state.is_some()
+                || compact_followup_profile.is_some()
+                || session_profile.is_some(),
             pressure_mode,
         )? {
             runtime_proxy_log(
@@ -118,6 +136,8 @@ pub(super) fn proxy_runtime_compact_request(
                     request,
                     shared,
                     compact_owner_profile: &compact_owner_profile,
+                    previous_response_id: request_previous_response_id.as_deref(),
+                    previous_response_profile: previous_response_profile.as_deref(),
                     strict_affinity_profile: compact_followup_profile
                         .as_ref()
                         .map(|(profile_name, _)| profile_name.as_str()),
@@ -140,7 +160,10 @@ pub(super) fn proxy_runtime_compact_request(
                 strict_affinity_profile: compact_followup_profile
                     .as_ref()
                     .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile: previous_response_profile.as_deref(),
                 session_profile: session_profile.as_deref(),
+                discover_previous_response_owner: request_previous_response_id.is_some(),
+                previous_response_id: request_previous_response_id.as_deref(),
                 ..RuntimeResponseCandidateSelection::fresh(
                     &excluded_profiles,
                     RuntimeRouteKind::Compact,
@@ -168,6 +191,8 @@ pub(super) fn proxy_runtime_compact_request(
                     RuntimeRouteKind::Compact,
                 )?;
             if remaining_cold_start_profiles > 0
+                && request_previous_response_id.is_none()
+                && request_turn_state.is_none()
                 && compact_followup_profile.is_none()
                 && session_profile.is_none()
             {
@@ -186,6 +211,8 @@ pub(super) fn proxy_runtime_compact_request(
                     request,
                     shared,
                     compact_owner_profile: &compact_owner_profile,
+                    previous_response_id: request_previous_response_id.as_deref(),
+                    previous_response_profile: previous_response_profile.as_deref(),
                     strict_affinity_profile: compact_followup_profile
                         .as_ref()
                         .map(|(profile_name, _)| profile_name.as_str()),
@@ -213,6 +240,7 @@ pub(super) fn proxy_runtime_compact_request(
         let candidate_has_hard_affinity = runtime_compact_route_candidate_has_hard_affinity(
             &candidate_name,
             &compact_followup_profile,
+            previous_response_profile.as_deref(),
             session_profile.as_deref(),
         );
         if runtime_compact_candidate_inflight_saturated(
@@ -239,6 +267,7 @@ pub(super) fn proxy_runtime_compact_request(
                 request_id,
                 shared,
                 candidate_has_hard_affinity,
+                previous_response_profile: previous_response_profile.as_deref(),
                 request_session_id: request_session_id.as_deref(),
                 request_turn_state: request_turn_state.as_deref(),
                 current_profile: &current_profile,
@@ -265,6 +294,7 @@ struct RuntimeCompactAttemptContext<'a> {
     request_id: u64,
     shared: &'a RuntimeRotationProxyShared,
     candidate_has_hard_affinity: bool,
+    previous_response_profile: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_turn_state: Option<&'a str>,
     current_profile: &'a str,
@@ -289,6 +319,7 @@ fn handle_runtime_compact_attempt(
         request_id,
         shared,
         candidate_has_hard_affinity,
+        previous_response_profile,
         request_session_id,
         request_turn_state,
         current_profile,
@@ -353,6 +384,7 @@ fn handle_runtime_compact_attempt(
                 profile_name,
                 response,
                 overload,
+                previous_response_profile,
                 request_session_id,
                 request_turn_state,
                 current_profile,

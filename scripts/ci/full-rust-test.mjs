@@ -116,7 +116,7 @@ function printHelp() {
       "  - run global-cache broker-log metrics tests serial",
       "  - run temp-executable rtk wrapper tests serial",
       "  - run auto_rotate integration tests as parallel serial shards",
-      "  - run every prodex-app lib test serially (the crate disables implicit workspace tests)",
+      "  - run every prodex-app lib test serially within its own parallel partition (the crate disables implicit workspace tests)",
     ].join("\n") + "\n",
   );
 }
@@ -264,20 +264,15 @@ async function main() {
   }
 
   completed.push(
-    ...(await runStepsParallel([...workspaceSteps(args), autoRotateStep(args)], {
-      dryRun: args.dryRun,
-      jobs: 3,
-      timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
-    })),
-  );
-  if (args.prodexAppLib) {
-    completed.push(
-      ...(await runStepsSerial([prodexAppStep()], {
+    ...(await runStepsParallel(
+      [...workspaceSteps(args), autoRotateStep(args), ...(args.prodexAppLib ? [prodexAppStep()] : [])],
+      {
         dryRun: args.dryRun,
-        timingSummary: timingSummary(args, "full-rust-test:prodex-app"),
-      })),
-    );
-  }
+        jobs: 3,
+        timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
+      },
+    )),
+  );
 
   if (args.timings && !args.dryRun) {
     process.stdout.write(

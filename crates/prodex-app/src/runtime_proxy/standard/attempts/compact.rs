@@ -10,13 +10,17 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
     allow_quota_exhausted_send: bool,
     hard_affinity: bool,
 ) -> Result<RuntimeStandardAttempt> {
+    let request_previous_response_id = runtime_request_previous_response_id(request);
     let request_session_id = runtime_request_session_id(request);
+    let request_turn_state = runtime_request_turn_state(request);
     match runtime_compact_precommit_quota_guard(
         request_id,
         shared,
         profile_name,
         allow_quota_exhausted_send,
-        request_session_id.is_none(),
+        request_previous_response_id.is_none()
+            && request_session_id.is_none()
+            && request_turn_state.is_none(),
     )? {
         RuntimeStandardPrecommitGuard::Continue => {}
         RuntimeStandardPrecommitGuard::RetryWithoutGuard => {

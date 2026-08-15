@@ -94,6 +94,7 @@ const REQUIRED_ENTERPRISE_ARTIFACT_PATHS = [
   ].map((name) => `docs/enterprise-governance/samples/${name}`),
 ];
 const TEST_MATRIX_PATH = "docs/enterprise-governance/test-matrix.json";
+const TEST_MATRIX_SCHEMA_VERSION = 2;
 const TEST_MATRIX_STATUSES = new Set([
   "tested",
   "implemented",
@@ -101,6 +102,10 @@ const TEST_MATRIX_STATUSES = new Set([
   "partial",
   "planned",
 ]);
+const ORDINARY_TEST_REFERENCE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const TEST_DECLARATION_PATTERN = /#\[(?:(?:[\w:]+::)?(?:test|rstest)|test_case)(?:\([^\]]*\))?\]\s*(?:#\[[^\]]+\]\s*)*(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gu;
+let repositoryTestNamesCache;
+let packageScriptNamesCache;
 const GOVERNANCE_LIFECYCLE_OPENAPI_PATH =
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_openapi.json";
 const GOVERNANCE_SECURITY_EVIDENCE_TESTS = [
@@ -200,6 +205,92 @@ function validateRequiredArtifacts(root = repoRoot, exists = fs.existsSync) {
   ).map((relativePath) => `${relativePath}: required enterprise artifact is missing`);
 }
 
+function repositoryTestNames() {
+  if (repositoryTestNamesCache !== undefined) return repositoryTestNamesCache;
+
+  const names = new Set();
+  const pending = ["crates", "scripts"]
+    .map((relativePath) => path.join(repoRoot, relativePath))
+    .filter((directory) => fs.existsSync(directory));
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!new Set([".git", "node_modules", "target"]).has(entry.name)) {
+          pending.push(entryPath);
+        }
+        continue;
+      }
+      if (!entry.isFile() || !/[.](?:rs|mjs|js|ts)$/u.test(entry.name)) continue;
+      const source = fs.readFileSync(entryPath, "utf8");
+      for (const match of source.matchAll(TEST_DECLARATION_PATTERN)) names.add(match[1]);
+    }
+  }
+  repositoryTestNamesCache = names;
+  return names;
+}
+
+function packageScriptNames() {
+  if (packageScriptNamesCache !== undefined) return packageScriptNamesCache;
+  const packagePath = path.join(repoRoot, PACKAGE_JSON_PATH);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+    packageScriptNamesCache = new Set(Object.keys(parsed?.scripts ?? {}));
+  } catch {
+    packageScriptNamesCache = new Set();
+  }
+  return packageScriptNamesCache;
+}
+
+function validateTestCommand(command, status, index, matrixPath, testNames) {
+  if (/^(?:external|planned):\s*/u.test(command)) {
+    if (["tested", "implemented"].includes(status)) {
+      return `${matrixPath}: tests[${index}].test_command cannot be external or planned for implementation_status '${status}'`;
+    }
+    return null;
+  }
+
+  const npmMatch = /^npm run ([A-Za-z0-9:_-]+)$/u.exec(command);
+  if (npmMatch !== null) {
+    if (!packageScriptNames().has(npmMatch[1])) {
+      return `${matrixPath}: tests[${index}].test_command references missing npm script '${npmMatch[1]}'`;
+    }
+    return null;
+  }
+
+  const cargoMatch = /^cargo test(?:\s+\S+)*\s+--\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(command);
+  if (cargoMatch !== null) {
+    if (!testNames.has(cargoMatch[1])) {
+      return `${matrixPath}: tests[${index}].test_command references missing repository test '${cargoMatch[1]}'`;
+    }
+    return null;
+  }
+
+  const nodeMatch = /^node\s+(scripts\/ci\/[^\s]+\.mjs)(?:\s+--self-test)?$/u.exec(command);
+  if (nodeMatch !== null && fs.existsSync(path.join(repoRoot, nodeMatch[1]))) return null;
+
+  return `${matrixPath}: tests[${index}].test_command must be a stable cargo test, npm run, node guard, planned:, or external: command`;
+}
+
+function validateEvidenceReferences(evidence, index, matrixPath, testNames) {
+  const errors = [];
+  evidence.forEach((item, evidenceIndex) => {
+    if (typeof item !== "string") return;
+    if (ORDINARY_TEST_REFERENCE_PATTERN.test(item) && !testNames.has(item)) {
+      errors.push(
+        `${matrixPath}: tests[${index}].evidence[${evidenceIndex}] ordinary test reference '${item}' does not resolve to a repository test`,
+      );
+    }
+    if (/^[A-Za-z0-9_-]+-guard\.mjs$/u.test(item) && !fs.existsSync(path.join(repoRoot, "scripts/ci", item))) {
+      errors.push(
+        `${matrixPath}: tests[${index}].evidence[${evidenceIndex}] guard reference '${item}' does not resolve to scripts/ci/${item}`,
+      );
+    }
+  });
+  return errors;
+}
+
 function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
   let parsed;
   try {
@@ -210,14 +301,15 @@ function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
   }
 
   const errors = [];
-  if (!Number.isInteger(parsed?.schema_version) || parsed.schema_version < 1) {
-    errors.push(`${matrixPath}: schema_version must be a positive integer`);
+  if (parsed?.schema_version !== TEST_MATRIX_SCHEMA_VERSION) {
+    errors.push(`${matrixPath}: schema_version must be ${TEST_MATRIX_SCHEMA_VERSION}`);
   }
   if (!Array.isArray(parsed?.tests) || parsed.tests.length === 0) {
     errors.push(`${matrixPath}: tests must be a non-empty array`);
     return errors;
   }
   const ids = new Set();
+  const testNames = repositoryTestNames();
   parsed.tests.forEach((test, index) => {
     if (typeof test?.id !== "string" || test.id.trim() === "") {
       errors.push(`${matrixPath}: tests[${index}].id must be a non-empty string`);
@@ -228,6 +320,31 @@ function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
     }
     if (!TEST_MATRIX_STATUSES.has(test?.implementation_status)) {
       errors.push(`${matrixPath}: tests[${index}].implementation_status is invalid`);
+    }
+    if (!Number.isInteger(test?.phase) || test.phase < 1) {
+      errors.push(`${matrixPath}: tests[${index}].phase must be a positive integer`);
+    }
+    if (
+      !Array.isArray(test?.modes) ||
+      test.modes.length === 0 ||
+      test.modes.some((mode) => typeof mode !== "string" || mode.trim() === "")
+    ) {
+      errors.push(`${matrixPath}: tests[${index}].modes must contain non-empty strings`);
+    }
+    for (const field of ["test_command", "expected", "evidence_artifact", "owner"]) {
+      if (typeof test?.[field] !== "string" || test[field].trim() === "") {
+        errors.push(`${matrixPath}: tests[${index}].${field} must be a non-empty string`);
+      }
+    }
+    if (typeof test?.test_command === "string" && test.test_command.trim() !== "") {
+      const commandError = validateTestCommand(
+        test.test_command,
+        test.implementation_status,
+        index,
+        matrixPath,
+        testNames,
+      );
+      if (commandError !== null) errors.push(commandError);
     }
     if (
       !Array.isArray(test?.evidence) ||
@@ -242,6 +359,9 @@ function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
       errors.push(
         `${matrixPath}: tests[${index}].evidence contradicts implementation_status '${test.implementation_status}'`,
       );
+    }
+    if (Array.isArray(test?.evidence)) {
+      errors.push(...validateEvidenceReferences(test.evidence, index, matrixPath, testNames));
     }
   });
   return errors;
@@ -465,6 +585,18 @@ function validateEnterpriseGuardSelfTests(packageJsonText, packageJsonPath = PAC
 }
 
 function runSelfTest() {
+  const validMatrixRow = (overrides = {}) => ({
+    id: "SEC-TEST-001",
+    phase: 1,
+    modes: ["enterprise_enforce"],
+    test_command: "planned: deployment evidence command",
+    expected: "The control remains explicitly tracked.",
+    evidence_artifact: "evidence/enterprise-test-matrix/SEC-TEST-001/",
+    owner: "prodex-security",
+    implementation_status: "planned",
+    evidence: ["design evidence only"],
+    ...overrides,
+  });
   const fake = {
     path: "fake.md",
     required: ["alpha", "beta"],
@@ -484,27 +616,18 @@ function runSelfTest() {
   }
 
   const plannedMatrix = JSON.stringify({
-    schema_version: 1,
-    tests: [
-      {
-        id: "SEC-TEST-001",
-        implementation_status: "planned",
-        evidence: ["design evidence only"],
-      },
-    ],
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow()],
   });
   if (validateTestMatrix(plannedMatrix, "test-matrix.json").length !== 0) {
     throw new Error("self-test failed: valid incomplete test matrix rejected");
   }
   const invalidMatrix = JSON.stringify({
-    schema_version: 1,
-    tests: [
-      {
-        id: "SEC-TEST-001",
-        implementation_status: "complete",
-        evidence: ["test evidence"],
-      },
-    ],
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({
+      implementation_status: "complete",
+      evidence: ["test evidence"],
+    })],
   });
   if (
     !validateTestMatrix(invalidMatrix, "test-matrix.json").some((error) =>
@@ -513,15 +636,57 @@ function runSelfTest() {
   ) {
     throw new Error("self-test failed: invalid test matrix status accepted");
   }
+  for (const field of ["id", "phase", "modes", "test_command", "expected", "evidence_artifact", "owner"]) {
+    const incompleteRow = validMatrixRow();
+    delete incompleteRow[field];
+    if (
+      !validateTestMatrix(
+        JSON.stringify({ schema_version: TEST_MATRIX_SCHEMA_VERSION, tests: [incompleteRow] }),
+        "test-matrix.json",
+      ).some((error) => error.includes(`tests[0].${field}`))
+    ) {
+      throw new Error(`self-test failed: missing test matrix field '${field}' accepted`);
+    }
+  }
+  const validReferenceMatrix = JSON.stringify({
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({
+      test_command: "cargo test --locked --workspace -- explicit_deny_wins_and_drops_obligations",
+      evidence: ["explicit_deny_wins_and_drops_obligations"],
+    })],
+  });
+  if (validateTestMatrix(validReferenceMatrix, "test-matrix.json").length !== 0) {
+    throw new Error("self-test failed: valid ordinary test reference rejected");
+  }
+  const staleReferenceMatrix = JSON.stringify({
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({ evidence: ["missing_test_reference"] })],
+  });
+  if (
+    !validateTestMatrix(staleReferenceMatrix, "test-matrix.json").some((error) =>
+      error.includes("ordinary test reference") && error.includes("missing_test_reference"),
+    )
+  ) {
+    throw new Error("self-test failed: stale ordinary test reference accepted");
+  }
+  const staleGuardReferenceMatrix = JSON.stringify({
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({ evidence: ["missing-guard.mjs"] })],
+  });
+  if (
+    !validateTestMatrix(staleGuardReferenceMatrix, "test-matrix.json").some((error) =>
+      error.includes("guard reference") && error.includes("missing-guard.mjs"),
+    )
+  ) {
+    throw new Error("self-test failed: stale guard reference accepted");
+  }
   const contradictoryMatrix = JSON.stringify({
-    schema_version: 1,
-    tests: [
-      {
-        id: "SEC-TEST-001",
-        implementation_status: "tested",
-        evidence: ["database validation pending"],
-      },
-    ],
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({
+      implementation_status: "tested",
+      test_command: "cargo test --locked --workspace -- explicit_deny_wins_and_drops_obligations",
+      evidence: ["database validation pending"],
+    })],
   });
   if (
     !validateTestMatrix(contradictoryMatrix, "test-matrix.json").some((error) =>
@@ -531,10 +696,10 @@ function runSelfTest() {
     throw new Error("self-test failed: contradictory test matrix evidence accepted");
   }
   const duplicateMatrix = JSON.stringify({
-    schema_version: 1,
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
     tests: [
-      { id: "SEC-TEST-001", implementation_status: "planned", evidence: ["first"] },
-      { id: "SEC-TEST-001", implementation_status: "planned", evidence: ["second"] },
+      validMatrixRow({ evidence: ["first"] }),
+      validMatrixRow({ evidence: ["second"] }),
     ],
   });
   if (
@@ -545,8 +710,8 @@ function runSelfTest() {
     throw new Error("self-test failed: duplicate test matrix id accepted");
   }
   const emptyEvidenceMatrix = JSON.stringify({
-    schema_version: 1,
-    tests: [{ id: "SEC-TEST-001", implementation_status: "planned", evidence: [] }],
+    schema_version: TEST_MATRIX_SCHEMA_VERSION,
+    tests: [validMatrixRow({ evidence: [] })],
   });
   if (
     !validateTestMatrix(emptyEvidenceMatrix, "test-matrix.json").some((error) =>

@@ -507,7 +507,7 @@ pub(crate) fn render_all_quota_reports_once_tui(
         profile_count: reports.len(),
         reports: reports.to_vec(),
     };
-    let data = build_all_quota_watch_tui_frame(
+    let mut data = build_all_quota_watch_tui_frame(
         &snapshot,
         AllQuotaWatchLayout {
             detail,
@@ -522,5 +522,6 @@ pub(crate) fn render_all_quota_reports_once_tui(
             ),
         },
     );
+    data.footer.clear();
     render_all_quota_watch_tui(frame, &data);
 }

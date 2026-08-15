@@ -31,6 +31,27 @@ The machine-readable matrix must assign a stable ID to each threat and control,
 then map it to the production mode, phase, test command, expected outcome,
 evidence artifact, and owner. At minimum it covers the following layers.
 
+`test-matrix.json` uses schema version 2. Every `tests` row must contain:
+
+- `id`: unique stable threat/control identifier;
+- `phase`: positive phase number;
+- `modes`: one or more production modes such as `enterprise_enforce` or
+  `bank_enforce`;
+- `test_command`: one stable checked-in `cargo test`, `npm run`, or guard command
+  that can be rerun without inventing a test; `planned:` and `external:` commands
+  are allowed only for rows whose status is not `tested` or `implemented`;
+- `expected`: expected control outcome;
+- `evidence_artifact`: run-independent locator for the immutable evidence bundle;
+- `owner`: accountable repository or deployment owner;
+- `evidence`: non-empty evidence references or descriptions.
+
+Identifier-shaped `evidence` entries are ordinary repository test references and
+must resolve to a checked-in test declaration. Guard filenames must resolve under
+`scripts/ci/`. Commands and deployment claims that are not repository tests stay
+explicitly marked as `external:` descriptions; they are not silently counted as
+automated test evidence. Missing fields and stale ordinary references fail the
+enterprise-docs guard deterministically.
+
 ### Unit and golden tests
 
 - classification ordering, monotonicity, coverage, and bounded findings;

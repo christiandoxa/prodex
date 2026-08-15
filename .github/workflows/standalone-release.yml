@@ -252,7 +252,17 @@ jobs:
       - name: Test native desktop launcher
         if: ${{ matrix.can-native-smoke }}
         shell: bash
-        run: RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
+        run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
+            exit 1
+          fi
+          if grep -Fq 'running 0 tests' "${test_log}"; then
+            echo "native desktop launcher test matched no tests" >&2
+            exit 1
+          fi
 
       - name: Build prodex
         shell: bash

@@ -139,6 +139,21 @@ fn setup_dry_run_uses_passive_binary_discovery() {
 }
 
 #[test]
+fn setup_dry_run_verify_tools_rejects_before_json_output() {
+    let error = handle_setup(SetupArgs {
+        dry_run: true,
+        verify_tools: true,
+        json: true,
+    })
+    .expect_err("incompatible setup flags should be rejected");
+
+    assert_eq!(
+        error.to_string(),
+        "--dry-run cannot be combined with --verify-tools"
+    );
+}
+
+#[test]
 fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
     let ids = prodex_optional_tools::OptionalToolSet::super_defaults()
         .iter()

@@ -196,15 +196,33 @@ jobs:
         run: |
           set -euo pipefail
           tmp_root="$(mktemp -d)"
-          trap 'find "${tmp_root}" -depth -delete' EXIT
+          test_log="$(mktemp)"
+          trap 'find "${tmp_root}" -depth -delete; rm -f "${test_log}"' EXIT
           mkdir -m 700 "${tmp_root}/real"
           ln -s "${tmp_root}/real" "${tmp_root}/alias"
-          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1
-          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+          run_targeted_test() {
+            local label="$1"
+            shift
+            if ! "$@" 2>&1 | tee "${test_log}"; then
+              return 1
+            fi
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "${label} matched no tests" >&2
+              return 1
+            fi
+          }
+          status=0
+          if ! run_targeted_test "prodex-app desktop test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
+            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1; then
+            status=1
+          fi
+          if ! run_targeted_test "prodex-app offline symlink test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
             --lib --all-features \
             'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
-            -- --test-threads=1
+            -- --test-threads=1; then
+            status=1
+          fi
+          exit "${status}"
 
   fuzz-build:
     needs: changes
@@ -383,8 +401,22 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          run_targeted_test() {
+            local label="$1"
+            shift
+            if ! "$@" 2>&1 | tee "${test_log}"; then
+              return 1
+            fi
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "${label} matched no tests" >&2
+              return 1
+            fi
+          }
           cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
-          cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
+          run_targeted_test "Windows optional-tools rtk tests" cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
 
       - name: Run Windows runtime member tests
         if: matrix.suite == 'members-runtime'
@@ -392,8 +424,22 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          run_targeted_test() {
+            local label="$1"
+            shift
+            if ! "$@" 2>&1 | tee "${test_log}"; then
+              return 1
+            fi
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "${label} matched no tests" >&2
+              return 1
+            fi
+          }
           cargo test --locked -q -p 'prodex-runtime-*' --all-features -- --test-threads=4 --skip continuity_failure_reason_metrics_
-          cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
+          run_targeted_test "Windows broker-log continuity tests" cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
 
       - name: Run Windows storage member tests
         if: matrix.suite == 'members-storage'
@@ -551,13 +597,38 @@ jobs:
       - name: Run native macOS broker recovery tests
         env:
           RUST_BACKTRACE: "1"
-        run: cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          if ! cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1 2>&1 | tee "${test_log}"; then
+            exit 1
+          fi
+          if grep -Fq 'running 0 tests' "${test_log}"; then
+            echo "macOS broker recovery tests matched no tests" >&2
+            exit 1
+          fi
 
       - name: Run native macOS Kiro selector and resume tests
         env:
           RUST_BACKTRACE: "1"
         run: |
           set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          run_targeted_test() {
+            local label="$1"
+            shift
+            if ! "$@" 2>&1 | tee "${test_log}"; then
+              return 1
+            fi
+            if grep -Fq 'running 0 tests' "${test_log}"; then
+              echo "${label} matched no tests" >&2
+              return 1
+            fi
+          }
+          status=0
           for filter in \
             provider_default_efforts_follow_catalog_for_every_provider \
             pure_interactive_resolution_prompts_presidio_before_resumed_sub_agent_config \
@@ -568,9 +639,12 @@ jobs:
             native_kiro_resolution_does_not_inject_the_codex_bridge_provider \
             native_kiro_cli_maps_resume_session_id
           do
-            cargo test --locked -q -p prodex-app --lib --all-features \
-              "${filter}" -- --test-threads=1
+            if ! run_targeted_test "macOS Kiro test ${filter}" cargo test --locked -q -p prodex-app --lib --all-features \
+              "${filter}" -- --test-threads=1; then
+              status=1
+            fi
           done
+          exit "${status}"
 
   smart-context-evidence:
     name: Smart Context evidence
@@ -833,7 +907,18 @@ jobs:
           cache-bin: false
 
       - name: Run Redis-backed atomicity tests
-        run: cargo test --locked -q -p prodex-storage-redis-runtime --test redis_rate_limit_runtime -- --ignored --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          if ! cargo test --locked -q -p prodex-storage-redis-runtime --test redis_rate_limit_runtime -- --ignored --test-threads=1 2>&1 | tee "${test_log}"; then
+            exit 1
+          fi
+          if grep -Fq 'running 0 tests' "${test_log}"; then
+            echo "Redis-backed atomicity tests matched no tests" >&2
+            exit 1
+          fi
 
   backup-restore-drill:
     needs: changes
@@ -1316,8 +1401,18 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Run profile command internal tests
+        shell: bash
         run: |
-          cargo test --locked -p prodex-app --lib --all-features profile_commands_internal_tests:: -- --test-threads=1
+          set -euo pipefail
+          test_log="$(mktemp)"
+          trap 'rm -f "${test_log}"' EXIT
+          if ! cargo test --locked -p prodex-app --lib --all-features profile_commands_internal_tests:: -- --test-threads=1 2>&1 | tee "${test_log}"; then
+            exit 1
+          fi
+          if grep -Fq 'running 0 tests' "${test_log}"; then
+            echo "profile command internal tests matched no tests" >&2
+            exit 1
+          fi
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})

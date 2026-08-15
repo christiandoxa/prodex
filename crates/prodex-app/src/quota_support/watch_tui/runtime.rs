@@ -10,11 +10,12 @@ pub(crate) fn render_profile_quota_once_tui(
     quota: ProviderQuotaSnapshot,
     detail: bool,
 ) {
-    let data = build_profile_quota_watch_tui_frame(
+    let mut data = build_profile_quota_watch_tui_frame(
         profile_name,
         &quota_watch_updated_at(),
         Ok(quota),
         detail,
     );
+    data.footer.clear();
     render_all_quota_watch_tui(frame, &data);
 }

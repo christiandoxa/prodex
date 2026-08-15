@@ -31,12 +31,20 @@ pub(crate) fn watch_quota(
         }
     }
 
+    let mut snapshot = ProfileQuotaWatchSnapshot {
+        updated: quota_watch_updated_at(),
+        quota: Err("Loading quota data...".to_string()),
+    };
     loop {
-        let output = render_profile_quota_watch_output(
-            profile_name,
-            &quota_watch_updated_at(),
-            fetch_profile_quota(provider, codex_home, base_url)
+        let next_snapshot = ProfileQuotaWatchSnapshot {
+            updated: quota_watch_updated_at(),
+            quota: fetch_profile_quota(provider, codex_home, base_url)
                 .map_err(|err| quota_error_message(&err)),
+        };
+        let output = render_profile_quota_watch_plain_snapshot(
+            &mut snapshot,
+            next_snapshot,
+            profile_name,
             detail,
         );
         print_quota_watch_plain_snapshot(&output)?;
@@ -50,6 +58,22 @@ pub(super) fn print_quota_watch_plain_snapshot(output: &str) -> Result<()> {
         .flush()
         .context("failed to flush quota watch output")?;
     Ok(())
+}
+
+fn render_profile_quota_watch_plain_snapshot(
+    previous: &mut ProfileQuotaWatchSnapshot,
+    next: ProfileQuotaWatchSnapshot,
+    profile_name: &str,
+    detail: bool,
+) -> String {
+    let merged = merge_profile_quota_watch_snapshot(previous, next);
+    *previous = merged;
+    render_profile_quota_watch_output(
+        profile_name,
+        &previous.updated,
+        previous.quota.clone(),
+        detail,
+    )
 }
 
 fn watch_profile_quota_tui(
@@ -181,5 +205,34 @@ mod tests {
             panic!("expected previous successful quota snapshot");
         };
         assert_eq!(usage.email.as_deref(), Some("before@example.com"));
+    }
+
+    #[test]
+    fn profile_quota_watch_plain_output_keeps_previous_success_on_refresh_error() {
+        let mut snapshot = ProfileQuotaWatchSnapshot {
+            updated: "before".to_string(),
+            quota: Ok(ProviderQuotaSnapshot::OpenAi(UsageResponse {
+                email: Some("before@example.com".to_string()),
+                plan_type: Some("plus".to_string()),
+                rate_limit: None,
+                code_review_rate_limit: None,
+                rate_limit_reset_credits: None,
+                additional_rate_limits: Vec::new(),
+            })),
+        };
+
+        let output = render_profile_quota_watch_plain_snapshot(
+            &mut snapshot,
+            ProfileQuotaWatchSnapshot {
+                updated: "after".to_string(),
+                quota: Err("HTTP 503".to_string()),
+            },
+            "main",
+            false,
+        );
+
+        assert!(output.contains("before@example.com"));
+        assert!(!output.contains("HTTP 503"));
+        assert_eq!(snapshot.updated, "before");
     }
 }

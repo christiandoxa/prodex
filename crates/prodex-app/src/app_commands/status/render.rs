@@ -427,42 +427,58 @@ pub(super) fn status_fields(
         ),
         (
             "Processes".to_string(),
-            format!(
-                "{} total, {} runtime; CPU {}",
-                resources.process_count,
-                resources.runtime_process_count,
-                resources
-                    .cpu_percent
-                    .map(|value| format!("{value:.1}%"))
-                    .unwrap_or_else(|| "warming up".to_string())
-            ),
+            if resources.available {
+                format!(
+                    "{} total, {} runtime; CPU {}",
+                    resources.process_count,
+                    resources.runtime_process_count,
+                    resources
+                        .cpu_percent
+                        .map(|value| format!("{value:.1}%"))
+                        .unwrap_or_else(|| "warming up".to_string())
+                )
+            } else {
+                "unavailable".to_string()
+            },
         ),
         (
             "Memory".to_string(),
-            format!(
-                "{} ({:.1}% host)",
-                human_bytes(resources.resident_bytes),
-                resource_memory_percent(resources)
-            ),
+            if resources.available {
+                format!(
+                    "{} ({:.1}% host)",
+                    human_bytes(resources.resident_bytes),
+                    resource_memory_percent(resources)
+                )
+            } else {
+                "unavailable".to_string()
+            },
         ),
         (
             "Network".to_string(),
-            format!(
-                "{} sockets; RX queue {}, TX queue {}",
-                resources.socket_count,
-                human_bytes(resources.network_rx_queue_bytes),
-                human_bytes(resources.network_tx_queue_bytes)
-            ),
+            if resources.available {
+                format!(
+                    "{} sockets; RX queue {}, TX queue {}",
+                    resources.socket_count,
+                    human_bytes(resources.network_rx_queue_bytes),
+                    human_bytes(resources.network_tx_queue_bytes)
+                )
+            } else {
+                "unavailable".to_string()
+            },
         ),
         (
             "Disk I/O".to_string(),
-            format!(
-                "read {} total ({}/s), write {} total ({}/s)",
-                human_bytes(resources.disk_read_bytes),
-                human_bytes(resources.disk_read_bytes_per_second),
-                human_bytes(resources.disk_write_bytes),
-                human_bytes(resources.disk_write_bytes_per_second)
-            ),
+            if resources.available {
+                format!(
+                    "read {} total ({}/s), write {} total ({}/s)",
+                    human_bytes(resources.disk_read_bytes),
+                    human_bytes(resources.disk_read_bytes_per_second),
+                    human_bytes(resources.disk_write_bytes),
+                    human_bytes(resources.disk_write_bytes_per_second)
+                )
+            } else {
+                "unavailable".to_string()
+            },
         ),
         (
             "Recent load".to_string(),

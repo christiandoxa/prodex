@@ -4,6 +4,7 @@ import {
   cargoFeatureArgs,
   cargoIntegrationTestFilterStep,
   formatStepTimingSummary,
+  runStep,
   sortedStepTimings,
 } from "./main-internal-test-runner.mjs";
 
@@ -56,5 +57,20 @@ test("cargo helpers include all-features before filters and harness args", () =>
       failOnZeroTests: true,
       label: "auto",
     },
+  );
+});
+
+test("targeted steps reject zero tests across output chunks", async () => {
+  await assert.rejects(
+    runStep({
+      label: "fragmented-zero-test",
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write('running '); setTimeout(() => process.stdout.write('0 tests\\n'), 10);",
+      ],
+      failOnZeroTests: true,
+    }),
+    /fragmented-zero-test matched no tests/,
   );
 });

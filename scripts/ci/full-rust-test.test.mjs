@@ -16,6 +16,8 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
     result.stdout,
     /prodex-app:all-lib-tests-serial: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1/,
   );
+  assert.match(result.stdout, /dry-run: 5 parallel step\(s\), jobs=3/);
+  assert.doesNotMatch(result.stdout, /full-rust-test:prodex-app/);
 
   const platformResult = spawnSync(
     process.execPath,
@@ -95,6 +97,34 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   for (const dependency of ["prodex-app-lib", "redis-integration", "backup-restore-drill"]) {
     assert.match(telemetry, new RegExp(`- ${dependency}`));
   }
+});
+
+test("direct targeted workflow lanes reject zero-test matches", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const releaseWorkflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  for (const [jobName, nextJob, stepName] of [
+    ["prodex-app-lib", "fuzz-build", "Test temp-backed state with a symlinked TMPDIR"],
+    ["windows-workspace", "windows-prodex-app", "Run Windows foundation member tests"],
+    ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
+    ["macos-workspace", "smart-context-evidence", "Run native macOS broker recovery tests"],
+    ["macos-workspace", "smart-context-evidence", "Run native macOS Kiro selector and resume tests"],
+    ["profile-commands-internal", "main-internal-core", "Run profile command internal tests"],
+    ["redis-integration", "backup-restore-drill", "Run Redis-backed atomicity tests"],
+  ]) {
+    const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
+    assert.ok(job, `${jobName} job missing`);
+    const stepOffset = job.indexOf(`- name: ${stepName}`);
+    assert.ok(stepOffset >= 0, `${jobName}/${stepName} step missing`);
+    const step = job.slice(stepOffset);
+    assert.match(step, /grep -Fq 'running 0 tests'/, `${jobName}/${stepName} lacks zero-test guard`);
+  }
+
+  const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
+  assert.ok(releaseBuild, "standalone release build job missing");
+  const releaseStepOffset = releaseBuild.indexOf("- name: Test native desktop launcher");
+  assert.ok(releaseStepOffset >= 0, "native desktop launcher test step missing");
+  const releaseStep = releaseBuild.slice(releaseStepOffset);
+  assert.match(releaseStep, /grep -Fq 'running 0 tests'/);
 });
 
 test("release hygiene does not inherit an unavailable Rust compiler wrapper", () => {
