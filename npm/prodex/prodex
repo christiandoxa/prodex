@@ -168,7 +168,7 @@ if (!codexBin) {
   );
 
   childPath = `${shimDir}${path.delimiter}${childPath}`;
-  codexBin = "codex";
+  codexBin = process.platform === "win32" ? "codex.cmd" : "codex";
   cleanup = () => {
     try {
       fs.rmSync(shimDir, { recursive: true, force: true });

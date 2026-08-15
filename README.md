@@ -139,13 +139,34 @@ Runtime proxy design contract:
 Install the standalone macOS or Linux binary from the latest GitHub Release:
 
 ```bash
-curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
+install_dir="$(mktemp -d)"
+trap 'rm -rf "$install_dir"' EXIT
+curl -fsSLo "$install_dir/install.sh" \
+  https://github.com/christiandoxa/prodex/releases/latest/download/install.sh
+curl -fsSLo "$install_dir/SHA256SUMS" \
+  https://github.com/christiandoxa/prodex/releases/latest/download/SHA256SUMS
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$install_dir" && grep ' install.sh$' SHA256SUMS | sha256sum -c -)
+else
+  (cd "$install_dir" && grep ' install.sh$' SHA256SUMS | shasum -a 256 -c)
+fi
+sh "$install_dir/install.sh"
 ```
 
-On Windows, run this from PowerShell or Command Prompt:
+On Windows, download and verify the PowerShell installer before running it:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
+$installDir = Join-Path ([IO.Path]::GetTempPath()) ("prodex-install-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $installDir | Out-Null
+try {
+  Invoke-WebRequest -Uri https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 -OutFile (Join-Path $installDir "install.ps1")
+  Invoke-WebRequest -Uri https://github.com/christiandoxa/prodex/releases/latest/download/SHA256SUMS -OutFile (Join-Path $installDir "SHA256SUMS")
+  $expected = (Get-Content (Join-Path $installDir "SHA256SUMS") | Where-Object { $_ -match ' \*?install\.ps1$' } | Select-Object -First 1).Split()[0]
+  if (-not $expected -or (Get-FileHash (Join-Path $installDir "install.ps1") -Algorithm SHA256).Hash -ne $expected) { throw "install.ps1 checksum verification failed" }
+  & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $installDir "install.ps1")
+} finally {
+  Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 ```
 
 Managed profiles require Windows symbolic-link permission. Enable Developer
@@ -156,14 +177,16 @@ profile state and reports an actionable error when permission is unavailable.
 <details>
 <summary>Installer verification, alternate source, and legacy migration</summary>
 
-The installers download the matching release asset and verify it against `SHA256SUMS`. Before publication, the release workflow verifies its ClamAV engine with EICAR and scans every final release asset; an unhealthy scanner or any detection blocks the release. The macOS/Linux target is `~/.local/bin`; Windows uses `%LOCALAPPDATA%\Programs\Prodex\bin`. Their auditable sources are also available directly from the repository:
+The installers download the matching release asset and verify it against `SHA256SUMS`. Before publication, the release workflow verifies its ClamAV engine with EICAR and scans every final release asset; an unhealthy scanner or any detection blocks the release. The macOS/Linux target is `~/.local/bin`; Windows uses `%LOCALAPPDATA%\Programs\Prodex\bin`. For source review, download the development installer without executing it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh | sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh
+less install.sh
 ```
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/christiandoxa/prodex/main/install.ps1 | iex"
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/christiandoxa/prodex/main/install.ps1 -OutFile .\install.ps1
+Get-Content .\install.ps1
 ```
 
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available.
@@ -220,9 +243,6 @@ RTK:
 ```bash
 brew install rtk
 # or
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
-# or
-cargo install --git https://github.com/rtk-ai/rtk
 
 rtk --version
 rtk gain
@@ -232,9 +252,12 @@ prodex capability super-doctor
 Codebase Memory MCP:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.9.1-rc.1/install.sh \
-  | CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.9.1-rc.1 \
-    bash -s -- --skip-config
+cbm_install_dir="$(mktemp -d)"
+trap 'rm -rf "$cbm_install_dir"' EXIT
+curl -fsSLo "$cbm_install_dir/install.sh" \
+  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.9.1-rc.1/install.sh
+CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.9.1-rc.1 \
+  bash "$cbm_install_dir/install.sh" --skip-config
 codebase-memory-mcp daemon status || true
 prodex capability super-doctor
 ```

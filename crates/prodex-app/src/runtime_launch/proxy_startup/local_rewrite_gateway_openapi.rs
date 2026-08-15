@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "79758e5e9d777571b798e57a400aa41635077fee1a2e154d6bc8dfd59514e0f1";
+        "baa7ab07a83f121f8c6407c3867ae20f57b35ebab1667e386139676d7e9eb168";
     const DOCUMENT_DIGEST: &str =
-        "960fbc41fc862c7dcaa7fde9df54f74cbdbbf604b121212d8e169a0c5325dc2f";
+        "36043a8e3c6ea3278b1c1dccf2594c12b1b3069ce0b9ffac0bd82a4ae57c8062";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -336,6 +336,9 @@ mod tests {
             "/v1/prodex/gateway/governance/outbox",
             "/v1/prodex/gateway/governance/outbox/claim",
             "/v1/prodex/gateway/governance/audit/integrity",
+            "/v1/prodex/gateway/audit/retention/holds",
+            "/v1/prodex/gateway/audit/retention/holds/{audit_event_id}",
+            "/v1/prodex/gateway/audit/retention/purge",
         ] {
             assert!(
                 paths[path].is_object(),

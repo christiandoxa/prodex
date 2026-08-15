@@ -12,6 +12,7 @@ import {
   openaiCodexVersion,
   platformPackages,
   platformPackageManifest,
+  repoRoot,
   writeJsonFile,
 } from "./common.mjs";
 
@@ -208,6 +209,14 @@ function runWrapper(install, env) {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
+
+test("prodex npm wrapper selects the Windows command shim when needed", async () => {
+  const source = await fs.readFile(path.join(repoRoot, "npm", "prodex", "prodex"), "utf8");
+  assert.match(
+    source,
+    /codexBin = process\.platform === "win32" \? "codex\.cmd" : "codex";/,
+  );
+});
 
 test("prodex npm wrapper uses bundled Codex shim by default", async (t) => {
   const install = await stageWrapperInstall("0.0.0-test");

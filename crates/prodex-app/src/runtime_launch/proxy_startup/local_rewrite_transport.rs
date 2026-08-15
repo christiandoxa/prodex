@@ -1,6 +1,7 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::{RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared};
+use super::local_rewrite_gateway_config::RuntimeGatewaySsoConfig;
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
@@ -122,7 +123,8 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     upstream_request =
         runtime_local_rewrite_apply_prepared_auth(upstream_request, request, shared, &body, auth)?;
     if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
-        upstream_request = runtime_local_rewrite_trace_context_headers(upstream_request, request);
+        upstream_request =
+            runtime_local_rewrite_trace_context_headers(upstream_request, request, shared);
     }
     runtime_proxy_log(
         &shared.runtime_shared,
@@ -320,7 +322,8 @@ fn runtime_local_rewrite_apply_anthropic_auth(
         )
         .expect("non-projected Anthropic auth builds request"),
     };
-    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+    if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
+    {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
     }
     Ok(upstream_request)
@@ -364,8 +367,12 @@ fn runtime_local_rewrite_apply_openai_auth(
             name.eq_ignore_ascii_case("authorization")
                 && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
         });
-    let mut upstream_request =
-        runtime_local_rewrite_copy_openai_headers(request, upstream_request, replacing_openai_auth);
+    let mut upstream_request = runtime_local_rewrite_copy_openai_headers(
+        request,
+        shared,
+        upstream_request,
+        replacing_openai_auth,
+    );
     if let Some(api_key) = api_key {
         upstream_request = upstream_request.bearer_auth(api_key);
     }
@@ -378,7 +385,7 @@ fn runtime_local_rewrite_apply_openai_projected_auth(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<reqwest::RequestBuilder> {
     let upstream_request =
-        runtime_local_rewrite_copy_openai_headers(request, upstream_request, true);
+        runtime_local_rewrite_copy_openai_headers(request, shared, upstream_request, true);
     runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)
 }
 
@@ -401,7 +408,8 @@ fn runtime_local_rewrite_apply_deepseek_auth(
         }
         (None, false) => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
     };
-    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+    if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
+    {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
     }
     Ok(upstream_request)
@@ -429,7 +437,8 @@ fn runtime_local_rewrite_apply_gemini_auth(
             )?;
         }
     }
-    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+    if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
+    {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
     }
     Ok(upstream_request)
@@ -446,7 +455,8 @@ fn runtime_local_rewrite_apply_gemini_openai_auth(
         Some(api_key) => upstream_request.bearer_auth(api_key),
         None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
     };
-    if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+    if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
+    {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
     }
     Ok(upstream_request)
@@ -534,6 +544,7 @@ mod anthropic_native_transport_tests {
 
 fn runtime_local_rewrite_copy_openai_headers(
     request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
     mut upstream_request: reqwest::RequestBuilder,
     replacing_openai_auth: bool,
 ) -> reqwest::RequestBuilder {
@@ -547,7 +558,7 @@ fn runtime_local_rewrite_copy_openai_headers(
         if runtime_proxy_crate::runtime_header_name_matches_connection_token(
             name,
             &connection_headers,
-        ) || should_skip_runtime_local_rewrite_request_header(name)
+        ) || should_skip_runtime_local_rewrite_request_header(name, &shared.gateway_sso)
         {
             continue;
         }
@@ -652,21 +663,80 @@ fn runtime_local_rewrite_header<'a>(
         .map(|(_, value)| value.as_str())
 }
 
+fn runtime_local_rewrite_header_if_allowed<'a>(
+    request: &'a RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    expected_name: &str,
+) -> Option<&'a str> {
+    (!shared.gateway_sso.is_configured_header(expected_name))
+        .then(|| runtime_local_rewrite_header(request, expected_name))
+        .flatten()
+}
+
 fn runtime_local_rewrite_trace_context_headers(
     mut upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
 ) -> reqwest::RequestBuilder {
     for header_name in ["traceparent", "tracestate", "baggage"] {
-        if let Some(header_value) = runtime_local_rewrite_header(request, header_name) {
+        if let Some(header_value) =
+            runtime_local_rewrite_header_if_allowed(request, shared, header_name)
+        {
             upstream_request = upstream_request.header(header_name, header_value);
         }
     }
     upstream_request
 }
 
-fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
+fn should_skip_runtime_local_rewrite_request_header(
+    name: &str,
+    gateway_sso: &RuntimeGatewaySsoConfig,
+) -> bool {
     runtime_proxy_crate::is_runtime_transport_local_request_header(name)
         || runtime_proxy_crate::is_prodex_internal_request_header(name)
+        || gateway_sso.is_configured_header(name)
+}
+
+#[cfg(test)]
+mod sso_header_tests {
+    use super::*;
+
+    #[test]
+    fn configured_sso_headers_are_not_forwardable_but_codex_metadata_is() {
+        let gateway_sso = RuntimeGatewaySsoConfig {
+            token_header: "x-auth-token".to_string(),
+            user_header: "x-auth-user".to_string(),
+            role_header: "x-auth-role".to_string(),
+            tenant_header: "x-auth-tenant".to_string(),
+            key_prefixes_header: "x-auth-prefixes".to_string(),
+            ..RuntimeGatewaySsoConfig::default()
+        };
+
+        for name in [
+            "X-AUTH-TOKEN",
+            "x-auth-user",
+            "x-auth-role",
+            "x-auth-tenant",
+            "x-auth-prefixes",
+        ] {
+            assert!(should_skip_runtime_local_rewrite_request_header(
+                name,
+                &gateway_sso
+            ));
+        }
+        for name in [
+            "session_id",
+            "x-openai-subagent",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+        ] {
+            assert!(!should_skip_runtime_local_rewrite_request_header(
+                name,
+                &gateway_sso
+            ));
+        }
+    }
 }
 
 fn runtime_local_rewrite_authorization_is_gateway_credential(

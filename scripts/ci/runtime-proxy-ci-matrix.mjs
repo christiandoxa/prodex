@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { RUNTIME_CI_WORKFLOW_SHARDS } from "./runtime-test-manifest.mjs";
 
-const TARGET_MATRIX_JOBS = 8;
+const TARGET_MATRIX_JOBS = 10;
 const DEFAULT_WEIGHT_SECONDS = 90;
 const RUNTIME_STRESS_BROAD_SHARDS = Object.freeze(
   Array.from({ length: 5 }, (_, shard) => ({
@@ -139,12 +139,19 @@ function packedMatrixEntries(shards, targetJobs = TARGET_MATRIX_JOBS) {
     (left, right) =>
       shardWeightSeconds(right) - shardWeightSeconds(left) || left.suite.localeCompare(right.suite),
   )) {
-    packs.sort(
+    const compatiblePacks = packs.filter((pack) => {
+      const admissionPair =
+        (shard.suite === "admission-core" && pack.suites.includes("admission-affinity")) ||
+        (shard.suite === "admission-affinity" && pack.suites.includes("admission-core"));
+      return !admissionPair;
+    });
+    const candidatePacks = compatiblePacks.length > 0 ? compatiblePacks : packs;
+    candidatePacks.sort(
       (left, right) =>
         left.weightSeconds - right.weightSeconds ||
         left.suites.join("\n").localeCompare(right.suites.join("\n")),
     );
-    const pack = packs[0];
+    const pack = candidatePacks[0];
     pack.filters.push(...shardFilters(shard, shards.indexOf(shard)));
     pack.labels.push(shard.label);
     pack.suites.push(shard.suite);

@@ -15,18 +15,39 @@ Windows must permit symbolic-link creation for managed profiles. Enable
 Developer Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an
 administrator before importing or creating a profile.
 
-Install Prodex on macOS or Linux:
+Install Prodex on macOS or Linux after downloading and verifying the release installer:
 
 ```bash
-curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
+install_dir="$(mktemp -d)"
+trap 'rm -rf "$install_dir"' EXIT
+curl -fsSLo "$install_dir/install.sh" \
+  https://github.com/christiandoxa/prodex/releases/latest/download/install.sh
+curl -fsSLo "$install_dir/SHA256SUMS" \
+  https://github.com/christiandoxa/prodex/releases/latest/download/SHA256SUMS
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$install_dir" && grep ' install.sh$' SHA256SUMS | sha256sum -c -)
+else
+  (cd "$install_dir" && grep ' install.sh$' SHA256SUMS | shasum -a 256 -c)
+fi
+sh "$install_dir/install.sh"
 prodex --version
 codex --version
 ```
 
-Windows PowerShell:
+Windows PowerShell (download, verify, then execute):
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
+$installDir = Join-Path ([IO.Path]::GetTempPath()) ("prodex-install-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $installDir | Out-Null
+try {
+  Invoke-WebRequest -Uri https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 -OutFile (Join-Path $installDir "install.ps1")
+  Invoke-WebRequest -Uri https://github.com/christiandoxa/prodex/releases/latest/download/SHA256SUMS -OutFile (Join-Path $installDir "SHA256SUMS")
+  $expected = (Get-Content (Join-Path $installDir "SHA256SUMS") | Where-Object { $_ -match ' \*?install\.ps1$' } | Select-Object -First 1).Split()[0]
+  if (-not $expected -or (Get-FileHash (Join-Path $installDir "install.ps1") -Algorithm SHA256).Hash -ne $expected) { throw "install.ps1 checksum verification failed" }
+  & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $installDir "install.ps1")
+} finally {
+  Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 prodex --version
 codex --version
 ```
