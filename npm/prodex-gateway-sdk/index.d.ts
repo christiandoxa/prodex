@@ -175,6 +175,27 @@ export interface GatewayGuardrails {
   };
 }
 
+export interface GatewayHarnessMode {
+  mode: string;
+  id: string;
+  display_label: string;
+  description: string;
+  selectable: boolean;
+  default_effective_mode: string;
+  supported_canonical_request_routes: string[];
+  request_shaping: boolean;
+  response_shaping: boolean;
+  stream_shaping: boolean;
+}
+
+export interface GatewayProviderEndpointContract {
+  endpoint: string;
+  status: string;
+  streaming: boolean;
+  tested: boolean;
+  unsupported_params: string[];
+}
+
 export interface GatewayProviderContract {
   provider: string;
   client_request_format: string;
@@ -184,13 +205,19 @@ export interface GatewayProviderContract {
   model_list_endpoint: string;
   supports_streaming: boolean;
   supports_model_fallback: boolean;
+  transform_status: string;
   supported_endpoints: string[];
+  endpoint_status: GatewayProviderEndpointContract[];
   model_count: number;
   replay_case_count: number;
 }
 
 export interface GatewayProviders {
   object: string;
+  supported_harness_modes: string[];
+  default_harness_mode: string;
+  resolved_harness_mode: string;
+  harness_modes: GatewayHarnessMode[];
   providers: GatewayProviderContract[];
 }
 

@@ -1,8 +1,8 @@
 use runtime_anthropic_crate::runtime_proxy_anthropic_unversioned_tool_type;
 use runtime_proxy_crate::{
     PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES, RuntimeProxyRequest,
-    is_runtime_anthropic_messages_path, is_runtime_compact_path, is_runtime_responses_path,
-    runtime_proxy_request_header_value, runtime_proxy_request_origin,
+    is_runtime_anthropic_messages_path, is_runtime_chat_completions_path, is_runtime_compact_path,
+    is_runtime_responses_path, runtime_proxy_request_header_value, runtime_proxy_request_origin,
     runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
 };
 use std::collections::BTreeSet;
@@ -100,7 +100,9 @@ fn runtime_capability_client_labels(
         };
     }
 
-    if is_runtime_responses_path(&request.path_and_query)
+    if is_runtime_chat_completions_path(&request.path_and_query) {
+        ("openai_compatible", "chat_completions_client")
+    } else if is_runtime_responses_path(&request.path_and_query)
         || is_runtime_compact_path(&request.path_and_query)
     {
         ("openai_compatible", "responses_client")
@@ -256,6 +258,11 @@ fn runtime_capability_collect_responses_tool(
     let name = tool
         .get("name")
         .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(serde_json::Value::as_str)
+        })
         .unwrap_or_default()
         .to_ascii_lowercase();
     match tool_type.as_str() {
@@ -374,6 +381,8 @@ fn runtime_capability_route_label(request: &RuntimeProxyRequest) -> &'static str
         "compact"
     } else if is_runtime_responses_path(&request.path_and_query) {
         "responses"
+    } else if is_runtime_chat_completions_path(&request.path_and_query) {
+        "chat_completions"
     } else {
         "standard"
     }
@@ -384,6 +393,20 @@ fn runtime_capability_stream_label(
     value: Option<&serde_json::Value>,
     transport: &str,
 ) -> &'static str {
+    if is_runtime_compact_path(&request.path_and_query) {
+        return "unary";
+    }
+    let stream_requested = value
+        .and_then(|value| value.get("stream"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if is_runtime_chat_completions_path(&request.path_and_query) {
+        return if transport == "websocket" || stream_requested {
+            "streaming"
+        } else {
+            "unary"
+        };
+    }
     if is_runtime_responses_path(&request.path_and_query)
         && value
             .and_then(|value| value.get("stream"))
@@ -392,11 +415,8 @@ fn runtime_capability_stream_label(
     {
         return "unary";
     }
-    let anthropic_streaming = is_runtime_anthropic_messages_path(&request.path_and_query)
-        && value
-            .and_then(|value| value.get("stream"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+    let anthropic_streaming =
+        is_runtime_anthropic_messages_path(&request.path_and_query) && stream_requested;
     if transport == "websocket"
         || anthropic_streaming
         || is_runtime_responses_path(&request.path_and_query)
@@ -421,6 +441,7 @@ fn runtime_capability_tool_flags(
     }
     if is_runtime_responses_path(&request.path_and_query)
         || is_runtime_compact_path(&request.path_and_query)
+        || is_runtime_chat_completions_path(&request.path_and_query)
     {
         runtime_capability_collect_tool_surface_from_responses(value, &mut flags);
     }
@@ -514,5 +535,66 @@ mod tests {
 
         assert_eq!(surface.stream, "unary");
         assert_eq!(surface.tool_surface, "shell+web");
+    }
+
+    #[test]
+    fn compact_requests_are_always_unary() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses/compact?reason=remote".to_string(),
+            headers: Vec::new(),
+            body: br#"{"stream":true}"#.to_vec(),
+        };
+
+        for transport in ["http", "websocket"] {
+            let surface =
+                runtime_detect_request_compatibility_surface(&request, "request", transport);
+
+            assert_eq!(surface.route, "compact");
+            assert_eq!(surface.stream, "unary", "transport={transport}");
+        }
+    }
+
+    #[test]
+    fn chat_completions_stream_and_nested_tools_are_detected() {
+        let mut request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/v1/chat/completions".to_string(),
+            headers: Vec::new(),
+            body: br#"{
+                "stream": true,
+                "tools": [
+                    {"type": "function", "function": {"name": "bash"}},
+                    {"type": "function", "function": {"name": "websearch"}}
+                ]
+            }"#
+            .to_vec(),
+        };
+
+        let surface = runtime_detect_request_compatibility_surface(&request, "request", "http");
+
+        assert_eq!(surface.family, "openai_compatible");
+        assert_eq!(surface.client, "chat_completions_client");
+        assert_eq!(surface.route, "chat_completions");
+        assert_eq!(surface.stream, "streaming");
+        assert_eq!(surface.tool_surface, "shell+web");
+
+        request.body = br#"{"stream":false}"#.to_vec();
+        let surface = runtime_detect_request_compatibility_surface(&request, "request", "http");
+        assert_eq!(surface.stream, "unary");
+    }
+
+    #[test]
+    fn responses_without_stream_remains_streaming() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{}"#.to_vec(),
+        };
+
+        let surface = runtime_detect_request_compatibility_surface(&request, "request", "http");
+
+        assert_eq!(surface.stream, "streaming");
     }
 }

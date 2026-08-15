@@ -477,6 +477,7 @@ pub(super) fn gateway_oidc_test_token_with_exp_and_kid(
         "email": email,
         "prodex_role": role,
         "prodex_key_prefixes": prefixes,
+        "scope": "control_plane",
         "exp": exp,
     });
     let mut header = Header::new(Algorithm::RS256);

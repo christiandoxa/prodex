@@ -536,7 +536,22 @@ async function ghApi(endpoint, { method = "GET", fields = {}, retries = 5, dryRu
   }
 }
 
-function parseGitHubRepo(remoteUrl) {
+function redactedRemoteUrl(remoteUrl) {
+  const trimmed = remoteUrl.trim();
+  try {
+    const parsed = new URL(trimmed);
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.href;
+  } catch {
+    return trimmed
+      .replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#\s]*@/iu, (authority) =>
+        authority.slice(0, authority.indexOf("://") + 3))
+      .replace(/^[^/\s:@]+@(?=[^/\s:]+:)/u, "");
+  }
+}
+
+export function parseGitHubRepo(remoteUrl) {
   const trimmed = remoteUrl.trim();
   const sshMatch = trimmed.match(/^git@github\.com:([^/]+\/[^/.]+)(?:\.git)?$/);
   if (sshMatch) {
@@ -546,7 +561,7 @@ function parseGitHubRepo(remoteUrl) {
   if (httpsMatch) {
     return httpsMatch[1];
   }
-  throw new Error(`cannot infer GitHub repo from remote URL: ${trimmed}`);
+  throw new Error(`cannot infer GitHub repo from remote URL: ${redactedRemoteUrl(trimmed)}`);
 }
 
 async function githubRepo(remote) {

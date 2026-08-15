@@ -1327,6 +1327,44 @@ jobs:
           npm run npm:sync-version
           npm run ci:generated-metadata-clean
 
+  npm-package-smoke:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-bin: false
+          save-if: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Build host release binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Smoke staged npm package
+        run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
+
   standalone-installer:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
@@ -1771,6 +1809,7 @@ jobs:
       - kics
       - supply-chain
       - release-sync
+      - npm-package-smoke
       - standalone-installer
       - auto-rotate
       - profile-commands-internal

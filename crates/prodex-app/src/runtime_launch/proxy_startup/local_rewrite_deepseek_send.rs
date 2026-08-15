@@ -93,6 +93,7 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
             api_key_attempt_count,
             binding,
             binding_endpoint,
+            endpoint == ProviderEndpoint::Messages,
         )
     }
 }
@@ -592,11 +593,13 @@ fn send_runtime_deepseek_passthrough_request(
     api_key_attempt_count: usize,
     binding: RuntimeLocalRewriteBindingContext,
     binding_endpoint: String,
+    native_messages: bool,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let upstream_url = runtime_deepseek_upstream_url(
+    let upstream_url = runtime_deepseek_passthrough_upstream_url(
         &shared.upstream_base_url,
         &shared.mount_path,
         &request.path_and_query,
+        native_messages,
     );
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         let response = send_runtime_local_rewrite_prepared_request(
@@ -607,7 +610,7 @@ fn send_runtime_deepseek_passthrough_request(
             body.clone(),
             RuntimeLocalRewritePreparedAuth::DeepSeek {
                 api_key,
-                native_messages: false,
+                native_messages,
             },
         )?;
         let status = response.status().as_u16();
@@ -647,6 +650,19 @@ fn send_runtime_deepseek_passthrough_request(
         ));
     }
     anyhow::bail!("no DeepSeek API key attempts were available")
+}
+
+fn runtime_deepseek_passthrough_upstream_url(
+    base_url: &str,
+    mount_path: &str,
+    path_and_query: &str,
+    native_messages: bool,
+) -> String {
+    if native_messages {
+        runtime_deepseek_anthropic_messages_upstream_url(base_url)
+    } else {
+        runtime_deepseek_upstream_url(base_url, mount_path, path_and_query)
+    }
 }
 
 fn runtime_deepseek_log_auth_rotate(
@@ -778,5 +794,27 @@ mod tests {
             RuntimeDeepSeekWebSearchMode::Auto,
             br#"{}"#
         ));
+    }
+
+    #[test]
+    fn passthrough_url_selects_native_messages_without_changing_chat_completions() {
+        assert_eq!(
+            runtime_deepseek_passthrough_upstream_url(
+                "https://api.deepseek.com/v1",
+                "/v1",
+                "/v1/messages",
+                true,
+            ),
+            "https://api.deepseek.com/anthropic/v1/messages"
+        );
+        assert_eq!(
+            runtime_deepseek_passthrough_upstream_url(
+                "https://api.deepseek.com/v1",
+                "/v1",
+                "/v1/chat/completions",
+                false,
+            ),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
     }
 }

@@ -106,6 +106,9 @@ pub(in super::super) fn runtime_gateway_oidc_admin_auth_from_verified(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Option<RuntimeGatewayAdminAuthentication> {
     let claims = &token.claims;
+    if !runtime_gateway_oidc_scope_claim_contains(claims.get("scope"), "control_plane") {
+        return None;
+    }
     let name = runtime_gateway_oidc_admin_name(claims, config)?;
     let claimed_tenant_id =
         runtime_gateway_oidc_claim_scope_string(claims, &config.tenant_claim).ok()?;

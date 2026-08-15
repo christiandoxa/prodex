@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
+fn gateway_oidc_missing_scope_claim_is_rejected_before_scim_fallback() {
     let root = temp_root("gateway-oidc-scim-fallback");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
@@ -78,7 +78,7 @@ fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
         .expect("SCIM fallback user should be provisioned");
     assert_eq!(provisioned.status().as_u16(), 201);
 
-    let created = client
+    let rejected = client
         .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
@@ -86,10 +86,12 @@ fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
         .bearer_auth(oidc_token)
         .json(&serde_json::json!({"name": "scim-oidc-key"}))
         .send()
-        .expect("OIDC request should use SCIM role and tenant fallback");
-    assert_eq!(created.status().as_u16(), 201);
-    let created: serde_json::Value = created.json().expect("created key should be json");
-    assert_eq!(created["key"]["tenant_id"], tenant_id);
+        .expect("OIDC request without scope should be rejected");
+    assert_eq!(rejected.status().as_u16(), 401);
+    assert_eq!(
+        rejected.json::<serde_json::Value>().unwrap()["error"]["code"],
+        "invalid_admin_token"
+    );
 
     let unknown_role = gateway_oidc_test_token(issuer, audience, email, "owner", &[]);
     let rejected = client

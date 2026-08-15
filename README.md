@@ -140,14 +140,28 @@ Install the latest published release (`0.408.6`):
 
 macOS or Linux:
 
+Download, inspect, verify, then run the installer:
+
 ```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.sh | sh -s -- --release 0.408.6
+release_url=https://github.com/christiandoxa/prodex/releases/download/0.408.6
+curl -fsSLo install.sh "$release_url/install.sh"
+curl -fsSLo SHA256SUMS "$release_url/SHA256SUMS"
+grep ' install.sh$' SHA256SUMS | sha256sum --check --strict
+less install.sh
+sh install.sh --release 0.408.6
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:PRODEX_RELEASE='0.408.6'; irm https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.ps1 | iex
+$releaseUrl = 'https://github.com/christiandoxa/prodex/releases/download/0.408.6'
+Invoke-WebRequest "$releaseUrl/install.ps1" -OutFile .\install.ps1
+Invoke-WebRequest "$releaseUrl/SHA256SUMS" -OutFile .\SHA256SUMS
+$expected = (Select-String -Path .\SHA256SUMS -Pattern 'install\.ps1$').Line.Split()[0]
+$actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash
+if ($actual -ine $expected) { throw 'install.ps1 checksum mismatch' }
+Get-Content .\install.ps1
+.\install.ps1 -Release 0.408.6
 ```
 
 Managed profiles require Windows symbolic-link permission. Enable Developer
@@ -156,21 +170,9 @@ before importing or creating a profile. Prodex checks this before migrating
 profile state and reports an actionable error when permission is unavailable.
 
 <details>
-<summary>Installer verification, alternate source, and legacy migration</summary>
+<summary>Installer verification and legacy migration</summary>
 
-Both installers download the selected binary and verify its `SHA256SUMS` entry. The release workflow malware-scans final assets and verifies installer provenance. If your policy disallows pipe-to-shell, download the `0.408.6` installer, inspect it, then run it locally:
-
-```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.sh -o install.sh
-less install.sh
-sh install.sh --release 0.408.6
-```
-
-```powershell
-irm https://github.com/christiandoxa/prodex/releases/download/0.408.6/install.ps1 -OutFile .\install.ps1
-Get-Content .\install.ps1
-.\install.ps1 -Release 0.408.6
-```
+The commands above verify each installer against the release `SHA256SUMS` file before execution. Both installers then download the selected binary and verify its own `SHA256SUMS` entry. The release workflow malware-scans final assets and verifies installer provenance.
 
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available. Existing npm or Cargo installations can run `prodex update` once to migrate.
 

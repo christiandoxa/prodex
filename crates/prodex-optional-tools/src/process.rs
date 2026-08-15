@@ -22,23 +22,6 @@ pub(crate) fn probe_command(
     args: &[impl AsRef<OsStr>],
     timeout: Duration,
 ) -> Result<ProbeOutput> {
-    probe_command_inner(program, args, timeout, false)
-}
-
-pub(crate) fn probe_command_without_secrets(
-    program: &Path,
-    args: &[impl AsRef<OsStr>],
-    timeout: Duration,
-) -> Result<ProbeOutput> {
-    probe_command_inner(program, args, timeout, true)
-}
-
-fn probe_command_inner(
-    program: &Path,
-    args: &[impl AsRef<OsStr>],
-    timeout: Duration,
-    sanitize_environment: bool,
-) -> Result<ProbeOutput> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -50,27 +33,26 @@ fn probe_command_inner(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    if sanitize_environment {
-        command.env_clear();
-        for key in [
-            "PATH",
-            "HOME",
-            "TMPDIR",
-            "TMP",
-            "TEMP",
-            "XDG_CACHE_HOME",
-            "NPM_CONFIG_CACHE",
-            "npm_config_cache",
-        ] {
-            if let Some(value) = env::var_os(key) {
-                command.env(key, value);
-            }
+    command.env_clear();
+    for key in [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "XDG_CACHE_HOME",
+        "NPM_CONFIG_CACHE",
+        "npm_config_cache",
+        "CBM_CACHE_DIR",
+    ] {
+        if let Some(value) = env::var_os(key) {
+            command.env(key, value);
         }
-        command.env(
-            "npm_config_userconfig",
-            if cfg!(windows) { "NUL" } else { "/dev/null" },
-        );
     }
+    command.env(
+        "npm_config_userconfig",
+        if cfg!(windows) { "NUL" } else { "/dev/null" },
+    );
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to execute {}", program.display()))?;
@@ -196,22 +178,27 @@ mod tests {
     static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct EnvGuard {
-        key: &'static str,
-        previous: Option<OsString>,
+        previous: Vec<(&'static str, Option<OsString>)>,
         _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
+        fn set_many(values: &[(&'static str, &str)]) -> Self {
             let lock = TEST_ENV_LOCK
                 .get_or_init(|| Mutex::new(()))
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let previous = env::var_os(key);
+            let previous = values
+                .iter()
+                .map(|(key, _)| (*key, env::var_os(key)))
+                .collect();
             // SAFETY: the shared test lock serializes this mutation and its restoration.
-            unsafe { env::set_var(key, value) };
+            unsafe {
+                for (key, value) in values {
+                    env::set_var(key, value);
+                }
+            }
             Self {
-                key,
                 previous,
                 _lock: lock,
             }
@@ -222,9 +209,11 @@ mod tests {
         fn drop(&mut self) {
             // SAFETY: the shared test lock is held for the complete guard lifetime.
             unsafe {
-                match self.previous.as_ref() {
-                    Some(value) => env::set_var(self.key, value),
-                    None => env::remove_var(self.key),
+                for (key, previous) in &self.previous {
+                    match previous {
+                        Some(value) => env::set_var(key, value),
+                        None => env::remove_var(key),
+                    }
                 }
             }
         }
@@ -275,15 +264,29 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn sanitized_probe_does_not_inherit_untrusted_environment() {
+    fn probe_filters_environment_to_discovery_and_cache_contract() {
         const SECRET: &str = "PRODEX_PROBE_TEST_SECRET";
-        let _env_guard = EnvGuard::set(SECRET, "sentinel");
-        let output = probe_command_without_secrets(
+        let _env_guard = EnvGuard::set_many(&[
+            (SECRET, "secret-marker"),
+            ("XDG_CACHE_HOME", "xdg-cache-marker"),
+            ("NPM_CONFIG_CACHE", "npm-cache-marker"),
+            ("npm_config_cache", "npm-cache-lower-marker"),
+            ("CBM_CACHE_DIR", "cbm-cache-marker"),
+            ("NPM_CONFIG_USERCONFIG", "userconfig-secret-marker"),
+        ]);
+        let output = probe_command(
             Path::new("/bin/sh"),
-            &["-c", "printf '%s' \"${PRODEX_PROBE_TEST_SECRET:-}\""],
+            &[
+                "-c",
+                "printf '%s\\n' \"${PRODEX_PROBE_TEST_SECRET:-}\" \"${XDG_CACHE_HOME:-}\" \"${NPM_CONFIG_CACHE:-}\" \"${npm_config_cache:-}\" \"${CBM_CACHE_DIR:-}\" \"${npm_config_userconfig:-}\"",
+            ],
             Duration::from_secs(2),
-        );
+        )
+        .unwrap();
 
-        assert!(output.unwrap().stdout.is_empty());
+        assert_eq!(
+            output.stdout,
+            b"\nxdg-cache-marker\nnpm-cache-marker\nnpm-cache-lower-marker\ncbm-cache-marker\n/dev/null\n"
+        );
     }
 }

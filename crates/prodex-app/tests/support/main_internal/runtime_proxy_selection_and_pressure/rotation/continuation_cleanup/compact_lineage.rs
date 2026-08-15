@@ -521,3 +521,77 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
         "compact lineage release should be logged after successor turn_state is established: {log}"
     );
 }
+
+#[test]
+fn compact_session_lineage_is_released_when_responses_rotate_profiles() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_cold_start_probe_selection(
+        &temp_dir,
+        "https://chatgpt.com/backend-api".to_string(),
+    );
+
+    let session_id = "sess-cross-route";
+    let compact_session_key = runtime_compact_session_lineage_key(session_id);
+    remember_runtime_session_id(
+        &shared,
+        "main",
+        Some(session_id),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("compact session should be remembered by the initial response route");
+    remember_runtime_compact_lineage(
+        &shared,
+        "main",
+        Some(session_id),
+        None,
+        RuntimeRouteKind::Compact,
+    )
+    .expect("compact lineage should be remembered");
+    wait_for_runtime_background_queues_idle();
+
+    assert_eq!(
+        runtime_compact_route_followup_bound_profile(&shared, None, Some(session_id))
+            .expect("initial compact lookup should succeed"),
+        Some(("main".to_string(), "session_id"))
+    );
+
+    assert!(
+        release_runtime_rotated_session_affinity(
+            &shared,
+            Some("main"),
+            Some("second"),
+            Some(session_id),
+        )
+        .expect("responses rotation should release the previous profile")
+    );
+    remember_runtime_session_id(
+        &shared,
+        "second",
+        Some(session_id),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("successor response route should remember the new profile");
+    wait_for_runtime_background_queues_idle();
+
+    {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        assert!(
+            !runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key)
+        );
+        assert_eq!(
+            runtime
+                .continuation_statuses
+                .session_id
+                .get(&compact_session_key)
+                .map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Dead)
+        );
+    }
+    assert_eq!(
+        runtime_compact_route_followup_bound_profile(&shared, None, Some(session_id))
+            .expect("successor compact lookup should succeed"),
+        Some(("second".to_string(), "session_id"))
+    );
+}

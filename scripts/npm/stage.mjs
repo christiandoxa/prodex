@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   copyRepoFile,
   ensureDir,
@@ -92,6 +93,32 @@ async function stageGatewaySdkPackage(version, outputDir) {
   return packageDir;
 }
 
+export async function stagePackages({ inputDir, outputDir, platformSpecs = platformPackages }) {
+  const version = await readCargoVersion();
+  await ensureDir(path.join(outputDir, "packages"));
+
+  const stagedPackages = [];
+  for (const spec of platformSpecs) {
+    stagedPackages.push(await stagePlatformPackage(version, inputDir, outputDir, spec));
+  }
+  stagedPackages.push(await stageMainPackage(version, outputDir));
+  stagedPackages.push(await stageGatewaySdkPackage(version, outputDir));
+
+  await fs.writeFile(
+    path.join(outputDir, "packages.json"),
+    `${JSON.stringify(
+      {
+        version,
+        packages: stagedPackages.map((dir) => path.basename(dir)),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  return { version, packageDirs: stagedPackages };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -105,31 +132,16 @@ async function main() {
     return;
   }
 
-  const version = await readCargoVersion();
-  await ensureDir(path.join(args.outputDir, "packages"));
-
-  const stagedPackages = [];
-  for (const spec of platformPackages) {
-    stagedPackages.push(await stagePlatformPackage(version, args.inputDir, args.outputDir, spec));
-  }
-  stagedPackages.push(await stageMainPackage(version, args.outputDir));
-  stagedPackages.push(await stageGatewaySdkPackage(version, args.outputDir));
-
-  await fs.writeFile(
-    path.join(args.outputDir, "packages.json"),
-    `${JSON.stringify(
-      {
-        version,
-        packages: stagedPackages.map((dir) => path.basename(dir)),
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  const { packageDirs } = await stagePackages({
+    inputDir: args.inputDir,
+    outputDir: args.outputDir,
+  });
 
   process.stdout.write(
-    `staged ${stagedPackages.length} package(s) at ${shellQuote(path.join(args.outputDir, "packages"))}\n`,
+    `staged ${packageDirs.length} package(s) at ${shellQuote(path.join(args.outputDir, "packages"))}\n`,
   );
 }
 
-await main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

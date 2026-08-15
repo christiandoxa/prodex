@@ -12,6 +12,8 @@ use super::super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_r
 mod operational_probe;
 #[path = "local_rewrite_pipeline_dispatch/provider_precommit.rs"]
 mod provider_precommit;
+#[path = "local_rewrite_pipeline_dispatch/quota.rs"]
+pub(super) mod quota;
 use super::{
     RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE, RuntimeLocalRewriteDispatchReadyRequest,
     RuntimeLocalRewritePipelineResult, RuntimeLocalRewriteProviderOptions,
@@ -41,9 +43,7 @@ use provider_precommit::{
     runtime_local_rewrite_provider_fallback_class, runtime_local_rewrite_record_provider_health,
     runtime_local_rewrite_record_provider_metric,
 };
-use std::sync::atomic::Ordering;
-use std::time::Instant;
-
+use std::{sync::atomic::Ordering, time::Instant};
 pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
     request: RuntimeLocalRewriteDispatchReadyRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,

@@ -49,9 +49,15 @@ struct AnthropicDispatchPlan {
     route: AnthropicDispatchRoute,
 }
 
+struct AnthropicPassthroughPlan {
+    upstream_url: String,
+    body: Vec<u8>,
+    native_messages: bool,
+}
+
 enum AnthropicDispatchRoute {
     Responses(AnthropicResponsesPlan),
-    Passthrough { upstream_url: String, body: Vec<u8> },
+    Passthrough(AnthropicPassthroughPlan),
 }
 
 struct AnthropicResponsesPlan {
@@ -167,15 +173,9 @@ pub(super) fn send_runtime_anthropic_upstream_request(
             &binding,
             responses,
         ),
-        AnthropicDispatchRoute::Passthrough { upstream_url, body } => send_passthrough_attempts(
-            request_id,
-            request,
-            shared,
-            auth_attempts,
-            &binding,
-            upstream_url,
-            body,
-        ),
+        AnthropicDispatchRoute::Passthrough(plan) => {
+            send_passthrough_attempts(request_id, request, shared, auth_attempts, &binding, plan)
+        }
     }
 }
 
@@ -226,14 +226,15 @@ impl AnthropicDispatchPlan {
                 ),
             })
         } else {
-            AnthropicDispatchRoute::Passthrough {
+            AnthropicDispatchRoute::Passthrough(AnthropicPassthroughPlan {
                 upstream_url: runtime_local_rewrite_upstream_url(
                     &shared.upstream_base_url,
                     &shared.mount_path,
                     &request.path_and_query,
                 ),
                 body,
-            }
+                native_messages: endpoint == ProviderEndpoint::Messages,
+            })
         };
         Ok(Self {
             auth_attempts,
@@ -603,9 +604,13 @@ fn send_passthrough_attempts(
     shared: &RuntimeLocalRewriteProxyShared,
     auth_attempts: Vec<RuntimeLocalRewriteSelectedAnthropicAuth>,
     binding: &RuntimeLocalRewriteBindingContext,
-    upstream_url: String,
-    body: Vec<u8>,
+    plan: AnthropicPassthroughPlan,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let AnthropicPassthroughPlan {
+        upstream_url,
+        body,
+        native_messages,
+    } = plan;
     let auth_count = auth_attempts.len();
     for (auth_index, selected_auth) in auth_attempts.iter().enumerate() {
         let response = send_runtime_local_rewrite_prepared_request(
@@ -616,7 +621,7 @@ fn send_passthrough_attempts(
             body.clone(),
             RuntimeLocalRewritePreparedAuth::Anthropic {
                 auth: &selected_auth.auth,
-                native_messages: false,
+                native_messages,
             },
         )?;
         let status = response.status().as_u16();

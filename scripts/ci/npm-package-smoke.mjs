@@ -1,18 +1,18 @@
 #!/usr/bin/env node
+import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { stagePackages } from "../npm/stage.mjs";
 import {
-  copyRepoFile,
   ensureDir,
-  mainPackageManifest,
+  gatewaySdkPackageName,
+  mainPackageName,
   packageSlug,
   platformPackages,
-  platformPackageManifest,
-  readCargoVersion,
   repoRoot,
-  writeJsonFile,
 } from "../npm/common.mjs";
 
 async function resolveDefaultBinaryDir(spec) {
@@ -53,33 +53,29 @@ function packageInstallDir(root, packageName) {
   return path.join(root, "node_modules", ...packageName.split("/"));
 }
 
-async function stageMainPackage(version, smokeRoot) {
-  const packageDir = packageInstallDir(smokeRoot, "@christiandoxa/prodex");
-  await ensureDir(path.join(packageDir, "lib"));
-  await copyRepoFile("README.md", path.join(packageDir, "README.md"));
-  await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
-  await copyRepoFile("npm/prodex/prodex", path.join(packageDir, "prodex"));
-  await copyRepoFile("npm/prodex/lib/codex-shim.cjs", path.join(packageDir, "lib", "codex-shim.cjs"));
-  await fs.chmod(path.join(packageDir, "prodex"), 0o755);
-  await fs.chmod(path.join(packageDir, "lib", "codex-shim.cjs"), 0o755);
-  await writeJsonFile(path.join(packageDir, "package.json"), mainPackageManifest(version));
-  return packageDir;
+async function copyStagedPackage(installRoot, packageDir) {
+  const manifest = JSON.parse(await fs.readFile(path.join(packageDir, "package.json"), "utf8"));
+  const installDir = packageInstallDir(installRoot, manifest.name);
+  await ensureDir(path.dirname(installDir));
+  await fs.cp(packageDir, installDir, { recursive: true });
+  return { dir: installDir, manifest };
 }
 
-async function stagePlatformPackage(version, smokeRoot, spec, binaryDir) {
-  const packageDir = packageInstallDir(smokeRoot, spec.packageName);
-  const nativeBinary = path.join(binaryDir, spec.binaryFileName);
-  const exists = await fs.access(nativeBinary).then(() => true).catch(() => false);
-  if (!exists) {
-    throw new Error(`missing native binary for smoke test: ${nativeBinary}`);
+function runPublishDryRun(stagingDir) {
+  const result = spawnSync(
+    process.execPath,
+    [path.join(repoRoot, "scripts/npm/publish.mjs"), "--root", stagingDir, "--dry-run"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  if (result.error) {
+    throw result.error;
   }
-
-  await ensureDir(path.join(packageDir, "vendor"));
-  await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
-  await fs.copyFile(nativeBinary, path.join(packageDir, "vendor", spec.binaryFileName));
-  await fs.chmod(path.join(packageDir, "vendor", spec.binaryFileName), 0o755);
-  await writeJsonFile(path.join(packageDir, "package.json"), platformPackageManifest(spec, version));
-  return packageDir;
+  if (result.status !== 0) {
+    process.stderr.write(result.stdout ?? "");
+    process.stderr.write(result.stderr ?? "");
+    throw new Error(`npm publish dry-run failed with exit code ${result.status}`);
+  }
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
 async function main() {
@@ -89,14 +85,13 @@ async function main() {
       [
         "Usage: node scripts/ci/npm-package-smoke.mjs [--binary-dir <target-dir>]",
         "",
-        "Stages a local npm package tree and runs prodex --version against it.",
+        "Stages the host npm packages, runs the repository publish dry-run, and runs prodex --version.",
         "Defaults to target/release and falls back to target/debug when no --binary-dir is provided.",
       ].join("\n") + "\n",
     );
     return;
   }
 
-  const version = await readCargoVersion();
   const spec = platformPackages.find((entry) => entry.os === process.platform && entry.cpu === process.arch);
   if (!spec) {
     throw new Error(`unsupported runner platform for npm smoke: ${process.platform} ${process.arch}`);
@@ -104,8 +99,44 @@ async function main() {
   args.binaryDir ??= await resolveDefaultBinaryDir(spec);
 
   const smokeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-npm-smoke-"));
-  const mainPackageDir = await stageMainPackage(version, smokeRoot);
-  await stagePlatformPackage(version, smokeRoot, spec, args.binaryDir);
+  const artifactDir = path.join(smokeRoot, "artifacts");
+  const stagingDir = path.join(smokeRoot, "staging");
+  const nativeBinary = path.join(args.binaryDir, spec.binaryFileName);
+  const binaryExists = await fs.access(nativeBinary).then(() => true).catch(() => false);
+  if (!binaryExists) {
+    throw new Error(`missing native binary for smoke test: ${nativeBinary}`);
+  }
+  await ensureDir(path.join(artifactDir, spec.target));
+  await fs.copyFile(nativeBinary, path.join(artifactDir, spec.target, spec.binaryFileName));
+
+  const { version, packageDirs } = await stagePackages({
+    inputDir: artifactDir,
+    outputDir: stagingDir,
+    platformSpecs: [spec],
+  });
+  const packagesManifest = JSON.parse(
+    await fs.readFile(path.join(stagingDir, "packages.json"), "utf8"),
+  );
+  assert.deepEqual(packagesManifest.packages, [
+    packageSlug(spec.packageName),
+    packageSlug(mainPackageName),
+    packageSlug(gatewaySdkPackageName),
+  ]);
+  const publishOutput = runPublishDryRun(stagingDir);
+  for (const packageName of [spec.packageName, mainPackageName, gatewaySdkPackageName]) {
+    assert.ok(publishOutput.includes(packageName), `publish dry-run omitted ${packageName}`);
+  }
+
+  const installRoot = path.join(smokeRoot, "install");
+  const installedPackages = await Promise.all(
+    packageDirs.map((packageDir) => copyStagedPackage(installRoot, packageDir)),
+  );
+  for (const { manifest } of installedPackages) {
+    assert.notEqual(manifest.private, true, `${manifest.name} must be publishable when staged`);
+  }
+
+  const mainPackageDir = installedPackages.find(({ manifest }) => manifest.name === mainPackageName).dir;
+  const sdkPackageDir = installedPackages.find(({ manifest }) => manifest.name === gatewaySdkPackageName).dir;
 
   const launcherPath = path.join(mainPackageDir, "prodex");
   const result = spawnSync(process.execPath, [launcherPath, "--version"], {
@@ -127,7 +158,21 @@ async function main() {
     throw new Error(`prodex --version did not report ${version}`);
   }
 
-  process.stdout.write(`npm smoke passed for ${packageSlug(spec.packageName)} at ${smokeRoot}\n`);
+  const { ProdexGatewayClient } = await import(
+    pathToFileURL(path.join(sdkPackageDir, "index.mjs")).href,
+  );
+  const sdkClient = new ProdexGatewayClient({
+    fetch: async () =>
+      new Response(JSON.stringify({ object: "gateway.providers", providers: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+  const providers = await sdkClient.providers();
+  assert.equal(providers.object, "gateway.providers");
+
+  process.stdout.write(
+    `npm smoke passed for ${packageSlug(spec.packageName)}, ${packageSlug(gatewaySdkPackageName)}@${version} at ${smokeRoot}\n`,
+  );
 }
 
 await main();

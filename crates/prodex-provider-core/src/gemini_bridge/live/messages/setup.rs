@@ -1,5 +1,7 @@
 //! Gemini Live setup message builders.
 
+use crate::gemini_provider_core_sanitize_function_schema;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeminiProviderCoreLiveSessionUpdate {
     pub setup: serde_json::Value,
@@ -13,12 +15,13 @@ pub fn gemini_provider_core_live_function_declaration(
         return None;
     }
     let name = tool.get("name").and_then(serde_json::Value::as_str)?;
+    let parameters = tool
+        .get("parameters")
+        .map(gemini_provider_core_sanitize_function_schema)
+        .unwrap_or_else(|| serde_json::json!({"type": "object"}));
     let mut declaration = serde_json::json!({
         "name": name,
-        "parameters": tool
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({"type": "object"})),
+        "parameters": parameters,
     });
     if let Some(description) = tool.get("description").filter(|value| !value.is_null()) {
         declaration["description"] = description.clone();
@@ -436,5 +439,40 @@ fn live_audio_format_name(
         super::super::audio::GeminiProviderCoreLiveAudioFormat::Pcm16 => "pcm16",
         super::super::audio::GeminiProviderCoreLiveAudioFormat::G711Ulaw => "g711_ulaw",
         super::super::audio::GeminiProviderCoreLiveAudioFormat::G711Alaw => "g711_alaw",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gemini_provider_core_live_function_declaration;
+
+    #[test]
+    fn live_function_declaration_sanitizes_unsupported_schema_keywords() {
+        let declaration = gemini_provider_core_live_function_declaration(&serde_json::json!({
+            "type": "function",
+            "name": "lookup",
+            "parameters": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "strict": true,
+                "additionalProperties": false,
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "strict": true,
+                        "additionalProperties": false
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            declaration["parameters"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"id": {"type": "string"}}
+            })
+        );
     }
 }

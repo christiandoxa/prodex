@@ -81,8 +81,8 @@ use governance_decision::runtime_gateway_governance_decision;
 const MAX_RUNTIME_GATEWAY_REQUESTED_TOOLS: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RuntimeGatewayTenantResource {
-    tenant_id: TenantId,
+pub(super) struct RuntimeGatewayTenantResource {
+    pub(super) tenant_id: TenantId,
 }
 
 pub(super) fn runtime_gateway_provider_capability_is_executable(
@@ -1116,7 +1116,7 @@ fn runtime_gateway_provider_stream_mode(captured: &RuntimeProxyRequest) -> Provi
     }
 }
 
-fn runtime_gateway_application_trace_context(
+pub(super) fn runtime_gateway_application_trace_context(
     request_id: RequestId,
 ) -> Result<TraceContext, TraceContextError> {
     let trace_id = request_id.as_uuid().simple().to_string();

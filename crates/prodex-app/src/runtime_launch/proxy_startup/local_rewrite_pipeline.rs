@@ -253,6 +253,7 @@ fn try_run_runtime_local_rewrite_pipeline(
     let authenticated = runtime_local_rewrite_authenticate(canonical, shared)?;
     let admitted = runtime_local_rewrite_bounded_admission(authenticated, shared)?;
     let captured = runtime_local_rewrite_capture_body(admitted, shared)?;
+    let captured = dispatch::quota::runtime_local_rewrite_dispatch_quota(captured, shared)?;
     let prepared = runtime_local_rewrite_prepare_constraints(captured, shared)?;
     let prepared = runtime_local_rewrite_dispatch_control_plane(prepared, shared)?;
     let governed = runtime_local_rewrite_enforce_guardrails(prepared, shared)?;
@@ -549,9 +550,15 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
         .runtime_config
         .governance
         .anonymous_data_plane;
-    runtime_gateway_application_data_plane_authorization(&state.context, credential)
-        .map(Some)
-        .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))
+    let authorized =
+        runtime_gateway_application_data_plane_authorization(&state.context, credential)
+            .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))?;
+    if state.context.route() == prodex_gateway_http::GatewayHttpRouteKind::DataPlaneQuota
+        && authorized.tenant_context().is_none()
+    {
+        return Err(runtime_local_rewrite_data_auth_rejection(state, shared));
+    }
+    Ok(Some(authorized))
 }
 
 fn runtime_local_rewrite_verified_virtual_key(

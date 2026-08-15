@@ -401,8 +401,11 @@ fn runtime_local_rewrite_apply_deepseek_auth(
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
     }
     upstream_request = match (api_key, native_messages) {
-        (Some(api_key), true) => upstream_request.header("x-api-key", api_key),
-        (Some(api_key), false) => upstream_request.bearer_auth(api_key),
+        (Some(api_key), native_messages) => runtime_local_rewrite_apply_direct_api_key_auth(
+            upstream_request,
+            api_key,
+            native_messages,
+        ),
         (None, true) => {
             runtime_local_rewrite_apply_projected_header(shared, upstream_request, "x-api-key")?
         }
@@ -468,16 +471,27 @@ fn runtime_local_rewrite_apply_direct_anthropic_auth(
     native_messages: bool,
 ) -> Option<reqwest::RequestBuilder> {
     match auth {
-        RuntimeAnthropicAuth::ApiKey { api_key } if native_messages => {
-            Some(request.header("x-api-key", api_key))
-        }
-        RuntimeAnthropicAuth::ApiKey { api_key } => Some(request.bearer_auth(api_key)),
+        RuntimeAnthropicAuth::ApiKey { api_key } => Some(
+            runtime_local_rewrite_apply_direct_api_key_auth(request, api_key, native_messages),
+        ),
         RuntimeAnthropicAuth::OAuth { access_token } => Some(
             request
                 .bearer_auth(access_token)
                 .header("anthropic-beta", "oauth-2025-04-20"),
         ),
         RuntimeAnthropicAuth::Projected => None,
+    }
+}
+
+fn runtime_local_rewrite_apply_direct_api_key_auth(
+    request: reqwest::RequestBuilder,
+    api_key: &str,
+    native_messages: bool,
+) -> reqwest::RequestBuilder {
+    if native_messages {
+        request.header("x-api-key", api_key)
+    } else {
+        request.bearer_auth(api_key)
     }
 }
 

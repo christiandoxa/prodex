@@ -265,22 +265,38 @@ pub(super) fn release_runtime_affinity_bindings(
     // Dropping previous_response or turn_state affinity should not also erase an existing
     // session lineage. Fresh fallback may still need that session owner to preserve compact
     // context or to reapply soft session affinity on the next selection pass.
-    if release_session_affinity
-        && let Some(session_id) = session_id
-        && runtime
+    if release_session_affinity && let Some(session_id) = session_id {
+        if runtime
             .session_id_bindings
             .get(session_id)
             .is_some_and(|binding| binding.profile_name == profile_name)
-    {
-        runtime.session_id_bindings.remove(session_id);
-        runtime.state.session_profile_bindings.remove(session_id);
-        let _ = runtime_mark_continuation_status_dead(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::SessionId,
-            session_id,
-            now,
-        );
-        changed = true;
+        {
+            runtime.session_id_bindings.remove(session_id);
+            runtime.state.session_profile_bindings.remove(session_id);
+            let _ = runtime_mark_continuation_status_dead(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::SessionId,
+                session_id,
+                now,
+            );
+            changed = true;
+        }
+        let compact_key = runtime_compact_session_lineage_key(session_id);
+        if runtime
+            .session_id_bindings
+            .get(&compact_key)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+        {
+            runtime.session_id_bindings.remove(&compact_key);
+            runtime.state.session_profile_bindings.remove(&compact_key);
+            let _ = runtime_mark_continuation_status_dead(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::SessionId,
+                &compact_key,
+                now,
+            );
+            changed = true;
+        }
     }
 
     changed
