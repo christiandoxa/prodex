@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.8 - 2026-08-16
+
+### Runtime
+
+- Fix audited runtime, storage, release docs, and CI (`847efd6`)
+
 ## 0.408.7 - 2026-08-16
 
 ### CLI
