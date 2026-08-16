@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn gateway_observability_config_rejects_relative_jsonl_parent_traversal() {
+    let root = temp_dir("gateway-observability-jsonl-path-parent");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.jsonl_path = Some("../gateway.jsonl".to_string());
+
+    let err = gateway_observability_config(&paths, &policy).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("relative paths cannot contain '..'")
+    );
+}
+
+#[test]
+fn gateway_observability_config_preserves_absolute_jsonl_deployment_path() {
+    let root = temp_dir("gateway-observability-jsonl-path-absolute");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let absolute = std::env::temp_dir().join(format!(
+        "prodex-gateway-deployment-{}.jsonl",
+        prodex_domain::RequestId::new()
+    ));
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.jsonl_path = Some(absolute.to_string_lossy().into_owned());
+
+    let config = gateway_observability_config(&paths, &policy).unwrap();
+
+    assert_eq!(config.jsonl_path.as_deref(), Some(absolute.as_path()));
+}
+
+#[test]
 fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
     let report = RunProfileProbeReport {
         name: "main".to_string(),

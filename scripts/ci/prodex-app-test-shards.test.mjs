@@ -45,6 +45,22 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(windowsMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include[0].suite, "workspace");
+  for (const [name, matrix] of [
+    ["app", appMatrix],
+    ["CI", ciMatrix],
+    ["full", fullMatrix],
+    ["Windows", windowsMatrix],
+  ]) {
+    for (const entry of matrix.include) {
+      const hasFilters = entry.filters.trim() !== "";
+      const hasSkipFilters = entry.skip_filters.trim() !== "";
+      assert.equal(
+        hasFilters || hasSkipFilters || entry.suite === "workspace",
+        true,
+        `${name} matrix has an empty shard: ${entry.suite}`,
+      );
+    }
+  }
   const ciFilters = ciMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
   assert.deepEqual(
     new Set(ciFilters),

@@ -266,7 +266,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 )]),
                 usage_snapshots: BTreeMap::new(),
                 backoffs: RuntimeProfileBackoffs {
-            updated_at: BTreeMap::new(),
+                    updated_at: BTreeMap::new(),
                     retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
                     transport_backoff_until: BTreeMap::new(),
                     route_circuit_open_until: BTreeMap::new(),
@@ -312,7 +312,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 )]),
                 usage_snapshots: BTreeMap::new(),
                 backoffs: RuntimeProfileBackoffs {
-            updated_at: BTreeMap::new(),
+                    updated_at: BTreeMap::new(),
                     retry_backoff_until: BTreeMap::new(),
                     transport_backoff_until: BTreeMap::from([(
                         runtime_profile_transport_backoff_key(
@@ -482,7 +482,7 @@ fn runtime_state_selected_snapshot_preserves_unselected_sections() {
     save_runtime_usage_snapshots_for_profiles(&paths, &initial_usage, &profiles)
         .expect("initial usage snapshots should save");
     let initial_backoffs = RuntimeProfileBackoffs {
-            updated_at: BTreeMap::new(),
+        updated_at: BTreeMap::new(),
         retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
         transport_backoff_until: BTreeMap::new(),
         route_circuit_open_until: BTreeMap::new(),

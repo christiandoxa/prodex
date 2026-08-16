@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "b3cb2871bc03d29d7f09d14edbb6863a11021281133b6e345ebbc1cedf944a4b";
+        "ee9932a0fd46d6017ebe6055d1cf2570295b9f99645b76b481e2430e41c5527e";
     const DOCUMENT_DIGEST: &str =
-        "5f2f50deecc025eb4e5b4bc43fa179b251810f603218291231c73a3f47239427";
+        "d8b5923cd0dc19ecb11c93a3254387ca8de5a6a0ae552f3136c199f448ff7b1d";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())

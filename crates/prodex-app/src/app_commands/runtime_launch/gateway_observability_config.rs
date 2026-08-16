@@ -2,7 +2,7 @@ use super::gateway_secret_config::GatewaySecretResolver;
 use super::gateway_siem_export::RuntimeSiemWorkerConfig;
 use super::*;
 use prodex_domain::SecretPurpose;
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 #[cfg(test)]
 pub(crate) fn gateway_observability_config(
@@ -82,6 +82,13 @@ fn gateway_observability_jsonl_path(
                 bail!("gateway.observability.jsonl_path cannot be empty");
             }
             let path = PathBuf::from(value);
+            if !path.is_absolute()
+                && path
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir))
+            {
+                bail!("gateway.observability.jsonl_path relative paths cannot contain '..'");
+            }
             Ok(if path.is_absolute() {
                 path
             } else {

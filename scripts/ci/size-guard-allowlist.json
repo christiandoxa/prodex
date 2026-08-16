@@ -146,7 +146,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1677,
+    "maxLines": 1669,
     "reason": "PostgreSQL storage characterization includes current/future schema rejection, concurrent reservation proof, audit reason compatibility, and actual usage above reservation."
   },
   {
@@ -166,7 +166,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1594,
+    "maxLines": 1548,
     "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh, bounded authentication-assurance configuration, and repeatable live PostgreSQL SCIM compatibility fixtures; the remaining legacy matrix stays capped."
   },
   {
@@ -181,7 +181,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
-    "maxLines": 943,
+    "maxLines": 876,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {
@@ -231,12 +231,12 @@
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",
-    "maxLines": 960,
+    "maxLines": 927,
     "reason": "PostgreSQL runtime pool, TLS, accounting reservation, idempotency, recovery, and retry orchestration remain capped until accounting execution moves behind its focused repository module."
   },
   {
     "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
-    "maxLines": 1127,
+    "maxLines": 1100,
     "reason": "The ordered PostgreSQL migration catalog keeps immutable revision metadata, audit reason compatibility, and fail-closed future-version checks beside schema planning."
   },
   {
@@ -251,7 +251,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
-    "maxLines": 1123,
+    "maxLines": 1104,
     "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
   },
   {

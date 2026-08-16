@@ -312,6 +312,18 @@ pub const LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION: SqliteMigration = SqliteMig
 ALTER TABLE prodex_reservations
     ADD COLUMN storage_scope TEXT NOT NULL DEFAULT 'tenant-default';
 
+CREATE TEMP TRIGGER prodex_reservation_storage_scope_backfill_guard
+BEFORE UPDATE OF storage_scope ON prodex_reservations
+WHEN (
+    SELECT COUNT(*)
+    FROM prodex_budget_counters counter
+    WHERE counter.tenant_id = NEW.tenant_id
+      AND counter.virtual_key_id IS NEW.virtual_key_id
+) > 1
+BEGIN
+    SELECT RAISE(ABORT, 'cannot infer storage_scope: multiple budget counters match a reservation');
+END;
+
 UPDATE prodex_reservations
 SET storage_scope = COALESCE(
     (
@@ -319,14 +331,14 @@ SET storage_scope = COALESCE(
         FROM prodex_budget_counters counter
         WHERE counter.tenant_id = prodex_reservations.tenant_id
           AND counter.virtual_key_id IS prodex_reservations.virtual_key_id
-        ORDER BY counter.updated_at_unix_ms DESC, counter.storage_scope
-        LIMIT 1
     ),
     CASE
         WHEN virtual_key_id IS NULL THEN 'tenant-default'
         ELSE 'virtual_key:' || virtual_key_id
     END
-);
+    );
+
+DROP TRIGGER prodex_reservation_storage_scope_backfill_guard;
 
 CREATE INDEX IF NOT EXISTS prodex_reservations_expired_active_idx
     ON prodex_reservations (expires_at_unix_ms, tenant_id)

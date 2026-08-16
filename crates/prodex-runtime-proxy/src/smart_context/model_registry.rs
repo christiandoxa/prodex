@@ -27,10 +27,10 @@ fn smart_context_registered_model_context_window_tokens(model: &str) -> Option<u
         "gpt-5.3-codex" | "gpt-5.4" | "gpt-5.5" => Some(1_000_000),
         "gpt-5.1-codex" => Some(200_000),
         "claude-sonnet-4-6" => Some(1_000_000),
-        "deepseek-v4-pro" => Some(1_048_576),
+        "deepseek-v4-pro" => Some(128_000),
         _ if model.starts_with("claude-") => Some(200_000),
         _ if model.starts_with("gemini-") => Some(1_048_576),
-        _ if model.starts_with("deepseek-") => Some(1_048_576),
+        _ if model.starts_with("deepseek-") => Some(128_000),
         _ => None,
     }
 }

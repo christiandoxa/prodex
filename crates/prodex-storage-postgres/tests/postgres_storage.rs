@@ -1628,25 +1628,17 @@ fn expired_reservation_recovery_plan_uses_tenant_context_dml_and_idempotent_rele
             .sql
             .contains("expires_at_unix_ms <= $4")
     );
+    let recovery_sql = RECOVER_EXPIRED_RESERVATION_STATEMENT.sql;
     assert!(
-        RECOVER_EXPIRED_RESERVATION_STATEMENT
-            .sql
-            .contains("reserved_tokens = reserved_tokens -")
+        recovery_sql
+            .contains("reserved_tokens = counter.reserved_tokens - reservation.reserved_tokens")
+            && recovery_sql.contains("counter.storage_scope = reservation.storage_scope")
     );
     assert!(
-        RECOVER_EXPIRED_RESERVATION_STATEMENT
-            .sql
-            .contains("released_at_unix_ms = $4")
-    );
-    assert!(
-        RECOVER_EXPIRED_RESERVATION_STATEMENT
-            .sql
-            .contains("ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING")
-    );
-    assert!(
-        RECOVER_EXPIRED_RESERVATION_STATEMENT
-            .sql
-            .contains("'released'")
+        recovery_sql.contains("released_at_unix_ms = $4")
+            && recovery_sql
+                .contains("ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING")
+            && recovery_sql.contains("'released'")
     );
 }
 

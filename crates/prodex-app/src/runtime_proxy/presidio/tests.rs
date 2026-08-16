@@ -39,6 +39,9 @@ use std::time::Duration;
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 
+#[path = "presidio_noop_anonymizer.rs"]
+mod noop_anonymizer;
+
 fn start_presidio_fixture(
     response_body: &'static str,
     expected_path: &'static str,
@@ -340,28 +343,6 @@ fn presidio_unicode_scalar_offsets_become_field_byte_offsets() {
     )
     .unwrap();
     assert!(detected_only.masked_findings.is_empty());
-}
-
-#[test]
-fn presidio_rejects_malformed_finding_metadata() {
-    let error = runtime_presidio_findings(
-        &[PresidioJsonString {
-            path: "$.input".to_string(),
-            text: "safe".to_string(),
-            sensitive_kind: None,
-        }],
-        "",
-        &[PresidioAnalyzerResult {
-            start: 0,
-            end: 4,
-            score: f64::NAN,
-            entity_type: "PERSON".to_string(),
-            language: "en".to_string(),
-        }],
-    )
-    .unwrap_err();
-
-    assert!(error.to_string().contains("invalid confidence score"));
 }
 
 #[test]

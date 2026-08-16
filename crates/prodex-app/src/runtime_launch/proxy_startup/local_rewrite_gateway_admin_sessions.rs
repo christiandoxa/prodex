@@ -1,6 +1,18 @@
-use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
-use prodex_domain::{CredentialScope, Principal, PrincipalKind, Role, TenantContext};
-use prodex_storage::{GovernanceRepositoryError, GovernanceWriteOutcome};
+use prodex_application::{
+    ApplicationControlPlaneIdempotencyError, ApplicationControlPlaneIdempotencyErrorStatus,
+    ApplicationControlPlaneIdempotencyRequest, plan_application_control_plane_idempotency,
+    plan_application_control_plane_idempotency_error_response,
+};
+use prodex_control_plane::{
+    ControlPlaneActionPlan, ControlPlaneActionRequest, ControlPlaneOperation,
+    ControlPlaneResourceRef,
+};
+use prodex_domain::{CredentialScope, Principal, PrincipalKind, ResourceKind, Role, TenantContext};
+use prodex_gateway_http::{control_plane_request_fingerprint, idempotency_key_from_headers};
+use prodex_storage::{
+    GovernanceMutationIdempotency, GovernanceRepositoryError, GovernanceWriteOutcome,
+};
+use sha2::{Digest, Sha256};
 
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
@@ -39,13 +51,78 @@ pub(super) fn runtime_gateway_self_service_session_response(
             "current-session revocation requires a tenant-bound identity",
         );
     };
-    let now_seconds =
-        super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis() / 1_000;
+    let now_unix_ms = super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis();
+    let action = ControlPlaneActionRequest {
+        principal: principal.clone(),
+        operation: ControlPlaneOperation::PolicyRevoke,
+        resource: ControlPlaneResourceRef::new(tenant_id, ResourceKind::Policy, None::<String>),
+        occurred_at_unix_ms: now_unix_ms,
+    };
+    let http = super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta(
+        request,
+        runtime_proxy_crate::path_without_query(&request.path_and_query),
+    );
+    let body_digest = {
+        let digest = Sha256::digest(&request.body);
+        let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        format!("sha256:{hex}")
+    };
+    let idempotency_key = match idempotency_key_from_headers(&http.headers) {
+        Ok(idempotency_key) => idempotency_key,
+        Err(error) => {
+            let response = plan_application_control_plane_idempotency_error_response(
+                &ApplicationControlPlaneIdempotencyError::IdempotencyKeyInvalid(error),
+            );
+            return session_error(400, response.code, response.message);
+        }
+    };
+    let request_fingerprint = match control_plane_request_fingerprint(&http, body_digest) {
+        Ok(request_fingerprint) => request_fingerprint,
+        Err(error) => {
+            let response = plan_application_control_plane_idempotency_error_response(
+                &ApplicationControlPlaneIdempotencyError::RequestFingerprintInvalid(error),
+            );
+            return session_error(400, response.code, response.message);
+        }
+    };
+    let idempotency = match plan_application_control_plane_idempotency(
+        ApplicationControlPlaneIdempotencyRequest {
+            action,
+            idempotency_key,
+            request_fingerprint,
+        },
+    ) {
+        Ok(plan) => {
+            let Some(operation) = plan.operation else {
+                return session_error(
+                    500,
+                    "control_plane_idempotency_plan_invalid",
+                    "control-plane idempotency planning failed",
+                );
+            };
+            Some(GovernanceMutationIdempotency {
+                operation,
+                started_at_unix_ms: now_unix_ms,
+            })
+        }
+        Err(error) => {
+            let response = plan_application_control_plane_idempotency_error_response(&error);
+            let status = match response.status {
+                ApplicationControlPlaneIdempotencyErrorStatus::BadRequest => 400,
+                ApplicationControlPlaneIdempotencyErrorStatus::Conflict => 409,
+                ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed => 405,
+                ApplicationControlPlaneIdempotencyErrorStatus::ServiceUnavailable => 503,
+            };
+            return session_error(status, response.code, response.message);
+        }
+    };
+    let now_seconds = now_unix_ms / 1_000;
     match shared.governance_sessions.revoke_current(
         request,
         TenantContext { tenant_id },
         principal,
         now_seconds,
+        idempotency,
     ) {
         Ok(GovernanceWriteOutcome::Applied | GovernanceWriteOutcome::Replayed) => {
             build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
@@ -61,6 +138,11 @@ pub(super) fn runtime_gateway_self_service_session_response(
             400,
             "governance_session_revoke_invalid",
             "session revocation request is invalid",
+        ),
+        Err(GovernanceRepositoryError::Conflict) => session_error(
+            409,
+            "governance_session_revoke_conflict",
+            "session revocation conflicted with current state",
         ),
         Err(_) => session_error(
             503,
@@ -148,6 +230,10 @@ pub(super) fn runtime_gateway_admin_session_response(
         Role::Admin,
         CredentialScope::ControlPlane,
     );
+    let idempotency = GovernanceMutationIdempotency {
+        operation: execution.atomic_write.operation.clone(),
+        started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
+    };
     Some(
         match shared.governance_sessions.revoke_by_hash(
             TenantContext {
@@ -156,6 +242,7 @@ pub(super) fn runtime_gateway_admin_session_response(
             &session_id_hash,
             &actor,
             &reason_code,
+            Some(idempotency),
         ) {
             Ok(GovernanceWriteOutcome::Applied | GovernanceWriteOutcome::Replayed) => {
                 build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {

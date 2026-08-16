@@ -226,14 +226,34 @@ fn runtime_gateway_observability_write_jsonl(
     event: &RuntimeProviderGatewaySpendEvent,
 ) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
+        runtime_gateway_observability_reject_symlink_components(parent)?;
         std::fs::create_dir_all(parent)?;
+        runtime_gateway_observability_reject_symlink_components(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    let mut file = prodex_core::open_regular_file_with_options_no_follow(path, &mut options)?;
     let payload = serde_json::to_string(event).map_err(std::io::Error::other)?;
     writeln!(file, "{payload}")
+}
+
+fn runtime_gateway_observability_reject_symlink_components(path: &Path) -> std::io::Result<()> {
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "gateway observability path must not contain symlinks",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn runtime_gateway_observability_http_payload(
@@ -383,6 +403,66 @@ mod tests {
         assert_eq!(json["legacy_request_sequence"], 7);
         assert!(json.get("request").is_none());
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_observability_jsonl_write_rejects_symlink_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-jsonl-symlink-parent-{}",
+            prodex_domain::RequestId::new()
+        ));
+        let outside = root.join("outside");
+        let redirect = root.join("redirect");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &redirect).unwrap();
+        let path = redirect.join("spend.jsonl");
+        let event = runtime_provider_gateway_spend_event(
+            7,
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            "/v1/responses",
+            Some("gpt-5-mini"),
+            200,
+            42,
+            128,
+            br#"{"model":"gpt-5-mini"}"#,
+            prodex_provider_core::ProviderModelCost::default(),
+        );
+
+        let error = runtime_gateway_observability_write_jsonl(&path, &event).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!outside.join("spend.jsonl").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_observability_jsonl_write_rejects_symlink_target() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-jsonl-symlink-target-{}",
+            prodex_domain::RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.jsonl");
+        std::fs::write(&target, "sentinel\n").unwrap();
+        let path = root.join("spend.jsonl");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let event = runtime_provider_gateway_spend_event(
+            7,
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            "/v1/responses",
+            Some("gpt-5-mini"),
+            200,
+            42,
+            128,
+            br#"{"model":"gpt-5-mini"}"#,
+            prodex_provider_core::ProviderModelCost::default(),
+        );
+
+        let _error = runtime_gateway_observability_write_jsonl(&path, &event).unwrap_err();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "sentinel\n");
         let _ = std::fs::remove_dir_all(root);
     }
 

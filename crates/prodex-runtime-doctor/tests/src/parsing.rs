@@ -61,6 +61,43 @@ fn runtime_doctor_prefers_json_event_and_fields() {
 }
 
 #[test]
+fn runtime_doctor_redacts_secret_fields_and_terminal_controls() {
+    let json_line = r#"{"timestamp":"2026-05-12T00:00:00Z","event":"runtime_proxy_lane_limit_reached","fields":{"route":"/v1/responses\u001b[31m","authorization":"Bearer fixture-secret-sentinel"}}"#;
+    let text_line = format!(
+        "[2026-05-12 00:00:01.000 +00:00] stream_read_error route=\"/v1/responses{}[31m\" authorization=\"Bearer fixture-secret-sentinel\"",
+        '\u{1b}'
+    );
+    let log = format!("{json_line}\n{text_line}");
+
+    let summary = summarize_runtime_log_tail(log.as_bytes());
+
+    let json_fields = summary
+        .marker_last_fields
+        .get("runtime_proxy_lane_limit_reached")
+        .unwrap();
+    assert_eq!(json_fields["authorization"], "<redacted>");
+    assert!(
+        !json_fields["route"]
+            .chars()
+            .any(|character| character.is_control() || character == '\u{7f}')
+    );
+    let text_fields = summary.marker_last_fields.get("stream_read_error").unwrap();
+    assert_eq!(text_fields["authorization"], "<redacted>");
+    assert!(
+        !text_fields["route"]
+            .chars()
+            .any(|character| character.is_control() || character == '\u{7f}')
+    );
+    let rendered = runtime_doctor_json_value(&summary).to_string();
+    assert!(!rendered.contains("fixture-secret-sentinel"), "{rendered}");
+    assert!(
+        !rendered
+            .chars()
+            .any(|character| character.is_control() || character == '\u{7f}')
+    );
+}
+
+#[test]
 fn runtime_doctor_falls_back_to_typed_text_parser() {
     let log = br#"[2026-05-12 00:00:00.000 +00:00] stream_read_error request=7 transport=http error="failed with spaces""#;
 

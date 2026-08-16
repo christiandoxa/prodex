@@ -26,7 +26,7 @@ fn model_registry_resolves_openai_codex_spark_window() {
 }
 
 #[test]
-fn model_registry_uses_family_defaults_for_known_large_window_providers() {
+fn model_registry_resolves_known_provider_windows() {
     assert_eq!(
         smart_context_model_context_window(Some("gemini-3-pro")).map(|window| window.tokens),
         Some(1_048_576)
@@ -37,7 +37,11 @@ fn model_registry_uses_family_defaults_for_known_large_window_providers() {
     );
     assert_eq!(
         smart_context_model_context_window(Some("deepseek-chat")).map(|window| window.tokens),
-        Some(1_048_576)
+        Some(128_000)
+    );
+    assert_eq!(
+        smart_context_model_context_window(Some("deepseek-custom")).map(|window| window.tokens),
+        Some(128_000)
     );
 }
 

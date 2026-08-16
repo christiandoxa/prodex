@@ -1,11 +1,26 @@
 use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::OnceLock;
 
 pub const PROVIDER_MODEL_CATALOG_HARD_LIMIT: usize = 1_024;
+
+fn deserialize_positive_context_window_tokens<'de, D>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<u64>::deserialize(deserializer)? {
+        Some(tokens) if tokens > 0 => Ok(Some(tokens)),
+        Some(_) => Err(serde::de::Error::custom(
+            "context_window_tokens must be positive",
+        )),
+        None => Ok(None),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderModelCatalogLimitError {
@@ -42,6 +57,7 @@ pub struct ProviderCatalogEntry {
     pub id: String,
     pub display_name: String,
     pub description: String,
+    #[serde(deserialize_with = "deserialize_positive_context_window_tokens")]
     pub context_window_tokens: Option<u64>,
     #[serde(default)]
     pub max_output_tokens: Option<u64>,
@@ -297,6 +313,36 @@ mod tests {
             for alias in &entry.aliases {
                 assert!(!alias.trim().is_empty());
             }
+        }
+    }
+
+    #[test]
+    fn provider_catalog_rejects_non_positive_context_windows() {
+        let mut value = serde_json::json!({
+            "provider": "openai",
+            "owned_by": "example",
+            "id": "test-model",
+            "display_name": "Test Model",
+            "description": "Synthetic test model.",
+            "context_window_tokens": 1,
+            "input_cost_per_million_microusd": null,
+            "output_cost_per_million_microusd": null,
+            "supported_endpoints": ["responses"],
+            "aliases": [],
+            "feature_flags": {
+                "tools": false,
+                "json_schema": false,
+                "vision": false,
+                "audio": false,
+                "web_search": false,
+                "reasoning": false
+            },
+            "pricing_known": false
+        });
+
+        for tokens in [0, -1] {
+            value["context_window_tokens"] = serde_json::json!(tokens);
+            assert!(serde_json::from_value::<ProviderCatalogEntry>(value.clone()).is_err());
         }
     }
 

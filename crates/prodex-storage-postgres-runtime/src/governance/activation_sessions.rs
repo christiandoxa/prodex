@@ -498,21 +498,61 @@ impl PostgresRepository {
         &self,
         command: GovernanceSessionRevokeCommand,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
-        self.governance_timeout(self.governance_revoke_session_inner(command))
+        self.governance_timeout(self.governance_revoke_session_inner(command, None))
+            .await
+    }
+
+    pub async fn governance_revoke_session_idempotent(
+        &self,
+        command: GovernanceSessionRevokeCommand,
+        idempotency: GovernanceMutationIdempotency,
+    ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
+        self.governance_timeout(self.governance_revoke_session_inner(command, Some(idempotency)))
             .await
     }
 
     async fn governance_revoke_session_inner(
         &self,
         command: GovernanceSessionRevokeCommand,
+        idempotency: Option<GovernanceMutationIdempotency>,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         validate_governance_session_revoke(&command)?;
         let revoked_at = to_i64(command.revoked_at_unix_ms)?;
+        let completed_at_unix_ms = command.audit_outbox.audit.event.occurred_at_unix_ms;
         let mut client = self.pool.get().await.map_err(database_error)?;
         let transaction = client.transaction().await.map_err(database_error)?;
         set_tenant_context(&transaction, command.tenant_id)
             .await
             .map_err(database_error)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            match governance_idempotency_replay_postgres(
+                &transaction,
+                command.tenant_id,
+                idempotency,
+            )
+            .await?
+            {
+                IdempotencyReplayDecision::ExecuteAndRecordPending => {
+                    insert_governance_idempotency_pending_postgres(
+                        &transaction,
+                        command.tenant_id,
+                        idempotency,
+                    )
+                    .await?;
+                }
+                IdempotencyReplayDecision::AlreadyInProgress { .. } => {
+                    return Err(GovernanceRepositoryError::Conflict);
+                }
+                IdempotencyReplayDecision::Replay(response) => {
+                    transaction.commit().await.map_err(database_error)?;
+                    return if response == GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE {
+                        Ok(GovernanceWriteOutcome::Replayed)
+                    } else {
+                        Err(GovernanceRepositoryError::InvalidInput)
+                    };
+                }
+            }
+        }
         if load_governance_session_tx(&transaction, command.tenant_id, &command.session_id_hash)
             .await?
             .is_none()
@@ -530,6 +570,16 @@ impl PostgresRepository {
         if let Some(existing) = existing {
             if existing.get::<_, String>(1) != command.reason_code {
                 return Err(GovernanceRepositoryError::Conflict);
+            }
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_governance_idempotency_postgres(
+                    &transaction,
+                    command.tenant_id,
+                    idempotency,
+                    GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE,
+                    completed_at_unix_ms,
+                )
+                .await?;
             }
             transaction.commit().await.map_err(database_error)?;
             return Ok(GovernanceWriteOutcome::Replayed);
@@ -561,6 +611,16 @@ impl PostgresRepository {
             return Err(GovernanceRepositoryError::NotFound);
         }
         append_audit_outbox_tx(&transaction, command.audit_outbox).await?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            complete_governance_idempotency_postgres(
+                &transaction,
+                command.tenant_id,
+                idempotency,
+                GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE,
+                completed_at_unix_ms,
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
     }

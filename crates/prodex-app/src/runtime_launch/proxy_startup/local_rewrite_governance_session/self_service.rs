@@ -1,7 +1,9 @@
 use super::RuntimeGatewayGovernanceSessionStore;
 use crate::RuntimeProxyRequest;
 use prodex_domain::{Channel, Principal, TenantContext};
-use prodex_storage::{GovernanceRepositoryError, GovernanceWriteOutcome};
+use prodex_storage::{
+    GovernanceMutationIdempotency, GovernanceRepositoryError, GovernanceWriteOutcome,
+};
 
 impl RuntimeGatewayGovernanceSessionStore {
     pub(in crate::runtime_launch::proxy_startup) fn revoke_current(
@@ -10,18 +12,28 @@ impl RuntimeGatewayGovernanceSessionStore {
         tenant: TenantContext,
         actor: &Principal,
         now_seconds: u64,
+        idempotency: Option<GovernanceMutationIdempotency>,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         let snapshot = self.snapshot(request, tenant, actor, Channel::Api, now_seconds);
         if !snapshot.store_ready {
             return Err(GovernanceRepositoryError::Database);
         }
-        if !snapshot.existing || !snapshot.binding_valid || snapshot.policy.revoked {
+        if !snapshot.existing
+            || !snapshot.binding_valid
+            || (snapshot.policy.revoked && idempotency.is_none())
+        {
             return Err(GovernanceRepositoryError::NotFound);
         }
         let session_id_hash = snapshot
             .session_id_hash()
             .ok_or(GovernanceRepositoryError::InvalidInput)?;
-        self.revoke_by_hash(tenant, &session_id_hash, actor, "session.self_revoke")
+        self.revoke_by_hash(
+            tenant,
+            &session_id_hash,
+            actor,
+            "session.self_revoke",
+            idempotency,
+        )
     }
 }
 
@@ -82,7 +94,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            store.revoke_current(&request(), tenant, &principal(tenant.tenant_id), 101),
+            store.revoke_current(&request(), tenant, &principal(tenant.tenant_id), 101, None),
             Err(GovernanceRepositoryError::NotFound)
         ));
 
@@ -107,7 +119,7 @@ mod tests {
         });
 
         assert_eq!(
-            store.revoke_current(&request(), tenant, &owner, 101),
+            store.revoke_current(&request(), tenant, &owner, 101, None),
             Ok(GovernanceWriteOutcome::Applied)
         );
         assert!(

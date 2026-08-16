@@ -129,7 +129,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "resp-fresh".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
@@ -137,7 +137,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "resp-stale".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: stale_response_binding,
                 },
             ),
@@ -147,7 +147,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "sess-fresh".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: now,
                 },
             ),
@@ -155,7 +155,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "sess-stale".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: stale_session_binding,
                 },
             ),

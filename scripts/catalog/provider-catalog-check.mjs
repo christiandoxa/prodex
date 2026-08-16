@@ -52,6 +52,10 @@ for (const model of models) {
   if (model.provider !== "local" && model.context_window_tokens == null) {
     issues.push(`missing context window for ${model.provider}:${model.id}`);
   }
+  if (model.context_window_tokens != null &&
+      (!Number.isSafeInteger(model.context_window_tokens) || model.context_window_tokens <= 0)) {
+    issues.push(`context_window_tokens must be a positive safe integer for ${model.provider}:${model.id}`);
+  }
   for (const field of ["max_output_tokens", "default_output_reserve_tokens"]) {
     if (model[field] != null && (!Number.isSafeInteger(model[field]) || model[field] <= 0)) {
       issues.push(`${field} must be a positive safe integer for ${model.provider}:${model.id}`);

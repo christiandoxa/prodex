@@ -18,6 +18,72 @@ struct PreparedRuntimeStateSelectedSnapshotSave {
     backoffs: Option<RuntimeProfileBackoffs>,
 }
 
+fn runtime_state_file_is_durable(paths: &AppPaths) -> bool {
+    paths.state_file.exists() || state_last_good_file_path(paths).exists()
+}
+
+fn rewrite_unavailable_state_bindings(
+    state: &mut AppState,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) {
+    for bindings in [
+        &mut state.response_profile_bindings,
+        &mut state.session_profile_bindings,
+    ] {
+        for binding in bindings.values_mut() {
+            if !profiles.contains_key(&binding.profile_name)
+                && !prodex_state::is_hard_binding_conflict_profile(&binding.profile_name)
+            {
+                binding.profile_name = prodex_state::HARD_BINDING_CONFLICT_PROFILE.to_string();
+                binding.binding_identity = None;
+            }
+        }
+    }
+}
+
+fn runtime_snapshot_for_save(
+    paths: &AppPaths,
+    existing: &AppState,
+    snapshot: &AppState,
+) -> AppState {
+    if !runtime_state_file_is_durable(paths) {
+        return snapshot.clone();
+    }
+
+    let mut snapshot = snapshot.clone();
+    rewrite_unavailable_state_bindings(&mut snapshot, &existing.profiles);
+    if existing.profiles.is_empty() {
+        snapshot.profiles.clear();
+    }
+    snapshot
+}
+
+fn runtime_selected_snapshot_for_save(
+    snapshot: &RuntimeStateSaveSelectedSnapshot,
+    existing: Option<&AppState>,
+    state_is_durable: bool,
+) -> RuntimeStateSaveSelectedSnapshot {
+    if !state_is_durable {
+        return snapshot.clone();
+    }
+
+    let mut snapshot = snapshot.clone();
+    let Some(existing) = existing else {
+        return snapshot;
+    };
+    if let Some(state) = snapshot.state.as_mut() {
+        rewrite_unavailable_state_bindings(state, &existing.profiles);
+        state.profiles = existing.profiles.clone();
+    }
+    if let Some(profiles) = snapshot.profiles.as_mut() {
+        *profiles = existing.profiles.clone();
+    }
+    if let Some(continuations) = snapshot.continuations.as_mut() {
+        rewrite_unavailable_profile_bindings(continuations, &existing.profiles);
+    }
+    snapshot
+}
+
 pub(crate) struct RuntimeStateSnapshotSaveInput<'a> {
     pub(crate) paths: &'a AppPaths,
     pub(crate) snapshot: &'a AppState,
@@ -158,20 +224,23 @@ fn prepare_runtime_state_selected_snapshot_save(
     let state_policy = app_state_compaction_policy();
     let continuation_policy = runtime_continuation_compaction_policy();
     let prepare_plan = prodex_runtime_store::runtime_state_selected_snapshot_prepare_plan(snapshot);
-    let existing_state = if prepare_plan.load.needs_existing_state {
+    let state_is_durable = runtime_state_file_is_durable(&snapshot.paths);
+    let existing_state = if prepare_plan.load.needs_existing_state || state_is_durable {
         Some(AppState::load_with_recovery_unlocked(&snapshot.paths)?.value)
     } else {
         None
     };
+    let snapshot =
+        runtime_selected_snapshot_for_save(snapshot, existing_state.as_ref(), state_is_durable);
     let profiles_for_continuation_load =
         prodex_runtime_store::runtime_state_selected_snapshot_profiles_for_merge(
-            snapshot,
+            &snapshot,
             existing_state.as_ref(),
             now,
             state_policy,
         )
         .context("invalid runtime state selected snapshot merge plan")?;
-    let existing_continuations = if prepare_plan.load.needs_existing_continuations {
+    let mut existing_continuations = if prepare_plan.load.needs_existing_continuations {
         Some(
             load_runtime_continuations_with_recovery(
                 &snapshot.paths,
@@ -182,8 +251,14 @@ fn prepare_runtime_state_selected_snapshot_save(
     } else {
         None
     };
+    if let Some(existing_continuations) = existing_continuations.as_mut() {
+        rewrite_unavailable_profile_bindings(
+            existing_continuations,
+            &profiles_for_continuation_load,
+        );
+    }
     let merged = prodex_runtime_store::merge_runtime_state_selected_snapshot_sections(
-        snapshot,
+        &snapshot,
         existing_state.as_ref(),
         existing_continuations.as_ref(),
         now,
@@ -255,20 +330,30 @@ fn merge_runtime_state_and_continuations_for_save(
     continuations: &RuntimeContinuationStore,
 ) -> Result<(AppState, RuntimeContinuationStore)> {
     let existing = AppState::load_with_recovery_unlocked(paths)?.value;
+    let state_is_durable = runtime_state_file_is_durable(paths);
+    let snapshot = runtime_snapshot_for_save(paths, &existing, snapshot);
     let now = Local::now().timestamp();
     let state_for_profiles = prodex_runtime_store::merge_runtime_state_snapshot_for_save(
         existing.clone(),
-        snapshot,
+        &snapshot,
         now,
         app_state_compaction_policy(),
     );
-    let existing_continuations =
-        load_runtime_continuations_with_recovery(paths, &state_for_profiles.profiles)?;
+    let continuation_profiles = if state_is_durable {
+        &existing.profiles
+    } else {
+        &state_for_profiles.profiles
+    };
+    let mut continuations = continuations.clone();
+    rewrite_unavailable_profile_bindings(&mut continuations, continuation_profiles);
+    let mut existing_continuations =
+        load_runtime_continuations_with_recovery(paths, continuation_profiles)?;
+    rewrite_unavailable_profile_bindings(&mut existing_continuations.value, continuation_profiles);
     let merged = prodex_runtime_store::merge_runtime_state_and_continuations_for_save(
         existing,
-        snapshot,
+        &snapshot,
         &existing_continuations.value,
-        continuations,
+        &continuations,
         now,
         app_state_compaction_policy(),
         runtime_continuation_compaction_policy(),

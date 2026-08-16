@@ -733,6 +733,12 @@
       },
       "GatewayKeyList": {
         "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "key_store_path": {
             "type": "string"
           },
@@ -741,6 +747,15 @@
               "$ref": "#/components/schemas/GatewayKey"
             },
             "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "object": {
             "type": "string"
@@ -757,6 +772,9 @@
           "state_path": {
             "type": "string"
           },
+          "total": {
+            "type": "integer"
+          },
           "unknown_persisted_keys": {
             "items": {
               "type": "string"
@@ -772,7 +790,11 @@
         },
         "required": [
           "object",
-          "keys"
+          "keys",
+          "total",
+          "limit",
+          "cursor",
+          "next_cursor"
         ],
         "type": "object"
       },
@@ -2023,6 +2045,12 @@
           "itemsPerPage": {
             "type": "integer"
           },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "schemas": {
             "items": {
               "type": "string"
@@ -2039,7 +2067,29 @@
         "required": [
           "schemas",
           "totalResults",
+          "startIndex",
+          "itemsPerPage",
+          "next_cursor",
           "Resources"
+        ],
+        "type": "object"
+      },
+      "GatewayScimUserDeleted": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "deleted"
         ],
         "type": "object"
       },
@@ -2417,10 +2467,10 @@
         "operationId": "createGatewayVirtualKey",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -2474,10 +2524,10 @@
         "operationId": "deleteGatewayVirtualKey",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -2573,10 +2623,10 @@
         "operationId": "updateGatewayVirtualKey",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -2635,6 +2685,88 @@
           }
         ],
         "summary": "Update, disable, or rotate an admin-managed gateway virtual key"
+      }
+    },
+    "/v1/prodex/gateway/keys/{name}/secret": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "rotateGatewayVirtualKeySecret",
+        "parameters": [
+          {
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional optimistic-concurrency guard. Use the current ETag from GET, or * to bypass the guard.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayKeyPatchRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyMutationResponse"
+                }
+              }
+            },
+            "description": "Rotated virtual-key secret. token is returned once."
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "412": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Rotate an admin-managed gateway virtual key secret"
       }
     },
     "/v1/prodex/gateway/ledger": {
@@ -3047,6 +3179,7 @@
           "401": {"$ref": "#/components/responses/GatewayError"},
           "403": {"$ref": "#/components/responses/GatewayError"},
           "404": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
           "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
@@ -3427,10 +3560,10 @@
         "operationId": "createGatewayScimUser",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -3484,10 +3617,10 @@
         "operationId": "deleteGatewayScimUser",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -3496,7 +3629,17 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUserDeleted"
+                }
+              }
+            },
             "description": "Deleted SCIM user marker"
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
           },
           "401": {
             "$ref": "#/components/responses/GatewayError"
@@ -3505,6 +3648,12 @@
             "$ref": "#/components/responses/GatewayError"
           },
           "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "503": {
             "$ref": "#/components/responses/GatewayError"
           }
         },
@@ -3556,10 +3705,10 @@
         "operationId": "patchGatewayScimUser",
         "parameters": [
           {
-            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -3610,6 +3759,67 @@
           }
         ],
         "summary": "Patch one gateway SCIM user"
+      },
+      "put": {
+        "operationId": "replaceGatewayScimUser",
+        "parameters": [
+          {
+            "description": "Required printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayScimUserWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUser"
+                }
+              }
+            },
+            "description": "Replaced SCIM user"
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "503": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Replace one gateway SCIM user"
       }
     },
     "/v1/prodex/gateway/usage": {

@@ -110,6 +110,8 @@ function printHelp() {
       "",
       "Runs the full workspace Rust suite in faster partitions.",
       "",
+      "The --jobs value controls both auto-rotate workers and independent test partitions.",
+      "",
       "Partitions:",
       "  - prebuild all all-features workspace and prodex-app lib test binaries once",
       "  - run workspace-safe all-features tests with parallel libtest threads",
@@ -268,7 +270,7 @@ async function main() {
       [...workspaceSteps(args), autoRotateStep(args), ...(args.prodexAppLib ? [prodexAppStep()] : [])],
       {
         dryRun: args.dryRun,
-        jobs: 3,
+        jobs: args.jobs,
         timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
       },
     )),

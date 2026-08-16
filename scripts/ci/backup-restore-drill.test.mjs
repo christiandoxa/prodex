@@ -68,6 +68,15 @@ test("assessDrill accepts an intact restore within thresholds", () => {
   );
 });
 
+test("backup drill SQL names current columns and checks migration provenance", async () => {
+  const source = await fs.readFile(new URL("./backup-restore-drill.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /INSERT INTO prodex_[a-z_]+\s+VALUES\b/gu);
+  assert.match(source, /prodex_reservations \([\s\S]*storage_scope/u);
+  assert.match(source, /prodex_audit_log \([\s\S]*reason_detail/u);
+  assert.match(source, /prodex_governance_sessions \([\s\S]*provider_descriptor_revision/u);
+  assert.match(source, /migration_provenance_rows/u);
+});
+
 test("backup artifact encryption round-trips and rejects tampering", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-backup-envelope-test-"));
   const source = path.join(directory, "source.dump");

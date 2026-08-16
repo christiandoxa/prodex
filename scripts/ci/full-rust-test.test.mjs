@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { RUNTIME_CI_BROAD_SHARD_FILTERS } from "./runtime-test-manifest.mjs";
+import {
+  RUNTIME_CI_BROAD_SHARD_FILTERS,
+  RUNTIME_CI_WORKFLOW_SHARDS,
+} from "./runtime-test-manifest.mjs";
 
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
   const result = spawnSync(
     process.execPath,
-    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--no-prebuild"],
+    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--no-prebuild", "--jobs", "4"],
     { cwd: process.cwd(), encoding: "utf8" },
   );
 
@@ -16,7 +19,7 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
     result.stdout,
     /prodex-app:all-lib-tests-serial: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1/,
   );
-  assert.match(result.stdout, /dry-run: 5 parallel step\(s\), jobs=3/);
+  assert.match(result.stdout, /dry-run: 5 parallel step\(s\), jobs=4/);
   assert.doesNotMatch(result.stdout, /full-rust-test:prodex-app/);
 
   const platformResult = spawnSync(
@@ -163,7 +166,12 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   const expectedFilters = RUNTIME_CI_BROAD_SHARD_FILTERS.map(
     ({ label, filter }) => `${label}|${filter}`,
   );
-  assert.equal(matrix.include.length, 10);
+  assert.equal(matrix.include.length, RUNTIME_CI_WORKFLOW_SHARDS.length);
+  assert.deepEqual(
+    matrix.include.map((entry) => entry.suite),
+    RUNTIME_CI_WORKFLOW_SHARDS.map((shard) => shard.suite),
+  );
+  assert.ok(matrix.include.every((entry) => entry.filters.trim() !== ""));
   assert.equal(matrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(new Set(filters), new Set(expectedFilters));
   const admissionCorePack = matrix.include.find((entry) =>

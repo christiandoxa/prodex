@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::{RUNTIME_DOCTOR_MARKERS, RuntimeDoctorMarker};
+use runtime_proxy_crate::{runtime_proxy_redact_log_field_value, runtime_proxy_redact_log_text};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RuntimeDoctorParsedLogMessage {
@@ -11,7 +12,15 @@ struct RuntimeDoctorParsedLogMessage {
 
 impl RuntimeDoctorParsedLogMessage {
     fn fields_map(&self) -> BTreeMap<String, String> {
-        self.fields.iter().cloned().collect()
+        self.fields
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    runtime_proxy_redact_log_field_value(key, value),
+                )
+            })
+            .collect()
     }
 }
 
@@ -43,13 +52,13 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
                 .get("timestamp")
                 .or_else(|| value.get("ts"))
                 .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string);
+                .map(runtime_proxy_redact_log_text);
         }
         let end = self.line.find("] ")?;
         self.line
             .strip_prefix('[')
             .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
-            .map(ToString::to_string)
+            .map(runtime_proxy_redact_log_text)
     }
 
     pub(crate) fn message(&self) -> Cow<'_, str> {
@@ -124,7 +133,10 @@ fn runtime_doctor_json_fields_map(
                 serde_json::Value::Bool(value) => value.to_string(),
                 _ => return None,
             };
-            Some((key.clone(), value))
+            Some((
+                key.clone(),
+                runtime_proxy_redact_log_field_value(key, &value),
+            ))
         })
         .collect()
 }
@@ -261,14 +273,18 @@ pub(super) fn runtime_doctor_chain_event_summary(
         "via",
     ] {
         if let Some(value) = fields.get(key) {
-            parts.push(format!("{key}={value}"));
+            parts.push(format!(
+                "{key}={}",
+                runtime_proxy_redact_log_field_value(key, value)
+            ));
         }
     }
     parts.join(" ")
 }
 
 pub(super) fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
-    let trimmed = line.trim();
+    let redacted = runtime_proxy_redact_log_text(line);
+    let trimmed = redacted.trim();
     let count = trimmed.chars().count();
     if count <= limit {
         return trimmed.to_string();

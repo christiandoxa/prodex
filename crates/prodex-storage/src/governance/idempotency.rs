@@ -21,6 +21,8 @@ pub const GOVERNANCE_REVISION_WRITE_IDEMPOTENCY_RESPONSE: &[u8] =
     b"v1|governance_revision_write|ok";
 pub const GOVERNANCE_APPROVAL_CREATE_IDEMPOTENCY_RESPONSE: &[u8] =
     b"v1|governance_approval_create|ok";
+pub const GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE: &[u8] =
+    b"v1|governance_session_revoke|ok";
 pub const GOVERNANCE_AUDIT_LEGAL_HOLD_UPSERT_IDEMPOTENCY_RESPONSE: &[u8] =
     b"v1|governance_audit_legal_hold_upsert|ok";
 pub const GOVERNANCE_AUDIT_LEGAL_HOLD_DELETE_APPLIED_IDEMPOTENCY_RESPONSE: &[u8] =

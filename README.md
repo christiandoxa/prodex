@@ -136,32 +136,18 @@ Runtime proxy design contract:
 
 ## Installation
 
-Install the latest published release (`0.408.6`):
+Replace `0.408.7` with the release you want.
 
 macOS or Linux:
 
-Download, inspect, verify, then run the installer:
-
 ```sh
-release_url=https://github.com/christiandoxa/prodex/releases/download/0.408.6
-curl -fsSLo install.sh "$release_url/install.sh"
-curl -fsSLo SHA256SUMS "$release_url/SHA256SUMS"
-grep ' install.sh$' SHA256SUMS | sha256sum --check --strict
-less install.sh
-sh install.sh --release 0.408.6
+curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.7/install.sh | sh -s -- --release 0.408.7
 ```
 
 Windows PowerShell:
 
 ```powershell
-$releaseUrl = 'https://github.com/christiandoxa/prodex/releases/download/0.408.6'
-Invoke-WebRequest "$releaseUrl/install.ps1" -OutFile .\install.ps1
-Invoke-WebRequest "$releaseUrl/SHA256SUMS" -OutFile .\SHA256SUMS
-$expected = (Select-String -Path .\SHA256SUMS -Pattern 'install\.ps1$').Line.Split()[0]
-$actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash
-if ($actual -ine $expected) { throw 'install.ps1 checksum mismatch' }
-Get-Content .\install.ps1
-.\install.ps1 -Release 0.408.6
+$env:PRODEX_RELEASE='0.408.7'; irm https://github.com/christiandoxa/prodex/releases/download/0.408.7/install.ps1 | iex
 ```
 
 Managed profiles require Windows symbolic-link permission. Enable Developer
@@ -172,7 +158,7 @@ profile state and reports an actionable error when permission is unavailable.
 <details>
 <summary>Installer verification and legacy migration</summary>
 
-The commands above verify each installer against the release `SHA256SUMS` file before execution. Both installers then download the selected binary and verify its own `SHA256SUMS` entry. The release workflow malware-scans final assets and verifies installer provenance.
+Both installers verify their downloaded assets against the release `SHA256SUMS` file. The release workflow malware-scans final assets and verifies installer provenance.
 
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available. Existing npm or Cargo installations can run `prodex update` once to migrate.
 

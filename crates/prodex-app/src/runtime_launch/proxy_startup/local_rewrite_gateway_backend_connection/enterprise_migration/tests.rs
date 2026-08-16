@@ -47,6 +47,36 @@ fn sqlite_enterprise_migrations_are_versioned_and_idempotent() {
         .unwrap();
     assert_eq!(count, i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0));
     assert_eq!(max_version, i64::from(REQUIRED_SQLITE_SCHEMA_VERSION.0));
+    let (phase, actor, build, started_at, completed_at, outcome): (
+        String,
+        String,
+        String,
+        i64,
+        Option<i64>,
+        String,
+    ) = conn
+        .query_row(
+            "SELECT phase, actor, build, started_at_epoch, completed_at_epoch, outcome
+             FROM prodex_enterprise_schema_migrations WHERE version = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(phase, "expand");
+    assert_eq!(actor, "prodex-gateway");
+    assert_eq!(build, env!("CARGO_PKG_VERSION"));
+    assert!(started_at > 0);
+    assert!(completed_at.is_some_and(|completed| completed >= started_at));
+    assert_eq!(outcome, "succeeded");
 
     drop(conn);
     std::fs::remove_dir_all(root).unwrap();

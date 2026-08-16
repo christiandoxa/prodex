@@ -395,3 +395,22 @@ fn structured_log_redacts_sensitive_fields_and_location_secrets() {
     assert!(message.contains("detail=upstream_timeout"), "{message}");
     assert!(!message.contains("secret-sentinel"), "{message}");
 }
+
+#[test]
+fn structured_logs_sanitize_controls_and_redact_secret_like_telemetry() {
+    let message = runtime_proxy_structured_log_message(
+        "stream_read_error\u{1b}[31m",
+        [
+            runtime_proxy_log_field("reason", "upstream\u{1b}[2J"),
+            runtime_proxy_log_field("authorization", "Bearer fixture-secret-sentinel"),
+        ],
+    );
+
+    assert!(
+        !message
+            .chars()
+            .any(|character| character.is_control() || character == '\u{7f}')
+    );
+    assert!(!message.contains("fixture-secret-sentinel"), "{message}");
+    assert!(message.contains("authorization=<redacted>"), "{message}");
+}

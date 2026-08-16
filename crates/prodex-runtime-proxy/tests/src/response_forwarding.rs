@@ -11,6 +11,8 @@ fn skips_runtime_response_headers_case_insensitively() {
     assert!(should_skip_runtime_response_header("Trailer"));
     assert!(should_skip_runtime_response_header("TRANSFER-ENCODING"));
     assert!(should_skip_runtime_response_header("Upgrade"));
+    assert!(!should_skip_runtime_response_header("Date"));
+    assert!(!should_skip_runtime_response_header("Server"));
     assert!(!should_skip_runtime_response_header("content-encoding"));
     assert!(!should_skip_runtime_response_header("x-codex-turn-state"));
     assert!(!should_skip_runtime_response_header("content-type"));
@@ -21,6 +23,7 @@ fn filters_text_response_headers_without_rewriting_values() {
     let headers = runtime_forward_text_response_headers([
         ("Content-Type", "text/event-stream"),
         ("Content-Encoding", "gzip"),
+        ("Date", "today"),
         ("Server", "upstream"),
         ("x-codex-turn-state", " ts-1 "),
     ]);
@@ -30,6 +33,8 @@ fn filters_text_response_headers_without_rewriting_values() {
         vec![
             ("Content-Type".to_string(), "text/event-stream".to_string()),
             ("Content-Encoding".to_string(), "gzip".to_string()),
+            ("Date".to_string(), "today".to_string()),
+            ("Server".to_string(), "upstream".to_string()),
             ("x-codex-turn-state".to_string(), " ts-1 ".to_string()),
         ]
     );
@@ -116,12 +121,17 @@ fn preserves_codex_0145_backend_response_headers() {
 fn filters_binary_response_headers_without_utf8_requirement() {
     let headers = runtime_forward_binary_response_headers([
         ("Date", b"today".as_slice()),
+        ("Server", b"upstream".as_slice()),
         ("x-binary", b"\xff\x00".as_slice()),
     ]);
 
     assert_eq!(
         headers,
-        vec![("x-binary".to_string(), b"\xff\x00".to_vec())]
+        vec![
+            ("Date".to_string(), b"today".to_vec()),
+            ("Server".to_string(), b"upstream".to_vec()),
+            ("x-binary".to_string(), b"\xff\x00".to_vec()),
+        ]
     );
 }
 

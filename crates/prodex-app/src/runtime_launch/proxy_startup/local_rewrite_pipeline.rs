@@ -516,6 +516,9 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
     Option<prodex_application::ApplicationAuthorizedRequestContext<'target>>,
     tiny_http::ResponseBox,
 > {
+    if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
+        return Ok(None);
+    }
     let virtual_keys_empty = runtime_gateway_virtual_key_entries_is_empty(shared);
     let legacy_authorized = shared
         .gateway_auth_token_hash
@@ -532,9 +535,6 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
     } else {
         runtime_local_rewrite_verified_virtual_key(state, shared, virtual_keys_empty)?
     };
-    if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
-        return Ok(None);
-    }
     let mut credential = runtime_gateway_data_plane_credential(
         virtual_key.as_ref(),
         legacy_authorized,

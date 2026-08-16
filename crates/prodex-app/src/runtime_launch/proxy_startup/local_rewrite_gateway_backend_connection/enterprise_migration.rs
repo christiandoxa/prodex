@@ -9,11 +9,11 @@ use super::{
 use anyhow::{Context, Result, anyhow, bail};
 use postgres::Client as PostgresClient;
 use prodex_storage_postgres::{
-    PostgresBackendOpenMode, PostgresRuntimeMode, REQUIRED_POSTGRES_SCHEMA_VERSION,
-    plan_postgres_backend_open, plan_postgres_migrations,
+    PostgresBackendOpenMode, PostgresMigrationPhase, PostgresRuntimeMode,
+    REQUIRED_POSTGRES_SCHEMA_VERSION, plan_postgres_backend_open, plan_postgres_migrations,
 };
 use prodex_storage_sqlite::{
-    REQUIRED_SQLITE_SCHEMA_VERSION, SqliteBackendOpenMode, SqliteRuntimeMode,
+    REQUIRED_SQLITE_SCHEMA_VERSION, SqliteBackendOpenMode, SqliteMigrationPhase, SqliteRuntimeMode,
     plan_sqlite_backend_open, plan_sqlite_migrations,
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -27,12 +27,20 @@ use siem_shape::{
 };
 
 const MIGRATIONS_TABLE: &str = "prodex_enterprise_schema_migrations";
+const MIGRATION_ACTOR: &str = "prodex-gateway";
+const MIGRATION_BUILD: &str = env!("CARGO_PKG_VERSION");
 const SQLITE_MIGRATIONS_TABLE_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS prodex_enterprise_schema_migrations (
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         checksum TEXT NOT NULL,
-        applied_at_epoch INTEGER NOT NULL
+        applied_at_epoch INTEGER NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'legacy',
+        actor TEXT NOT NULL DEFAULT 'legacy',
+        build TEXT NOT NULL DEFAULT 'legacy',
+        started_at_epoch INTEGER NOT NULL DEFAULT 0,
+        completed_at_epoch INTEGER,
+        outcome TEXT NOT NULL DEFAULT 'succeeded'
     );
     "#;
 const POSTGRES_MIGRATIONS_TABLE_SQL: &str = r#"
@@ -40,8 +48,27 @@ const POSTGRES_MIGRATIONS_TABLE_SQL: &str = r#"
         version BIGINT PRIMARY KEY,
         name TEXT NOT NULL,
         checksum TEXT NOT NULL,
-        applied_at_epoch BIGINT NOT NULL
+        applied_at_epoch BIGINT NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'legacy',
+        actor TEXT NOT NULL DEFAULT 'legacy',
+        build TEXT NOT NULL DEFAULT 'legacy',
+        started_at_epoch BIGINT NOT NULL DEFAULT 0,
+        completed_at_epoch BIGINT,
+        outcome TEXT NOT NULL DEFAULT 'succeeded'
     );
+    ALTER TABLE prodex_enterprise_schema_migrations
+        ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'legacy',
+        ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT 'legacy',
+        ADD COLUMN IF NOT EXISTS build TEXT NOT NULL DEFAULT 'legacy',
+        ADD COLUMN IF NOT EXISTS started_at_epoch BIGINT NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS completed_at_epoch BIGINT,
+        ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'succeeded';
+    UPDATE prodex_enterprise_schema_migrations
+    SET started_at_epoch = applied_at_epoch
+    WHERE started_at_epoch = 0;
+    UPDATE prodex_enterprise_schema_migrations
+    SET completed_at_epoch = applied_at_epoch
+    WHERE completed_at_epoch IS NULL;
     "#;
 
 pub(super) fn runtime_gateway_sqlite_require_schema(conn: &Connection) -> Result<()> {
@@ -116,10 +143,59 @@ fn migration_checksum(name: &str, sql: &str) -> String {
         .collect()
 }
 
+fn sqlite_migration_phase(phase: SqliteMigrationPhase) -> &'static str {
+    match phase {
+        SqliteMigrationPhase::Expand => "expand",
+        SqliteMigrationPhase::Backfill => "backfill",
+        SqliteMigrationPhase::Contract => "contract",
+    }
+}
+
+fn postgres_migration_phase(phase: PostgresMigrationPhase) -> &'static str {
+    match phase {
+        PostgresMigrationPhase::Expand => "expand",
+        PostgresMigrationPhase::Backfill => "backfill",
+        PostgresMigrationPhase::Validate => "validate",
+        PostgresMigrationPhase::Contract => "contract",
+    }
+}
+
+fn ensure_sqlite_migration_provenance(conn: &Connection) -> Result<()> {
+    for (column, definition) in [
+        ("phase", "TEXT NOT NULL DEFAULT 'legacy'"),
+        ("actor", "TEXT NOT NULL DEFAULT 'legacy'"),
+        ("build", "TEXT NOT NULL DEFAULT 'legacy'"),
+        ("started_at_epoch", "INTEGER NOT NULL DEFAULT 0"),
+        ("completed_at_epoch", "INTEGER"),
+        ("outcome", "TEXT NOT NULL DEFAULT 'succeeded'"),
+    ] {
+        if !runtime_gateway_sqlite_table_has_column(conn, MIGRATIONS_TABLE, column)? {
+            conn.execute(
+                &format!("ALTER TABLE {MIGRATIONS_TABLE} ADD COLUMN {column} {definition}"),
+                [],
+            )?;
+        }
+    }
+    conn.execute(
+        "UPDATE prodex_enterprise_schema_migrations
+         SET started_at_epoch = applied_at_epoch
+         WHERE started_at_epoch = 0",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE prodex_enterprise_schema_migrations
+         SET completed_at_epoch = applied_at_epoch
+         WHERE completed_at_epoch IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
 fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
-    let ledger_exists = runtime_gateway_sqlite_table_exists(conn, MIGRATIONS_TABLE)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let ledger_exists = runtime_gateway_sqlite_table_exists(&tx, MIGRATIONS_TABLE)?;
     let observed_version = if ledger_exists {
-        sqlite_observed_version(conn)?
+        sqlite_observed_version(&tx)?
     } else {
         None
     };
@@ -129,18 +205,18 @@ fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
     }
     let legacy_version = if !ledger_exists
         || (observed_version.is_none()
-            && runtime_gateway_sqlite_table_exists(conn, "prodex_tenants")?)
+            && runtime_gateway_sqlite_table_exists(&tx, "prodex_tenants")?)
     {
-        infer_legacy_sqlite_version(conn)?
+        infer_legacy_sqlite_version(&tx)?
     } else {
         0
     };
-    conn.execute_batch(SQLITE_MIGRATIONS_TABLE_SQL)
+    tx.execute_batch(SQLITE_MIGRATIONS_TABLE_SQL)
         .context("failed to ensure gateway sqlite enterprise migrations table")?;
+    ensure_sqlite_migration_provenance(&tx)?;
     let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator)?;
 
     if legacy_version > 0 {
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for migration in plan
             .migrations
             .iter()
@@ -149,14 +225,16 @@ fn apply_sqlite_migrations(conn: &mut Connection) -> Result<usize> {
             let checksum = migration_checksum(migration.name, migration.sql);
             tx.execute(
                 "INSERT INTO prodex_enterprise_schema_migrations
-                 (version, name, checksum, applied_at_epoch)
-                 VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
+                 (version, name, checksum, applied_at_epoch, phase, actor, build,
+                  started_at_epoch, completed_at_epoch, outcome)
+                 VALUES (?1, ?2, ?3, strftime('%s', 'now'), 'legacy', 'legacy', 'legacy',
+                         strftime('%s', 'now'), strftime('%s', 'now'), 'succeeded')",
                 rusqlite::params![i64::from(migration.version.0), migration.name, checksum],
             )?;
         }
-        tx.commit()?;
     }
 
+    tx.commit()?;
     apply_sqlite_migration_plan(conn, &plan)
 }
 
@@ -198,6 +276,21 @@ fn apply_sqlite_migration_plan(
         let reason_detail_already_present = migration.name == "014_audit_reason_detail"
             && runtime_gateway_sqlite_table_has_column(conn, "prodex_audit_log", "reason_detail")?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO prodex_enterprise_schema_migrations
+             (version, name, checksum, applied_at_epoch, phase, actor, build,
+              started_at_epoch, completed_at_epoch, outcome)
+             VALUES (?1, ?2, ?3, strftime('%s', 'now'), ?4, ?5, ?6,
+                     strftime('%s', 'now'), NULL, 'running')",
+            rusqlite::params![
+                version,
+                migration.name,
+                checksum,
+                sqlite_migration_phase(migration.phase),
+                MIGRATION_ACTOR,
+                MIGRATION_BUILD,
+            ],
+        )?;
         if !reason_detail_already_present {
             tx.execute_batch(migration.sql).with_context(|| {
                 format!(
@@ -207,10 +300,12 @@ fn apply_sqlite_migration_plan(
             })?;
         }
         tx.execute(
-            "INSERT INTO prodex_enterprise_schema_migrations
-             (version, name, checksum, applied_at_epoch)
-             VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-            rusqlite::params![version, migration.name, checksum],
+            "UPDATE prodex_enterprise_schema_migrations
+             SET applied_at_epoch = strftime('%s', 'now'),
+                 completed_at_epoch = strftime('%s', 'now'),
+                 outcome = 'succeeded'
+             WHERE version = ?1",
+            [version],
         )?;
         tx.commit()?;
         applied += 1;
@@ -253,8 +348,11 @@ pub(super) fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<u
             let checksum = migration_checksum(migration.name, migration.sql);
             tx.execute(
                 "INSERT INTO prodex_enterprise_schema_migrations
-                 (version, name, checksum, applied_at_epoch)
-                 VALUES ($1, $2, $3, EXTRACT(EPOCH FROM now())::BIGINT)",
+                 (version, name, checksum, applied_at_epoch, phase, actor, build,
+                  started_at_epoch, completed_at_epoch, outcome)
+                 VALUES ($1, $2, $3, EXTRACT(EPOCH FROM now())::BIGINT,
+                         'legacy', 'legacy', 'legacy', EXTRACT(EPOCH FROM now())::BIGINT,
+                         EXTRACT(EPOCH FROM now())::BIGINT, 'succeeded')",
                 &[&i64::from(migration.version.0), &migration.name, &checksum],
             )?;
         }
@@ -299,6 +397,21 @@ fn apply_postgres_migration_plan(
             bail!("gateway postgres enterprise migration ledger contains a version gap");
         }
         let mut tx = client.transaction()?;
+        tx.execute(
+            "INSERT INTO prodex_enterprise_schema_migrations
+             (version, name, checksum, applied_at_epoch, phase, actor, build,
+              started_at_epoch, completed_at_epoch, outcome)
+             VALUES ($1, $2, $3, EXTRACT(EPOCH FROM now())::BIGINT,
+                     $4, $5, $6, EXTRACT(EPOCH FROM now())::BIGINT, NULL, 'running')",
+            &[
+                &version,
+                &migration.name,
+                &checksum,
+                &postgres_migration_phase(migration.phase),
+                &MIGRATION_ACTOR,
+                &MIGRATION_BUILD,
+            ],
+        )?;
         tx.batch_execute(migration.sql).with_context(|| {
             format!(
                 "failed to apply gateway postgres enterprise migration {}",
@@ -306,10 +419,12 @@ fn apply_postgres_migration_plan(
             )
         })?;
         tx.execute(
-            "INSERT INTO prodex_enterprise_schema_migrations
-             (version, name, checksum, applied_at_epoch)
-             VALUES ($1, $2, $3, EXTRACT(EPOCH FROM now())::BIGINT)",
-            &[&version, &migration.name, &checksum],
+            "UPDATE prodex_enterprise_schema_migrations
+             SET applied_at_epoch = EXTRACT(EPOCH FROM now())::BIGINT,
+                 completed_at_epoch = EXTRACT(EPOCH FROM now())::BIGINT,
+                 outcome = 'succeeded'
+             WHERE version = $1",
+            &[&version],
         )?;
         tx.commit()?;
         applied += 1;

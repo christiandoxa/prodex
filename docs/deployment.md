@@ -246,17 +246,43 @@ baseline with:
 - an intentionally non-deployable `PRODEX_IMAGE_DIGEST` source placeholder.
   Every standalone release publishes a rendered `prodex-gateway-<version>.yaml`
   asset whose three workload references use the exact attested GHCR image
-  digest; deploy that release asset rather than the source template.
+  digest. The source template is for review and release rendering only; do not
+  apply it.
 
-The manifest creates and targets the dedicated `prodex` namespace. Apply it as
-a unit so the namespace labels, policies, and namespaced resources are
-installed together:
+The release manifest creates and targets the dedicated `prodex` namespace.
+Download and verify the release asset, then apply it as a unit so the namespace
+labels, policies, and namespaced resources are installed together:
 
 ```bash
-kubectl apply -f deploy/kubernetes/prodex-gateway.yaml
+version=0.408.7
+release_url="https://github.com/christiandoxa/prodex/releases/download/${version}"
+manifest="prodex-gateway-${version}.yaml"
+curl -fsSLo "${manifest}" "${release_url}/${manifest}"
+curl -fsSLo SHA256SUMS "${release_url}/SHA256SUMS"
+grep " ${manifest}$" SHA256SUMS | sha256sum --check --strict
+kubectl apply -f "${manifest}"
 ```
 
-Standalone release assets use the same command with the downloaded asset path.
+Verify the release asset's provenance before applying it. Never replace the
+rendered digest with a tag or apply `deploy/kubernetes/prodex-gateway.yaml`.
+
+The migration Job has an immutable pod template. On an upgrade, wait for the
+previous migration to complete successfully, delete only that completed Job,
+then apply the new release manifest and wait for its migration Job to finish:
+
+```bash
+set -euo pipefail
+kubectl wait --for=condition=complete --timeout=15m \
+  job/prodex-gateway-migration -n prodex
+kubectl delete job/prodex-gateway-migration -n prodex --wait=true
+kubectl apply -f "${manifest}"
+kubectl wait --for=condition=complete --timeout=15m \
+  job/prodex-gateway-migration -n prodex
+```
+
+If the existing Job is active or failed, do not delete it; inspect its logs and
+events, resolve the migration issue, and resume the upgrade. A first install
+uses the single `kubectl apply` command above.
 
 The gateway workload mounts `prodex-gateway-secrets`, which contains the
 gateway bearer token, provider API key references, PostgreSQL, and Redis

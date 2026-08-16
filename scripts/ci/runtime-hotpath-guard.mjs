@@ -529,6 +529,15 @@ const ALLOWLIST = Object.freeze([
     reason: "best-effort JSONL append belongs to the bounded background observability sink",
   },
   {
+    name: "local-rewrite-transport-split-log-symlink-check",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
+    id: "blocking-disk-io",
+    pattern: /\bstd::fs::symlink_metadata\(&current\)/,
+    maxHits: 1,
+    reason:
+      "bounded JSONL parent-component symlink rejection belongs to the background observability sink",
+  },
+  {
     name: "local-rewrite-test-fixture-disk-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
     id: "blocking-disk-io",

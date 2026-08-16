@@ -179,3 +179,31 @@ pub(super) fn presidio_finding_kind(entity_type: &str) -> FindingKind {
         _ => FindingKind::TenantSensitive,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::json_body::PresidioJsonString;
+    use super::*;
+
+    #[test]
+    fn presidio_rejects_malformed_finding_metadata() {
+        let error = runtime_presidio_findings(
+            &[PresidioJsonString {
+                path: "$.input".to_string(),
+                text: "safe".to_string(),
+                sensitive_kind: None,
+            }],
+            "",
+            &[PresidioAnalyzerResult {
+                start: 0,
+                end: 4,
+                score: f64::NAN,
+                entity_type: "PERSON".to_string(),
+                language: "en".to_string(),
+            }],
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("invalid confidence score"));
+    }
+}
