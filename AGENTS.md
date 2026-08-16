@@ -65,6 +65,16 @@ module in the owning crate.
 - Keep new modules private by default and re-export only deliberate public contracts.
 - When extracting code, move its tests, invariants, and module/type documentation with it.
 
+## Audit and delivery discipline
+
+- During a whole-source audit, accept a finding only with a concrete path and symbol/line, an
+  observed behavior, and a reproducible test, trace, or source-level proof. Do not implement
+  speculative findings or treat a review suggestion as evidence.
+- Preserve working behavior: fix the shared root cause, add a meaningful regression check for
+  every non-trivial fix, and run focused validation before broad CI.
+- Report the exact validation command and result. Never bypass a guard, hide a failure, or claim
+  completion when a required check was skipped; record residual risk and unexecuted coverage.
+
 ## Runtime Proxy Rules
 
 The runtime proxy is the most sensitive part of the project. Preserve the detailed contract in
