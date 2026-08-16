@@ -136,18 +136,18 @@ Runtime proxy design contract:
 
 ## Installation
 
-Replace `0.408.7` with the release you want.
+These commands install the latest published release.
 
 macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/christiandoxa/prodex/releases/download/0.408.7/install.sh | sh -s -- --release 0.408.7
+curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:PRODEX_RELEASE='0.408.7'; irm https://github.com/christiandoxa/prodex/releases/download/0.408.7/install.ps1 | iex
+irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex
 ```
 
 Managed profiles require Windows symbolic-link permission. Enable Developer
