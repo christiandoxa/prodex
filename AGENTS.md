@@ -357,6 +357,10 @@ every 5 seconds by default, `--raw` and `--once` are one-shot modes, the prior s
 visible during refresh, and `--all` preserves sort order while reporting hidden rows; snapshot
 style tests should use `--once`.
 
+Keep the README installation commands versionless and pointed at the latest published release
+(`releases/latest/download`). Do not replace them with versioned URLs or rewrite them during a
+release version bump; release notes may retain version-pinned commands for reproducibility.
+
 For an authorized release, follow the repository release scripts and
 `.github/workflows/standalone-release.yml`: synchronize version metadata, lockfiles, tests, and
 docs as required by their guards. The default release path is GitHub/container artifacts, not
