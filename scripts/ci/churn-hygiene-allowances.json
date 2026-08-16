@@ -1,5 +1,19 @@
 [
   {
+    "id": "audited-runtime-storage-release-docs-ci-0.408.7",
+    "requiredSubjects": [
+      "fix audited runtime, storage, release docs, and CI",
+      "chore(ci): record reviewed audited runtime/storage churn"
+    ],
+    "caps": {
+      "maxFiles": 85,
+      "maxBehaviorFiles": 80,
+      "maxLines": 3800,
+      "maxFileLines": 300
+    },
+    "reason": "Reviewed whole-source audit covering runtime continuity, gateway governance, storage reconciliation and migration provenance, Presidio fail-closed inspection, provider catalog correctness, release documentation, and CI fan-out; exact caps cover this bounded audited change and its reviewed churn record while default thresholds remain unchanged."
+  },
+  {
     "id": "audited-gateway-provider-ci-0.408.7",
     "requiredSubjects": [
       "fix: close audited gateway and provider gaps"
