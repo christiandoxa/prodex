@@ -225,7 +225,7 @@ fn gateway_handler_error_status(error: GatewayHandlerError) -> u16 {
         GatewayHandlerError::InvalidRequest | GatewayHandlerError::InvalidRequestTarget => 400,
         GatewayHandlerError::RequestBodyTooLarge => 413,
         GatewayHandlerError::Overloaded => 503,
-        GatewayHandlerError::Unavailable => 502,
+        GatewayHandlerError::Unavailable => 503,
     }
 }
 
@@ -565,6 +565,14 @@ fn parse_serve_options_with_replica_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn telemetry_uses_wire_status_for_unavailable_gateway_errors() {
+        assert_eq!(
+            gateway_handler_error_status(GatewayHandlerError::Unavailable),
+            503
+        );
+    }
 
     #[test]
     fn serve_listen_defaults_are_loopback_and_overrides_are_validated() {

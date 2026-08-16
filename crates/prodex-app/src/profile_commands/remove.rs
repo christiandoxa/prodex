@@ -12,7 +12,8 @@ use std::path::PathBuf;
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs, audit_log_event,
-    load_runtime_continuation_journal_with_recovery, load_runtime_continuations_with_recovery,
+    invalidate_pending_runtime_saves, load_runtime_continuation_journal_with_recovery,
+    load_runtime_continuations_with_recovery, rewrite_unavailable_profile_bindings,
     runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
     runtime_continuations_file_path, runtime_continuations_last_good_file_path,
     runtime_random_token, save_runtime_continuation_journal_for_profiles,
@@ -33,6 +34,7 @@ pub(crate) fn persist_pruned_profile_runtime_sidecars(
     paths: &AppPaths,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Result<()> {
+    invalidate_pending_runtime_saves(paths);
     if profiles.is_empty() {
         save_runtime_continuations_for_profiles(
             paths,
@@ -73,29 +75,6 @@ pub(crate) fn persist_pruned_profile_runtime_sidecars(
     }
 
     Ok(())
-}
-
-fn rewrite_unavailable_profile_bindings(
-    continuations: &mut crate::RuntimeContinuationStore,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) {
-    for bindings in [
-        &mut continuations.response_profile_bindings,
-        &mut continuations.session_profile_bindings,
-        &mut continuations.turn_state_bindings,
-        &mut continuations.session_id_bindings,
-    ] {
-        for binding in bindings.values_mut() {
-            if !profiles.contains_key(&binding.profile_name)
-                && binding.profile_name
-                    != prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
-            {
-                binding.profile_name =
-                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string();
-                binding.binding_identity = None;
-            }
-        }
-    }
 }
 
 pub(crate) fn finalize_recovered_profile_removals(

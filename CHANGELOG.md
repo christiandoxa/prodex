@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.408.7 - 2026-08-16
 
+### CLI
+
+- Publish refresh result after heartbeat timeout (`236d88d`)
+
 ### Misc
 
 - Close audited gateway and provider gaps (`cdfd4c2`)

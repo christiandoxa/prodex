@@ -408,11 +408,54 @@ impl GovernanceSqliteRepository {
         &self,
         command: GovernanceSessionRevokeCommand,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
+        self.governance_revoke_session_inner(command, None)
+    }
+
+    pub fn governance_revoke_session_idempotent(
+        &self,
+        command: GovernanceSessionRevokeCommand,
+        idempotency: GovernanceMutationIdempotency,
+    ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
+        self.governance_revoke_session_inner(command, Some(idempotency))
+    }
+
+    fn governance_revoke_session_inner(
+        &self,
+        command: GovernanceSessionRevokeCommand,
+        idempotency: Option<GovernanceMutationIdempotency>,
+    ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         validate_governance_session_revoke(&command)?;
+        let completed_at_unix_ms = command.audit_outbox.audit.event.occurred_at_unix_ms;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            match governance_idempotency_replay_sqlite(
+                &transaction,
+                command.tenant_id,
+                idempotency,
+            )? {
+                IdempotencyReplayDecision::ExecuteAndRecordPending => {
+                    insert_governance_idempotency_pending_sqlite(
+                        &transaction,
+                        command.tenant_id,
+                        idempotency,
+                    )?;
+                }
+                IdempotencyReplayDecision::AlreadyInProgress { .. } => {
+                    return Err(GovernanceRepositoryError::Conflict);
+                }
+                IdempotencyReplayDecision::Replay(response) => {
+                    transaction.commit().map_err(database_error)?;
+                    return if response == GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE {
+                        Ok(GovernanceWriteOutcome::Replayed)
+                    } else {
+                        Err(GovernanceRepositoryError::InvalidInput)
+                    };
+                }
+            }
+        }
         if load_governance_session_tx(&transaction, command.tenant_id, &command.session_id_hash)?
             .is_none()
         {
@@ -430,6 +473,15 @@ impl GovernanceSqliteRepository {
         if let Some((_revoked_at, reason)) = existing {
             if reason != command.reason_code {
                 return Err(GovernanceRepositoryError::Conflict);
+            }
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_governance_idempotency_sqlite(
+                    &transaction,
+                    command.tenant_id,
+                    idempotency,
+                    GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE,
+                    completed_at_unix_ms,
+                )?;
             }
             transaction.commit().map_err(database_error)?;
             return Ok(GovernanceWriteOutcome::Replayed);
@@ -459,6 +511,15 @@ impl GovernanceSqliteRepository {
             return Err(GovernanceRepositoryError::NotFound);
         }
         append_audit_outbox_tx(&transaction, command.audit_outbox)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            complete_governance_idempotency_sqlite(
+                &transaction,
+                command.tenant_id,
+                idempotency,
+                GOVERNANCE_SESSION_REVOKE_IDEMPOTENCY_RESPONSE,
+                completed_at_unix_ms,
+            )?;
+        }
         transaction.commit().map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
     }

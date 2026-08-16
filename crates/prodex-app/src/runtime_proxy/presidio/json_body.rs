@@ -50,7 +50,7 @@ pub(super) fn collect_json_content(
     )?;
     let coverage = if state.values.is_empty() {
         InspectionCoverage::Unsupported
-    } else if state.unsupported_modality {
+    } else if state.unsupported_modality || state.opaque_content {
         InspectionCoverage::Partial
     } else {
         InspectionCoverage::Full
@@ -66,6 +66,7 @@ struct PresidioJsonWalkState {
     values: Vec<PresidioJsonString>,
     total_text_bytes: usize,
     unsupported_modality: bool,
+    opaque_content: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -191,6 +192,13 @@ fn collect_json_object_field(
     state: &mut PresidioJsonWalkState,
 ) -> Result<(), PresidioJsonContentError> {
     let field_mode = json_string_inspection_mode(key);
+    if !inspect_all_strings
+        && field_mode == PresidioJsonInspectMode::SchemaOnly
+        && !value.is_null()
+        && !json_field_is_known_protocol_metadata(key)
+    {
+        state.opaque_content = true;
+    }
     let child_mode = if inspect_all_strings {
         PresidioJsonInspectMode::AllStrings
     } else {
@@ -252,6 +260,38 @@ fn json_string_inspection_mode(key: &str) -> PresidioJsonInspectMode {
         }
         _ => PresidioJsonInspectMode::SchemaOnly,
     }
+}
+
+fn json_field_is_known_protocol_metadata(key: &str) -> bool {
+    matches!(
+        key,
+        "background"
+            | "call_id"
+            | "conversation"
+            | "id"
+            | "include"
+            | "max_completion_tokens"
+            | "max_output_tokens"
+            | "model"
+            | "name"
+            | "parallel_tool_calls"
+            | "previous_response_id"
+            | "prompt_cache_key"
+            | "reasoning"
+            | "response_format"
+            | "role"
+            | "server_label"
+            | "service_tier"
+            | "store"
+            | "stream"
+            | "temperature"
+            | "top_k"
+            | "top_p"
+            | "truncation"
+            | "type"
+            | "user"
+            | "verbosity"
+    )
 }
 
 fn json_object_declares_tools(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -385,6 +425,27 @@ mod tests {
                 .values
                 .iter()
                 .all(|value| !value.path.contains("customer_email"))
+        );
+    }
+
+    #[test]
+    fn walker_downgrades_known_content_with_opaque_fields() {
+        let value = serde_json::json!({
+            "model": "example-model",
+            "input": "inspect me",
+            "opaque": {"secret": "must not be treated as covered"}
+        });
+
+        let content = collect_json_content(&value).unwrap();
+
+        assert_eq!(content.coverage, InspectionCoverage::Partial);
+        assert_eq!(
+            content
+                .values
+                .iter()
+                .map(|value| value.text.as_str())
+                .collect::<Vec<_>>(),
+            ["inspect me"]
         );
     }
 

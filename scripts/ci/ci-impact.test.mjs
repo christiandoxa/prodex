@@ -42,7 +42,6 @@ test("classifies docs and npm release tooling as lightweight", () => {
     "scripts/npm/release-run.mjs",
     "scripts/ci/release-metadata-only-guard.mjs",
     "scripts/ci/version-metadata-release-guard.mjs",
-    "scripts/ci/test-impact-manifest.mjs",
   ]);
 
   assert.equal(result.heavy, false);
@@ -50,12 +49,22 @@ test("classifies docs and npm release tooling as lightweight", () => {
   assert.deepEqual(result.unknownPaths, []);
 });
 
-test("classifies storage postgres proof helper as lightweight", () => {
-  const result = classifyChangedPaths(["scripts/ci/storage-postgres-proof.mjs"]);
+test("classifies PostgreSQL proof, backup, and impact classifier paths as heavy", () => {
+  const paths = [
+    "scripts/ci/backup-restore-drill.mjs",
+    "scripts/ci/backup-restore-drill.test.mjs",
+    "scripts/ci/ci-impact.mjs",
+    "scripts/ci/ci-impact.test.mjs",
+    "scripts/ci/storage-postgres-proof.mjs",
+    "scripts/ci/storage-postgres-proof.test.mjs",
+    "scripts/ci/test-impact-manifest.json",
+    "scripts/ci/test-impact-manifest.mjs",
+  ];
+  const result = classifyChangedPaths(paths);
 
-  assert.equal(result.heavy, false);
-  assert.equal(result.reason, "only lightweight docs/npm/release metadata paths changed");
-  assert.deepEqual(result.lightPaths, ["scripts/ci/storage-postgres-proof.mjs"]);
+  assert.equal(result.heavy, true);
+  assert.deepEqual(result.heavyPaths, paths.slice().sort());
+  assert.deepEqual(result.lightPaths, []);
   assert.deepEqual(result.unknownPaths, []);
 });
 

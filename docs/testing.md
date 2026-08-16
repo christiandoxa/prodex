@@ -24,9 +24,10 @@ Prodex test speed should come from process-level sharding first, not from making
   them. The weekly CI schedule skips those duplicate Ubuntu owners because the
   daily full-test workflow already runs their canonical coverage; Windows and
   the schedule-only stress, fuzz, security, and integration lanes still run.
-- The generated runtime-proxy matrix uses weighted packs and keeps the two
-  admission process groups in separate packs; every runtime command remains
-  internally serial with `--test-threads=1`.
+- The generated runtime-proxy matrix gives each manifest-owned suite its own
+  job; filters within a suite remain internally serial with
+  `--test-threads=1`, and the two admission process groups stay in separate
+  jobs.
 - The static process-guard lane runs `docs:provider-capabilities:check` with its
   locked Rust toolchain, keeping provider capability drift visible in CI.
 - Push and pull-request CI keep serialized and continuation stress quarantine.
@@ -62,6 +63,11 @@ Context evidence compilation is cheaper without adding more runner jobs to the
 already-wide matrix. Windows `prodex-app` partitions cover
 the runtime-broker and runtime-launch namespaces; those tests are not repeated
 in a second dedicated Windows job.
+
+PostgreSQL backup/restore and accounting-proof helpers, plus the impact
+classifier and manifest that gate them, are always heavy-impact paths. Changes
+to those CI proofs cannot take the lightweight path by changing their own
+classification rules.
 
 When the classifier returns `heavy=false`, cheap and broadly relevant checks still run: formatting, docs lint, secret scan, process guards, and release sync. Use this path for docs-only or similarly low-impact changes once the classifier recognizes them.
 

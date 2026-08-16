@@ -7,7 +7,8 @@ use prodex_storage_postgres::{
     GOVERNANCE_LIFECYCLE_MIGRATION, GOVERNANCE_REVOCATION_MIGRATION,
     GOVERNANCE_SESSION_INDEX_MIGRATION, GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
     INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS, PostgresMigrationPhase,
-    PostgresMigrationVersion, REQUIRED_POSTGRES_SCHEMA_VERSION, SIEM_OUTBOX_LEASING_MIGRATION,
+    PostgresMigrationVersion, REQUIRED_POSTGRES_SCHEMA_VERSION,
+    RESERVATION_STORAGE_SCOPE_MIGRATION, SIEM_OUTBOX_LEASING_MIGRATION,
     TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION, VALIDATE_DEFERRED_CONSTRAINTS_MIGRATION,
     postgres_governance_pointer_statements,
 };
@@ -18,6 +19,17 @@ fn migration_creates_only_missing_rls_policies() {
     let sql = INITIAL_TENANT_ACCOUNTING_MIGRATION.sql;
     assert!(sql.contains("FROM pg_policies"));
     assert!(sql.contains("policyname = tenant_table || '_tenant_isolation'"));
+}
+
+#[test]
+fn reservation_storage_scope_backfill_fails_closed_on_ambiguous_counters() {
+    let sql = RESERVATION_STORAGE_SCOPE_MIGRATION.sql;
+    assert!(sql.contains("multiple budget counters match"));
+    assert!(sql.contains("SELECT COUNT(*)"));
+    assert!(sql.contains("IS NOT DISTINCT FROM"));
+    assert!(sql.contains("virtual_key:"));
+    assert!(!sql.contains("ORDER BY counter.updated_at_unix_ms"));
+    assert!(!sql.contains("LIMIT 1"));
 }
 
 #[test]

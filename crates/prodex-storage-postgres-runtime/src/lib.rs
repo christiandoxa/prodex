@@ -8,10 +8,14 @@
 use std::{fmt, future::Future, time::Duration};
 
 mod governance;
+mod reservation_queries;
 mod tls;
 mod types;
 pub use governance::PostgresSiemOutboxClaim;
 pub use governance::{GovernanceInvalidationOutboxCleanup, PostgresGovernanceInvalidation};
+use reservation_queries::{
+    load_by_call_for_storage_key_in_transaction, stored_reservation_from_row,
+};
 pub use tls::{PostgresTlsConfig, PostgresTlsMode, connect_blocking};
 pub use types::{
     ExpiredReservationCandidate, IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome,
@@ -461,6 +465,12 @@ impl PostgresRepository {
         let released = command.record.reserved.saturating_sub(command.actual);
         let released = usage_to_i64(released)?;
         let storage_scope = command.storage_key.storage_scope();
+        let virtual_key_id = command
+            .storage_key
+            .virtual_key_id
+            .map(VirtualKeyId::as_uuid);
+        let created_at_unix_ms = to_i64(command.record.created_at_unix_ms)?;
+        let expires_at_unix_ms = to_i64(command.record.expires_at_unix_ms)?;
 
         let mut client = self
             .pool
@@ -495,6 +505,9 @@ impl PostgresRepository {
                     &released.cost_micros,
                     &RequestId::new().as_uuid(),
                     &RequestId::new().as_uuid(),
+                    &virtual_key_id,
+                    &created_at_unix_ms,
+                    &expires_at_unix_ms,
                 ],
             )
             .await
@@ -503,10 +516,12 @@ impl PostgresRepository {
         let outcome = if row.is_some() {
             IdempotentWriteOutcome::Applied
         } else {
-            let stored = load_by_call_in_transaction(
+            let stored = load_by_call_for_storage_key_in_transaction(
                 &transaction,
                 command.record.tenant_id,
                 command.record.call_id,
+                &storage_scope,
+                virtual_key_id,
             )
             .await?
             .ok_or(PostgresRuntimeError::StateConflict)?;
@@ -593,6 +608,12 @@ impl PostgresRepository {
         let now_unix_ms = to_i64(command.now_unix_ms)?;
         let reserved = usage_to_i64(command.record.reserved)?;
         let storage_scope = command.storage_key.storage_scope();
+        let virtual_key_id = command
+            .storage_key
+            .virtual_key_id
+            .map(VirtualKeyId::as_uuid);
+        let created_at_unix_ms = to_i64(command.record.created_at_unix_ms)?;
+        let expires_at_unix_ms = to_i64(command.record.expires_at_unix_ms)?;
 
         let mut client = self
             .pool
@@ -622,6 +643,9 @@ impl PostgresRepository {
                     &reserved.cost_micros,
                     &storage_scope,
                     &RequestId::new().as_uuid(),
+                    &virtual_key_id,
+                    &created_at_unix_ms,
+                    &expires_at_unix_ms,
                 ],
             )
             .await
@@ -630,10 +654,12 @@ impl PostgresRepository {
         let outcome = if row.is_some() {
             IdempotentWriteOutcome::Applied
         } else {
-            let stored = load_by_call_in_transaction(
+            let stored = load_by_call_for_storage_key_in_transaction(
                 &transaction,
                 command.record.tenant_id,
                 command.record.call_id,
+                &storage_scope,
+                virtual_key_id,
             )
             .await?
             .ok_or(PostgresRuntimeError::StateConflict)?;
@@ -828,47 +854,6 @@ async fn load_by_idempotency_in_transaction(
     row.map(stored_reservation_from_row).transpose()
 }
 
-fn stored_reservation_from_row(row: Row) -> Result<StoredReservation, PostgresRuntimeError> {
-    let tenant_id = TenantId::from_uuid(row.get::<_, Uuid>("tenant_id"));
-    let reservation_id = ReservationId::from_uuid(row.get::<_, Uuid>("reservation_id"));
-    let call_id = CallId::from_uuid(row.get::<_, Uuid>("call_id"));
-    let virtual_key_id = row
-        .get::<_, Option<Uuid>>("virtual_key_id")
-        .map(VirtualKeyId::from_uuid);
-    let idempotency_key = IdempotencyKey::new(row.get::<_, String>("idempotency_key"))
-        .map_err(|_| PostgresRuntimeError::InvalidDatabaseState)?;
-    let committed_at = row.get::<_, Option<i64>>("committed_at_unix_ms");
-    let released_at = row.get::<_, Option<i64>>("released_at_unix_ms");
-    let committed_usage =
-        optional_usage_from_row(&row, "committed_tokens", "committed_cost_micros")?;
-    let released_usage = optional_usage_from_row(&row, "released_tokens", "released_cost_micros")?;
-    let state = if committed_at.is_some() {
-        StoredReservationState::Committed
-    } else if released_at.is_some() {
-        StoredReservationState::Released
-    } else {
-        StoredReservationState::Active
-    };
-    Ok(StoredReservation {
-        record: ReservationRecord {
-            tenant_id,
-            call_id,
-            reservation_id,
-            reserved: UsageAmount::new(
-                from_i64(row.get("reserved_tokens"))?,
-                from_i64(row.get("reserved_cost_micros"))?,
-            ),
-            created_at_unix_ms: from_i64(row.get("created_at_unix_ms"))?,
-            expires_at_unix_ms: from_i64(row.get("expires_at_unix_ms"))?,
-        },
-        virtual_key_id,
-        idempotency_key,
-        state,
-        committed_usage,
-        released_usage,
-    })
-}
-
 fn expired_reservation_candidate_from_row(
     tenant_id: TenantId,
     row: Row,
@@ -929,24 +914,6 @@ async fn classify_reservation_limit_rejection(
         return Ok(ReserveRejection::RequestBudgetExceeded);
     }
     Ok(ReserveRejection::BudgetLimitExceeded)
-}
-
-fn optional_usage_from_row(
-    row: &Row,
-    tokens_column: &str,
-    cost_column: &str,
-) -> Result<Option<UsageAmount>, PostgresRuntimeError> {
-    match (
-        row.get::<_, Option<i64>>(tokens_column),
-        row.get::<_, Option<i64>>(cost_column),
-    ) {
-        (Some(tokens), Some(cost_micros)) => Ok(Some(UsageAmount::new(
-            from_i64(tokens)?,
-            from_i64(cost_micros)?,
-        ))),
-        (None, None) => Ok(None),
-        _ => Err(PostgresRuntimeError::InvalidDatabaseState),
-    }
 }
 
 fn usage_to_i64(amount: UsageAmount) -> Result<SignedUsageAmount, PostgresRuntimeError> {

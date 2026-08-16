@@ -325,12 +325,15 @@ mod tests {
     }
 
     #[test]
-    fn buffered_async_response_strips_standard_hop_by_hop_headers() {
+    fn buffered_async_response_forwards_end_to_end_headers() {
         let server = TinyServer::http("127.0.0.1:0").expect("test server should bind");
         let addr = server.server_addr().to_ip().unwrap();
         let handle = thread::spawn(move || {
             let request = server.recv().expect("request should arrive");
             let response = TinyResponse::from_string("ok")
+                .with_header(
+                    TinyHeader::from_bytes("Date", "Thu, 01 Jan 1970 00:00:00 GMT").unwrap(),
+                )
                 .with_header(TinyHeader::from_bytes("Server", "upstream").unwrap())
                 .with_header(TinyHeader::from_bytes("x-codex-turn-state", "keep-me").unwrap());
             request.respond(response).expect("response should send");
@@ -351,8 +354,21 @@ mod tests {
         handle.join().expect("test server should finish");
 
         assert!(
-            !parts.headers.iter().any(|(name, _)| name == "server"),
-            "buffered response must not forward hop-by-hop/runtime-local headers"
+            parts.headers.iter().any(|(name, value)| {
+                name == "date" && value == b"Thu, 01 Jan 1970 00:00:00 GMT"
+            })
+        );
+        assert!(
+            parts
+                .headers
+                .iter()
+                .any(|(name, value)| name == "server" && value == b"upstream")
+        );
+        assert!(
+            !parts
+                .headers
+                .iter()
+                .any(|(name, _)| name == "content-length")
         );
         assert!(parts.headers.iter().any(|(name, value)| {
             name == "x-codex-turn-state" && value.as_slice() == b"keep-me"

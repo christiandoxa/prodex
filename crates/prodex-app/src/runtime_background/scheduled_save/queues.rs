@@ -5,9 +5,10 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex};
 
 use crate::{
-    RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD, RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE,
-    RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD, RUNTIME_STATE_SAVE_QUEUE,
-    RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
+    AppPaths, RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD,
+    RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE, RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
+    RUNTIME_STATE_SAVE_QUEUE, RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
+    runtime_continuation_journal_file_path,
 };
 
 use super::super::worker_spawn::spawn_runtime_background_worker_or_log;
@@ -68,6 +69,32 @@ pub(crate) fn runtime_continuation_journal_queue_backlog() -> usize {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .len()
+}
+
+pub(crate) fn invalidate_pending_runtime_saves(paths: &AppPaths) {
+    if let Some(queue) = RUNTIME_STATE_SAVE_QUEUE.get() {
+        let removed = queue
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&paths.state_file)
+            .is_some();
+        if removed {
+            queue.wake.notify_one();
+        }
+    }
+
+    if let Some(queue) = RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE.get() {
+        let removed = queue
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&runtime_continuation_journal_file_path(paths))
+            .is_some();
+        if removed {
+            queue.wake.notify_one();
+        }
+    }
 }
 
 #[cfg(test)]

@@ -588,11 +588,19 @@ pub const RECONCILE_USAGE_STATEMENT: PostgresStatement = PostgresStatement {
     name: "reconcile_usage_atomically",
     sql: r#"
 WITH locked_reservation AS (
-    SELECT tenant_id, reservation_id, call_id, virtual_key_id, released_at_unix_ms
+    SELECT tenant_id, reservation_id, call_id, virtual_key_id, storage_scope,
+           reserved_tokens, reserved_cost_micros, created_at_unix_ms,
+           expires_at_unix_ms, released_at_unix_ms
     FROM prodex_reservations
     WHERE tenant_id = $1
       AND reservation_id = $2
       AND call_id = $3
+      AND virtual_key_id IS NOT DISTINCT FROM $14
+      AND storage_scope = $9
+      AND reserved_tokens = $4
+      AND reserved_cost_micros = $5
+      AND created_at_unix_ms = $15
+      AND expires_at_unix_ms = $16
       AND committed_at_unix_ms IS NULL
     FOR UPDATE
 ), update_counter AS (
@@ -609,8 +617,8 @@ WITH locked_reservation AS (
         committed_cost_micros = counter.committed_cost_micros + $7,
         updated_at_unix_ms = $8
     FROM locked_reservation AS reservation
-    WHERE counter.tenant_id = $1
-      AND counter.storage_scope = $9
+    WHERE counter.tenant_id = reservation.tenant_id
+      AND counter.storage_scope = reservation.storage_scope
       AND counter.reserved_tokens >= CASE
           WHEN reservation.released_at_unix_ms IS NULL THEN $4::BIGINT
           ELSE 0
@@ -630,6 +638,14 @@ WITH locked_reservation AS (
         END
     WHERE tenant_id = $1
       AND reservation_id = $2
+      AND call_id = $3
+      AND virtual_key_id IS NOT DISTINCT FROM $14
+      AND storage_scope = $9
+      AND reserved_tokens = $4
+      AND reserved_cost_micros = $5
+      AND created_at_unix_ms = $15
+      AND expires_at_unix_ms = $16
+      AND committed_at_unix_ms IS NULL
       AND EXISTS (SELECT 1 FROM update_counter)
     RETURNING tenant_id
 ), committed_ledger AS (
@@ -677,31 +693,49 @@ pub const RECOVER_EXPIRED_RESERVATION_STATEMENT: PostgresStatement = PostgresSta
     name: "recover_expired_reservation",
     sql: r#"
 WITH locked_reservation AS (
-    SELECT tenant_id, reservation_id, call_id, reserved_tokens, reserved_cost_micros
+    SELECT tenant_id, reservation_id, call_id, virtual_key_id, storage_scope,
+           reserved_tokens, reserved_cost_micros, created_at_unix_ms,
+           expires_at_unix_ms
     FROM prodex_reservations
     WHERE tenant_id = $1
       AND reservation_id = $2
       AND call_id = $3
+      AND virtual_key_id IS NOT DISTINCT FROM $9
+      AND storage_scope = $7
+      AND reserved_tokens = $5::BIGINT
+      AND reserved_cost_micros = $6::BIGINT
+      AND created_at_unix_ms = $10
+      AND expires_at_unix_ms = $11
       AND committed_at_unix_ms IS NULL
       AND released_at_unix_ms IS NULL
       AND expires_at_unix_ms <= $4
     FOR UPDATE
 ), update_counter AS (
-    UPDATE prodex_budget_counters
-    SET reserved_tokens = reserved_tokens - $5,
-        reserved_cost_micros = reserved_cost_micros - $6,
+    UPDATE prodex_budget_counters AS counter
+    SET reserved_tokens = counter.reserved_tokens - reservation.reserved_tokens,
+        reserved_cost_micros = counter.reserved_cost_micros - reservation.reserved_cost_micros,
         updated_at_unix_ms = $4
-    WHERE tenant_id = $1
-      AND storage_scope = $7
-      AND reserved_tokens >= $5
-      AND reserved_cost_micros >= $6
-      AND EXISTS (SELECT 1 FROM locked_reservation)
-    RETURNING tenant_id
+    FROM locked_reservation AS reservation
+    WHERE counter.tenant_id = reservation.tenant_id
+      AND counter.storage_scope = reservation.storage_scope
+      AND counter.reserved_tokens >= reservation.reserved_tokens
+      AND counter.reserved_cost_micros >= reservation.reserved_cost_micros
+    RETURNING counter.tenant_id
 ), mark_reservation AS (
     UPDATE prodex_reservations
     SET released_at_unix_ms = $4
     WHERE tenant_id = $1
       AND reservation_id = $2
+      AND call_id = $3
+      AND virtual_key_id IS NOT DISTINCT FROM $9
+      AND storage_scope = $7
+      AND reserved_tokens = $5::BIGINT
+      AND reserved_cost_micros = $6::BIGINT
+      AND created_at_unix_ms = $10
+      AND expires_at_unix_ms = $11
+      AND committed_at_unix_ms IS NULL
+      AND released_at_unix_ms IS NULL
+      AND expires_at_unix_ms <= $4
       AND EXISTS (SELECT 1 FROM update_counter)
     RETURNING tenant_id
 )

@@ -25,5 +25,4 @@ pub(crate) use websocket::{
 };
 
 #[cfg(test)]
-#[path = "presidio/tests.rs"]
 mod tests;

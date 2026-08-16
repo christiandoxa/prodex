@@ -419,7 +419,7 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
                 "resp-external".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: now - 10,
                 },
             )]),

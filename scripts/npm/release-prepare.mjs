@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import {
   cargoTomlPath,
   gatewaySdkPackageName,
@@ -23,6 +24,10 @@ const DOC_VERSION_PATTERNS = [
   {
     label: "current local version",
     pattern: /(The current local version in this repo is `)([^`]+)(`)/g,
+  },
+  {
+    label: "release installer version",
+    pattern: /^(version=|\$version\s*=\s*['"])([^'"\r\n]+)(?:['"])?$/gm,
   },
 ];
 
@@ -71,7 +76,7 @@ function printHelp() {
       "Runs release prep guards without publishing or mutating tracked files.",
       "",
       "Checks:",
-      "  - Cargo/npm/docs version sync and available lockfiles",
+      "  - Cargo/npm/docs version sync and workspace lock entries",
       "  - generated changelog freshness",
       "  - docs markdown lint",
       "  - upstream Codex compatibility baseline",
@@ -215,25 +220,49 @@ async function checkCargoManifest(version, errors) {
   expectEqual(errors, "Cargo.toml workspace.package version", workspaceVersion, version);
 }
 
+function parseCargoLockEntries(contents) {
+  return contents
+    .split(/\r?\n\[\[package\]\]\r?\n/)
+    .slice(1)
+    .map((block) => ({
+      name: block.match(/(?:^|\n)name = "([^"]+)"/)?.[1] ?? null,
+      version: block.match(/(?:^|\n)version = "([^"]+)"/)?.[1] ?? null,
+      source: block.match(/(?:^|\n)source = "([^"]+)"/)?.[1] ?? null,
+    }))
+    .filter((entry) => entry.name);
+}
+
+export function cargoLockVersionErrors(contents, workspacePackageNames, version) {
+  const entries = parseCargoLockEntries(contents);
+  const errors = [];
+
+  for (const packageName of workspacePackageNames) {
+    const entry = entries.find((candidate) => candidate.name === packageName && !candidate.source);
+    if (!entry) {
+      errors.push(`Cargo.lock ${packageName} package entry missing version`);
+      continue;
+    }
+    expectEqual(errors, `Cargo.lock ${packageName} version`, entry.version, version);
+  }
+
+  return errors;
+}
+
 async function checkCargoLock(version, errors) {
   const relativePath = "Cargo.lock";
   if (!(await fileExists(relativePath))) {
     process.stdout.write("release metadata: Cargo.lock absent, lockfile version check skipped\n");
-    return;
+    return null;
   }
 
   const contents = await fs.readFile(path.join(repoRoot, relativePath), "utf8");
-  for (const packageName of ["prodex"]) {
-    const packageBlock = contents
-      .split(/\n\[\[package\]\]\n/)
-      .find((block) => new RegExp(`(?:^|\\n)name = "${packageName}"(?:\\n|$)`).test(block));
-    const match = packageBlock?.match(/(?:^|\n)version = "([^"]+)"/);
-    if (!match) {
-      errors.push(`Cargo.lock ${packageName} package entry missing version`);
-      continue;
-    }
-    expectEqual(errors, `Cargo.lock ${packageName} version`, match[1], version);
-  }
+  const metadata = await readCargoMetadata();
+  const workspaceMemberIds = new Set(metadata.workspace_members ?? []);
+  const workspacePackageNames = (metadata.packages ?? [])
+    .filter((packageMetadata) => workspaceMemberIds.has(packageMetadata.id))
+    .map((packageMetadata) => packageMetadata.name);
+  errors.push(...cargoLockVersionErrors(contents, workspacePackageNames, version));
+  return metadata;
 }
 
 function packageNameForLockEntry(lockPath, entry) {
@@ -242,6 +271,9 @@ function packageNameForLockEntry(lockPath, entry) {
   }
   if (lockPath === "npm/prodex" || lockPath === "node_modules/@christiandoxa/prodex") {
     return mainPackageName;
+  }
+  if (lockPath === "npm/prodex-gateway-sdk") {
+    return gatewaySdkPackageName;
   }
   for (const spec of platformPackages) {
     const slug = packageSlug(spec.packageName);
@@ -258,7 +290,11 @@ function packageNameForLockEntry(lockPath, entry) {
 
 function validateNpmLockEntry(relativePath, packageName, entry, version, errors) {
   if (entry?.link === true && entry.version === undefined) return;
-  if (packageName === mainPackageName || platformPackages.some((spec) => spec.packageName === packageName)) {
+  if (
+    packageName === mainPackageName ||
+    packageName === gatewaySdkPackageName ||
+    platformPackages.some((spec) => spec.packageName === packageName)
+  ) {
     expectEqual(errors, `${relativePath} ${packageName} lock version`, entry.version, version);
   }
 }
@@ -280,6 +316,12 @@ function validateNpmLock(lock, relativePath, version, errors) {
   }
 }
 
+export function npmLockVersionErrors(lock, relativePath, version) {
+  const errors = [];
+  validateNpmLock(lock, relativePath, version, errors);
+  return errors;
+}
+
 async function checkNpmLockfiles(version, errors) {
   const present = [];
   for (const relativePath of KNOWN_NPM_LOCKFILE_PATHS) {
@@ -295,7 +337,7 @@ async function checkNpmLockfiles(version, errors) {
 
   for (const relativePath of present) {
     const lock = JSON.parse(await fs.readFile(path.join(repoRoot, relativePath), "utf8"));
-    validateNpmLock(lock, relativePath, version, errors);
+    errors.push(...npmLockVersionErrors(lock, relativePath, version));
   }
 }
 
@@ -305,7 +347,7 @@ async function checkReleaseMetadata() {
   await checkCargoManifest(version, errors);
   await checkPackageManifests(version, errors);
   await checkDocs(version, errors);
-  await checkCargoLock(version, errors);
+  const cargoMetadata = await checkCargoLock(version, errors);
   await checkNpmLockfiles(version, errors);
 
   if (errors.length > 0) {
@@ -320,15 +362,16 @@ async function checkReleaseMetadata() {
   }
 
   process.stdout.write(`release metadata: ok (${version})\n`);
+  return cargoMetadata;
 }
 
-async function checkCargoPublishOrder(args) {
+async function checkCargoPublishOrder(args, metadata) {
   if (args.dryRun) {
     process.stdout.write("dry-run: cargo-publish-order: cargo metadata --locked --no-deps --format-version 1\n");
     return;
   }
 
-  const order = cargoPublishOrderFromMetadata(await readCargoMetadata());
+  const order = cargoPublishOrderFromMetadata(metadata ?? (await readCargoMetadata()));
   const first = order[0]?.name ?? "<none>";
   const last = order.at(-1)?.name ?? "<none>";
   process.stdout.write(`cargo publish order: ok (${order.length} package(s), first ${first}, last ${last})\n`);
@@ -341,8 +384,8 @@ async function main() {
     return;
   }
 
-  await checkReleaseMetadata();
-  await checkCargoPublishOrder(args);
+  const cargoMetadata = await checkReleaseMetadata();
+  await checkCargoPublishOrder(args, cargoMetadata);
   const changelogArgs = [
     "scripts/npm/changelog.mjs",
     args.changelogMode === "ci" ? "--ci-check" : "--check",
@@ -369,10 +412,12 @@ async function main() {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`release-prepare: ${message}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`release-prepare: ${message}\n`);
+    process.exitCode = 1;
+  }
 }

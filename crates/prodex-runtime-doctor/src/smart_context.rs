@@ -8,6 +8,7 @@ use crate::log_fields::{
 use crate::parsing::RuntimeDoctorParsedLogLine;
 #[cfg(test)]
 use crate::summarize_runtime_log_tail;
+use runtime_proxy_crate::runtime_proxy_redact_log_field_value;
 
 #[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
 pub struct RuntimeDoctorSmartContextAutopilotEvent {
@@ -75,13 +76,22 @@ pub fn runtime_doctor_parse_smart_context_autopilot_line(
         return None;
     }
 
-    let mut fields = runtime_proxy_log_fields(&message);
+    let mut fields = runtime_proxy_log_fields(&message)
+        .into_iter()
+        .map(|(key, value)| {
+            let value = runtime_proxy_redact_log_field_value(&key, &value);
+            (key, value)
+        })
+        .collect::<BTreeMap<_, _>>();
     if let Some(value) = parsed_line.json()
         && let Some(json_fields) = value.get("fields").and_then(serde_json::Value::as_object)
     {
         for (key, value) in json_fields {
             if let Some(string_value) = runtime_doctor_json_field_string(value) {
-                fields.insert(key.clone(), string_value);
+                fields.insert(
+                    key.clone(),
+                    runtime_proxy_redact_log_field_value(key, &string_value),
+                );
             }
         }
     }

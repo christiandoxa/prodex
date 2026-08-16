@@ -55,7 +55,7 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p backups
 prodex quota --all --once >/dev/null # optional health read before snapshot
 tar --numeric-owner -C "$PRODEX_HOME" -czf "backups/prodex-home-$stamp.tgz" .
-tar --numeric-owner -C "${PRODEX_AUDIT_LOG_DIR:-$PRODEX_HOME}" -czf "backups/prodex-audit-$stamp.tgz" . || true
+tar --numeric-owner -C "${PRODEX_AUDIT_LOG_DIR:-$PRODEX_HOME}" -czf "backups/prodex-audit-$stamp.tgz" .
 tar --numeric-owner -C "${PRODEX_RUNTIME_LOG_DIR:-/tmp}" -czf "backups/prodex-runtime-logs-$stamp.tgz" . || true
 tar --numeric-owner -C "${PRODEX_CONFIG_PUBLICATION_TRANSPORT_ROOT:-$PRODEX_HOME}" -czf "backups/prodex-config-publication-$stamp.tgz" config-publication || true
 ```
@@ -115,6 +115,8 @@ outside the cluster. A full database dump includes
 `prodex_config_publication_events`, `prodex_config_publication_replicas`, and
 `prodex_config_publication_acks`, plus the governance invalidation outbox,
 replica, and acknowledgement tables; do not exclude those tables.
+It also includes `prodex_enterprise_schema_migrations`, whose phase, actor/build,
+timing, and outcome fields are part of the restore provenance.
 
 Backup:
 

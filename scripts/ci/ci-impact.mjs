@@ -4,6 +4,17 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ciImpactCategory } from "./test-impact-manifest.mjs";
 
+const ALWAYS_HEAVY_PATHS = new Set([
+  "scripts/ci/backup-restore-drill.mjs",
+  "scripts/ci/backup-restore-drill.test.mjs",
+  "scripts/ci/ci-impact.mjs",
+  "scripts/ci/ci-impact.test.mjs",
+  "scripts/ci/storage-postgres-proof.mjs",
+  "scripts/ci/storage-postgres-proof.test.mjs",
+  "scripts/ci/test-impact-manifest.json",
+  "scripts/ci/test-impact-manifest.mjs",
+]);
+
 export function normalizeChangedPath(filePath) {
   return String(filePath ?? "")
     .trim()
@@ -12,7 +23,7 @@ export function normalizeChangedPath(filePath) {
 }
 
 function pathCategory(filePath) {
-  return ciImpactCategory(filePath);
+  return ALWAYS_HEAVY_PATHS.has(filePath) ? "heavy" : ciImpactCategory(filePath);
 }
 
 export function classifyChangedPaths(changedPaths) {

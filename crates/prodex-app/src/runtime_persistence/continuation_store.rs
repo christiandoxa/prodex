@@ -1,4 +1,3 @@
-#[cfg(test)]
 use super::AppStateIoExt;
 use super::{
     AppState, ProfileEntry, RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT, RecoveredLoad,
@@ -7,7 +6,7 @@ use super::{
     runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
     runtime_continuations_file_path, runtime_continuations_last_good_file_path,
     runtime_sidecar_generation_error_is_stale, runtime_take_fault_injection,
-    save_versioned_json_file_with_fence,
+    save_versioned_json_file_with_fence, state_last_good_file_path,
 };
 use anyhow::{Result, bail};
 use chrono::Local;
@@ -44,6 +43,29 @@ pub(crate) fn merge_runtime_continuation_store(
         Local::now().timestamp(),
         runtime_continuation_compaction_policy(),
     )
+}
+
+pub(crate) fn rewrite_unavailable_profile_bindings(
+    continuations: &mut RuntimeContinuationStore,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) {
+    for bindings in [
+        &mut continuations.response_profile_bindings,
+        &mut continuations.session_profile_bindings,
+        &mut continuations.turn_state_bindings,
+        &mut continuations.session_id_bindings,
+    ] {
+        for binding in bindings.values_mut() {
+            if !profiles.contains_key(&binding.profile_name)
+                && binding.profile_name
+                    != prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+            {
+                binding.profile_name =
+                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string();
+                binding.binding_identity = None;
+            }
+        }
+    }
 }
 
 pub(crate) fn load_runtime_continuations_with_recovery(
@@ -129,15 +151,22 @@ pub(crate) fn save_runtime_continuation_journal_for_profiles(
     profiles: &BTreeMap<String, ProfileEntry>,
     saved_at: i64,
 ) -> Result<()> {
-    let incoming = compact_runtime_continuation_store(continuations.clone(), profiles);
+    let profiles = if paths.state_file.exists() || state_last_good_file_path(paths).exists() {
+        AppState::load_with_recovery_unlocked(paths)?.value.profiles
+    } else {
+        profiles.clone()
+    };
+    let mut incoming = compact_runtime_continuation_store(continuations.clone(), &profiles);
+    rewrite_unavailable_profile_bindings(&mut incoming, &profiles);
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        let existing = load_runtime_continuation_journal_with_recovery(paths, profiles)?;
+        let mut existing = load_runtime_continuation_journal_with_recovery(paths, &profiles)?;
+        rewrite_unavailable_profile_bindings(&mut existing.value.continuations, &profiles);
         let journal = RuntimeContinuationJournal {
             saved_at: saved_at.max(existing.value.saved_at),
             continuations: merge_runtime_continuation_store(
                 &existing.value.continuations,
                 &incoming,
-                profiles,
+                &profiles,
             ),
         };
         match save_versioned_json_file_with_fence(

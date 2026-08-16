@@ -15,7 +15,7 @@ Windows must permit symbolic-link creation for managed profiles. Enable
 Developer Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an
 administrator before importing or creating a profile.
 
-Install the latest published release (`0.408.6`) using the
+Install a published release using the
 [download, inspect, and verify instructions in the README](README.md#installation).
 
 After the installer completes:

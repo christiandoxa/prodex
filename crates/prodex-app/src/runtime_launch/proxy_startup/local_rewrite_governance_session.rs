@@ -1,16 +1,17 @@
+mod revoke;
 mod self_service;
+
+use revoke::runtime_gateway_governance_session_revoke;
 
 use crate::RuntimeProxyRequest;
 use prodex_domain::{
-    AuditAction, AuditEvent, AuditEventId, AuditOutcome, AuditResource, Channel, CredentialScope,
-    DataClassification, PolicyRevisionId, Principal, PrincipalId, SessionPolicyContext,
-    TenantContext, TenantId, compute_audit_chain_digest,
+    Channel, CredentialScope, DataClassification, PolicyRevisionId, Principal, PrincipalId,
+    SessionPolicyContext, TenantContext, TenantId,
 };
 use prodex_provider_core::ProviderId;
 use prodex_storage::{
-    AppendOnlyAuditCommand, AuditOutboxWriteCommand, GovernanceRepositoryError,
-    GovernanceSessionRecord, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
-    GovernanceSessionUpsertOutcome, GovernanceWriteOutcome, TenantStorageKey,
+    GovernanceMutationIdempotency, GovernanceRepositoryError, GovernanceSessionRecord,
+    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, GovernanceWriteOutcome,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,6 +75,7 @@ enum RuntimeGatewayGovernanceSessionBankCommand {
         session_id_hash: String,
         actor: Principal,
         reason_code: String,
+        idempotency: Option<GovernanceMutationIdempotency>,
         acknowledge: SyncSender<Result<GovernanceWriteOutcome, GovernanceRepositoryError>>,
     },
     Wake,
@@ -199,6 +201,7 @@ impl RuntimeGatewayGovernanceSessionStore {
         session_id_hash: &str,
         actor: &Principal,
         reason_code: &str,
+        idempotency: Option<GovernanceMutationIdempotency>,
     ) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
         let key =
             parse_session_hash(session_id_hash).ok_or(GovernanceRepositoryError::InvalidInput)?;
@@ -222,6 +225,7 @@ impl RuntimeGatewayGovernanceSessionStore {
             session_id_hash: session_id_hash.to_string(),
             actor: actor.clone(),
             reason_code: reason_code.to_string(),
+            idempotency,
             acknowledge,
         })
         .map_err(|_| GovernanceRepositoryError::Database)?;
@@ -548,6 +552,7 @@ fn runtime_gateway_governance_session_receive(
             session_id_hash,
             actor,
             reason_code,
+            idempotency,
             acknowledge,
         }) => {
             let result = runtime_gateway_governance_session_revoke(
@@ -557,6 +562,7 @@ fn runtime_gateway_governance_session_receive(
                 session_id_hash,
                 actor,
                 reason_code,
+                idempotency,
             );
             let _ = acknowledge.send(result);
             true
@@ -679,79 +685,6 @@ fn runtime_gateway_governance_sessions_mark_unavailable(
     if let Ok(mut state) = store.0.state.lock() {
         state.hydrated_tenants.clear();
     }
-}
-
-fn runtime_gateway_governance_session_revoke(
-    authority: &RuntimeGovernanceAuthority,
-    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
-    tenant: TenantContext,
-    session_id_hash: String,
-    actor: Principal,
-    reason_code: String,
-) -> Result<GovernanceWriteOutcome, GovernanceRepositoryError> {
-    for _ in 0..3 {
-        let previous_digest = match authority {
-            RuntimeGovernanceAuthority::Sqlite { .. } => sqlite
-                .ok_or(GovernanceRepositoryError::Database)?
-                .latest_audit_digest(tenant.tenant_id)?,
-            RuntimeGovernanceAuthority::Postgres {
-                repository,
-                runtime,
-                ..
-            } => runtime.block_on(repository.governance_latest_audit_digest(tenant.tenant_id))?,
-        };
-        let occurred_at_unix_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
-        let event = AuditEvent::new(
-            occurred_at_unix_ms,
-            tenant,
-            &actor,
-            AuditAction::try_new("governance.session.revoke")
-                .map_err(|_| GovernanceRepositoryError::InvalidInput)?,
-            AuditResource::new(
-                "governance_session",
-                Some(session_id_hash.clone()),
-                Some(tenant.tenant_id),
-            ),
-            AuditOutcome::Success,
-            Some(reason_code.clone()),
-        );
-        let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), &event);
-        let command = GovernanceSessionRevokeCommand {
-            tenant_id: tenant.tenant_id,
-            session_id_hash: session_id_hash.clone(),
-            revoked_at_unix_ms: occurred_at_unix_ms,
-            reason_code: reason_code.clone(),
-            audit_outbox: AuditOutboxWriteCommand {
-                outbox_event_id: AuditEventId::new(),
-                audit: AppendOnlyAuditCommand {
-                    storage_key: TenantStorageKey::tenant(tenant.tenant_id),
-                    event,
-                    previous_digest,
-                    event_digest,
-                },
-            },
-        };
-        let result = match authority {
-            RuntimeGovernanceAuthority::Sqlite { .. } => sqlite
-                .ok_or(GovernanceRepositoryError::Database)?
-                .governance_revoke_session(command),
-            RuntimeGovernanceAuthority::Postgres {
-                repository,
-                runtime,
-                ..
-            } => runtime.block_on(repository.governance_revoke_session(command)),
-        };
-        match result {
-            Err(GovernanceRepositoryError::AuditChainConflict) => continue,
-            result => return result,
-        }
-    }
-    Err(GovernanceRepositoryError::AuditChainConflict)
 }
 
 fn runtime_gateway_governance_session_upsert(

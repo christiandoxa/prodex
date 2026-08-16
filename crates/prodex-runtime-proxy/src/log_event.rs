@@ -56,15 +56,16 @@ impl<'a> RuntimeProxyLogEvent<'a> {
                 .map(|field| field.key().len() + field.value().len() + 2)
                 .sum::<usize>();
         let mut message = String::with_capacity(capacity);
-        message.push_str(&runtime_proxy_sanitize_log_fragment(&self.event));
+        message.push_str(&runtime_proxy_redact_log_text(&self.event));
         for field in &self.fields {
-            if field.key().is_empty() || runtime_proxy_log_key_needs_skip(field.key()) {
+            let key = runtime_proxy_sanitize_log_fragment(field.key());
+            if key.is_empty() || runtime_proxy_log_key_needs_skip(&key) {
                 continue;
             }
             if !message.is_empty() {
                 message.push(' ');
             }
-            message.push_str(field.key());
+            message.push_str(&key);
             message.push('=');
             message.push_str(&runtime_proxy_format_log_field_value(
                 field.key(),
@@ -176,6 +177,24 @@ pub fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
     runtime_proxy_parse_log_message(message).fields_map()
 }
 
+/// Replaces terminal control characters and redacts secret-like text in a log fragment.
+pub fn runtime_proxy_redact_log_text(value: &str) -> String {
+    let sanitized = runtime_proxy_sanitize_log_fragment(value);
+    redaction_redact_secret_like_text(sanitized.as_ref())
+}
+
+/// Applies the structured-log redaction policy without adding field-value quotes.
+pub fn runtime_proxy_redact_log_field_value(key: &str, value: &str) -> String {
+    let value = if !runtime_proxy_log_key_is_known_safe(key) && redaction_key_looks_sensitive(key) {
+        "<redacted>".to_string()
+    } else if runtime_proxy_log_key_is_location(key) {
+        runtime_proxy_strip_log_location_secrets(value)
+    } else {
+        value.to_string()
+    };
+    runtime_proxy_redact_log_text(&value)
+}
+
 pub fn runtime_proxy_log_event(message: &str) -> Option<&str> {
     runtime_proxy_log_event_span(message).map(|(start, end)| &message[start..end])
 }
@@ -233,61 +252,14 @@ fn runtime_proxy_log_key_needs_skip(key: &str) -> bool {
 }
 
 fn runtime_proxy_format_log_field_value(key: &str, value: &str) -> String {
-    if runtime_proxy_log_key_is_internal_code(key)
-        || key == "trace"
-        || (runtime_proxy_log_key_is_known_safe(key)
-            && runtime_proxy_log_value_is_stable_code(value))
+    let value = if runtime_proxy_log_key_is_free_form(key)
+        && !runtime_proxy_log_value_is_stable_code(value)
     {
-        return runtime_proxy_quote_log_field_value(value);
-    }
-    let value = if (!runtime_proxy_log_key_is_known_safe(key) && redaction_key_looks_sensitive(key))
-        || (runtime_proxy_log_key_is_free_form(key)
-            && !runtime_proxy_log_value_is_stable_code(value))
-    {
-        Cow::Borrowed("<redacted>")
+        "<redacted>".to_string()
     } else {
-        if runtime_proxy_log_key_is_location(key) {
-            Cow::Owned(redaction_redact_secret_like_text(
-                &runtime_proxy_strip_log_location_secrets(value),
-            ))
-        } else if runtime_proxy_log_value_is_stable_code(value) {
-            Cow::Borrowed(value)
-        } else {
-            Cow::Owned(redaction_redact_secret_like_text(value))
-        }
+        runtime_proxy_redact_log_field_value(key, value)
     };
     runtime_proxy_quote_log_field_value(&value)
-}
-
-fn runtime_proxy_log_key_is_internal_code(key: &str) -> bool {
-    matches!(
-        key,
-        "affinity"
-            | "balance"
-            | "cold_start_jobs"
-            | "excluded_count"
-            | "fallback"
-            | "health"
-            | "inflight"
-            | "mode"
-            | "order"
-            | "outcome"
-            | "performance"
-            | "pressure_mode"
-            | "prompt_cache_bound"
-            | "ready"
-            | "reason"
-            | "reports"
-            | "route"
-            | "schema_version"
-            | "signaled"
-            | "soft_limit"
-            | "sync_probe_jobs"
-            | "transport"
-            | "useful"
-            | "wait_ms"
-            | "waited_ms"
-    )
 }
 
 fn runtime_proxy_quote_log_field_value(value: &str) -> String {
@@ -377,8 +349,22 @@ fn runtime_proxy_strip_log_location_secrets(value: &str) -> String {
 }
 
 fn runtime_proxy_sanitize_log_fragment(value: &str) -> Cow<'_, str> {
-    if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
-        Cow::Owned(value.replace(['\r', '\n'], " "))
+    if value
+        .chars()
+        .any(|character| character.is_control() || character == '\u{7f}')
+    {
+        Cow::Owned(
+            value
+                .chars()
+                .map(|character| {
+                    if character.is_control() || character == '\u{7f}' {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .collect(),
+        )
     } else {
         Cow::Borrowed(value)
     }

@@ -26,22 +26,40 @@ const tenantA = "00000000-0000-7000-8000-000000000001";
 const tenantB = "00000000-0000-7000-8000-000000000002";
 
 const seedSql = String.raw`
-INSERT INTO prodex_tenants VALUES
-  ('${tenantA}', 'tenant-a', 1000, 1000),
-  ('${tenantB}', 'tenant-b', 1000, 1000);
-INSERT INTO prodex_virtual_keys VALUES
+INSERT INTO prodex_tenants (
+  tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms,
+  session_revocation_epoch
+) VALUES
+  ('${tenantA}', 'tenant-a', 1000, 1000, 0),
+  ('${tenantB}', 'tenant-b', 1000, 1000, 0);
+INSERT INTO prodex_virtual_keys (
+  tenant_id, virtual_key_id, principal_id, display_name, secret_provider,
+  secret_name, secret_version, secret_rotated_at_unix_ms, created_at_unix_ms,
+  revoked_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000011', '00000000-0000-7000-8000-000000000101', 'key-a', 'external', 'key-a', '1', 1000, 1000, NULL),
   ('${tenantB}', '00000000-0000-7000-8000-000000000012', '00000000-0000-7000-8000-000000000102', 'key-b', 'external', 'key-b', '1', 1000, 1000, NULL);
-INSERT INTO prodex_service_identities VALUES
+INSERT INTO prodex_service_identities (
+  tenant_id, principal_id, display_name, created_at_unix_ms, disabled_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000101', 'service-a', 1000, NULL),
   ('${tenantB}', '00000000-0000-7000-8000-000000000102', 'service-b', 1000, NULL);
-INSERT INTO prodex_users VALUES
+INSERT INTO prodex_users (
+  tenant_id, principal_id, external_id, display_name, created_at_unix_ms,
+  updated_at_unix_ms, deleted_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000201', 'user-a', 'User A', 1000, 1000, NULL),
   ('${tenantB}', '00000000-0000-7000-8000-000000000202', 'user-b', 'User B', 1000, 1000, NULL);
-INSERT INTO prodex_role_bindings VALUES
+INSERT INTO prodex_role_bindings (
+  tenant_id, role_binding_id, principal_id, role_name, granted_at_unix_ms,
+  revoked_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000301', '00000000-0000-7000-8000-000000000201', 'Viewer', 1000, NULL),
   ('${tenantB}', '00000000-0000-7000-8000-000000000302', '00000000-0000-7000-8000-000000000202', 'Viewer', 1000, NULL);
-INSERT INTO prodex_provider_credentials VALUES
+INSERT INTO prodex_provider_credentials (
+  tenant_id, provider_credential_id, provider_name, secret_provider, secret_name,
+  secret_version, rotated_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000401', 'openai', 'external', 'provider-a', '1', 1000),
   ('${tenantB}', '00000000-0000-7000-8000-000000000402', 'openai', 'external', 'provider-b', '1', 1000);
 INSERT INTO prodex_budget_counters (
@@ -51,83 +69,166 @@ INSERT INTO prodex_budget_counters (
 ) VALUES
   ('${tenantA}', 'tenant-default', NULL, 0, 0, 15, 150, 0, 1000),
   ('${tenantB}', 'tenant-default', NULL, 0, 0, 25, 250, 0, 1000);
-INSERT INTO prodex_budget_policies VALUES
+INSERT INTO prodex_budget_policies (
+  tenant_id, budget_scope, max_tokens, max_cost_micros, updated_at_unix_ms
+) VALUES
   ('${tenantA}', 'tenant-default', 1000, 10000, 1000),
   ('${tenantB}', 'tenant-default', 1000, 10000, 1000);
-INSERT INTO prodex_reservations VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000501', '00000000-0000-7000-8000-000000000601', NULL, 'reservation-a', 15, 150, 1000, 2000, 1500, NULL),
-  ('${tenantB}', '00000000-0000-7000-8000-000000000502', '00000000-0000-7000-8000-000000000602', NULL, 'reservation-b', 25, 250, 1000, 2000, 1500, NULL);
-INSERT INTO prodex_usage_ledger VALUES
+INSERT INTO prodex_reservations (
+  tenant_id, reservation_id, call_id, virtual_key_id, idempotency_key,
+  reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms,
+  committed_at_unix_ms, released_at_unix_ms, storage_scope
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000501', '00000000-0000-7000-8000-000000000601', NULL, 'reservation-a', 15, 150, 1000, 2000, 1500, NULL, 'tenant-default'),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000502', '00000000-0000-7000-8000-000000000602', NULL, 'reservation-b', 25, 250, 1000, 2000, 1500, NULL, 'tenant-default');
+INSERT INTO prodex_usage_ledger (
+  tenant_id, ledger_event_id, reservation_id, call_id, event_kind, tokens,
+  cost_micros, occurred_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000701', '00000000-0000-7000-8000-000000000501', '00000000-0000-7000-8000-000000000601', 'committed', 15, 150, 1500),
   ('${tenantB}', '00000000-0000-7000-8000-000000000702', '00000000-0000-7000-8000-000000000502', '00000000-0000-7000-8000-000000000602', 'committed', 25, 250, 1500);
-INSERT INTO prodex_audit_log VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000801', NULL, 'digest-a', 1500, '00000000-0000-7000-8000-000000000101', 'drill.seed', 'tenant', 'tenant-a', 'success', NULL),
-  ('${tenantB}', '00000000-0000-7000-8000-000000000802', NULL, 'digest-b', 1500, '00000000-0000-7000-8000-000000000102', 'drill.seed', 'tenant', 'tenant-b', 'success', NULL);
-INSERT INTO prodex_idempotency_records VALUES
+INSERT INTO prodex_audit_log (
+  tenant_id, audit_event_id, previous_digest, event_digest, occurred_at_unix_ms,
+  principal_id, action, resource_kind, resource_id, outcome, reason_code,
+  reason_detail
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000801', NULL, 'digest-a', 1500, '00000000-0000-7000-8000-000000000101', 'drill.seed', 'tenant', 'tenant-a', 'success', NULL, NULL),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000802', NULL, 'digest-b', 1500, '00000000-0000-7000-8000-000000000102', 'drill.seed', 'tenant', 'tenant-b', 'success', NULL, NULL);
+INSERT INTO prodex_idempotency_records (
+  tenant_id, idempotency_key, request_fingerprint, entry_status,
+  started_at_unix_ms, completed_at_unix_ms, response_body
+) VALUES
   ('${tenantA}', 'request-a', 'fingerprint-a', 'completed', 1000, 1500, decode('01', 'hex')),
   ('${tenantB}', 'request-b', 'fingerprint-b', 'completed', 1000, 1500, decode('02', 'hex'));
-INSERT INTO prodex_policy_revisions VALUES
+INSERT INTO prodex_policy_revisions (
+  tenant_id, revision_id, artifact_checksum, compiled_metadata, lifecycle_state,
+  created_by, created_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000901', 'policy-checksum-a', '{}', 'active', '00000000-0000-7000-8000-000000000201', 1000),
   ('${tenantB}', '00000000-0000-7000-8000-000000000902', 'policy-checksum-b', '{}', 'active', '00000000-0000-7000-8000-000000000202', 1000);
-INSERT INTO prodex_policy_pointers VALUES
+INSERT INTO prodex_policy_pointers (
+  tenant_id, active_revision_id, last_known_good_revision_id, etag,
+  updated_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000901', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', 1000),
   ('${tenantB}', '00000000-0000-7000-8000-000000000902', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', 1000);
-INSERT INTO prodex_policy_activation_history VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000911', '00000000-0000-7000-8000-000000000901', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 1000),
-  ('${tenantB}', '00000000-0000-7000-8000-000000000912', '00000000-0000-7000-8000-000000000902', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 1000);
-INSERT INTO prodex_approvals VALUES
-  ('${tenantA}', 'approval-a', 'policy_revision', 'policy', 'approval-fingerprint-a', '00000000-0000-7000-8000-000000000201', 'active', 1, 10000, 1000, 1),
-  ('${tenantB}', 'approval-b', 'policy_revision', 'policy', 'approval-fingerprint-b', '00000000-0000-7000-8000-000000000202', 'active', 1, 10000, 1000, 1);
-INSERT INTO prodex_approval_votes VALUES
+INSERT INTO prodex_policy_activation_history (
+  tenant_id, activation_id, revision_id, previous_revision_id, action, actor_id,
+  occurred_at_unix_ms, resulting_active_revision_id, promoted_revision_id
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000911', '00000000-0000-7000-8000-000000000901', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 1000, NULL, NULL),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000912', '00000000-0000-7000-8000-000000000902', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 1000, NULL, NULL);
+INSERT INTO prodex_approvals (
+  tenant_id, approval_id, approval_kind, approval_scope, fingerprint, maker_id,
+  lifecycle_state, required_quorum, expires_at_unix_ms, activated_at_unix_ms,
+  resource_version, termination_reason
+) VALUES
+  ('${tenantA}', 'approval-a', 'policy_revision', 'policy', 'approval-fingerprint-a', '00000000-0000-7000-8000-000000000201', 'active', 1, 10000, 1000, 1, NULL),
+  ('${tenantB}', 'approval-b', 'policy_revision', 'policy', 'approval-fingerprint-b', '00000000-0000-7000-8000-000000000202', 'active', 1, 10000, 1000, 1, NULL);
+INSERT INTO prodex_approval_votes (
+  tenant_id, approval_id, checker_id, approved_at_unix_ms
+) VALUES
   ('${tenantA}', 'approval-a', '00000000-0000-7000-8000-000000000201', 1000),
   ('${tenantB}', 'approval-b', '00000000-0000-7000-8000-000000000202', 1000);
-INSERT INTO prodex_classification_rule_revisions VALUES
+INSERT INTO prodex_classification_rule_revisions (
+  tenant_id, revision_id, artifact_checksum, compiled_metadata, lifecycle_state,
+  created_at_unix_ms
+) VALUES
   ('${tenantA}', 'classification-1', 'classification-checksum-a', '{}', 'active', 1000),
   ('${tenantB}', 'classification-1', 'classification-checksum-b', '{}', 'active', 1000);
-INSERT INTO prodex_provider_registry_revisions VALUES
+INSERT INTO prodex_provider_registry_revisions (
+  tenant_id, revision_id, artifact_checksum, lifecycle_state, created_at_unix_ms
+) VALUES
   ('${tenantA}', 'registry-1', 'registry-checksum-a', 'active', 1000),
   ('${tenantB}', 'registry-1', 'registry-checksum-b', 'active', 1000);
-INSERT INTO prodex_pricing_revisions VALUES
+INSERT INTO prodex_pricing_revisions (
+  tenant_id, revision_id, artifact_checksum, pricing_metadata, lifecycle_state,
+  created_at_unix_ms
+) VALUES
   ('${tenantA}', 'pricing-1', 'pricing-checksum-a', '{}', 'active', 1000),
   ('${tenantB}', 'pricing-1', 'pricing-checksum-b', '{}', 'active', 1000);
-INSERT INTO prodex_provider_descriptors VALUES
+INSERT INTO prodex_provider_descriptors (
+  tenant_id, registry_revision_id, provider_id, adapter_kind, lifecycle_state,
+  trust_tier, deployment_type, approved_regions, capability_metadata,
+  data_handling_metadata, static_risk_basis_points, pricing_revision,
+  secret_provider, secret_name, secret_version
+) VALUES
   ('${tenantA}', 'registry-1', 'provider-a', 'openai', 'active', 'trusted', 'hosted', ARRAY['region-a'], '{}', '{}', 0, 'pricing-1', 'projected', 'credential-a', '1'),
   ('${tenantB}', 'registry-1', 'provider-b', 'openai', 'active', 'trusted', 'hosted', ARRAY['region-b'], '{}', '{}', 0, 'pricing-1', 'projected', 'credential-b', '1');
-INSERT INTO prodex_routing_score_revisions VALUES
+INSERT INTO prodex_routing_score_revisions (
+  tenant_id, revision_id, artifact_checksum, fixed_point_weights, lifecycle_state,
+  created_at_unix_ms
+) VALUES
   ('${tenantA}', 'routing-1', 'routing-checksum-a', '{}', 'active', 1000),
   ('${tenantB}', 'routing-1', 'routing-checksum-b', '{}', 'active', 1000);
-INSERT INTO prodex_governance_sessions VALUES
-  ('${tenantA}', 'session-hash-a', '00000000-0000-7000-8000-000000000201', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000901', 'registry-1', 'provider-a', 1000, 1500, 10000, 5000),
-  ('${tenantB}', 'session-hash-b', '00000000-0000-7000-8000-000000000202', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000902', 'registry-1', 'provider-b', 1000, 1500, 10000, 5000);
-INSERT INTO prodex_session_revocations VALUES
+INSERT INTO prodex_governance_sessions (
+  tenant_id, session_id_hash, principal_id, channel, credential_scope,
+  classification, policy_revision_id, provider_registry_revision,
+  provider_descriptor_revision, provider_affinity, created_at_unix_ms,
+  last_seen_at_unix_ms, absolute_expires_at_unix_ms, idle_expires_at_unix_ms
+) VALUES
+  ('${tenantA}', 'session-hash-a', '00000000-0000-7000-8000-000000000201', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000901', 'registry-1', 0, 'provider-a', 1000, 1500, 10000, 5000),
+  ('${tenantB}', 'session-hash-b', '00000000-0000-7000-8000-000000000202', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000902', 'registry-1', 0, 'provider-b', 1000, 1500, 10000, 5000);
+INSERT INTO prodex_session_revocations (
+  tenant_id, session_id_hash, revoked_at_unix_ms, reason_code
+) VALUES
   ('${tenantA}', 'session-hash-a', 1600, 'logout'),
   ('${tenantB}', 'session-hash-b', 1600, 'logout');
 UPDATE prodex_tenants SET session_revocation_epoch = 1;
-INSERT INTO prodex_siem_outbox VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000921', '00000000-0000-7000-8000-000000000801', '{}', 0, 2000, 1600, NULL),
-  ('${tenantB}', '00000000-0000-7000-8000-000000000922', '00000000-0000-7000-8000-000000000802', '{}', 0, 2000, 1600, NULL);
-INSERT INTO prodex_siem_dead_letters VALUES
+INSERT INTO prodex_siem_outbox (
+  tenant_id, event_id, audit_event_id, event_envelope, attempt_count,
+  next_attempt_at_unix_ms, created_at_unix_ms, delivered_at_unix_ms,
+  claim_token, claim_expires_at_unix_ms
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000921', '00000000-0000-7000-8000-000000000801', '{}', 0, 2000, 1600, NULL, NULL, NULL),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000922', '00000000-0000-7000-8000-000000000802', '{}', 0, 2000, 1600, NULL, NULL, NULL);
+INSERT INTO prodex_siem_dead_letters (
+  tenant_id, event_id, audit_event_id, event_envelope, attempt_count,
+  stable_reason_code, failed_at_unix_ms
+) VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000931', '00000000-0000-7000-8000-000000000801', '{}', 1, 'delivery_failed', 2000),
   ('${tenantB}', '00000000-0000-7000-8000-000000000932', '00000000-0000-7000-8000-000000000802', '{}', 1, 'delivery_failed', 2000);
-INSERT INTO prodex_governance_revision_artifacts VALUES
-  ('${tenantA}', 'policy', '00000000-0000-7000-8000-000000000901', 'policy-checksum-a', decode('01', 'hex'), '00000000-0000-7000-8000-000000000201', 1000),
-  ('${tenantB}', 'policy', '00000000-0000-7000-8000-000000000902', 'policy-checksum-b', decode('02', 'hex'), '00000000-0000-7000-8000-000000000202', 1000);
-INSERT INTO prodex_classification_rule_pointers VALUES
+INSERT INTO prodex_governance_revision_artifacts (
+  tenant_id, artifact_kind, revision_id, artifact_checksum, compiled_artifact,
+  created_by, created_at_unix_ms, signature_key_id, artifact_signature
+) VALUES
+  ('${tenantA}', 'policy', '00000000-0000-7000-8000-000000000901', 'policy-checksum-a', decode('01', 'hex'), '00000000-0000-7000-8000-000000000201', 1000, NULL, NULL),
+  ('${tenantB}', 'policy', '00000000-0000-7000-8000-000000000902', 'policy-checksum-b', decode('02', 'hex'), '00000000-0000-7000-8000-000000000202', 1000, NULL, NULL);
+INSERT INTO prodex_classification_rule_pointers (
+  tenant_id, active_revision_id, last_known_good_revision_id, etag,
+  updated_at_unix_ms
+) VALUES
   ('${tenantA}', 'classification-1', 'classification-1', 'classification-etag-a', 1000),
   ('${tenantB}', 'classification-1', 'classification-1', 'classification-etag-b', 1000);
-INSERT INTO prodex_provider_registry_pointers VALUES
+INSERT INTO prodex_provider_registry_pointers (
+  tenant_id, active_revision_id, last_known_good_revision_id, etag,
+  updated_at_unix_ms
+) VALUES
   ('${tenantA}', 'registry-1', 'registry-1', 'registry-etag-a', 1000),
   ('${tenantB}', 'registry-1', 'registry-1', 'registry-etag-b', 1000);
-INSERT INTO prodex_routing_score_pointers VALUES
+INSERT INTO prodex_routing_score_pointers (
+  tenant_id, active_revision_id, last_known_good_revision_id, etag,
+  updated_at_unix_ms
+) VALUES
   ('${tenantA}', 'routing-1', 'routing-1', 'routing-etag-a', 1000),
   ('${tenantB}', 'routing-1', 'routing-1', 'routing-etag-b', 1000);
-INSERT INTO prodex_governance_activation_history VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000941', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 'classification-activate-a', 1000),
-  ('${tenantB}', '00000000-0000-7000-8000-000000000942', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 'classification-activate-b', 1000);
-INSERT INTO prodex_governance_mutation_idempotency VALUES
-  ('${tenantA}', 'policy', 'policy-activate-a', 'request-a', 'activate', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', 1000),
-  ('${tenantB}', 'policy', 'policy-activate-b', 'request-b', 'activate', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', 1000);
-INSERT INTO prodex_governance_invalidation_replicas VALUES
+INSERT INTO prodex_governance_activation_history (
+  tenant_id, activation_id, artifact_kind, revision_id, previous_revision_id,
+  action, actor_id, idempotency_key, resulting_active_revision_id,
+  promoted_revision_id, occurred_at_unix_ms
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000941', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 'classification-activate-a', NULL, NULL, 1000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000942', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 'classification-activate-b', NULL, NULL, 1000);
+INSERT INTO prodex_governance_mutation_idempotency (
+  tenant_id, artifact_kind, idempotency_key, request_fingerprint, action,
+  revision_id, resulting_etag, resulting_active_revision_id,
+  resulting_last_known_good_revision_id, created_at_unix_ms
+) VALUES
+  ('${tenantA}', 'policy', 'policy-activate-a', 'request-a', 'activate', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', NULL, NULL, 1000),
+  ('${tenantB}', 'policy', 'policy-activate-b', 'request-b', 'activate', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', NULL, NULL, 1000);
+INSERT INTO prodex_governance_invalidation_replicas (
+  tenant_id, replica_id, registered_at_unix_ms, last_seen_at_unix_ms
+) VALUES
   ('${tenantA}', 'drill-replica', 1000, 1000),
   ('${tenantB}', 'drill-replica', 1000, 1000);
 INSERT INTO prodex_governance_invalidation_acks (
@@ -141,6 +242,13 @@ GROUP BY tenant_id;
 const fingerprintSql = String.raw`
 SELECT json_build_object(
   'tenants', (SELECT COUNT(*) FROM prodex_tenants),
+  'migration_rows', (SELECT COUNT(*) FROM prodex_enterprise_schema_migrations),
+  'migration_provenance_rows', (
+    SELECT COUNT(*) FROM prodex_enterprise_schema_migrations
+    WHERE phase <> '' AND actor <> '' AND build <> ''
+      AND started_at_epoch > 0 AND completed_at_epoch >= started_at_epoch
+      AND outcome = 'succeeded'
+  ),
   'virtual_keys', (SELECT COUNT(*) FROM prodex_virtual_keys),
   'service_identities', (SELECT COUNT(*) FROM prodex_service_identities),
   'users', (SELECT COUNT(*) FROM prodex_users),
@@ -255,8 +363,12 @@ SELECT json_build_object(
 `;
 
 const postBackupWriteSql = String.raw`
-INSERT INTO prodex_audit_log VALUES
-  ('${tenantA}', '00000000-0000-7000-8000-000000000899', 'digest-a', 'post-backup-marker', 2000, '00000000-0000-7000-8000-000000000101', 'drill.post_backup', 'tenant', 'tenant-a', 'success', NULL);
+INSERT INTO prodex_audit_log (
+  tenant_id, audit_event_id, previous_digest, event_digest, occurred_at_unix_ms,
+  principal_id, action, resource_kind, resource_id, outcome, reason_code,
+  reason_detail
+) VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000899', 'digest-a', 'post-backup-marker', 2000, '00000000-0000-7000-8000-000000000101', 'drill.post_backup', 'tenant', 'tenant-a', 'success', NULL, NULL);
 `;
 
 const rlsSetupSql = String.raw`
@@ -315,7 +427,10 @@ BEGIN
   GET DIAGNOSTICS changed_rows = ROW_COUNT;
   IF changed_rows <> 0 THEN RAISE EXCEPTION 'cross-tenant delete succeeded'; END IF;
   BEGIN
-    INSERT INTO prodex_users VALUES (
+    INSERT INTO prodex_users (
+      tenant_id, principal_id, external_id, display_name, created_at_unix_ms,
+      updated_at_unix_ms, deleted_at_unix_ms
+    ) VALUES (
       '${tenantB}', '00000000-0000-7000-8000-000000000299',
       'blocked-user', 'Blocked User', 2000, 2000, NULL
     );
@@ -662,6 +777,8 @@ async function runManagedDrill() {
       restoredFingerprint.ledger_tokens === 40 &&
       restoredFingerprint.ledger_rows === restoredFingerprint.unique_ledger_rows;
     const tenantDataComplete =
+      restoredFingerprint.migration_rows > 0 &&
+      restoredFingerprint.migration_provenance_rows === restoredFingerprint.migration_rows &&
       [
         "tenants", "virtual_keys", "service_identities", "users", "role_bindings",
         "provider_credentials", "budget_counters", "budget_policies", "reservations",

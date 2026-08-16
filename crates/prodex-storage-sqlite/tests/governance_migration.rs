@@ -3,7 +3,8 @@ use prodex_storage_sqlite::{
     LOCAL_AUDIT_REASON_DETAIL_BYTE_LIMIT_MIGRATION, LOCAL_AUDIT_REASON_DETAIL_MIGRATION,
     LOCAL_ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION, LOCAL_ENTERPRISE_GOVERNANCE_MIGRATION,
     LOCAL_GOVERNANCE_LIFECYCLE_MIGRATION, LOCAL_GOVERNANCE_SESSION_INDEX_MIGRATION,
-    LOCAL_GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION, LOCAL_SIEM_OUTBOX_LEASING_MIGRATION,
+    LOCAL_GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
+    LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION, LOCAL_SIEM_OUTBOX_LEASING_MIGRATION,
 };
 
 #[test]
@@ -116,6 +117,124 @@ fn sqlite_foreign_keys_reject_orphans_and_restrict_parent_deletes() {
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn sqlite_reservation_storage_scope_backfill_preserves_unambiguous_legacy_scopes() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(INITIAL_LOCAL_ACCOUNTING_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_tenants VALUES ('tenant-a', 'A', 1, 1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_budget_counters (
+                tenant_id, storage_scope, virtual_key_id, reserved_tokens,
+                reserved_cost_micros, committed_tokens, committed_cost_micros,
+                updated_at_unix_ms
+             ) VALUES ('tenant-a', 'scope-a', 'key-a', 0, 0, 0, 0, 1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_reservations (
+                tenant_id, reservation_id, call_id, virtual_key_id, idempotency_key,
+                reserved_tokens, reserved_cost_micros, created_at_unix_ms,
+                expires_at_unix_ms, committed_at_unix_ms, released_at_unix_ms
+             ) VALUES
+                ('tenant-a', 'reservation-a', 'call-a', 'key-a', 'idempotency-a', 1, 1, 1, 2, NULL, NULL),
+                ('tenant-a', 'reservation-b', 'call-b', NULL, 'idempotency-b', 1, 1, 1, 2, NULL, NULL),
+                ('tenant-a', 'reservation-c', 'call-c', 'key-c', 'idempotency-c', 1, 1, 1, 2, NULL, NULL)",
+            [],
+        )
+        .unwrap();
+
+    connection
+        .execute_batch(LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION.sql)
+        .unwrap();
+
+    let scopes = connection
+        .prepare(
+            "SELECT reservation_id, storage_scope
+             FROM prodex_reservations ORDER BY reservation_id",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        scopes,
+        [
+            ("reservation-a".to_string(), "scope-a".to_string()),
+            ("reservation-b".to_string(), "tenant-default".to_string()),
+            ("reservation-c".to_string(), "virtual_key:key-c".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn sqlite_reservation_storage_scope_backfill_fails_closed_on_ambiguous_counters() {
+    let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(INITIAL_LOCAL_ACCOUNTING_MIGRATION.sql)
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_tenants VALUES ('tenant-a', 'A', 1, 1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_budget_counters (
+                tenant_id, storage_scope, virtual_key_id, reserved_tokens,
+                reserved_cost_micros, committed_tokens, committed_cost_micros,
+                updated_at_unix_ms
+             ) VALUES
+                ('tenant-a', 'scope-a', 'key-a', 0, 0, 0, 0, 1),
+                ('tenant-a', 'scope-b', 'key-a', 0, 0, 0, 0, 2)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO prodex_reservations (
+                tenant_id, reservation_id, call_id, virtual_key_id, idempotency_key,
+                reserved_tokens, reserved_cost_micros, created_at_unix_ms,
+                expires_at_unix_ms, committed_at_unix_ms, released_at_unix_ms
+             ) VALUES ('tenant-a', 'reservation-a', 'call-a', 'key-a', 'idempotency-a',
+                       1, 1, 1, 2, NULL, NULL)",
+            [],
+        )
+        .unwrap();
+
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    let error = transaction
+        .execute_batch(LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION.sql)
+        .unwrap_err();
+    assert!(error.to_string().contains("multiple budget counters match"));
+    drop(transaction);
+
+    let storage_scope_column_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('prodex_reservations')
+             WHERE name = 'storage_scope'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(storage_scope_column_count, 0);
 }
 
 #[test]

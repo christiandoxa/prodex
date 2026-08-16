@@ -1,8 +1,8 @@
-use prodex_domain::{PrincipalKind, Role};
+use prodex_domain::{AuditEventId, PrincipalKind, Role};
 
 use super::{
-    Arc, AuditEventId, BTreeMap, BTreeSet, Channel, CredentialScope, DataClassification, Mutex,
-    PolicyRevisionId, Principal, PrincipalId, ProviderId, RuntimeGatewayGovernanceSessionStore,
+    Arc, BTreeMap, BTreeSet, Channel, CredentialScope, DataClassification, Mutex, PolicyRevisionId,
+    Principal, PrincipalId, ProviderId, RuntimeGatewayGovernanceSessionStore,
     RuntimeGovernanceAuthority, RuntimeProxyRequest, TenantContext, TenantId,
     runtime_gateway_governance_session_revocation_changed,
     runtime_gateway_governance_sessions_mark_unavailable,

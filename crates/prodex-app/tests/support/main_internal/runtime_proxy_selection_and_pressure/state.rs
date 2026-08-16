@@ -6,6 +6,8 @@ mod app_state;
 mod continuations;
 #[path = "state/housekeeping.rs"]
 mod housekeeping;
+#[path = "state/profile_deletion.rs"]
+mod profile_deletion;
 #[path = "state/snapshots.rs"]
 mod snapshots;
 

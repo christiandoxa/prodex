@@ -44,11 +44,9 @@ pub fn should_skip_runtime_response_header(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "connection"
             | "content-length"
-            | "date"
             | "keep-alive"
             | "proxy-authenticate"
             | "proxy-authorization"
-            | "server"
             | "te"
             | "trailer"
             | "transfer-encoding"

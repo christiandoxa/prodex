@@ -157,13 +157,6 @@ async fn runtime_presidio_redact_text_body(
         )
         .await?;
         let findings = runtime_presidio_findings(&content.values, &separator, &redacted.findings)?;
-        if redacted.text == combined {
-            return Ok(RedactionOutcome {
-                body: text.as_bytes().to_vec(),
-                source: runtime_presidio_inspection_source(content.coverage, findings, false)?,
-            });
-        }
-
         let redacted_values = redacted.text.split(&separator).collect::<Vec<_>>();
         if redacted_values.len() != content.values.len() {
             anyhow::bail!(
@@ -285,6 +278,9 @@ async fn runtime_presidio_redact_text(
     .await?;
     let anonymized = serde_json::from_slice::<PresidioAnonymizeResponse>(&anonymized_body)
         .context("failed to parse Presidio Anonymizer response")?;
+    if anonymized.text == text {
+        anyhow::bail!("Presidio Anonymizer returned unchanged text for findings");
+    }
     Ok(RuntimePresidioTextRedaction {
         text: anonymized.text,
         findings: all_analyzer_results,

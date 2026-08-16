@@ -179,7 +179,14 @@ fn streaming_sse_previous_response_error_passes_through_after_commit() {
     };
     let response = RuntimeStreamingResponse {
         status: 200,
-        headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
+        headers: vec![
+            ("content-type".to_string(), "text/event-stream".to_string()),
+            (
+                "date".to_string(),
+                "Thu, 01 Jan 1970 00:00:00 GMT".to_string(),
+            ),
+            ("server".to_string(), "upstream".to_string()),
+        ],
         body: Box::new(Cursor::new(event.as_bytes().to_vec())),
         request_id: 1,
         profile_name: "test".to_string(),
@@ -197,6 +204,8 @@ fn streaming_sse_previous_response_error_passes_through_after_commit() {
     write_runtime_streaming_response(Box::new(writer), response).expect("stream response");
     let text = String::from_utf8(output.lock().expect("output").clone()).expect("utf8");
 
+    assert!(text.contains("date: Thu, 01 Jan 1970 00:00:00 GMT\r\n"));
+    assert!(text.contains("server: upstream\r\n"));
     assert!(text.contains("previous_response_not_found"));
     assert!(!text.contains("stale_continuation"));
 }
