@@ -19,6 +19,7 @@ use super::{
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::path::Path;
 
 pub(super) struct RunCommandStrategy {
     pub(super) args: RunArgs,
@@ -38,6 +39,23 @@ pub(super) struct RunCommandStrategy {
     pub(super) pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     pub(super) goal_resume_session_affinity_release: Option<String>,
     pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
+}
+
+fn apply_remembered_model_preference(
+    codex_home: &Path,
+    codex_args: Vec<OsString>,
+    selection: Option<&crate::LastModelSelection>,
+) -> Vec<OsString> {
+    let Some(selection) = selection else {
+        return codex_args;
+    };
+    if crate::model_preference_model_is_compatible(codex_home, &codex_args, selection) {
+        crate::apply_model_preference_selection(codex_home, codex_args, selection, false, true)
+    } else {
+        let mut codex_args = codex_args;
+        crate::remove_remembered_model_override(&mut codex_args);
+        codex_args
+    }
 }
 
 impl RunCommandStrategy {
@@ -184,25 +202,12 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
                 )
             })
             .unwrap_or(codex_args);
-        let mut codex_args =
-            prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
-        if let Some(selection) = remembered_selection.as_ref() {
-            if crate::model_preference_model_is_compatible(
-                &prepared.codex_home,
-                &codex_args,
-                selection,
-            ) {
-                codex_args = crate::apply_model_preference_selection(
-                    &prepared.codex_home,
-                    codex_args,
-                    selection,
-                    false,
-                    true,
-                );
-            } else {
-                crate::remove_remembered_model_override(&mut codex_args);
-            }
-        }
+        let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
+        let mut codex_args = apply_remembered_model_preference(
+            &prepared.codex_home,
+            codex_args,
+            remembered_selection.as_ref(),
+        );
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
                 &prepared.codex_home,
