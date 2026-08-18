@@ -40,7 +40,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 13);
-  assert.equal(ciMatrix.include.length, 25);
+  assert.equal(ciMatrix.include.length, 26);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
   assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -186,6 +186,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.doesNotMatch(workflow, /^  windows-security:/m);
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("app_commands::"));
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_broker::"));
+  assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_model_preferences::"));
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  redis-integration:/)?.[1];
   assert.ok(processGuard, "process-guard job missing");
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);

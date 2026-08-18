@@ -99,6 +99,7 @@ const TARGETED_SHARDS = Object.freeze([
       "runtime_state_shared::",
       "runtime_broker::",
       "runtime_tools::",
+      "runtime_model_preferences::",
       "runtime_gemini_cli::",
       "runtime_kiro_acp::",
       "runtime_config::",

@@ -531,8 +531,17 @@ An accepted interactive `/model` change is observed from Codex's atomic
 configuration write before launch cleanup. An absent effort remains distinct
 from the explicit string `none`; unsupported model/effort pairs are ignored
 for the next fresh launch and resolved by the active catalog. Fresh launches
-use an exact provider/catalog scope, while resume launches retain Codex's
-persisted thread settings and do not consume the fresh-session preference.
+resolve one immutable logical provider/catalog scope before runtime transport
+arguments are added. The reserved `prodex-openai-governed-http` transport
+alias uses the compatible logical `openai` bucket; unrelated providers and
+catalogs remain isolated. Existing governed-scope records are copied to the
+logical bucket on first valid read without deleting the legacy record.
+
+Remembered model and effort fields are merged independently with explicit
+launch fields. Resume launches retain Codex's persisted thread settings and do
+not consume or overwrite the fresh-session preference. `max` is durable when
+Codex writes it through normal model selection; `ultra` remains an advanced
+conversation setting, and `plan_mode_reasoning_effort` is stored separately.
 Reading a preference does not advance its revision.
 
 Before and after an interactive Codex child, Prodex asks that same Codex binary's

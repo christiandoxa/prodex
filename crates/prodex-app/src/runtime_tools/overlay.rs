@@ -64,13 +64,10 @@ pub(super) fn build_plan(
     let overlay_home = prepare_overlay_home(strategy, prepared)?;
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
     let scope_args = strategy.base_runtime_codex_args(&overlay_home)?;
-    let remembered_selection =
-        crate::resolve_fresh_model_preference(&prepared.paths, &overlay_home, &scope_args)?;
-    let runtime_args = strategy.prepare_runtime_codex_args(
-        &overlay_home,
-        runtime_proxy,
-        remembered_selection.as_ref(),
-    )?;
+    let preference_context =
+        crate::resolve_fresh_model_preference_context(&prepared.paths, &overlay_home, &scope_args)?;
+    let runtime_args =
+        strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
         super::write_sub_agent_overlay(&overlay_home, sub_agent)?;
     }
@@ -99,16 +96,19 @@ pub(super) fn build_plan(
         // historical prelaunch repair with its explicit shared SQLite home.
         && (strategy.desktop_command.is_none() || prepared.managed)
     {
-        strategy.model_preference_sync =
-            match crate::ModelPreferenceSync::start(&prepared.paths, &child) {
-                Ok(sync) => Some(sync),
-                Err(_error) => {
-                    crate::print_launch_status(
-                        "model preference synchronization unavailable; continuing",
-                    );
-                    None
-                }
-            };
+        strategy.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
+            &prepared.paths,
+            &child,
+            preference_context.logical_scope.clone(),
+        ) {
+            Ok(sync) => Some(sync),
+            Err(_error) => {
+                crate::print_launch_status(
+                    "model preference synchronization unavailable; continuing",
+                );
+                None
+            }
+        };
         let repair_binary = strategy
             .desktop_command
             .as_ref()
@@ -249,6 +249,73 @@ mod tests {
                 .is_none(),
             "failed build must remove temporary overlay"
         );
+        std::fs::remove_dir_all(root).expect("test root should be removed");
+    }
+
+    #[test]
+    fn super_overlay_applies_fresh_model_preference() {
+        let root = env::temp_dir()
+            .canonicalize()
+            .expect("temporary directory should resolve")
+            .join(format!(
+                "prodex-runtime-tools-overlay-model-preference-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+        let base_home = root.join("base");
+        std::fs::create_dir_all(&base_home).expect("base home should exist");
+        std::fs::write(
+            base_home.join("config.toml"),
+            "model_provider = \"openai\"\n",
+        )
+        .expect("config should be written");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let scope = crate::model_preference_scope(&base_home, &[]).unwrap();
+        let child = prodex_runtime_launch::ChildProcessPlan::new("codex".into(), base_home.clone());
+        let mut sync = crate::ModelPreferenceSync::start_with_scope(&paths, &child, scope).unwrap();
+        std::fs::write(
+            base_home.join("config.toml"),
+            "model_provider = \"openai\"\nmodel = \"remembered-model\"\nmodel_reasoning_effort = \"max\"\n",
+        )
+        .expect("selected config should be written");
+        assert!(sync.finish().is_none());
+        let command = parse_cli_command_from(["prodex", "s", "--no-presidio", "--no-sub-agent"])
+            .expect("Super command should parse");
+        let Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+        let mut runtime_args = args.into_runtime_tool_args_with_presidio(false);
+        runtime_args.dry_run = true;
+        runtime_args.tools.clear();
+        runtime_args.required_tools.clear();
+        let mut strategy = RuntimeToolLaunchStrategy::new(runtime_args);
+        let prepared = PreparedRuntimeLaunch {
+            paths,
+            codex_home: base_home,
+            managed: false,
+            runtime_proxy: None,
+        };
+
+        let plan = super::build_plan(&mut strategy, &prepared, None).unwrap();
+        assert_eq!(
+            crate::codex_cli_config_override_value(&plan.child.args, "model").as_deref(),
+            Some("remembered-model")
+        );
+        assert_eq!(
+            crate::codex_cli_config_override_value(&plan.child.args, "model_reasoning_effort")
+                .as_deref(),
+            Some("max")
+        );
+        drop(plan);
         std::fs::remove_dir_all(root).expect("test root should be removed");
     }
 

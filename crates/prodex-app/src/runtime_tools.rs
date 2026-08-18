@@ -161,37 +161,29 @@ impl RuntimeToolLaunchStrategy {
         &self,
         overlay_home: &std::path::Path,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
-        remembered_selection: Option<&LastModelSelection>,
+        preference_context: &crate::ModelPreferenceContext,
     ) -> Result<Vec<OsString>> {
         let codex_args = self.base_runtime_codex_args(overlay_home)?;
-        let codex_args = remembered_selection
-            .map(|selection| {
-                apply_model_preference_selection(
-                    overlay_home,
-                    codex_args.clone(),
-                    selection,
-                    true,
-                    false,
-                )
-            })
-            .unwrap_or(codex_args);
+        let codex_args = crate::apply_fresh_model_preference_selection(
+            overlay_home,
+            codex_args,
+            preference_context,
+            true,
+            false,
+        );
         let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_gemini_provider_codex_args(overlay_home, &codex_args)?;
-        let codex_args = if let Some(selection) = remembered_selection {
-            if model_preference_model_is_compatible(overlay_home, &codex_args, selection) {
-                apply_model_preference_selection(overlay_home, codex_args, selection, false, true)
-            } else {
-                let mut codex_args = codex_args;
-                remove_remembered_model_override(&mut codex_args);
-                codex_args
-            }
-        } else {
-            codex_args
-        };
+        let codex_args = crate::apply_fresh_model_preference_selection(
+            overlay_home,
+            codex_args,
+            preference_context,
+            false,
+            true,
+        );
         Ok(runtime_proxy_codex_passthrough_args(
             runtime_proxy,
             &codex_args,

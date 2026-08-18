@@ -11,7 +11,7 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:runtime-manifest` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `npm run ci:runtime-manifest` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
-  The full workflow runs the workspace and forty-four disjoint `prodex-app` library
+  The full workflow runs the workspace and forty-five disjoint `prodex-app` library
   partitions concurrently; its workspace partition excludes `prodex-app`, and
   each risky partition remains internally serial. The independent provider-runtime
   and support/command filters are separate jobs so their serial cargo processes
@@ -19,7 +19,7 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:full-test-shards` validates the shared app-library shard manifest;
   `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
   without compiling or running tests.
-- Push/PR CI runs twenty-five generic `prodex-app` partitions. Dedicated parallel jobs
+- Push/PR CI runs twenty-six generic `prodex-app` partitions. Dedicated parallel jobs
   own every `main_internal_tests::` and `profile_commands_internal_tests::`
   test, so the generic remainder excludes those namespaces instead of rerunning
   them. The weekly CI schedule skips those duplicate Ubuntu owners because the
@@ -101,6 +101,7 @@ npm run test:fast
 npm run test:fast:timings
 npm run test:serial
 npm run test:serial:timings
+cargo test --locked -q -p prodex-app --lib runtime_model_preferences -- --test-threads=1
 npm run ci:preflight
 npm run ci:impact
 npm run ci:release-hygiene

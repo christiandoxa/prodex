@@ -19,7 +19,6 @@ use super::{
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::path::Path;
 
 pub(super) struct RunCommandStrategy {
     pub(super) args: RunArgs,
@@ -39,23 +38,6 @@ pub(super) struct RunCommandStrategy {
     pub(super) pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     pub(super) goal_resume_session_affinity_release: Option<String>,
     pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
-}
-
-fn apply_remembered_model_preference(
-    codex_home: &Path,
-    codex_args: Vec<OsString>,
-    selection: Option<&crate::LastModelSelection>,
-) -> Vec<OsString> {
-    let Some(selection) = selection else {
-        return codex_args;
-    };
-    if crate::model_preference_model_is_compatible(codex_home, &codex_args, selection) {
-        crate::apply_model_preference_selection(codex_home, codex_args, selection, false, true)
-    } else {
-        let mut codex_args = codex_args;
-        crate::remove_remembered_model_override(&mut codex_args);
-        codex_args
-    }
 }
 
 impl RunCommandStrategy {
@@ -185,28 +167,25 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
-        let remembered_selection = crate::resolve_fresh_model_preference(
+        let preference_context = crate::resolve_fresh_model_preference_context(
             &prepared.paths,
             &prepared.codex_home,
             &codex_args,
         )?;
-        let codex_args = remembered_selection
-            .as_ref()
-            .map(|selection| {
-                crate::apply_model_preference_selection(
-                    &prepared.codex_home,
-                    codex_args.clone(),
-                    selection,
-                    true,
-                    false,
-                )
-            })
-            .unwrap_or(codex_args);
-        let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
-        let mut codex_args = apply_remembered_model_preference(
+        let codex_args = crate::apply_fresh_model_preference_selection(
             &prepared.codex_home,
             codex_args,
-            remembered_selection.as_ref(),
+            &preference_context,
+            true,
+            false,
+        );
+        let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
+        let mut codex_args = crate::apply_fresh_model_preference_selection(
+            &prepared.codex_home,
+            codex_args,
+            &preference_context,
+            false,
+            true,
         );
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
@@ -238,16 +217,19 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             ));
         }
         if !self.dry_run && !self.command_server {
-            self.model_preference_sync =
-                match crate::ModelPreferenceSync::start(&prepared.paths, &child) {
-                    Ok(sync) => Some(sync),
-                    Err(_error) => {
-                        crate::print_launch_status(
-                            "model preference synchronization unavailable; continuing",
-                        );
-                        None
-                    }
-                };
+            self.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
+                &prepared.paths,
+                &child,
+                preference_context.logical_scope.clone(),
+            ) {
+                Ok(sync) => Some(sync),
+                Err(_error) => {
+                    crate::print_launch_status(
+                        "model preference synchronization unavailable; continuing",
+                    );
+                    None
+                }
+            };
             if crate::reconcile_codex_thread_index(&child.binary, &child).is_err() {
                 crate::print_launch_status("session index reconciliation unavailable; continuing");
             }
