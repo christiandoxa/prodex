@@ -1,6 +1,7 @@
 # prodex
 
 [![Release malware scan](https://github.com/christiandoxa/prodex/actions/workflows/standalone-release.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/christiandoxa/prodex/actions/workflows/standalone-release.yml)
+[![GitHub release downloads](https://img.shields.io/github/downloads/christiandoxa/prodex/total?label=release%20downloads)](https://github.com/christiandoxa/prodex/releases)
 
 `prodex` is a multi-account, multi-provider Codex wrapper with quota-aware profile routing.
 
