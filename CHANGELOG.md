@@ -2,19 +2,6 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.408.9 - 2026-08-18
-
-### Docs
-
-- Record evidence-based audit discipline (`e129baa`)
-- Keep README installer on latest (`895a610`)
-- Install latest release by default (`1e00977`)
-
-### Misc
-
-- Revert "chore(release): release 0.408.9" (`237b17b`)
-- Reconcile sessions and persist model preferences (`d84ad90`)
-
 ## 0.408.8 - 2026-08-16
 
 ### Runtime
