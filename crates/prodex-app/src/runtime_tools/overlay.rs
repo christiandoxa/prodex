@@ -56,14 +56,21 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
 }
 
 pub(super) fn build_plan(
-    strategy: &RuntimeToolLaunchStrategy,
+    strategy: &mut RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<RuntimeLaunchPlan> {
     let tool_plan = resolve_optional_tool_plan(strategy, prepared)?;
     let overlay_home = prepare_overlay_home(strategy, prepared)?;
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
-    let runtime_args = strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy)?;
+    let scope_args = strategy.base_runtime_codex_args(&overlay_home)?;
+    let remembered_selection =
+        crate::resolve_fresh_model_preference(&prepared.paths, &overlay_home, &scope_args)?;
+    let runtime_args = strategy.prepare_runtime_codex_args(
+        &overlay_home,
+        runtime_proxy,
+        remembered_selection.as_ref(),
+    )?;
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
         super::write_sub_agent_overlay(&overlay_home, sub_agent)?;
     }
@@ -74,6 +81,43 @@ pub(super) fn build_plan(
     )?;
     let mut child = strategy.build_child_plan(prepared, &overlay_home, &runtime_args)?;
     strategy.finalize_child_plan(&mut child, &overlay_home, runtime_proxy);
+    if prepared.managed
+        && !child
+            .extra_env
+            .iter()
+            .any(|(key, _)| key == "CODEX_SQLITE_HOME")
+    {
+        child.extra_env.push((
+            "CODEX_SQLITE_HOME".into(),
+            prepared.paths.shared_codex_root.as_os_str().to_os_string(),
+        ));
+    }
+    if !strategy.args.dry_run
+        && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
+        // Desktop's unmanaged overlay deliberately shares the state database through a
+        // symlink; app-server startup may localize that path. Managed Desktop keeps the
+        // historical prelaunch repair with its explicit shared SQLite home.
+        && (strategy.desktop_command.is_none() || prepared.managed)
+    {
+        strategy.model_preference_sync =
+            match crate::ModelPreferenceSync::start(&prepared.paths, &child) {
+                Ok(sync) => Some(sync),
+                Err(_error) => {
+                    crate::print_launch_status(
+                        "model preference synchronization unavailable; continuing",
+                    );
+                    None
+                }
+            };
+        let repair_binary = strategy
+            .desktop_command
+            .as_ref()
+            .map(|_| crate::codex_bin())
+            .unwrap_or_else(|| child.binary.clone());
+        if crate::reconcile_codex_thread_index(&repair_binary, &child).is_err() {
+            crate::print_launch_status("session index reconciliation unavailable; continuing");
+        }
+    }
     Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
 }
 
@@ -180,7 +224,7 @@ mod tests {
         };
         args.select_tool(prodex_optional_tools::OptionalToolId::PlaywrightMcp);
         args.dry_run = true;
-        let strategy = RuntimeToolLaunchStrategy::new(args);
+        let mut strategy = RuntimeToolLaunchStrategy::new(args);
         let paths = AppPaths {
             root: root.clone(),
             state_file: root.join("state.json"),
@@ -195,7 +239,7 @@ mod tests {
             runtime_proxy: None,
         };
 
-        let error = super::build_plan(&strategy, &prepared, None).unwrap_err();
+        let error = super::build_plan(&mut strategy, &prepared, None).unwrap_err();
 
         assert!(error.to_string().contains("config.toml"));
         assert!(
@@ -432,7 +476,8 @@ mod tests {
         runtime_args.dry_run = true;
         runtime_args.tools.clear();
         runtime_args.required_tools.clear();
-        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(runtime_args, Some(sub_agent));
+        let mut strategy =
+            RuntimeToolLaunchStrategy::new_with_sub_agent(runtime_args, Some(sub_agent));
         let prepared = PreparedRuntimeLaunch {
             paths: AppPaths {
                 root: root.clone(),
@@ -446,7 +491,7 @@ mod tests {
             runtime_proxy: None,
         };
 
-        let plan = super::build_plan(&strategy, &prepared, None)
+        let plan = super::build_plan(&mut strategy, &prepared, None)
             .expect("configured resume launch plan should build");
 
         assert_ne!(plan.child.codex_home, base_home);

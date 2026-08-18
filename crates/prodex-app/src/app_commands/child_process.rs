@@ -100,6 +100,15 @@ fn run_child_plan_inner(
     }
     let private_process_group = child_owns_private_process_group();
     configure_child_process_group(&mut command, private_process_group);
+    #[cfg(unix)]
+    let interactive_sigint = if !private_process_group {
+        let guard = InteractiveSigintGuard::install()
+            .context("failed to install interactive SIGINT handler")?;
+        reset_child_sigint_handler(&mut command);
+        Some(guard)
+    } else {
+        None
+    };
     reset_terminal_keyboard_enhancement_best_effort(plan);
     let mut child = command
         .spawn()
@@ -109,7 +118,7 @@ fn run_child_plan_inner(
             Ok(lease) => Some(lease),
             Err(err) => {
                 let _ = terminate_child_process_tree(&mut child, private_process_group);
-                let _ = child.wait();
+                let _ = wait_for_child(&mut child, private_process_group);
                 return Err(err);
             }
         },
@@ -117,10 +126,27 @@ fn run_child_plan_inner(
     };
     let status = match monitor.as_mut() {
         Some(monitor) => wait_for_monitored_child(&mut child, monitor, private_process_group),
-        None => child.wait().map_err(anyhow::Error::from),
+        None => wait_for_child(&mut child, private_process_group).map_err(anyhow::Error::from),
     }
     .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
+    #[cfg(unix)]
+    drop(interactive_sigint);
     Ok(status)
+}
+
+fn wait_for_child(child: &mut Child, private_process_group: bool) -> io::Result<ExitStatus> {
+    loop {
+        match child.wait() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                #[cfg(unix)]
+                if InteractiveSigintGuard::count() >= 2 {
+                    let _ = terminate_child_process_tree(child, private_process_group);
+                }
+                continue;
+            }
+            result => return result,
+        }
+    }
 }
 
 fn child_owns_private_process_group() -> bool {
@@ -143,6 +169,11 @@ fn wait_for_monitored_child(
         if let Some(status) = child.try_wait()? {
             terminate_child_process_group_best_effort(child, private_process_group);
             return Ok(status);
+        }
+        #[cfg(unix)]
+        if !private_process_group && InteractiveSigintGuard::count() >= 2 {
+            terminate_child_process_tree(child, private_process_group)?;
+            return Ok(wait_for_child(child, private_process_group)?);
         }
         let should_stop = match monitor() {
             Ok(should_stop) => should_stop,
@@ -171,7 +202,7 @@ fn wait_for_child_termination(
         }
         if Instant::now() >= deadline {
             terminate_child_process_tree(child, private_process_group)?;
-            return child.wait();
+            return wait_for_child(child, private_process_group);
         }
         thread::sleep(Duration::from_millis(50));
     }

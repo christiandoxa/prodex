@@ -23,7 +23,10 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(), []);
   assert.deepEqual(validateShards(PRODEX_APP_FULL_TEST_SHARDS), []);
   assert.equal(PRODEX_APP_LIB_SHARDS.length, 13);
-  assert.equal(PRODEX_APP_FULL_TEST_SHARDS.length, 20);
+  assert.equal(
+    PRODEX_APP_FULL_TEST_SHARDS.filter((shard) => shard.filters?.length > 1).length,
+    0,
+  );
   assert.deepEqual(
     PRODEX_APP_LIB_SHARDS.filter((shard) => shard.filters).flatMap((shard) => shard.filters),
     PRODEX_APP_LIB_FILTERS,
@@ -37,8 +40,8 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 13);
-  assert.equal(ciMatrix.include.length, 16);
-  assert.equal(fullMatrix.include.length, 21);
+  assert.equal(ciMatrix.include.length, 25);
+  assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
   assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -103,8 +106,11 @@ test("shard planner dry-run and matrix output are compile-free", () => {
 
   const dryRun = runPlanner("--dry-run");
   assert.equal(dryRun.status, 0, dryRun.stderr);
-  assert.match(dryRun.stdout, /dry-run: 21 full-test shard\(s\)/);
-  assert.match(dryRun.stdout, /selection: cargo test .*--test-threads=1/);
+  assert.match(
+    dryRun.stdout,
+    new RegExp(`dry-run: ${PRODEX_APP_FULL_TEST_SHARDS.length + 1} full-test shard\\(s\\)`),
+  );
+  assert.match(dryRun.stdout, /selection-1: cargo test .*--test-threads=1/);
   assert.match(dryRun.stdout, /remainder: cargo test .*--skip/);
 
   const matrixRun = runPlanner("--github-matrix");

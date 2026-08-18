@@ -119,12 +119,12 @@ export const PRODEX_APP_LIB_SHARDS = Object.freeze([
   },
 ]);
 
-// Provider runtime filters are disjoint. Give each its own runner while keeping
-// every cargo process serial; Windows stays grouped below to avoid recompiling
-// the same workspace for each provider.
+// Filters in each targeted shard are disjoint. Give each independent filter its
+// own runner; Windows stays grouped below to avoid recompiling the workspace
+// for every filter on the slower platform.
 function splitIndependentShards(shards) {
   return shards.flatMap((shard) => {
-    if (shard.suite !== "launch-providers") return [shard];
+    if (!Array.isArray(shard.filters) || shard.filters.length < 2) return [shard];
     return shard.filters.map((filter, index) => {
       const split = {
         suite: `${shard.suite}-${index + 1}`,

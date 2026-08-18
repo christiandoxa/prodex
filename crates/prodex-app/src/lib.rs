@@ -83,6 +83,7 @@ mod runtime_kiro_connect_proxy;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
+mod runtime_model_preferences;
 mod runtime_operational_metrics;
 mod runtime_panic;
 mod runtime_persistence;
@@ -93,6 +94,7 @@ mod runtime_save_shared;
 mod runtime_secret_backend;
 mod runtime_state_shared;
 mod runtime_store;
+mod runtime_thread_index;
 mod runtime_tools;
 mod secret_store_support;
 mod semantic_compact_metrics;
@@ -147,6 +149,7 @@ use runtime_kiro_connect_proxy::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;
 use runtime_local_provider_config::*;
+use runtime_model_preferences::*;
 use runtime_persistence::*;
 use runtime_policy::*;
 pub use runtime_policy::{
@@ -165,6 +168,7 @@ pub use runtime_policy::{
     publish_config_publication_event_to_postgres_transport,
     runtime_config_publication_postgres_transport,
 };
+pub(crate) use runtime_thread_index::*;
 use runtime_tools::*;
 pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)

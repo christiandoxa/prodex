@@ -85,7 +85,7 @@ printf '%s\n' "$CODEX_HOME" > "$TEST_CODEX_LOG"
 if [ -n "$TEST_CODEX_LOG_APPEND" ]; then
   printf '%s\n' "$CODEX_HOME" >> "$TEST_CODEX_LOG_APPEND"
 fi
-if [ -n "$TEST_CODEX_ARGS_LOG" ]; then
+if [ "$1" != "app-server" ] && [ -n "$TEST_CODEX_ARGS_LOG" ]; then
   if [ -z "$TEST_CODEX_ARGS_LOG_APPEND" ]; then
     : > "$TEST_CODEX_ARGS_LOG"
   fi
@@ -93,7 +93,7 @@ if [ -n "$TEST_CODEX_ARGS_LOG" ]; then
     printf '%s\n' "$arg" >> "$TEST_CODEX_ARGS_LOG"
   done
 fi
-if [ -n "$TEST_CODEX_STDIN_LOG" ]; then
+if [ "$1" != "app-server" ] && [ -n "$TEST_CODEX_STDIN_LOG" ]; then
   cat > "$TEST_CODEX_STDIN_LOG"
 fi
 if [ -n "$TEST_LONG_RUNNING_RUN" ]; then
@@ -147,15 +147,15 @@ setlocal EnableExtensions
 if defined TEST_CODEX_LOG_APPEND >> "%TEST_CODEX_LOG_APPEND%" echo %CODEX_HOME%
 set "prodex_first_arg=%~1"
 set "prodex_with_api_key="
-if defined TEST_CODEX_ARGS_LOG if not defined TEST_CODEX_ARGS_LOG_APPEND type nul > "%TEST_CODEX_ARGS_LOG%"
+if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG if not defined TEST_CODEX_ARGS_LOG_APPEND type nul > "%TEST_CODEX_ARGS_LOG%"
 :prodex_args
 if "%~1"=="" goto prodex_stdin
-if defined TEST_CODEX_ARGS_LOG >> "%TEST_CODEX_ARGS_LOG%" echo %~1
+if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG >> "%TEST_CODEX_ARGS_LOG%" echo %~1
 if /I "%~1"=="--with-api-key" set "prodex_with_api_key=1"
 shift
 goto prodex_args
 :prodex_stdin
-if defined TEST_CODEX_STDIN_LOG more > "%TEST_CODEX_STDIN_LOG%"
+if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_STDIN_LOG more > "%TEST_CODEX_STDIN_LOG%"
 if defined TEST_LONG_RUNNING_RUN powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds %TEST_LONG_RUNNING_RUN%"
 if /I "%prodex_first_arg%"=="login" goto prodex_login
 goto prodex_session
