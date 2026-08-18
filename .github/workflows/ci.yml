@@ -775,61 +775,9 @@ jobs:
             npm run ci:release-hygiene
           fi
 
-      - name: Enforce Rust file size guard
+      - name: Run independent static guards in parallel
         if: matrix.lane == 'static'
-        run: npm run ci:size-guard
-
-      - name: Enforce Rust allow attribute guard
-        if: matrix.lane == 'static'
-        run: npm run ci:allow-guard
-
-      - name: Enforce optional-tool decoupling guard
-        if: matrix.lane == 'static'
-        run: npm run ci:optional-tools-guard
-
-      - name: Enforce Smart Context correctness guard
-        if: matrix.lane == 'static'
-        run: npm run ci:smart-context-guard
-
-      - name: Validate full-test shard manifest
-        if: matrix.lane == 'static'
-        run: npm run ci:full-test-shards
-
-      - name: Check provider capability matrix
-        if: matrix.lane == 'static'
-        run: npm run docs:provider-capabilities:check
-
-      - name: Validate runtime CI manifest
-        if: matrix.lane == 'static'
-        run: npm run ci:runtime-manifest
-
-      - name: Enforce runtime hot-path guard
-        if: matrix.lane == 'static'
-        run: npm run ci:runtime-hotpath-guard
-
-      - name: Enforce Rust super wildcard guard
-        if: matrix.lane == 'static'
-        run: npm run ci:super-wildcard-guard
-
-      - name: Enforce Rust env mutation guard
-        if: matrix.lane == 'static'
-        run: npm run ci:env-mutation-guard
-
-      - name: Enforce secret-bearing argument and URL guard
-        if: matrix.lane == 'static'
-        run: npm run ci:secret-boundary-guard
-
-      - name: Enforce immutable supply-chain pins
-        if: matrix.lane == 'static'
-        run: npm run ci:supply-chain-guard
-
-      - name: Enforce crate boundaries
-        if: matrix.lane == 'static'
-        run: npm run ci:crate-boundary
-
-      - name: Enforce domain crate boundary
-        if: matrix.lane == 'static'
-        run: npm run ci:domain-boundary-guard
+        run: node scripts/ci/static-guards-parallel.mjs
 
       - name: Enforce enterprise boundary guards (core)
         if: matrix.lane == 'enterprise-core'

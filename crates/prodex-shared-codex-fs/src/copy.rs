@@ -9,9 +9,27 @@ const CODEX_MANAGED_PACKAGES_DIR_NAME: &str = "packages";
 enum CodexManagedPackages {
     Copy,
     SkipAtRoot,
+    SkipChatHistoryAtRoot,
 }
 
 pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
+    copy_codex_home_internal(source, destination, CodexManagedPackages::SkipAtRoot)
+}
+
+/// Copies CODEX_HOME metadata while leaving chat history for the caller to link or merge.
+pub fn copy_codex_home_without_chat_history(source: &Path, destination: &Path) -> Result<()> {
+    copy_codex_home_internal(
+        source,
+        destination,
+        CodexManagedPackages::SkipChatHistoryAtRoot,
+    )
+}
+
+fn copy_codex_home_internal(
+    source: &Path,
+    destination: &Path,
+    managed_packages: CodexManagedPackages,
+) -> Result<()> {
     if !source.is_dir() {
         bail!("copy source {} is not a directory", source.display());
     }
@@ -29,12 +47,7 @@ pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     }
 
     create_codex_home_if_missing(destination)?;
-    let result = copy_directory_contents_under_root(
-        source,
-        source,
-        destination,
-        CodexManagedPackages::SkipAtRoot,
-    );
+    let result = copy_directory_contents_under_root(source, source, destination, managed_packages);
     if result.is_err() && !destination_existed {
         let _ = fs::remove_dir_all(destination);
     }
@@ -56,9 +69,26 @@ fn copy_directory_contents_under_root(
     {
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", source.display()))?;
-        if managed_packages == CodexManagedPackages::SkipAtRoot
-            && entry.file_name() == CODEX_MANAGED_PACKAGES_DIR_NAME
-        {
+        let skip_root_entry = match managed_packages {
+            CodexManagedPackages::Copy => false,
+            CodexManagedPackages::SkipAtRoot => {
+                entry.file_name() == CODEX_MANAGED_PACKAGES_DIR_NAME
+            }
+            CodexManagedPackages::SkipChatHistoryAtRoot => {
+                entry.file_name() == CODEX_MANAGED_PACKAGES_DIR_NAME
+                    || matches!(
+                        entry.file_name().to_str(),
+                        Some(
+                            "history.jsonl"
+                                | "sessions"
+                                | "archived_sessions"
+                                | "attachments"
+                                | "image_attachments"
+                        )
+                    )
+            }
+        };
+        if skip_root_entry {
             continue;
         }
         let source_path = entry.path();

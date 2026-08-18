@@ -44,6 +44,7 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     configure_prodex_overlay: bool,
     sub_agent: Option<ResolvedSuperSubAgent>,
     model_preference_sync: Option<ModelPreferenceSync>,
+    resume_session_path: Option<PathBuf>,
 }
 
 impl RuntimeToolLaunchStrategy {
@@ -84,6 +85,7 @@ impl RuntimeToolLaunchStrategy {
             configure_prodex_overlay: true,
             sub_agent,
             model_preference_sync: None,
+            resume_session_path: None,
         }
     }
 
@@ -145,13 +147,20 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         {
             print_launch_status("model preference synchronization was incomplete");
         }
-        if self.desktop_command.is_none()
-            && !prodex_cli::is_codex_command_server_subcommand(&self.codex_args)
-            && crate::reconcile_codex_thread_index(&plan.child.binary, &plan.child).is_err()
-        {
-            print_launch_status("session index reconciliation unavailable after exit; continuing");
+        let mut repair_child = plan.child.clone();
+        if self.desktop_command.is_some() {
+            repair_child.binary = crate::codex_bin();
         }
-        crate::app_commands::runtime_launch::maintain_shared_codex_sessions_after_child_exit();
+        if let Some(session_file) = self.resume_session_path.as_deref() {
+            crate::app_commands::runtime_launch::maintain_shared_codex_session_after_child_exit(
+                &repair_child,
+                session_file,
+            );
+        } else {
+            crate::app_commands::runtime_launch::maintain_shared_codex_sessions_after_child_exit(
+                &repair_child,
+            );
+        }
         Ok(())
     }
 }

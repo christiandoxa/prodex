@@ -544,12 +544,28 @@ Codex writes it through normal model selection; `ultra` remains an advanced
 conversation setting, and `plan_mode_reasoning_effort` is stored separately.
 Reading a preference does not advance its revision.
 
-Before and after an interactive Codex child, Prodex asks that same Codex binary's
-`app-server` to list active and archived threads with `useStateDbOnly=false`.
-The paginated, bounded, fail-soft request lets Codex perform its own rollout
-index repair without Prodex writing or recreating `state_*.sqlite`. Protocol
-responses stay on private pipes and never reach interactive or server-mode
-stdout. A failed repair does not change the child exit status.
+Normal interactive launch and shutdown do not start an auxiliary `app-server`
+and do not paginate historical threads. Prodex keeps the normal path bounded to
+the exact resumed rollout, or the newest active rollout in the current/recent
+date buckets, and uses a fingerprint cache to skip unchanged JSONL reads. The
+normal path never scans `archived_sessions`; the cache also retains the thread
+identifier needed to repair goal attachment paths without reopening an
+unchanged rollout.
+
+When the read-only state/index check finds a missing, stale, or persisted dirty
+latest row, Prodex may make one bounded active-only `thread/list` request with
+`useStateDbOnly=false` through the same Codex binary. It verifies the target
+rollout afterward and retains a small dirty marker when repair is incomplete.
+The full active-plus-archived paginated repair remains explicit in
+`prodex doctor --repair-session-index`. All repair protocol traffic stays on
+private pipes and never reaches interactive or server-mode stdout; a failed
+repair does not change the child exit status.
+
+Normal startup is O(1) metadata plus any persisted dirty target; normal
+shutdown is O(entries in the two current/recent date buckets) plus the exact or
+newest changed rollout. It never scales with older active or archived history;
+full repair is O(all active and archived sessions) and is not part of every
+invocation.
 
 ## Runtime Proxy Contract
 

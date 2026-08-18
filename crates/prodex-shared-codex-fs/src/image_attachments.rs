@@ -44,16 +44,18 @@ fn persist_codex_session_image_attachments_in_dir(
             .context("failed to read codex session entry metadata")?;
         if file_type.is_dir() {
             persist_codex_session_image_attachments_in_dir(codex_home, &path)?;
-        } else if file_type.is_file()
-            && path
-                .extension()
-                .is_some_and(|extension| extension == "jsonl")
-        {
+        } else if file_type.is_file() && is_codex_session_rollout_file(&path) {
             let _ = persist_codex_session_file_image_attachments(codex_home, &path)?;
         }
     }
 
     Ok(())
+}
+
+pub(super) fn is_codex_session_rollout_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
 }
 
 pub(crate) fn persist_codex_session_file_image_attachments(
@@ -91,8 +93,15 @@ fn read_codex_session_attachment_file(path: &Path) -> Result<Option<String>> {
     {
         bail!("codex session file changed while opening");
     }
+    let mut input: Box<dyn Read> = if is_compressed_session_file(path) {
+        Box::new(zstd::stream::read::Decoder::new(file)?)
+    } else {
+        Box::new(file)
+    };
     let mut bytes = Vec::new();
-    file.take(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES.saturating_add(1))
+    input
+        .by_ref()
+        .take(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)
         .context("failed to read codex session file")?;
     if bytes.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
@@ -133,7 +142,12 @@ fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()
     let mut file = options
         .open(&temp_path)
         .context("failed to write codex session file")?;
-    file.write_all(contents.as_bytes())
+    let encoded = if is_compressed_session_file(path) {
+        zstd::stream::encode_all(contents.as_bytes(), 3)?
+    } else {
+        contents.as_bytes().to_vec()
+    };
+    file.write_all(&encoded)
         .context("failed to write codex session file")?;
     file.sync_all()
         .context("failed to sync codex session file")?;
@@ -143,6 +157,12 @@ fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()
         .and_then(|directory| directory.sync_all())
         .context("failed to sync codex session directory")?;
     Ok(())
+}
+
+fn is_compressed_session_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".jsonl.zst"))
 }
 
 pub(crate) fn codex_session_image_attachments_are_stable(
@@ -206,6 +226,68 @@ pub(crate) fn codex_session_image_attachments_are_stable(
     }
 
     true
+}
+
+pub(crate) fn codex_session_persisted_attachment_paths(contents: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut add_path = |path: &Path| {
+        if !paths.iter().any(|known| known == path) {
+            paths.push(path.to_path_buf());
+        }
+    };
+
+    let mut cursor = 0;
+    while let Some(relative_tag_start) = contents[cursor..].find(CODEX_IMAGE_TAG_PREFIX) {
+        let tag_start = cursor + relative_tag_start;
+        let Some(relative_tag_end) = contents[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + relative_tag_end;
+        let tag = &contents[tag_start..tag_end];
+        let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+            cursor = tag_end;
+            continue;
+        };
+        let path_start = tag_start + relative_path_start + path_prefix.len();
+        let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
+            cursor = tag_end;
+            continue;
+        };
+        let decoded_path =
+            decode_codex_session_path(&contents[path_start..path_start + relative_path_end]);
+        let path = Path::new(decoded_path.as_ref());
+        if path.is_absolute()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(CODEX_CLIPBOARD_PREFIX))
+        {
+            add_path(path);
+        }
+        cursor = tag_end;
+    }
+
+    let mut cursor = 0;
+    while let Some((path_start, path_end)) = next_codex_session_clipboard_path(contents, cursor) {
+        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
+        let path = Path::new(decoded_path.as_ref());
+        if path.is_absolute() {
+            add_path(path);
+        }
+        cursor = path_end;
+    }
+
+    let mut cursor = 0;
+    while let Some((path_start, path_end)) = next_codex_session_attachment_path(contents, cursor) {
+        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
+        let path = Path::new(decoded_path.as_ref());
+        if path.is_absolute() && codex_attachment_path_suffix(path).is_some() {
+            add_path(path);
+        }
+        cursor = path_end;
+    }
+
+    paths
 }
 
 pub(crate) fn rewrite_codex_persisted_attachment_paths(
@@ -533,6 +615,48 @@ fn path_is_regular_file(path: &Path) -> Result<bool> {
         Ok(metadata) => Ok(metadata.file_type().is_file()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+#[cfg(test)]
+mod compressed_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn compressed_rollout_attachment_is_rewritten_and_persisted() {
+        let root = env::temp_dir().join(format!(
+            "prodex-compressed-attachment-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("sessions")).unwrap();
+        let source = env::temp_dir().join(format!("codex-clipboard-{}.png", std::process::id()));
+        fs::write(&source, b"image").unwrap();
+        let session = root.join("sessions/rollout-00000000-0000-0000-0000-000000000001.jsonl.zst");
+        let contents = format!("<image path=\"{}\">\n", source.display());
+        fs::write(
+            &session,
+            zstd::stream::encode_all(contents.as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let rewritten = persist_codex_session_file_image_attachments(&root, &session)
+            .unwrap()
+            .unwrap();
+        assert!(rewritten.contains("image_attachments"));
+        assert_eq!(
+            fs::read(
+                root.join("image_attachments")
+                    .join(source.file_name().unwrap())
+            )
+            .unwrap(),
+            b"image"
+        );
+        let _ = fs::remove_file(source);
+        let _ = fs::remove_dir_all(root);
     }
 }
 

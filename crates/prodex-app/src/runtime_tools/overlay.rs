@@ -7,6 +7,7 @@ use super::{
 };
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 pub(crate) struct RuntimeOverlayCleanup(Option<PathBuf>);
 
@@ -40,7 +41,7 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
         .iter()
         .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
         .collect();
-    let plan = prodex_optional_tools::resolve_optional_tools(&selected, &required);
+    let plan = prodex_optional_tools::resolve_optional_tools_for_launch(&selected, &required);
     if let Some(unavailable) = plan
         .unavailable
         .iter()
@@ -60,22 +61,50 @@ pub(super) fn build_plan(
     prepared: &PreparedRuntimeLaunch,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<RuntimeLaunchPlan> {
+    let stage_started = Instant::now();
+    if !strategy.args.dry_run {
+        strategy.resume_session_path =
+            crate::app_commands::runtime_launch::resume_repair::repair_resume_session_in_shared_home(
+                &prepared.paths.shared_codex_root,
+                &strategy.codex_args,
+            )?;
+    }
+    crate::runtime_launch::emit_runtime_timing("startup.resume_repair_ms", stage_started);
+    let stage_started = Instant::now();
     let tool_plan = resolve_optional_tool_plan(strategy, prepared)?;
+    crate::runtime_launch::emit_runtime_timing("startup.optional_tool_prepare_ms", stage_started);
+    let stage_started = Instant::now();
     let overlay_home = prepare_overlay_home(strategy, prepared)?;
+    crate::runtime_launch::emit_runtime_timing("startup.overlay_prepare_ms", stage_started);
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
+    let stage_started = Instant::now();
     let scope_args = strategy.base_runtime_codex_args(&overlay_home)?;
     let preference_context =
         crate::resolve_fresh_model_preference_context(&prepared.paths, &overlay_home, &scope_args)?;
+    crate::runtime_launch::emit_runtime_timing(
+        "startup.model_preference_context_ms",
+        stage_started,
+    );
+    let stage_started = Instant::now();
     let runtime_args =
         strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
+    crate::runtime_launch::emit_runtime_timing(
+        "startup.provider_catalog_prepare_ms",
+        stage_started,
+    );
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
         super::write_sub_agent_overlay(&overlay_home, sub_agent)?;
     }
+    let stage_started = Instant::now();
     prodex_optional_tools::activate_optional_tools_for_codex(
         &overlay_home,
         &tool_plan,
         strategy.presidio_enabled,
     )?;
+    crate::runtime_launch::emit_runtime_timing(
+        "startup.optional_tool_activation_ms",
+        stage_started,
+    );
     let mut child = strategy.build_child_plan(prepared, &overlay_home, &runtime_args)?;
     strategy.finalize_child_plan(&mut child, &overlay_home, runtime_proxy);
     if prepared.managed
@@ -88,6 +117,12 @@ pub(super) fn build_plan(
             "CODEX_SQLITE_HOME".into(),
             prepared.paths.shared_codex_root.as_os_str().to_os_string(),
         ));
+    }
+    if !strategy.args.dry_run
+        && strategy.desktop_command.is_none()
+        && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
+    {
+        crate::runtime_thread_index::repair_dirty_thread_index(&prepared.paths, &child);
     }
     if !strategy.args.dry_run
         && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
@@ -109,14 +144,6 @@ pub(super) fn build_plan(
                 None
             }
         };
-        let repair_binary = strategy
-            .desktop_command
-            .as_ref()
-            .map(|_| crate::codex_bin())
-            .unwrap_or_else(|| child.binary.clone());
-        if crate::reconcile_codex_thread_index(&repair_binary, &child).is_err() {
-            crate::print_launch_status("session index reconciliation unavailable; continuing");
-        }
     }
     Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
 }
@@ -129,12 +156,6 @@ fn resolve_optional_tool_plan(
         &strategy.args.selected_tool_set(),
         &strategy.args.required_tool_set(),
     )?;
-    if !strategy.args.dry_run {
-        crate::app_commands::runtime_launch::resume_repair::repair_resume_session_in_shared_home(
-            &prepared.paths.shared_codex_root,
-            &strategy.codex_args,
-        )?;
-    }
     let required_presidio = strategy
         .args
         .required_tool_set()
@@ -179,9 +200,6 @@ pub(crate) fn prepare_prodex_overlay_home(
         &paths.shared_codex_root.join("sessions"),
     );
     if sessions_are_managed {
-        // Recheck fingerprints immediately before linking history so concurrent session updates
-        // retain the same attachment-persistence behavior without rescanning every JSONL payload.
-        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
         return prodex_optional_tools::prepare_prodex_overlay_home_from_prepared_base(
             &paths.managed_profiles_root,
             base_codex_home,

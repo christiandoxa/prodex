@@ -52,6 +52,7 @@
     "docs:smart-context-evidence": "node scripts/docs/smart-context-evidence.mjs --write",
     "docs:smart-context-evidence:check": "node scripts/docs/smart-context-evidence.mjs --check",
     "bench:smart-context-report": "node scripts/bench/smart-context-performance-report.mjs",
+    "bench:startup-shutdown": "node scripts/bench/prodex-startup-shutdown.mjs",
     "smart-context:replay": "cargo run --locked -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict",
     "test": "npm run test:fast --",
     "test:node": "node --test scripts/**/*.test.mjs scripts/*.test.mjs npm/prodex-gateway-sdk/test/*.test.mjs",

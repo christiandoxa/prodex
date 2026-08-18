@@ -19,6 +19,7 @@ use super::{
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 pub(super) struct RunCommandStrategy {
     pub(super) args: RunArgs,
@@ -38,6 +39,7 @@ pub(super) struct RunCommandStrategy {
     pub(super) pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     pub(super) goal_resume_session_affinity_release: Option<String>,
     pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
+    pub(super) resume_session_path: Option<PathBuf>,
 }
 
 impl RunCommandStrategy {
@@ -55,9 +57,10 @@ impl RunCommandStrategy {
         let mut gemini_thinking_budget_tokens =
             runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
         let dry_run = args.dry_run || dry_run_arg;
-        if !dry_run {
-            repair_resume_session_metadata_prefix_from_codex_args(&codex_args)?;
-        }
+        let resume_session_path = (!dry_run)
+            .then(|| repair_resume_session_metadata_prefix_from_codex_args(&codex_args))
+            .transpose()?
+            .flatten();
         let session_settings = runtime_resume_session_settings_from_codex_args(&codex_args);
         let model_is_explicit = runtime_launch_cli_model(&codex_args).is_some()
             || codex_cli_config_override_value(&codex_args, "model").is_some();
@@ -126,6 +129,7 @@ impl RunCommandStrategy {
             pending_goal_resume_plan: None,
             goal_resume_session_affinity_release: None,
             model_preference_sync: None,
+            resume_session_path,
         })
     }
 }
@@ -163,7 +167,11 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
+        if let Some(path) = repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?
+            && path.starts_with(&prepared.paths.shared_codex_root)
+        {
+            self.resume_session_path = Some(path);
+        }
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
@@ -217,6 +225,9 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             ));
         }
         if !self.dry_run && !self.command_server {
+            crate::runtime_thread_index::repair_dirty_thread_index(&prepared.paths, &child);
+        }
+        if !self.dry_run && !self.command_server {
             self.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
                 &prepared.paths,
                 &child,
@@ -230,9 +241,6 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
                     None
                 }
             };
-            if crate::reconcile_codex_thread_index(&child.binary, &child).is_err() {
-                crate::print_launch_status("session index reconciliation unavailable; continuing");
-            }
         }
         Ok(RuntimeLaunchPlan::new(child))
     }
@@ -282,14 +290,11 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         {
             crate::print_launch_status("model preference synchronization was incomplete");
         }
-        if !self.command_server
-            && crate::reconcile_codex_thread_index(&plan.child.binary, &plan.child).is_err()
-        {
-            crate::print_launch_status(
-                "session index reconciliation unavailable after exit; continuing",
-            );
+        if let Some(session_file) = self.resume_session_path.as_deref() {
+            super::maintain_shared_codex_session_after_child_exit(&plan.child, session_file);
+        } else {
+            maintain_shared_codex_sessions_after_child_exit(&plan.child);
         }
-        maintain_shared_codex_sessions_after_child_exit();
         if status.success() {
             cleanup_codex_deleted_session_binding(self.delete_session_id.as_deref())?;
         }

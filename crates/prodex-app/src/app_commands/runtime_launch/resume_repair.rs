@@ -9,7 +9,7 @@ use crate::{AppPaths, AppState, AppStateIoExt};
 
 pub(super) fn repair_resume_session_metadata_prefix_from_codex_args(
     codex_args: &[OsString],
-) -> Result<()> {
+) -> Result<Option<std::path::PathBuf>> {
     let paths = AppPaths::discover()?;
     repair_resume_session_in_shared_home(&paths.shared_codex_root, codex_args)
 }
@@ -17,9 +17,9 @@ pub(super) fn repair_resume_session_metadata_prefix_from_codex_args(
 pub(crate) fn repair_resume_session_in_shared_home(
     codex_home: &Path,
     codex_args: &[OsString],
-) -> Result<()> {
+) -> Result<Option<std::path::PathBuf>> {
     let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args) else {
-        return Ok(());
+        return Ok(None);
     };
     repair_resume_session_home_strict(codex_home, session_id)
 }
@@ -27,20 +27,26 @@ pub(crate) fn repair_resume_session_in_shared_home(
 pub(super) fn repair_resume_session_in_home(
     codex_home: &Path,
     codex_args: &[OsString],
-) -> Result<()> {
+) -> Result<Option<std::path::PathBuf>> {
     let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args) else {
-        return Ok(());
+        return Ok(None);
     };
-    repair_resume_session_home_strict(codex_home, session_id)?;
+    let repaired_path = repair_resume_session_home_strict(codex_home, session_id)?;
     repair_resume_session_in_other_profile_homes(codex_home, session_id);
-    Ok(())
+    Ok(repaired_path)
 }
 
-fn repair_resume_session_home_strict(codex_home: &Path, session_id: &str) -> Result<()> {
-    if prodex_session_store::repair_resume_session_metadata_prefix(codex_home, session_id)?
-        .is_some()
+fn repair_resume_session_home_strict(
+    codex_home: &Path,
+    session_id: &str,
+) -> Result<Option<std::path::PathBuf>> {
+    if let Some(path) =
+        prodex_session_store::repair_resume_session_metadata_prefix(codex_home, session_id)?
     {
-        return Ok(());
+        return Ok(Some(path));
+    }
+    if let Some(path) = prodex_session_store::find_resume_session_path(codex_home, session_id)? {
+        return Ok(Some(path));
     }
     if let Some(path) =
         prodex_session_store::find_unrepairable_resume_session(codex_home, session_id)?
@@ -51,7 +57,7 @@ fn repair_resume_session_home_strict(codex_home: &Path, session_id: &str) -> Res
             path.display()
         );
     }
-    Ok(())
+    Ok(None)
 }
 
 fn repair_resume_session_in_other_profile_homes(primary_home: &Path, session_id: &str) {

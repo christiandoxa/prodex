@@ -191,7 +191,8 @@ Examples:
   prodex doctor --quota
   prodex doctor --runtime
   prodex doctor --runtime --json
-  prodex doctor --bundle ./prodex-doctor.json --redacted";
+  prodex doctor --bundle ./prodex-doctor.json --redacted
+  prodex doctor --repair-session-index";
 pub const CLI_SETUP_AFTER_HELP: &str = "\
 Examples:
   prodex setup --dry-run

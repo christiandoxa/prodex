@@ -1303,5 +1303,32 @@
       "maxFileLines": 900
     },
     "reason": "Reviewed the atomic evaluated-harness catalog, native Anthropic Messages round trip, reversible Gemini tool aliases, runtime diagnostics, continuity coverage, and documentation with the full local all-features suite, focused provider/proxy tests, formatting, docs checks, and secret scan."
+  },
+  {
+    "id": "audited-runtime-startup-shutdown-fast-path",
+    "requiredSubjects": [
+      "fix(runtime): remove historical startup and shutdown scans"
+    ],
+    "caps": {
+      "maxFiles": 51,
+      "maxBehaviorFiles": 45,
+      "maxLines": 2800,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the bounded startup/shutdown performance audit: incremental session-index and attachment maintenance, bounded preference persistence, metadata-only Super overlays, deterministic benchmarks, and parallel static CI guards. Caps cover this single audited implementation while the default churn thresholds remain unchanged."
+  },
+  {
+    "id": "audited-runtime-startup-shutdown-fast-path-release-0.408.11",
+    "requiredSubjects": [
+      "fix(runtime): remove historical startup and shutdown scans",
+      "chore(release): release 0.408.11"
+    ],
+    "caps": {
+      "maxFiles": 65,
+      "maxBehaviorFiles": 45,
+      "maxLines": 3300,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the same bounded startup/shutdown implementation plus synchronized 0.408.11 release metadata; the release cap covers generated version, lockfile, changelog, and package metadata while the default churn thresholds remain unchanged."
   }
 ]

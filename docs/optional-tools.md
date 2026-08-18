@@ -1,8 +1,10 @@
 # Optional Tools
 
-Prodex discovers optional tools without modifying them. Resolution and health
-checks happen before launch; activation writes only to the temporary launch
-overlay. Normal launches do not download, clone, update, trust, or grant extra
+Prodex discovers optional tools without modifying them. Normal interactive
+launches use bounded path/root resolution and activate only the temporary
+overlay; version, daemon, and package health checks remain available through
+`prodex capability super-doctor` and are still required for `--require-tool`.
+Normal launches do not download, clone, update, trust, or grant extra
 permissions to a tool.
 
 Do not replace an externally managed optional-tool binary while its daemon or
@@ -91,7 +93,9 @@ Ponytail uses the same manifest and tree-validation contract at
 
 RTK and Codebase Memory MCP resolve from managed roots first and then `PATH`.
 Codebase Memory MCP must be `0.9.1-rc.1` or newer (or a development build) and
-expose its native `daemon status` contract. Parallel Codex processes retain
+expose its native `daemon status` contract. The explicit health check verifies
+this contract; normal optional launch resolution does not synchronously spawn
+the daemon probe. Parallel Codex processes retain
 their own lightweight stdio frontends, while the daemon shares indexing jobs,
 watchers, and the graph cache; legacy builds that duplicate heavy per-session
 work fail the health check. Prodex leaves `CBM_CACHE_DIR` unset so parent and
@@ -101,7 +105,8 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned package to
-pass an offline probe; install the package and browser before launching Super.
+pass an offline probe; install the package and browser before launching Super,
+then use `prodex capability super-doctor` to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing
 doctor path. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass

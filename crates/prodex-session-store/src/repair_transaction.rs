@@ -17,6 +17,7 @@ pub(super) struct SessionRepairTransaction {
     parent: PathBuf,
     source: File,
     source_revision: SourceRevision,
+    source_bytes: Vec<u8>,
     contents: String,
     _maintenance_lock: File,
 }
@@ -53,7 +54,15 @@ impl SessionRepairTransaction {
             );
         }
         verify_source(path, &source, &source_revision)?;
-        let contents = String::from_utf8(bytes)
+        let decoded = decode_session_bytes(path, &bytes, max_bytes)?;
+        if decoded.len() as u64 > max_bytes {
+            bail!(
+                "session {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                max_bytes
+            );
+        }
+        let contents = String::from_utf8(decoded)
             .with_context(|| format!("failed to decode session {}", path.display()))?;
 
         Ok(Self {
@@ -61,6 +70,7 @@ impl SessionRepairTransaction {
             parent,
             source,
             source_revision,
+            source_bytes: bytes,
             contents,
             _maintenance_lock: maintenance_lock,
         })
@@ -93,15 +103,17 @@ impl SessionRepairTransaction {
             parent,
             source,
             source_revision,
-            contents,
+            source_bytes,
+            contents: _contents,
             _maintenance_lock,
         } = self;
         verify_source(&path, &source, &source_revision)?;
-        let mut backup = ensure_backup(&path, contents.as_bytes())?;
+        let mut backup = ensure_backup(&path, &source_bytes)?;
 
         let result = (|| {
             let mut temporary = create_temporary_file(&path)?;
-            temporary.file_mut().write_all(repaired).with_context(|| {
+            let encoded = encode_session_bytes(&path, repaired)?;
+            temporary.file_mut().write_all(&encoded).with_context(|| {
                 format!(
                     "failed to write repaired session {}",
                     temporary.path().display()
@@ -135,6 +147,36 @@ impl SessionRepairTransaction {
             let _ = sync_directory(&parent);
         }
         result
+    }
+}
+
+fn decode_session_bytes(path: &Path, bytes: &[u8], max_bytes: u64) -> Result<Vec<u8>> {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".jsonl.zst"))
+    {
+        let decoder = zstd::stream::read::Decoder::new(bytes)?;
+        let mut decoded = Vec::new();
+        decoder
+            .take(max_bytes.saturating_add(1))
+            .read_to_end(&mut decoded)
+            .context("failed to decompress session")?;
+        Ok(decoded)
+    } else {
+        Ok(bytes.to_vec())
+    }
+}
+
+fn encode_session_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<u8>> {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".jsonl.zst"))
+    {
+        zstd::stream::encode_all(bytes, 3).context("failed to compress repaired session")
+    } else {
+        Ok(bytes.to_vec())
     }
 }
 

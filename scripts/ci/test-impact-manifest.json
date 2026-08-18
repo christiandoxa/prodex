@@ -200,6 +200,7 @@
         "scripts/ci/ci-impact.mjs",
         "scripts/ci/ci-impact.test.mjs",
         "scripts/ci/main-internal-core-shard.mjs",
+        "scripts/ci/static-guards-parallel.mjs",
         "scripts/ci/runtime-env-parallel.mjs",
         "scripts/ci/runtime-hotpath-guard.mjs",
         "scripts/ci/runtime-proxy-bench-thresholds.json",

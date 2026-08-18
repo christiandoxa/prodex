@@ -1045,6 +1045,7 @@ prodex log upstream
 prodex doctor --install
 prodex doctor --runtime
 prodex doctor --bundle ./prodex-doctor.json --redacted
+prodex doctor --repair-session-index
 prodex setup --dry-run
 prodex capability list
 prodex context audit
@@ -1062,6 +1063,7 @@ git diff | prodex context compact-output --kind git-diff
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
+| `prodex doctor --repair-session-index` | Explicitly performs full active and archived Codex session-index repair. |
 | `prodex setup --dry-run` | Shows setup reconciliation actions without changing files. |
 | `prodex capability list` | Lists built-in and optional Prodex capabilities with availability status. |
 | `prodex context audit` | Reports approximate token weight for shared instruction and memory files. |

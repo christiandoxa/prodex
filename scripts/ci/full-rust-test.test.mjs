@@ -133,7 +133,7 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
 test("release hygiene does not inherit an unavailable Rust compiler wrapper", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const job = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
-  const step = job?.match(/- name: Enforce release hygiene([\s\S]*?)- name: Enforce Rust file size guard/)?.[1];
+  const step = job?.match(/- name: Enforce release hygiene([\s\S]*?)- name: Run independent static guards in parallel/)?.[1];
 
   assert.ok(job, "process-guard job missing");
   assert.ok(step, "release hygiene step missing");
@@ -241,7 +241,7 @@ test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", ()
   }
 
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
-  assert.match(processGuard, /Validate runtime CI manifest[\s\S]*?npm run ci:runtime-manifest/);
+  assert.match(processGuard, /Run independent static guards in parallel[\s\S]*?scripts\/ci\/static-guards-parallel\.mjs/);
 });
 
 test("large CI matrices use one cache writer and retain failure diagnostics", () => {

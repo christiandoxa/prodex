@@ -1,4 +1,5 @@
 use super::*;
+use chrono::{Datelike, Utc};
 use filetime::FileTime;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,6 +154,112 @@ fn copy_codex_home_skips_codex_managed_packages_directory() {
     assert!(
         fs::symlink_metadata(destination.join("packages")).is_err(),
         "Codex managed packages directory should not be copied into the profile"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_codex_home_without_chat_history_skips_history_roots() {
+    let temp_dir = CopyTestDir::new("skip-chat-history");
+    let source = temp_dir.path.join("source");
+    let destination = temp_dir.path.join("destination");
+    for relative in [
+        "history.jsonl",
+        "sessions/2026/08/18/rollout.jsonl",
+        "archived_sessions/2026/08/18/rollout.jsonl",
+        "attachments/id/pasted.txt",
+        "image_attachments/id/image.png",
+        "packages/standalone/releases/current/codex",
+    ] {
+        let path = source.join(relative);
+        fs::create_dir_all(path.parent().expect("source parent")).expect("source parent");
+        fs::write(path, "chat history").expect("chat history should write");
+    }
+    fs::write(source.join("config.toml"), "model = \"gpt-5\"\n").expect("config should write");
+
+    copy_codex_home_without_chat_history(&source, &destination)
+        .expect("metadata copy should succeed");
+
+    assert_eq!(
+        fs::read_to_string(destination.join("config.toml")).expect("config should copy"),
+        "model = \"gpt-5\"\n"
+    );
+    for relative in [
+        "history.jsonl",
+        "sessions",
+        "archived_sessions",
+        "attachments",
+        "image_attachments",
+        "packages",
+    ] {
+        assert!(
+            fs::symlink_metadata(destination.join(relative)).is_err(),
+            "chat history root {relative} should be left for the overlay linker"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn recent_session_maintenance_ignores_large_historical_and_archived_trees() {
+    let temp_dir = CopyTestDir::new("recent-maintenance");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared-codex"),
+        legacy_shared_codex_root: temp_dir.path.join("legacy-shared-codex"),
+    };
+    let today = Utc::now().date_naive();
+    let recent_dir = paths.shared_codex_root.join(format!(
+        "sessions/{}/{:02}/{:02}",
+        today.year(),
+        today.month(),
+        today.day()
+    ));
+    fs::create_dir_all(&recent_dir).expect("recent session directory should exist");
+    let session_id = "01900000-0000-7000-8000-000000000004";
+    let session_file = recent_dir.join(format!("rollout-{session_id}.jsonl"));
+    let source = temp_dir.path.join("codex-clipboard-recent.png");
+    fs::write(&source, b"recent image").expect("recent source should write");
+    fs::write(
+        &session_file,
+        format!(
+            "{{\"timestamp\":\"{}T08:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"session_id\":\"{session_id}\"}}}}\n{{\"text\":\"<image path=\\\"{}\\\">\"}}\n",
+            today,
+            source.display()
+        ),
+    )
+    .expect("recent session should write");
+    for root in [
+        paths.shared_codex_root.join("sessions/2000/01/01"),
+        paths.shared_codex_root.join("archived_sessions/2000/01/01"),
+    ] {
+        fs::create_dir_all(&root).expect("historical directory should exist");
+        for index in 0..5_000 {
+            fs::write(root.join(format!("rollout-{index}.jsonl")), [0xff])
+                .expect("historical session should write");
+        }
+    }
+
+    assert_eq!(
+        maintain_recent_managed_codex_sessions(&paths)
+            .expect("recent maintenance should not read historical sessions"),
+        Some(session_file.clone())
+    );
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("image_attachments/codex-clipboard-recent.png")
+        )
+        .expect("recent attachment should persist"),
+        b"recent image"
+    );
+    assert!(
+        maintain_recent_managed_codex_sessions(&paths)
+            .expect("unchanged recent maintenance should succeed")
+            .is_some()
     );
 }
 

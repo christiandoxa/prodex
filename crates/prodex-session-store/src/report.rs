@@ -80,9 +80,11 @@ pub fn sort_session_reports(reports: &mut [SessionReport]) {
 }
 
 pub fn is_session_metadata_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension, "jsonl" | "json"))
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.ends_with(".jsonl") || name.ends_with(".jsonl.zst") || name.ends_with(".json")
+        })
 }
 
 pub fn apply_session_json_lines<'a>(
@@ -248,8 +250,14 @@ pub fn value_at_path<'a>(
 }
 
 pub fn session_id_from_path(path: &Path) -> String {
-    path.file_stem()
+    path.file_name()
         .and_then(|name| name.to_str())
+        .and_then(|name| {
+            name.strip_suffix(".jsonl.zst")
+                .or_else(|| name.strip_suffix(".jsonl"))
+                .or_else(|| name.strip_suffix(".json"))
+                .or(Some(name))
+        })
         .unwrap_or("unknown-session")
         .to_string()
 }

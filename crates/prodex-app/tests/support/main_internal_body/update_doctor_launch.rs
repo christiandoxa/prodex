@@ -55,6 +55,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         runtime: true,
         install: false,
         repair_import_auth_journals: false,
+        repair_session_index: false,
         tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
         suggest_policy: false,
         json: true,

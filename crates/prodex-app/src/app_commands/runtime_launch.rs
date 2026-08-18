@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime_launch::emit_runtime_timing as emit_timing;
 mod command_server;
 pub(crate) mod gateway_config;
 #[path = "runtime_launch/gateway_shutdown.rs"]
@@ -42,15 +43,17 @@ use resume_provider::{
 use run_command_strategy::RunCommandStrategy;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
-pub(crate) use session_delete::maintain_shared_codex_sessions_after_child_exit;
 use session_delete::{
     cleanup_codex_deleted_session_binding, clear_codex_session_binding,
     resolve_codex_delete_session_id,
 };
+pub(crate) use session_delete::{
+    maintain_shared_codex_session_after_child_exit, maintain_shared_codex_sessions_after_child_exit,
+};
 use std::borrow::Cow;
 use std::path::Path;
+use std::time::Instant;
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
-
 pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
@@ -108,7 +111,6 @@ pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<(
     })
     .map(|_| ())
 }
-
 fn restore_resume_session_settings(
     codex_args: &mut Vec<OsString>,
     settings: Option<&RuntimeResumeSessionSettings>,
@@ -144,7 +146,6 @@ fn restore_resume_session_settings(
         );
     }
 }
-
 pub(super) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {
     let mut index = 0;
     while index + 1 < args.len() {
@@ -161,7 +162,6 @@ pub(super) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, 
     }
     false
 }
-
 pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let backend = start_gateway_backend(args)?;
     print_gateway_status(
@@ -171,7 +171,6 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     )?;
     gateway_shutdown::wait_for_signal_and_drain(&backend)
 }
-
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
@@ -179,15 +178,16 @@ struct RuntimeLaunchPreparationBuilder<'a> {
     state: AppState,
     selection: RuntimeLaunchSelection,
 }
-
 impl<'a> RuntimeLaunchPreparationBuilder<'a> {
     fn from_request(
         request: RuntimeLaunchRequest<'a>,
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<Self> {
+        let profile_started = Instant::now();
         let paths = AppPaths::discover()?;
         let mut state = AppState::load_and_repair(&paths)?;
         let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
+        emit_timing("startup.profile_resolution_ms", profile_started);
 
         Ok(Self {
             request,
@@ -197,11 +197,9 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             selection,
         })
     }
-
     fn build(self) -> Result<PreparedRuntimeLaunch> {
         self.build_with_terminal_output(true)
     }
-
     fn build_with_terminal_output(
         mut self,
         terminal_output: bool,
@@ -218,10 +216,14 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         let managed = self.selected_profile_is_managed()?;
         if managed {
             ensure_managed_runtime_launch_home_under_root(&self.paths, &self.selection.codex_home)?;
-            // ponytail: only targeted resume repair belongs here; full maintenance runs after exit.
+            // ponytail: runtime launch only prepares links; full maintenance is explicit.
+            let shared_fs_started = Instant::now();
             prepare_managed_codex_home_for_runtime_launch(&self.paths, &self.selection.codex_home)?;
+            emit_timing("startup.managed_home_prepare_ms", shared_fs_started);
+            emit_timing("startup.shared_fs_prepare_ms", shared_fs_started);
         }
 
+        let proxy_started = Instant::now();
         let runtime_proxy = RuntimeProxyStartupFactory::build(
             &self.paths,
             &self.state,
@@ -229,6 +231,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             &self.request,
             self.resolved_harness,
         )?;
+        emit_timing("startup.runtime_proxy_prepare_ms", proxy_started);
 
         let RuntimeLaunchPreparationBuilder {
             paths, selection, ..
@@ -240,7 +243,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             runtime_proxy,
         })
     }
-
     fn handle_non_openai_model_provider(&self) -> Result<()> {
         let Some(setting) = self.selection.non_openai_model_provider.as_ref() else {
             return Ok(());
@@ -292,7 +294,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         )?;
         Ok(())
     }
-
     fn record_selection(&mut self) -> Result<()> {
         if self.selection.profileless_local_home {
             return Ok(());
@@ -302,7 +303,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         self.state.save(&self.paths)?;
         Ok(())
     }
-
     fn selected_profile_is_managed(&self) -> Result<bool> {
         if self.selection.profileless_local_home {
             return Ok(false);

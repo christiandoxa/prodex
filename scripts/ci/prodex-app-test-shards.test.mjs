@@ -129,6 +129,7 @@ test("shard planner dry-run and matrix output are compile-free", () => {
 test("CI consumes generated app shards and retains required safety gates", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const fullWorkflow = readFileSync(".github/workflows/full-test.yml", "utf8");
+  const staticGuards = readFileSync("scripts/ci/static-guards-parallel.mjs", "utf8");
 
   assert.match(workflow, /prodex_app_matrix: \$\{\{ steps\.prodex-app-matrix\.outputs\.matrix \}\}/);
   assert.match(
@@ -192,7 +193,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
   assert.match(processGuard, /mozilla-actions\/sccache-action@/);
   assert.match(processGuard, /Swatinem\/rust-cache@/);
-  assert.match(processGuard, /npm run docs:provider-capabilities:check/);
+  assert.match(processGuard, /scripts\/ci\/static-guards-parallel\.mjs/);
   assert.doesNotMatch(processGuard, /npm run docs:smart-context-evidence:check/);
   assert.equal(
     processGuard.match(/if: matrix\.lane == 'static' \|\| matrix\.lane == 'enterprise-storage'/g)
@@ -210,16 +211,16 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(smartContextEvidence, /npm run docs:smart-context-evidence:check/);
   const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)$/)?.[1];
   assert.match(telemetry, /- smart-context-evidence/);
-  for (const command of [
-    "npm run docs:lint",
-    "npm run ci:secret-boundary-guard",
-    "npm run ci:crate-boundary",
-    "npm run ci:deployment-security-guard",
-    "npm run ci:backup-restore-drill",
-    "npm run ci:storage-postgres-proof",
-    "redis_rate_limit_runtime",
+  for (const [source, command] of [
+    [workflow, "npm run docs:lint"],
+    [staticGuards, "ci:secret-boundary-guard"],
+    [staticGuards, "ci:crate-boundary"],
+    [workflow, "npm run ci:deployment-security-guard"],
+    [workflow, "npm run ci:backup-restore-drill"],
+    [workflow, "npm run ci:storage-postgres-proof"],
+    [workflow, "redis_rate_limit_runtime"],
   ]) {
-    assert.match(workflow, new RegExp(command.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")), `${command} missing`);
+    assert.match(source, new RegExp(command.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")), `${command} missing`);
   }
 });
 

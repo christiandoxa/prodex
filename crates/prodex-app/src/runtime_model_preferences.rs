@@ -4,23 +4,26 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MODEL_PREFERENCE_SCHEMA_VERSION: u32 = 1;
 const MODEL_PREFERENCE_FILE: &str = "model-preferences.json";
-const MODEL_PREFERENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const OPENAI_PROVIDER_ID: &str = "openai";
 const GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID: &str = "prodex-openai-governed-http";
+const MODEL_PREFERENCE_LOCK_WAIT: Duration = Duration::from_millis(250);
 
+#[path = "runtime_model_preferences_lock.rs"]
+mod lock;
+#[path = "runtime_model_preferences_pending.rs"]
+mod pending;
+use lock::try_acquire_model_preference_lock;
+use pending::{flush_pending_model_preference, save_pending_model_preference};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ModelPreferenceScope {
     /// A digest keeps arbitrary provider identifiers, URLs, and user input out of the store.
     pub(crate) provider: String,
     pub(crate) catalog: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LastModelSelection {
     pub(crate) scope: ModelPreferenceScope,
@@ -32,7 +35,6 @@ pub(crate) struct LastModelSelection {
     pub(crate) generation: u64,
     pub(crate) source: String,
 }
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ModelPreferenceFile {
     #[serde(default = "current_model_preference_schema_version")]
@@ -40,24 +42,20 @@ struct ModelPreferenceFile {
     #[serde(default)]
     selections: Vec<LastModelSelection>,
 }
-
 fn current_model_preference_schema_version() -> u32 {
     MODEL_PREFERENCE_SCHEMA_VERSION
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ConfigFingerprint {
     modified_at: u128,
     digest: [u8; 32],
 }
-
 #[derive(Debug, Clone)]
 struct ConfigSnapshot {
     fingerprint: ConfigFingerprint,
     model: Option<String>,
     reasoning_effort: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub(crate) struct ModelPreferenceContext {
     pub(crate) logical_scope: ModelPreferenceScope,
@@ -65,7 +63,6 @@ pub(crate) struct ModelPreferenceContext {
     explicit_model: Option<String>,
     explicit_effort: Option<String>,
 }
-
 pub(crate) fn model_preference_scope(
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
@@ -82,7 +79,6 @@ pub(crate) fn model_preference_scope(
         catalog: catalog_identity,
     })
 }
-
 fn model_preference_provider_and_catalog(
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
@@ -93,7 +89,6 @@ fn model_preference_provider_and_catalog(
     let catalog = codex_effective_config_value(codex_home, &provider_args, "model_catalog_json")?;
     Ok((provider, catalog))
 }
-
 fn logical_model_provider_id(provider: &str) -> String {
     if provider.eq_ignore_ascii_case(OPENAI_PROVIDER_ID)
         || provider.eq_ignore_ascii_case(GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID)
@@ -103,7 +98,6 @@ fn logical_model_provider_id(provider: &str) -> String {
         provider.to_string()
     }
 }
-
 fn catalog_identity(path: &Path, provider: &str) -> String {
     let generated_name = path
         .file_name()
@@ -140,13 +134,17 @@ fn generated_catalog_identity(provider: &str) -> Option<String> {
         format!("prodex-generated-catalog-v1\0{provider}\0{name}").as_bytes(),
     ))
 }
-
 /// Resolves one immutable logical scope and its remembered selection for a launch.
 pub(crate) fn resolve_fresh_model_preference_context(
     paths: &AppPaths,
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
 ) -> Result<ModelPreferenceContext> {
+    if let Err(_error) = flush_pending_model_preference(paths) {
+        crate::print_launch_status(
+            "pending model preference synchronization is unavailable; continuing",
+        );
+    }
     let logical_scope = model_preference_scope(codex_home, codex_args)?;
     let explicit_model = crate::runtime_launch_cli_model(codex_args)
         .or_else(|| crate::codex_cli_config_override_value(codex_args, "model"));
@@ -160,7 +158,6 @@ pub(crate) fn resolve_fresh_model_preference_context(
             explicit_effort,
         });
     }
-
     let remembered = match load_latest_model_preference(paths, &logical_scope) {
         Ok(Some(selection)) => Some(selection),
         Ok(None) => {
@@ -186,7 +183,6 @@ pub(crate) fn resolve_fresh_model_preference_context(
         explicit_effort,
     })
 }
-
 /// Applies remembered fields that were not explicitly supplied for a fresh launch.
 ///
 /// This is called before and after provider catalog preparation. The same context is passed to
@@ -434,7 +430,6 @@ fn prepend_config_override(args: &mut Vec<std::ffi::OsString>, key: &str, value:
         ],
     );
 }
-
 fn model_preference_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join(MODEL_PREFERENCE_FILE)
 }
@@ -513,7 +508,11 @@ fn record_model_preference(paths: &AppPaths, mut selection: LastModelSelection) 
         .with_context(|| format!("failed to create {}", paths.root.display()))?;
     let path = model_preference_file_path(paths);
     let backup = model_preference_backup_path(&path);
-    let _lock = crate::runtime_store::acquire_json_file_lock(&path)?;
+    let Some(_lock) =
+        try_acquire_model_preference_lock(&path, Instant::now() + MODEL_PREFERENCE_LOCK_WAIT)?
+    else {
+        bail!("model preference file is busy");
+    };
     let (mut preferences, generation) = read_model_preference_file_locked(&path, &backup)?
         .unwrap_or((
             ModelPreferenceFile {
@@ -546,8 +545,11 @@ fn record_model_preference(paths: &AppPaths, mut selection: LastModelSelection) 
 }
 
 pub(crate) struct ModelPreferenceSync {
-    stop: Option<Sender<()>>,
-    worker: Option<JoinHandle<Option<String>>>,
+    paths: AppPaths,
+    config_paths: Vec<PathBuf>,
+    scope: ModelPreferenceScope,
+    previous: Option<ConfigSnapshot>,
+    finished: bool,
 }
 
 impl ModelPreferenceSync {
@@ -556,31 +558,35 @@ impl ModelPreferenceSync {
         child: &ChildProcessPlan,
         scope: ModelPreferenceScope,
     ) -> Result<Self> {
+        let started = Instant::now();
         let config_paths = config_paths_for_child(&child.codex_home, &child.args);
         let baseline = read_config_snapshot(&config_paths)?;
-        let (stop_tx, stop_rx) = mpsc::channel();
-        let worker = thread::Builder::new()
-            .name("prodex-model-preference-sync".to_string())
-            .spawn({
-                let paths = paths.clone();
-                move || preference_sync_worker(paths, config_paths, scope, baseline, stop_rx)
-            })
-            .context("failed to start model preference synchronization worker")?;
+        emit_model_preference_timing("startup.model_preference_resolve_ms", started);
         Ok(Self {
-            stop: Some(stop_tx),
-            worker: Some(worker),
+            paths: paths.clone(),
+            config_paths,
+            scope,
+            previous: baseline,
+            finished: false,
         })
     }
 
     pub(crate) fn finish(&mut self) -> Option<String> {
-        if let Some(stop) = self.stop.take()
-            && stop.send(()).is_err()
-        {
-            return Some("model preference synchronization worker stopped".to_string());
+        if self.finished {
+            return None;
         }
-        self.worker
-            .take()
-            .and_then(|worker| worker.join().ok().flatten())
+        self.finished = true;
+        let started = Instant::now();
+        let result = capture_changed_config(
+            &self.paths,
+            &self.config_paths,
+            &self.scope,
+            &mut self.previous,
+        )
+        .err()
+        .map(|error| redacted_preference_error(&error));
+        emit_model_preference_timing("shutdown.model_preference_sync_ms", started);
+        result
     }
 }
 
@@ -588,31 +594,6 @@ impl Drop for ModelPreferenceSync {
     fn drop(&mut self) {
         let _ = self.finish();
     }
-}
-
-fn preference_sync_worker(
-    paths: AppPaths,
-    config_paths: Vec<PathBuf>,
-    scope: ModelPreferenceScope,
-    mut previous: Option<ConfigSnapshot>,
-    stop_rx: Receiver<()>,
-) -> Option<String> {
-    let mut first_error = None;
-    loop {
-        let should_stop = match stop_rx.recv_timeout(MODEL_PREFERENCE_POLL_INTERVAL) {
-            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => true,
-            Err(mpsc::RecvTimeoutError::Timeout) => false,
-        };
-        if let Err(error) = capture_changed_config(&paths, &config_paths, &scope, &mut previous)
-            && first_error.is_none()
-        {
-            first_error = Some(redacted_preference_error(&error));
-        }
-        if should_stop {
-            break;
-        }
-    }
-    first_error
 }
 
 fn capture_changed_config(
@@ -641,19 +622,19 @@ fn capture_changed_config(
         *previous = Some(snapshot);
         return Ok(());
     };
-    let result = record_model_preference(
-        paths,
-        LastModelSelection {
-            scope: scope.clone(),
-            model,
-            reasoning_effort: snapshot.reasoning_effort.clone(),
-            selected_at: snapshot.fingerprint.modified_at,
-            generation: 0,
-            source: "codex-config".to_string(),
-        },
-    );
+    let selection = LastModelSelection {
+        scope: scope.clone(),
+        model,
+        reasoning_effort: snapshot.reasoning_effort.clone(),
+        selected_at: snapshot.fingerprint.modified_at,
+        generation: 0,
+        source: "codex-config".to_string(),
+    };
+    let result = record_model_preference(paths, selection.clone());
     if result.is_ok() {
         *previous = Some(snapshot);
+    } else if let Err(_error) = save_pending_model_preference(paths, &selection) {
+        // The original error remains the observable result; a later launch can retry the write.
     }
     result
 }
@@ -728,6 +709,15 @@ fn config_paths_for_child(codex_home: &Path, codex_args: &[std::ffi::OsString]) 
 
 fn redacted_preference_error(_error: &anyhow::Error) -> String {
     "model preference synchronization failed".to_string()
+}
+
+fn emit_model_preference_timing(stage: &str, started: Instant) {
+    if std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some() {
+        eprintln!(
+            "prodex_runtime_timing stage={stage} duration_ms={}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 }
 
 fn digest_bytes(bytes: &[u8]) -> String {

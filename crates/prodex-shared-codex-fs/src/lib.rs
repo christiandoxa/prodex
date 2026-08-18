@@ -5,6 +5,8 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod copy;
 mod entries;
@@ -14,8 +16,8 @@ mod migration;
 mod ops;
 mod prepare;
 
-pub use self::copy::copy_codex_home;
 use self::copy::*;
+pub use self::copy::{copy_codex_home, copy_codex_home_without_chat_history};
 pub use self::entries::{SharedCodexEntry, SharedCodexEntryKind};
 use self::history::*;
 pub use self::image_attachments::persist_codex_session_image_attachments;
@@ -24,7 +26,8 @@ use self::migration::*;
 use self::ops::*;
 pub use self::ops::{create_codex_home_if_missing, ensure_managed_profiles_root};
 pub use self::prepare::{
-    maintain_managed_codex_sessions, prepare_managed_codex_home,
+    maintain_managed_codex_session_file, maintain_managed_codex_sessions,
+    maintain_recent_managed_codex_sessions, prepare_managed_codex_home,
     prepare_managed_codex_home_for_runtime_launch,
 };
 
@@ -64,6 +67,7 @@ const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_", "goals_", "me
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 const SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX: &str = ".config.toml";
 const CODEX_SESSION_MAINTENANCE_LOCK_FILE: &str = ".prodex-maintenance.lock";
+const CODEX_SESSION_CHILD_LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn open_codex_session_maintenance_lock(codex_home: &Path) -> Result<fs::File> {
     let sessions_dir = codex_home.join("sessions");
@@ -81,8 +85,22 @@ fn open_codex_session_maintenance_lock(codex_home: &Path) -> Result<fs::File> {
 
 pub fn lock_codex_sessions_for_child(codex_home: &Path) -> Result<fs::File> {
     let lock = open_codex_session_maintenance_lock(codex_home)?;
-    lock.lock_shared()
-        .with_context(|| "failed to lock Codex sessions for child process")?;
+    let deadline = Instant::now() + CODEX_SESSION_CHILD_LOCK_TIMEOUT;
+    loop {
+        match lock.try_lock_shared() {
+            Ok(()) => break,
+            Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                bail!(
+                    "timed out after {} ms waiting for Codex session lock",
+                    CODEX_SESSION_CHILD_LOCK_TIMEOUT.as_millis()
+                );
+            }
+            Err(err) => return Err(err).context("failed to lock Codex sessions for child process"),
+        }
+    }
     Ok(lock)
 }
 
