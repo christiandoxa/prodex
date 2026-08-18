@@ -19,7 +19,7 @@ pub(super) fn try_acquire_model_preference_lock(
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => return Ok(Some(file)),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(error) if is_lock_contention(&error) => {
                 let now = Instant::now();
                 if now >= deadline {
                     return Ok(None);
@@ -33,5 +33,20 @@ pub(super) fn try_acquire_model_preference_lock(
                     .with_context(|| format!("failed to lock {}", lock_path.display()));
             }
         }
+    }
+}
+
+fn is_lock_contention(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        matches!(error.raw_os_error(), Some(32) | Some(33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }

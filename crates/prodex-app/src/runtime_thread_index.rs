@@ -250,6 +250,14 @@ pub(crate) enum LatestThreadIndexState {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DatabaseThreadIndexState {
+    Present,
+    Stale,
+    Missing,
+    Unavailable,
+}
+
 pub(crate) fn latest_thread_index_state(
     child: &ChildProcessPlan,
     session_file: &Path,
@@ -269,46 +277,14 @@ pub(crate) fn latest_thread_index_state(
     let mut queryable_database = false;
     let mut stale_row = false;
     for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.starts_with("state_") || !name.ends_with(".sqlite") {
-            continue;
-        }
-        let Ok(metadata) = entry.file_type() else {
-            continue;
-        };
-        if !metadata.is_file() || metadata.is_symlink() {
-            continue;
-        }
-        let Ok(connection) = Connection::open_with_flags(
-            &path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        ) else {
-            continue;
-        };
-        let thread_id = format!("thread_{session_id}");
-        let Ok(mut statement) =
-            connection.prepare("SELECT rollout_path FROM threads WHERE id = ?1 OR id = ?2")
-        else {
-            continue;
-        };
-        let Ok(rows) = statement.query_map(rusqlite::params![session_id, thread_id], |row| {
-            row.get::<_, String>(0)
-        }) else {
-            continue;
-        };
-        queryable_database = true;
-        let mut found_row = false;
-        for row in rows.flatten() {
-            found_row = true;
-            if state_db_rollout_path_matches(sqlite_home, session_file, &row) {
-                return LatestThreadIndexState::Present;
+        match inspect_thread_index_database(&entry, sqlite_home, session_file, &session_id) {
+            DatabaseThreadIndexState::Present => return LatestThreadIndexState::Present,
+            DatabaseThreadIndexState::Stale => {
+                queryable_database = true;
+                stale_row = true;
             }
-        }
-        if found_row {
-            stale_row = true;
+            DatabaseThreadIndexState::Missing => queryable_database = true,
+            DatabaseThreadIndexState::Unavailable => {}
         }
     }
     if stale_row {
@@ -318,6 +294,56 @@ pub(crate) fn latest_thread_index_state(
         LatestThreadIndexState::Missing
     } else {
         LatestThreadIndexState::Unavailable
+    }
+}
+
+fn inspect_thread_index_database(
+    entry: &fs::DirEntry,
+    sqlite_home: &Path,
+    session_file: &Path,
+    session_id: &str,
+) -> DatabaseThreadIndexState {
+    let path = entry.path();
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return DatabaseThreadIndexState::Unavailable;
+    };
+    if !name.starts_with("state_") || !name.ends_with(".sqlite") {
+        return DatabaseThreadIndexState::Unavailable;
+    }
+    let Ok(metadata) = entry.file_type() else {
+        return DatabaseThreadIndexState::Unavailable;
+    };
+    if !metadata.is_file() || metadata.is_symlink() {
+        return DatabaseThreadIndexState::Unavailable;
+    }
+    let Ok(connection) = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return DatabaseThreadIndexState::Unavailable;
+    };
+    let Ok(mut statement) =
+        connection.prepare("SELECT rollout_path FROM threads WHERE id = ?1 OR id = ?2")
+    else {
+        return DatabaseThreadIndexState::Unavailable;
+    };
+    let thread_id = format!("thread_{session_id}");
+    let Ok(rows) = statement.query_map(rusqlite::params![session_id, thread_id], |row| {
+        row.get::<_, String>(0)
+    }) else {
+        return DatabaseThreadIndexState::Unavailable;
+    };
+    let mut found_row = false;
+    for row in rows.flatten() {
+        found_row = true;
+        if state_db_rollout_path_matches(sqlite_home, session_file, &row) {
+            return DatabaseThreadIndexState::Present;
+        }
+    }
+    if found_row {
+        DatabaseThreadIndexState::Stale
+    } else {
+        DatabaseThreadIndexState::Missing
     }
 }
 
