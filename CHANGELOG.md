@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.408.10 - 2026-08-18
+
+### Docs
+
+- Show GitHub release downloads (`2db7a71`)
+
+### Misc
+
+- Persist model preferences by logical scope (`55b4c90`)
+
 ## 0.408.9 - 2026-08-18
 
 ### Docs
