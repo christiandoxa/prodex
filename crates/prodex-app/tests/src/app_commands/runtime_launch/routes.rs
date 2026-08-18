@@ -216,7 +216,7 @@ fn command_server_managed_stdio_uses_selected_profile_home() {
     ]);
     args.profile = Some("second".to_string());
 
-    let strategy = RunCommandStrategy::new(args).unwrap();
+    let mut strategy = RunCommandStrategy::new(args).unwrap();
     let prepared = prepare_codex_command_server_runtime_launch(strategy.runtime_request()).unwrap();
     let plan = strategy
         .build_plan(&prepared, prepared.runtime_proxy.as_ref())
@@ -263,7 +263,7 @@ fn command_server_managed_stdio_rewrites_legacy_profile_v2_for_codex_0134() {
         OsString::from("--stdio"),
     ]);
 
-    let strategy = RunCommandStrategy::new(args).unwrap();
+    let mut strategy = RunCommandStrategy::new(args).unwrap();
     let prepared = prepare_codex_command_server_runtime_launch(strategy.runtime_request()).unwrap();
     let plan = strategy
         .build_plan(&prepared, prepared.runtime_proxy.as_ref())
@@ -285,7 +285,7 @@ fn command_server_managed_stdio_routes_model_traffic_through_runtime_proxy() {
     let root = temp_dir("command-server-runtime-proxy");
     let codex_home = root.join("codex-home");
     fs::create_dir_all(&codex_home).unwrap();
-    let strategy = RunCommandStrategy::new(test_run_args(vec![
+    let mut strategy = RunCommandStrategy::new(test_run_args(vec![
         OsString::from("app-server"),
         OsString::from("--stdio"),
     ]))

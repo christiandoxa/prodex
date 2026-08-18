@@ -51,7 +51,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
     }
 
     fn build_plan(
-        &self,
+        &mut self,
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {

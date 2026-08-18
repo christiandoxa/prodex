@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn latest_rollout_remains_resolvable_when_state_db_only_has_older_thread() {
+    let root = test_temp_dir("session-latest-rollout-missing-state-row");
+    let sessions = root.join("sessions/2026/08/18");
+    fs::create_dir_all(&sessions).expect("session directory should be created");
+    let old_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let latest_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0929";
+    let old_path = sessions.join(format!("rollout-2026-08-18T10-00-00-{old_id}.jsonl"));
+    let latest_path = sessions.join(format!("rollout-2026-08-18T11-00-00-{latest_id}.jsonl"));
+    for (path, id, timestamp) in [
+        (&old_path, old_id, "2026-08-18T10:00:00Z"),
+        (&latest_path, latest_id, "2026-08-18T11:00:00Z"),
+    ] {
+        fs::write(
+            path,
+            format!(
+                "{{\"timestamp\":\"{timestamp}\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"cwd\":\"/home/test-user/project\"}}}}\n"
+            ),
+        )
+        .expect("rollout should be written");
+    }
+
+    let db_path = root.join("state_7.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![old_id, old_path.display().to_string()],
+        )
+        .expect("older thread should be indexed");
+    drop(connection);
+
+    let reports = collect_session_reports(&root, None, &AppState::default())
+        .expect("session listing should scan both rollout trees");
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|report| report.id == latest_id)
+            .count(),
+        1
+    );
+    let resolved = resolve_session_report_by_id_in_store(&root, &AppState::default(), latest_id)
+        .expect("latest direct resume should resolve from its rollout");
+    assert_eq!(resolved.id, latest_id);
+
+    let connection = rusqlite::Connection::open(db_path).expect("state db should reopen");
+    let row_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM threads", [], |row| row.get(0))
+        .expect("thread rows should remain readable");
+    assert_eq!(
+        row_count, 1,
+        "listing must not fabricate a duplicate SQLite row"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_ignores_unrelated_state_database_schema() {
     let root = test_temp_dir("session-repair-unrelated-state-schema");
     let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";

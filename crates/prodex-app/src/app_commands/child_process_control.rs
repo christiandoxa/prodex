@@ -4,8 +4,73 @@ use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 const COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_PROBE_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
+
+#[cfg(unix)]
+static INTERACTIVE_SIGINT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(unix)]
+extern "C" fn interactive_sigint_handler(_signal: libc::c_int) {
+    INTERACTIVE_SIGINT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(unix)]
+pub(crate) struct InteractiveSigintGuard {
+    previous: libc::sigaction,
+}
+
+#[cfg(unix)]
+impl InteractiveSigintGuard {
+    pub(crate) fn install() -> io::Result<Self> {
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
+        let empty_mask_result = unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        if empty_mask_result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        action.sa_sigaction = interactive_sigint_handler as *const () as usize;
+        if unsafe { libc::sigaction(libc::SIGINT, &action, &mut previous) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        INTERACTIVE_SIGINT_COUNT.store(0, Ordering::Relaxed);
+        Ok(Self { previous })
+    }
+
+    pub(crate) fn count() -> usize {
+        INTERACTIVE_SIGINT_COUNT.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for InteractiveSigintGuard {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::sigaction(libc::SIGINT, &self.previous, std::ptr::null_mut()) };
+        INTERACTIVE_SIGINT_COUNT.store(0, Ordering::Relaxed);
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn reset_child_sigint_handler(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            if libc::sigemptyset(&mut action.sa_mask) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            action.sa_sigaction = libc::SIG_DFL;
+            if libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
 
 pub(crate) fn configure_child_process_group(_command: &mut Command, _private_process_group: bool) {
     #[cfg(unix)]

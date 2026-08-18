@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
-    prepare_desktop_overlay_home, prepare_runtime_overlay_home, repair_desktop_thread_index,
+    prepare_desktop_overlay_home, prepare_runtime_overlay_home,
 };
 #[path = "runtime_tools/child_env.rs"]
 mod child_env;
@@ -9,6 +9,9 @@ mod child_env;
 mod overlay;
 #[path = "runtime_tools/provider_auth.rs"]
 mod provider_auth;
+#[cfg(test)]
+#[path = "runtime_tools/provider_auth_tests.rs"]
+mod provider_auth_tests;
 #[path = "runtime_tools/sub_agents.rs"]
 mod sub_agents;
 #[path = "runtime_tools/super_dry_run.rs"]
@@ -40,6 +43,7 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     desktop_command: Option<DesktopGuiCommand>,
     configure_prodex_overlay: bool,
     sub_agent: Option<ResolvedSuperSubAgent>,
+    model_preference_sync: Option<ModelPreferenceSync>,
 }
 
 impl RuntimeToolLaunchStrategy {
@@ -79,6 +83,7 @@ impl RuntimeToolLaunchStrategy {
             desktop_command: None,
             configure_prodex_overlay: true,
             sub_agent,
+            model_preference_sync: None,
         }
     }
 
@@ -123,11 +128,31 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
     }
 
     fn build_plan(
-        &self,
+        &mut self,
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
         overlay::build_plan(self, prepared, runtime_proxy)
+    }
+
+    fn after_child_exit(
+        &mut self,
+        _status: &std::process::ExitStatus,
+        plan: &RuntimeLaunchPlan,
+    ) -> Result<()> {
+        if let Some(sync) = self.model_preference_sync.as_mut()
+            && let Some(_error) = sync.finish()
+        {
+            print_launch_status("model preference synchronization was incomplete");
+        }
+        if self.desktop_command.is_none()
+            && !prodex_cli::is_codex_command_server_subcommand(&self.codex_args)
+            && crate::reconcile_codex_thread_index(&plan.child.binary, &plan.child).is_err()
+        {
+            print_launch_status("session index reconciliation unavailable after exit; continuing");
+        }
+        crate::app_commands::runtime_launch::maintain_shared_codex_sessions_after_child_exit();
+        Ok(())
     }
 }
 
@@ -136,22 +161,51 @@ impl RuntimeToolLaunchStrategy {
         &self,
         overlay_home: &std::path::Path,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
+        remembered_selection: Option<&LastModelSelection>,
     ) -> Result<Vec<OsString>> {
-        let codex_args = if self.args.super_mode {
-            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
-        } else {
-            self.codex_args.clone()
-        };
+        let codex_args = self.base_runtime_codex_args(overlay_home)?;
+        let codex_args = remembered_selection
+            .map(|selection| {
+                apply_model_preference_selection(
+                    overlay_home,
+                    codex_args.clone(),
+                    selection,
+                    true,
+                    false,
+                )
+            })
+            .unwrap_or(codex_args);
         let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_gemini_provider_codex_args(overlay_home, &codex_args)?;
+        let codex_args = if let Some(selection) = remembered_selection {
+            if model_preference_model_is_compatible(overlay_home, &codex_args, selection) {
+                apply_model_preference_selection(overlay_home, codex_args, selection, false, true)
+            } else {
+                let mut codex_args = codex_args;
+                remove_remembered_model_override(&mut codex_args);
+                codex_args
+            }
+        } else {
+            codex_args
+        };
         Ok(runtime_proxy_codex_passthrough_args(
             runtime_proxy,
             &codex_args,
         ))
+    }
+
+    fn base_runtime_codex_args(&self, overlay_home: &std::path::Path) -> Result<Vec<OsString>> {
+        let codex_args = if self.args.super_mode {
+            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
+        } else {
+            self.codex_args.clone()
+        };
+        let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
+        profile_openai_compatible_codex_args(overlay_home, &codex_args)
     }
 
     fn build_child_plan(
@@ -170,11 +224,6 @@ impl RuntimeToolLaunchStrategy {
                 self.args.full_access,
                 sqlite_home,
             )?;
-            if !self.args.dry_run
-                && let Some(sqlite_home) = sqlite_home
-            {
-                repair_desktop_thread_index(&crate::codex_bin(), overlay_home, sqlite_home)?;
-            }
             let mut child = codex_child_plan(overlay_home.to_path_buf(), Vec::new());
             child.binary = desktop.binary.clone();
             child.args = desktop.args.clone();
@@ -676,78 +725,5 @@ mod tests {
                 .contains(&OsString::from("PRODEX_RTK_DISABLE_AUTO_WRAP"))
         );
         assert!(child.removed_env.contains(&OsString::from("CODEX_SANDBOX")));
-    }
-
-    #[test]
-    fn provider_runtime_auth_sets_local_placeholder_and_removes_upstream_secrets() {
-        let mut child = ChildProcessPlan {
-            binary: OsString::from("codex"),
-            args: Vec::new(),
-            codex_home: PathBuf::from("/tmp/prodex-caveman-test"),
-            extra_env: vec![
-                (OsString::from("OPENAI_API_KEY"), OsString::from("user-key")),
-                (
-                    OsString::from("UNRELATED_CHILD_ENV"),
-                    OsString::from("keep-me"),
-                ),
-            ],
-            removed_env: vec![OsString::from("EXISTING_REMOVED_ENV")],
-            reset_terminal_keyboard_enhancement: false,
-        };
-
-        force_codex_api_key_auth_for_provider_runtime(&mut child);
-        remove_provider_secret_env(&mut child);
-
-        let values = child
-            .extra_env
-            .iter()
-            .filter(|(key, _)| key == "OPENAI_API_KEY")
-            .map(|(_, value)| value.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(values, vec![PRODEX_PROVIDER_CODEX_API_KEY.to_string()]);
-        for key in PROVIDER_SECRET_ENV_KEYS {
-            assert!(
-                child.removed_env.contains(&OsString::from(key)),
-                "provider secret env {key} should be removed"
-            );
-        }
-        assert!(
-            child
-                .removed_env
-                .contains(&OsString::from("EXISTING_REMOVED_ENV"))
-        );
-        assert!(
-            !child
-                .removed_env
-                .contains(&OsString::from("UNRELATED_CHILD_ENV"))
-        );
-        assert!(
-            child
-                .extra_env
-                .iter()
-                .any(|(key, value)| { key == "UNRELATED_CHILD_ENV" && value == "keep-me" })
-        );
-    }
-
-    #[test]
-    fn provider_runtime_auth_writes_api_key_auth_file() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-provider-auth-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should be after epoch")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).expect("temp home should be created");
-
-        write_provider_runtime_codex_auth(&root).expect("auth file should be written");
-
-        let auth = std::fs::read_to_string(root.join("auth.json")).expect("auth should be read");
-        let value: serde_json::Value = serde_json::from_str(&auth).expect("auth should be json");
-        assert_eq!(value["auth_mode"], "apikey");
-        assert_eq!(value["OPENAI_API_KEY"], PRODEX_PROVIDER_CODEX_API_KEY);
-        assert!(value["tokens"].is_null());
-        std::fs::remove_dir_all(root).expect("temp home should be removed");
     }
 }

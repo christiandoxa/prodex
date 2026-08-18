@@ -764,7 +764,7 @@ fn native_gemini_cli_build_plan_uses_base_home_without_optional_tool_overlay() {
     args.profile = None;
     args.cli = Some(SuperCliAgent::Gemini);
     args.provider = Some(SuperExternalProvider::Gemini);
-    let strategy = SuperNativeCliLaunchStrategy {
+    let mut strategy = SuperNativeCliLaunchStrategy {
         args,
         presidio_enabled: false,
         agent: SuperCliAgent::Gemini,
@@ -791,7 +791,7 @@ fn native_gemini_cli_build_plan_uses_base_home_without_optional_tool_overlay() {
     unsupported_args
         .required_tools
         .push(prodex_optional_tools::OptionalToolId::Rtk);
-    let unsupported_strategy = SuperNativeCliLaunchStrategy {
+    let mut unsupported_strategy = SuperNativeCliLaunchStrategy {
         args: unsupported_args,
         presidio_enabled: false,
         agent: SuperCliAgent::Gemini,

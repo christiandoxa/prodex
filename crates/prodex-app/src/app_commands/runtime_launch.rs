@@ -42,9 +42,10 @@ use resume_provider::{
 use run_command_strategy::RunCommandStrategy;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
+pub(crate) use session_delete::maintain_shared_codex_sessions_after_child_exit;
 use session_delete::{
     cleanup_codex_deleted_session_binding, clear_codex_session_binding,
-    maintain_shared_codex_sessions_after_child_exit, resolve_codex_delete_session_id,
+    resolve_codex_delete_session_id,
 };
 use std::borrow::Cow;
 use std::path::Path;
@@ -86,7 +87,7 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
         .then(|| runtime_resume_session_settings_from_codex_args(&normalized))
         .flatten();
     let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio);
-    if is_resume && !model_is_explicit {
+    if !model_is_explicit {
         remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
     }
     restore_resume_session_settings(

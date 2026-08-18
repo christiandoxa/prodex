@@ -37,7 +37,7 @@ pub(super) fn execute_codex_command_server_managed_runtime(
         }
     };
     drop(runtime_proxy);
-    let after_result = strategy.after_child_exit(&status);
+    let after_result = strategy.after_child_exit(&status, &plan);
     prodex_runtime_launch::cleanup_runtime_launch_plan(&plan);
     after_result?;
     exit_with_status(status)
@@ -46,7 +46,7 @@ pub(super) fn execute_codex_command_server_managed_runtime(
 pub(in crate::app_commands) fn codex_app_server_broker_launch(
     profile: Option<&str>,
 ) -> Result<(ChildProcessPlan, Option<RuntimeProxyEndpoint>)> {
-    let strategy = RunCommandStrategy::new(RunArgs {
+    let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: profile.map(str::to_string),
         auto_rotate: false,
         no_auto_rotate: false,

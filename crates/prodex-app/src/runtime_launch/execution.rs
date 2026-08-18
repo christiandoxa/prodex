@@ -12,7 +12,7 @@ pub(crate) trait RuntimeLaunchStrategy {
         None
     }
     fn build_plan(
-        &self,
+        &mut self,
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan>;
@@ -28,7 +28,7 @@ pub(crate) trait RuntimeLaunchStrategy {
     fn relaunch_after_child_exit(&mut self, _status: &ExitStatus) -> Result<bool> {
         Ok(false)
     }
-    fn after_child_exit(&mut self, _status: &ExitStatus) -> Result<()> {
+    fn after_child_exit(&mut self, _status: &ExitStatus, _plan: &RuntimeLaunchPlan) -> Result<()> {
         Ok(())
     }
 }
@@ -49,14 +49,14 @@ where
     S: RuntimeLaunchStrategy,
 {
     loop {
-        let execution = build_runtime_launch_execution(&strategy)?;
+        let execution = build_runtime_launch_execution(&mut strategy)?;
         let completed = if strategy.monitors_child_exit() {
             run_runtime_launch_execution(execution, Some(&mut || strategy.child_exit_requested()))?
         } else {
             run_runtime_launch_execution(execution, None)?
         };
         let relaunch = strategy.relaunch_after_child_exit(&completed.status)?;
-        let after_result = strategy.after_child_exit(&completed.status);
+        let after_result = strategy.after_child_exit(&completed.status, &completed.plan);
         cleanup_runtime_launch_plan(&completed.plan);
         after_result?;
         if relaunch {
@@ -66,7 +66,7 @@ where
     }
 }
 
-fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecution>
+fn build_runtime_launch_execution<S>(strategy: &mut S) -> Result<RuntimeLaunchExecution>
 where
     S: RuntimeLaunchStrategy,
 {

@@ -669,7 +669,7 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
         },
     );
 
-    let strategy = RunCommandStrategy::new(RunArgs {
+    let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: Some("em2".to_string()),
         auto_rotate: false,
         no_auto_rotate: true,
@@ -752,7 +752,7 @@ fn run_strategy_skips_symlink_managed_profile_home_during_resume_repair() {
         },
     );
 
-    let strategy = RunCommandStrategy::new(RunArgs {
+    let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: Some("primary".to_string()),
         auto_rotate: false,
         no_auto_rotate: true,
@@ -885,7 +885,7 @@ fn run_strategy_repairs_resume_session_in_managed_profile_after_shared_migration
         },
     );
 
-    let strategy = RunCommandStrategy::new(RunArgs {
+    let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: Some("em2015-139.com".to_string()),
         auto_rotate: false,
         no_auto_rotate: true,

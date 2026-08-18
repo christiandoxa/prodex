@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn maintain_shared_codex_sessions_after_child_exit() {
+pub(crate) fn maintain_shared_codex_sessions_after_child_exit() {
     let Ok(paths) = AppPaths::discover() else {
         return;
     };

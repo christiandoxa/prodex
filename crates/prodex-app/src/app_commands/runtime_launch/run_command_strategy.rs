@@ -37,6 +37,7 @@ pub(super) struct RunCommandStrategy {
     pub(super) goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
     pub(super) pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     pub(super) goal_resume_session_affinity_release: Option<String>,
+    pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
 }
 
 impl RunCommandStrategy {
@@ -124,6 +125,7 @@ impl RunCommandStrategy {
             goal_usage_limit_monitor,
             pending_goal_resume_plan: None,
             goal_resume_session_affinity_release: None,
+            model_preference_sync: None,
         })
     }
 }
@@ -157,7 +159,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     }
 
     fn build_plan(
-        &self,
+        &mut self,
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
@@ -165,8 +167,42 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
+        let remembered_selection = crate::resolve_fresh_model_preference(
+            &prepared.paths,
+            &prepared.codex_home,
+            &codex_args,
+        )?;
+        let codex_args = remembered_selection
+            .as_ref()
+            .map(|selection| {
+                crate::apply_model_preference_selection(
+                    &prepared.codex_home,
+                    codex_args.clone(),
+                    selection,
+                    true,
+                    false,
+                )
+            })
+            .unwrap_or(codex_args);
         let mut codex_args =
             prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
+        if let Some(selection) = remembered_selection.as_ref() {
+            if crate::model_preference_model_is_compatible(
+                &prepared.codex_home,
+                &codex_args,
+                selection,
+            ) {
+                codex_args = crate::apply_model_preference_selection(
+                    &prepared.codex_home,
+                    codex_args,
+                    selection,
+                    false,
+                    true,
+                );
+            } else {
+                crate::remove_remembered_model_override(&mut codex_args);
+            }
+        }
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
                 &prepared.codex_home,
@@ -184,6 +220,32 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         isolate_auto_external_provider_child_env(self.auto_external_provider, &mut child);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
+        }
+        if prepared.managed
+            && !child
+                .extra_env
+                .iter()
+                .any(|(key, _)| key == "CODEX_SQLITE_HOME")
+        {
+            child.extra_env.push((
+                "CODEX_SQLITE_HOME".into(),
+                prepared.paths.shared_codex_root.as_os_str().to_os_string(),
+            ));
+        }
+        if !self.dry_run && !self.command_server {
+            self.model_preference_sync =
+                match crate::ModelPreferenceSync::start(&prepared.paths, &child) {
+                    Ok(sync) => Some(sync),
+                    Err(_error) => {
+                        crate::print_launch_status(
+                            "model preference synchronization unavailable; continuing",
+                        );
+                        None
+                    }
+                };
+            if crate::reconcile_codex_thread_index(&child.binary, &child).is_err() {
+                crate::print_launch_status("session index reconciliation unavailable; continuing");
+            }
         }
         Ok(RuntimeLaunchPlan::new(child))
     }
@@ -223,7 +285,23 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         Ok(true)
     }
 
-    fn after_child_exit(&mut self, status: &std::process::ExitStatus) -> Result<()> {
+    fn after_child_exit(
+        &mut self,
+        status: &std::process::ExitStatus,
+        plan: &RuntimeLaunchPlan,
+    ) -> Result<()> {
+        if let Some(sync) = self.model_preference_sync.as_mut()
+            && let Some(_error) = sync.finish()
+        {
+            crate::print_launch_status("model preference synchronization was incomplete");
+        }
+        if !self.command_server
+            && crate::reconcile_codex_thread_index(&plan.child.binary, &plan.child).is_err()
+        {
+            crate::print_launch_status(
+                "session index reconciliation unavailable after exit; continuing",
+            );
+        }
         maintain_shared_codex_sessions_after_child_exit();
         if status.success() {
             cleanup_codex_deleted_session_binding(self.delete_session_id.as_deref())?;

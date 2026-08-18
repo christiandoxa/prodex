@@ -517,6 +517,31 @@ The preset changes only local concurrency and admission tuning; transport timeou
 Runtime proxy numeric environment overrides are exact values: unset means use policy/default tuning, while empty, whitespace-bearing, malformed, or non-positive values for positive-only settings fail closed. Overflow-capacity overrides that explicitly allow zero keep zero as the documented escape hatch.
 `PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` follows the same exact positive-integer boundary for the HTTP request capture limit.
 
+## Interactive session state
+
+Prodex keeps Codex authentication homes isolated while sharing only the
+non-secret fresh-session model preference needed across managed account
+profiles. The preference file is `model-preferences.json` under the Prodex
+root. It is versioned, lock-protected, atomically replaced with a last-good
+backup, and stores only digested provider/catalog scopes, model, reasoning
+effort, selection revision, and source metadata. It never stores `auth.json`,
+tokens, account identifiers, or the managed profile configuration.
+
+An accepted interactive `/model` change is observed from Codex's atomic
+configuration write before launch cleanup. An absent effort remains distinct
+from the explicit string `none`; unsupported model/effort pairs are ignored
+for the next fresh launch and resolved by the active catalog. Fresh launches
+use an exact provider/catalog scope, while resume launches retain Codex's
+persisted thread settings and do not consume the fresh-session preference.
+Reading a preference does not advance its revision.
+
+Before and after an interactive Codex child, Prodex asks that same Codex binary's
+`app-server` to list active and archived threads with `useStateDbOnly=false`.
+The paginated, bounded, fail-soft request lets Codex perform its own rollout
+index repair without Prodex writing or recreating `state_*.sqlite`. Protocol
+responses stay on private pipes and never reach interactive or server-mode
+stdout. A failed repair does not change the child exit status.
+
 ## Runtime Proxy Contract
 
 `runtime_proxy` tuning must preserve these invariants:
