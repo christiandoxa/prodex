@@ -1,12 +1,45 @@
 use super::*;
+use std::path::Path;
 
-pub(crate) fn maintain_shared_codex_sessions_after_child_exit() {
+pub(crate) fn maintain_shared_codex_sessions_after_child_exit(child: &ChildProcessPlan) {
     let Ok(paths) = AppPaths::discover() else {
         return;
     };
-    let _ = maintain_managed_codex_sessions(&paths);
-    let _ =
-        prodex_shared_codex_fs::persist_codex_session_image_attachments(&paths.shared_codex_root);
+    match prodex_shared_codex_fs::maintain_recent_managed_codex_sessions(&paths) {
+        Ok(Some(session_file)) if !prodex_cli::is_codex_command_server_subcommand(&child.args) => {
+            crate::runtime_thread_index::repair_latest_thread_index_after_child(
+                &paths,
+                child,
+                &session_file,
+            );
+        }
+        Err(_error) if std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some() => {
+            eprintln!("prodex_runtime_timing stage=shutdown.session_maintenance_error");
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn maintain_shared_codex_session_after_child_exit(
+    child: &ChildProcessPlan,
+    session_file: &Path,
+) {
+    let Ok(paths) = AppPaths::discover() else {
+        return;
+    };
+    if let Err(_error) =
+        prodex_shared_codex_fs::maintain_managed_codex_session_file(&paths, session_file)
+        && std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some()
+    {
+        eprintln!("prodex_runtime_timing stage=shutdown.session_maintenance_error");
+    }
+    if !prodex_cli::is_codex_command_server_subcommand(&child.args) {
+        crate::runtime_thread_index::repair_latest_thread_index_after_child(
+            &paths,
+            child,
+            session_file,
+        );
+    }
 }
 
 pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {

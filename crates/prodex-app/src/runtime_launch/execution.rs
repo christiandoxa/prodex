@@ -5,6 +5,7 @@ use super::{
 use crate::print_launch_status;
 use anyhow::Result;
 use std::process::ExitStatus;
+use std::time::Instant;
 
 pub(crate) trait RuntimeLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_>;
@@ -49,15 +50,23 @@ where
     S: RuntimeLaunchStrategy,
 {
     loop {
+        let preparation_started = Instant::now();
         let execution = build_runtime_launch_execution(&mut strategy)?;
+        emit_runtime_timing("startup.prepare_and_plan_ms", preparation_started);
+        emit_runtime_timing("startup.total_ms", preparation_started);
         let completed = if strategy.monitors_child_exit() {
             run_runtime_launch_execution(execution, Some(&mut || strategy.child_exit_requested()))?
         } else {
             run_runtime_launch_execution(execution, None)?
         };
+        let shutdown_started = Instant::now();
         let relaunch = strategy.relaunch_after_child_exit(&completed.status)?;
         let after_result = strategy.after_child_exit(&completed.status, &completed.plan);
+        let cleanup_started = Instant::now();
         cleanup_runtime_launch_plan(&completed.plan);
+        emit_runtime_timing("shutdown.overlay_cleanup_ms", cleanup_started);
+        emit_runtime_timing("shutdown.post_child_ms", shutdown_started);
+        emit_runtime_timing("shutdown.total_ms", shutdown_started);
         after_result?;
         if relaunch {
             continue;
@@ -128,17 +137,33 @@ fn run_runtime_launch_execution(
         runtime_proxy,
     } = execution;
     print_launch_status("starting child process...");
+    let child_wait_started = Instant::now();
     let status = match child_exit_requested {
         Some(monitor) => run_child_plan_with_monitor(&plan.child, runtime_proxy.as_ref(), monitor),
         None => run_child_plan(&plan.child, runtime_proxy.as_ref()),
     };
+    emit_runtime_timing("shutdown.child_wait_ms", child_wait_started);
+    let runtime_proxy_shutdown_started = Instant::now();
     drop(runtime_proxy);
+    emit_runtime_timing(
+        "shutdown.runtime_proxy_shutdown_ms",
+        runtime_proxy_shutdown_started,
+    );
     match status {
         Ok(status) => Ok(RuntimeLaunchCompleted { status, plan }),
         Err(err) => {
             cleanup_runtime_launch_plan(&plan);
             Err(err)
         }
+    }
+}
+
+pub(crate) fn emit_runtime_timing(stage: &str, started: Instant) {
+    if std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some() {
+        eprintln!(
+            "prodex_runtime_timing stage={stage} duration_ms={}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
 

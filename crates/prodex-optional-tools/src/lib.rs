@@ -22,6 +22,7 @@ pub use optional_tools::{
     OptionalToolId, OptionalToolSet, ResolvedTool, ToolActivation, ToolActivationPlan,
     ToolCapability, ToolDescriptor, ToolDiscoverySource, ToolHealth, ToolHealthStatus, ToolKind,
     optional_tool_descriptor, optional_tool_status, resolve_optional_tools,
+    resolve_optional_tools_for_launch,
 };
 pub use rtk::configure_rtk_codex_home;
 pub use super_optimizers::{

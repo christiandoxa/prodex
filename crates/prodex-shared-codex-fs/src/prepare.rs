@@ -1,19 +1,27 @@
+use self::goal_attachments::{
+    persist_codex_goal_attachment_path_for_thread, persist_codex_goal_attachment_paths,
+    session_thread_id,
+};
 use super::*;
 use crate::image_attachments::{
-    codex_session_image_attachments_are_stable, persist_codex_session_file_image_attachments,
-    rewrite_codex_persisted_attachment_paths,
+    codex_session_image_attachments_are_stable, codex_session_persisted_attachment_paths,
+    is_codex_session_rollout_file, persist_codex_session_file_image_attachments,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use filetime::FileTime;
 use prodex_session_store::repair_codex_session_metadata_prefix;
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::time::Instant;
 use std::time::UNIX_EPOCH;
+
+#[path = "prepare/goal_attachments.rs"]
+mod goal_attachments;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
 const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 4;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
+const RECENT_SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
+const RECENT_SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-recent-v1.json";
 
 #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 struct SessionMaintenanceCache {
@@ -29,6 +37,15 @@ struct SessionFileFingerprint {
     changed_secs: i64,
     changed_nanos: i64,
     identity: u64,
+}
+
+#[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+struct RecentSessionMaintenanceCache {
+    version: u8,
+    key: String,
+    fingerprint: Option<SessionFileFingerprint>,
+    attachment_paths: Vec<String>,
+    thread_id: Option<String>,
 }
 
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
@@ -119,6 +136,172 @@ pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
     Ok(())
 }
 
+/// Maintains only the most recently modified active rollout from today or yesterday.
+///
+/// Normal child exit must not revisit historical active or archived sessions. The date-bound
+/// lookup keeps attachment and metadata repair available for a fresh rollout or a recent resume;
+/// explicit full maintenance remains available through `maintain_managed_codex_sessions`.
+pub fn maintain_recent_managed_codex_sessions(paths: &AppPaths) -> Result<Option<PathBuf>> {
+    let started = Instant::now();
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
+    else {
+        return Ok(None);
+    };
+
+    let Some(session_file) = find_recent_session_file(&paths.shared_codex_root) else {
+        return Ok(None);
+    };
+    let (session_files_opened, session_bytes_read) =
+        maintain_one_managed_codex_session_file(paths, &session_file)?;
+    emit_recent_session_maintenance_timing(started, session_files_opened, session_bytes_read);
+    Ok(Some(session_file))
+}
+
+/// Maintains one rollout whose path was already identified by a resume repair.
+pub fn maintain_managed_codex_session_file(paths: &AppPaths, session_file: &Path) -> Result<()> {
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
+    else {
+        return Ok(());
+    };
+    let started = Instant::now();
+    let (session_files_opened, session_bytes_read) =
+        maintain_one_managed_codex_session_file(paths, session_file)?;
+    emit_recent_session_maintenance_timing(started, session_files_opened, session_bytes_read);
+    Ok(())
+}
+
+fn maintain_one_managed_codex_session_file(
+    paths: &AppPaths,
+    session_file: &Path,
+) -> Result<(u64, u64)> {
+    let Ok(relative_path) = session_file.strip_prefix(&paths.shared_codex_root) else {
+        return Ok((0, 0));
+    };
+    let key = relative_path.to_string_lossy().into_owned();
+    let fingerprint = session_file_fingerprint(session_file)?;
+    let recent_cache_path = paths.root.join(RECENT_SESSION_MAINTENANCE_CACHE_FILE);
+    let previous_recent = load_recent_session_maintenance_cache(&recent_cache_path);
+    let recent_cache_hit = previous_recent.version == RECENT_SESSION_MAINTENANCE_CACHE_VERSION
+        && previous_recent.key == key
+        && previous_recent.fingerprint == Some(fingerprint)
+        && previous_recent
+            .attachment_paths
+            .iter()
+            .all(|path| stable_attachment_path_exists(Path::new(path)));
+    if recent_cache_hit {
+        if let Some(thread_id) = previous_recent.thread_id.as_deref() {
+            persist_codex_goal_attachment_path_for_thread(&paths.shared_codex_root, thread_id)?;
+        }
+        return Ok((0, 0));
+    }
+
+    let mut session_files_opened = 1_u64;
+    let mut session_bytes_read = 0_u64;
+    let Some(mut contents) =
+        persist_codex_session_file_image_attachments(&paths.shared_codex_root, session_file)?
+    else {
+        return Ok((0, 0));
+    };
+    session_bytes_read = session_bytes_read.saturating_add(contents.len() as u64);
+    if repair_codex_session_metadata_prefix(session_file, &contents)? {
+        session_files_opened += 1;
+        let Some(repaired_contents) =
+            persist_codex_session_file_image_attachments(&paths.shared_codex_root, session_file)?
+        else {
+            return Ok((session_files_opened, session_bytes_read));
+        };
+        session_bytes_read = session_bytes_read.saturating_add(repaired_contents.len() as u64);
+        contents = repaired_contents;
+    }
+    restore_codex_session_file_modified_time(session_file, &contents)?;
+    if let Some(thread_id) = session_thread_id(&contents) {
+        persist_codex_goal_attachment_path_for_thread(&paths.shared_codex_root, &thread_id)?;
+    }
+    let stable = codex_session_image_attachments_are_stable(&paths.shared_codex_root, &contents);
+
+    if stable {
+        save_recent_session_maintenance_cache(
+            &recent_cache_path,
+            &RecentSessionMaintenanceCache {
+                version: RECENT_SESSION_MAINTENANCE_CACHE_VERSION,
+                key,
+                fingerprint: Some(session_file_fingerprint(session_file)?),
+                attachment_paths: codex_session_persisted_attachment_paths(&contents)
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+                thread_id: session_thread_id(&contents),
+            },
+        );
+    }
+    Ok((session_files_opened, session_bytes_read))
+}
+
+fn emit_recent_session_maintenance_timing(
+    started: Instant,
+    session_files_opened: u64,
+    session_bytes_read: u64,
+) {
+    if std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some() {
+        eprintln!(
+            "prodex_runtime_timing stage=shutdown.session_maintenance_ms duration_ms={} sessions_walked=1 archived_sessions_walked=0 session_files_opened={session_files_opened} attachment_files_processed={session_files_opened} session_bytes_read={session_bytes_read}",
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+        eprintln!(
+            "prodex_runtime_timing stage=shutdown.attachment_maintenance_ms duration_ms={} session_files_opened={session_files_opened} session_bytes_read={session_bytes_read}",
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
+}
+
+fn find_recent_session_file(codex_home: &Path) -> Option<PathBuf> {
+    // ponytail: scan only the two current date buckets; replace with a Codex-emitted session path
+    // when an exact O(1) fresh-session handoff is available.
+    let today = Utc::now().date_naive();
+    [Some(today), today.pred_opt()]
+        .into_iter()
+        .flatten()
+        .filter_map(|date| {
+            let date_dir = codex_home.join("sessions").join(format!(
+                "{}/{:02}/{:02}",
+                date.year(),
+                date.month(),
+                date.day()
+            ));
+            find_newest_session_file_in_dir(&date_dir)
+        })
+        .max_by_key(|(_, modified)| *modified)
+        .map(|(path, _)| path)
+}
+
+fn find_newest_session_file_in_dir(dir: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
+    let mut newest = None;
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if let Some(candidate) = find_newest_session_file_in_dir(&path)
+                && newest
+                    .as_ref()
+                    .is_none_or(|(_, modified)| candidate.1 > *modified)
+            {
+                newest = Some(candidate);
+            }
+        } else if file_type.is_file()
+            && is_codex_session_rollout_file(&path)
+            && let Ok(modified) = entry.metadata().and_then(|metadata| metadata.modified())
+            && newest
+                .as_ref()
+                .is_none_or(|(_, current)| modified > *current)
+        {
+            newest = Some((path, modified));
+        }
+    }
+    newest
+}
+
 fn maintain_codex_sessions_in_dir(
     codex_home: &Path,
     sessions_dir: &Path,
@@ -142,11 +325,7 @@ fn maintain_codex_sessions_in_dir(
             maintain_codex_sessions_in_dir(codex_home, &path, previous, next)?;
             continue;
         }
-        if !file_type.is_file()
-            || path
-                .extension()
-                .is_none_or(|extension| extension != "jsonl")
-        {
+        if !file_type.is_file() || !is_codex_session_rollout_file(&path) {
             continue;
         }
 
@@ -182,91 +361,6 @@ fn maintain_codex_sessions_in_dir(
     }
 
     Ok(())
-}
-
-fn persist_codex_goal_attachment_paths(codex_home: &Path) -> Result<()> {
-    if !codex_home.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(codex_home)
-        .with_context(|| format!("failed to read {}", codex_home.display()))?
-    {
-        let entry =
-            entry.with_context(|| format!("failed to read entry in {}", codex_home.display()))?;
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if file_name.starts_with("goals_") && file_name.ends_with(".sqlite") {
-            persist_codex_goal_attachment_paths_in_db(codex_home, &entry.path())?;
-        }
-    }
-    Ok(())
-}
-
-fn persist_codex_goal_attachment_paths_in_db(codex_home: &Path, db_path: &Path) -> Result<()> {
-    if !path_looks_like_sqlite_db(db_path) {
-        return Ok(());
-    }
-    let Ok(conn) = Connection::open(db_path) else {
-        return Ok(());
-    };
-    let has_thread_goals = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()
-        .ok()
-        .flatten()
-        .is_some();
-    if !has_thread_goals {
-        return Ok(());
-    }
-
-    let mut stmt = match conn.prepare("SELECT thread_id, objective FROM thread_goals") {
-        Ok(stmt) => stmt,
-        Err(_) => return Ok(()),
-    };
-    let rows = match stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return Ok(()),
-    };
-    let mut updates = Vec::new();
-    for row in rows {
-        let Ok((thread_id, objective)) = row else {
-            continue;
-        };
-        let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &objective)?;
-        if rewritten != objective {
-            updates.push((thread_id, rewritten));
-        }
-    }
-    drop(stmt);
-
-    for (thread_id, objective) in updates {
-        conn.execute(
-            "UPDATE thread_goals SET objective = ? WHERE thread_id = ?",
-            params![objective, thread_id],
-        )
-        .with_context(|| format!("failed to update goal attachments in {}", db_path.display()))?;
-    }
-    Ok(())
-}
-
-fn path_looks_like_sqlite_db(path: &Path) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if !metadata.file_type().is_file() {
-        return false;
-    }
-    let Ok(mut file) = fs::File::open(path) else {
-        return false;
-    };
-    let mut header = [0; 16];
-    file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
 }
 
 fn session_file_fingerprint(path: &Path) -> Result<SessionFileFingerprint> {
@@ -306,6 +400,26 @@ fn load_session_maintenance_cache(path: &Path) -> SessionMaintenanceCache {
             cache.version == SESSION_MAINTENANCE_CACHE_VERSION
         })
         .unwrap_or_default()
+}
+
+fn load_recent_session_maintenance_cache(path: &Path) -> RecentSessionMaintenanceCache {
+    fs::read(path)
+        .ok()
+        .and_then(|contents| serde_json::from_slice(&contents).ok())
+        .unwrap_or_default()
+}
+
+fn stable_attachment_path_exists(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn save_recent_session_maintenance_cache(path: &Path, cache: &RecentSessionMaintenanceCache) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(contents) = serde_json::to_vec(cache) {
+        let _ = fs::write(path, contents);
+    }
 }
 
 fn save_session_maintenance_cache(path: &Path, cache: &SessionMaintenanceCache) -> Result<()> {
@@ -500,3 +614,7 @@ fn ensure_shared_codex_entry(
 #[cfg(test)]
 #[path = "../tests/src/prepare.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/src/recent_maintenance.rs"]
+mod recent_maintenance_tests;

@@ -203,6 +203,31 @@ fn repair_resume_session_metadata_prefix_prefers_exact_rollout_path() {
 }
 
 #[test]
+fn repair_resume_session_metadata_prefix_returns_an_already_valid_exact_path() {
+    let root = test_temp_dir("session-repair-valid-exact-path");
+    let session_id = "019ebd01-c881-74c0-b01d-7fdf5bd4dd32";
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let target = sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &target,
+        format!(
+            "{{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"timestamp\":\"2026-06-13T02:04:31Z\",\"cwd\":\"/tmp/workspace\",\"originator\":\"codex-tui\",\"cli_version\":\"0.1.0\"}}}}\n"
+        ),
+    )
+    .expect("valid session should be written");
+
+    let resolved = repair_resume_session_metadata_prefix(&root, session_id)
+        .expect("exact session lookup should succeed");
+
+    assert_eq!(resolved, None);
+    assert_eq!(
+        find_resume_session_path(&root, session_id).expect("exact path lookup should succeed"),
+        Some(target)
+    );
+}
+
+#[test]
 fn repair_transaction_aborts_and_cleans_up_after_concurrent_append() {
     let root = test_temp_dir("session-repair-concurrent-append");
     let sessions = root.join("sessions/2026/07/16");

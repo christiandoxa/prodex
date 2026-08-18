@@ -50,6 +50,10 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         .map(|error| redaction_redact_secret_like_text(&error.to_string()));
     let runtime_config = runtime_config.ok();
     let mut state = AppState::load(&paths)?;
+    if args.repair_session_index {
+        repair_session_index(&paths, &state)?;
+        eprintln!("Prodex doctor: session index repair completed.");
+    }
     let repaired_import_auth_journals = if args.repair_import_auth_journals {
         let repaired = repair_profile_import_auth_journals(&paths, &mut state)?;
         audit_log_event(
@@ -96,7 +100,33 @@ fn doctor_install_only(args: &DoctorArgs) -> bool {
         && !args.quota
         && !args.runtime
         && !args.repair_import_auth_journals
+        && !args.repair_session_index
         && args.bundle.is_none()
+}
+
+fn repair_session_index(paths: &AppPaths, state: &AppState) -> Result<()> {
+    let started = std::time::Instant::now();
+    let codex_home = state
+        .active_profile
+        .as_deref()
+        .and_then(|name| state.profiles.get(name))
+        .map(|profile| profile.codex_home.clone())
+        .unwrap_or(default_codex_home(paths)?);
+    let mut child = ChildProcessPlan::new(codex_bin(), codex_home.clone());
+    if prodex_core::same_path(
+        &codex_home.join("sessions"),
+        &paths.shared_codex_root.join("sessions"),
+    ) {
+        child.extra_env.push((
+            "CODEX_SQLITE_HOME".into(),
+            paths.shared_codex_root.as_os_str().to_os_string(),
+        ));
+    }
+    let result = maintain_managed_codex_sessions(paths)
+        .and_then(|()| crate::reconcile_codex_thread_index(&child.binary, &child))
+        .context("full session index repair failed");
+    crate::runtime_launch::emit_runtime_timing("startup.thread_index_reconcile_ms", started);
+    result
 }
 
 fn handle_doctor_bundle(context: &DoctorContext<'_>) -> Result<bool> {
@@ -523,6 +553,7 @@ mod install_only_tests {
             runtime: false,
             install: true,
             repair_import_auth_journals: false,
+            repair_session_index: false,
             tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
             suggest_policy: false,
             json: false,
@@ -568,6 +599,7 @@ mod install_only_tests {
             runtime: false,
             install: true,
             repair_import_auth_journals: false,
+            repair_session_index: false,
             tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
             suggest_policy: false,
             json: false,

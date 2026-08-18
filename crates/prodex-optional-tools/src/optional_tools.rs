@@ -11,10 +11,12 @@ use std::fs;
 use std::io::{BufReader, Read as _};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[path = "codebase_memory.rs"]
 mod codebase_memory;
+#[path = "launch_resolution.rs"]
+mod launch_resolution;
 
 const MAX_EXECUTABLE_DIGEST_BYTES: u64 = 512 * 1024 * 1024;
 const TOOL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -267,6 +269,7 @@ pub fn resolve_optional_tools(
 ) -> ToolActivationPlan {
     let mut plan = ToolActivationPlan::default();
     for id in selected.iter() {
+        let started = Instant::now();
         if id == OptionalToolId::Caveman {
             match crate::resolve_caveman() {
                 Ok(tool) => plan.activations.push(ToolActivation {
@@ -275,6 +278,7 @@ pub fn resolve_optional_tools(
                 }),
                 Err(_) => plan.unavailable.push(caveman_tool_status()),
             }
+            emit_optional_tool_timing(id, started);
             continue;
         }
         let health = optional_tool_status(id);
@@ -292,8 +296,20 @@ pub fn resolve_optional_tools(
         } else {
             plan.unavailable.push(health);
         }
+        emit_optional_tool_timing(id, started);
     }
     plan
+}
+
+pub use launch_resolution::resolve_optional_tools_for_launch;
+
+fn emit_optional_tool_timing(id: OptionalToolId, started: Instant) {
+    if std::env::var_os("PRODEX_RUNTIME_TIMINGS").is_some() {
+        eprintln!(
+            "prodex_runtime_timing stage=startup.optional_tool.{id}_ms duration_ms={}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 }
 
 pub fn optional_tool_status(id: OptionalToolId) -> ToolHealth {
@@ -456,12 +472,8 @@ fn resolved_command_tool(
     source: ToolDiscoverySource,
     args: &[&str],
 ) -> Result<ResolvedTool> {
-    let mut tool = resolved_file_tool(id, path, source)?;
-    let program = tool
-        .path
-        .as_deref()
-        .context("resolved command has no path")?;
-    let output = crate::process::probe_command(program, args, TOOL_PROBE_TIMEOUT)?;
+    let program = validated_tool_file(&path)?;
+    let output = crate::process::probe_command(&program, args, TOOL_PROBE_TIMEOUT)?;
     anyhow::ensure!(
         output.status.success(),
         "{} health check exited with {}: {}",
@@ -472,10 +484,16 @@ fn resolved_command_tool(
     let version = probe_first_line(&output)?;
     if id == OptionalToolId::CodebaseMemoryMcp {
         codebase_memory::validate_version(&version)?;
-        codebase_memory::validate_daemon(program)?;
+        codebase_memory::validate_daemon(&program)?;
     }
-    tool.version = Some(version);
-    Ok(tool)
+    let digest = sha256_file(&program, MAX_EXECUTABLE_DIGEST_BYTES)?;
+    Ok(ResolvedTool {
+        descriptor: optional_tool_descriptor(id),
+        source,
+        path: Some(program.to_path_buf()),
+        version: Some(version),
+        digest: Some(digest),
+    })
 }
 
 fn probe_first_line(output: &crate::process::ProbeOutput) -> Result<String> {
@@ -622,11 +640,7 @@ fn validated_managed_directory(allowed_root: &Path, candidate: &Path) -> Result<
     Ok(candidate)
 }
 
-fn resolved_file_tool(
-    id: OptionalToolId,
-    path: PathBuf,
-    source: ToolDiscoverySource,
-) -> Result<ResolvedTool> {
+fn validated_tool_file(path: &Path) -> Result<PathBuf> {
     let path = path
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", path.display()))?;
@@ -634,13 +648,7 @@ fn resolved_file_tool(
     if !metadata.is_file() || metadata.len() > MAX_EXECUTABLE_DIGEST_BYTES {
         anyhow::bail!("{} is not a bounded regular file", path.display());
     }
-    Ok(ResolvedTool {
-        descriptor: optional_tool_descriptor(id),
-        source,
-        digest: Some(sha256_file(&path, MAX_EXECUTABLE_DIGEST_BYTES)?),
-        path: Some(path),
-        version: None,
-    })
+    Ok(path)
 }
 
 fn invalid_tool(id: OptionalToolId, error: anyhow::Error) -> ToolHealth {

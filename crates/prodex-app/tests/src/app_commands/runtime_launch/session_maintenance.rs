@@ -1,4 +1,5 @@
 use super::*;
+use chrono::{Datelike, Utc};
 
 #[test]
 fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
@@ -6,7 +7,13 @@ fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let _shared_override = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", "shared-codex");
     let paths = AppPaths::discover().expect("paths should resolve");
-    let sessions_dir = paths.shared_codex_root.join("sessions/2026/06/24");
+    let today = Utc::now().date_naive();
+    let sessions_dir = paths.shared_codex_root.join(format!(
+        "sessions/{}/{:02}/{:02}",
+        today.year(),
+        today.month(),
+        today.day()
+    ));
     let session_file = sessions_dir.join("rollout.jsonl");
     let image_source = root.join("codex-clipboard-history.png");
     fs::create_dir_all(&root).expect("root dir should exist");
@@ -21,7 +28,7 @@ fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
         format!(
             "{}\n",
             serde_json::json!({
-                "timestamp": "2026-06-24T01:02:03Z",
+                "timestamp": Utc::now().to_rfc3339(),
                 "type": "event",
                 "payload": {
                     "content": [{
@@ -34,7 +41,11 @@ fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
     )
     .expect("session should write");
 
-    maintain_shared_codex_sessions_after_child_exit();
+    let child = ChildProcessPlan::new(
+        std::ffi::OsString::from("codex"),
+        paths.shared_codex_root.clone(),
+    );
+    maintain_shared_codex_sessions_after_child_exit(&child);
 
     let copied = paths
         .shared_codex_root

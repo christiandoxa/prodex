@@ -141,6 +141,9 @@ pub struct DoctorArgs {
     /// Recover orphaned profile import auth rollback journals before reporting.
     #[arg(long)]
     pub repair_import_auth_journals: bool,
+    /// Explicitly run Codex's full active and archived thread-index repair.
+    #[arg(long)]
+    pub repair_session_index: bool,
     /// Bytes of runtime log tail to inspect for --runtime/--json.
     #[arg(long, default_value_t = RUNTIME_PROXY_DOCTOR_TAIL_BYTES, value_name = "BYTES")]
     pub tail_bytes: usize,

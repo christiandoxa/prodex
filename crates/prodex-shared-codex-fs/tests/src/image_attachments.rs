@@ -1,5 +1,5 @@
 use super::*;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 struct ImageAttachmentTestDir {
     path: PathBuf,
@@ -201,6 +201,30 @@ fn persist_codex_session_image_attachments_skips_active_session_tree() {
         fs::read(&stable).expect("stable image should be readable"),
         b"active png"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn child_session_lock_times_out_while_repair_holds_exclusive_lock() {
+    let temp_dir = ImageAttachmentTestDir::new("bounded-child-lock");
+    let codex_home = temp_dir.path.join("codex-home");
+    let lock_path = codex_home.join("sessions/.prodex-maintenance.lock");
+    fs::create_dir_all(lock_path.parent().expect("lock parent")).expect("lock parent");
+    let lock = fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .expect("lock file should open");
+    lock.lock().expect("exclusive lock should succeed");
+
+    let started = Instant::now();
+    let error = lock_codex_sessions_for_child(&codex_home)
+        .expect_err("child lock should not wait indefinitely");
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(4));
+    assert!(error.to_string().contains("timed out"));
 }
 
 #[test]

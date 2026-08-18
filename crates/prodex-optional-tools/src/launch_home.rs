@@ -18,34 +18,28 @@ pub fn prepare_prodex_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true, true)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true)
 }
 
 pub fn prepare_prodex_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true, true)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true)
 }
 
 pub fn prepare_runtime_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, false, false)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, false)
 }
 
 pub fn prepare_runtime_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(
-        managed_profiles_root,
-        base_codex_home,
-        false,
-        false,
-        false,
-    )
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, false)
 }
 
 pub fn prepare_desktop_overlay_home(
@@ -56,7 +50,6 @@ pub fn prepare_desktop_overlay_home(
     prepare_prodex_overlay_home_internal(
         managed_profiles_root,
         base_codex_home,
-        true,
         configure_prodex,
         true,
     )
@@ -70,7 +63,6 @@ pub fn prepare_desktop_overlay_home_from_prepared_base(
     prepare_prodex_overlay_home_internal(
         managed_profiles_root,
         base_codex_home,
-        false,
         configure_prodex,
         true,
     )
@@ -79,38 +71,34 @@ pub fn prepare_desktop_overlay_home_from_prepared_base(
 fn prepare_prodex_overlay_home_internal(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
-    maintain_session_attachments: bool,
     configure_prodex: bool,
     share_rollout_state: bool,
 ) -> Result<PathBuf> {
     let overlay_home = create_temporary_prodex_overlay_home(managed_profiles_root)?;
-    if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &overlay_home)
-        .and_then(|_| {
-            remove_prodex_overlay_codex_apps_cache(&overlay_home)?;
-            share_prodex_overlay_chat_history(
-                base_codex_home,
-                &overlay_home,
-                maintain_session_attachments,
-            )
-        })
-        .and_then(|_| {
-            if share_rollout_state {
-                share_prodex_overlay_rollout_state(base_codex_home, &overlay_home)
-            } else {
-                localize_prodex_overlay_rollout_state(&overlay_home)?;
-                localize_prodex_overlay_rollout_state_symlinks_from_base(
-                    base_codex_home,
-                    &overlay_home,
-                )
-            }
-        })
-        .and_then(|_| {
-            if configure_prodex {
-                configure_prodex_overlay_home(&overlay_home)
-            } else {
-                localize_text_file(&overlay_home.join("config.toml"))
-            }
-        })
+    if let Err(err) =
+        prodex_shared_codex_fs::copy_codex_home_without_chat_history(base_codex_home, &overlay_home)
+            .and_then(|_| {
+                remove_prodex_overlay_codex_apps_cache(&overlay_home)?;
+                share_prodex_overlay_chat_history(base_codex_home, &overlay_home)
+            })
+            .and_then(|_| {
+                if share_rollout_state {
+                    share_prodex_overlay_rollout_state(base_codex_home, &overlay_home)
+                } else {
+                    localize_prodex_overlay_rollout_state(&overlay_home)?;
+                    localize_prodex_overlay_rollout_state_symlinks_from_base(
+                        base_codex_home,
+                        &overlay_home,
+                    )
+                }
+            })
+            .and_then(|_| {
+                if configure_prodex {
+                    configure_prodex_overlay_home(&overlay_home)
+                } else {
+                    localize_text_file(&overlay_home.join("config.toml"))
+                }
+            })
     {
         let _ = fs::remove_dir_all(&overlay_home);
         return Err(err);
@@ -201,11 +189,7 @@ fn ensure_prodex_overlay_root(managed_profiles_root: &Path) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(managed_profiles_root)
 }
 
-fn share_prodex_overlay_chat_history(
-    base_codex_home: &Path,
-    overlay_home: &Path,
-    maintain_session_attachments: bool,
-) -> Result<()> {
+fn share_prodex_overlay_chat_history(base_codex_home: &Path, overlay_home: &Path) -> Result<()> {
     link_prodex_overlay_shared_chat_file(
         &base_codex_home.join("history.jsonl"),
         &overlay_home.join("history.jsonl"),
@@ -222,9 +206,10 @@ fn share_prodex_overlay_chat_history(
         &base_codex_home.join("attachments"),
         &overlay_home.join("attachments"),
     )?;
-    if maintain_session_attachments {
-        prodex_shared_codex_fs::persist_codex_session_image_attachments(base_codex_home)?;
-    }
+    link_prodex_overlay_shared_chat_dir(
+        &base_codex_home.join("image_attachments"),
+        &overlay_home.join("image_attachments"),
+    )?;
     Ok(())
 }
 

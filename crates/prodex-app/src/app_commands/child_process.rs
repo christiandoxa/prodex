@@ -110,9 +110,11 @@ fn run_child_plan_inner(
         None
     };
     reset_terminal_keyboard_enhancement_best_effort(plan);
+    let child_spawn_started = Instant::now();
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to execute {}", plan.binary.to_string_lossy()))?;
+    crate::runtime_launch::emit_runtime_timing("startup.child_spawn_ms", child_spawn_started);
     let _child_runtime_broker_lease = match runtime_proxy {
         Some(proxy) => match proxy.create_child_lease(child.id()) {
             Ok(lease) => Some(lease),

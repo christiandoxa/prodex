@@ -3409,6 +3409,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "zstd",
 ]
 
 [[package]]
@@ -3423,6 +3424,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "zstd",
 ]
 
 [[package]]

@@ -1,9 +1,10 @@
 use super::{
     AppPaths, ChildProcessPlan, LastModelSelection, MODEL_PREFERENCE_FILE, ModelPreferenceScope,
     ModelPreferenceSync, apply_fresh_model_preference, apply_model_preference_selection,
-    capture_changed_config, catalog_supports_selection, load_latest_model_preference,
-    model_preference_file_path, model_preference_model_is_compatible, model_preference_scope,
-    now_nanos, read_config_snapshot, record_model_preference,
+    capture_changed_config, catalog_supports_selection, flush_pending_model_preference,
+    load_latest_model_preference, model_preference_file_path, model_preference_model_is_compatible,
+    model_preference_scope, now_nanos, read_config_snapshot, record_model_preference,
+    save_pending_model_preference,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -136,6 +137,67 @@ fn older_process_exit_cannot_overwrite_newer_config_commit() {
         .unwrap()
         .unwrap();
     assert_eq!(selection.model, "new");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preference_lock_contention_is_bounded_and_preserves_committed_selection() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-model-preferences-lock-{}-{}",
+        std::process::id(),
+        now_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let paths = paths(&root);
+    let scope = ModelPreferenceScope {
+        provider: "provider".to_string(),
+        catalog: "catalog".to_string(),
+    };
+    record_model_preference(
+        &paths,
+        LastModelSelection {
+            scope: scope.clone(),
+            model: "committed".to_string(),
+            reasoning_effort: Some("high".to_string()),
+            selected_at: 1,
+            generation: 0,
+            source: "test".to_string(),
+        },
+    )
+    .unwrap();
+    let preference_path = model_preference_file_path(&paths);
+    let held_lock = crate::runtime_store::acquire_json_file_lock(&preference_path).unwrap();
+    let pending = LastModelSelection {
+        scope: scope.clone(),
+        model: "blocked".to_string(),
+        reasoning_effort: Some("max".to_string()),
+        selected_at: 2,
+        generation: 0,
+        source: "test".to_string(),
+    };
+
+    let started = std::time::Instant::now();
+    let result = record_model_preference(&paths, pending.clone());
+
+    assert!(result.is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(
+        load_latest_model_preference(&paths, &scope)
+            .unwrap()
+            .unwrap()
+            .model,
+        "committed"
+    );
+    save_pending_model_preference(&paths, &pending).unwrap();
+    drop(held_lock);
+    flush_pending_model_preference(&paths).unwrap();
+    assert_eq!(
+        load_latest_model_preference(&paths, &scope)
+            .unwrap()
+            .unwrap()
+            .model,
+        "blocked"
+    );
     let _ = fs::remove_dir_all(root);
 }
 

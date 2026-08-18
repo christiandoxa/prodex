@@ -82,7 +82,6 @@ pub(crate) fn prepare_runtime_overlay_home(
         &paths.shared_codex_root.join("sessions"),
     );
     if sessions_are_managed {
-        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
         return prodex_optional_tools::prepare_runtime_overlay_home_from_prepared_base(
             &paths.managed_profiles_root,
             base_codex_home,
@@ -104,7 +103,6 @@ pub(crate) fn prepare_desktop_overlay_home(
         &paths.shared_codex_root.join("sessions"),
     );
     if sessions_are_managed {
-        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
         return prodex_optional_tools::prepare_desktop_overlay_home_from_prepared_base(
             &paths.managed_profiles_root,
             base_codex_home,

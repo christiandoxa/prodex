@@ -276,6 +276,25 @@ pub fn repair_resume_session_metadata_prefix(
     Ok(None)
 }
 
+/// Finds a valid exact rollout path without changing the session file.
+pub fn find_resume_session_path(
+    shared_codex_root: &Path,
+    selector: &str,
+) -> Result<Option<PathBuf>> {
+    let selector = selector.trim();
+    if selector.is_empty() || full_codex_session_id(selector).is_none() {
+        return Ok(None);
+    }
+    let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
+    let exact_paths = collect_exact_repair_candidates(&session_paths, selector, true)?;
+    for candidate in exact_paths {
+        if session_file_has_resume_metadata_for_selector(&candidate.path, selector)? {
+            return Ok(Some(candidate.path));
+        }
+    }
+    Ok(None)
+}
+
 pub fn repair_codex_session_metadata_prefix(path: &Path, _contents: &str) -> Result<bool> {
     let Some(selector) = codex_session_id_from_path(path) else {
         return Ok(false);
