@@ -11,6 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MODEL_PREFERENCE_SCHEMA_VERSION: u32 = 1;
 const MODEL_PREFERENCE_FILE: &str = "model-preferences.json";
 const MODEL_PREFERENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const OPENAI_PROVIDER_ID: &str = "openai";
+const GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID: &str = "prodex-openai-governed-http";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ModelPreferenceScope {
@@ -56,14 +58,20 @@ struct ConfigSnapshot {
     reasoning_effort: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ModelPreferenceContext {
+    pub(crate) logical_scope: ModelPreferenceScope,
+    pub(crate) remembered: Option<LastModelSelection>,
+    explicit_model: Option<String>,
+    explicit_effort: Option<String>,
+}
+
 pub(crate) fn model_preference_scope(
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
 ) -> Result<ModelPreferenceScope> {
-    let provider_args = crate::profile_openai_compatible_codex_args(codex_home, codex_args)?;
-    let provider = codex_effective_config_value(codex_home, &provider_args, "model_provider")?
-        .unwrap_or_else(|| "openai".to_string());
-    let catalog = codex_effective_config_value(codex_home, &provider_args, "model_catalog_json")?;
+    let (provider, catalog) = model_preference_provider_and_catalog(codex_home, codex_args)?;
+    let provider = logical_model_provider_id(&provider);
     let catalog_identity = match catalog {
         Some(path) => catalog_identity(&PathBuf::from(path), &provider),
         None => generated_catalog_identity(&provider)
@@ -73,6 +81,27 @@ pub(crate) fn model_preference_scope(
         provider: digest_bytes(provider.as_bytes()),
         catalog: catalog_identity,
     })
+}
+
+fn model_preference_provider_and_catalog(
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+) -> Result<(String, Option<String>)> {
+    let provider_args = crate::profile_openai_compatible_codex_args(codex_home, codex_args)?;
+    let provider = codex_effective_config_value(codex_home, &provider_args, "model_provider")?
+        .unwrap_or_else(|| OPENAI_PROVIDER_ID.to_string());
+    let catalog = codex_effective_config_value(codex_home, &provider_args, "model_catalog_json")?;
+    Ok((provider, catalog))
+}
+
+fn logical_model_provider_id(provider: &str) -> String {
+    if provider.eq_ignore_ascii_case(OPENAI_PROVIDER_ID)
+        || provider.eq_ignore_ascii_case(GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID)
+    {
+        OPENAI_PROVIDER_ID.to_string()
+    } else {
+        provider.to_string()
+    }
 }
 
 fn catalog_identity(path: &Path, provider: &str) -> String {
@@ -112,37 +141,150 @@ fn generated_catalog_identity(provider: &str) -> Option<String> {
     ))
 }
 
-/// Applies a remembered selection only to a fresh launch with no invocation override.
-///
-/// The first pass may run before a generated provider catalog exists. It applies the model so
-/// the catalog generator sees the same model; the second pass applies the validated effort.
-pub(crate) fn resolve_fresh_model_preference(
+/// Resolves one immutable logical scope and its remembered selection for a launch.
+pub(crate) fn resolve_fresh_model_preference_context(
     paths: &AppPaths,
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
-) -> Result<Option<LastModelSelection>> {
-    if prodex_runtime_launch::codex_resume_session_id(codex_args).is_some()
-        || crate::runtime_launch_cli_model(codex_args).is_some()
-        || crate::codex_cli_config_override_value(codex_args, "model").is_some()
-        || crate::codex_cli_config_override_value(codex_args, "model_reasoning_effort").is_some()
-    {
-        return Ok(None);
+) -> Result<ModelPreferenceContext> {
+    let logical_scope = model_preference_scope(codex_home, codex_args)?;
+    let explicit_model = crate::runtime_launch_cli_model(codex_args)
+        .or_else(|| crate::codex_cli_config_override_value(codex_args, "model"));
+    let explicit_effort =
+        crate::codex_cli_config_override_value(codex_args, "model_reasoning_effort");
+    if prodex_runtime_launch::codex_resume_session_id(codex_args).is_some() {
+        return Ok(ModelPreferenceContext {
+            logical_scope,
+            remembered: None,
+            explicit_model,
+            explicit_effort,
+        });
     }
 
-    let scope = model_preference_scope(codex_home, codex_args)?;
-    let remembered = match load_latest_model_preference(paths, &scope) {
-        Ok(selection) => selection,
+    let remembered = match load_latest_model_preference(paths, &logical_scope) {
+        Ok(Some(selection)) => Some(selection),
+        Ok(None) => {
+            migrate_transport_model_preference(paths, codex_home, codex_args, &logical_scope)?
+        }
         Err(_error) => {
             crate::print_launch_status(
                 "remembered model preference is unavailable; using normal Codex resolution",
             );
-            return Ok(None);
+            None
         }
     };
-    if remembered.is_some() {
-        return Ok(remembered);
+    let remembered =
+        if remembered.is_none() && explicit_model.is_none() && explicit_effort.is_none() {
+            migrate_native_model_preference(paths, codex_home, codex_args, logical_scope.clone())?
+        } else {
+            remembered
+        };
+    Ok(ModelPreferenceContext {
+        logical_scope,
+        remembered,
+        explicit_model,
+        explicit_effort,
+    })
+}
+
+/// Applies remembered fields that were not explicitly supplied for a fresh launch.
+///
+/// This is called before and after provider catalog preparation. The same context is passed to
+/// both calls, so runtime transport arguments cannot change the preference bucket.
+pub(crate) fn apply_fresh_model_preference_selection(
+    codex_home: &Path,
+    mut codex_args: Vec<std::ffi::OsString>,
+    context: &ModelPreferenceContext,
+    include_model: bool,
+    include_effort: bool,
+) -> Vec<std::ffi::OsString> {
+    let Some(remembered) = context.remembered.as_ref() else {
+        return codex_args;
+    };
+    let mut selection = remembered.clone();
+    if let Some(model) = context.explicit_model.as_deref() {
+        selection.model = model.to_string();
     }
-    migrate_native_model_preference(paths, codex_home, codex_args, scope)
+    if let Some(effort) = context.explicit_effort.as_deref() {
+        selection.reasoning_effort = Some(effort.to_string());
+    }
+    if !model_preference_model_is_compatible(codex_home, &codex_args, &selection) {
+        if context.explicit_model.is_none() && !include_model {
+            remove_model_preference_override(&mut codex_args);
+        }
+        return codex_args;
+    }
+    apply_model_preference_selection(
+        codex_home,
+        std::mem::take(&mut codex_args),
+        &selection,
+        include_model && context.explicit_model.is_none(),
+        include_effort && context.explicit_effort.is_none(),
+    )
+}
+
+fn remove_model_preference_override(args: &mut Vec<std::ffi::OsString>) {
+    let Some(index) = args.windows(2).position(|window| {
+        matches!(window[0].to_str(), Some("-c" | "--config"))
+            && window[1]
+                .to_str()
+                .is_some_and(|assignment| assignment.trim_start().starts_with("model="))
+    }) else {
+        return;
+    };
+    args.drain(index..=index + 1);
+}
+
+fn migrate_transport_model_preference(
+    paths: &AppPaths,
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+    logical_scope: &ModelPreferenceScope,
+) -> Result<Option<LastModelSelection>> {
+    if logical_scope.provider != digest_bytes(OPENAI_PROVIDER_ID.as_bytes()) {
+        return Ok(None);
+    }
+    let (provider, catalog) = model_preference_provider_and_catalog(codex_home, codex_args)?;
+    if !provider.eq_ignore_ascii_case(OPENAI_PROVIDER_ID) {
+        return Ok(None);
+    }
+    let legacy_provider = digest_bytes(GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID.as_bytes());
+    let mut legacy_catalogs = vec![logical_scope.catalog.clone()];
+    legacy_catalogs.push(match catalog {
+        Some(path) => catalog_identity(&PathBuf::from(path), GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID),
+        None => digest_bytes(
+            format!("codex-default-v1\0{GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID}").as_bytes(),
+        ),
+    });
+    legacy_catalogs.sort();
+    legacy_catalogs.dedup();
+    for catalog in legacy_catalogs {
+        let legacy_scope = ModelPreferenceScope {
+            provider: legacy_provider.clone(),
+            catalog,
+        };
+        let Some(selection) = load_latest_model_preference(paths, &legacy_scope)? else {
+            continue;
+        };
+        if !model_preference_model_is_compatible(codex_home, codex_args, &selection)
+            || selection.reasoning_effort.as_deref().is_some_and(|effort| {
+                !catalog_supports_selection(codex_home, codex_args, &selection, effort)
+            })
+        {
+            continue;
+        }
+        let migrated = LastModelSelection {
+            scope: logical_scope.clone(),
+            ..selection
+        };
+        if let Err(_error) = record_model_preference(paths, migrated.clone()) {
+            crate::print_launch_status(
+                "legacy model preference migration was unavailable; continuing",
+            );
+        }
+        return Ok(Some(migrated));
+    }
+    Ok(None)
 }
 
 fn migrate_native_model_preference(
@@ -204,21 +346,6 @@ pub(crate) fn model_preference_model_is_compatible(
     }
 }
 
-pub(crate) fn remove_remembered_model_override(args: &mut Vec<std::ffi::OsString>) {
-    let mut index = 0;
-    while index + 1 < args.len() {
-        if matches!(args[index].to_str(), Some("-c" | "--config"))
-            && args[index + 1]
-                .to_str()
-                .is_some_and(|assignment| assignment.trim_start().starts_with("model="))
-        {
-            args.drain(index..=index + 1);
-            return;
-        }
-        index += 1;
-    }
-}
-
 #[cfg(test)]
 fn apply_fresh_model_preference(
     paths: &AppPaths,
@@ -227,13 +354,11 @@ fn apply_fresh_model_preference(
     include_model: bool,
     include_effort: bool,
 ) -> Result<Vec<std::ffi::OsString>> {
-    let Some(selection) = resolve_fresh_model_preference(paths, codex_home, &codex_args)? else {
-        return Ok(codex_args);
-    };
-    Ok(apply_model_preference_selection(
+    let context = resolve_fresh_model_preference_context(paths, codex_home, &codex_args)?;
+    Ok(apply_fresh_model_preference_selection(
         codex_home,
         codex_args,
-        &selection,
+        &context,
         include_model,
         include_effort,
     ))
@@ -426,9 +551,12 @@ pub(crate) struct ModelPreferenceSync {
 }
 
 impl ModelPreferenceSync {
-    pub(crate) fn start(paths: &AppPaths, child: &ChildProcessPlan) -> Result<Self> {
+    pub(crate) fn start_with_scope(
+        paths: &AppPaths,
+        child: &ChildProcessPlan,
+        scope: ModelPreferenceScope,
+    ) -> Result<Self> {
         let config_paths = config_paths_for_child(&child.codex_home, &child.args);
-        let scope = model_preference_scope(&child.codex_home, &child.args)?;
         let baseline = read_config_snapshot(&config_paths)?;
         let (stop_tx, stop_rx) = mpsc::channel();
         let worker = thread::Builder::new()
@@ -627,3 +755,6 @@ fn system_time_nanos(time: SystemTime) -> u128 {
 #[cfg(test)]
 #[path = "runtime_model_preferences_tests.rs"]
 mod extracted_tests;
+#[cfg(test)]
+#[path = "runtime_model_preferences_regression_tests.rs"]
+mod regression_tests;

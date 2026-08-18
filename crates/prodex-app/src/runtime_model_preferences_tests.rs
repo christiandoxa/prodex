@@ -140,7 +140,7 @@ fn older_process_exit_cannot_overwrite_newer_config_commit() {
 }
 
 #[test]
-fn fresh_preference_is_not_applied_to_resume_or_explicit_invocation() {
+fn fresh_preference_preserves_resume_and_merges_explicit_fields() {
     let root = std::env::temp_dir().join(format!(
         "prodex-model-preferences-precedence-{}-{}",
         std::process::id(),
@@ -170,22 +170,50 @@ fn fresh_preference_is_not_applied_to_resume_or_explicit_invocation() {
         resume
     );
     let explicit = vec![OsString::from("-m"), OsString::from("explicit")];
+    let applied = apply_fresh_model_preference(&paths, &home, explicit, true, true).unwrap();
     assert_eq!(
-        apply_fresh_model_preference(&paths, &home, explicit.clone(), true, true).unwrap(),
-        explicit
+        crate::runtime_launch_cli_model(&applied).as_deref(),
+        Some("explicit")
     );
-    for explicit in [
-        vec![OsString::from("-c"), OsString::from("model=explicit")],
-        vec![
-            OsString::from("-c"),
-            OsString::from("model_reasoning_effort=high"),
-        ],
-    ] {
-        assert_eq!(
-            apply_fresh_model_preference(&paths, &home, explicit.clone(), true, true).unwrap(),
-            explicit
-        );
-    }
+    assert_eq!(
+        crate::codex_cli_config_override_value(&applied, "model_reasoning_effort").as_deref(),
+        Some("max")
+    );
+
+    let explicit_model = vec![OsString::from("-c"), OsString::from("model=explicit")];
+    let applied = apply_fresh_model_preference(&paths, &home, explicit_model, true, true).unwrap();
+    assert_eq!(
+        crate::codex_cli_config_override_value(&applied, "model").as_deref(),
+        Some("explicit")
+    );
+    assert_eq!(
+        crate::codex_cli_config_override_value(&applied, "model_reasoning_effort").as_deref(),
+        Some("max")
+    );
+
+    let explicit_effort = vec![
+        OsString::from("-c"),
+        OsString::from("model_reasoning_effort=high"),
+    ];
+    let applied = apply_fresh_model_preference(&paths, &home, explicit_effort, true, true).unwrap();
+    assert_eq!(
+        crate::codex_cli_config_override_value(&applied, "model").as_deref(),
+        Some("remembered")
+    );
+    assert_eq!(
+        crate::codex_cli_config_override_value(&applied, "model_reasoning_effort").as_deref(),
+        Some("high")
+    );
+
+    let explicit_pair = vec![
+        OsString::from("-c"),
+        OsString::from("model=explicit"),
+        OsString::from("-c"),
+        OsString::from("model_reasoning_effort=high"),
+    ];
+    let applied =
+        apply_fresh_model_preference(&paths, &home, explicit_pair.clone(), true, true).unwrap();
+    assert_eq!(applied, explicit_pair);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -511,7 +539,8 @@ fn config_commit_is_captured_before_child_cleanup() {
     .unwrap();
     let paths = paths(&root);
     let child = ChildProcessPlan::new(OsString::from("codex"), home.clone());
-    let mut sync = ModelPreferenceSync::start(&paths, &child).unwrap();
+    let scope = model_preference_scope(&home, &[]).unwrap();
+    let mut sync = ModelPreferenceSync::start_with_scope(&paths, &child, scope.clone()).unwrap();
 
     fs::write(
         &config,
@@ -520,7 +549,6 @@ fn config_commit_is_captured_before_child_cleanup() {
     .unwrap();
     assert!(sync.finish().is_none());
 
-    let scope = model_preference_scope(&home, &[]).unwrap();
     let selection = load_latest_model_preference(&paths, &scope)
         .unwrap()
         .unwrap();
@@ -546,6 +574,10 @@ fn catalog_scopes_do_not_share_preferences_for_same_provider() {
         provider: first.provider.clone(),
         catalog: "catalog-b".to_string(),
     };
+    let other_provider = ModelPreferenceScope {
+        provider: "other-provider".to_string(),
+        catalog: first.catalog.clone(),
+    };
     record_model_preference(
         &paths,
         LastModelSelection {
@@ -570,6 +602,18 @@ fn catalog_scopes_do_not_share_preferences_for_same_provider() {
         },
     )
     .unwrap();
+    record_model_preference(
+        &paths,
+        LastModelSelection {
+            scope: other_provider.clone(),
+            model: "model-other-provider".to_string(),
+            reasoning_effort: None,
+            selected_at: 3,
+            generation: 0,
+            source: "test".to_string(),
+        },
+    )
+    .unwrap();
 
     assert_eq!(
         load_latest_model_preference(&paths, &first)
@@ -584,6 +628,13 @@ fn catalog_scopes_do_not_share_preferences_for_same_provider() {
             .unwrap()
             .model,
         "model-b"
+    );
+    assert_eq!(
+        load_latest_model_preference(&paths, &other_provider)
+            .unwrap()
+            .unwrap()
+            .model,
+        "model-other-provider"
     );
     let _ = fs::remove_dir_all(root);
 }
