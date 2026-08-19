@@ -2,6 +2,20 @@ use super::*;
 
 #[test]
 fn runtime_proxy_websocket_invalid_previous_response_triggers_codex_full_context_replay() {
+    assert_websocket_invalid_previous_response_replays_full_context(
+        "codex-tui/0.148.0 (Linux; x86_64)",
+    );
+}
+
+#[test]
+fn runtime_proxy_websocket_0_147_reconnect_invalid_previous_response_replays_full_context() {
+    assert_websocket_invalid_previous_response_replays_full_context(
+        "codex-tui/0.147.0 (Linux; x86_64)",
+    );
+}
+
+#[track_caller]
+fn assert_websocket_invalid_previous_response_replays_full_context(user_agent: &str) {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -13,7 +27,7 @@ fn runtime_proxy_websocket_invalid_previous_response_triggers_codex_full_context
         Vec::new(),
     );
     let headers = [
-        runtime_continuation_header("user-agent", "codex-tui/0.148.0 (Linux; x86_64)"),
+        runtime_continuation_header("user-agent", user_agent),
         runtime_continuation_header("session_id", "session-chain-owner"),
     ];
     let mut socket =
@@ -41,7 +55,7 @@ fn runtime_proxy_websocket_invalid_previous_response_triggers_codex_full_context
     assert!(invalid.contains("invalid_request_error"), "{invalid}");
     assert!(
         invalid.contains("previous_response_not_found"),
-        "Codex 0.148 needs the retryable code to replay full context: {invalid}"
+        "affected Codex clients need the retryable code to replay full context: {invalid}"
     );
     let _ = socket.close(None);
 

@@ -715,16 +715,16 @@ pub fn runtime_request_full_history_without_previous_response_id(
 }
 
 fn runtime_input_is_reconstructable_full_history(input: &[serde_json::Value]) -> bool {
-    let item_type = |item: &serde_json::Value| {
+    fn item_type(item: &serde_json::Value) -> &str {
         item.get("type")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
-    };
-    let item_role = |item: &serde_json::Value| {
+    }
+    fn item_role(item: &serde_json::Value) -> &str {
         item.get("role")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
-    };
+    }
 
     if input
         .iter()

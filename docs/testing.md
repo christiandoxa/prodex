@@ -155,6 +155,20 @@ node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
+To reproduce the two-turn Responses chain against real Codex 0.147 and 0.148
+binaries with one local provider, profile, model, WebSocket connection, and no
+rotation:
+
+```bash
+npm run compat:previous-response-repro -- \
+  --codex-0147 /path/to/codex-0.147 \
+  --codex-0148 /path/to/codex-0.148
+```
+
+The deterministic upstream asserts that turn two sends the `response.id` from
+turn one as `previous_response_id`. It uses only synthetic credentials and
+never contacts a live provider.
+
 `npm run test:node` discovers every checked-in `*.test.mjs` module under the
 repository scripts and gateway SDK. The fast lane and CI process guard both run
 this command, so adding a test file cannot leave it outside the default gate.

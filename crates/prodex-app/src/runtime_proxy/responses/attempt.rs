@@ -4,12 +4,14 @@ pub(crate) struct RuntimeResponsesContinuationTrace<'a> {
     pub(crate) request_id: u64,
     pub(crate) profile_name: &'a str,
     pub(crate) session_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
     pub(crate) turn_id: Option<&'a str>,
     pub(crate) turn_state: Option<&'a str>,
     pub(crate) previous_response_id: Option<&'a str>,
     pub(crate) returned_response_id: Option<&'a str>,
     pub(crate) rotation_generation: usize,
     pub(crate) retry_number: usize,
+    pub(crate) compaction_generation: Option<u64>,
     pub(crate) stream_committed: bool,
 }
 
@@ -17,16 +19,21 @@ pub(crate) fn log_runtime_responses_continuation_trace(
     shared: &RuntimeRotationProxyShared,
     trace: RuntimeResponsesContinuationTrace<'_>,
 ) {
+    if !shared.runtime_config.response_chain_trace {
+        return;
+    }
     let RuntimeResponsesContinuationTrace {
         request_id,
         profile_name,
         session_id,
+        thread_id,
         turn_id,
         turn_state,
         previous_response_id,
         returned_response_id,
         rotation_generation,
         retry_number,
+        compaction_generation,
         stream_committed,
     } = trace;
     let (logical_provider, transport_provider_hash) =
@@ -49,6 +56,10 @@ pub(crate) fn log_runtime_responses_continuation_trace(
                     runtime_proxy_crate::runtime_proxy_identifier_hash(session_id),
                 ),
                 runtime_proxy_log_field(
+                    "thread_id_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(thread_id),
+                ),
+                runtime_proxy_log_field(
                     "turn_id_hash",
                     runtime_proxy_crate::runtime_proxy_identifier_hash(turn_id),
                 ),
@@ -65,9 +76,14 @@ pub(crate) fn log_runtime_responses_continuation_trace(
                     runtime_proxy_crate::runtime_proxy_identifier_hash(returned_response_id),
                 ),
                 runtime_proxy_log_field("rotation_generation", rotation_generation.to_string()),
-                runtime_proxy_log_field("transport_generation", "untracked_http_pool"),
+                runtime_proxy_log_field("transport_generation", "not_applicable"),
                 runtime_proxy_log_field("retry_attempt", retry_number.to_string()),
-                runtime_proxy_log_field("compaction_generation", "untracked"),
+                runtime_proxy_log_field(
+                    "compaction_generation",
+                    compaction_generation
+                        .map(|generation| generation.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                ),
                 runtime_proxy_log_field(
                     "full_context_request",
                     previous_response_id.is_none().to_string(),
@@ -132,6 +148,9 @@ pub(crate) fn attempt_runtime_responses_request(
         .or_else(|| runtime_request_prompt_cache_key(request));
     let request_turn_state = runtime_request_turn_state(request);
     let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(request);
+    let request_thread_id = runtime_proxy_crate::runtime_request_thread_id(request);
+    let request_compaction_generation =
+        runtime_proxy_crate::runtime_request_compaction_generation(request);
     let codex_previous_response_id_regression =
         runtime_codex_previous_response_id_regression(request);
     let mut request_for_attempt = request.clone();
@@ -189,12 +208,14 @@ pub(crate) fn attempt_runtime_responses_request(
                 request_id,
                 profile_name,
                 session_id: request_session_id.as_deref(),
+                thread_id: request_thread_id.as_deref(),
                 turn_id: request_turn_id.as_deref(),
                 turn_state: request_turn_state.as_deref(),
                 previous_response_id: previous_response_id_for_attempt.as_deref(),
                 returned_response_id: None,
                 rotation_generation: selection_attempt,
                 retry_number,
+                compaction_generation: request_compaction_generation,
                 stream_committed: false,
             },
         );
@@ -323,7 +344,7 @@ pub(crate) fn attempt_runtime_responses_request(
             };
             return Ok(attempt);
         }
-        let prepared = prepare_runtime_responses_success_attempt(
+        let mut prepared = prepare_runtime_responses_success_attempt(
             RuntimeResponsesSuccessAttemptContext {
                 request_id,
                 shared: shared.clone(),
@@ -332,14 +353,88 @@ pub(crate) fn attempt_runtime_responses_request(
                 request_previous_response_id: previous_response_id_for_attempt.clone(),
                 request_prompt_cache_key: request_prompt_cache_key.clone(),
                 request_session_id: request_session_id.clone(),
+                request_thread_id: request_thread_id.clone(),
                 request_turn_id: request_turn_id.clone(),
                 request_turn_state: request_turn_state.clone(),
                 request_model_name: runtime_smart_context_model_name_from_body(&request.body),
                 selection_attempt,
+                retry_number,
+                request_compaction_generation,
                 inflight_guard: inflight_guard.take(),
             },
             response,
         );
+        let exact_sse_invalid_previous_response_id = matches!(
+            prepared.as_ref(),
+            Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
+                invalid_previous_response_id: true,
+                ..
+            })
+        );
+        if exact_sse_invalid_previous_response_id
+            && codex_previous_response_id_regression
+            && !full_history_fallback_used
+            && let Some(previous_response_id) = previous_response_id_for_attempt.as_deref()
+            && runtime_response_bound_profile(
+                shared,
+                previous_response_id,
+                RuntimeRouteKind::Responses,
+            )?
+            .as_deref()
+                == Some(profile_name)
+            && let Some(fallback_request) =
+                runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(
+                    &request_for_attempt,
+                )
+        {
+            let recovery_guard = match &mut prepared {
+                Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
+                    response: RuntimeResponsesReply::Streaming(response),
+                    ..
+                }) => response._inflight_guard.take(),
+                _ => None,
+            };
+            let Some(recovery_guard) = recovery_guard else {
+                return Err(anyhow::anyhow!(
+                    "responses SSE recovery lost its profile in-flight guard"
+                ));
+            };
+            clear_runtime_dead_response_bindings(
+                shared,
+                profile_name,
+                &[previous_response_id.to_string()],
+                "invalid_previous_response_id",
+            )?;
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "responses_full_history_recovery",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http_sse"),
+                        runtime_proxy_log_field(
+                            "profile_hash",
+                            runtime_proxy_crate::runtime_proxy_identifier_hash(Some(profile_name)),
+                        ),
+                        runtime_proxy_log_field(
+                            "previous_response_id_hash",
+                            runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
+                                previous_response_id,
+                            )),
+                        ),
+                        runtime_proxy_log_field("attempt", "one"),
+                        runtime_proxy_log_field("full_context_request", "true"),
+                    ],
+                ),
+            );
+            drop(prepared);
+            inflight_guard = Some(recovery_guard);
+            request_for_attempt = fallback_request;
+            previous_response_id_for_attempt = None;
+            full_history_fallback_used = true;
+            retry_number = retry_number.saturating_add(1);
+            continue;
+        }
         if let Ok(RuntimeResponsesAttempt::Success { profile_name, .. }) = &prepared {
             remember_runtime_prompt_cache_profile(
                 shared,
@@ -437,10 +532,13 @@ struct RuntimeResponsesSuccessAttemptContext {
     request_previous_response_id: Option<String>,
     request_prompt_cache_key: Option<String>,
     request_session_id: Option<String>,
+    request_thread_id: Option<String>,
     request_turn_id: Option<String>,
     request_turn_state: Option<String>,
     request_model_name: Option<String>,
     selection_attempt: usize,
+    retry_number: usize,
+    request_compaction_generation: Option<u64>,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
 }
 
@@ -456,10 +554,13 @@ fn prepare_runtime_responses_success_attempt(
         request_previous_response_id,
         request_prompt_cache_key,
         request_session_id,
+        request_thread_id,
         request_turn_id,
         request_turn_state,
         request_model_name,
         selection_attempt,
+        retry_number,
+        request_compaction_generation,
         inflight_guard,
     } = context;
     let Some(inflight_guard) = inflight_guard else {
@@ -488,10 +589,13 @@ fn prepare_runtime_responses_success_attempt(
                 request_previous_response_id: request_previous_response_id.as_deref(),
                 request_prompt_cache_key: request_prompt_cache_key.as_deref(),
                 request_session_id: request_session_id.as_deref(),
+                request_thread_id: request_thread_id.as_deref(),
                 request_turn_id: request_turn_id.as_deref(),
                 request_turn_state: request_turn_state.as_deref(),
                 turn_state_override: turn_state_override.as_deref(),
                 selection_attempt,
+                retry_number,
+                request_compaction_generation,
                 shared: &success_shared,
                 profile_name: &success_profile_name,
                 inflight_guard,

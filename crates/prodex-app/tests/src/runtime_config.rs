@@ -97,6 +97,25 @@ fn runtime_config_default_allows_large_codex_turns() {
 }
 
 #[test]
+fn runtime_response_chain_trace_is_opt_in() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let default =
+        RuntimeConfig::from_environment(&paths, RuntimeConfigEnvironment::read_with(|_| None))
+            .expect("default config should parse");
+    assert!(!default.response_chain_trace);
+
+    let enabled = RuntimeConfig::from_environment(
+        &paths,
+        RuntimeConfigEnvironment::read_with(|key| {
+            (key == "PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE").then(|| OsString::from("true"))
+        }),
+    )
+    .expect("trace opt-in should parse");
+    assert!(enabled.response_chain_trace);
+}
+
+#[test]
 fn runtime_config_carries_validated_governance_mode() {
     let policy_dir = with_test_policy_dir(
         r#"

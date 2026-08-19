@@ -525,6 +525,9 @@ impl RuntimeWebsocketResponseLoop<'_> {
         retry_number: usize,
         stream_committed: bool,
     ) {
+        if !self.shared.runtime_config.response_chain_trace {
+            return;
+        }
         let (logical_provider, transport_provider_hash) =
             runtime_response_trace_provider_labels(self.shared, self.profile_name);
         runtime_proxy_log(
