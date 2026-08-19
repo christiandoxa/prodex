@@ -1,20 +1,126 @@
 use super::*;
 
+pub(crate) struct RuntimeResponsesContinuationTrace<'a> {
+    pub(crate) request_id: u64,
+    pub(crate) profile_name: &'a str,
+    pub(crate) session_id: Option<&'a str>,
+    pub(crate) turn_id: Option<&'a str>,
+    pub(crate) turn_state: Option<&'a str>,
+    pub(crate) previous_response_id: Option<&'a str>,
+    pub(crate) returned_response_id: Option<&'a str>,
+    pub(crate) rotation_generation: usize,
+    pub(crate) retry_number: usize,
+    pub(crate) stream_committed: bool,
+}
+
+pub(crate) fn log_runtime_responses_continuation_trace(
+    shared: &RuntimeRotationProxyShared,
+    trace: RuntimeResponsesContinuationTrace<'_>,
+) {
+    let RuntimeResponsesContinuationTrace {
+        request_id,
+        profile_name,
+        session_id,
+        turn_id,
+        turn_state,
+        previous_response_id,
+        returned_response_id,
+        rotation_generation,
+        retry_number,
+        stream_committed,
+    } = trace;
+    let (logical_provider, transport_provider_hash) =
+        runtime_response_trace_provider_labels(shared, profile_name);
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "responses_continuation",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field(
+                    "profile_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(Some(profile_name)),
+                ),
+                runtime_proxy_log_field("logical_provider", logical_provider),
+                runtime_proxy_log_field("transport_provider_hash", transport_provider_hash),
+                runtime_proxy_log_field(
+                    "session_id_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(session_id),
+                ),
+                runtime_proxy_log_field(
+                    "turn_id_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(turn_id),
+                ),
+                runtime_proxy_log_field(
+                    "turn_state_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(turn_state),
+                ),
+                runtime_proxy_log_field(
+                    "previous_response_id_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(previous_response_id),
+                ),
+                runtime_proxy_log_field(
+                    "returned_response_id_hash",
+                    runtime_proxy_crate::runtime_proxy_identifier_hash(returned_response_id),
+                ),
+                runtime_proxy_log_field("rotation_generation", rotation_generation.to_string()),
+                runtime_proxy_log_field("retry_number", retry_number.to_string()),
+                runtime_proxy_log_field("stream_committed", stream_committed.to_string()),
+            ],
+        ),
+    );
+}
+
+pub(crate) fn runtime_response_trace_provider_labels(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> (String, String) {
+    let Ok(runtime) = shared.runtime.lock() else {
+        return ("unknown".to_string(), "none".to_string());
+    };
+    let logical_provider = runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .map(|profile| profile.provider.label().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let transport_provider_hash = runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
+        runtime.upstream_base_url.as_str(),
+    ));
+    (logical_provider, transport_provider_hash)
+}
+
+pub(crate) struct RuntimeResponsesAttemptOptions<'a> {
+    pub(crate) turn_state_override: Option<&'a str>,
+    pub(crate) prompt_cache_key: Option<&'a str>,
+    pub(crate) hard_affinity: bool,
+    pub(crate) selection_attempt: usize,
+}
+
 pub(crate) fn attempt_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
-    turn_state_override: Option<&str>,
-    prompt_cache_key: Option<&str>,
-    hard_affinity: bool,
+    options: RuntimeResponsesAttemptOptions<'_>,
 ) -> Result<RuntimeResponsesAttempt> {
+    let RuntimeResponsesAttemptOptions {
+        turn_state_override,
+        prompt_cache_key,
+        hard_affinity,
+        selection_attempt,
+    } = options;
     let request_session_id = runtime_request_session_id(request);
     let request_previous_response_id = runtime_request_previous_response_id(request);
     let request_prompt_cache_key = prompt_cache_key
         .map(str::to_string)
         .or_else(|| runtime_request_prompt_cache_key(request));
     let request_turn_state = runtime_request_turn_state(request);
+    let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(request);
+    let mut request_for_attempt = request.clone();
+    let mut previous_response_id_for_attempt = request_previous_response_id.clone();
+    let mut full_history_fallback_used = false;
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
         shared,
         profile_name,
@@ -59,7 +165,23 @@ pub(crate) fn attempt_runtime_responses_request(
 
     let mut inflight_guard = Some(inflight_guard);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
+    let mut retry_number = 0usize;
     loop {
+        log_runtime_responses_continuation_trace(
+            shared,
+            RuntimeResponsesContinuationTrace {
+                request_id,
+                profile_name,
+                session_id: request_session_id.as_deref(),
+                turn_id: request_turn_id.as_deref(),
+                turn_state: request_turn_state.as_deref(),
+                previous_response_id: previous_response_id_for_attempt.as_deref(),
+                returned_response_id: None,
+                rotation_generation: selection_attempt,
+                retry_number,
+                stream_committed: false,
+            },
+        );
         let upstream_auth =
             runtime_profile_usage_auth(shared, profile_name).inspect_err(|err| {
                 note_runtime_profile_transport_failure(
@@ -70,7 +192,7 @@ pub(crate) fn attempt_runtime_responses_request(
                     err,
                 );
             })?;
-        let upstream_request = request.clone();
+        let upstream_request = request_for_attempt.clone();
         let upstream_shared = shared.clone();
         let upstream_profile_name = profile_name.to_string();
         let upstream_turn_state_override = turn_state_override.map(str::to_string);
@@ -98,15 +220,80 @@ pub(crate) fn attempt_runtime_responses_request(
         let response_turn_state =
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
         if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let parts = await_runtime_proxy_async_task(
+                shared,
+                "responses_buffer_response",
+                buffer_runtime_proxy_async_response_parts(response, Vec::new()),
+            )
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    "responses_buffer_response",
+                    err,
+                );
+            })?;
+            let exact_invalid_previous_response_id =
+                runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
+                    &parts.body,
+                );
+            if status == 400
+                && exact_invalid_previous_response_id
+                && !full_history_fallback_used
+                && let Some(previous_response_id) = previous_response_id_for_attempt.as_deref()
+                && let Some(fallback_request) =
+                    runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(
+                        &request_for_attempt,
+                    )
+            {
+                clear_runtime_dead_response_bindings(
+                    shared,
+                    profile_name,
+                    &[previous_response_id.to_string()],
+                    "invalid_previous_response_id",
+                )?;
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "responses_full_history_recovery",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field(
+                                "profile_hash",
+                                runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
+                                    profile_name,
+                                )),
+                            ),
+                            runtime_proxy_log_field(
+                                "previous_response_id_hash",
+                                runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
+                                    previous_response_id,
+                                )),
+                            ),
+                            runtime_proxy_log_field("attempt", "one"),
+                        ],
+                    ),
+                );
+                request_for_attempt = fallback_request;
+                previous_response_id_for_attempt = None;
+                full_history_fallback_used = true;
+                retry_number = retry_number.saturating_add(1);
+                continue;
+            }
             let Some(attempt) = handle_runtime_responses_non_success(
                 request_id,
                 shared,
                 profile_name,
-                response,
+                status,
+                parts,
                 response_turn_state,
                 &mut recovery_steps,
             )?
             else {
+                retry_number = retry_number.saturating_add(1);
                 continue;
             };
             return Ok(attempt);
@@ -117,11 +304,13 @@ pub(crate) fn attempt_runtime_responses_request(
                 shared: shared.clone(),
                 profile_name: profile_name.to_string(),
                 turn_state_override: turn_state_override.map(str::to_string),
-                request_previous_response_id: request_previous_response_id.clone(),
+                request_previous_response_id: previous_response_id_for_attempt.clone(),
                 request_prompt_cache_key: request_prompt_cache_key.clone(),
                 request_session_id: request_session_id.clone(),
+                request_turn_id: request_turn_id.clone(),
                 request_turn_state: request_turn_state.clone(),
                 request_model_name: runtime_smart_context_model_name_from_body(&request.body),
+                selection_attempt,
                 inflight_guard: inflight_guard.take(),
             },
             response,
@@ -142,25 +331,11 @@ fn handle_runtime_responses_non_success(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
-    response: reqwest::Response,
+    status: u16,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
     response_turn_state: Option<String>,
     recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
 ) -> Result<Option<RuntimeResponsesAttempt>> {
-    let status = response.status().as_u16();
-    let parts = await_runtime_proxy_async_task(
-        shared,
-        "responses_buffer_response",
-        buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-    )
-    .inspect_err(|err| {
-        note_runtime_profile_transport_failure(
-            shared,
-            profile_name,
-            RuntimeRouteKind::Responses,
-            "responses_buffer_response",
-            err,
-        );
-    })?;
     if status == 401
         && runtime_try_recover_profile_auth_from_unauthorized_steps(
             request_id,
@@ -178,6 +353,8 @@ fn handle_runtime_responses_non_success(
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
     let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
+    let invalid_previous_response_id =
+        runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(&parts.body);
     let retryable_previous =
         status == 400 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
     let response = RuntimeResponsesReply::Buffered(parts);
@@ -210,6 +387,7 @@ fn handle_runtime_responses_non_success(
             profile_name: profile_name.to_string(),
             response,
             turn_state: response_turn_state,
+            invalid_previous_response_id,
         }));
     }
     if matches!(status, 401 | 403) || token_invalidated {
@@ -234,8 +412,10 @@ struct RuntimeResponsesSuccessAttemptContext {
     request_previous_response_id: Option<String>,
     request_prompt_cache_key: Option<String>,
     request_session_id: Option<String>,
+    request_turn_id: Option<String>,
     request_turn_state: Option<String>,
     request_model_name: Option<String>,
+    selection_attempt: usize,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
 }
 
@@ -251,8 +431,10 @@ fn prepare_runtime_responses_success_attempt(
         request_previous_response_id,
         request_prompt_cache_key,
         request_session_id,
+        request_turn_id,
         request_turn_state,
         request_model_name,
+        selection_attempt,
         inflight_guard,
     } = context;
     let Some(inflight_guard) = inflight_guard else {
@@ -281,8 +463,10 @@ fn prepare_runtime_responses_success_attempt(
                 request_previous_response_id: request_previous_response_id.as_deref(),
                 request_prompt_cache_key: request_prompt_cache_key.as_deref(),
                 request_session_id: request_session_id.as_deref(),
+                request_turn_id: request_turn_id.as_deref(),
                 request_turn_state: request_turn_state.as_deref(),
                 turn_state_override: turn_state_override.as_deref(),
+                selection_attempt,
                 shared: &success_shared,
                 profile_name: &success_profile_name,
                 inflight_guard,

@@ -41,8 +41,10 @@ pub(crate) struct RuntimeResponsesSuccessContext<'a> {
     pub(crate) request_previous_response_id: Option<&'a str>,
     pub(crate) request_prompt_cache_key: Option<&'a str>,
     pub(crate) request_session_id: Option<&'a str>,
+    pub(crate) request_turn_id: Option<&'a str>,
     pub(crate) request_turn_state: Option<&'a str>,
     pub(crate) turn_state_override: Option<&'a str>,
+    pub(crate) selection_attempt: usize,
     pub(crate) shared: &'a RuntimeRotationProxyShared,
     pub(crate) profile_name: &'a str,
     pub(crate) inflight_guard: RuntimeProfileInFlightGuard,
@@ -58,8 +60,10 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         request_previous_response_id,
         request_prompt_cache_key,
         request_session_id,
+        request_turn_id,
         request_turn_state,
         turn_state_override,
+        selection_attempt,
         shared,
         profile_name,
         inflight_guard,
@@ -122,6 +126,21 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             ),
         );
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
+        log_runtime_responses_continuation_trace(
+            shared,
+            RuntimeResponsesContinuationTrace {
+                request_id,
+                profile_name,
+                session_id: request_session_id,
+                turn_id: request_turn_id,
+                turn_state: request_turn_state,
+                previous_response_id: request_previous_response_id,
+                returned_response_id: response_ids.first().map(String::as_str),
+                rotation_generation: selection_attempt,
+                retry_number: 0,
+                stream_committed: true,
+            },
+        );
         if !response_ids.is_empty() {
             remember_runtime_response_ids_with_turn_state(
                 shared,
@@ -235,6 +254,8 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             });
         }
         RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
+            let invalid_previous_response_id =
+                runtime_proxy_crate::runtime_sse_body_is_invalid_previous_response_id(&prelude);
             runtime_proxy_log(
                 shared,
                 format!(
@@ -255,6 +276,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     _inflight_guard: Some(inflight_guard),
                 }),
                 turn_state: response_header_turn_state,
+                invalid_previous_response_id,
             });
         }
     };
@@ -286,6 +308,21 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         response_turn_state.as_deref(),
         RuntimeRouteKind::Responses,
     )?;
+    log_runtime_responses_continuation_trace(
+        shared,
+        RuntimeResponsesContinuationTrace {
+            request_id,
+            profile_name,
+            session_id: request_session_id,
+            turn_id: request_turn_id,
+            turn_state: request_turn_state,
+            previous_response_id: request_previous_response_id,
+            returned_response_id: response_ids.first().map(String::as_str),
+            rotation_generation: selection_attempt,
+            retry_number: 0,
+            stream_committed: true,
+        },
+    );
     if !response_ids.is_empty() && response_turn_state.is_some() {
         let _ = release_runtime_compact_lineage(
             shared,

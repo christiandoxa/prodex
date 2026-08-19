@@ -19,9 +19,26 @@ pub(crate) fn repair_resume_session_in_shared_home(
     codex_args: &[OsString],
 ) -> Result<Option<std::path::PathBuf>> {
     let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args) else {
+        if prodex_runtime_launch::codex_resume_requested(codex_args) {
+            // Picker resumes have no UUID until after the selection. Repair only indexed overlay
+            // rows here; do not scan rollout history or manufacture missing sessions.
+            prodex_session_store::repair_stale_overlay_rollout_paths(codex_home)?;
+        }
         return Ok(None);
     };
-    repair_resume_session_home_strict(codex_home, session_id)
+
+    if let Some(path) = repair_resume_session_home_strict(codex_home, session_id)? {
+        return Ok(Some(path));
+    }
+
+    if prodex_runtime_launch::codex_resume_requested(codex_args) {
+        let _ = prodex_session_store::repair_stale_overlay_rollout_path_for_session(
+            codex_home, session_id,
+        )?;
+        prodex_session_store::repair_stale_overlay_rollout_paths(codex_home)?;
+        return repair_resume_session_home_strict(codex_home, session_id);
+    }
+    Ok(None)
 }
 
 pub(super) fn repair_resume_session_in_home(

@@ -99,3 +99,61 @@ fn recent_session_maintenance_rewrites_only_the_matching_goal_attachment() {
     assert!(objective.contains(&stable_attachment.display().to_string()));
     assert!(!objective.contains(&old_root.display().to_string()));
 }
+
+#[test]
+fn recent_session_maintenance_repoints_overlay_index_before_cleanup() {
+    let temp_dir = RecentMaintenanceTestDir::new();
+    let paths = temp_dir.app_paths();
+    let today = chrono::Utc::now().date_naive();
+    let session_id = "01a01824-29f7-7332-96c7-5d09044ee0d0";
+    let relative = format!(
+        "sessions/{}/{:02}/{:02}/rollout-{}T10-50-18-{session_id}.jsonl",
+        today.year(),
+        today.month(),
+        today.day(),
+        today.format("%Y-%m-%d")
+    );
+    let session_file = paths.shared_codex_root.join(&relative);
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        format!(
+            "{{\"timestamp\":\"{}T10:50:18Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"timestamp\":\"{}T10:50:18Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.148.0\"}}}}\n",
+            today, today
+        ),
+    )
+    .expect("session should write");
+    let stale_path = paths
+        .shared_codex_root
+        .with_file_name(".prodex-overlay-old")
+        .join(&relative);
+    let db_path = paths.shared_codex_root.join("state_1.sqlite");
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should exist");
+    let conn = rusqlite::Connection::open(&db_path).expect("state db should open");
+    conn.execute_batch("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL);")
+        .expect("threads table should create");
+    conn.execute(
+        "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+        rusqlite::params![session_id, stale_path.display().to_string()],
+    )
+    .expect("stale thread should insert");
+    drop(conn);
+
+    assert_eq!(
+        maintain_recent_managed_codex_sessions(&paths)
+            .expect("recent maintenance should succeed")
+            .as_deref(),
+        Some(session_file.as_path())
+    );
+    let conn = rusqlite::Connection::open(&db_path).expect("state db should reopen");
+    let rollout_path: String = conn
+        .query_row(
+            "SELECT rollout_path FROM threads WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .expect("rollout path should read");
+    assert_eq!(Path::new(&rollout_path), session_file.as_path());
+    assert!(session_file.is_file());
+    assert!(!stale_path.exists());
+}

@@ -153,6 +153,8 @@ pub fn maintain_recent_managed_codex_sessions(paths: &AppPaths) -> Result<Option
     };
     let (session_files_opened, session_bytes_read) =
         maintain_one_managed_codex_session_file(paths, &session_file)?;
+    let _ =
+        prodex_session_store::repair_state_db_rollout_path(&paths.shared_codex_root, &session_file);
     emit_recent_session_maintenance_timing(started, session_files_opened, session_bytes_read);
     Ok(Some(session_file))
 }
@@ -166,6 +168,8 @@ pub fn maintain_managed_codex_session_file(paths: &AppPaths, session_file: &Path
     let started = Instant::now();
     let (session_files_opened, session_bytes_read) =
         maintain_one_managed_codex_session_file(paths, session_file)?;
+    let _ =
+        prodex_session_store::repair_state_db_rollout_path(&paths.shared_codex_root, session_file);
     emit_recent_session_maintenance_timing(started, session_files_opened, session_bytes_read);
     Ok(())
 }

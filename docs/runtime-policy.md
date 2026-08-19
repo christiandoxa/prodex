@@ -567,6 +567,24 @@ newest changed rollout. It never scales with older active or archived history;
 full repair is O(all active and archived sessions) and is not part of every
 invocation.
 
+Codex 0.148 continuation handling is deliberately owner-bound. A
+previous_response_id and its x-codex-turn-state stay on the profile and
+transport context that produced them; a committed stream is never rotated to
+another profile. If an HTTP response explicitly reports Invalid
+previous_response_id, Prodex invalidates only that stale binding and makes at
+most one same-profile full-history request when the request has a replayable
+top-level input array. The original input, tool results, turn metadata, and
+headers remain intact; if that safe recovery is unavailable, the original 400
+is forwarded once. WebSocket recovery follows Codex connection scope: an
+invalid chain is reported once and a later client reconnect starts without the
+stale incremental id. Raw identifiers are never written to the runtime trace;
+continuation diagnostics use stable redacted hashes.
+
+The 0.148 x-codex-routing-hint request header is preserved. Codex-owned resume,
+fork, archive, restore, compaction, and model/effort semantics remain
+upstream-owned; Prodex only supplies profile affinity, provider routing, and
+shared-state integration around those operations.
+
 ## Runtime Proxy Contract
 
 `runtime_proxy` tuning must preserve these invariants:

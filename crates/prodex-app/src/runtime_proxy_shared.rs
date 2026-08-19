@@ -21,6 +21,7 @@ pub(super) enum RuntimeResponsesAttempt {
         profile_name: String,
         response: RuntimeResponsesReply,
         turn_state: Option<String>,
+        invalid_previous_response_id: bool,
     },
     LocalSelectionBlocked {
         profile_name: String,
@@ -194,6 +195,7 @@ pub(super) enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
         turn_state: Option<String>,
+        invalid_previous_response_id: bool,
     },
     TransportFailed {
         profile_name: String,

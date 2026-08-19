@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.147.0 release",
+      "baseline_source": "openai/codex rust-v0.148.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -42,6 +42,8 @@
             "WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY",
             "ws_request_header_x_openai_internal_codex_responses_lite",
             "x-codex-beta-features",
+            "X_CODEX_ROUTING_HINT_HEADER",
+            "x-codex-routing-hint",
             "OPENAI_BETA_HEADER",
             "responses_websockets=2026-02-06",
             "x-client-request-id",
@@ -147,7 +149,7 @@
         },
         {
           "path": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Owns provider metadata and Bedrock model ID constants. Codex 0.147.0 moves remote-compaction capability gating into the provider runtime, while Prodex Gemini and Bedrock direct-launch compatibility depend on the resulting OpenAI/Azure behavior.",
+          "reason": "Owns provider metadata and Bedrock model ID constants. Codex 0.148.0 adds the built-in Bedrock Runtime provider while Prodex Gemini and Bedrock direct-launch compatibility depend on the resulting OpenAI/Azure behavior.",
           "required_contains": [
             "ModelProviderInfo",
             "supports_standalone_web_search",
@@ -182,7 +184,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Owns Codex provider capabilities and model-manager wiring for direct Bedrock launches. Codex 0.147.0 keeps remote-compaction support in ProviderCapabilities.",
+          "reason": "Owns Codex provider capabilities and model-manager wiring for direct Bedrock launches. Codex 0.148.0 keeps remote-compaction support in ProviderCapabilities and adds the Bedrock Runtime catalog.",
           "required_contains": [
             "RemoteCompactionSupport",
             "ProviderCapabilities",
@@ -409,7 +411,7 @@
         },
         {
           "path": "codex-rs/ext/web-search/src/extension.rs",
-          "reason": "Owns the Codex 0.147 custom-provider gate for standalone web search used by the governed OpenAI-through-Prodex provider.",
+          "reason": "Owns the Codex 0.148 custom-provider gate for standalone web search used by the governed OpenAI-through-Prodex provider.",
           "required_contains": [
             "WebSearchExtensionConfig",
             "supports_standalone_web_search",
@@ -1286,7 +1288,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.147.0",
+      "tested_codex_release": "rust-v0.148.0",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1303,18 +1305,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.147.0",
-      "name": "0.147.0",
-      "published_at": "2026-08-07T01:41:49Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.147.0",
+      "tag_name": "rust-v0.148.0",
+      "name": "0.148.0",
+      "published_at": "2026-08-18T22:26:03Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.148.0",
       "body_head": [
         "## New Features",
-        "- Install portable Agent Plugins and search across local, personal, workspace, and remote plugin catalogs. (#36544, #36409, #36919, #36796)",
-        "- Organize conversations into persistent, manually ordered sections and browse long transcripts incrementally. (#35722, #36007, #36380, #36948, #36950)",
-        "- Enable automatically reviewed approvals with the new `--approve-for-me` CLI flag. (#36373)",
-        "- Import Cursor-managed skills and synchronize changes to imported Claude and Cursor conversations without creating duplicates. (#36361, #36356, #35623)",
-        "- Support the opt-in MCP 2026-07-28 protocol, including paginated discovery, multi-round requests, and non-blocking server startup. (#35724, #35725, #35590, #35742)",
-        "- Enable cached web search and remote conversation compaction for Amazon Bedrock. (#36938, #36981)"
+        "- Export complete TUI conversations to Markdown with `/export`, either to the clipboard or a new file. (#37358)",
+        "- Fork sessions with `codex exec fork`, and archive or restore sessions from the TUI resume picker. (#37367, #37369, #37371)",
+        "- Draft prompts while the TUI initializes, with resume and fork progress shown during startup. (#38642, #38788)",
+        "- View estimated thread credits or cost in `/status`, status lines, and terminal titles for eligible workspaces. (#38281, #38282)",
+        "- Use Amazon Bedrock Runtime as a built-in provider with AWS profile, region, and GPT-5.6 routing support. (#38470)",
+        "- Hooks can now run commands asynchronously and invoke MCP tools. (#37533, #38705)"
       ]
     }
   },

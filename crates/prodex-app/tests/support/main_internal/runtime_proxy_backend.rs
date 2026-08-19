@@ -44,6 +44,9 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyResetBeforeFirstByte,
     HttpOnlyResetAfterFirstChunk,
     HttpOnlyPreviousResponseNeedsTurnState,
+    HttpOnlyInvalidPreviousResponseId,
+    HttpOnlyAlwaysInvalidPreviousResponseId,
+    HttpOnlySseInvalidPreviousResponseId,
     HttpOnlyPreviousResponseNotFoundAfterCommit,
     HttpOnlySseHeadersArrayTurnState,
     HttpOnlyCompactOverloaded,
@@ -66,6 +69,7 @@ pub(super) enum RuntimeProxyBackendMode {
     WebsocketReusePrecommitHoldStall,
     WebsocketReuseOwnedPreviousResponseSilentHang,
     WebsocketReusePreviousResponseNeedsTurnState,
+    WebsocketInvalidPreviousResponseId,
     WebsocketPreviousResponseNotFoundAfterPrelude,
     WebsocketPreviousResponseNotFoundAfterCommit,
     WebsocketPreviousResponseMissingWithoutTurnState,
@@ -121,6 +125,18 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
+    }
+
+    pub(super) fn start_http_invalid_previous_response_id() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyInvalidPreviousResponseId)
+    }
+
+    pub(super) fn start_http_always_invalid_previous_response_id() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAlwaysInvalidPreviousResponseId)
+    }
+
+    pub(super) fn start_http_sse_invalid_previous_response_id() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySseInvalidPreviousResponseId)
     }
 
     pub(super) fn start_http_previous_response_not_found_after_commit() -> Self {
@@ -213,6 +229,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_websocket_reuse_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
+    }
+
+    pub(super) fn start_websocket_invalid_previous_response_id() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketInvalidPreviousResponseId)
     }
 
     pub(super) fn start_websocket_previous_response_not_found_after_prelude() -> Self {
@@ -331,6 +351,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit
+                                | RuntimeProxyBackendMode::WebsocketInvalidPreviousResponseId
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                                 | RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn

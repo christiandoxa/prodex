@@ -141,6 +141,26 @@ pub fn extract_runtime_proxy_previous_response_message_from_value(
     )
 }
 
+pub fn runtime_proxy_value_is_invalid_previous_response_id(value: &serde_json::Value) -> bool {
+    runtime_json_find(value, |candidate| {
+        let serde_json::Value::Object(map) = candidate else {
+            return None;
+        };
+        let error_type = map.get("type").and_then(serde_json::Value::as_str);
+        let message = map.get("message").and_then(serde_json::Value::as_str);
+        (error_type == Some("invalid_request_error")
+            && message.is_some_and(runtime_proxy_invalid_previous_response_id_message))
+        .then_some(())
+    })
+    .is_some()
+}
+
+pub fn runtime_proxy_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|value| runtime_proxy_value_is_invalid_previous_response_id(&value))
+}
+
 fn extract_runtime_proxy_previous_response_message_candidate(
     value: &serde_json::Value,
 ) -> Option<String> {
@@ -164,6 +184,16 @@ fn extract_runtime_proxy_previous_response_message_candidate(
                         )
                         .to_string(),
                 );
+            }
+
+            // Some Responses backends report a missing incremental chain as a generic
+            // invalid_request_error instead of using the older dedicated error code.
+            // Keep this check narrow: the field name must be present in the message and the
+            // message must explicitly describe the value as invalid.
+            if error_type == Some("invalid_request_error")
+                && message.is_some_and(runtime_proxy_invalid_previous_response_id_message)
+            {
+                return message.map(str::to_string);
             }
 
             if let Some(message) = message
@@ -199,6 +229,7 @@ fn runtime_proxy_previous_response_missing_text_signature(message: &str) -> bool
     let lower = message.trim().to_ascii_lowercase();
     lower.starts_with("previous_response_not_found")
         || (lower.starts_with("previous response") && lower.contains("not found"))
+        || runtime_proxy_invalid_previous_response_id_message(message)
 }
 
 fn runtime_proxy_tool_context_missing_text_signature(message: &str) -> bool {
@@ -212,4 +243,9 @@ fn runtime_proxy_tool_context_missing_text_signature(message: &str) -> bool {
 pub fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("no tool call found") || lower.contains("no function call found")
+}
+
+fn runtime_proxy_invalid_previous_response_id_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("previous_response_id") && lower.contains("invalid")
 }

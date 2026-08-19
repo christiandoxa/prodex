@@ -145,6 +145,10 @@ pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
     resume_args.get(target_index)?.to_str()
 }
 
+pub fn codex_resume_requested(codex_args: &[OsString]) -> bool {
+    codex_resume_command_index(codex_args).is_some()
+}
+
 pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str) -> Vec<OsString> {
     let command_index = first_codex_positional_arg_index(codex_args).unwrap_or(codex_args.len());
     let mut args = codex_args[..command_index].to_vec();

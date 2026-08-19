@@ -739,6 +739,17 @@ fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
 }
 
 #[test]
+fn sse_body_detects_invalid_previous_response_id_inside_data_event() {
+    let body = br#"event: response.failed
+data: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"Invalid `previous_response_id`."}}
+
+"#;
+
+    assert!(runtime_sse_body_is_invalid_previous_response_id(body));
+    assert!(!runtime_proxy_body_is_invalid_previous_response_id(body));
+}
+
+#[test]
 fn inspect_sse_buffer_detects_usage_not_included_before_commit() {
     let progress = inspect_runtime_sse_buffer_at_eof(
         b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"usage_not_included\",\"message\":\"Your workspace is out of credits.\"}}}",

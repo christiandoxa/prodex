@@ -25,7 +25,11 @@ use repair_candidates::{
 };
 use repair_transaction::SessionRepairTransaction;
 use session_file::{read_session_file_to_string, visit_session_lines};
-use state_db_index::{collect_state_db_rollout_paths, repair_state_db_rollout_path};
+use state_db_index::collect_state_db_rollout_paths;
+pub use state_db_index::{
+    repair_stale_overlay_rollout_path_for_session, repair_stale_overlay_rollout_paths,
+    repair_state_db_rollout_path,
+};
 
 const SESSIONS_DIR: &str = "sessions";
 const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";

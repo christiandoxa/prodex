@@ -6,6 +6,7 @@ use super::{
     RuntimeProxyChainLog, RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind,
     RuntimeUpstreamFailureResponse, RuntimeWebsocketAttempt, RuntimeWebsocketErrorPayload,
     RuntimeWebsocketRequestMetadata, RuntimeWebsocketSessionState,
+    clear_runtime_dead_response_bindings,
     extract_runtime_proxy_overload_message_from_websocket_payload,
     extract_runtime_proxy_quota_message_from_websocket_payload,
     forward_runtime_proxy_websocket_error, handle_runtime_previous_response_not_found,

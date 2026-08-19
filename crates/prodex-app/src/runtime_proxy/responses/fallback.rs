@@ -85,9 +85,12 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
         fallback.request,
         fallback.shared,
         &current_profile,
-        fallback.request_turn_state,
-        fallback.prompt_cache_key,
-        false,
+        RuntimeResponsesAttemptOptions {
+            turn_state_override: fallback.request_turn_state,
+            prompt_cache_key: fallback.prompt_cache_key,
+            hard_affinity: false,
+            selection_attempt: 0,
+        },
     )?;
     handle_runtime_responses_direct_attempt(
         &fallback,
@@ -154,7 +157,19 @@ fn handle_runtime_responses_direct_attempt(
         RuntimeResponsesAttempt::PreviousResponseNotFound {
             profile_name,
             response,
+            turn_state: _,
+            invalid_previous_response_id: true,
+            ..
+        } => handle_runtime_responses_direct_invalid_previous_response(
+            fallback,
+            &profile_name,
+            response,
+        ),
+        RuntimeResponsesAttempt::PreviousResponseNotFound {
+            profile_name,
+            response,
             turn_state,
+            invalid_previous_response_id: false,
         } => handle_runtime_responses_direct_previous_response(
             fallback,
             affinity_state,
@@ -378,6 +393,24 @@ fn handle_runtime_responses_direct_previous_response(
             )))
         }
     }
+}
+
+fn handle_runtime_responses_direct_invalid_previous_response(
+    fallback: &RuntimeResponsesDirectCurrentFallback<'_>,
+    profile_name: &str,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesDirectCurrentFallbackAction>> {
+    if let Some(previous_response_id) = fallback.previous_response_id {
+        clear_runtime_dead_response_bindings(
+            fallback.shared,
+            profile_name,
+            &[previous_response_id.to_string()],
+            "invalid_previous_response_id",
+        )?;
+    }
+    Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+        Box::new(response),
+    )))
 }
 
 fn handle_runtime_responses_direct_local_selection(

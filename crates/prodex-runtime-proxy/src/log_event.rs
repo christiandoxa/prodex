@@ -113,6 +113,14 @@ pub fn runtime_proxy_log_field<'a>(
     }
 }
 
+pub fn runtime_proxy_identifier_hash(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(crate::smart_context_hash_text)
+        .unwrap_or_else(|| "none".to_string())
+}
+
 pub fn runtime_proxy_structured_log_message<'a>(
     event: &str,
     fields: impl IntoIterator<Item = RuntimeProxyLogField<'a>>,

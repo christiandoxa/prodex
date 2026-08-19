@@ -36,10 +36,7 @@ use gateway_startup::start_gateway_backend;
 use gateway_status::print_gateway_status;
 use goal_resume::*;
 pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
-use resume_provider::{
-    RuntimeResumeSessionSettings, runtime_resume_external_provider_from_codex_args,
-    runtime_resume_session_settings_from_codex_args,
-};
+use resume_provider::*;
 use run_command_strategy::RunCommandStrategy;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
@@ -50,9 +47,7 @@ use session_delete::{
 pub(crate) use session_delete::{
     maintain_shared_codex_session_after_child_exit, maintain_shared_codex_sessions_after_child_exit,
 };
-use std::borrow::Cow;
-use std::path::Path;
-use std::time::Instant;
+use std::{borrow::Cow, path::Path, time::Instant};
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
@@ -81,7 +76,7 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
 
 pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
-    let is_resume = prodex_runtime_launch::codex_resume_session_id(&normalized).is_some();
+    let is_resume = prodex_runtime_launch::codex_resume_requested(&normalized);
     let model_is_explicit = args.local_model.is_some()
         || codex_cli_config_override_value(&args.codex_args, "model").is_some();
     let effort_is_explicit =
@@ -93,6 +88,11 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
     if !model_is_explicit {
         remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
     }
+    remove_resume_generated_effort_override(
+        &mut runtime_args.codex_args,
+        is_resume,
+        effort_is_explicit,
+    );
     restore_resume_session_settings(
         &mut runtime_args.codex_args,
         session_settings.as_ref(),

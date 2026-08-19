@@ -25,7 +25,19 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 profile_name,
                 payload,
                 turn_state,
+                invalid_previous_response_id,
             } => {
+                if invalid_previous_response_id {
+                    if let Some(previous_response_id) = self.previous_response_id.as_deref() {
+                        clear_runtime_dead_response_bindings(
+                            self.shared,
+                            &profile_name,
+                            &[previous_response_id.to_string()],
+                            "invalid_previous_response_id",
+                        )?;
+                    }
+                    return self.handle_upstream_rejected(profile_name, payload);
+                }
                 let action = self.handle_previous_response_not_found(
                     &profile_name,
                     turn_state,
@@ -89,7 +101,19 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 profile_name,
                 payload,
                 turn_state,
+                invalid_previous_response_id,
             } => {
+                if invalid_previous_response_id {
+                    if let Some(previous_response_id) = self.previous_response_id.as_deref() {
+                        clear_runtime_dead_response_bindings(
+                            self.shared,
+                            &profile_name,
+                            &[previous_response_id.to_string()],
+                            "invalid_previous_response_id",
+                        )?;
+                    }
+                    return self.handle_upstream_rejected(profile_name, payload);
+                }
                 let action = self.handle_previous_response_not_found(
                     &profile_name,
                     turn_state,
