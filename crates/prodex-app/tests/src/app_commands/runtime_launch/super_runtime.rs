@@ -66,8 +66,8 @@ fn super_picker_and_direct_resume_repair_the_same_stale_overlay_path() {
     };
     repair_super_resume_session_metadata(&picker_args).unwrap();
     assert_eq!(
-        repaired_path(&connection),
-        rollout_path.display().to_string()
+        std::path::PathBuf::from(repaired_path(&connection)),
+        rollout_path
     );
 
     connection
@@ -83,8 +83,8 @@ fn super_picker_and_direct_resume_repair_the_same_stale_overlay_path() {
     };
     repair_super_resume_session_metadata(&direct_args).unwrap();
     assert_eq!(
-        repaired_path(&connection),
-        rollout_path.display().to_string()
+        std::path::PathBuf::from(repaired_path(&connection)),
+        rollout_path
     );
 }
 

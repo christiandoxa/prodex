@@ -259,7 +259,7 @@ fn runtime_proxy_http_stale_overlay_resume_after_restart_recovers_chain_once() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(repaired_path, rollout_path.display().to_string());
+    assert_eq!(std::path::PathBuf::from(repaired_path), rollout_path);
 
     let fixture = fixture.restart();
     let resumed = fixture.post_json_with_headers(
