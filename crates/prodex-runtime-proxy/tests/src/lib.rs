@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "local_bridge.rs"]
 mod local_bridge;
+#[path = "payload_detection_invalid_previous_response.rs"]
+mod payload_detection_invalid_previous_response;
 
 #[test]
 fn runtime_proxy_request_debug_redacts_target_headers_and_body() {
@@ -24,6 +26,17 @@ fn runtime_proxy_request_debug_redacts_target_headers_and_body() {
     ] {
         assert!(!rendered.contains(secret));
     }
+}
+
+#[test]
+fn continuation_identifier_hash_is_stable_and_redacted() {
+    let first = runtime_proxy_identifier_hash(Some("resp-secret"));
+    let second = runtime_proxy_identifier_hash(Some("resp-secret"));
+
+    assert_eq!(first, second);
+    assert!(first.starts_with("sc2:"));
+    assert!(!first.contains("resp-secret"));
+    assert_eq!(runtime_proxy_identifier_hash(None), "none");
 }
 
 #[test]
@@ -267,6 +280,37 @@ fn strips_previous_response_id_from_request_body_for_fresh_retry() {
     );
     assert!(value.get("previous_response_id").is_none());
     assert!(runtime_request_without_previous_response_id(&rewritten).is_none());
+}
+
+#[test]
+fn full_history_fallback_preserves_context_and_session_metadata() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session_id".to_string(), "sess-1".to_string())],
+        body: br#"{"previous_response_id":"resp-old","input":[{"type":"message","role":"user","content":"continue"}],"client_metadata":{"turn_id":"turn-1"}}"#.to_vec(),
+    };
+
+    let fallback = runtime_request_full_history_without_previous_response_id(&request)
+        .expect("array input should support full-history recovery");
+    let value = serde_json::from_slice::<serde_json::Value>(&fallback.body).unwrap();
+
+    assert_eq!(fallback.headers, request.headers);
+    assert!(value.get("previous_response_id").is_none());
+    assert_eq!(value["input"][0]["role"], "user");
+    assert_eq!(value["client_metadata"]["turn_id"], "turn-1");
+}
+
+#[test]
+fn full_history_fallback_rejects_unidentified_partial_clients() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"previous_response_id":"resp-old","input":[{"type":"message"}]}"#.to_vec(),
+    };
+
+    assert!(runtime_request_full_history_without_previous_response_id(&request).is_none());
 }
 
 #[test]

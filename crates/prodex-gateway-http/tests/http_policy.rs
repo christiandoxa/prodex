@@ -385,6 +385,7 @@ fn upstream_header_policy_preserves_codex_metadata_and_strips_auth_or_hop_by_hop
     let headers = vec![
         GatewayHttpHeader::new("session_id", "sess-1"),
         GatewayHttpHeader::new("x-codex-turn-state", "state"),
+        GatewayHttpHeader::new("x-codex-routing-hint", "route-a"),
         GatewayHttpHeader::new("User-Agent", "codex"),
         GatewayHttpHeader::new("traceparent", traceparent().value),
         GatewayHttpHeader::new("tracestate", "rojo=00f067aa0ba902b7"),
@@ -405,6 +406,7 @@ fn upstream_header_policy_preserves_codex_metadata_and_strips_auth_or_hop_by_hop
         vec![
             "session_id",
             "x-codex-turn-state",
+            "x-codex-routing-hint",
             "user-agent",
             "traceparent",
             "tracestate",

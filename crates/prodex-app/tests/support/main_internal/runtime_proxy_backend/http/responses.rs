@@ -95,6 +95,59 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
             "second-account"
                 if matches!(
                     mode,
+                    RuntimeProxyBackendMode::HttpOnlyInvalidPreviousResponseId
+                        | RuntimeProxyBackendMode::HttpOnlyAlwaysInvalidPreviousResponseId
+                ) && (previous_response_id.as_deref() == Some("resp-second")
+                    || (matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyAlwaysInvalidPreviousResponseId
+                    ) && previous_response_id.is_none()
+                        && body_json
+                            .get("input")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|items| items.len() > 1))) =>
+            {
+                (
+                    "HTTP/1.1 400 Bad Request",
+                    "application/json",
+                    serde_json::json!({
+                        "type": "error",
+                        "status": 400,
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": "Invalid `previous_response_id`.",
+                            "param": "previous_response_id",
+                        }
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::HttpOnlySseInvalidPreviousResponseId
+                ) && previous_response_id.as_deref() == Some("resp-second") =>
+            {
+                (
+                    "HTTP/1.1 200 OK",
+                    "text/event-stream",
+                    concat!(
+                        "event: response.failed\r\n",
+                        "data: {\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Invalid `previous_response_id`.\"}}\r\n",
+                        "\r\n"
+                    )
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            "second-account"
+                if matches!(
+                    mode,
                     RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit
                 ) && runtime_proxy_backend_is_owned_continuation(
                     "second-account",

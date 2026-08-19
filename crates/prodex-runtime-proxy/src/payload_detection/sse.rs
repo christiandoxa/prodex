@@ -1,7 +1,8 @@
 use super::{
     RuntimeTokenUsage, extract_runtime_proxy_previous_response_message_from_value,
     extract_runtime_response_ids_from_value, extract_runtime_token_usage_from_value,
-    extract_runtime_turn_state_from_value, runtime_response_event_type_from_value,
+    extract_runtime_turn_state_from_value, runtime_proxy_value_is_invalid_previous_response_id,
+    runtime_response_event_type_from_value,
 };
 use crate::{
     RuntimeHttpErrorAction, RuntimeHttpErrorPhase, runtime_stream_error_policy_from_value,
@@ -14,6 +15,7 @@ pub struct RuntimeParsedSseEvent {
     pub quota_blocked: bool,
     pub overloaded: bool,
     pub previous_response_not_found: bool,
+    pub invalid_previous_response_id: bool,
     pub response_ids: Vec<String>,
     pub event_type: Option<String>,
     pub turn_state: Option<String>,
@@ -311,9 +313,28 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
             &value,
         )
         .is_some(),
+        invalid_previous_response_id: runtime_proxy_value_is_invalid_previous_response_id(&value),
         response_ids: extract_runtime_response_ids_from_value(&value),
         event_type: runtime_response_event_type_from_value(&value),
         turn_state: extract_runtime_turn_state_from_value(&value),
         token_usage: extract_runtime_token_usage_from_value(&value),
     }
+}
+
+/// Detects the exact invalid incremental-response error in an SSE payload.
+///
+/// The ordinary body classifier intentionally parses JSON bodies only. Responses failures can
+/// also arrive as `data:` SSE events, where treating this as the older generic
+/// `previous_response_not_found` signal would incorrectly re-enter profile rotation.
+pub fn runtime_sse_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    let mut invalid = false;
+    runtime_sse_consume_chunk(&mut line, &mut data_lines, body, |event| {
+        invalid |= event.invalid_previous_response_id;
+    });
+    runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
+        invalid |= event.invalid_previous_response_id;
+    });
+    invalid
 }

@@ -67,6 +67,7 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
         "x-openai-memgen-request",
         "x-codex-installation-id",
         "x-codex-turn-state",
+        "x-codex-routing-hint",
         "x-codex-turn-metadata",
         "x-codex-parent-thread-id",
         "x-codex-window-id",

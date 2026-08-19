@@ -5,11 +5,24 @@ use prodex_core::AppPaths;
 use prodex_provider_core::ProviderId;
 use prodex_state::AppState;
 use std::ffi::OsString;
+use std::path::Path;
+
+use super::remove_first_codex_config_override_pair;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeResumeSessionSettings {
     pub(super) model: Option<String>,
     pub(super) reasoning_effort: Option<String>,
+}
+
+pub(super) fn remove_resume_generated_effort_override(
+    codex_args: &mut Vec<OsString>,
+    is_resume: bool,
+    effort_is_explicit: bool,
+) {
+    if is_resume && !effort_is_explicit {
+        remove_first_codex_config_override_pair(codex_args, "model_reasoning_effort");
+    }
 }
 
 pub(super) fn runtime_resume_external_provider_from_codex_args(
@@ -44,29 +57,76 @@ fn runtime_resume_session_report_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<prodex_session_store::SessionReport>> {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
-    let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) else {
+    if !prodex_runtime_launch::codex_resume_requested(&normalized) {
         return Ok(None);
-    };
+    }
+    let resume_last = codex_resume_last(&normalized);
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let report = match prodex_session_store::resolve_session_report_by_id_in_store(
-        &paths.shared_codex_root,
-        &state,
-        session_id,
-    ) {
-        Ok(report) => report,
-        Err(prodex_session_store::SessionResolveError::Missing { .. }) => return Ok(None),
-        Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => {
-            bail!("resume target is ambiguous; use the full session UUID")
-        }
-    };
-    Ok(Some(report))
+    let report =
+        if let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) {
+            match prodex_session_store::resolve_session_report_by_id_in_store(
+                &paths.shared_codex_root,
+                &state,
+                session_id,
+            ) {
+                Ok(report) => Some(report),
+                Err(prodex_session_store::SessionResolveError::Missing { .. }) => None,
+                Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => {
+                    bail!("resume target is ambiguous; use the full session UUID")
+                }
+            }
+        } else if resume_last {
+            let current_dir = (!codex_resume_all(&normalized))
+                .then(std::env::current_dir)
+                .transpose()?;
+            select_resume_last_report(prodex_session_store::collect_session_reports_with_filter(
+                &paths.shared_codex_root,
+                prodex_session_store::SessionReportFilter {
+                    current_dir: current_dir.as_deref(),
+                    ..prodex_session_store::SessionReportFilter::default()
+                },
+                &state,
+            )?)
+        } else {
+            None
+        };
+    Ok(report)
+}
+
+fn select_resume_last_report(
+    reports: Vec<prodex_session_store::SessionReport>,
+) -> Option<prodex_session_store::SessionReport> {
+    reports
+        .into_iter()
+        .find(|report| !report_path_is_archived(report.path.as_str()))
+}
+
+fn codex_resume_all(codex_args: &[OsString]) -> bool {
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
+    normalized.iter().any(|arg| arg == "--all")
+}
+
+fn codex_resume_last(codex_args: &[OsString]) -> bool {
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
+    normalized.iter().any(|arg| arg == "--last")
+}
+
+fn report_path_is_archived(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|component| component.as_os_str() == "archived_sessions")
 }
 
 fn resolve_bound_provider_identity(value: Option<&str>) -> Result<Option<ProviderId>> {
     let Some(value) = value else {
         return Ok(None);
     };
+    if value.eq_ignore_ascii_case("amazon-bedrock")
+        || value.eq_ignore_ascii_case("amazon-bedrock-runtime")
+    {
+        return Ok(None);
+    }
     prodex_provider_core::provider_implementation_registry()
         .resolve_model_provider_id(value)
         .map(Some)
@@ -89,9 +149,10 @@ fn runtime_external_provider_from_model_provider_id(
 #[cfg(test)]
 mod tests {
     use super::{
-        SuperExternalProvider, resolve_bound_provider_identity,
-        runtime_external_provider_from_model_provider_id,
+        SuperExternalProvider, codex_resume_last, resolve_bound_provider_identity,
+        runtime_external_provider_from_model_provider_id, select_resume_last_report,
     };
+    use std::ffi::OsString;
 
     #[test]
     fn runtime_external_provider_from_model_provider_id_accepts_kiro() {
@@ -113,5 +174,41 @@ mod tests {
             .to_string();
         assert!(error.contains("unsupported provider identity"), "{error}");
         assert!(!error.contains("unknown-provider"), "{error}");
+    }
+
+    #[test]
+    fn upstream_bedrock_provider_ids_remain_direct_on_resume() {
+        for provider in ["amazon-bedrock", "amazon-bedrock-runtime"] {
+            assert_eq!(
+                resolve_bound_provider_identity(Some(provider)).unwrap(),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn resume_last_uses_newest_active_report_not_archived_report() {
+        let active = prodex_session_store::SessionReport::from_path(
+            std::path::Path::new("/home/test-user/codex/sessions/active.jsonl"),
+            2,
+        );
+        let archived = prodex_session_store::SessionReport::from_path(
+            std::path::Path::new("/home/test-user/codex/archived_sessions/archived.jsonl"),
+            3,
+        );
+
+        assert_eq!(
+            select_resume_last_report(vec![archived, active]).map(|report| report.path),
+            Some("/home/test-user/codex/sessions/active.jsonl".to_string())
+        );
+    }
+
+    #[test]
+    fn bare_resume_does_not_restore_last_session_settings() {
+        assert!(!codex_resume_last(&[OsString::from("resume")]));
+        assert!(codex_resume_last(&[
+            OsString::from("resume"),
+            OsString::from("--last"),
+        ]));
     }
 }

@@ -22,7 +22,18 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
         body: br#"{"input":[]}"#.to_vec(),
     };
 
-    match attempt_runtime_responses_request(1, &request, harness.shared(), "main", None, None, false)
+    match attempt_runtime_responses_request(
+        1,
+        &request,
+        harness.shared(),
+        "main",
+        RuntimeResponsesAttemptOptions {
+            turn_state_override: None,
+            prompt_cache_key: None,
+            hard_affinity: false,
+            selection_attempt: 0,
+        },
+    )
         .expect("responses attempt should succeed")
     {
         RuntimeResponsesAttempt::LocalSelectionBlocked {

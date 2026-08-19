@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod large_files;
 mod repair;
 mod state_db;
+mod state_db_targeted;
 
 fn assert_codex_session_meta_line(
     line: &str,

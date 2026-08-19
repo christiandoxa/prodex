@@ -24,6 +24,7 @@ fn preserve_upstream_header(name: &str) -> bool {
             | "x-codex-turn-state"
             | "x-codex-turn-metadata"
             | "x-codex-beta-features"
+            | "x-codex-routing-hint"
             | "user-agent"
             | "traceparent"
             | "tracestate"

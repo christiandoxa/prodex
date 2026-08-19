@@ -55,9 +55,11 @@ pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
 pub(crate) use self::realtime_sidecar::*;
 pub(crate) use self::response_forwarding::*;
-#[cfg(test)]
-pub(crate) use self::responses::attempt_runtime_responses_request;
 pub(crate) use self::responses::proxy_runtime_responses_request;
+#[cfg(test)]
+pub(crate) use self::responses::{
+    RuntimeResponsesAttemptOptions, attempt_runtime_responses_request,
+};
 pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
 #[cfg(feature = "bench-support")]
@@ -76,6 +78,11 @@ pub(crate) use self::upstream_payload_log::*;
 pub(crate) use self::websocket::*;
 use self::websocket_message::{
     RuntimeWebsocketTextMessageInput, proxy_runtime_websocket_text_message,
+};
+
+pub(crate) use self::responses::{
+    RuntimeResponsesContinuationTrace, log_runtime_responses_continuation_trace,
+    runtime_response_trace_provider_labels,
 };
 
 #[cfg(test)]

@@ -21,11 +21,13 @@ pub(crate) use self::app_server_broker_preview::{
 };
 #[cfg(test)]
 pub(crate) use self::app_server_broker_protocol::{
-    AppServerBrokerCommitBoundary, AppServerBrokerContinuationOwnerKind, AppServerBrokerFrameKind,
-    AppServerBrokerMethod, AppServerBrokerMethodKind, AppServerBrokerPolicyHint,
-    AppServerBrokerPolicyHintMode, AppServerBrokerRotationWindow, AppServerBrokerRoutingHint,
-    app_server_broker_affinity_keys, app_server_broker_allows_provider_switch,
-    app_server_broker_commit_boundaries, app_server_broker_continuation_decision_kinds,
+    AppServerBrokerAffinityKeyKind, AppServerBrokerCommitBoundary,
+    AppServerBrokerContinuationDecision, AppServerBrokerContinuationOwnerKind,
+    AppServerBrokerFrameKind, AppServerBrokerMethod, AppServerBrokerMethodKind,
+    AppServerBrokerPolicyHint, AppServerBrokerPolicyHintMode, AppServerBrokerRotationWindow,
+    AppServerBrokerRoutingHint, app_server_broker_affinity_keys,
+    app_server_broker_allows_provider_switch, app_server_broker_commit_boundaries,
+    app_server_broker_continuation_decision, app_server_broker_continuation_decision_kinds,
     app_server_broker_diagnostic_summary, app_server_broker_diagnostic_summary_json,
     app_server_broker_frame_kind, app_server_broker_invalid_reason,
     app_server_broker_is_lifecycle_method, app_server_broker_lifecycle_binding,

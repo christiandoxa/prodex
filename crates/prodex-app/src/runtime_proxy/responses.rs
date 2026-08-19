@@ -11,7 +11,11 @@ mod quota_blocked;
 use self::affinity_state::{
     RuntimeResponsesAffinityState, RuntimeResponsesRefreshRouteAffinityInput,
 };
-pub(crate) use self::attempt::attempt_runtime_responses_request;
+pub(crate) use self::attempt::{
+    RuntimeResponsesAttemptOptions, RuntimeResponsesContinuationTrace,
+    attempt_runtime_responses_request, log_runtime_responses_continuation_trace,
+    runtime_response_trace_provider_labels,
+};
 use self::fallback::{
     RuntimeResponsesDirectCurrentFallback, RuntimeResponsesDirectCurrentFallbackAction,
     RuntimeResponsesDirectCurrentFallbackReason,
@@ -24,6 +28,7 @@ use self::local_selection::{
 use self::overloaded::{RuntimeResponsesOverloaded, handle_runtime_responses_overloaded};
 use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
+    handle_runtime_responses_previous_response_attempt,
     runtime_responses_previous_response_not_found_context,
 };
 use self::quota_blocked::{
@@ -500,9 +505,12 @@ fn handle_runtime_responses_attempt(
         context.request,
         context.shared,
         candidate_name,
-        turn_state_override,
-        context.prompt_cache_key,
-        hard_affinity,
+        RuntimeResponsesAttemptOptions {
+            turn_state_override,
+            prompt_cache_key: context.prompt_cache_key,
+            hard_affinity,
+            selection_attempt: loop_state.selection_attempts,
+        },
     )? {
         RuntimeResponsesAttempt::Success {
             profile_name,
@@ -554,6 +562,7 @@ fn handle_runtime_responses_attempt(
             profile_name,
             response,
             turn_state,
+            invalid_previous_response_id,
         } => handle_runtime_responses_previous_response_attempt(
             context,
             affinity_state,
@@ -561,6 +570,7 @@ fn handle_runtime_responses_attempt(
             profile_name,
             response,
             turn_state,
+            invalid_previous_response_id,
         ),
     }
 }
@@ -710,44 +720,4 @@ fn handle_runtime_responses_local_selection_attempt(
         affinity_state,
         excluded_profiles: &mut loop_state.excluded_profiles,
     })
-}
-
-fn handle_runtime_responses_previous_response_attempt(
-    context: &RuntimeResponsesRequestContext<'_>,
-    affinity_state: &mut RuntimeResponsesAffinityState,
-    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
-    profile_name: String,
-    response: RuntimeResponsesReply,
-    turn_state: Option<String>,
-) -> Result<Option<RuntimeResponsesReply>> {
-    match handle_runtime_previous_response_not_found(
-        runtime_responses_previous_response_not_found_context(
-            RuntimeResponsesPreviousResponseNotFoundContextInput {
-                shared: context.shared,
-                request_id: context.request_id,
-                profile_name: &profile_name,
-                turn_state,
-                via: None,
-                previous_response_id: context.previous_response_id,
-                request_turn_state: context.request_turn_state,
-                request_session_id: context.request_session_id,
-                request_requires_previous_response_affinity: context
-                    .request_requires_previous_response_affinity,
-                trusted_previous_response_affinity: affinity_state
-                    .trusted_previous_response_affinity(),
-                fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
-                policy: RuntimePreviousResponseNotFoundPolicy::responses(true),
-            },
-        ),
-        affinity_state.previous_response_not_found_state(&mut loop_state.excluded_profiles, true),
-    )? {
-        RuntimePreviousResponseNotFoundAction::RetryOwner
-        | RuntimePreviousResponseNotFoundAction::Rotate => {
-            loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
-        }
-        RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-            return Ok(Some(runtime_responses_stale_continuation_reply()));
-        }
-    }
-    Ok(None)
 }

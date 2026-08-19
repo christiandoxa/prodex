@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-codex-0148-continuation-feature-0.409.0",
+    "requiredSubjects": [
+      "fix: audit Codex rust-v0.148 compatibility and continuation lifecycle"
+    ],
+    "caps": {
+      "maxFiles": 80,
+      "maxBehaviorFiles": 62,
+      "maxLines": 3200,
+      "maxFileLines": 293
+    },
+    "reason": "Reviewed the bounded Codex rust-v0.148 compatibility implementation and its sanitized fixtures, including continuation recovery, targeted stale-overlay repair, protocol/config compatibility, provider routing, and CI guards; the allowance is exact to the reviewed feature commit and preserves the default churn thresholds for unrelated work."
+  },
+  {
+    "id": "audited-codex-0148-continuation-release-0.409.0",
+    "requiredSubjects": [
+      "fix: audit Codex rust-v0.148 compatibility and continuation lifecycle",
+      "chore(release): release 0.409.0"
+    ],
+    "caps": {
+      "maxFiles": 85,
+      "maxBehaviorFiles": 67,
+      "maxLines": 3400,
+      "maxFileLines": 300
+    },
+    "reason": "Reviewed the bounded Codex rust-v0.148 compatibility audit covering continuation affinity, invalid previous_response_id recovery, targeted stale-overlay resume repair, app-server passthrough, resume-last settings, Bedrock provider identity, routing metadata, sanitized 0.147/0.148 fixtures, deployment docs, and synchronized release metadata; exact caps cover the observed audited range and remain tied to both exact subjects without bypassing source, protocol, security, or release tests."
+  },
+  {
     "id": "audited-runtime-storage-release-docs-ci-0.408.7",
     "requiredSubjects": [
       "fix audited runtime, storage, release docs, and CI",

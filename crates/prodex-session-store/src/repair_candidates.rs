@@ -80,7 +80,7 @@ pub(super) fn repair_session_candidate(
         repair_selector,
         true,
     )?;
-    repair_state_db_rollout_path(shared_codex_root, &candidate.path)?;
+    let _ = repair_state_db_rollout_path(shared_codex_root, &candidate.path)?;
     Ok(repaired)
 }
 

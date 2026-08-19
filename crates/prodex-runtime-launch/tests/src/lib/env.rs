@@ -84,6 +84,18 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
 }
 
 #[test]
+fn codex_child_plan_keeps_codex_session_identity_available_to_tools() {
+    let plan = codex_child_plan_with_env(
+        OsString::from("codex"),
+        PathBuf::from("/tmp/prodex-codex-home"),
+        Vec::new(),
+        "prodex-local",
+        &environment(&[("CODEX_SESSION_ID", "sess_fixture")]),
+    );
+    assert!(!plan.removed_env.iter().any(|key| key == "CODEX_SESSION_ID"));
+}
+
+#[test]
 fn codex_child_plan_disables_keyboard_enhancement_by_default_without_override() {
     let plan = |environment: Vec<(OsString, OsString)>| {
         codex_child_plan_with_env(

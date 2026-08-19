@@ -8,6 +8,25 @@ pub(super) fn handle_second_account(
     request_count: usize,
     effective_turn_state: Option<&str>,
 ) -> BackendWebsocketAction {
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketInvalidPreviousResponseId)
+        && runtime_proxy_backend_is_owned_continuation("second-account", previous_response_id)
+    {
+        events::send_backend_websocket_json(
+            websocket,
+            serde_json::json!({
+                "type": "error",
+                "status": 400,
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Invalid `previous_response_id`.",
+                    "param": "previous_response_id",
+                }
+            }),
+            "invalid previous_response_id should be sent",
+        );
+        return BackendWebsocketAction::Continue;
+    }
+
     if matches!(
         mode,
         RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude

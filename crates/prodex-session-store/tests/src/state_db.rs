@@ -139,6 +139,179 @@ fn repair_resume_session_metadata_prefix_repoints_stale_overlay_rollout_path() {
 }
 
 #[test]
+fn repair_stale_overlay_rollout_path_repoints_active_session_idempotently() {
+    let root = test_temp_dir("session-repair-stale-overlay-active");
+    let session_id = "01a01824-29f7-7332-96c7-5d09044ee2d0";
+    let relative = PathBuf::from(
+        "2026/08/19/rollout-2026-08-19T10-50-18-01a01824-29f7-7332-96c7-5d09044ee2d0.jsonl",
+    );
+    let persistent_path = root.join("sessions").join(&relative);
+    fs::create_dir_all(
+        persistent_path
+            .parent()
+            .expect("session parent should exist"),
+    )
+    .expect("persistent session directory should be created");
+    fs::write(
+        &persistent_path,
+        format!(
+            "{{\"timestamp\":\"2026-08-19T10:50:18Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"session_id\":\"{session_id}\",\"timestamp\":\"2026-08-19T10:50:18Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.148.0\"}}}}\n"
+        ),
+    )
+    .expect("persistent rollout should be written");
+    let stale_path = root
+        .with_file_name(".prodex-overlay-OLD")
+        .join("sessions")
+        .join(&relative);
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![
+                format!("thread_{session_id}"),
+                stale_path.display().to_string()
+            ],
+        )
+        .expect("stale thread row should be created");
+    drop(connection);
+
+    assert_eq!(
+        repair_stale_overlay_rollout_paths(&root).expect("stale row should repair"),
+        1
+    );
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should reopen");
+    let rollout_path: String = connection
+        .query_row(
+            "SELECT rollout_path FROM threads WHERE id = ?1",
+            [format!("thread_{session_id}")],
+            |row| row.get(0),
+        )
+        .expect("repaired rollout path should read");
+    assert_eq!(Path::new(&rollout_path), persistent_path.as_path());
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM threads", [], |row| row
+                .get::<_, i64>(0))
+            .expect("thread count should read"),
+        1
+    );
+    drop(connection);
+
+    assert_eq!(
+        repair_stale_overlay_rollout_paths(&root).expect("second repair should succeed"),
+        0,
+        "repair must be idempotent"
+    );
+    assert!(persistent_path.is_file());
+    assert!(!stale_path.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_stale_overlay_rollout_path_repoints_archived_session() {
+    let root = test_temp_dir("session-repair-stale-overlay-archived");
+    let session_id = "01a01824-29f7-7332-96c7-5d09044ee2d1";
+    let relative = PathBuf::from(
+        "2026/08/19/rollout-2026-08-19T10-50-18-01a01824-29f7-7332-96c7-5d09044ee2d1.jsonl",
+    );
+    let persistent_path = root.join("archived_sessions").join(&relative);
+    fs::create_dir_all(
+        persistent_path
+            .parent()
+            .expect("session parent should exist"),
+    )
+    .expect("archived session directory should be created");
+    fs::write(
+        &persistent_path,
+        format!(
+            "{{\"timestamp\":\"2026-08-19T10:50:18Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"timestamp\":\"2026-08-19T10:50:18Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.148.0\"}}}}\n"
+        ),
+    )
+    .expect("archived rollout should be written");
+    let stale_path = root
+        .with_file_name(".prodex-overlay-OLD")
+        .join("archived_sessions")
+        .join(&relative);
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, stale_path.display().to_string()],
+        )
+        .expect("stale archived row should be created");
+    drop(connection);
+
+    assert_eq!(
+        repair_stale_overlay_rollout_paths(&root).expect("archived row should repair"),
+        1
+    );
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should reopen");
+    let rollout_path: String = connection
+        .query_row(
+            "SELECT rollout_path FROM threads WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .expect("archived rollout path should read");
+    assert_eq!(Path::new(&rollout_path), persistent_path.as_path());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_stale_overlay_rollout_path_does_not_fabricate_missing_session() {
+    let root = test_temp_dir("session-repair-stale-overlay-missing");
+    let session_id = "01a01824-29f7-7332-96c7-5d09044ee2d2";
+    let stale_path = root
+        .with_file_name(".prodex-overlay-OLD")
+        .join("sessions/2026/08/19/rollout-missing-{session_id}.jsonl");
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, stale_path.display().to_string()],
+        )
+        .expect("missing thread row should be created");
+    drop(connection);
+
+    assert_eq!(
+        repair_stale_overlay_rollout_paths(&root).expect("missing row should be inspected"),
+        0
+    );
+    assert!(!root.join("sessions").exists());
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should reopen");
+    let rollout_path: String = connection
+        .query_row(
+            "SELECT rollout_path FROM threads WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .expect("missing rollout path should remain visible");
+    assert_eq!(rollout_path, stale_path.display().to_string());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_uses_state_db_rollout_path() {
     let root = test_temp_dir("session-repair-state-db-rollout");
     fs::create_dir_all(&root).expect("root should be created");

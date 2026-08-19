@@ -254,7 +254,7 @@ Download and verify the release asset, then apply it as a unit so the namespace
 labels, policies, and namespaced resources are installed together:
 
 ```bash
-version=0.408.7
+version=0.409.0
 release_url="https://github.com/christiandoxa/prodex/releases/download/${version}"
 manifest="prodex-gateway-${version}.yaml"
 curl -fsSLo "${manifest}" "${release_url}/${manifest}"

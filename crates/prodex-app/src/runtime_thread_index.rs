@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -354,6 +354,11 @@ fn state_db_rollout_path_matches(sqlite_home: &Path, session_file: &Path, stored
     } else {
         sqlite_home.join(stored_path)
     };
+    if stored_path.components().any(|component| {
+        matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(".prodex-overlay-"))
+    }) {
+        return false;
+    }
     let stored_plain = plain_rollout_path(&stored_path);
     let session_plain = plain_rollout_path(session_file);
     stored_path == session_file
@@ -414,16 +419,17 @@ pub(crate) fn repair_latest_thread_index_after_child(
 }
 
 fn repair_latest_thread_index(paths: &AppPaths, child: &ChildProcessPlan, session_file: &Path) {
-    match latest_thread_index_state(child, session_file) {
+    let index_child = persistent_index_child(paths, child, session_file);
+    match latest_thread_index_state(&index_child, session_file) {
         LatestThreadIndexState::Present => {
             if dirty_marker_targets(paths, session_file) {
                 clear_dirty_marker(&paths.root.join(THREAD_INDEX_DIRTY_FILE));
             }
         }
         LatestThreadIndexState::Stale | LatestThreadIndexState::Missing => {
-            if reconcile_latest_codex_thread_index(&child.binary, child).is_ok()
+            if reconcile_latest_codex_thread_index(&index_child.binary, &index_child).is_ok()
                 && matches!(
-                    latest_thread_index_state(child, session_file),
+                    latest_thread_index_state(&index_child, session_file),
                     LatestThreadIndexState::Present
                 )
             {
@@ -434,11 +440,27 @@ fn repair_latest_thread_index(paths: &AppPaths, child: &ChildProcessPlan, sessio
                 save_dirty_marker(paths, session_file);
             }
         }
-        LatestThreadIndexState::Unavailable if state_db_files_exist(child) => {
+        LatestThreadIndexState::Unavailable if state_db_files_exist(&index_child) => {
             save_dirty_marker(paths, session_file)
         }
         LatestThreadIndexState::Unavailable => {}
     }
+}
+
+fn persistent_index_child(
+    paths: &AppPaths,
+    child: &ChildProcessPlan,
+    session_file: &Path,
+) -> ChildProcessPlan {
+    if !session_file.starts_with(&paths.shared_codex_root)
+        || prodex_core::same_path(&child.codex_home, &paths.shared_codex_root)
+    {
+        return child.clone();
+    }
+
+    let mut index_child = child.clone();
+    index_child.codex_home = paths.shared_codex_root.clone();
+    index_child
 }
 
 fn state_db_files_exist(child: &ChildProcessPlan) -> bool {
@@ -519,186 +541,5 @@ fn dirty_marker_targets(paths: &AppPaths, session_file: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        ChildProcessPlan, LatestThreadIndexState, ThreadIndexRepairScope,
-        latest_thread_index_state, reconcile_codex_thread_index_protocol,
-        reconcile_codex_thread_index_protocol_with_scope,
-    };
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn reconciliation_scans_all_active_and_archived_pages() {
-        let responses = concat!(
-            "{\"id\":1,\"result\":{}}\n",
-            "{\"method\":\"remoteControl/status/changed\",\"params\":{}}\n",
-            "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":\"active-next\"}}\n",
-            "{\"id\":3,\"result\":{\"data\":[],\"nextCursor\":null}}\n",
-            "{\"id\":4,\"result\":{\"data\":[],\"nextCursor\":null}}\n",
-        );
-        let mut reader = std::io::Cursor::new(responses.as_bytes());
-        let mut written = Vec::new();
-
-        reconcile_codex_thread_index_protocol(&mut reader, &mut written).unwrap();
-
-        let requests = String::from_utf8(written)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 5);
-        assert_eq!(requests[0]["method"], "initialize");
-        assert_eq!(requests[1]["method"], "initialized");
-        assert_eq!(requests[2]["method"], "thread/list");
-        assert_eq!(requests[2]["params"]["archived"], false);
-        assert_eq!(requests[2]["params"]["cursor"], serde_json::Value::Null);
-        assert_eq!(requests[2]["params"]["useStateDbOnly"], false);
-        assert_eq!(
-            requests[2]["params"]["modelProviders"],
-            serde_json::json!([])
-        );
-        assert_eq!(requests[3]["params"]["cursor"], "active-next");
-        assert_eq!(requests[4]["params"]["archived"], true);
-    }
-
-    #[test]
-    fn reconciliation_rejects_repeated_cursor() {
-        let responses = concat!(
-            "{\"id\":1,\"result\":{}}\n",
-            "{\"id\":2,\"result\":{\"nextCursor\":\"same\"}}\n",
-            "{\"id\":3,\"result\":{\"nextCursor\":\"same\"}}\n",
-        );
-        let mut reader = std::io::Cursor::new(responses.as_bytes());
-        let mut written = Vec::new();
-
-        let error = reconcile_codex_thread_index_protocol(&mut reader, &mut written).unwrap_err();
-
-        assert!(error.to_string().contains("repeated"));
-    }
-
-    #[test]
-    fn targeted_reconciliation_requests_only_the_newest_active_page() {
-        let responses = concat!(
-            "{\"id\":1,\"result\":{}}\n",
-            "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":\"ignored\"}}\n",
-        );
-        let mut reader = std::io::Cursor::new(responses.as_bytes());
-        let mut written = Vec::new();
-
-        reconcile_codex_thread_index_protocol_with_scope(
-            &mut reader,
-            &mut written,
-            ThreadIndexRepairScope::Latest,
-        )
-        .unwrap();
-
-        let requests = String::from_utf8(written)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[2]["params"]["archived"], false);
-        assert_eq!(requests[2]["params"]["limit"], 1);
-        assert_eq!(requests[2]["params"]["sortKey"], "updated_at");
-    }
-
-    #[test]
-    fn latest_thread_index_state_detects_missing_and_present_rows() {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "prodex-thread-index-state-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir_all(root.join("sessions")).unwrap();
-        fs::create_dir_all(root.join("overlay")).unwrap();
-        let session_id = "01900000-0000-7000-8000-000000000005";
-        let session_file = root
-            .join("sessions")
-            .join(format!("rollout-{session_id}.jsonl.zst"));
-        fs::write(
-            &session_file,
-            zstd::stream::encode_all(&b"session"[..], 3).unwrap(),
-        )
-        .unwrap();
-        let database = root.join("state_test.sqlite");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
-                [],
-            )
-            .unwrap();
-        drop(connection);
-
-        let mut child = ChildProcessPlan::new("codex".into(), root.join("overlay"));
-        child
-            .extra_env
-            .push(("CODEX_SQLITE_HOME".into(), root.clone().into_os_string()));
-        assert_eq!(
-            latest_thread_index_state(&child, &session_file),
-            LatestThreadIndexState::Missing
-        );
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
-                rusqlite::params![session_id, "/stale/rollout.jsonl"],
-            )
-            .unwrap();
-        assert_eq!(
-            latest_thread_index_state(&child, &session_file),
-            LatestThreadIndexState::Stale
-        );
-        connection
-            .execute(
-                "UPDATE threads SET rollout_path = ?1 WHERE id = ?2",
-                rusqlite::params![
-                    "sessions/rollout-01900000-0000-7000-8000-000000000005.jsonl",
-                    session_id
-                ],
-            )
-            .unwrap();
-        assert_eq!(
-            latest_thread_index_state(&child, &session_file),
-            LatestThreadIndexState::Present
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn targeted_reconciliation_kills_a_hanging_app_server() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::Instant;
-
-        let root = std::env::temp_dir().join(format!(
-            "prodex-thread-index-hang-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let script = root.join("fake-codex.sh");
-        fs::write(
-            &script,
-            "#!/bin/sh\nread line\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nread line\nsleep 30\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&script).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).unwrap();
-        let child = ChildProcessPlan::new(script.into_os_string(), root.clone());
-        let started = Instant::now();
-        let result = super::reconcile_latest_codex_thread_index(&child.binary, &child);
-        assert!(result.is_err());
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        let _ = fs::remove_dir_all(root);
-    }
-}
+#[path = "runtime_thread_index_tests.rs"]
+mod tests;

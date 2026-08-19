@@ -652,13 +652,13 @@ prodex run --current-time-reminder --current-time-reminder-interval 2
 prodex run --respect-system-proxy
 ```
 
-`--web-search` maps to Codex's top-level `web_search = "disabled" | "cached" | "indexed" | "live"` setting. In Super provider mode, an explicit `--web-search` is appended after the provider default, so it overrides the default bridge choice. Codex 0.147.0 allows compatible custom providers to use its standalone search endpoint; Prodex enables that capability automatically for the governed OpenAI-through-Prodex provider. Other custom providers must set `model_providers.<id>.supports_standalone_web_search = true` only when their endpoint implements that contract.
+`--web-search` maps to Codex's top-level `web_search = "disabled" | "cached" | "indexed" | "live"` setting. In Super provider mode, an explicit `--web-search` is appended after the provider default, so it overrides the default bridge choice. Codex 0.148.0 allows compatible custom providers to use its standalone search endpoint; Prodex enables that capability automatically for the governed OpenAI-through-Prodex provider. Other custom providers must set `model_providers.<id>.supports_standalone_web_search = true` only when their endpoint implements that contract.
 
 `--rollout-budget-tokens` enables Codex's `[features.rollout_budget]` config. If no reminder thresholds are supplied, Prodex provides valid 75%, 50%, and 25% remaining-token thresholds for the selected limit. Use `--rollout-budget-sampling-weight` and `--rollout-budget-prefill-weight` only when you need Codex's weighted accounting knobs.
 
 `--current-time-reminder` enables Codex's `[features.current_time_reminder]` config. The default system clock source is owned by Codex. `--current-time-clock-source external` is intended for Codex app-server clients that implement the upstream `currentTime/read` request.
 
-`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.147.0 routes auth, model, plugin, MCP, remote-exec, and Responses traffic through its shared proxy-aware HTTP client path so supported system proxy, PAC, WPAD, static proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
+`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.148.0 routes auth, model, plugin, MCP, remote-exec, and Responses traffic through its shared proxy-aware HTTP client path so supported system proxy, PAC, WPAD, static proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
 
 Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
 
@@ -1125,9 +1125,9 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 
 Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, supported Gemini API-key configurations, and configured custom providers. Disabled Gemini OAuth profiles receive migration guidance.
 
-If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
+If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or Codex 0.148's built-in `amazon-bedrock-runtime`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy. Prodex does not rewrite either provider ID.
 
-Codex 0.143.0 includes upstream Bedrock catalog entries for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`, plus Codex-owned `max` reasoning effort handling. Prodex leaves those model IDs and Bedrock service-tier behavior owned by the direct Codex launch.
+Codex 0.148.0 includes upstream Bedrock catalog entries for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`, plus Codex-owned `max` reasoning effort handling. Prodex leaves those model IDs and Bedrock service-tier behavior owned by the direct Codex launch.
 
 Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 

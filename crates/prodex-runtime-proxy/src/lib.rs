@@ -599,6 +599,38 @@ pub fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<Strin
         })
 }
 
+pub fn runtime_request_turn_id_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("turn_id")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .get("client_metadata")
+                .and_then(|metadata| metadata.get("turn_id"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> {
+    request
+        .headers
+        .iter()
+        .find_map(|(name, value)| {
+            name.eq_ignore_ascii_case("x-codex-turn-metadata")
+                .then_some(value.as_str())
+        })
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .and_then(|value| runtime_request_turn_id_from_value(&value))
+        .or_else(|| {
+            serde_json::from_slice::<serde_json::Value>(&request.body)
+                .ok()
+                .and_then(|value| runtime_request_turn_id_from_value(&value))
+        })
+}
+
 pub fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
@@ -606,6 +638,23 @@ pub fn runtime_request_without_previous_response_id(
     if runtime_request_value_requires_previous_response_affinity(&value)
         || runtime_request_session_id(request).is_some()
     {
+        return None;
+    }
+    remove_previous_response_id(&mut value)?;
+    let mut request = request.clone();
+    request.body = serde_json::to_vec(&value).ok()?;
+    Some(request)
+}
+
+pub fn runtime_request_full_history_without_previous_response_id(
+    request: &RuntimeProxyRequest,
+) -> Option<RuntimeProxyRequest> {
+    // Codex builds Responses requests from its persisted prompt history and includes the
+    // session metadata on every turn.  Without that marker, an arbitrary Responses client may
+    // send only the newest input item; removing its incremental id would silently lose context.
+    runtime_request_session_id(request)?;
+    let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
+    if !value.get("input").is_some_and(serde_json::Value::is_array) {
         return None;
     }
     remove_previous_response_id(&mut value)?;

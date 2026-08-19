@@ -759,6 +759,22 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: CONTINUATION_TAGS,
   },
   {
+    name: "runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once",
+    tags: CONTINUATION_TAGS,
+  },
+  {
+    name: "runtime_proxy_http_invalid_previous_response_id_stops_after_one_recovery",
+    tags: CONTINUATION_TAGS,
+  },
+  {
+    name: "runtime_proxy_http_sse_invalid_previous_response_id_does_not_rotate",
+    tags: CONTINUATION_TAGS,
+  },
+  {
+    name: "runtime_proxy_websocket_invalid_previous_response_is_forwarded_once_and_allows_fresh_reconnect",
+    tags: CONTINUATION_TAGS,
+  },
+  {
     name: "runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continuation",
     tags: CONTINUATION_TAGS,
   },

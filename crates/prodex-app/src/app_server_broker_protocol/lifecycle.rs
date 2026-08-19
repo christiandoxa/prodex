@@ -9,6 +9,7 @@ pub(crate) enum AppServerBrokerMethod {
     ThreadStart,
     ThreadResume,
     ThreadFork,
+    ThreadRevert,
     TurnStart,
     TurnInterrupt,
     #[cfg(test)]
@@ -24,6 +25,7 @@ impl AppServerBrokerMethod {
             "thread/start" => Self::ThreadStart,
             "thread/resume" => Self::ThreadResume,
             "thread/fork" => Self::ThreadFork,
+            "thread/revert" => Self::ThreadRevert,
             "turn/start" => Self::TurnStart,
             "turn/interrupt" | "turn/cancel" => Self::TurnInterrupt,
             _ => Self::Other,
@@ -37,6 +39,7 @@ impl AppServerBrokerMethod {
             Self::ThreadStart => "thread/start",
             Self::ThreadResume => "thread/resume",
             Self::ThreadFork => "thread/fork",
+            Self::ThreadRevert => "thread/revert",
             Self::TurnStart => "turn/start",
             Self::TurnInterrupt => "turn/interrupt",
             #[cfg(test)]
@@ -53,6 +56,10 @@ pub(crate) enum AppServerBrokerLifecycleStage {
     ThreadStartedNotification,
     ThreadResumeRequest,
     ThreadForkRequest,
+    ThreadQueueRequest,
+    ThreadQueueChangedNotification,
+    ThreadRevertRequest,
+    ThreadRevertedNotification,
     TurnStartRequest,
     TurnStartedNotification,
     TurnCompletedNotification,
@@ -68,6 +75,10 @@ impl AppServerBrokerLifecycleStage {
             Self::ThreadStartedNotification => "thread_started_notification",
             Self::ThreadResumeRequest => "thread_resume_request",
             Self::ThreadForkRequest => "thread_fork_request",
+            Self::ThreadQueueRequest => "thread_queue_request",
+            Self::ThreadQueueChangedNotification => "thread_queue_changed_notification",
+            Self::ThreadRevertRequest => "thread_revert_request",
+            Self::ThreadRevertedNotification => "thread_reverted_notification",
             Self::TurnStartRequest => "turn_start_request",
             Self::TurnStartedNotification => "turn_started_notification",
             Self::TurnCompletedNotification => "turn_completed_notification",
@@ -76,7 +87,7 @@ impl AppServerBrokerLifecycleStage {
     }
 }
 
-pub(crate) fn app_server_broker_lifecycle_methods() -> [&'static str; 10] {
+pub(crate) fn app_server_broker_lifecycle_methods() -> [&'static str; 19] {
     [
         AppServerBrokerMethod::Initialize.label(),
         AppServerBrokerMethod::Initialized.label(),
@@ -84,6 +95,15 @@ pub(crate) fn app_server_broker_lifecycle_methods() -> [&'static str; 10] {
         "thread/started",
         AppServerBrokerMethod::ThreadResume.label(),
         AppServerBrokerMethod::ThreadFork.label(),
+        "thread/queue/add",
+        "thread/queue/list",
+        "thread/queue/update",
+        "thread/queue/delete",
+        "thread/queue/reorder",
+        "thread/queue/start",
+        "thread/queue/changed",
+        AppServerBrokerMethod::ThreadRevert.label(),
+        "thread/reverted",
         AppServerBrokerMethod::TurnStart.label(),
         "turn/started",
         "turn/completed",
@@ -123,6 +143,18 @@ fn app_server_broker_request_stage(method: &str) -> Option<AppServerBrokerLifecy
         Some(AppServerBrokerLifecycleStage::ThreadResumeRequest)
     } else if method.eq_ignore_ascii_case("thread/fork") {
         Some(AppServerBrokerLifecycleStage::ThreadForkRequest)
+    } else if matches!(
+        method.to_ascii_lowercase().as_str(),
+        "thread/queue/add"
+            | "thread/queue/list"
+            | "thread/queue/update"
+            | "thread/queue/delete"
+            | "thread/queue/reorder"
+            | "thread/queue/start"
+    ) {
+        Some(AppServerBrokerLifecycleStage::ThreadQueueRequest)
+    } else if method.eq_ignore_ascii_case("thread/revert") {
+        Some(AppServerBrokerLifecycleStage::ThreadRevertRequest)
     } else if method.eq_ignore_ascii_case("turn/start") {
         Some(AppServerBrokerLifecycleStage::TurnStartRequest)
     } else if method.eq_ignore_ascii_case("turn/interrupt")
@@ -141,6 +173,10 @@ fn app_server_broker_notification_stage(method: &str) -> Option<AppServerBrokerL
         Some(AppServerBrokerLifecycleStage::InitializedNotification)
     } else if method.eq_ignore_ascii_case("thread/started") {
         Some(AppServerBrokerLifecycleStage::ThreadStartedNotification)
+    } else if method.eq_ignore_ascii_case("thread/queue/changed") {
+        Some(AppServerBrokerLifecycleStage::ThreadQueueChangedNotification)
+    } else if method.eq_ignore_ascii_case("thread/reverted") {
+        Some(AppServerBrokerLifecycleStage::ThreadRevertedNotification)
     } else if method.eq_ignore_ascii_case("turn/started") {
         Some(AppServerBrokerLifecycleStage::TurnStartedNotification)
     } else if method.eq_ignore_ascii_case("turn/completed") {
@@ -161,6 +197,10 @@ pub(crate) fn app_server_broker_lifecycle_schema_file(
         }
         AppServerBrokerLifecycleStage::ThreadResumeRequest => Some("ThreadResumeParams.json"),
         AppServerBrokerLifecycleStage::ThreadForkRequest => Some("ThreadForkParams.json"),
+        AppServerBrokerLifecycleStage::ThreadQueueRequest
+        | AppServerBrokerLifecycleStage::ThreadQueueChangedNotification
+        | AppServerBrokerLifecycleStage::ThreadRevertRequest
+        | AppServerBrokerLifecycleStage::ThreadRevertedNotification => None,
         AppServerBrokerLifecycleStage::TurnStartRequest => Some("TurnStartParams.json"),
         AppServerBrokerLifecycleStage::TurnStartedNotification => {
             Some("TurnStartedNotification.json")

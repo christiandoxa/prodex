@@ -33,6 +33,8 @@ use crate::app_server_broker::*;
 mod context_commands;
 #[path = "main_internal_body/app_server_broker.rs"]
 mod app_server_broker;
+#[path = "main_internal_body/app_server_broker_compat.rs"]
+mod app_server_broker_compat;
 #[path = "main_internal_body/quota_selection.rs"]
 mod quota_selection;
 #[path = "main_internal_body/info_and_broker.rs"]

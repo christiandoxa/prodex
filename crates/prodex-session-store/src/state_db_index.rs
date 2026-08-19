@@ -1,12 +1,13 @@
 use super::{
     SessionRepairCandidate, SessionRepairMatchKind, codex_session_id_from_path,
-    full_codex_session_id, is_session_metadata_file, session_id_matches_selector,
-    session_path_id_matches_selector, session_path_id_matching_selector,
+    full_codex_session_id, is_session_metadata_file, session_file_has_resume_metadata_for_selector,
+    session_id_matches_selector, session_path_id_matches_selector,
+    session_path_id_matching_selector,
 };
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub(super) fn collect_state_db_rollout_paths(
     root: &Path,
@@ -27,17 +28,22 @@ pub(super) fn collect_state_db_rollout_paths(
     }
 }
 
-pub(super) fn repair_state_db_rollout_path(root: &Path, session_path: &Path) -> Result<()> {
+/// Repoints stale overlay state rows to a verified persistent rollout path.
+///
+/// Codex does not expose this repair through its app-server protocol. Keep the update narrow:
+/// only an existing row for the rollout's UUID whose current value is an overlay path is changed,
+/// and the write uses that value as an expected-old-path compare-and-swap.
+pub fn repair_state_db_rollout_path(root: &Path, session_path: &Path) -> Result<bool> {
     if !path_is_contained_regular_file(root, session_path) {
-        return Ok(());
+        return Ok(false);
     }
     let Some(session_id) = codex_session_id_from_path(session_path) else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(rollout_path) = session_path.to_str() else {
-        return Ok(());
+        return Ok(false);
     };
-    let thread_id = format!("thread_{session_id}");
+    let mut repaired = false;
 
     for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
         let db_path = entry
@@ -51,29 +57,268 @@ pub(super) fn repair_state_db_rollout_path(root: &Path, session_path: &Path) -> 
         else {
             continue;
         };
-        let Ok(needs_repair) = connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM threads WHERE (id = ?1 OR id = ?2) AND rollout_path != ?3)",
-                rusqlite::params![session_id, thread_id, rollout_path],
-                |row| row.get::<_, bool>(0),
-            ) else {
+        let Ok(mut statement) = connection.prepare(
+            "SELECT id, rollout_path FROM threads WHERE (id = ?1 OR id = ?2) AND rollout_path != ?3 AND instr(rollout_path, '.prodex-overlay-') > 0",
+        ) else {
             continue;
         };
+        let Ok(rows) = statement.query_map(
+            rusqlite::params![session_id, format!("thread_{session_id}"), rollout_path],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ) else {
+            continue;
+        };
+        let candidates = rows.flatten().collect::<Vec<_>>();
+        drop(statement);
         drop(connection);
-        if !needs_repair {
+        for (thread_id, expected_path) in candidates {
+            repaired |= repair_state_db_rollout_path_if_current(
+                &db_path,
+                &session_id,
+                &thread_id,
+                &expected_path,
+                rollout_path,
+            )?;
+        }
+    }
+    Ok(repaired)
+}
+
+/// Repairs stale overlay rollout paths without scanning the rollout history.
+///
+/// This is intentionally limited to state rows containing a Prodex overlay marker. For each
+/// row, the same relative path is checked in the persistent active and archived roots and its
+/// session metadata must identify the indexed thread before SQLite is changed.
+pub fn repair_stale_overlay_rollout_paths(root: &Path) -> Result<usize> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(0);
+    };
+    let mut repaired = 0;
+    for entry in entries.flatten() {
+        let db_path = entry.path();
+        if !is_codex_state_db_path(&db_path) {
             continue;
         }
-        let connection = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE)
-            .with_context(|| {
-            format!("failed to open state db {} for repair", db_path.display())
-        })?;
-        connection
-            .execute(
-                "UPDATE threads SET rollout_path = ?1 WHERE (id = ?2 OR id = ?3) AND rollout_path != ?1",
-                rusqlite::params![rollout_path, session_id, thread_id],
-            )
-            .with_context(|| format!("failed to repair state db {}", db_path.display()))?;
+        let Ok(connection) =
+            Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        else {
+            continue;
+        };
+        let Ok(mut statement) = connection.prepare(
+            "SELECT id, rollout_path FROM threads WHERE instr(rollout_path, '.prodex-overlay-') > 0",
+        ) else {
+            continue;
+        };
+        let Ok(rows) = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) else {
+            continue;
+        };
+        let candidates = rows.flatten().collect::<Vec<_>>();
+        drop(statement);
+        drop(connection);
+        for (thread_id, stale_path) in candidates {
+            let Some(session_id) = state_row_session_id(&thread_id, &stale_path) else {
+                continue;
+            };
+            let Some(persistent_path) =
+                persistent_overlay_replacement(root, &stale_path, &session_id)
+            else {
+                continue;
+            };
+            let Some(persistent_path) = persistent_path.to_str() else {
+                continue;
+            };
+            if repair_state_db_rollout_path_if_current(
+                &db_path,
+                &session_id,
+                &thread_id,
+                &stale_path,
+                persistent_path,
+            )? {
+                repaired += 1;
+            }
+        }
     }
-    Ok(())
+    Ok(repaired)
+}
+
+/// Repairs stale overlay rows for one known thread UUID.
+///
+/// The normal picker repair deliberately uses only the overlay's relative path so it stays
+/// bounded. A direct resume knows the UUID, so it may perform the narrowly scoped persistent
+/// lookup required when promotion changed the rollout's date directory or filename.
+pub fn repair_stale_overlay_rollout_path_for_session(
+    root: &Path,
+    session_id: &str,
+) -> Result<usize> {
+    let Some(session_id) = full_codex_session_id(session_id).map(str::to_owned) else {
+        return Ok(0);
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(0);
+    };
+    let mut repaired = 0;
+    for entry in entries.flatten() {
+        let db_path = entry.path();
+        if !is_codex_state_db_path(&db_path) {
+            continue;
+        }
+        let Ok(connection) =
+            Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        else {
+            continue;
+        };
+        let Ok(mut statement) = connection.prepare(
+            "SELECT id, rollout_path FROM threads WHERE (id = ?1 OR id = ?2) AND instr(rollout_path, '.prodex-overlay-') > 0",
+        ) else {
+            continue;
+        };
+        let Ok(rows) = statement.query_map(
+            rusqlite::params![session_id, format!("thread_{session_id}")],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ) else {
+            continue;
+        };
+        let candidates = rows.flatten().collect::<Vec<_>>();
+        drop(statement);
+        drop(connection);
+        for (thread_id, stale_path) in candidates {
+            let Some(persistent_path) =
+                persistent_overlay_replacement(root, &stale_path, &session_id)
+                    .or_else(|| find_persistent_rollout_by_session_id(root, &session_id))
+            else {
+                continue;
+            };
+            let Some(persistent_path) = persistent_path.to_str() else {
+                continue;
+            };
+            if repair_state_db_rollout_path_if_current(
+                &db_path,
+                &session_id,
+                &thread_id,
+                &stale_path,
+                persistent_path,
+            )? {
+                repaired += 1;
+            }
+        }
+    }
+    Ok(repaired)
+}
+
+fn repair_state_db_rollout_path_if_current(
+    db_path: &Path,
+    session_id: &str,
+    thread_id: &str,
+    expected_path: &str,
+    persistent_path: &str,
+) -> Result<bool> {
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .with_context(|| format!("failed to open state db {} for repair", db_path.display()))?;
+    let changed = connection
+        .execute(
+            "UPDATE threads SET rollout_path = ?1 WHERE (id = ?2 OR id = ?3 OR id = ?4) AND rollout_path = ?5",
+            rusqlite::params![persistent_path, session_id, format!("thread_{session_id}"), thread_id, expected_path],
+        )
+        .with_context(|| format!("failed to repair state db {}", db_path.display()))?;
+    Ok(changed > 0)
+}
+
+fn state_row_session_id(thread_id: &str, rollout_path: &str) -> Option<String> {
+    let candidate = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
+    full_codex_session_id(candidate)
+        .map(str::to_owned)
+        .or_else(|| codex_session_id_from_path(Path::new(rollout_path)))
+}
+
+fn persistent_overlay_replacement(
+    root: &Path,
+    stale_path: &str,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let path = Path::new(stale_path);
+    let components = path.components().collect::<Vec<_>>();
+    let overlay_index = components.iter().position(|component| {
+        matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(".prodex-overlay-"))
+    })?;
+    let storage_index = components
+        .iter()
+        .enumerate()
+        .skip(overlay_index + 1)
+        .find_map(|(index, component)| {
+            matches!(component, Component::Normal(name) if name.to_string_lossy() == "sessions" || name.to_string_lossy() == "archived_sessions")
+                .then_some(index)
+        })?;
+    let storage = match components[storage_index] {
+        Component::Normal(name) => name.to_string_lossy(),
+        _ => return None,
+    };
+    let relative = components.iter().skip(storage_index + 1).try_fold(
+        PathBuf::new(),
+        |mut relative, component| {
+            let Component::Normal(component) = component else {
+                return None;
+            };
+            relative.push(component);
+            Some(relative)
+        },
+    )?;
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+
+    let alternate_storage = if storage == "sessions" {
+        "archived_sessions"
+    } else {
+        "sessions"
+    };
+    [storage.as_ref(), alternate_storage]
+        .into_iter()
+        .map(|storage| root.join(storage).join(&relative))
+        .find(|candidate| {
+            path_is_contained_regular_file(root, candidate)
+                && is_session_metadata_file(candidate)
+                && session_file_has_resume_metadata_for_selector(candidate, session_id)
+                    .unwrap_or(false)
+        })
+}
+
+fn find_persistent_rollout_by_session_id(root: &Path, session_id: &str) -> Option<PathBuf> {
+    let mut pending = ["sessions", "archived_sessions"]
+        .into_iter()
+        .map(|directory| root.join(directory))
+        .collect::<Vec<_>>();
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !metadata.is_file()
+                || !is_session_metadata_file(&path)
+                || !path_is_contained_regular_file(root, &path)
+            {
+                continue;
+            }
+            if codex_session_id_from_path(&path).as_deref() == Some(session_id)
+                || session_file_has_resume_metadata_for_selector(&path, session_id).unwrap_or(false)
+            {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 fn is_codex_state_db_path(path: &Path) -> bool {

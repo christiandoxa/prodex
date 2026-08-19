@@ -243,6 +243,7 @@ fn custom_model_provider_display_name(provider_id: &str) -> String {
     } else if provider_id.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
         "Anthropic Claude".to_string()
     } else if provider_id.eq_ignore_ascii_case("amazon-bedrock")
+        || provider_id.eq_ignore_ascii_case("amazon-bedrock-runtime")
         || provider_id.eq_ignore_ascii_case("bedrock")
     {
         "Amazon Bedrock".to_string()

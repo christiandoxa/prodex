@@ -1,0 +1,17 @@
+{"jsonrpc":"2.0","id":"initialize","method":"initialize","params":{}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","id":"thread-start","method":"thread/start","params":{"cwd":"/home/test-user/project","model":"gpt-5.5","modelProvider":"openai","approvalPolicy":"on-request"}}
+{"jsonrpc":"2.0","id":"thread-resume","method":"thread/resume","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","id":"thread-fork","method":"thread/fork","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","id":"thread-list","method":"thread/list","params":{"limit":2,"cursor":null,"archived":false}}
+{"jsonrpc":"2.0","id":"thread-archive","method":"thread/archive","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","method":"thread/archived","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","id":"thread-unarchive","method":"thread/unarchive","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","method":"thread/unarchived","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","id":"turn-start","method":"turn/start","params":{"threadId":"thr_147","input":[{"type":"text","text":"Run the compatibility fixture."}]}}
+{"jsonrpc":"2.0","id":"turn-interrupt","method":"turn/interrupt","params":{"threadId":"thr_147","turnId":"turn_147"}}
+{"jsonrpc":"2.0","id":"model-list","result":{"data":[{"id":"gpt-5.5","model":"gpt-5.5","upgrade":null,"upgradeInfo":null,"availabilityNux":null,"displayName":"GPT-5.5","description":"fixture model","hidden":false,"supportedReasoningEfforts":[],"defaultReasoningEffort":"medium","inputModalities":["text"],"supportsPersonality":false,"additionalSpeedTiers":[],"serviceTiers":[],"defaultServiceTier":null,"isDefault":true}],"nextCursor":null}}
+{"jsonrpc":"2.0","id":"mcp-status-list","method":"mcpServerStatus/list","params":{"threadId":"thr_147"}}
+{"jsonrpc":"2.0","id":"hooks-list","method":"hooks/list","params":{}}
+{"jsonrpc":"2.0","id":"config-read","method":"config/read","params":{}}
+{"jsonrpc":"2.0","id":"config-batch-write","method":"config/batchWrite","params":{"edits":[]}}

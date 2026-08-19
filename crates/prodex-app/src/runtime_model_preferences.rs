@@ -150,7 +150,7 @@ pub(crate) fn resolve_fresh_model_preference_context(
         .or_else(|| crate::codex_cli_config_override_value(codex_args, "model"));
     let explicit_effort =
         crate::codex_cli_config_override_value(codex_args, "model_reasoning_effort");
-    if prodex_runtime_launch::codex_resume_session_id(codex_args).is_some() {
+    if prodex_runtime_launch::codex_resume_requested(codex_args) {
         return Ok(ModelPreferenceContext {
             logical_scope,
             remembered: None,

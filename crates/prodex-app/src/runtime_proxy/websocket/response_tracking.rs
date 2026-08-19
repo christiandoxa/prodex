@@ -56,6 +56,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         promote_committed_profile,
     } = attempt;
     let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
+    let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(handshake_request);
 
     let realtime_websocket = websocket_session.is_realtime_duplex();
     if let Some(attempt) =
@@ -151,6 +152,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         websocket_session,
         profile_name,
         request_previous_response_id,
+        request_turn_id,
         request_prompt_cache_key,
         request_session_id,
         request_turn_state,
@@ -184,6 +186,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     websocket_session: &'a mut RuntimeWebsocketSessionState,
     profile_name: &'a str,
     request_previous_response_id: Option<&'a str>,
+    request_turn_id: Option<String>,
     request_prompt_cache_key: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_turn_state: Option<&'a str>,
@@ -360,11 +363,20 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 })
             }
             Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound) => {
+                if runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
+                    text.as_bytes(),
+                ) {
+                    self.log_continuation_trace(None, 0, false);
+                }
                 self.close_and_reset();
                 Some(RuntimeWebsocketAttempt::PreviousResponseNotFound {
                     profile_name: self.profile_name.to_string(),
                     payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                     turn_state: self.upstream_turn_state.clone(),
+                    invalid_previous_response_id:
+                        runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
+                            text.as_bytes(),
+                        ),
                 })
             }
             None => None,
@@ -452,6 +464,9 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 &mut self.previous_response_owner_recorded,
             )?;
         }
+        if let Some(response_id) = inspected.response_ids.first() {
+            self.log_continuation_trace(Some(response_id), 0, self.committed);
+        }
         if self.committed && runtime_token_usage_event_is_loggable(inspected.event_type.as_deref())
         {
             log_runtime_token_usage(RuntimeTokenUsageLog {
@@ -482,6 +497,59 @@ impl RuntimeWebsocketResponseLoop<'_> {
             );
         }
         Ok(committed_previous_response_not_found)
+    }
+
+    fn log_continuation_trace(
+        &self,
+        returned_response_id: Option<&str>,
+        retry_number: usize,
+        stream_committed: bool,
+    ) {
+        let (logical_provider, transport_provider_hash) =
+            runtime_response_trace_provider_labels(self.shared, self.profile_name);
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "responses_continuation",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field(
+                        "profile_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(Some(self.profile_name)),
+                    ),
+                    runtime_proxy_log_field("logical_provider", logical_provider),
+                    runtime_proxy_log_field("transport_provider_hash", transport_provider_hash),
+                    runtime_proxy_log_field(
+                        "session_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(self.request_session_id),
+                    ),
+                    runtime_proxy_log_field(
+                        "turn_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.request_turn_id.as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "turn_state_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(self.request_turn_state),
+                    ),
+                    runtime_proxy_log_field(
+                        "previous_response_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.request_previous_response_id,
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "returned_response_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(returned_response_id),
+                    ),
+                    runtime_proxy_log_field("rotation_generation", "0"),
+                    runtime_proxy_log_field("retry_number", retry_number.to_string()),
+                    runtime_proxy_log_field("stream_committed", stream_committed.to_string()),
+                ],
+            ),
+        );
     }
 
     fn forward_text(&mut self, text: &str) -> Result<()> {

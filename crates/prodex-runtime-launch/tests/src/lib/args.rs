@@ -469,6 +469,24 @@ fn codex_resume_session_id_ignores_resume_without_target() {
 }
 
 #[test]
+fn codex_resume_requested_includes_last_without_classifying_fork() {
+    assert!(codex_resume_requested(&[
+        OsString::from("resume"),
+        OsString::from("--last"),
+    ]));
+    assert!(codex_resume_requested(&[
+        OsString::from("exec"),
+        OsString::from("resume"),
+        OsString::from("--last"),
+    ]));
+    assert!(!codex_resume_requested(&[
+        OsString::from("exec"),
+        OsString::from("fork"),
+        OsString::from("--last"),
+    ]));
+}
+
+#[test]
 fn prepare_codex_launch_args_extracts_prodex_full_access_passthrough_marker() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

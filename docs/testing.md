@@ -291,6 +291,27 @@ Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtu
 
 Use `npm run compat:capture -- --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
+Codex 0.147 and 0.148 app-server replay fixtures live under
+crates/prodex-app/tests/fixtures/compat_replay/codex-0.147 and codex-0.148.
+The main fixtures are sanitized protocol frames derived from the checked-out
+upstream schemas and are byte-preserving in broker observation mode. The
+0.148 directory also contains `app-server-live-smoke.jsonl`, a redacted
+initialize/status/model-list capture from the locally checked-out Codex
+0.148.0 binary. The fixture set covers thread queue/revert notifications,
+archive/restore, multiAgentVersion, pluginId, and packagedDefaults. Run the
+focused replay checks with:
+
+    cargo test --locked -q -p prodex-app --lib app_server_broker_compat -- --test-threads=1
+    cargo test --locked -q -p prodex-app --lib runtime_proxy_http_invalid_previous_response_id -- --test-threads=1
+    cargo test --locked -q -p prodex-app --lib runtime_proxy_websocket_invalid_previous_response_is_forwarded_once_and_allows_fresh_reconnect -- --test-threads=1
+
+The invalid-response regression matrix is deterministic and uses a local
+mock-upstream for HTTP and WebSocket. It verifies profile ownership, one-shot
+same-profile full-history recovery, no post-commit rotation, and no retry loop.
+The four live provider combinations (old/new Prodex x Codex 0.147/0.148) are
+not run in CI because they require credentials and incur provider cost; any
+live A/B run must use disposable homes and explicit authorization.
+
 ## Smart Context Evidence
 
 Run the production engine against the inputs-only deterministic corpus:

@@ -20,10 +20,47 @@ pub(crate) fn app_server_broker_affinity_keys(value: &Value) -> Vec<AppServerBro
     }
 
     let summary = app_server_broker_diagnostic_summary(value);
+    if app_server_broker_thread_affinity_method(summary.method.as_deref(), summary.frame_kind) {
+        return app_server_broker_response_affinity_keys(summary.metadata);
+    }
     if !matches!(summary.frame_kind, AppServerBrokerFrameKind::Response) {
         return Vec::new();
     }
     app_server_broker_response_affinity_keys(summary.metadata)
+}
+
+fn app_server_broker_thread_affinity_method(
+    method: Option<&str>,
+    frame_kind: AppServerBrokerFrameKind,
+) -> bool {
+    if !matches!(
+        frame_kind,
+        AppServerBrokerFrameKind::Request | AppServerBrokerFrameKind::Notification
+    ) {
+        return false;
+    }
+    let Some(method) = method else {
+        return false;
+    };
+    [
+        "thread/archive",
+        "thread/delete",
+        "thread/unarchive",
+        "thread/read",
+        "thread/rollback",
+        "thread/compact/start",
+        "thread/settings/update",
+        "thread/metadata/update",
+        "thread/section/move",
+        "thread/memoryMode/set",
+        "thread/archived",
+        "thread/deleted",
+        "thread/unarchived",
+        "thread/closed",
+        "turn/steer",
+    ]
+    .iter()
+    .any(|candidate| candidate.eq_ignore_ascii_case(method.trim()))
 }
 
 fn app_server_broker_lifecycle_affinity_keys(
@@ -42,7 +79,11 @@ fn app_server_broker_lifecycle_affinity_keys(
         AppServerBrokerLifecycleStage::ThreadStartRequest
         | AppServerBrokerLifecycleStage::ThreadStartedNotification
         | AppServerBrokerLifecycleStage::ThreadResumeRequest
-        | AppServerBrokerLifecycleStage::ThreadForkRequest => {
+        | AppServerBrokerLifecycleStage::ThreadForkRequest
+        | AppServerBrokerLifecycleStage::ThreadQueueRequest
+        | AppServerBrokerLifecycleStage::ThreadQueueChangedNotification
+        | AppServerBrokerLifecycleStage::ThreadRevertRequest
+        | AppServerBrokerLifecycleStage::ThreadRevertedNotification => {
             push_affinity_key(
                 &mut keys,
                 AppServerBrokerAffinityKeyKind::Thread,
@@ -240,6 +281,10 @@ pub(crate) fn app_server_broker_commit_boundary(value: &Value) -> AppServerBroke
             | AppServerBrokerLifecycleStage::ThreadStartedNotification
             | AppServerBrokerLifecycleStage::ThreadResumeRequest
             | AppServerBrokerLifecycleStage::ThreadForkRequest
+            | AppServerBrokerLifecycleStage::ThreadQueueRequest
+            | AppServerBrokerLifecycleStage::ThreadQueueChangedNotification
+            | AppServerBrokerLifecycleStage::ThreadRevertRequest
+            | AppServerBrokerLifecycleStage::ThreadRevertedNotification
             | AppServerBrokerLifecycleStage::TurnStartRequest => {
                 AppServerBrokerCommitBoundary::Precommit
             }
