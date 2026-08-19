@@ -87,3 +87,62 @@ fn runtime_proxy_websocket_owner_retry_survives_expired_budget_after_reuse_watch
         "a scheduled owner retry must run once after the elapsed watchdog budget: {log}"
     );
 }
+
+#[test]
+fn runtime_proxy_response_owner_survives_http_websocket_transitions() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "second",
+        &["second", "main"],
+        &[],
+        Vec::new(),
+    );
+
+    let first = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "http one"}],
+            "client_metadata": {"session_id": "cross-transport"}
+        }),
+    );
+    assert!(first.text().expect("HTTP body").contains("resp-second"));
+
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "session_id": "cross-transport",
+            "input": [{"type": "message", "role": "user", "content": "websocket two"}]
+        }),
+    );
+    let (_, websocket_response) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("response.completed")
+    });
+    let _ = socket.close(None);
+    assert!(websocket_response.contains("resp-second-next"));
+
+    let third = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "previous_response_id": "resp-second-next",
+            "input": [{"type": "message", "role": "user", "content": "http three"}],
+            "client_metadata": {"session_id": "cross-transport"}
+        }),
+    );
+    assert!(
+        third
+            .text()
+            .expect("HTTP continuation body")
+            .contains("resp-second-next-next")
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec![
+            "second-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string()
+        ]
+    );
+}

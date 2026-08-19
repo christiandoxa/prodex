@@ -767,11 +767,15 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: CONTINUATION_TAGS,
   },
   {
+    name: "runtime_proxy_http_invalid_previous_response_id_workaround_is_off_for_0_147",
+    tags: CONTINUATION_TAGS,
+  },
+  {
     name: "runtime_proxy_http_sse_invalid_previous_response_id_does_not_rotate",
     tags: CONTINUATION_TAGS,
   },
   {
-    name: "runtime_proxy_websocket_invalid_previous_response_is_forwarded_once_and_allows_fresh_reconnect",
+    name: "runtime_proxy_websocket_invalid_previous_response_triggers_codex_full_context_replay",
     tags: CONTINUATION_TAGS,
   },
   {

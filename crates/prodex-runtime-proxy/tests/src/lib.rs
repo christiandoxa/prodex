@@ -288,7 +288,7 @@ fn full_history_fallback_preserves_context_and_session_metadata() {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
         headers: vec![("session_id".to_string(), "sess-1".to_string())],
-        body: br#"{"previous_response_id":"resp-old","input":[{"type":"message","role":"user","content":"continue"}],"client_metadata":{"turn_id":"turn-1"}}"#.to_vec(),
+        body: br#"{"model":"gpt-5.6","reasoning":{"effort":"max"},"previous_response_id":"resp-old","input":[{"type":"message","role":"assistant","content":"earlier result"},{"type":"compaction","encrypted_content":"compact-context"},{"type":"message","role":"user","content":"continue"}],"client_metadata":{"turn_id":"turn-1"}}"#.to_vec(),
     };
 
     let fallback = runtime_request_full_history_without_previous_response_id(&request)
@@ -297,7 +297,11 @@ fn full_history_fallback_preserves_context_and_session_metadata() {
 
     assert_eq!(fallback.headers, request.headers);
     assert!(value.get("previous_response_id").is_none());
-    assert_eq!(value["input"][0]["role"], "user");
+    assert_eq!(value["input"][0]["role"], "assistant");
+    assert_eq!(value["input"][1]["type"], "compaction");
+    assert_eq!(value["input"][2]["role"], "user");
+    assert_eq!(value["model"], "gpt-5.6");
+    assert_eq!(value["reasoning"]["effort"], "max");
     assert_eq!(value["client_metadata"]["turn_id"], "turn-1");
 }
 
@@ -308,6 +312,30 @@ fn full_history_fallback_rejects_unidentified_partial_clients() {
         path_and_query: "/backend-api/codex/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"previous_response_id":"resp-old","input":[{"type":"message"}]}"#.to_vec(),
+    };
+
+    assert!(runtime_request_full_history_without_previous_response_id(&request).is_none());
+}
+
+#[test]
+fn full_history_fallback_rejects_single_item_incremental_context() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session_id".to_string(), "sess-1".to_string())],
+        body: br#"{"previous_response_id":"resp-old","input":[{"type":"message"}]}"#.to_vec(),
+    };
+
+    assert!(runtime_request_full_history_without_previous_response_id(&request).is_none());
+}
+
+#[test]
+fn full_history_fallback_rejects_multi_item_tool_delta() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session_id".to_string(), "sess-1".to_string())],
+        body: br#"{"previous_response_id":"resp-old","input":[{"type":"function_call","call_id":"call-1"},{"type":"function_call_output","call_id":"call-1","output":"done"}]}"#.to_vec(),
     };
 
     assert!(runtime_request_full_history_without_previous_response_id(&request).is_none());

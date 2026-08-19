@@ -303,7 +303,7 @@ focused replay checks with:
 
     cargo test --locked -q -p prodex-app --lib app_server_broker_compat -- --test-threads=1
     cargo test --locked -q -p prodex-app --lib runtime_proxy_http_invalid_previous_response_id -- --test-threads=1
-    cargo test --locked -q -p prodex-app --lib runtime_proxy_websocket_invalid_previous_response_is_forwarded_once_and_allows_fresh_reconnect -- --test-threads=1
+    cargo test --locked -q -p prodex-app --lib runtime_proxy_websocket_invalid_previous_response_triggers_codex_full_context_replay -- --test-threads=1
 
 The invalid-response regression matrix is deterministic and uses a local
 mock-upstream for HTTP and WebSocket. It verifies profile ownership, one-shot

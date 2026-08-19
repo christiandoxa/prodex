@@ -37,6 +37,7 @@ pub(super) struct RuntimeWebsocketSessionStart {
     pub(super) precommit_transport_retry_allowed: bool,
     pub(super) reuse_started_at: Option<Instant>,
     pub(super) precommit_started_at: Instant,
+    pub(super) transport_generation: u64,
 }
 
 pub(super) enum RuntimeWebsocketSessionStartDecision {
@@ -233,6 +234,11 @@ pub(super) fn start_runtime_websocket_upstream_session(
             }
         }
     };
+    let transport_generation = if reuse_existing_session {
+        websocket_session.transport_generation()
+    } else {
+        websocket_session.advance_transport_generation()
+    };
     runtime_set_upstream_websocket_io_timeout(
         &mut upstream_socket,
         Some(Duration::from_millis(
@@ -254,6 +260,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
             precommit_transport_retry_allowed,
             reuse_started_at,
             precommit_started_at,
+            transport_generation,
         },
     )))
 }

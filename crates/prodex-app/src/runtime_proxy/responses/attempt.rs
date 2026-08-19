@@ -61,11 +61,25 @@ pub(crate) fn log_runtime_responses_continuation_trace(
                     runtime_proxy_crate::runtime_proxy_identifier_hash(previous_response_id),
                 ),
                 runtime_proxy_log_field(
-                    "returned_response_id_hash",
+                    "response_id_hash",
                     runtime_proxy_crate::runtime_proxy_identifier_hash(returned_response_id),
                 ),
                 runtime_proxy_log_field("rotation_generation", rotation_generation.to_string()),
-                runtime_proxy_log_field("retry_number", retry_number.to_string()),
+                runtime_proxy_log_field("transport_generation", "untracked_http_pool"),
+                runtime_proxy_log_field("retry_attempt", retry_number.to_string()),
+                runtime_proxy_log_field("compaction_generation", "untracked"),
+                runtime_proxy_log_field(
+                    "full_context_request",
+                    previous_response_id.is_none().to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "chain_reuse_reason",
+                    if previous_response_id.is_some() {
+                        "previous_response_present"
+                    } else {
+                        "full_context"
+                    },
+                ),
                 runtime_proxy_log_field("stream_committed", stream_committed.to_string()),
             ],
         ),
@@ -118,6 +132,8 @@ pub(crate) fn attempt_runtime_responses_request(
         .or_else(|| runtime_request_prompt_cache_key(request));
     let request_turn_state = runtime_request_turn_state(request);
     let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(request);
+    let codex_previous_response_id_regression =
+        runtime_codex_previous_response_id_regression(request);
     let mut request_for_attempt = request.clone();
     let mut previous_response_id_for_attempt = request_previous_response_id.clone();
     let mut full_history_fallback_used = false;
@@ -241,8 +257,16 @@ pub(crate) fn attempt_runtime_responses_request(
                 );
             if status == 400
                 && exact_invalid_previous_response_id
+                && codex_previous_response_id_regression
                 && !full_history_fallback_used
                 && let Some(previous_response_id) = previous_response_id_for_attempt.as_deref()
+                && runtime_response_bound_profile(
+                    shared,
+                    previous_response_id,
+                    RuntimeRouteKind::Responses,
+                )?
+                .as_deref()
+                    == Some(profile_name)
                 && let Some(fallback_request) =
                     runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(
                         &request_for_attempt,
@@ -274,6 +298,7 @@ pub(crate) fn attempt_runtime_responses_request(
                                 )),
                             ),
                             runtime_proxy_log_field("attempt", "one"),
+                            runtime_proxy_log_field("full_context_request", "true"),
                         ],
                     ),
                 );

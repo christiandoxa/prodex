@@ -147,7 +147,7 @@ pub(super) fn handle_second_account(
         return BackendWebsocketAction::Continue;
     }
 
-    handle_fresh_second_account(websocket, mode, request_count)
+    handle_fresh_second_account(websocket, mode, request, request_count)
 }
 
 fn handle_owned_second_account_continuation(
@@ -212,6 +212,7 @@ fn handle_owned_second_account_continuation(
 fn handle_fresh_second_account(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
     mode: RuntimeProxyBackendMode,
+    request: &str,
     request_count: usize,
 ) -> BackendWebsocketAction {
     let response_id = runtime_proxy_backend_initial_response_id_for_account("second-account")
@@ -267,5 +268,11 @@ fn handle_fresh_second_account(
         return BackendWebsocketAction::Break;
     }
     events::send_response_completed(websocket, response_id);
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketInvalidPreviousResponseId)
+        && !request.contains("turn one result")
+    {
+        let _ = websocket.close(None);
+        return BackendWebsocketAction::Break;
+    }
     BackendWebsocketAction::Continue
 }

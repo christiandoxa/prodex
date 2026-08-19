@@ -9,8 +9,8 @@ use super::super::{
     clear_runtime_response_profile_affinity, mark_runtime_profile_retry_backoff,
     refresh_and_log_runtime_response_route_affinity_for_request,
     release_runtime_quota_blocked_affinity, release_runtime_rotated_session_affinity,
-    runtime_candidate_has_hard_affinity, runtime_noncompact_session_priority_profile,
-    runtime_previous_response_affinity_is_trusted,
+    runtime_candidate_has_hard_affinity, runtime_codex_previous_response_id_regression,
+    runtime_noncompact_session_priority_profile, runtime_previous_response_affinity_is_trusted,
     runtime_previous_response_fresh_fallback_shape_with_session,
     runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
@@ -112,6 +112,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             .map(|value| runtime_turn_state_bound_profile(shared, value))
             .transpose()?
             .flatten();
+        let codex_previous_response_id_regression =
+            runtime_codex_previous_response_id_regression(&handshake_request);
         let mut flow = Self {
             session_id,
             request_id,
@@ -147,6 +149,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
             websocket_reuse_fresh_retry_pending: false,
+            codex_previous_response_id_regression,
         };
         flow.recompute_route_affinity("initial")?;
         Ok(flow)

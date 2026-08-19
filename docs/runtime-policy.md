@@ -570,15 +570,17 @@ invocation.
 Codex 0.148 continuation handling is deliberately owner-bound. A
 previous_response_id and its x-codex-turn-state stay on the profile and
 transport context that produced them; a committed stream is never rotated to
-another profile. If an HTTP response explicitly reports Invalid
-previous_response_id, Prodex invalidates only that stale binding and makes at
-most one same-profile full-history request when the request has a replayable
-top-level input array. The original input, tool results, turn metadata, and
-headers remain intact; if that safe recovery is unavailable, the original 400
-is forwarded once. WebSocket recovery follows Codex connection scope: an
-invalid chain is reported once and a later client reconnect starts without the
-stale incremental id. Raw identifiers are never written to the runtime trace;
-continuation diagnostics use stable redacted hashes.
+another profile. For the exact Codex 0.148 invalid_request_error with message
+`Invalid previous_response_id`, Prodex invalidates only that stale binding.
+On WebSocket, it adds the upstream retryable `previous_response_not_found`
+code so Codex reconstructs and sends its own complete prompt exactly once.
+On HTTP, at most one same-profile retry removes the stale id only when the
+Codex 0.148 user agent, session metadata, and a multi-item full-history input
+are all present. The original input, tool results, turn metadata, and headers
+remain intact; otherwise the original 400 is forwarded once. The workaround
+is disabled for Codex 0.147 and later versions. Raw identifiers are never
+written to the runtime trace; continuation diagnostics use stable redacted
+hashes plus WebSocket transport and compaction generations.
 
 The 0.148 x-codex-routing-hint request header is preserved. Codex-owned resume,
 fork, archive, restore, compaction, and model/effort semantics remain

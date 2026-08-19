@@ -28,15 +28,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 invalid_previous_response_id,
             } => {
                 if invalid_previous_response_id {
-                    if let Some(previous_response_id) = self.previous_response_id.as_deref() {
-                        clear_runtime_dead_response_bindings(
-                            self.shared,
-                            &profile_name,
-                            &[previous_response_id.to_string()],
-                            "invalid_previous_response_id",
-                        )?;
-                    }
-                    return self.handle_upstream_rejected(profile_name, payload);
+                    return self.handle_invalid_previous_response_id(profile_name, payload);
                 }
                 let action = self.handle_previous_response_not_found(
                     &profile_name,
@@ -104,15 +96,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 invalid_previous_response_id,
             } => {
                 if invalid_previous_response_id {
-                    if let Some(previous_response_id) = self.previous_response_id.as_deref() {
-                        clear_runtime_dead_response_bindings(
-                            self.shared,
-                            &profile_name,
-                            &[previous_response_id.to_string()],
-                            "invalid_previous_response_id",
-                        )?;
-                    }
-                    return self.handle_upstream_rejected(profile_name, payload);
+                    return self.handle_invalid_previous_response_id(profile_name, payload);
                 }
                 let action = self.handle_previous_response_not_found(
                     &profile_name,
@@ -126,6 +110,135 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         }
     }
 
+    fn handle_invalid_previous_response_id(
+        &mut self,
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let owner_matches = self.bound_profile.as_deref() == Some(profile_name.as_str());
+        let compatibility_retry = self.codex_previous_response_id_regression
+            && self.previous_response_id.is_some()
+            && self.request_session_id.is_some()
+            && owner_matches;
+        let owner_transport_generation =
+            self.previous_response_id
+                .as_deref()
+                .and_then(|response_id| {
+                    self.websocket_session
+                        .response_transport_generation(response_id)
+                });
+        if let Some(previous_response_id) = self.previous_response_id.as_deref() {
+            clear_runtime_dead_response_bindings(
+                self.shared,
+                &profile_name,
+                &[previous_response_id.to_string()],
+                "invalid_previous_response_id",
+            )?;
+        }
+        if compatibility_retry {
+            let _ = commit_runtime_proxy_profile_selection_with_policy(
+                self.shared,
+                &profile_name,
+                RuntimeRouteKind::Websocket,
+                false,
+            )?;
+        }
+        let (payload, action) = if compatibility_retry {
+            (
+                runtime_proxy_crate::runtime_translate_invalid_previous_response_websocket_error(
+                    payload,
+                ),
+                "codex_full_context_retry_signal",
+            )
+        } else {
+            (payload, "pass_through")
+        };
+        let (logical_provider, transport_provider_hash) =
+            runtime_response_trace_provider_labels(self.shared, &profile_name);
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "invalid_previous_response_id",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field(
+                        "owner_transport_generation",
+                        owner_transport_generation
+                            .map(|generation| generation.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                    ),
+                    runtime_proxy_log_field(
+                        "transport_generation",
+                        self.websocket_session.transport_generation().to_string(),
+                    ),
+                    runtime_proxy_log_field(
+                        "previous_response_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.previous_response_id.as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "owner_profile_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.bound_profile.as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "failing_profile_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(Some(&profile_name)),
+                    ),
+                    runtime_proxy_log_field("logical_provider", logical_provider),
+                    runtime_proxy_log_field("transport_provider_hash", transport_provider_hash),
+                    runtime_proxy_log_field(
+                        "session_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.request_session_id.as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "thread_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            runtime_proxy_crate::runtime_request_thread_id(&self.handshake_request)
+                                .as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
+                        "turn_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            runtime_proxy_crate::runtime_request_turn_id(&self.handshake_request)
+                                .as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field("retry_attempt", "0"),
+                    runtime_proxy_log_field("rotation_generation", "0"),
+                    runtime_proxy_log_field(
+                        "compaction_generation",
+                        runtime_proxy_crate::runtime_request_compaction_generation(
+                            &self.handshake_request,
+                        )
+                        .map(|generation| generation.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    ),
+                    runtime_proxy_log_field("full_context_request", "false"),
+                    runtime_proxy_log_field("stream_committed", "false"),
+                    runtime_proxy_log_field(
+                        "chain_reuse_reason",
+                        if owner_matches {
+                            "bound_profile_affinity"
+                        } else {
+                            "unbound_previous_response"
+                        },
+                    ),
+                    runtime_proxy_log_field("action", action),
+                    runtime_proxy_log_field("compatibility_gate", compatibility_retry.to_string()),
+                ],
+            ),
+        );
+        self.handle_upstream_rejected(profile_name, payload)
+    }
+
     fn handle_upstream_rejected(
         &mut self,
         profile_name: String,
@@ -134,8 +247,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         runtime_proxy_log(
             self.shared,
             format!(
-                "request={} websocket_session={} upstream_rejected profile={} action=pass_through",
-                self.request_id, self.session_id, profile_name
+                "request={} websocket_session={} upstream_rejected profile_hash={} action=pass_through",
+                self.request_id,
+                self.session_id,
+                runtime_proxy_crate::runtime_proxy_identifier_hash(Some(&profile_name)),
             ),
         );
         forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;

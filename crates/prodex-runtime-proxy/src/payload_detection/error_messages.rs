@@ -246,6 +246,7 @@ pub fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
 }
 
 fn runtime_proxy_invalid_previous_response_id_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("previous_response_id") && lower.contains("invalid")
+    message
+        .trim()
+        .eq_ignore_ascii_case("Invalid `previous_response_id`.")
 }
