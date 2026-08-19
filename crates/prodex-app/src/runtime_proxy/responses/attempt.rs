@@ -158,6 +158,22 @@ fn runtime_responses_full_history_recovery_request(
     )
 }
 
+fn take_runtime_responses_sse_recovery_guard(
+    prepared: &mut Result<RuntimeResponsesAttempt>,
+) -> Result<RuntimeProfileInFlightGuard> {
+    match prepared {
+        Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
+            response: RuntimeResponsesReply::Streaming(response),
+            ..
+        }) => response._inflight_guard.take().ok_or_else(|| {
+            anyhow::anyhow!("responses SSE recovery lost its profile in-flight guard")
+        }),
+        _ => Err(anyhow::anyhow!(
+            "responses SSE recovery lost its profile in-flight guard"
+        )),
+    }
+}
+
 pub(crate) fn attempt_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -406,18 +422,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 full_history_fallback_used,
             )?
         {
-            let recovery_guard = match &mut prepared {
-                Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
-                    response: RuntimeResponsesReply::Streaming(response),
-                    ..
-                }) => response._inflight_guard.take(),
-                _ => None,
-            };
-            let Some(recovery_guard) = recovery_guard else {
-                return Err(anyhow::anyhow!(
-                    "responses SSE recovery lost its profile in-flight guard"
-                ));
-            };
+            let recovery_guard = take_runtime_responses_sse_recovery_guard(&mut prepared)?;
             clear_runtime_dead_response_bindings(
                 shared,
                 profile_name,
