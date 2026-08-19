@@ -28,6 +28,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) fault_smart_context_unwind_once: usize,
     pub(crate) log_dir: PathBuf,
     pub(crate) log_format: RuntimeLogFormat,
+    pub(crate) response_chain_trace: bool,
     pub(crate) websocket_environment: RuntimeWebsocketEnvironment,
     pub(crate) oidc: RuntimeOidcTimingConfig,
     pub(crate) gateway: RuntimeGatewayConfig,
@@ -212,6 +213,7 @@ impl fmt::Debug for RuntimeConfig {
                 &self.smart_context_canary_percent,
             )
             .field("log_format", &self.log_format)
+            .field("response_chain_trace", &self.response_chain_trace)
             .field("gateway", &self.gateway)
             .field("governance_mode", &self.governance.mode.as_str())
             .field("gemini_home_configured", &self.gemini.home_dir.is_some())

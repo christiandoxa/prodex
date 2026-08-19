@@ -14,6 +14,21 @@ pub(crate) fn repair_resume_session_metadata_prefix_from_codex_args(
     repair_resume_session_in_shared_home(&paths.shared_codex_root, codex_args)
 }
 
+pub(crate) fn repair_super_resume_session_metadata(args: &prodex_cli::SuperArgs) -> Result<()> {
+    if !matches!(args.cli, None | Some(prodex_cli::SuperCliAgent::Codex)) {
+        return Ok(());
+    }
+    let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
+    let picker_args = [OsString::from("resume")];
+    let repair_args = if prodex_runtime_launch::codex_resume_requested(&normalized) {
+        normalized.as_slice()
+    } else {
+        picker_args.as_slice()
+    };
+    repair_resume_session_metadata_prefix_from_codex_args(repair_args)?;
+    Ok(())
+}
+
 pub(crate) fn repair_resume_session_in_shared_home(
     codex_home: &Path,
     codex_args: &[OsString],

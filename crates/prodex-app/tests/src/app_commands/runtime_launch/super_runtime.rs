@@ -5,8 +5,88 @@ use super::{
     prepare_runtime_launch_dry_run, resolved_super_runtime_tool_args, temp_dir,
     write_runtime_launch_auth, write_state,
 };
-use crate::app_commands::runtime_launch::resolve_super_dry_run_main_agent;
+use crate::app_commands::runtime_launch::{
+    repair_super_resume_session_metadata, resolve_super_dry_run_main_agent,
+};
 use crate::{AppPaths, codex_cli_config_override_value};
+
+#[test]
+fn super_picker_and_direct_resume_repair_the_same_stale_overlay_path() {
+    let root = temp_dir("super-resume-stale-overlay");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "01a01824-29f7-7332-96c7-5d09044ee2d0";
+    let relative = format!("sessions/2026/08/19/rollout-2026-08-19T10-50-18-{session_id}.jsonl");
+    let rollout_path = paths.shared_codex_root.join(&relative);
+    fs::create_dir_all(rollout_path.parent().unwrap()).unwrap();
+    fs::write(
+        &rollout_path,
+        format!(
+            "{{\"timestamp\":\"2026-08-19T10:50:18Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"session_id\":\"{session_id}\",\"timestamp\":\"2026-08-19T10:50:18Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.148.0\",\"model_provider\":\"openai\"}}}}\n"
+        ),
+    )
+    .unwrap();
+    let stale_path = paths
+        .shared_codex_root
+        .with_file_name(".prodex-overlay-old")
+        .join(&relative);
+    let connection =
+        rusqlite::Connection::open(paths.shared_codex_root.join("state_5.sqlite")).unwrap();
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, stale_path.display().to_string()],
+        )
+        .unwrap();
+
+    let repaired_path = |connection: &rusqlite::Connection| -> String {
+        connection
+            .query_row(
+                "SELECT rollout_path FROM threads WHERE id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    let crate::Commands::Super(picker_args) =
+        crate::parse_cli_command_from(["prodex", "s"]).unwrap()
+    else {
+        panic!("expected Super command");
+    };
+    repair_super_resume_session_metadata(&picker_args).unwrap();
+    assert_eq!(
+        repaired_path(&connection),
+        rollout_path.display().to_string()
+    );
+
+    connection
+        .execute(
+            "UPDATE threads SET rollout_path = ?1 WHERE id = ?2",
+            rusqlite::params![stale_path.display().to_string(), session_id],
+        )
+        .unwrap();
+    let crate::Commands::Super(direct_args) =
+        crate::parse_cli_command_from(["prodex", "s", session_id]).unwrap()
+    else {
+        panic!("expected Super command");
+    };
+    repair_super_resume_session_metadata(&direct_args).unwrap();
+    assert_eq!(
+        repaired_path(&connection),
+        rollout_path.display().to_string()
+    );
+}
 
 #[test]
 fn super_resume_restores_the_session_model_and_reasoning_effort() {

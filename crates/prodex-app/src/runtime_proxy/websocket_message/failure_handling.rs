@@ -116,10 +116,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         let owner_matches = self.bound_profile.as_deref() == Some(profile_name.as_str());
-        let compatibility_retry = self.codex_previous_response_id_regression
-            && self.previous_response_id.is_some()
-            && self.request_session_id.is_some()
-            && owner_matches;
         let owner_transport_generation =
             self.previous_response_id
                 .as_deref()
@@ -127,6 +123,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     self.websocket_session
                         .response_transport_generation(response_id)
                 });
+        let transport_generation = self.websocket_session.transport_generation();
+        let crossed_transport_generation = owner_transport_generation
+            .is_some_and(|owner_generation| owner_generation != transport_generation);
+        let compatibility_retry = (self.codex_previous_response_id_regression
+            || (crossed_transport_generation
+                && self.codex_previous_response_id_websocket_reconnect_regression))
+            && self.previous_response_id.is_some()
+            && self.request_session_id.is_some()
+            && owner_matches;
         if let Some(previous_response_id) = self.previous_response_id.as_deref() {
             clear_runtime_dead_response_bindings(
                 self.shared,
@@ -171,7 +176,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     ),
                     runtime_proxy_log_field(
                         "transport_generation",
-                        self.websocket_session.transport_generation().to_string(),
+                        transport_generation.to_string(),
                     ),
                     runtime_proxy_log_field(
                         "previous_response_id_hash",
@@ -225,7 +230,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     runtime_proxy_log_field("stream_committed", "false"),
                     runtime_proxy_log_field(
                         "chain_reuse_reason",
-                        if owner_matches {
+                        if crossed_transport_generation {
+                            "upstream_websocket_reconnect"
+                        } else if owner_matches {
                             "bound_profile_affinity"
                         } else {
                             "unbound_previous_response"

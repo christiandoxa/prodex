@@ -1,4 +1,5 @@
 mod gateway_helpers;
+mod gemini;
 use super as runtime_config;
 use crate::{core_constants, runtime_proxy};
 use gateway_helpers::{
@@ -8,7 +9,6 @@ use prodex_cli::GatewayArgs;
 use prodex_core::AppPaths;
 use prodex_runtime_policy::RuntimeLogFormat;
 use prodex_runtime_state::RuntimeProxyLaneLimits;
-use std::collections::BTreeSet;
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -524,7 +524,7 @@ impl runtime_config::RuntimeConfig {
             adaptive_routing: Default::default(),
             launch: runtime_config::RuntimeGatewayLaunchEnvironment::default(),
         };
-        let gemini = Self::parse_gemini(parser);
+        let gemini = gemini::parse_gemini(parser);
         Self {
             tuning,
             compact_request_timeout_ms: parser.positive_u64(
@@ -620,6 +620,7 @@ impl runtime_config::RuntimeConfig {
             ),
             log_dir,
             log_format,
+            response_chain_trace: parser.strict_bool("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", false),
             websocket_environment: runtime_config::RuntimeWebsocketEnvironment {
                 https_proxy,
                 http_proxy,
@@ -658,116 +659,6 @@ impl runtime_config::RuntimeConfig {
                 crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns::default(),
             gemini,
             compatibility_defaults: Vec::new(),
-        }
-    }
-
-    fn parse_gemini(
-        parser: &mut runtime_config::RuntimeConfigParser,
-    ) -> runtime_config::RuntimeGeminiConfig {
-        let home_dir = parser.environment.nonempty_path("HOME");
-        let config_dir = parser
-            .environment
-            .nonempty_path("GEMINI_CLI_HOME")
-            .map(|path| path.join(".gemini"))
-            .or_else(|| home_dir.as_ref().map(|home| home.join(".gemini")));
-        let system_settings_path = parser.environment.path("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
-        let system_defaults_path = parser.environment.path("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
-        let split_paths = |key| {
-            parser
-                .environment
-                .get(key)
-                .map(env::split_paths)
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-        };
-        let extension_dirs = split_paths("PRODEX_GEMINI_EXTENSION_DIRS");
-        let import_paths = [
-            "PRODEX_GEMINI_SESSION_FILE",
-            "PRODEX_GEMINI_CHECKPOINT_FILE",
-            "PRODEX_GEMINI_IMPORT_FILE",
-        ]
-        .into_iter()
-        .flat_map(split_paths)
-        .collect();
-        let extension_memory_paths = split_paths("PRODEX_GEMINI_EXTENSION_MEMORY");
-        let export_checkpoint_path = [
-            "PRODEX_GEMINI_EXPORT_FILE",
-            "PRODEX_GEMINI_CHECKPOINT_EXPORT_FILE",
-        ]
-        .into_iter()
-        .filter_map(|key| parser.environment.get(key))
-        .find(|path| !path.is_empty())
-        .map(PathBuf::from);
-        let tool_output_dir = parser
-            .environment
-            .get("PRODEX_GEMINI_TOOL_OUTPUT_DIR")
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from);
-        let extension_selection =
-            match parser
-                .compatibility_text("PRODEX_GEMINI_EXTENSIONS")
-                .map(|value| {
-                    value
-                        .split([',', ';', ' ', '\n', '\t'])
-                        .filter_map(|item| {
-                            let item = item.trim().to_ascii_lowercase();
-                            (!item.is_empty()).then_some(item)
-                        })
-                        .collect::<BTreeSet<_>>()
-                }) {
-                None => runtime_config::RuntimeGeminiExtensionSelection::All,
-                Some(names) if names.is_empty() => {
-                    runtime_config::RuntimeGeminiExtensionSelection::All
-                }
-                Some(names) if names.len() == 1 && names.contains("none") => {
-                    runtime_config::RuntimeGeminiExtensionSelection::None
-                }
-                Some(names) => runtime_config::RuntimeGeminiExtensionSelection::Names(names),
-            };
-        let memory_files_disabled =
-            parser.compatibility_optional_bool("PRODEX_GEMINI_DISABLE_MEMORY") == Some(true)
-                || parser.compatibility_optional_bool("PRODEX_GEMINI_DISABLE_CONTEXT_FILES")
-                    == Some(true);
-        let memory_files_default = parser
-            .compatibility_optional_bool("PRODEX_GEMINI_LOAD_MEMORY")
-            .or_else(|| parser.compatibility_optional_bool("PRODEX_GEMINI_MEMORY"))
-            .unwrap_or(true);
-        let live_url = parser
-            .compatibility_text("PRODEX_GEMINI_LIVE_URL")
-            .filter(|value| !value.trim().is_empty());
-        let live_model = parser.compatibility_text("PRODEX_GEMINI_LIVE_MODEL");
-        let sticky_fresh_oauth = parser
-            .compatibility_text("PRODEX_GEMINI_STICKY_FRESH_OAUTH")
-            .is_none_or(|value| {
-                !matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "0" | "false" | "off" | "no"
-                )
-            });
-        runtime_config::RuntimeGeminiConfig {
-            home_dir,
-            config_dir,
-            system_settings_path,
-            system_defaults_path,
-            extension_dirs,
-            extension_selection,
-            export_checkpoint_path,
-            import_paths,
-            tool_output_mask_threshold: parser.compatibility_u64(
-                "PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD",
-                runtime_config::RuntimeGeminiConfig::DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD as u64,
-                false,
-                true,
-                usize::MAX as u64,
-            ) as usize,
-            tool_output_dir,
-            memory_files_disabled,
-            memory_files_default,
-            extension_memory_paths,
-            live_url,
-            live_model,
-            sticky_fresh_oauth,
         }
     }
 }

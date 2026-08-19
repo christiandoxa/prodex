@@ -336,24 +336,34 @@ fn runtime_capability_continuation_label(request: &RuntimeProxyRequest) -> Strin
     runtime_capability_labels_from_flags(&flags, "none")
 }
 
-/// Returns whether this request needs the Codex 0.148 previous-response compatibility shim.
-pub fn runtime_codex_previous_response_id_regression(request: &RuntimeProxyRequest) -> bool {
-    runtime_proxy_request_header_value(&request.headers, "user-agent").is_some_and(|user_agent| {
-        user_agent.split_ascii_whitespace().any(|component| {
-            component.split_once('/').is_some_and(|(client, version)| {
-                version == "0.148.0"
-                    && matches!(
-                        client,
-                        "codex-cli"
-                            | "codex_cli_rs"
-                            | "codex-tui"
-                            | "codex_exec"
-                            | "codex_app_server"
-                            | "codex-app-server"
-                    )
-            })
+fn runtime_codex_client_version(request: &RuntimeProxyRequest) -> Option<&str> {
+    runtime_proxy_request_header_value(&request.headers, "user-agent").and_then(|user_agent| {
+        user_agent.split_ascii_whitespace().find_map(|component| {
+            match component.split_once('/')? {
+                (
+                    "codex-cli" | "codex_cli_rs" | "codex-tui" | "codex_exec" | "codex_app_server"
+                    | "codex-app-server",
+                    version,
+                ) => Some(version),
+                _ => None,
+            }
         })
     })
+}
+
+/// Returns whether this request needs the Codex 0.148 previous-response compatibility shim.
+pub fn runtime_codex_previous_response_id_regression(request: &RuntimeProxyRequest) -> bool {
+    runtime_codex_client_version(request) == Some("0.148.0")
+}
+
+/// Returns whether an exact invalid-id failure after a WebSocket reconnect needs replay signaling.
+pub fn runtime_codex_previous_response_id_websocket_reconnect_regression(
+    request: &RuntimeProxyRequest,
+) -> bool {
+    matches!(
+        runtime_codex_client_version(request),
+        Some("0.147.0" | "0.148.0")
+    )
 }
 
 pub fn runtime_detect_request_compatibility_surface(
@@ -535,6 +545,29 @@ mod tests {
 
             assert_eq!(
                 runtime_codex_previous_response_id_regression(&request),
+                affected,
+                "user_agent={user_agent}"
+            );
+        }
+    }
+
+    #[test]
+    fn previous_response_websocket_reconnect_regression_is_version_bounded() {
+        for (user_agent, affected) in [
+            ("codex-cli/0.146.0", false),
+            ("codex-tui/0.147.0 (Linux; x86_64)", true),
+            ("codex_exec/0.148.0 (Linux; x86_64)", true),
+            ("codex-cli/0.149.0", false),
+        ] {
+            let request = RuntimeProxyRequest {
+                method: "POST".to_string(),
+                path_and_query: "/backend-api/codex/responses".to_string(),
+                headers: vec![("User-Agent".to_string(), user_agent.to_string())],
+                body: Vec::new(),
+            };
+
+            assert_eq!(
+                runtime_codex_previous_response_id_websocket_reconnect_regression(&request),
                 affected,
                 "user_agent={user_agent}"
             );

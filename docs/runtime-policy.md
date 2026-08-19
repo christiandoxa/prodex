@@ -567,20 +567,26 @@ newest changed rollout. It never scales with older active or archived history;
 full repair is O(all active and archived sessions) and is not part of every
 invocation.
 
-Codex 0.148 continuation handling is deliberately owner-bound. A
+Codex continuation handling is deliberately owner-bound. A
 previous_response_id and its x-codex-turn-state stay on the profile and
 transport context that produced them; a committed stream is never rotated to
-another profile. For the exact Codex 0.148 invalid_request_error with message
-`Invalid previous_response_id`, Prodex invalidates only that stale binding.
-On WebSocket, it adds the upstream retryable `previous_response_not_found`
-code so Codex reconstructs and sends its own complete prompt exactly once.
+another profile. For the exact Codex 0.148 `invalid_request_error` with message
+“Invalid `previous_response_id`.”, Prodex invalidates only that stale binding.
+On a Codex 0.147 or 0.148 WebSocket reconnect, it adds the upstream retryable
+`previous_response_not_found` code so Codex reconstructs and sends its own
+complete prompt exactly once.
+
 On HTTP, at most one same-profile retry removes the stale id only when the
 Codex 0.148 user agent, session metadata, and a multi-item full-history input
 are all present. The original input, tool results, turn metadata, and headers
 remain intact; otherwise the original 400 is forwarded once. The workaround
-is disabled for Codex 0.147 and later versions. Raw identifiers are never
-written to the runtime trace; continuation diagnostics use stable redacted
-hashes plus WebSocket transport and compaction generations.
+for same-generation and HTTP failures is disabled for Codex 0.147 and versions
+after 0.148; the 0.147 exception is only the proven cross-generation WebSocket
+transition described above. Set
+`PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE=true` to record successful continuation
+lifecycle events. Raw identifiers are never written to that opt-in trace;
+diagnostics use stable redacted hashes plus WebSocket transport and compaction
+generations.
 
 The 0.148 x-codex-routing-hint request header is preserved. Codex-owned resume,
 fork, archive, restore, compaction, and model/effort semantics remain

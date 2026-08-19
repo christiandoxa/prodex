@@ -26,6 +26,7 @@
     "compat:capture": "node scripts/compat/capture-replay.mjs",
     "compat:replay-fixtures": "node scripts/compat/capture-replay-fixture-tests.mjs",
     "compat:offline-gate": "npm run compat:check && npm run compat:replay-fixtures",
+    "compat:previous-response-repro": "node scripts/compat/previous-response-reproducer.mjs",
     "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
     "compat:watch": "node scripts/compat/watch-upstream.mjs",
     "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
