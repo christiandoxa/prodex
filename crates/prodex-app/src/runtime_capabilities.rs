@@ -3,7 +3,8 @@ use crate::runtime_state_shared::RuntimeRotationProxyShared;
 
 use prodex_runtime_capabilities::runtime_capability_log_safe_value;
 pub(super) use prodex_runtime_capabilities::{
-    RuntimeRequestCompatibilitySurface, runtime_detect_request_compatibility_surface,
+    RuntimeRequestCompatibilitySurface, runtime_codex_previous_response_id_regression,
+    runtime_detect_request_compatibility_surface,
     runtime_detect_websocket_message_compatibility_surface,
 };
 

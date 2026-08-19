@@ -14,6 +14,8 @@ pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
     pub(in crate::runtime_proxy) turn_state: Option<String>,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
     last_terminal_at: Option<Instant>,
+    transport_generation: u64,
+    last_response_transport_generation: Option<(String, u64)>,
 }
 
 impl RuntimeWebsocketSessionState {
@@ -48,6 +50,36 @@ impl RuntimeWebsocketSessionState {
 
     pub(in crate::runtime_proxy) fn last_terminal_elapsed(&self) -> Option<Duration> {
         self.last_terminal_at.map(|timestamp| timestamp.elapsed())
+    }
+
+    pub(in crate::runtime_proxy) fn transport_generation(&self) -> u64 {
+        self.transport_generation
+    }
+
+    pub(in crate::runtime_proxy) fn advance_transport_generation(&mut self) -> u64 {
+        self.transport_generation = self.transport_generation.saturating_add(1);
+        self.transport_generation
+    }
+
+    pub(in crate::runtime_proxy) fn remember_response_transport_generation(
+        &mut self,
+        response_ids: impl IntoIterator<Item = String>,
+        transport_generation: u64,
+    ) {
+        if let Some(response_id) = response_ids.into_iter().last() {
+            self.last_response_transport_generation = Some((response_id, transport_generation));
+        }
+    }
+
+    pub(in crate::runtime_proxy) fn response_transport_generation(
+        &self,
+        response_id: &str,
+    ) -> Option<u64> {
+        self.last_response_transport_generation.as_ref().and_then(
+            |(owned_response_id, generation)| {
+                (owned_response_id == response_id).then_some(*generation)
+            },
+        )
     }
 
     pub(in crate::runtime_proxy) fn store(

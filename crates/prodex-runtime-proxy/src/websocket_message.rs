@@ -105,6 +105,34 @@ pub fn runtime_translate_previous_response_websocket_text_frame(payload: &str) -
     payload.to_string()
 }
 
+pub fn runtime_translate_invalid_previous_response_websocket_error(
+    payload: RuntimeWebsocketErrorPayload,
+) -> RuntimeWebsocketErrorPayload {
+    let RuntimeWebsocketErrorPayload::Text(text) = payload else {
+        return payload;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return RuntimeWebsocketErrorPayload::Text(text);
+    };
+    if !crate::runtime_proxy_value_is_invalid_previous_response_id(&value) {
+        return RuntimeWebsocketErrorPayload::Text(text);
+    }
+    let Some(error) = value
+        .get_mut("error")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return RuntimeWebsocketErrorPayload::Text(text);
+    };
+    if error.contains_key("code") {
+        return RuntimeWebsocketErrorPayload::Text(text);
+    }
+    error.insert(
+        "code".to_string(),
+        serde_json::Value::String("previous_response_not_found".to_string()),
+    );
+    RuntimeWebsocketErrorPayload::Text(value.to_string())
+}
+
 pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payload: &str) -> String {
     if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
         return payload.to_string();

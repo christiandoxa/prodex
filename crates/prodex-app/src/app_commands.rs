@@ -67,6 +67,19 @@ struct ResolvedMainAgentConfig {
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
     super_prompt::reject_sub_agent_recursion_reenable(&args)?;
+    if matches!(args.cli, None | Some(SuperCliAgent::Codex)) {
+        let normalized_codex_args =
+            prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
+        let picker_repair_args = [std::ffi::OsString::from("resume")];
+        let repair_args = if prodex_runtime_launch::codex_resume_requested(&normalized_codex_args) {
+            normalized_codex_args.as_slice()
+        } else {
+            picker_repair_args.as_slice()
+        };
+        runtime_launch::resume_repair::repair_resume_session_metadata_prefix_from_codex_args(
+            repair_args,
+        )?;
+    }
     let interactive = super_prompt::super_prompt_is_interactive();
     let (use_presidio, _main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
         &mut args,

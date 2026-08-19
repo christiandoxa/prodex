@@ -57,6 +57,9 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
     } = attempt;
     let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
     let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(handshake_request);
+    let request_thread_id = runtime_proxy_crate::runtime_request_thread_id(handshake_request);
+    let compaction_generation =
+        runtime_proxy_crate::runtime_request_compaction_generation(handshake_request);
 
     let realtime_websocket = websocket_session.is_realtime_duplex();
     if let Some(attempt) =
@@ -96,6 +99,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         precommit_transport_retry_allowed,
         reuse_started_at,
         precommit_started_at,
+        transport_generation,
     } = match session_start {
         RuntimeWebsocketSessionStartDecision::Started(start) => *start,
         RuntimeWebsocketSessionStartDecision::Attempt(attempt) => return Ok(attempt),
@@ -153,6 +157,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         profile_name,
         request_previous_response_id,
         request_turn_id,
+        request_thread_id,
         request_prompt_cache_key,
         request_session_id,
         request_turn_state,
@@ -166,6 +171,8 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         precommit_transport_retry_allowed,
         reuse_started_at,
         precommit_started_at,
+        transport_generation,
+        compaction_generation,
         committed: false,
         first_upstream_frame_seen: false,
         first_upstream_text_seen: false,
@@ -187,6 +194,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     profile_name: &'a str,
     request_previous_response_id: Option<&'a str>,
     request_turn_id: Option<String>,
+    request_thread_id: Option<String>,
     request_prompt_cache_key: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_turn_state: Option<&'a str>,
@@ -200,6 +208,8 @@ struct RuntimeWebsocketResponseLoop<'a> {
     precommit_transport_retry_allowed: bool,
     reuse_started_at: Option<Instant>,
     precommit_started_at: Instant,
+    transport_generation: u64,
+    compaction_generation: Option<u64>,
     promote_committed_profile: bool,
     committed: bool,
     first_upstream_frame_seen: bool,
@@ -424,6 +434,11 @@ impl RuntimeWebsocketResponseLoop<'_> {
             self.committed_response_ids
                 .extend(frame.response_ids.iter().cloned());
         }
+        self.websocket_session
+            .remember_response_transport_generation(
+                self.committed_response_ids.iter().cloned(),
+                self.transport_generation,
+            );
         commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
             request_id: self.request_id,
             local_socket: self.local_socket,
@@ -451,6 +466,11 @@ impl RuntimeWebsocketResponseLoop<'_> {
         if !inspected.precommit_hold {
             self.committed_response_ids
                 .extend(inspected.response_ids.iter().cloned());
+            self.websocket_session
+                .remember_response_transport_generation(
+                    inspected.response_ids.iter().cloned(),
+                    self.transport_generation,
+                );
             remember_runtime_websocket_response_ids(
                 RuntimeWebsocketResponseBindingContext {
                     shared: self.shared,
@@ -531,6 +551,12 @@ impl RuntimeWebsocketResponseLoop<'_> {
                         ),
                     ),
                     runtime_proxy_log_field(
+                        "thread_id_hash",
+                        runtime_proxy_crate::runtime_proxy_identifier_hash(
+                            self.request_thread_id.as_deref(),
+                        ),
+                    ),
+                    runtime_proxy_log_field(
                         "turn_state_hash",
                         runtime_proxy_crate::runtime_proxy_identifier_hash(self.request_turn_state),
                     ),
@@ -541,11 +567,33 @@ impl RuntimeWebsocketResponseLoop<'_> {
                         ),
                     ),
                     runtime_proxy_log_field(
-                        "returned_response_id_hash",
+                        "response_id_hash",
                         runtime_proxy_crate::runtime_proxy_identifier_hash(returned_response_id),
                     ),
                     runtime_proxy_log_field("rotation_generation", "0"),
-                    runtime_proxy_log_field("retry_number", retry_number.to_string()),
+                    runtime_proxy_log_field(
+                        "transport_generation",
+                        self.transport_generation.to_string(),
+                    ),
+                    runtime_proxy_log_field(
+                        "compaction_generation",
+                        self.compaction_generation
+                            .map(|generation| generation.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                    ),
+                    runtime_proxy_log_field("retry_attempt", retry_number.to_string()),
+                    runtime_proxy_log_field(
+                        "full_context_request",
+                        self.request_previous_response_id.is_none().to_string(),
+                    ),
+                    runtime_proxy_log_field(
+                        "chain_reuse_reason",
+                        if self.request_previous_response_id.is_some() {
+                            "previous_response_present"
+                        } else {
+                            "full_context"
+                        },
+                    ),
                     runtime_proxy_log_field("stream_committed", stream_committed.to_string()),
                 ],
             ),

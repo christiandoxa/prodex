@@ -6,7 +6,7 @@ use super::{
     RuntimeProxyChainLog, RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind,
     RuntimeUpstreamFailureResponse, RuntimeWebsocketAttempt, RuntimeWebsocketErrorPayload,
     RuntimeWebsocketRequestMetadata, RuntimeWebsocketSessionState,
-    clear_runtime_dead_response_bindings,
+    clear_runtime_dead_response_bindings, commit_runtime_proxy_profile_selection_with_policy,
     extract_runtime_proxy_overload_message_from_websocket_payload,
     extract_runtime_proxy_quota_message_from_websocket_payload,
     forward_runtime_proxy_websocket_error, handle_runtime_previous_response_not_found,
@@ -15,7 +15,8 @@ use super::{
     runtime_proxy_log, runtime_proxy_log_chain_dead_upstream_confirmed,
     runtime_proxy_log_chain_retried_owner, runtime_proxy_log_field,
     runtime_proxy_record_continuity_failure_reason, runtime_proxy_structured_log_message,
-    runtime_quota_last_chance_profile_for_route, runtime_smart_context_model_name_from_body,
+    runtime_quota_last_chance_profile_for_route, runtime_response_trace_provider_labels,
+    runtime_smart_context_model_name_from_body,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_previous_response_reuse_is_stale,
     send_runtime_proxy_stale_continuation_websocket_error, send_runtime_proxy_websocket_error,
@@ -166,6 +167,7 @@ struct RuntimeWebsocketTextMessageFlow<'a> {
     saw_previous_response_not_found: bool,
     websocket_reuse_fresh_retry_profiles: BTreeSet<String>,
     websocket_reuse_fresh_retry_pending: bool,
+    codex_previous_response_id_regression: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -363,6 +365,7 @@ pub(super) mod test_support {
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
             websocket_reuse_fresh_retry_pending: false,
+            codex_previous_response_id_regression: false,
         }
     }
 }

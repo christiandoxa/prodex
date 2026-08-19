@@ -18,7 +18,13 @@ fn runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once
         "role": "user",
         "content": [{"type": "input_text", "text": "turn two"}],
     });
-    let full_history = serde_json::json!([turn_one.clone(), turn_two.clone()]);
+    let full_history = serde_json::json!([
+        turn_one.clone(),
+        {"type": "message", "role": "assistant", "content": "checking"},
+        {"type": "function_call", "call_id": "call-once", "name": "lookup", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call-once", "output": "done"},
+        turn_two.clone()
+    ]);
 
     let first = fixture.post_json(
         "backend-api/codex/responses",
@@ -40,8 +46,12 @@ fn runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once
             .contains("\"id\":\"resp-second\"")
     );
 
-    let second = fixture.post_json(
+    let second = fixture.post_json_with_headers(
         "backend-api/codex/responses",
+        &[runtime_continuation_header(
+            "user-agent",
+            "codex_exec/0.148.0 (Linux; x86_64)",
+        )],
         serde_json::json!({
             "model": "gpt-5.6",
             "previous_response_id": "resp-second",
@@ -82,6 +92,8 @@ fn runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once
     );
     assert!(bodies[2].contains("turn one"));
     assert!(bodies[2].contains("turn two"));
+    assert_eq!(bodies[2].matches("turn two").count(), 1);
+    assert_eq!(bodies[2].matches("function_call_output").count(), 1);
 }
 
 #[test]
@@ -104,13 +116,18 @@ fn runtime_proxy_http_invalid_previous_response_id_stops_after_one_recovery() {
     assert_eq!(first.status().as_u16(), 200);
     let _ = first.text().expect("first response body should decode");
 
-    let second = fixture.post_json(
+    let second = fixture.post_json_with_headers(
         "backend-api/codex/responses",
+        &[runtime_continuation_header(
+            "user-agent",
+            "codex_exec/0.148.0 (Linux; x86_64)",
+        )],
         serde_json::json!({
             "model": "gpt-5.6",
             "previous_response_id": "resp-second",
             "input": [
                 {"type": "message", "role": "user", "content": "turn one"},
+                {"type": "message", "role": "assistant", "content": "turn one result"},
                 {"type": "message", "role": "user", "content": "turn two"},
             ],
             "client_metadata": {"session_id": "session-second"},
@@ -127,6 +144,36 @@ fn runtime_proxy_http_invalid_previous_response_id_stops_after_one_recovery() {
     assert_eq!(accounts, vec!["second-account"; 3]);
     assert_eq!(bodies.len(), 3, "invalid ID recovery must run at most once");
     assert!(!bodies[2].contains("previous_response_id"));
+}
+
+#[test]
+fn runtime_proxy_http_invalid_previous_response_id_workaround_is_off_for_0_147() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_invalid_previous_response_id(),
+        "second",
+        &["second", "main"],
+        &[],
+        Vec::new(),
+    );
+    let response = fixture.post_json_with_headers(
+        "backend-api/codex/responses",
+        &[runtime_continuation_header(
+            "user-agent",
+            "codex-cli/0.147.0",
+        )],
+        serde_json::json!({
+            "model": "gpt-5.6",
+            "previous_response_id": "resp-second",
+            "input": [
+                {"type": "message", "role": "assistant", "content": "turn one result"},
+                {"type": "message", "role": "user", "content": "turn two"}
+            ],
+            "client_metadata": {"session_id": "session-second"},
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 400);
+    assert_eq!(fixture.backend.responses_bodies().len(), 1);
 }
 
 #[test]

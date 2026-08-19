@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 
 use crate::{AppPaths, AppState, AppStateIoExt};
 
-pub(super) fn repair_resume_session_metadata_prefix_from_codex_args(
+pub(crate) fn repair_resume_session_metadata_prefix_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<std::path::PathBuf>> {
     let paths = AppPaths::discover()?;

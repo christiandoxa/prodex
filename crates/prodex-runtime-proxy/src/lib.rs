@@ -631,6 +631,56 @@ pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> 
         })
 }
 
+pub fn runtime_request_thread_id(request: &RuntimeProxyRequest) -> Option<String> {
+    runtime_proxy_request_header_value(&request.headers, "thread-id")
+        .map(str::to_string)
+        .or_else(|| {
+            request
+                .headers
+                .iter()
+                .find_map(|(name, value)| {
+                    name.eq_ignore_ascii_case("x-codex-turn-metadata")
+                        .then_some(value.as_str())
+                })
+                .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+                .and_then(|value| {
+                    value
+                        .get("thread_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+        })
+}
+
+pub fn runtime_request_compaction_generation(request: &RuntimeProxyRequest) -> Option<u64> {
+    let window_id = request
+        .headers
+        .iter()
+        .find_map(|(name, value)| {
+            name.eq_ignore_ascii_case("x-codex-turn-metadata")
+                .then_some(value.as_str())
+        })
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .and_then(|value| {
+            value
+                .get("window_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            serde_json::from_slice::<serde_json::Value>(&request.body)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("client_metadata")
+                        .and_then(|metadata| metadata.get("x-codex-window-id"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+        })?;
+    window_id.rsplit_once(':')?.1.parse().ok()
+}
+
 pub fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
@@ -649,18 +699,52 @@ pub fn runtime_request_without_previous_response_id(
 pub fn runtime_request_full_history_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
-    // Codex builds Responses requests from its persisted prompt history and includes the
-    // session metadata on every turn.  Without that marker, an arbitrary Responses client may
-    // send only the newest input item; removing its incremental id would silently lose context.
     runtime_request_session_id(request)?;
     let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
-    if !value.get("input").is_some_and(serde_json::Value::is_array) {
+    if !value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|input| runtime_input_is_reconstructable_full_history(input))
+    {
         return None;
     }
     remove_previous_response_id(&mut value)?;
     let mut request = request.clone();
     request.body = serde_json::to_vec(&value).ok()?;
     Some(request)
+}
+
+fn runtime_input_is_reconstructable_full_history(input: &[serde_json::Value]) -> bool {
+    let item_type = |item: &serde_json::Value| {
+        item.get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    let item_role = |item: &serde_json::Value| {
+        item.get("role")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+
+    if input
+        .iter()
+        .enumerate()
+        .any(|(index, item)| item_type(item) == "compaction" && index + 1 < input.len())
+    {
+        return true;
+    }
+
+    input.iter().enumerate().any(|(user_index, item)| {
+        item_role(item) == "user"
+            && input
+                .iter()
+                .enumerate()
+                .skip(user_index + 1)
+                .any(|(output_index, output)| {
+                    (item_role(output) == "assistant" || item_type(output) == "function_call")
+                        && output_index + 1 < input.len()
+                })
+    })
 }
 
 pub fn runtime_request_text_without_previous_response_id(request_text: &str) -> Option<String> {
