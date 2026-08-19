@@ -128,6 +128,36 @@ pub(crate) struct RuntimeResponsesAttemptOptions<'a> {
     pub(crate) selection_attempt: usize,
 }
 
+fn runtime_responses_full_history_recovery_request(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request: &RuntimeProxyRequest,
+    previous_response_id: Option<&str>,
+    exact_invalid_previous_response_id: bool,
+    codex_previous_response_id_regression: bool,
+    full_history_fallback_used: bool,
+) -> Result<Option<(String, RuntimeProxyRequest)>> {
+    if !exact_invalid_previous_response_id
+        || !codex_previous_response_id_regression
+        || full_history_fallback_used
+    {
+        return Ok(None);
+    }
+    let Some(previous_response_id) = previous_response_id else {
+        return Ok(None);
+    };
+    if runtime_response_bound_profile(shared, previous_response_id, RuntimeRouteKind::Responses)?
+        .as_deref()
+        != Some(profile_name)
+    {
+        return Ok(None);
+    }
+    Ok(
+        runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(request)
+            .map(|request| (previous_response_id.to_string(), request)),
+    )
+}
+
 pub(crate) fn attempt_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -276,27 +306,21 @@ pub(crate) fn attempt_runtime_responses_request(
                 runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
                     &parts.body,
                 );
-            if status == 400
-                && exact_invalid_previous_response_id
-                && codex_previous_response_id_regression
-                && !full_history_fallback_used
-                && let Some(previous_response_id) = previous_response_id_for_attempt.as_deref()
-                && runtime_response_bound_profile(
+            if let Some((previous_response_id, fallback_request)) =
+                runtime_responses_full_history_recovery_request(
                     shared,
-                    previous_response_id,
-                    RuntimeRouteKind::Responses,
+                    profile_name,
+                    &request_for_attempt,
+                    previous_response_id_for_attempt.as_deref(),
+                    status == 400 && exact_invalid_previous_response_id,
+                    codex_previous_response_id_regression,
+                    full_history_fallback_used,
                 )?
-                .as_deref()
-                    == Some(profile_name)
-                && let Some(fallback_request) =
-                    runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(
-                        &request_for_attempt,
-                    )
             {
                 clear_runtime_dead_response_bindings(
                     shared,
                     profile_name,
-                    &[previous_response_id.to_string()],
+                    std::slice::from_ref(&previous_response_id),
                     "invalid_previous_response_id",
                 )?;
                 runtime_proxy_log(
@@ -315,7 +339,7 @@ pub(crate) fn attempt_runtime_responses_request(
                             runtime_proxy_log_field(
                                 "previous_response_id_hash",
                                 runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
-                                    previous_response_id,
+                                    previous_response_id.as_str(),
                                 )),
                             ),
                             runtime_proxy_log_field("attempt", "one"),
@@ -371,21 +395,16 @@ pub(crate) fn attempt_runtime_responses_request(
                 ..
             })
         );
-        if exact_sse_invalid_previous_response_id
-            && codex_previous_response_id_regression
-            && !full_history_fallback_used
-            && let Some(previous_response_id) = previous_response_id_for_attempt.as_deref()
-            && runtime_response_bound_profile(
+        if let Some((previous_response_id, fallback_request)) =
+            runtime_responses_full_history_recovery_request(
                 shared,
-                previous_response_id,
-                RuntimeRouteKind::Responses,
+                profile_name,
+                &request_for_attempt,
+                previous_response_id_for_attempt.as_deref(),
+                exact_sse_invalid_previous_response_id,
+                codex_previous_response_id_regression,
+                full_history_fallback_used,
             )?
-            .as_deref()
-                == Some(profile_name)
-            && let Some(fallback_request) =
-                runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(
-                    &request_for_attempt,
-                )
         {
             let recovery_guard = match &mut prepared {
                 Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
@@ -402,7 +421,7 @@ pub(crate) fn attempt_runtime_responses_request(
             clear_runtime_dead_response_bindings(
                 shared,
                 profile_name,
-                &[previous_response_id.to_string()],
+                std::slice::from_ref(&previous_response_id),
                 "invalid_previous_response_id",
             )?;
             runtime_proxy_log(
@@ -419,7 +438,7 @@ pub(crate) fn attempt_runtime_responses_request(
                         runtime_proxy_log_field(
                             "previous_response_id_hash",
                             runtime_proxy_crate::runtime_proxy_identifier_hash(Some(
-                                previous_response_id,
+                                previous_response_id.as_str(),
                             )),
                         ),
                         runtime_proxy_log_field("attempt", "one"),
