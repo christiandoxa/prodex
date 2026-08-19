@@ -305,20 +305,25 @@ fn find_persistent_rollout_by_session_id(root: &Path, session_id: &str) -> Optio
                 pending.push(path);
                 continue;
             }
-            if !metadata.is_file()
-                || !is_session_metadata_file(&path)
-                || !path_is_contained_regular_file(root, &path)
-            {
-                continue;
-            }
-            if codex_session_id_from_path(&path).as_deref() == Some(session_id)
-                || session_file_has_resume_metadata_for_selector(&path, session_id).unwrap_or(false)
-            {
+            if let Some(path) = persistent_rollout_candidate(root, path, session_id) {
                 return Some(path);
             }
         }
     }
     None
+}
+
+fn persistent_rollout_candidate(root: &Path, path: PathBuf, session_id: &str) -> Option<PathBuf> {
+    if !is_session_metadata_file(&path) || !path_is_contained_regular_file(root, &path) {
+        return None;
+    }
+    if codex_session_id_from_path(&path).as_deref() == Some(session_id)
+        || session_file_has_resume_metadata_for_selector(&path, session_id).unwrap_or(false)
+    {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn is_codex_state_db_path(path: &Path) -> bool {
