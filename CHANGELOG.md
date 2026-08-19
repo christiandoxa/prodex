@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.410.0 - 2026-08-19
+
+### Runtime
+
+- Harden response chains across reconnects (`adb35b4`)
+- Recover Codex 0.148 response chains (`c559d31`)
+
 ## 0.409.0 - 2026-08-19
 
 ### Runtime
