@@ -2,23 +2,28 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.410.1 - 2026-08-20
+
+### Runtime
+
+- Extend runtime and routing kernels (`ba7b2de`)
+
+### CLI
+
+- Support positional profile login (`256dea4`)
+- Consolidate quota bridge (`6187457`)
+- Expand quota core and enforce real CI parity (`99f7337`)
+- Add opt-in quota core bridge (`8986955`)
+
 ## 0.410.0 - 2026-08-19
 
 ### Runtime
 
+- Satisfy response recovery quality gate (`2b3d273`)
+- Unblock cross-platform release (`4aa8d04`)
 - Harden response chains across reconnects (`adb35b4`)
 - Recover Codex 0.148 response chains (`c559d31`)
-
-## 0.409.0 - 2026-08-19
-
-### Runtime
-
 - Audit Codex rust-v0.148 compatibility and continuation lifecycle (`434e151`)
-
-## 0.408.11 - 2026-08-19
-
-### Runtime
-
 - Preserve bounded preference lock retries (`bd36239`)
 - Remove historical startup and shutdown scans (`71de67a`)
 - Fix audited runtime, storage, release docs, and CI (`847efd6`)
@@ -28,48 +33,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Harden log completion and auth caching (`85b98d4`)
 - Preserve first-pass profile rotation (`53dd38b`)
 - Persist quota readiness across profiles (`20c4bf7`)
-
-### CLI
-
-- Publish refresh result after heartbeat timeout (`236d88d`)
-- Align Kiro effort and persisted quota fallback (`88286e5`)
-- Preserve model and quota readiness across profiles (`554bc5a`)
-- Skip catalog startup (`1bb3220`)
-- Include weekly-ready OpenAI profiles (`a3c5b5d`)
-- Use ready quota snapshots (`0375a53`)
-- Continue after profile launch errors (`169ac6b`)
-- Restore weekly-only availability (`ee3d4f1`)
-
-### Docs
-
-- Show GitHub release downloads (`2db7a71`)
-- Record evidence-based audit discipline (`e129baa`)
-- Keep README installer on latest (`895a610`)
-- Install latest release by default (`1e00977`)
-- Pin latest release install commands (`b07504c`)
-
-### Deps
-
-- Include dependabot uuid update (`94a0364`)
-
-### Misc
-
-- Persist model preferences by logical scope (`55b4c90`)
-- Revert "chore(release): release 0.408.9" (`0d2a48c`)
-- Revert "chore(release): release 0.408.9" (`237b17b`)
-- Reconcile sessions and persist model preferences (`d84ad90`)
-- Close audited gateway and provider gaps (`cdfd4c2`)
-- Harden gateway headers and release tooling (`4709593`)
-- Preserve UUID identifiers (`4815838`)
-- Clean live broker descendants (`eaa5bcf`)
-- Scope provider-core to tests (`c0e0c17`)
-- Close diagnostic secret boundary leaks (`821ad97`)
-- Serialize backup recovery repairs (`ba002e0`)
-
-## 0.407.4 - 2026-08-12
-
-### Runtime
-
 - Recover healthy profile selection (`4c68738`)
 - Improve proxy recovery and payload logging (`57c2e3c`)
 - Preserve websocket owner recovery (`42d4643`)
@@ -146,6 +109,14 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Publish refresh result after heartbeat timeout (`236d88d`)
+- Align Kiro effort and persisted quota fallback (`88286e5`)
+- Preserve model and quota readiness across profiles (`554bc5a`)
+- Skip catalog startup (`1bb3220`)
+- Include weekly-ready OpenAI profiles (`a3c5b5d`)
+- Use ready quota snapshots (`0375a53`)
+- Continue after profile launch errors (`169ac6b`)
+- Restore weekly-only availability (`ee3d4f1`)
 - Harden child tool launches (`8e2f274`)
 - Preserve quota snapshots and aliases (`b5b6325`)
 - Support trusted imports and Codex 0.147.0 (`1ac7b11`)
@@ -196,6 +167,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Show GitHub release downloads (`2db7a71`)
+- Record evidence-based audit discipline (`e129baa`)
+- Keep README installer on latest (`895a610`)
+- Install latest release by default (`1e00977`)
+- Pin latest release install commands (`b07504c`)
 - Strengthen agent guidance (`171c206`)
 - Refresh smart context evidence (`d0c04f4`)
 - Include fuzz lock in manual releases (`93f5c30`)
@@ -215,6 +191,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Deps
 
+- Include dependabot uuid update (`94a0364`)
 - Bump debian from `7b140f3` to `abd67ff` (`b16425a`)
 - Bump rust from `77fac8b` to `14bc9c5` (`7fc6998`)
 - Bump the fuzz-cargo group in /fuzz with 2 updates (`00ee0c1`)
@@ -248,6 +225,17 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Persist model preferences by logical scope (`55b4c90`)
+- Revert "chore(release): release 0.408.9" (`0d2a48c`)
+- Revert "chore(release): release 0.408.9" (`237b17b`)
+- Reconcile sessions and persist model preferences (`d84ad90`)
+- Close audited gateway and provider gaps (`cdfd4c2`)
+- Harden gateway headers and release tooling (`4709593`)
+- Preserve UUID identifiers (`4815838`)
+- Clean live broker descendants (`eaa5bcf`)
+- Scope provider-core to tests (`c0e0c17`)
+- Close diagnostic secret boundary leaks (`821ad97`)
+- Serialize backup recovery repairs (`ba002e0`)
 - Show provider models (`344f3d6`)
 - Compile provider process cleanup (`ad9a559`)
 - Bound SDK requests and responses (`27bc17b`)
