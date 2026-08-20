@@ -407,7 +407,7 @@ jobs:
             export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
-          build_args=(--release --locked --target "${{ matrix.target }}")
+          build_args=(--release --target "${{ matrix.target }}")
           if [ "${{ matrix.mojo-release }}" = "true" ]; then
             export PRODEX_MOJO_REQUIRED=1
             export PRODEX_MOJO_VERSION="${MOJO_VERSION}"
@@ -420,9 +420,9 @@ jobs:
           fi
           for attempt in 1 2 3; do
             if [ "${{ matrix.use-cross }}" = "true" ]; then
-              cross build "${build_args[@]}" && exit 0
+              cross build --locked "${build_args[@]}" && exit 0
             else
-              RUSTC_WRAPPER=sccache cargo build "${build_args[@]}" && exit 0
+              RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}" && exit 0
             fi
             if [ "${attempt}" = "3" ]; then
               exit 1
