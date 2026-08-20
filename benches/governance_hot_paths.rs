@@ -5,22 +5,24 @@ use prodex_application::{
     plan_application_request_inspection,
 };
 use prodex_domain::{
-    CanonicalRoute, CapabilitySet, Channel, ClassificationRequest, ClassificationRule,
-    ClassificationRuleSet, ClassificationRuleSetChecksum, ClassificationRuleSetRevisionId,
-    ContentLocation, CredentialScope, DataClassification, DataModality, DataPolicyContext,
-    DetectorId, DetectorRevisionId, EnvironmentContext, FindingKind, GovernanceObligation,
-    GovernancePolicyArtifact, GovernancePolicyRule, GovernancePolicyRuleId, GovernedAction,
-    InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode, NetworkZone,
-    PolicyDecision, PolicyEffect, PolicyInput, PolicyReasonCode, PolicyRevisionId,
-    PolicyRuleCondition, Principal, PrincipalId, PrincipalKind, PrincipalPolicyAttributes,
-    ProviderTrustTier, QuotaContext, RequestPolicyAttributes, RequestRisk, Role, SecretRef,
-    SessionPolicyContext, TenantContext, TenantId, classify_inspection,
-    compile_classification_rule_set, compile_governance_policy, evaluate_governance_policy,
+    CanonicalRoute, CapabilityRequest, CapabilitySet, Channel, ClassificationRequest,
+    ClassificationRule, ClassificationRuleSet, ClassificationRuleSetChecksum,
+    ClassificationRuleSetRevisionId, ContentLocation, CredentialScope, DataClassification,
+    DataModality, DataPolicyContext, DetectorId, DetectorRevisionId, EnvironmentContext,
+    FindingKind, GovernanceObligation, GovernancePolicyArtifact, GovernancePolicyRule,
+    GovernancePolicyRuleId, GovernedAction, InspectionCoverage, InspectionFinding,
+    InspectionLimits, InspectionReasonCode, ModelCapability, NetworkZone, PolicyDecision,
+    PolicyEffect, PolicyInput, PolicyReasonCode, PolicyRevisionId, PolicyRuleCondition, Principal,
+    PrincipalId, PrincipalKind, PrincipalPolicyAttributes, ProviderTrustTier, QuotaContext,
+    RequestPolicyAttributes, RequestRisk, Role, SecretRef, SessionPolicyContext, TenantContext,
+    TenantId, classify_inspection, compile_classification_rule_set, compile_governance_policy,
+    evaluate_governance_policy,
 };
-use prodex_provider_core::ProviderId;
+use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoutingRequest,
-    GovernedRoutingSignals, GovernedRoutingWeights, MAX_GOVERNED_ROUTING_CANDIDATES,
+    GovernedRoutingSignals, GovernedRoutingWeights, MAX_GOVERNED_ROUTING_CANDIDATES, ProviderRoute,
+    ProviderRouteCapabilityCandidate, negotiate_provider_route_capability,
     plan_governed_provider_route,
 };
 use std::hint::black_box;
@@ -352,6 +354,34 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
         ProviderId::Kiro,
         ProviderId::Local,
     ];
+    let capability_request =
+        CapabilityRequest::new(CapabilitySet::new(vec![ModelCapability::ResponsesApi]));
+    let capability_candidates = (0..MAX_GOVERNED_ROUTING_CANDIDATES)
+        .map(|index| {
+            let route = ProviderRoute::new(
+                provider_ids[index % provider_ids.len()],
+                ProviderEndpoint::Responses,
+                ProviderWireFormat::OpenAiResponses,
+                format!("model-{index}"),
+            )
+            .unwrap();
+            let capabilities = if index + 1 == MAX_GOVERNED_ROUTING_CANDIDATES {
+                CapabilitySet::new(vec![ModelCapability::ResponsesApi])
+            } else {
+                CapabilitySet::new(Vec::new())
+            };
+            ProviderRouteCapabilityCandidate::new(route, capabilities)
+        })
+        .collect::<Vec<_>>();
+    c.bench_function("governance_capability_match_max_candidates", |b| {
+        b.iter(|| {
+            black_box(negotiate_provider_route_capability(
+                &capability_request,
+                &capability_candidates,
+            ))
+        })
+    });
+
     let providers = (0..MAX_GOVERNED_ROUTING_CANDIDATES)
         .map(|index| GovernedProviderDescriptor {
             revision: index as u64 + 1,

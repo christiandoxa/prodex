@@ -72,10 +72,14 @@ pub fn self_test() -> bool {
             && score.five_hour_pressure == 2_000
             && score.reserve_floor == 80
     });
+    let candidate_plan_ok = runtime::candidate_plan_self_test();
+    let pressure_snapshot_ok = runtime::smart_context_pressure_snapshot_self_test();
     let checks = [
         routing_ok,
         capability_ok,
         profile_ok,
+        candidate_plan_ok,
+        pressure_snapshot_ok,
         routing::abi_version() == Some(routing::ABI_VERSION),
         quota,
         runtime::pressure_band_for_route(Some((4, 1)), None, 0) == 2,

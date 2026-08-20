@@ -102,7 +102,6 @@ def prodex_runtime_quota_profile_score_batch(
             reserve_floor[unsafe_offset=index] = five_hour_remaining_value
 
     return 0
-from std.memory import Pointer
 
 comptime INT64_MAX: Int64 = 9223372036854775807
 
@@ -131,3 +130,188 @@ def runtime_quota_scale_pressure(pressure: Int64, scale_bps: Int64) -> Int64:
     if pressure > INT64_MAX / scale:
         return INT64_MAX
     return (pressure * scale) / 10_000
+
+comptime RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: Int64 = 22
+comptime RUNTIME_CANDIDATE_PLAN_MAX_COUNT: Int64 = 256
+
+def runtime_candidate_field(fields: Pointer[mut=False, Int64, _], index: Int64, field: Int64) -> Int64:
+    return fields[unsafe_offset=(index * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT) + field]
+
+def runtime_candidate_source_sort_key(route_kind: Int64, source: Int64) -> Int64:
+    if route_kind == 0 or route_kind == 2:
+        return source
+    return 0
+
+def runtime_candidate_ready_less(
+    fields: Pointer[mut=False, Int64, _],
+    left: Int64,
+    right: Int64,
+    route_kind: Int64,
+) -> Bool:
+    var left_value = runtime_candidate_field(fields, left, 1)
+    var right_value = runtime_candidate_field(fields, right, 1)
+    if left_value != right_value:
+        return left_value < right_value
+
+    # quota_sort_key = (band, a, b, c, Reverse(d), Reverse(e), Reverse(f), g, h)
+    left_value = runtime_candidate_field(fields, left, 2)
+    right_value = runtime_candidate_field(fields, right, 2)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 3)
+    right_value = runtime_candidate_field(fields, right, 3)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 4)
+    right_value = runtime_candidate_field(fields, right, 4)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 5)
+    right_value = runtime_candidate_field(fields, right, 5)
+    if left_value != right_value:
+        return left_value > right_value
+    left_value = runtime_candidate_field(fields, left, 6)
+    right_value = runtime_candidate_field(fields, right, 6)
+    if left_value != right_value:
+        return left_value > right_value
+    left_value = runtime_candidate_field(fields, left, 7)
+    right_value = runtime_candidate_field(fields, right, 7)
+    if left_value != right_value:
+        return left_value > right_value
+    left_value = runtime_candidate_field(fields, left, 8)
+    right_value = runtime_candidate_field(fields, right, 8)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 9)
+    right_value = runtime_candidate_field(fields, right, 9)
+    if left_value != right_value:
+        return left_value < right_value
+
+    left_value = runtime_candidate_source_sort_key(
+        route_kind,
+        runtime_candidate_field(fields, left, 11),
+    )
+    right_value = runtime_candidate_source_sort_key(
+        route_kind,
+        runtime_candidate_field(fields, right, 11),
+    )
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 12)
+    right_value = runtime_candidate_field(fields, right, 12)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 13)
+    right_value = runtime_candidate_field(fields, right, 13)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 14)
+    right_value = runtime_candidate_field(fields, right, 14)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 15)
+    right_value = runtime_candidate_field(fields, right, 15)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 16)
+    right_value = runtime_candidate_field(fields, right, 16)
+    if left_value != right_value:
+        return left_value < right_value
+    left_value = runtime_candidate_field(fields, left, 17)
+    right_value = runtime_candidate_field(fields, right, 17)
+    if left_value != right_value:
+        return left_value < right_value
+    return left < right
+
+def runtime_candidate_less(
+    fields: Pointer[mut=False, Int64, _],
+    left: Int64,
+    right: Int64,
+    route_kind: Int64,
+    fallback: Bool,
+) -> Bool:
+    if fallback:
+        var left_value = runtime_candidate_field(fields, left, 18)
+        var right_value = runtime_candidate_field(fields, right, 18)
+        if left_value != right_value:
+            return left_value < right_value
+        left_value = runtime_candidate_field(fields, left, 19)
+        right_value = runtime_candidate_field(fields, right, 19)
+        if left_value != right_value:
+            return left_value < right_value
+        left_value = runtime_candidate_field(fields, left, 20)
+        right_value = runtime_candidate_field(fields, right, 20)
+        if left_value != right_value:
+            return left_value < right_value
+        left_value = runtime_candidate_field(fields, left, 21)
+        right_value = runtime_candidate_field(fields, right, 21)
+        if left_value != right_value:
+            return left_value < right_value
+    return runtime_candidate_ready_less(fields, left, right, route_kind)
+
+@export("prodex_runtime_candidate_plan_batch")
+def prodex_runtime_candidate_plan_batch(
+    fields: Pointer[mut=False, Int64, _],
+    ready_indices: Pointer[mut=True, Int64, _],
+    ready_count: Pointer[mut=True, Int64, _],
+    fallback_indices: Pointer[mut=True, Int64, _],
+    fallback_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+    route_kind: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT:
+        return 1
+    if route_kind < 0 or route_kind > 3:
+        return 2
+
+    for index in range(count):
+        if runtime_candidate_field(fields, index, 0) < 0 or runtime_candidate_field(fields, index, 0) > 1:
+            return 2
+        if runtime_candidate_field(fields, index, 11) < 0 or runtime_candidate_field(fields, index, 11) > 1:
+            return 2
+        if runtime_candidate_field(fields, index, 14) < 0 or runtime_candidate_field(fields, index, 14) > 1:
+            return 2
+        if runtime_candidate_field(fields, index, 1) < 0 or runtime_candidate_field(fields, index, 12) < 0 or runtime_candidate_field(fields, index, 13) < 0:
+            return 2
+        if runtime_candidate_field(fields, index, 16) < 0 or runtime_candidate_field(fields, index, 18) < 0:
+            return 2
+
+    var ready_len: Int64 = 0
+    for index in range(count):
+        if runtime_candidate_field(fields, index, 0) == 0:
+            ready_indices[unsafe_offset=ready_len] = index
+            ready_len += 1
+    ready_count[unsafe_offset=0] = ready_len
+
+    var fallback_len: Int64 = 0
+    for index in range(count):
+        fallback_indices[unsafe_offset=fallback_len] = index
+        fallback_len += 1
+    fallback_count[unsafe_offset=0] = fallback_len
+
+    # ponytail: bounded O(n²) selection keeps the ABI allocation-free; replace with
+    # a verified stable sort only if the runtime pool exceeds 256 candidates.
+    for position in range(ready_len):
+        var best = position
+        for offset in range(position + 1, ready_len):
+            var candidate = ready_indices[unsafe_offset=offset]
+            var current = ready_indices[unsafe_offset=best]
+            if runtime_candidate_less(fields, candidate, current, route_kind, False):
+                best = offset
+        if best != position:
+            var selected = ready_indices[unsafe_offset=best]
+            ready_indices[unsafe_offset=best] = ready_indices[unsafe_offset=position]
+            ready_indices[unsafe_offset=position] = selected
+
+    for position in range(fallback_len):
+        var best = position
+        for offset in range(position + 1, fallback_len):
+            var candidate = fallback_indices[unsafe_offset=offset]
+            var current = fallback_indices[unsafe_offset=best]
+            if runtime_candidate_less(fields, candidate, current, route_kind, True):
+                best = offset
+        if best != position:
+            var selected = fallback_indices[unsafe_offset=best]
+            fallback_indices[unsafe_offset=best] = fallback_indices[unsafe_offset=position]
+            fallback_indices[unsafe_offset=position] = selected
+    return 0

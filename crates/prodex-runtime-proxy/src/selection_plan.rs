@@ -357,9 +357,12 @@ pub fn build_runtime_response_candidate_execution_plan(
     excluded_profiles: &BTreeSet<String>,
     options: RuntimeResponseCandidatePlanOptions<'_>,
 ) -> RuntimeResponseCandidateExecutionPlan {
-    let available_candidates = candidates
+    let available_inputs = candidates
         .into_iter()
         .filter(|candidate| !excluded_profiles.contains(&candidate.name))
+        .collect::<Vec<_>>();
+    let available_candidates = available_inputs
+        .iter()
         .map(|candidate| {
             let quota_guard_reason = matches!(
                 options.route_kind,
@@ -397,6 +400,24 @@ pub fn build_runtime_response_candidate_execution_plan(
             }
         })
         .collect::<Vec<_>>();
+
+    #[cfg(feature = "mojo")]
+    if let Some(plan) =
+        crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
+    {
+        return RuntimeResponseCandidateExecutionPlan {
+            ready_candidates: plan
+                .ready_indices
+                .into_iter()
+                .map(|index| available_candidates[index].clone())
+                .collect(),
+            fallback_candidates: plan
+                .fallback_indices
+                .into_iter()
+                .map(|index| available_candidates[index].clone())
+                .collect(),
+        };
+    }
 
     let mut ready_candidates = available_candidates
         .iter()
