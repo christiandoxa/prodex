@@ -404,6 +404,8 @@ jobs:
           diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary}" doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
           clean_root="$(mktemp -d)"
           trap 'rm -rf "${clean_root}"' EXIT
@@ -414,6 +416,7 @@ jobs:
           env -i PATH="/usr/bin:/bin" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
             "${binary}" doctor --runtime --json > "${clean_root}/diagnostics.json"
           grep -F '"implementation": "mojo-compiled-in"' "${clean_root}/diagnostics.json"
+          grep -F '"compiler_required": false' "${clean_root}/diagnostics.json"
           grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"
 
       - name: Verify Linux GLIBC baseline
