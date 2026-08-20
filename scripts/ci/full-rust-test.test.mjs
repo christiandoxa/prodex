@@ -140,6 +140,19 @@ test("release hygiene does not inherit an unavailable Rust compiler wrapper", ()
   assert.match(step, /env:\n\s+RUSTC_WRAPPER: ""/);
 });
 
+test("release Mojo install activates the compiler in its current step", () => {
+  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const installStep = workflow.match(
+    /- name: Install pinned Mojo toolchain for release([\s\S]*?)- name: Cache Rust dependencies/,
+  )?.[1];
+
+  assert.ok(installStep, "release Mojo install step missing");
+  assert.match(
+    installStep,
+    /export PATH="\$\{GITHUB_WORKSPACE\}\/\.venv\/bin:\$\{PATH\}"[\s\S]*mojo --version/,
+  );
+});
+
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const changes = workflow.match(/\n  changes:\n([\s\S]*?)\n  fmt:/)?.[1];

@@ -271,6 +271,7 @@ jobs:
           set -euo pipefail
           uv venv --python 3.12 .venv
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          export PATH="${GITHUB_WORKSPACE}/.venv/bin:${PATH}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
           mojo --version
 
