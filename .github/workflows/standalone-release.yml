@@ -24,7 +24,7 @@ env:
   CARGO_HTTP_MULTIPLEXING: "false"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
-  KIRO_CLI_VERSION: "2.18.1"
+  KIRO_CLI_VERSION: "2.19.0"
   MOJO_VERSION: "1.0.0"
   UV_VERSION: "0.11.7"
 
@@ -155,8 +155,19 @@ jobs:
             sleep 30
           done
 
+      - name: Verify pinned Kiro CLI release
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          if [ "${manifest_version}" != "${KIRO_CLI_VERSION}" ]; then
+            echo "Kiro stable release ${manifest_version} does not match pinned ${KIRO_CLI_VERSION}" >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.target }}
+    needs: verify-ci
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 120
     permissions:
@@ -469,8 +480,6 @@ jobs:
           echo "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
           echo "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
           echo "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
-          kiro_manifest_version="$(curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
-          test "${kiro_manifest_version}" = "${KIRO_CLI_VERSION}"
           bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
           VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
           bash "${RUNNER_TEMP}/claude-install.sh" 2.1.220

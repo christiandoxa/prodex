@@ -437,7 +437,7 @@ export function validateReleaseContainerPublication(contents) {
     }
   }
   const nativeClientRetryFlags = "--retry 5 --retry-all-errors --retry-delay 2";
-  if (build.split(nativeClientRetryFlags).length - 1 !== 4) {
+  if (`${verify}\n${build}`.split(nativeClientRetryFlags).length - 1 !== 4) {
     violations.push(
       ".github/workflows/standalone-release.yml: every native client download must retry transient failures",
     );
