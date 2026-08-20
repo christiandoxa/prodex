@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod keyring;
 mod refresh_lease;
+#[cfg(target_os = "linux")]
+mod secure_file;
 
 #[test]
 fn private_payload_encryption_authenticates_scope_and_content() {

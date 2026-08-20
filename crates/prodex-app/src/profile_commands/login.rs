@@ -90,17 +90,18 @@ enum PromptLoginSelection {
 
 pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let login_request = match resolve_login_request(args.profile.as_deref(), args.codex_args)? {
+    let (selected_profile, codex_args) = args.into_selected_profile();
+    let login_request = match resolve_login_request(selected_profile.as_deref(), codex_args)? {
         ResolvedLoginRequest::Login(login_request) => login_request,
         ResolvedLoginRequest::ImportCopilot => return handle_copilot_login_import(),
     };
     if login_request.method == LoginMethod::Antigravity {
-        if args.profile.is_some() {
+        if selected_profile.is_some() {
             bail!("Antigravity login is global to the `agy` CLI and does not use Prodex profiles");
         }
         return exit_with_status(run_antigravity_login(&paths)?);
     }
-    let status = if let Some(profile_name) = args.profile.as_deref() {
+    let status = if let Some(profile_name) = selected_profile.as_deref() {
         login_into_profile(&paths, profile_name, &login_request)?
     } else {
         login_with_auto_profile(&paths, &login_request)?

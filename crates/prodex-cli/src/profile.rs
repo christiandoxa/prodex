@@ -137,16 +137,39 @@ pub struct CodexPassthroughArgs {
     /// Existing profile to log into. If omitted, prodex creates or reuses a profile by workspace identity.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Login-method flags or extra arguments for the selected provider login flow.
-    #[arg(value_name = "LOGIN_ARG", allow_hyphen_values = true)]
+    /// Optional profile name first, followed by login-method flags or provider arguments.
+    #[arg(value_name = "PROFILE_OR_LOGIN_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
+}
+
+impl CodexPassthroughArgs {
+    pub fn selected_profile(&self) -> Option<&str> {
+        self.profile.as_deref().or_else(|| {
+            self.codex_args
+                .first()
+                .and_then(|arg| arg.to_str())
+                .filter(|arg| !arg.starts_with('-') && *arg != "status")
+        })
+    }
+
+    pub fn into_selected_profile(mut self) -> (Option<String>, Vec<OsString>) {
+        let positional_profile = if self.profile.is_none() {
+            self.selected_profile().map(str::to_owned)
+        } else {
+            None
+        };
+        if positional_profile.is_some() {
+            self.codex_args.remove(0);
+        }
+        (self.profile.or(positional_profile), self.codex_args)
+    }
 }
 
 impl fmt::Debug for CodexPassthroughArgs {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CodexPassthroughArgs")
-            .field("profile_configured", &self.profile.is_some())
+            .field("profile_configured", &self.selected_profile().is_some())
             .field("codex_args_count", &self.codex_args.len())
             .finish()
     }

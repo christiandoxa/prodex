@@ -43,7 +43,7 @@ Add another account only when needed:
 
 ```bash
 prodex profile add second
-prodex login --profile second
+prodex login second
 ```
 
 Prodex keeps each managed profile in a separate Codex home.

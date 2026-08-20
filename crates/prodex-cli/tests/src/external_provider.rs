@@ -187,6 +187,37 @@ fn login_accepts_antigravity_flag_as_passthrough_arg() {
 }
 
 #[test]
+fn login_accepts_positional_profile_name() {
+    let command = parse_cli_command_from(["prodex", "login", "main", "--device-auth"])
+        .expect("named login should parse");
+    let Commands::Login(args) = command else {
+        panic!("expected login command");
+    };
+
+    assert_eq!(args.selected_profile(), Some("main"));
+    let (profile, codex_args) = args.into_selected_profile();
+    assert_eq!(profile.as_deref(), Some("main"));
+    assert_eq!(codex_args, vec![OsString::from("--device-auth")]);
+
+    let Commands::Login(args) =
+        parse_cli_command_from(["prodex", "login", "--profile", "main", "--device-auth"])
+            .expect("named option login should remain supported")
+    else {
+        panic!("expected login command");
+    };
+    assert_eq!(args.selected_profile(), Some("main"));
+    assert_eq!(args.codex_args, vec![OsString::from("--device-auth")]);
+
+    let Commands::Login(args) = parse_cli_command_from(["prodex", "login", "status"])
+        .expect("Codex login status should remain passthrough")
+    else {
+        panic!("expected login command");
+    };
+    assert_eq!(args.selected_profile(), None);
+    assert_eq!(args.codex_args, vec![OsString::from("status")]);
+}
+
+#[test]
 fn super_deepseek_provider_rejects_unknown_provider() {
     assert!(parse_cli_command_from(["prodex", "s", "--provider", "unknown", "exec"]).is_err());
 }
