@@ -153,6 +153,18 @@ test("release Mojo install activates the compiler in its current step", () => {
   );
 });
 
+test("release validates the Kiro pin before build fan-out", () => {
+  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const verifyCi = workflow.match(/\n  verify-ci:\n([\s\S]*?)\n  build:/)?.[1];
+  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
+
+  assert.ok(verifyCi, "release CI verification job missing");
+  assert.ok(build, "release build job missing");
+  assert.match(verifyCi, /Verify pinned Kiro CLI release/);
+  assert.match(verifyCi, /manifest_version[\s\S]*KIRO_CLI_VERSION/);
+  assert.match(build, /needs: verify-ci/);
+});
+
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const changes = workflow.match(/\n  changes:\n([\s\S]*?)\n  fmt:/)?.[1];
