@@ -9,6 +9,7 @@ MIGRATE="${PRODEX_MIGRATE:-false}"
 RUNNING_EXE="${PRODEX_RUNNING_EXE:-}"
 BASE_URL_OVERRIDE="${PRODEX_RELEASE_BASE_URL:-}"
 NO_PATH_UPDATE="${PRODEX_NO_PATH_UPDATE:-false}"
+REQUIRE_MOJO="${PRODEX_INSTALL_REQUIRE_MOJO:-false}"
 CODEX_NPM_VERSION="0.148.0"
 
 if [ -n "${PRODEX_INSTALL_DIR:-}" ]; then
@@ -51,6 +52,7 @@ Environment:
   PRODEX_RELEASE           Version to install; overridden by --release.
   PRODEX_INSTALL_DIR       Binary directory; defaults to $HOME/.local/bin.
   PRODEX_NON_INTERACTIVE   Set to 1, true, or yes to skip prompts.
+  PRODEX_INSTALL_REQUIRE_MOJO  Require a release artifact with compiled-in Mojo.
 EOF
         exit 0
         ;;
@@ -223,6 +225,54 @@ cleanup() {
   [ -z "$tmp_dir" ] || rm -rf "$tmp_dir"
 }
 
+release_manifest_row() {
+  manifest_path="$1"
+  target_name="$2"
+  awk -F '\t' -v target_name="$target_name" '$1 == target_name { print; exit }' "$manifest_path"
+}
+
+verify_staged_implementation() {
+  expected_implementation="$1"
+  case "$expected_implementation" in
+    rust | mojo-compiled-in) ;;
+    mojo-bundled-runtime)
+      echo "Release declares an unsupported Mojo runtime bundle for $target." >&2
+      exit 1
+      ;;
+    *)
+      echo "Release manifest contains an unknown implementation: $expected_implementation" >&2
+      exit 1
+      ;;
+  esac
+
+  case "$REQUIRE_MOJO" in
+    1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss])
+      [ "$expected_implementation" = "mojo-compiled-in" ] || {
+        echo "Release $RELEASE has no Mojo-enabled artifact for $target." >&2
+        exit 1
+      }
+      ;;
+  esac
+
+  diagnostics="$(PRODEX_HOME="$tmp_dir/verify-home" "$staged_path" doctor --runtime --json 2>/dev/null || true)"
+  implementation="$(printf '%s\n' "$diagnostics" | awk -F '"' '/"implementation"[[:space:]]*:/ { print $4; exit }')"
+  if [ "$implementation" != "$expected_implementation" ] \
+    && ! { [ "$expected_implementation" = "rust" ] && [ "$implementation" = "rust-fallback" ]; }; then
+    echo "Downloaded Prodex implementation $implementation did not match manifest $expected_implementation." >&2
+    exit 1
+  fi
+  if [ "$expected_implementation" = "mojo-compiled-in" ]; then
+    printf '%s\n' "$diagnostics" | grep -F '"fallback": false' >/dev/null 2>&1 || {
+      echo "Downloaded Prodex did not report fallback=false." >&2
+      exit 1
+    }
+    printf '%s\n' "$diagnostics" | grep -F '"self_test": "passed"' >/dev/null 2>&1 || {
+      echo "Downloaded Prodex Mojo self-test failed." >&2
+      exit 1
+    }
+  fi
+}
+
 parse_args "$@"
 validate_release
 require_command mktemp
@@ -264,10 +314,70 @@ tmp_dir="$(mktemp -d)"
 trap cleanup 0
 trap 'exit 1' 1 2 15
 checksums_path="$tmp_dir/SHA256SUMS"
+manifest_path="$tmp_dir/release-manifest.tsv"
 download_path="$tmp_dir/$asset"
 
 step "Downloading Prodex $RELEASE for $target"
 download_file "$base_url/SHA256SUMS" "$checksums_path"
+manifest_available=true
+if ! download_file "$base_url/release-manifest.tsv" "$manifest_path"; then
+  manifest_available=false
+fi
+if [ "$manifest_available" = "true" ]; then
+  schema_version="$(awk -F '\t' '$1 == "schema_version" { print $2; exit }' "$manifest_path")"
+  [ "$schema_version" = "1" ] || {
+    echo "Unsupported Prodex release manifest schema: $schema_version" >&2
+    exit 1
+  }
+  manifest_commit="$(awk -F '\t' '$1 == "commit" { print $2; exit }' "$manifest_path")"
+  manifest_version="$(awk -F '\t' '$1 == "version" { print $2; exit }' "$manifest_path")"
+  printf '%s\n' "$manifest_commit" | grep -Eq '^[0-9a-f]{40}$' || {
+    echo "Prodex release manifest has an invalid commit." >&2
+    exit 1
+  }
+  [ -n "$manifest_version" ] || {
+    echo "Prodex release manifest is incomplete." >&2
+    exit 1
+  }
+  manifest_digest="$(awk '$2 == "release-manifest.tsv" && length($1) == 64 { print tolower($1); exit }' "$checksums_path")"
+  [ -n "$manifest_digest" ] || {
+    echo "SHA256SUMS does not cover release-manifest.tsv." >&2
+    exit 1
+  }
+  [ "$(file_sha256 "$manifest_path")" = "$manifest_digest" ] || {
+    echo "Downloaded release-manifest.tsv checksum did not match." >&2
+    exit 1
+  }
+  row="$(release_manifest_row "$manifest_path" "$target")"
+  [ -n "$row" ] || {
+    echo "Prodex release manifest has no entry for $target." >&2
+    exit 1
+  }
+  manifest_asset="$(printf '%s\n' "$row" | awk -F '\t' '{print $2}')"
+  implementation="$(printf '%s\n' "$row" | awk -F '\t' '{print $3}')"
+  [ "$manifest_asset" = "$asset" ] || {
+    echo "Prodex release manifest asset mismatch for $target." >&2
+    exit 1
+  }
+  step "Release implementation: $implementation"
+else
+  case "$RELEASE" in
+    latest)
+      echo "Latest Prodex release is missing release-manifest.tsv." >&2
+      exit 1
+      ;;
+    *)
+      implementation="rust"
+      case "$REQUIRE_MOJO" in
+        1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss])
+          echo "Release $RELEASE has no Mojo capability metadata." >&2
+          exit 1
+          ;;
+      esac
+      step "Legacy release without Mojo capability metadata"
+      ;;
+  esac
+fi
 expected_digest="$(awk -v asset="$asset" '$2 == asset && length($1) == 64 { print tolower($1); exit }' "$checksums_path")"
 if ! printf '%s\n' "$expected_digest" | grep -Eq '^[0-9a-f]{64}$'; then
   echo "Could not find a valid checksum for $asset." >&2
@@ -297,6 +407,20 @@ esac
 if [ "$RELEASE" != "latest" ] && [ "$installed_version" != "prodex $RELEASE" ]; then
   echo "Downloaded asset version $installed_version did not match requested release $RELEASE." >&2
   exit 1
+fi
+if [ "$manifest_available" = "true" ]; then
+  if [ "$RELEASE" = "latest" ]; then
+    [ "$manifest_version" = "${installed_version#prodex }" ] || {
+      echo "Downloaded asset version does not match the release manifest." >&2
+      exit 1
+    }
+  else
+    [ "$manifest_version" = "$RELEASE" ] || {
+      echo "Release manifest version $manifest_version did not match requested release $RELEASE." >&2
+      exit 1
+    }
+  fi
+  verify_staged_implementation "$implementation"
 fi
 
 existing_path="$(existing_prodex_path)"

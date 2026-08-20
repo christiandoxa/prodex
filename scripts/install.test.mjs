@@ -35,7 +35,7 @@ function run(command, args, options = {}) {
   });
 }
 
-async function fixture(t, { validChecksum = true } = {}) {
+async function fixture(t, { validChecksum = true, manifestImplementation = null } = {}) {
   const target = targetForHost();
   if (!target) {
     t.skip(`installer fixture unsupported on ${process.platform}`);
@@ -48,13 +48,31 @@ async function fixture(t, { validChecksum = true } = {}) {
   const managerLog = path.join(root, "manager.log");
   await fs.mkdir(fakeBin, { recursive: true });
   const asset = `prodex-${target}`;
-  const binary = Buffer.from(`#!/bin/sh\nprintf 'prodex ${version}\\n'\n`);
+  const binary = Buffer.from(
+    manifestImplementation === null
+      ? `#!/bin/sh\nprintf 'prodex ${version}\\n'\n`
+      : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
+  );
+  const manifest =
+    manifestImplementation === null
+      ? null
+      : [
+          "schema_version\t1",
+          `version\t${version}`,
+          `commit\t${"0".repeat(40)}`,
+          "target\tasset\timplementation\tmojo_version\tmojo_features\truntime_bundle\tminimum_glibc",
+          `${target}\t${asset}\t${manifestImplementation}\t${manifestImplementation === "mojo-compiled-in" ? "1.0.0" : ""}\t${manifestImplementation === "mojo-compiled-in" ? "mojo-core" : ""}\tfalse\t`,
+          "",
+        ].join("\n");
   const digest = validChecksum
     ? crypto.createHash("sha256").update(binary).digest("hex")
     : "0".repeat(64);
+  const manifestDigest = manifest === null ? null : crypto.createHash("sha256").update(manifest).digest("hex");
   const server = http.createServer((request, response) => {
     if (request.url === "/release/SHA256SUMS") {
-      response.end(`${digest}  ${asset}\n`);
+      response.end(`${digest}  ${asset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`);
+    } else if (request.url === "/release/release-manifest.tsv" && manifest !== null) {
+      response.end(manifest);
     } else if (request.url === `/release/${asset}`) {
       response.end(binary);
     } else {
@@ -170,6 +188,25 @@ test("installer verifies and installs the host release binary", async (t) => {
   assert.equal(result.code, 0, result.stderr);
   const installed = path.join(state.binDir, "prodex");
   assert.equal((await run(installed, ["--version"])).stdout, `prodex ${version}\n`);
+});
+
+test("installer selects and verifies a compiled-in Mojo release from the manifest", async (t) => {
+  const state = await fixture(t, { manifestImplementation: "mojo-compiled-in" });
+  if (!state) return;
+  const result = await runInstaller(state);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Release implementation: mojo-compiled-in/);
+  const installed = path.join(state.binDir, "prodex");
+  assert.equal((await run(installed, ["--version"])).stdout, `prodex ${version}\n`);
+});
+
+test("installer require-Mojo mode rejects a Rust compatibility release", async (t) => {
+  const state = await fixture(t, { manifestImplementation: "rust" });
+  if (!state) return;
+  const result = await runInstaller(state, { PRODEX_INSTALL_REQUIRE_MOJO: "1" });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /no Mojo-enabled artifact/);
+  await assert.rejects(fs.access(path.join(state.binDir, "prodex")));
 });
 
 test("installer rejects a release binary with the wrong checksum", async (t) => {

@@ -21,6 +21,7 @@ $RunningExe = $env:PRODEX_RUNNING_EXE
 $NonInteractive = $env:PRODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
 $Migrate = $env:PRODEX_MIGRATE -match "^(?i:1|true|yes)$"
 $NoPathUpdate = $env:PRODEX_NO_PATH_UPDATE -match "^(?i:1|true|yes)$"
+$RequireMojo = $env:PRODEX_INSTALL_REQUIRE_MOJO -match "^(?i:1|true|yes)$"
 $CodexNpmVersion = "0.148.0"
 
 function Write-Step {
@@ -143,6 +144,60 @@ function Get-ProdexVersion {
         throw "Downloaded asset did not report a valid Prodex version."
     }
     return $Matches[1]
+}
+
+function Get-ReleaseManifestRow {
+    param(
+        [string]$ManifestPath,
+        [string]$TargetName
+    )
+
+    foreach ($line in Get-Content -LiteralPath $ManifestPath) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) {
+            continue
+        }
+        $fields = $line -split "`t", -1
+        if ($fields.Count -ge 7 -and $fields[0] -ceq $TargetName) {
+            return $fields
+        }
+    }
+    throw "Prodex release manifest has no entry for $TargetName."
+}
+
+function Verify-StagedImplementation {
+    param(
+        [string]$BinaryPath,
+        [string]$ExpectedImplementation,
+        [string]$VerifyHome
+    )
+
+    if ($ExpectedImplementation -notin @("rust", "mojo-compiled-in")) {
+        throw "Release declares an unsupported implementation: $ExpectedImplementation."
+    }
+    if ($RequireMojo -and $ExpectedImplementation -cne "mojo-compiled-in") {
+        throw "Release $Release has no Mojo-enabled artifact for $Target."
+    }
+
+    $previousHome = $env:PRODEX_HOME
+    try {
+        $env:PRODEX_HOME = $VerifyHome
+        $diagnosticOutput = & $BinaryPath doctor --runtime --json 2>$null | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "Downloaded Prodex diagnostics failed."
+        }
+        $diagnostics = $diagnosticOutput | ConvertFrom-Json
+    } finally {
+        $env:PRODEX_HOME = $previousHome
+    }
+    $actualImplementation = [string]$diagnostics.mojo_core.implementation
+    if ($actualImplementation -cne $ExpectedImplementation) {
+        throw "Downloaded Prodex implementation $actualImplementation did not match manifest $ExpectedImplementation."
+    }
+    if ($ExpectedImplementation -ceq "mojo-compiled-in") {
+        if ([bool]$diagnostics.mojo_core.fallback -or [string]$diagnostics.mojo_core.self_test -cne "passed") {
+            throw "Downloaded Prodex Mojo self-test failed."
+        }
+    }
 }
 
 function Get-ExistingProdexPath {
@@ -279,9 +334,46 @@ New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 
 try {
     $ChecksumsPath = Join-Path $TempDir "SHA256SUMS"
+    $ManifestPath = Join-Path $TempDir "release-manifest.tsv"
     $DownloadPath = Join-Path $TempDir $Asset
     Write-Step "Downloading Prodex $Release for $Target"
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf "SHA256SUMS") -Destination $ChecksumsPath
+    $ManifestAvailable = $true
+    try {
+        Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf "release-manifest.tsv") -Destination $ManifestPath
+    } catch {
+        if ($Release -ceq "latest") {
+            throw "Latest Prodex release is missing release-manifest.tsv."
+        }
+        $ManifestAvailable = $false
+    }
+    if ($ManifestAvailable) {
+        $manifestLines = Get-Content -LiteralPath $ManifestPath
+        $schema = ($manifestLines | Where-Object { $_ -match "^schema_version`t" } | Select-Object -First 1) -split "`t", -1
+        if ($schema.Count -ne 2 -or $schema[1] -cne "1") {
+            throw "Unsupported Prodex release manifest schema."
+        }
+        $manifestVersionLine = ($manifestLines | Where-Object { $_ -match "^version`t" } | Select-Object -First 1) -split "`t", -1
+        $manifestCommitLine = ($manifestLines | Where-Object { $_ -match "^commit`t" } | Select-Object -First 1) -split "`t", -1
+        if ($manifestVersionLine.Count -ne 2 -or $manifestCommitLine.Count -ne 2 -or
+            $manifestCommitLine[1] -cnotmatch "^[0-9a-f]{40}$") {
+            throw "Prodex release manifest is incomplete."
+        }
+        $ManifestVersion = $manifestVersionLine[1]
+        $ManifestDigest = Get-ExpectedDigest -ManifestPath $ChecksumsPath -AssetName "release-manifest.tsv"
+        if ((Get-Sha256Digest -Path $ManifestPath) -ne $ManifestDigest) {
+            throw "Downloaded release-manifest.tsv checksum did not match."
+        }
+        $row = Get-ReleaseManifestRow -ManifestPath $ManifestPath -TargetName $Target
+        if ($row[1] -cne $Asset) {
+            throw "Prodex release manifest asset mismatch for $Target."
+        }
+        $Implementation = $row[2]
+        Write-Step "Release implementation: $Implementation"
+    } else {
+        $Implementation = "rust"
+        Write-Step "Legacy release without Mojo capability metadata"
+    }
     $ExpectedDigest = Get-ExpectedDigest -ManifestPath $ChecksumsPath -AssetName $Asset
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf $Asset) -Destination $DownloadPath
     $ActualDigest = Get-Sha256Digest -Path $DownloadPath
@@ -292,6 +384,15 @@ try {
     $InstalledVersion = Get-ProdexVersion -BinaryPath $DownloadPath
     if ($Release -ne "latest" -and $InstalledVersion -ne $Release) {
         throw "Downloaded asset version $InstalledVersion did not match requested release $Release."
+    }
+    if ($ManifestAvailable) {
+        if (($Release -eq "latest" -and $InstalledVersion -ne $ManifestVersion) -or
+            ($Release -ne "latest" -and $Release -cne $ManifestVersion)) {
+            throw "Downloaded asset version did not match the release manifest."
+        }
+        Verify-StagedImplementation -BinaryPath $DownloadPath -ExpectedImplementation $Implementation -VerifyHome (Join-Path $TempDir "verify-home")
+    } elseif ($RequireMojo) {
+        throw "Release $Release has no Mojo capability metadata."
     }
 
     New-Item -ItemType Directory -Force -Path $ReleasesDir | Out-Null
