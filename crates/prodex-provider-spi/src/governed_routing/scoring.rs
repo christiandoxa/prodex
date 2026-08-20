@@ -3,6 +3,9 @@ use super::*;
 #[cfg(feature = "mojo")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct NormalizedRoutingScoreInput {
+    pub(super) hard_eligible: bool,
+    pub(super) capability_mask: u8,
+    pub(super) provider_order: i64,
     pub(super) health: i64,
     pub(super) load: i64,
     pub(super) quota_headroom: i64,
@@ -22,41 +25,26 @@ pub(super) struct MojoRoutingScore {
     pub(super) score: u16,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn score_providers(
     providers: &[&GovernedProviderDescriptor],
     request: &GovernedRoutingRequest<'_>,
 ) -> Result<Vec<GovernedScoreBreakdown>, GovernedRoutingError> {
-    #[cfg(feature = "mojo")]
-    let inputs = providers
+    Ok(providers
         .iter()
-        .map(|provider| normalized_routing_score_input(provider, request))
-        .collect::<Vec<_>>();
-
-    #[cfg(feature = "mojo")]
-    {
-        let scores = mojo::score_batch(&inputs, request.weights)
-            .ok_or(GovernedRoutingError::InvalidWeights)?;
-        Ok(scores
-            .into_iter()
-            .map(|score| score_breakdown_from_mojo(score, request.score_revision, request.weights))
-            .collect())
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        Ok(providers
-            .iter()
-            .map(|provider| score_provider_rust(provider, request))
-            .collect())
-    }
+        .map(|provider| score_provider_rust(provider, request))
+        .collect())
 }
 
 #[cfg(feature = "mojo")]
-fn normalized_routing_score_input(
+pub(super) fn normalized_routing_score_input(
     provider: &GovernedProviderDescriptor,
     request: &GovernedRoutingRequest<'_>,
 ) -> NormalizedRoutingScoreInput {
     NormalizedRoutingScoreInput {
+        hard_eligible: true,
+        capability_mask: 0,
+        provider_order: 0,
         health: i64::from(provider.signals.health.unwrap_or(ROUTING_SCORE_SCALE / 2)),
         load: i64::from(provider.signals.load),
         quota_headroom: i64::from(provider.signals.quota_headroom.unwrap_or(0)),
@@ -136,7 +124,7 @@ fn score_provider_rust(
 }
 
 #[cfg(feature = "mojo")]
-fn score_breakdown_from_mojo(
+pub(super) fn score_breakdown_from_mojo(
     score: MojoRoutingScore,
     score_revision: u64,
     weights: GovernedRoutingWeights,
@@ -274,7 +262,9 @@ mod mojo_tests {
             .iter()
             .map(|provider| normalized_routing_score_input(provider, &request))
             .collect::<Vec<_>>();
-        let mojo_scores = mojo::score_batch(&inputs, request.weights).expect("valid batch");
+        let mojo_scores = mojo::plan_batch(&inputs, 0, request.weights)
+            .expect("valid batch")
+            .scores;
         let rust_scores = provider_refs
             .iter()
             .map(|provider| score_provider_rust(provider, &request))

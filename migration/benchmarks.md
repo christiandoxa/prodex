@@ -1,7 +1,8 @@
 # Migration benchmarks
 
-The first slice is one scalar quota conversion. An isolated per-value benchmark would
-mostly measure FFI call overhead, so it is not evidence for moving a larger algorithm.
+The current provider work is a bounded routing-plan batch and a capability-match batch.
+No performance benchmark has been run for those complete paths; an isolated Mojo inner-loop
+measurement would not include Rust normalization, FFI conversion, or plan reconstruction.
 
 | Check | Command / observation | Result |
 | --- | --- | --- |
@@ -11,25 +12,28 @@ mostly measure FFI call overhead, so it is not evidence for moving a larger algo
 | Runtime-proxy linkage | `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-proxy --features mojo` | 406 tests plus 1 activation test pass, including route-pressure, profile-score, and byte-estimate parity |
 | Rust fallback | `PATH=/home/doxa/.cargo/bin:/usr/bin:/bin cargo test --locked -q -p prodex-quota --features mojo` | 50 tests pass without a Mojo compiler |
 | Linked binary | `PRODEX_MOJO_REQUIRED=1 cargo build --locked --features mojo-core --bin prodex` | `prodex --version` runs; no Mojo/Modular shared dependency in `ldd` |
-| Performance | Not measured | Defer until a batch candidate exists |
+| Performance | Not measured for complete routing/capability paths or domain FFI calls | Defer until the Rust and Mojo workloads include conversion, FFI, and reconstruction |
 
 ## Measurement rule
 
-Benchmark the complete coarse-grained candidate in Rust and Mojo, including conversion
-and FFI overhead. Record throughput, latency, allocations where measurable, and startup
-cost. Do not promote a Mojo implementation because its inner loop is faster if the
-boundary makes the complete path slower or less maintainable.
+Benchmark the complete coarse-grained candidate in Rust and Mojo, including Rust
+normalization, flat-buffer conversion, FFI overhead, and Rust plan reconstruction. Record
+throughput, latency, allocations where measurable, and startup cost. Do not promote a Mojo
+implementation because its inner loop is faster if the complete boundary is slower or less
+maintainable.
 
 ## Current migration evidence
 
 | Check | Command / observation | Result |
 | --- | --- | --- |
-| Shared strict build | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo build --locked --features mojo-core --bin prodex` | Pass; binary reports compiled-in Mojo and self-test value `58` |
+| Shared strict build | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo build --locked --features mojo-core --bin prodex` | Pass when run; binary must report compiled-in Mojo, `compiler_required=false`, and a passing self-test |
 | Quota parity | `cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1` | 53 passed |
 | Runtime proxy parity | `cargo test --locked -q -p prodex-runtime-proxy --features mojo -- --test-threads=1` | 406 passed plus 1 activation test |
 | Runtime quota parity | `cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1` | 17 passed |
-| Provider score parity | `cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1` | 2 + 15 + 16 tests passed |
-| Optimized direct release | `cargo build --release --locked --target x86_64-unknown-linux-gnu --features mojo-core --bin prodex` | Links and runs Mojo, but local host requires up to `GLIBC_2.39`; this is not the release artifact |
+| Provider routing and capability strict suite | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1` | 2 + 15 + 16 tests passed across 4 suites; provider score oracle, governed routing, and capability negotiation paths exercised |
+| Provider routing and capability Rust fallback | `PATH=/home/doxa/.cargo/bin:/usr/bin:/bin PRODEX_MOJO_REQUIRED=0 cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1` | 2 + 15 + 16 tests passed across 4 suites without a Mojo compiler on `PATH` |
+| Root `mojo-routing` feature wiring | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo check --locked -q --features mojo-routing --bin prodex` | Pass |
+| Optimized direct release | `cargo build --release --locked --target x86_64-unknown-linux-gnu --features mojo-core --bin prodex` | Host-link evidence is separate from the release artifact and must not be used as the GLIBC promotion result |
 | Target archive handoff | `PRODEX_MOJO_ARCHIVE=target/mojo-release/x86_64-unknown-linux-gnu/libprodex_mojo_core.a cross build --release ...` | Pass locally; final ELF requires at most `GLIBC_2.18`, has no dynamic Mojo dependency/RPATH, and executes the Mojo self-test without `mojo` |
 | Final binary dependencies | `ldd` / `readelf --dynamic` on optimized Mojo binary | Only libc/libm/libgcc/loader; no Mojo/Modular dependency or RPATH/RUNPATH observed |
 | Optimized binary size | `stat` on current stripped host/cross Linux artifacts | 49,681,016 bytes host link; 50,202,496 bytes GLIBC-compatible cross link |

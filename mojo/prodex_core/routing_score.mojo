@@ -2,6 +2,14 @@ from std.memory import Pointer
 
 comptime ROUTING_SCORE_SCALE: Int64 = 10_000
 comptime SCORE_COMPONENT_COUNT: Int64 = 7
+comptime ROUTING_REASON_ELIGIBLE: Int64 = 0
+comptime ROUTING_REASON_HARD_REJECTED: Int64 = 1
+comptime ROUTING_REASON_CAPABILITY_MISSING: Int64 = 2
+comptime PRODEX_MOJO_ABI_VERSION: Int64 = 1
+
+@export("prodex_mojo_abi_version")
+def prodex_mojo_abi_version() abi("C") -> Int64:
+    return PRODEX_MOJO_ABI_VERSION
 
 def routing_score_valid(value: Int64) -> Bool:
     return value >= 0 and value <= ROUTING_SCORE_SCALE
@@ -112,4 +120,149 @@ def prodex_routing_score_batch(
         weighted_totals[unsafe_offset=index] = weighted_total
         scores[unsafe_offset=index] = weighted_total / weight_total
 
+    return 0
+
+@export("prodex_routing_plan_batch")
+def prodex_routing_plan_batch(
+    hard_eligible: Pointer[mut=False, Int64, _],
+    capability_masks: Pointer[mut=False, Int64, _],
+    provider_order: Pointer[mut=False, Int64, _],
+    health: Pointer[mut=False, Int64, _],
+    load: Pointer[mut=False, Int64, _],
+    quota_headroom: Pointer[mut=False, Int64, _],
+    quota_present: Pointer[mut=False, Int64, _],
+    cost: Pointer[mut=False, Int64, _],
+    latency: Pointer[mut=False, Int64, _],
+    risk: Pointer[mut=False, Int64, _],
+    priority: Pointer[mut=False, Int64, _],
+    affinity: Pointer[mut=False, Int64, _],
+    eligible: Pointer[mut=True, Int64, _],
+    reason_tags: Pointer[mut=True, Int64, _],
+    normalized_values: Pointer[mut=True, Int64, _],
+    weighted_totals: Pointer[mut=True, Int64, _],
+    scores: Pointer[mut=True, Int64, _],
+    ordered_indices: Pointer[mut=True, Int64, _],
+    out_ordered_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+    required_capability_mask: Int64,
+    health_weight: Int64,
+    load_weight: Int64,
+    cost_weight: Int64,
+    latency_weight: Int64,
+    risk_weight: Int64,
+    priority_weight: Int64,
+    affinity_weight: Int64,
+) abi("C") -> Int64:
+    if required_capability_mask < 0 or required_capability_mask > 255:
+        return 4
+
+    var status = prodex_routing_score_batch(
+        health,
+        load,
+        quota_headroom,
+        quota_present,
+        cost,
+        latency,
+        risk,
+        priority,
+        affinity,
+        normalized_values,
+        weighted_totals,
+        scores,
+        count,
+        health_weight,
+        load_weight,
+        cost_weight,
+        latency_weight,
+        risk_weight,
+        priority_weight,
+        affinity_weight,
+    )
+    if status != 0:
+        return status
+
+    var ordered_count: Int64 = 0
+    for index in range(count):
+        var hard_value = hard_eligible[unsafe_offset=index]
+        var capability_value = capability_masks[unsafe_offset=index]
+        if (hard_value != 0 and hard_value != 1) or capability_value < 0 or capability_value > 255:
+            return 4
+
+        if hard_value == 0:
+            eligible[unsafe_offset=index] = 0
+            reason_tags[unsafe_offset=index] = ROUTING_REASON_HARD_REJECTED
+        elif (capability_value & required_capability_mask) != required_capability_mask:
+            eligible[unsafe_offset=index] = 0
+            reason_tags[unsafe_offset=index] = ROUTING_REASON_CAPABILITY_MISSING
+        else:
+            eligible[unsafe_offset=index] = 1
+            reason_tags[unsafe_offset=index] = ROUTING_REASON_ELIGIBLE
+            ordered_indices[unsafe_offset=ordered_count] = index
+            ordered_count += 1
+
+    for position in range(ordered_count):
+        var best_position = position
+        var best_index = ordered_indices[unsafe_offset=best_position]
+        for candidate_position in range(position + 1, ordered_count):
+            var candidate_index = ordered_indices[unsafe_offset=candidate_position]
+            var candidate_is_better = False
+            if affinity[unsafe_offset=candidate_index] > affinity[unsafe_offset=best_index]:
+                candidate_is_better = True
+            elif affinity[unsafe_offset=candidate_index] == affinity[unsafe_offset=best_index]:
+                if scores[unsafe_offset=candidate_index] > scores[unsafe_offset=best_index]:
+                    candidate_is_better = True
+                elif scores[unsafe_offset=candidate_index] == scores[unsafe_offset=best_index]:
+                    if provider_order[unsafe_offset=candidate_index] < provider_order[unsafe_offset=best_index]:
+                        candidate_is_better = True
+                    elif provider_order[unsafe_offset=candidate_index] == provider_order[unsafe_offset=best_index] and candidate_index < best_index:
+                        candidate_is_better = True
+            if candidate_is_better:
+                best_position = candidate_position
+                best_index = candidate_index
+
+        if best_position != position:
+            var selected_index = ordered_indices[unsafe_offset=position]
+            ordered_indices[unsafe_offset=position] = ordered_indices[unsafe_offset=best_position]
+            ordered_indices[unsafe_offset=best_position] = selected_index
+
+    out_ordered_count[unsafe_offset=0] = ordered_count
+    return 0
+
+@export("prodex_capability_match_batch")
+def prodex_capability_match_batch(
+    well_formed: Pointer[mut=False, Int64, _],
+    capability_masks: Pointer[mut=False, Int64, _],
+    compatible: Pointer[mut=True, Int64, _],
+    reason_tags: Pointer[mut=True, Int64, _],
+    out_first_compatible: Pointer[mut=True, Int64, _],
+    out_first_incompatible: Pointer[mut=True, Int64, _],
+    count: Int64,
+    required_capability_mask: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > 64 or required_capability_mask < 0 or required_capability_mask > 127:
+        return 5
+
+    var first_compatible: Int64 = -1
+    var first_incompatible: Int64 = -1
+    for index in range(count):
+        var well_formed_value = well_formed[unsafe_offset=index]
+        var capability_value = capability_masks[unsafe_offset=index]
+        if (well_formed_value != 0 and well_formed_value != 1) or capability_value < 0 or capability_value > 127:
+            return 5
+        if well_formed_value == 0:
+            compatible[unsafe_offset=index] = 0
+            reason_tags[unsafe_offset=index] = 0
+        elif (capability_value & required_capability_mask) == required_capability_mask:
+            compatible[unsafe_offset=index] = 1
+            reason_tags[unsafe_offset=index] = 1
+            if first_compatible < 0:
+                first_compatible = index
+        else:
+            compatible[unsafe_offset=index] = 0
+            reason_tags[unsafe_offset=index] = 2
+            if first_incompatible < 0:
+                first_incompatible = index
+
+    out_first_compatible[unsafe_offset=0] = first_compatible
+    out_first_incompatible[unsafe_offset=0] = first_incompatible
     return 0

@@ -2,8 +2,7 @@
 
 ## Current boundary
 
-Rust calls four exported Mojo functions when the `prodex-quota/mojo` Cargo feature is
-enabled:
+Rust calls the quota policy exports when the `prodex-quota/mojo` Cargo feature is enabled:
 
 ```text
 prodex_quota_remaining_percent(used_percent: Int64, has_value: Int64) -> Int64
@@ -17,7 +16,54 @@ prodex_quota_window_pair_has_ready_limit(
 ) -> Int64
 ```
 
-The symbol uses the platform C ABI. `has_value` is `0` for Rust `None` and `1` for
+The `prodex-provider-spi/mojo` feature uses the shared `mojo-routing` source for one complete
+bounded routing-plan batch and one capability-match batch:
+
+```text
+prodex_routing_plan_batch(
+    hard_eligible: *const Int64,
+    capability_masks: *const Int64,
+    provider_order: *const Int64,
+    health: *const Int64,
+    load: *const Int64,
+    quota_headroom: *const Int64,
+    quota_present: *const Int64,
+    cost: *const Int64,
+    latency: *const Int64,
+    risk: *const Int64,
+    priority: *const Int64,
+    affinity: *const Int64,
+    eligible: *mut Int64,
+    reason_tags: *mut Int64,
+    normalized_values: *mut Int64,
+    weighted_totals: *mut Int64,
+    scores: *mut Int64,
+    ordered_indices: *mut Int64,
+    ordered_count: *mut Int64,
+    count: Int64,
+    required_capability_mask: Int64,
+    health_weight: Int64,
+    load_weight: Int64,
+    cost_weight: Int64,
+    latency_weight: Int64,
+    risk_weight: Int64,
+    priority_weight: Int64,
+    affinity_weight: Int64,
+) -> Int64
+
+prodex_capability_match_batch(
+    well_formed: *const Int64,
+    capability_masks: *const Int64,
+    compatible: *mut Int64,
+    reason_tags: *mut Int64,
+    first_compatible: *mut Int64,
+    first_incompatible: *mut Int64,
+    count: Int64,
+    required_capability_mask: Int64,
+) -> Int64
+```
+
+The symbols use the platform C ABI. `has_value` is `0` for Rust `None` and `1` for
 Rust `Some(_)`; the `used_percent` value is ignored when `has_value == 0`.
 
 The policy entry points use explicit integer tags:
@@ -27,12 +73,15 @@ The policy entry points use explicit integer tags:
 | Window status | `Ready=0`, `Thin=1`, `Critical=2`, `Exhausted=3`, `Unknown=4` |
 | Pressure band | `Healthy=0`, `Thin=1`, `Critical=2`, `Exhausted=3`, `Unknown=4` |
 | Boolean result | `0=false`, `1=true` |
+| Routing-plan reason | `Eligible=0`, `HardRejected=1`, `CapabilityMissing=2` |
+| Capability-match reason | `Malformed=0`, `Compatible=1`, `Missing=2` |
+| Core ABI version | `1` |
 
 ## Ownership and lifetime
 
 | Concern | Contract |
 | --- | --- |
-| Allocation | None. Both arguments and return value are scalar registers. |
+| Allocation | Rust owns flat input/output vectors; Mojo allocates nothing across the ABI. |
 | Owner | Rust owns the logical input; Mojo owns no Rust memory. |
 | Mutation | Neither side mutates shared memory. |
 | Freeing | No allocation means neither side frees anything. |
@@ -111,21 +160,37 @@ Rust wrappers and never declare a Mojo symbol themselves. The shared static arch
 contains these additional deterministic entry points:
 
 ```text
+prodex_mojo_abi_version() -> Int64
 prodex_runtime_quota_profile_score_batch(..., count: Int64) -> Int64
 prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64
 prodex_routing_score_batch(..., count: Int64, weights...) -> Int64
+prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, weights...) -> Int64
+prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64) -> Int64
 ```
 
-The batch calls use parallel flat `Int64` arrays and caller-owned output arrays. They accept at
-most 64 records. A zero-length batch is valid and does not dereference any pointer. Non-zero
-batches require every pointer to reference at least `count` input or output elements; null
-non-zero pointers are invalid and must never be passed. Rust keeps all vectors alive for the
-synchronous call, and Mojo does not retain any pointer after return.
+All batch calls use parallel flat `Int64` arrays and caller-owned output arrays. They accept at
+most 64 records. A zero-length batch is valid and does not read or write per-record arrays;
+the scalar result pointers (`ordered_count`, `first_compatible`, and `first_incompatible`) still
+need one writable slot. Non-zero batches require every per-record pointer to reference at least
+`count` elements; null non-zero pointers are invalid and must never be passed. Rust keeps all
+vectors alive for the synchronous call, and Mojo does not retain any pointer after return.
 
-The routing batch writes seven normalized components, one weighted total, and one final score per
-record. The runtime quota batch writes four `Int64` values per record. Status `0` means success;
-non-zero statuses mean invalid bounded input and the Rust wrapper keeps the Rust oracle result.
-The wrapper also validates integer conversions before exposing results to its callers.
+The routing-score batch writes seven normalized components, one weighted total, and one final
+score per record. The complete routing-plan batch additionally writes one eligibility flag and
+one reason tag per input, plus an eligible-only ordered-index array and its count. It computes
+scores for every input, but Rust uses scores and ordered indices only for eligible routes. The
+capability-match batch writes one compatibility flag and reason tag per input plus the first
+compatible and first well-formed incompatible indices. The runtime quota batch writes four
+`Int64` values per record. The Rust wrappers validate statuses, bounds, indices, and integer
+conversions before exposing results to callers.
+
+For routing-plan ordering, Mojo compares eligible candidates by affinity descending, score
+descending, provider order ascending, then original candidate index ascending. Rust maps provider
+identities to the bounded provider-order integer and keeps route construction, candidate
+evaluation details, policy, credentials, and affinity/error handling outside the ABI. For
+capability matching, malformed route/model tokens are marked `Malformed` and skipped when
+choosing first indices; a well-formed candidate is compatible when its mask contains the
+required mask.
 
 | Concern | Batch contract |
 | --- | --- |
@@ -134,9 +199,9 @@ The wrapper also validates integer conversions before exposing results to its ca
 | Lifetime | Pointer lifetime is one synchronous call; no pointer escapes |
 | Alignment | Rust slices provide native `i64` alignment; Mojo pointers are typed `Int64` pointers |
 | Thread safety | Functions are stateless and reentrant; concurrent calls use disjoint caller-owned buffers |
-| Nullability | Null is valid only for zero-count buffers; Rust uses zero-length slices and Mojo returns before dereference |
+| Nullability | Non-zero per-record buffers must be valid; zero-count per-record buffers are not read or written, but scalar result pointers still need one writable slot |
 | Error propagation | Explicit integer status; no panic, exception, Rust enum, `Vec`, `String`, or `Result` crosses the boundary |
-| Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Invalid runtime batch input is handled by the Rust oracle and is not a compiler fallback |
+| Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Capability negotiation falls back to Rust if its Mojo result is invalid; governed routing rejects an invalid plan result |
 
 ## Shared build contract
 
@@ -160,6 +225,11 @@ PRODEX_MOJO_ARCHIVE=<verified target archive, release cross-link only>
 Relative archive paths resolve from the workspace root so the same path works on the host and
 inside the `cross` build container. Strict release builds forward the Mojo variables through
 `CROSS_CONTAINER_OPTS`.
+
+Runtime diagnostics intentionally report `compiler_required=false`: the compiler is never a
+runtime dependency. `build_strict=true` means `PRODEX_MOJO_REQUIRED=1` governed the build and
+missing compiler/archiver/archive failed it. `compiler_required` and `build_strict` therefore
+describe different phases.
 
 No generated object or archive is committed. The final Linux release is verified for static
 Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on

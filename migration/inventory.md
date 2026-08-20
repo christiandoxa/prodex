@@ -17,15 +17,19 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-quota::render::window_pair_has_ready_limit` | Decide whether a quota window pair is usable | Pure | None | Low | A | `MOVE_NOW` | Four scalar inputs in one batched ABI call; model lookup stays Rust |
 | `prodex-runtime-proxy::runtime_proxy_quota_pressure_band_for_route` | Apply route-specific quota thresholds to two observations | Pure | None | Medium | A/B | `MOVE_NOW` | Batch scalar ABI preserves route-specific thresholds; affinity and transport remain Rust |
 | `prodex-runtime-proxy::runtime_proxy_quota_profile_scores_batch` | Score bounded profile quota pressure inputs for selection | Pure | None after normalization | Medium | A | `MOVE_NOW` | One flat-buffer batch call; Rust saturation oracle retained; selection ordering remains Rust |
-| `prodex-provider-spi::score_providers` | Score already-eligible provider descriptors | Pure after hard filtering | normalized provider signals and weights | High | B | `MOVE_NOW` | Mojo receives only bounded numeric signals; policy, credentials, filtering, and ordering remain Rust |
+| `prodex-provider-spi::score_providers` | Score already-eligible provider descriptors | Pure after hard filtering | normalized provider signals and weights | High | B | `MOVE_NOW` | Mojo score arithmetic is now part of the complete bounded routing-plan batch; Rust still owns normalization and policy inputs |
+| `prodex-provider-spi::plan_governed_provider_route` | Filter, score, and order governed provider candidates | Pure after Rust validation and policy normalization | capability masks, provider order, normalized signals, and weights | High | B | `MOVE_NOW` | One batch covers up to 64 candidates; Mojo applies capability eligibility and stable ordering, while Rust retains hard policy gates, credentials, affinity, route construction, and error semantics |
+| `prodex-provider-spi::negotiate_provider_route_capability` | Match provider routes to required model capabilities | Pure after Rust enum-to-mask normalization | well-formed flags and seven-bit capability masks | High | B | `MOVE_NOW` | Separate flat-buffer capability batch returns first compatible/incompatible indices; Rust retains route/model selection, missing-capability details, redacted errors, and fallback |
 | `prodex-runtime-proxy::smart_context_estimate_tokens_from_body_bytes` | Estimate token budget from body size | Pure | None | Low | A | `MOVE_NOW` | Deterministic `u64` arithmetic; real Mojo parity and release diagnostic coverage |
 | `prodex-quota::render::{windows,gemini,pool,reports}` | Quota summaries, rendering, reset calculations | Mostly pure | `chrono`, terminal formatting | Medium | A/B | `EXPERIMENT` | Batch calculations may benefit; formatting and time stay Rust |
-| `prodex-domain::{accounting,accounting_budget,rate_limit,slo}` | Usage, budget, rate-limit, SLO decisions | Pure plans plus identifiers | `serde`, UUID types | High | A/B | `REFACTOR_THEN_MOVE` | Good algorithms, but accounting and policy are security-sensitive |
+| `prodex-domain::accounting::commit_reservation` | Commit normalized reservation arithmetic | Pure helper, not the durable production path | Fixed-width usage values | High | B | `KEEP_RUST` | The production accounting flow uses durable `reconcile_reserved_usage`; the generic helper has no safe Mojo production seam and the domain boundary remains Rust-only |
+| `prodex-domain::rate_limit::evaluate_rate_limit` | Evaluate bounded request-window admission arithmetic | Pure helper, not distributed admission | Fixed-width counters and timestamps | High | B | `KEEP_RUST` | Production rate limiting is owned by Redis/runtime adapters; tenant ownership, clocks, and persistence stay Rust |
+| `prodex-domain::{accounting_budget,slo}` | Budget and SLO decisions | Pure plans plus identifiers | `serde`, UUID types, float semantics | High | A/B | `REFACTOR_THEN_MOVE` | Candidate arithmetic remains separate; SLO float parity and budget enforcement contract need explicit probes |
 | `prodex-domain::{policy,security,secrets,identity,ids}` | Signed policy, tenant identity, secret-safe IDs | Pure-looking models | hashes, UUID, zeroization | Critical | C | `KEEP_RUST` | Trust boundary and established Rust security behavior |
 | `prodex-domain::{audit,governance,observability}` | Audit, governance, telemetry contracts | Pure plans plus sensitive data | hashing, serialization | Critical | B/C | `KEEP_RUST` | Preserve redaction, authorization, and audit invariants |
 | `prodex-provider-core::{catalog,constraints,models}` | Provider capabilities and model constraints | Mostly pure | `serde`, provider data | High | A/B | `REFACTOR_THEN_MOVE` | Candidate after provider-independent input normalization |
 | `prodex-provider-core::translators` | Provider request/response translation | Mixed | JSON/provider schemas | High | C | `KEEP_RUST` | Ecosystem and compatibility-heavy; no rewrite justified |
-| `prodex-provider-spi::governed_routing` | Governed provider eligibility and routing | Pure decision over policy snapshots | Domain/provider contracts | Critical | B | `REFACTOR_THEN_MOVE` | Scoring kernel moved; hard security gates, filtering, stable ordering, and affinity stay Rust |
+| `prodex-provider-spi::governed_routing` | Governed provider eligibility and routing | Pure decision over normalized policy snapshots | Domain/provider contracts | Critical | B | `MOVE_NOW` | Mojo owns the bounded filter/score/order batch; Rust retains hard security gates, credentials, affinity, route construction, and errors |
 | `prodex-runtime-proxy::{selection_plan,smart_context}` | Candidate selection, scoring, context algorithms | Mixed | tokenizers, runtime state | Critical | B | `EXPERIMENT` | Byte estimate moved; candidate scoring, tokenizer integration, hard affinity, and transport remain Rust |
 | `prodex-runtime-proxy::{failure_response,gateway_policy}` | Proxy policy and failure semantics | Pure helpers | HTTP-neutral but hot path | Critical | C | `KEEP_RUST` | Runtime invariants require Rust oracle and extensive replay coverage |
 | `prodex-application::{data_plane,provider,governance,request_context}` | Side-effect-free application plans and ports | Pure plans | security/policy contracts | Critical | B | `REFACTOR_THEN_MOVE` | Move only isolated calculations after boundary tests |
@@ -50,7 +54,10 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 
 ## Initial conclusion
 
-The first production-worthy seam is quota arithmetic, not routing. `remaining_percent`
-is small enough to validate ABI and parity without exposing a Rust object graph. The
-next candidate is a batch form of quota or Smart Context scoring only after measuring
-that one-call-per-value FFI overhead and extracting a complete input/output contract.
+Quota arithmetic remains the first validated seam. Provider routing now has a second
+bounded seam: a complete candidate-plan batch after Rust validation and normalization,
+plus a separate capability-mask batch. The generic accounting and rate-limit helpers remain
+Rust-only because their actual production owners are durable storage and Redis/runtime
+admission. Mojo does not own policy,
+credentials, affinity, tenant ownership, transport, route construction, durable mutation, or
+user-facing errors. Smart Context candidate scoring remains a future batch candidate.

@@ -1,8 +1,8 @@
 # Rust and Mojo equivalents
 
 This is a semantic mapping for current Prodex usage, not a syntax translation guide.
-The quota, runtime scoring, provider scoring, and byte-estimation rows are enabled in
-production code behind the opt-in `mojo-core` feature; Rust fallback remains the default.
+The quota, runtime scoring, provider routing/capability, and byte-estimation rows are enabled
+in production code behind the opt-in `mojo-core` feature; Rust fallback remains the default.
 
 | Rust construct / usage | Current Prodex location | Mojo equivalent verified or expected | Confidence | Complexity | External dependencies | Candidate | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -13,9 +13,10 @@ production code behind the opt-in `mojo-core` feature; Rust fallback remains the
 | quota pair eligibility | `prodex-quota::render::window_pair_has_ready_limit` | Four scalar values plus presence flags | Verified | Low | None | `MOVE_NOW` | One batch call covers both windows |
 | route-specific quota pressure | `prodex-runtime-proxy::runtime_proxy_quota_pressure_band_for_route` | Five scalar inputs and one band tag | Verified | Medium | None | `MOVE_NOW` | Rust builds observations; Mojo applies route thresholds in one call |
 | bounded profile quota scoring | `prodex-runtime-quota::selection::ready_profile_scores_for_candidates` | Flat `Int64` arrays, four flat output arrays, explicit count/status | Verified | Medium | None after normalization | `MOVE_NOW` | Maximum 64 records; Rust keeps saturation/oracle fallback |
-| provider routing score | `prodex-provider-spi::governed_routing::score_provider_rust` | Flat normalized signal arrays plus weights and score outputs | Verified | Medium | None after hard filtering | `MOVE_NOW` | Mojo does arithmetic only; Rust owns eligibility, affinity, ordering, and policy |
+| provider routing plan | `prodex-provider-spi::governed_routing::plan_governed_provider_route` | Flat candidate arrays plus eligibility, score, and stable-order outputs | Verified | High | None after Rust normalization | `MOVE_NOW` | Mojo owns capability filtering, score arithmetic, and stable eligible ordering; Rust owns hard gates, affinity constraints, route construction, and policy |
+| provider capability matching | `prodex-provider-spi::negotiate_provider_route_capability` | Flat well-formed flags and capability masks plus tagged outputs | Verified | Medium | None after Rust normalization | `MOVE_NOW` | Mojo returns compatibility and first-index facts; Rust owns route/model objects, diagnostics, and fallback |
 | Smart Context byte estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body_bytes` | `UInt64` bytes to saturated `UInt64` estimate | Verified | Low | None | `MOVE_NOW` | Text tokenization remains Rust |
-| `u64` checked/saturating arithmetic | `prodex-domain::accounting` | `UInt64` plus explicit overflow branches | Unverified | Low | None | `EXPERIMENT` | Compile a representative pair before migration |
+| `u64` checked/saturating arithmetic | `prodex-domain::accounting` | `UInt64` plus explicit overflow branches | Unverified | Low | None | `KEEP_RUST` | Generic accounting helper has no production Mojo seam; durable accounting remains Rust-owned |
 | small Rust structs | domain and quota models | Mojo `struct` with scalar fields | Documented, unverified here | Low/medium | None | `EXPERIMENT` | Do not expose these structs across FFI until layout is tested |
 | Rust enums / tagged decisions | domain and provider plans | Mojo enum-like tagged representation or explicit integer tag | Unverified | Medium | None | `EXPERIMENT` | Keep Rust enum authoritative at first |
 | `Vec` / `BTreeMap` collection algorithms | quota pool and routing helpers | Mojo `List` / `Dict` or flat buffers | Unverified | Medium | stdlib only | `EXPERIMENT` | Prefer one batch call, not per-element FFI |

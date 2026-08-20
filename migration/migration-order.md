@@ -15,17 +15,24 @@
 11. Provider-independent numeric scoring batch after Rust hard eligibility.
 12. Smart Context byte-size token estimate.
 13. Strict release/installer metadata and compiled-in Linux artifact gate.
+14. Complete governed provider routing-plan batch: Rust validation and policy normalization,
+    Mojo capability filtering, bounded score arithmetic, and stable eligible ordering.
+15. Provider route capability matching batch over well-formed flags and capability masks.
 
 ## Next order
 
-1. Measure a complete batch quota/routing workload including FFI conversion.
-2. Evaluate provider-independent candidate filtering as a batch algorithm; keep hard
-   affinity, authorization, and runtime state in Rust.
-3. Evaluate Smart Context candidate scoring as a batch algorithm; keep tokenizer and
+1. Measure complete routing-plan and capability-matching workloads including FFI conversion
+   and Rust-side plan reconstruction.
+2. Evaluate Smart Context candidate scoring as a batch algorithm; keep tokenizer and
    input collection in Rust.
-4. Revisit normalized policy validation only after security and error contracts are explicit.
-5. Evaluate accounting/budget arithmetic only as a candidate result; Rust retains enforcement.
-6. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
+3. Revisit normalized policy validation only after security and error contracts are explicit.
+4. Reevaluate provider capability/model constraint normalization only after its actual
+   production call graph is isolated from provider schemas and serialization.
+5. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
+
+The generic domain `commit_reservation` and `evaluate_rate_limit` helpers remain Rust-only:
+the former is not the production durable accounting path, and distributed rate limiting is
+owned by the Redis/runtime adapters. Do not add a Mojo wrapper without a real production seam.
 
 ## Stop conditions
 

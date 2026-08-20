@@ -396,6 +396,9 @@ jobs:
           archive="$(find "target/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
           test -s "${archive}"
           nm -g "${archive}" | grep -F 'prodex_quota_remaining_percent'
+          nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
+          nm -g "${archive}" | grep -F 'prodex_routing_plan_batch'
+          nm -g "${archive}" | grep -F 'prodex_capability_match_batch'
           if readelf --dynamic "${binary}" | grep -Eiq 'lib(mojo|modular)|RPATH|RUNPATH'; then
             echo "Mojo release binary has an unexpected dynamic Mojo dependency or build path" >&2
             readelf --dynamic "${binary}" >&2
