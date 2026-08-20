@@ -92,6 +92,36 @@ If a runtime test needs parallel coverage, prefer a separate process with isolat
 
 ## Commands
 
+### Rust-only and real Mojo validation
+
+Normal Rust development does not require Mojo:
+
+```bash
+cargo test --locked
+```
+
+The optional local path keeps the Rust fallback available when `mojo` is absent:
+
+```bash
+cargo test --locked -p prodex-quota --features mojo
+cargo test --locked -p prodex-runtime-proxy --features mojo
+```
+
+For a strict real-Mojo check, install the pinned stable Mojo package from the
+[official Mojo installation instructions](https://docs.modular.com/mojo/manual/install/)
+(`mojo==1.0.0` via `uv`), then run:
+
+```bash
+PRODEX_MOJO_REQUIRED=1 cargo build --locked --features mojo-quota --bin prodex
+PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-quota --features mojo
+PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-runtime-proxy --features mojo
+```
+
+Strict mode fails if the Mojo feature is disabled, the compiler or archiver is missing,
+the checked-out Mojo source does not compile, or the build would activate the Rust
+fallback. The authoritative CI job is `.github/workflows/mojo-parity.yml`; it also runs
+the built `prodex --version` binary and checks the generated static archives.
+
 Current CI building blocks include:
 
 ```bash

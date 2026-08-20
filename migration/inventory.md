@@ -13,6 +13,9 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | Package / module area | Purpose | Pure vs IO | External / async | Risk | Class | Action | Evidence / reason |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `prodex-quota::render::remaining_percent` | Convert used quota percent to bounded remaining percent | Pure | None | Low | A | `MOVE_NOW` | Scalar integer function; parity-covered Mojo C ABI slice |
+| `prodex-quota::render::{quota_window_status,quota_pressure_band_from_windows}` | Classify quota windows and aggregate pressure | Pure | None | Low | A | `MOVE_NOW` | Explicit status/band tags; parity-covered in the existing quota bridge |
+| `prodex-quota::render::window_pair_has_ready_limit` | Decide whether a quota window pair is usable | Pure | None | Low | A | `MOVE_NOW` | Four scalar inputs in one batched ABI call; model lookup stays Rust |
+| `prodex-runtime-proxy::runtime_proxy_quota_pressure_band_for_route` | Apply route-specific quota thresholds to two observations | Pure | None | Medium | A/B | `MOVE_NOW` | Batch scalar ABI preserves route-specific thresholds; affinity and transport remain Rust |
 | `prodex-quota::render::{windows,gemini,pool,reports}` | Quota summaries, rendering, reset calculations | Mostly pure | `chrono`, terminal formatting | Medium | A/B | `EXPERIMENT` | Batch calculations may benefit; formatting and time stay Rust |
 | `prodex-domain::{accounting,accounting_budget,rate_limit,slo}` | Usage, budget, rate-limit, SLO decisions | Pure plans plus identifiers | `serde`, UUID types | High | A/B | `REFACTOR_THEN_MOVE` | Good algorithms, but accounting and policy are security-sensitive |
 | `prodex-domain::{policy,security,secrets,identity,ids}` | Signed policy, tenant identity, secret-safe IDs | Pure-looking models | hashes, UUID, zeroization | Critical | C | `KEEP_RUST` | Trust boundary and established Rust security behavior |

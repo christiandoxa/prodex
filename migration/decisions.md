@@ -30,3 +30,18 @@ this choice or move to a supported artifact/distribution path.
 
 The integration uses Cargo build-script stdlib APIs and the existing compiler. No FFI,
 serialization, networking, or build dependency was added.
+
+## 2026-08-20: Quota policy stays scalar and stateless
+
+Window status, pressure-band aggregation, and pair readiness cross the same opt-in C ABI
+as the original remaining-percent calculation. Rust still owns model lookup, labels,
+missing-window discovery, and all formatting. Mojo receives only bounded integer values
+and explicit presence/status tags.
+
+The runtime-proxy candidate planner was not ported in this wave: its hard-affinity,
+health, backoff, inflight, and quota-source ordering are coupled policy invariants, and
+per-candidate scalar FFI would be finer-grained than the current bridge justifies.
+
+Route-specific quota pressure is a narrower exception: two already-normalized window
+observations and one route tag form a bounded batch decision. The Mojo entry point returns
+only a pressure-band tag; it does not select profiles or override hard affinity.

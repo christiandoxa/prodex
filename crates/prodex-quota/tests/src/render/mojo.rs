@@ -1,6 +1,11 @@
 use super::*;
 
 #[test]
+fn real_mojo_quota_smoke_calls_exported_c_abi() {
+    assert_eq!(remaining_percent(Some(42)), 58);
+}
+
+#[test]
 fn remaining_percent_matches_rust_oracle() {
     for (used_percent, expected) in [
         (None, 0),

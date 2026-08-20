@@ -100,15 +100,26 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
 }
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    let used_percentages = ["5h", "weekly"]
-        .into_iter()
-        .filter_map(|label| find_main_window(pair, label)?.used_percent)
-        .collect::<Vec<_>>();
+    let first_used_percent = find_main_window(pair, "5h").and_then(|window| window.used_percent);
+    let second_used_percent =
+        find_main_window(pair, "weekly").and_then(|window| window.used_percent);
 
-    !used_percentages.is_empty()
-        && used_percentages
+    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    {
+        crate::mojo::window_pair_has_ready_limit(first_used_percent, second_used_percent)
+    }
+
+    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    {
+        let used_percentages = [first_used_percent, second_used_percent]
             .into_iter()
-            .all(|used_percent| used_percent < 100)
+            .flatten()
+            .collect::<Vec<_>>();
+        !used_percentages.is_empty()
+            && used_percentages
+                .into_iter()
+                .all(|used_percent| used_percent < 100)
+    }
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
@@ -161,15 +172,7 @@ pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaW
         };
     };
 
-    let status = if window.remaining_percent == 0 {
-        RuntimeQuotaWindowStatus::Exhausted
-    } else if window.remaining_percent <= 5 {
-        RuntimeQuotaWindowStatus::Critical
-    } else if window.remaining_percent <= 15 {
-        RuntimeQuotaWindowStatus::Thin
-    } else {
-        RuntimeQuotaWindowStatus::Ready
-    };
+    let status = quota_window_status(window.remaining_percent, true);
 
     RuntimeQuotaWindowSummary {
         status,
@@ -185,29 +188,6 @@ pub fn quota_summary(usage: &UsageResponse) -> RuntimeQuotaSummary {
         five_hour,
         weekly,
         route_band: quota_pressure_band_from_windows(five_hour, weekly),
-    }
-}
-
-pub fn quota_pressure_band_from_windows(
-    five_hour: RuntimeQuotaWindowSummary,
-    weekly: RuntimeQuotaWindowSummary,
-) -> RuntimeQuotaPressureBand {
-    [five_hour.status, weekly.status]
-        .into_iter()
-        .map(quota_pressure_band_from_window_status)
-        .max()
-        .unwrap_or(RuntimeQuotaPressureBand::Unknown)
-}
-
-pub fn quota_pressure_band_from_window_status(
-    status: RuntimeQuotaWindowStatus,
-) -> RuntimeQuotaPressureBand {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => RuntimeQuotaPressureBand::Healthy,
-        RuntimeQuotaWindowStatus::Thin => RuntimeQuotaPressureBand::Thin,
-        RuntimeQuotaWindowStatus::Critical => RuntimeQuotaPressureBand::Critical,
-        RuntimeQuotaWindowStatus::Exhausted => RuntimeQuotaPressureBand::Exhausted,
-        RuntimeQuotaWindowStatus::Unknown => RuntimeQuotaPressureBand::Unknown,
     }
 }
 

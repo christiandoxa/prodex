@@ -29,10 +29,10 @@ fn main() {
     }
 
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let source = manifest_dir.join("../../mojo/prodex_core/quota.mojo");
+    let source = manifest_dir.join("../../mojo/prodex_core/runtime_quota.mojo");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let object = out_dir.join("prodex_quota_mojo.o");
-    let archive = out_dir.join("libprodex_quota_mojo.a");
+    let object = out_dir.join("prodex_runtime_quota_mojo.o");
+    let archive = out_dir.join("libprodex_runtime_quota_mojo.a");
     let mojo_override = env::var_os("PRODEX_MOJO");
     let mojo = mojo_override
         .clone()
@@ -88,7 +88,7 @@ fn main() {
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-lib=static=prodex_quota_mojo");
+    println!("cargo:rustc-link-lib=static=prodex_runtime_quota_mojo");
     println!("cargo:rustc-cfg=prodex_mojo_active");
 }
 
@@ -99,7 +99,7 @@ fn mojo_required() -> bool {
 }
 
 fn use_rust_fallback(reason: &str) {
-    println!("cargo:warning=prodex-quota Mojo feature using Rust fallback: {reason}");
+    println!("cargo:warning=runtime-proxy Mojo feature using Rust fallback: {reason}");
     println!("cargo:rustc-cfg=prodex_mojo_fallback");
 }
 

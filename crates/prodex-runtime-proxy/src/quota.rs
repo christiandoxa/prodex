@@ -6,6 +6,10 @@ use crate::{
     runtime_quota_window_precommit_guard,
 };
 
+#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[path = "mojo.rs"]
+mod mojo;
+
 pub type RuntimeProxyQuotaPressureSortKey = (
     RuntimeSelectionQuotaPressureBand,
     i64,
@@ -447,31 +451,39 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeSelectionQuotaPressureBand {
-    if weekly.is_none() && five_hour.is_none() {
-        return RuntimeSelectionQuotaPressureBand::Unknown;
+    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    {
+        mojo::pressure_band_for_route(five_hour, weekly, route_kind)
     }
 
-    if weekly.is_some_and(|window| window.remaining_percent == 0)
-        || five_hour.is_some_and(|window| window.remaining_percent == 0)
+    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
     {
-        return RuntimeSelectionQuotaPressureBand::Exhausted;
-    }
+        if weekly.is_none() && five_hour.is_none() {
+            return RuntimeSelectionQuotaPressureBand::Unknown;
+        }
 
-    let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
-    };
+        if weekly.is_some_and(|window| window.remaining_percent == 0)
+            || five_hour.is_some_and(|window| window.remaining_percent == 0)
+        {
+            return RuntimeSelectionQuotaPressureBand::Exhausted;
+        }
 
-    if weekly.is_some_and(|window| window.remaining_percent <= critical_weekly)
-        || five_hour.is_some_and(|window| window.remaining_percent <= critical_five_hour)
-    {
-        RuntimeSelectionQuotaPressureBand::Critical
-    } else if weekly.is_some_and(|window| window.remaining_percent <= thin_weekly)
-        || five_hour.is_some_and(|window| window.remaining_percent <= thin_five_hour)
-    {
-        RuntimeSelectionQuotaPressureBand::Thin
-    } else {
-        RuntimeSelectionQuotaPressureBand::Healthy
+        let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
+            RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
+        };
+
+        if weekly.is_some_and(|window| window.remaining_percent <= critical_weekly)
+            || five_hour.is_some_and(|window| window.remaining_percent <= critical_five_hour)
+        {
+            RuntimeSelectionQuotaPressureBand::Critical
+        } else if weekly.is_some_and(|window| window.remaining_percent <= thin_weekly)
+            || five_hour.is_some_and(|window| window.remaining_percent <= thin_five_hour)
+        {
+            RuntimeSelectionQuotaPressureBand::Thin
+        } else {
+            RuntimeSelectionQuotaPressureBand::Healthy
+        }
     }
 }
 
@@ -661,3 +673,7 @@ fn runtime_proxy_quota_window_status_rank(status: RuntimeSelectionQuotaWindowSta
 #[cfg(test)]
 #[path = "../tests/src/quota.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/src/quota_mojo.rs"]
+mod mojo_tests;

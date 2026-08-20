@@ -11,6 +11,7 @@
 | Verified Rust call | Rust linked the object and matched the quota oracle |
 | Shared library | `--emit shared-lib` compiled in the spike; not selected for Cargo because it adds runtime loader/distribution state |
 | Portability | Host Linux x86-64 only for this slice; other targets require a separate compiler/linker check |
+| Real Mojo CI | Ubuntu 24.04 installs official `mojo==1.0.0` with pinned uv `0.11.7`; `PRODEX_MOJO_REQUIRED=1` forbids fallback |
 
 `--emit object` is currently documented as experimental. That is an intentional, narrow
 build risk accepted for this scalar slice; the object contains no observed Mojo runtime
@@ -48,3 +49,13 @@ shipping broader Mojo components.
 - [Mojo C ABI and `abi("C")` changelog](https://docs.modular.com/mojo/changelog/v0.26.2/)
 - [Mojo FFI standard library](https://docs.modular.com/mojo/std/ffi/)
 - [Mojo packages](https://docs.modular.com/mojo/manual/packages/)
+- [Official Mojo installation](https://docs.modular.com/mojo/manual/install/)
+
+## Real Mojo CI evidence contract
+
+The dedicated `.github/workflows/mojo-parity.yml` lane compiles the checked-out
+`.mojo` sources, links their archives into Rust, runs the Mojo-backed quota and runtime
+proxy tests, and runs the built `prodex --version` binary. The lane uses
+`PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` and the absence of
+`prodex_mojo_fallback` are asserted by tests. Rust-only CI keeps the default fallback
+behavior and does not satisfy this evidence contract.
