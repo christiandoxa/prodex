@@ -710,13 +710,6 @@ fn quota_error_summary_response(lower: &str) -> Option<&'static str> {
     }
 }
 
-pub fn remaining_percent(used_percent: Option<i64>) -> i64 {
-    let Some(used) = used_percent else {
-        return 0;
-    };
-    (100 - used).clamp(0, 100)
-}
-
 pub fn window_label(seconds: Option<i64>) -> String {
     let Some(seconds) = seconds else {
         return "usage".to_string();

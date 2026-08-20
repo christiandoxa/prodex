@@ -205,6 +205,7 @@ zstd = "0.13.3"
 default = []
 bench-support = ["prodex_app/bench-support"]
 allocation-bench-support = ["prodex_app/allocation-bench-support"]
+mojo-quota = ["prodex_app/mojo-quota"]
 
 [[example]]
 name = "runtime_allocator_trim_evidence"

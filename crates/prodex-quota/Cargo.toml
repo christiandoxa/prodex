@@ -13,6 +13,10 @@ ignored = ["base64"]
 name = "prodex_quota"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = []
+
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
