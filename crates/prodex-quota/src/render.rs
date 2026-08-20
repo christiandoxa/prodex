@@ -18,6 +18,7 @@ mod copilot;
 mod gemini;
 mod panels;
 mod pool;
+mod remaining_percent;
 mod reports;
 mod windows;
 
@@ -25,8 +26,13 @@ pub use copilot::*;
 pub use gemini::*;
 pub use panels::*;
 pub use pool::*;
+pub use remaining_percent::*;
 pub use reports::*;
 pub use windows::*;
 #[cfg(test)]
 #[path = "../tests/src/render.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "mojo", not(prodex_mojo_fallback)))]
+#[path = "../tests/src/render/mojo.rs"]
+mod mojo_tests;

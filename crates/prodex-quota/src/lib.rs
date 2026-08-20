@@ -1,5 +1,7 @@
 mod auth;
 mod models;
+#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+mod mojo;
 mod render;
 
 pub use self::auth::*;
