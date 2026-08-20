@@ -1,6 +1,7 @@
 use crate::{
     RuntimeProxyQuotaProfileScore, RuntimeProxyQuotaProfileScoreInput,
-    RuntimeProxyQuotaWindowObservation, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
+    RuntimeProxyQuotaWindowObservation, RuntimeResponseCandidatePlanInput,
+    RuntimeResponseCandidatePlanOptions, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
 };
 
 pub(crate) fn pressure_band_for_route(
@@ -53,4 +54,83 @@ pub(crate) fn profile_scores_batch(
 
 pub(crate) fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
     prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(body_bytes)
+}
+
+pub(crate) fn smart_context_pressure_snapshot(
+    model_context_window_tokens: Option<u64>,
+    reserved_output_tokens: u64,
+    effective_input_tokens: u64,
+    effective_input_source: i64,
+    unknown_token_window: bool,
+    zero_context_window: bool,
+    reserved_output_consumes_window: bool,
+) -> Option<prodex_mojo_core::runtime::SmartContextPressureSnapshot> {
+    prodex_mojo_core::runtime::smart_context_pressure_snapshot(
+        model_context_window_tokens,
+        reserved_output_tokens,
+        effective_input_tokens,
+        effective_input_source,
+        unknown_token_window,
+        zero_context_window,
+        reserved_output_consumes_window,
+    )
+}
+
+pub(crate) fn runtime_response_candidate_plan_batch(
+    candidates: &[RuntimeResponseCandidatePlanInput],
+    options: RuntimeResponseCandidatePlanOptions<'_>,
+) -> Option<prodex_mojo_core::runtime::RuntimeCandidatePlan> {
+    let mut fields = Vec::with_capacity(
+        candidates.len() * prodex_mojo_core::runtime::RUNTIME_CANDIDATE_PLAN_FIELD_COUNT,
+    );
+    for candidate in candidates {
+        let prompt_cache_affinity_sort_key =
+            crate::runtime_prompt_cache_affinity_sort_key_with_owner(
+                options.prompt_cache_key,
+                options.prompt_cache_owner_profile,
+                &candidate.name,
+            );
+        let push_usize = |fields: &mut Vec<i64>, value: usize| {
+            fields.push(i64::try_from(value).ok()?);
+            Some(())
+        };
+        fields.push(if candidate.in_selection_backoff { 1 } else { 0 });
+        push_usize(&mut fields, candidate.provider_priority)?;
+        fields.push(i64::from(candidate.quota_sort_key.0));
+        fields.push(candidate.quota_sort_key.1);
+        fields.push(candidate.quota_sort_key.2);
+        fields.push(candidate.quota_sort_key.3);
+        fields.push(candidate.quota_sort_key.4.0);
+        fields.push(candidate.quota_sort_key.5.0);
+        fields.push(candidate.quota_sort_key.6.0);
+        fields.push(candidate.quota_sort_key.7);
+        fields.push(candidate.quota_sort_key.8);
+        fields.push(match candidate.quota_source {
+            crate::RuntimeSelectionQuotaSource::LiveProbe => 0,
+            crate::RuntimeSelectionQuotaSource::PersistedSnapshot => 1,
+        });
+        push_usize(&mut fields, candidate.inflight_count)?;
+        fields.push(i64::from(candidate.health_sort_key));
+        fields.push(i64::from(prompt_cache_affinity_sort_key.0));
+        fields.push(encode_u64_for_signed_order(
+            prompt_cache_affinity_sort_key.1,
+        ));
+        push_usize(&mut fields, candidate.order_index)?;
+        fields.push(encode_u64_for_signed_order(candidate.jitter));
+        push_usize(&mut fields, candidate.backoff_sort_key.0)?;
+        fields.push(candidate.backoff_sort_key.1);
+        fields.push(candidate.backoff_sort_key.2);
+        fields.push(candidate.backoff_sort_key.3);
+    }
+    let route_kind = match options.route_kind {
+        RuntimeRouteKind::Responses => 0,
+        RuntimeRouteKind::Compact => 1,
+        RuntimeRouteKind::Websocket => 2,
+        RuntimeRouteKind::Standard => 3,
+    };
+    prodex_mojo_core::runtime::runtime_candidate_plan_batch(&fields, route_kind)
+}
+
+fn encode_u64_for_signed_order(value: u64) -> i64 {
+    i64::from_ne_bytes((value ^ (1_u64 << 63)).to_ne_bytes())
 }

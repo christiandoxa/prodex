@@ -437,6 +437,59 @@ pub struct SmartContextPressureSnapshotInput<'a> {
 pub fn smart_context_pressure_snapshot(
     input: SmartContextPressureSnapshotInput<'_>,
 ) -> SmartContextPressureSnapshot {
+    #[cfg(feature = "mojo")]
+    if let Some(snapshot) = crate::quota::mojo::smart_context_pressure_snapshot(
+        input.model_context_window_tokens,
+        input.reserved_output_tokens,
+        input.effective_input_tokens,
+        match input.effective_input_source {
+            SmartContextTokenAccountingSource::CurrentRequestTokens => 0,
+            SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => 1,
+            SmartContextTokenAccountingSource::ObservedHistory => 2,
+            SmartContextTokenAccountingSource::Unknown => 3,
+        },
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow),
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow),
+    ) {
+        let pressure_band = match snapshot.pressure_band {
+            0 => Some(SmartContextPressureBand::Unknown),
+            1 => Some(SmartContextPressureBand::Low),
+            2 => Some(SmartContextPressureBand::Moderate),
+            3 => Some(SmartContextPressureBand::High),
+            4 => Some(SmartContextPressureBand::Critical),
+            5 => Some(SmartContextPressureBand::Exhausted),
+            _ => None,
+        };
+        let estimator_confidence = match snapshot.estimator_confidence {
+            0 => Some(SmartContextEstimatorConfidence::High),
+            1 => Some(SmartContextEstimatorConfidence::Medium),
+            2 => Some(SmartContextEstimatorConfidence::Low),
+            _ => None,
+        };
+        if let (Some(pressure_band), Some(estimator_confidence)) =
+            (pressure_band, estimator_confidence)
+        {
+            return SmartContextPressureSnapshot {
+                model_context_window_tokens: input.model_context_window_tokens,
+                reserved_output_tokens: input.reserved_output_tokens,
+                effective_usable_context_tokens: snapshot.effective_usable_context_tokens,
+                effective_used_tokens: snapshot.effective_used_tokens,
+                pressure_basis_points: snapshot.pressure_basis_points,
+                pressure_band,
+                absolute_safety_floor_tokens: snapshot.absolute_safety_floor_tokens,
+                available_context_tokens: input.available_context_tokens,
+                estimator_confidence,
+            };
+        }
+    }
+
     let effective_usable_context_tokens = input
         .model_context_window_tokens
         .and_then(|window| window.checked_sub(input.reserved_output_tokens));

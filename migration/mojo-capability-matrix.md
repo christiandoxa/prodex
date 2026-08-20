@@ -8,7 +8,7 @@
 | Modular CLI | Not installed as a `modular` executable; no command was invented |
 | Verified source syntax | `def`, `Int64`, `UInt64`, `Pointer`, `@export("...")`, and `abi("C")` in quota, runtime, Smart Context, and routing sources |
 | Verified artifact | Strict Cargo builds compile the current sources into the shared static archive; routing and capability exports link into their Rust consumers |
-| Verified Rust call | Strict provider/core Mojo tests link the archive and exercise provider planning, capability negotiation, quota, runtime, and Smart Context paths |
+| Verified Rust call | Strict provider/core/runtime-proxy Mojo tests link the archive and exercise provider planning, capability negotiation, quota, Smart Context pressure, and runtime candidate ordering paths |
 | Shared library | `--emit shared-lib` compiled in the spike; not selected for Cargo because it adds runtime loader/distribution state |
 | Portability | Target-aware object probes exist for Linux x86_64/aarch64, macOS x86_64/arm64, and Windows COFF; only Linux x86_64 has release link/runtime evidence |
 | Real Mojo CI | Ubuntu 24.04 installs official `mojo==1.0.0` with pinned uv `0.11.7`; `PRODEX_MOJO_REQUIRED=1` forbids fallback |
@@ -37,7 +37,7 @@ integration before shipping broader Mojo components.
 | Networking / HTTP | Yes | Not required by core | Mature Rust stack exists | Hyper/Reqwest | `KEEP RUST` | Architecture |
 | TLS | Yes | Not required by core | Security-sensitive ecosystem | rustls | `KEEP RUST` | Threat model |
 | Process execution / PTY | Yes | Not required by core | OS-specific | Rust process/PTY crates | `KEEP RUST` | Runtime launch |
-| Dynamic libraries / C ABI | Yes | C ABI scalar, routing-plan, capability-match, and other flat-buffer exports verified | Narrow stateless boundary only | Rust `extern "C"` | `MOVE NOW` for verified kernels | `ffi-contract.md`; Mojo export/changelog; `migration/abi_probe.rs` |
+| Dynamic libraries / C ABI | Yes | C ABI scalar, routing-plan, capability-match, Smart Context pressure, and runtime candidate-plan flat-buffer exports verified | Narrow stateless boundary only | Rust `extern "C"` | `MOVE NOW` for verified kernels | `ffi-contract.md`; Mojo export/changelog; `migration/abi_probe.rs` |
 | SQLite / PostgreSQL / Redis | Yes | Not required by core | Rust drivers and persistence contracts | rusqlite/postgres/redis | `KEEP RUST` | Storage boundary |
 | Cryptography / keyring / OAuth | Yes | Not required by core | Security ecosystem | Rust crates | `KEEP RUST` | Auth boundary |
 | Terminal / logging | Yes | Not required by core | TUI/log redaction contracts | Crossterm/Ratatui/tracing | `KEEP RUST` | Observability rules |
@@ -54,9 +54,9 @@ integration before shipping broader Mojo components.
 ## Real Mojo CI evidence contract
 
 The `Real Mojo / parity` job in `.github/workflows/ci.yml` compiles the checked-out
-`.mojo` sources, links their archives into Rust, runs the Mojo-backed quota, runtime,
-provider-routing, and capability-negotiation tests, and runs the built `prodex --version`
-binary. The lane uses
+`.mojo` sources, links their archives into Rust, runs the Mojo-backed quota, Smart Context
+pressure, runtime candidate ordering, provider-routing, and capability-negotiation tests, and
+runs the built `prodex --version` binary. The lane uses
 `PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` and the absence of
 `prodex_mojo_fallback` are asserted by tests. Rust-only CI keeps the default fallback
 behavior and does not satisfy this evidence contract.
@@ -64,10 +64,11 @@ behavior and does not satisfy this evidence contract.
 ## Shared core and release evidence
 
 The current production feature set is `mojo-core`, composed of `mojo-quota`, `mojo-runtime`,
-and `mojo-routing`. It compiles the quota, runtime, Smart Context, and routing sources into
-one static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation,
-provider score/routing-plan batching, and provider capability matching through their Rust
-consumers.
+and `mojo-routing`. It compiles the quota, runtime, Smart Context, and routing sources into one
+static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation and
+pressure snapshot, runtime candidate ordering, provider score/routing-plan batching, and
+provider capability matching through their Rust consumers. The new runtime kernels remain under
+the existing `mojo-runtime` feature; no speculative feature was added.
 
 The release matrix is intentionally stricter than object generation:
 

@@ -166,10 +166,13 @@ prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt
 prodex_routing_score_batch(..., count: Int64, weights...) -> Int64
 prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, weights...) -> Int64
 prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64) -> Int64
+prodex_smart_context_pressure_snapshot(..., output pointers...) -> Int64
+prodex_runtime_candidate_plan_batch(..., count: Int64, route_kind: Int64) -> Int64
 ```
 
-All batch calls use parallel flat `Int64` arrays and caller-owned output arrays. They accept at
-most 64 records. A zero-length batch is valid and does not read or write per-record arrays;
+Existing routing and capability batches use parallel flat `Int64` arrays and accept at most 64
+records. The runtime candidate-plan batch uses the same layout and accepts at most 256 records.
+A zero-length batch is valid and does not read or write per-record arrays;
 the scalar result pointers (`ordered_count`, `first_compatible`, and `first_incompatible`) still
 need one writable slot. Non-zero batches require every per-record pointer to reference at least
 `count` elements; null non-zero pointers are invalid and must never be passed. Rust keeps all
@@ -202,6 +205,56 @@ required mask.
 | Nullability | Non-zero per-record buffers must be valid; zero-count per-record buffers are not read or written, but scalar result pointers still need one writable slot |
 | Error propagation | Explicit integer status; no panic, exception, Rust enum, `Vec`, `String`, or `Result` crosses the boundary |
 | Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Capability negotiation falls back to Rust if its Mojo result is invalid; governed routing rejects an invalid plan result |
+
+## Runtime candidate-plan and Smart Context pressure contracts
+
+`prodex_smart_context_pressure_snapshot` is a synchronous fixed-width decision call. Rust passes
+an optional model window as `model_context_window_tokens` plus a presence flag, effective input
+tokens, reserved output tokens, an input-source tag, and three normalized risk flags. Source tags
+are `CurrentRequestTokens=0`, `CurrentRequestBodyEstimate=1`, `ObservedHistory=2`, and
+`Unknown=3`. Risk flags are `0` or `1`.
+
+The caller-owned outputs are effective usable tokens plus a presence flag, pressure basis points
+plus a presence flag, pressure-band tag, absolute safety floor, and estimator-confidence tag.
+Pressure tags are `Unknown=0`, `Low=1`, `Moderate=2`, `High=3`, `Critical=4`, and
+`Exhausted=5`. Confidence tags are `High=0`, `Medium=1`, and `Low=2`. Status `0` means success;
+status `1` means an invalid normalized tag. Rust rejects any unexpected status, presence flag,
+band, confidence, or numeric conversion before mapping the result to the public Smart Context
+model. The result is used by `smart_context_observed_token_accounting_with_calibration`;
+token estimation, model lookup, risk discovery, and available-context construction remain Rust.
+
+`prodex_runtime_candidate_plan_batch` receives one flat row per already-normalized candidate.
+Each row has 22 signed `Int64` fields:
+
+```text
+0  selection-backoff flag
+1  provider priority
+2..10 quota sort key (fields 5..7 are descending components)
+11 quota source tag
+12 inflight count
+13 health sort key
+14 prompt-cache affinity rank
+15 encoded prompt-cache affinity key
+16 original order index
+17 encoded jitter
+18..21 backoff sort key
+```
+
+Route tags are `Responses=0`, `Compact=1`, `Websocket=2`, and `Standard=3`. The output arrays
+are caller-owned ready and fallback indices plus their counts. Ready excludes candidates marked
+with selection backoff. Fallback contains every input candidate, so the two output arrays may
+overlap; Rust validates that each array is duplicate-free, in bounds, and that fallback covers
+the complete input set. Status `0` means success, `1` means an invalid count, and `2` means an
+invalid route or normalized tag. The maximum count is 256; zero candidates are valid.
+
+Rust encodes `u64` ordering fields as the bit pattern of `value ^ (1 << 63)` in an `i64`, which
+preserves unsigned ascending order when Mojo compares signed values. No Rust object layout,
+string, collection, enum, or affinity state crosses the ABI. Rust filters excluded profiles,
+acquires health/quota state, constructs hard quota guards, computes prompt-cache ownership keys,
+and reconstructs the public plan. Mojo owns only the deterministic bounded ordering.
+
+The shared ABI version remains `1`: these are additive symbols using the established static
+archive and do not change existing entry-point layouts.
 
 ## Shared build contract
 

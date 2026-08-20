@@ -281,6 +281,8 @@ fn mojo_core_json_value() -> serde_json::Value {
                 "routing_plan": self_test,
                 "provider_capability": self_test,
                 "smart_context": self_test,
+                "runtime_candidate_plan": prodex_mojo_core::runtime::candidate_plan_self_test(),
+                "smart_context_pressure": prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test(),
             },
         })
     }

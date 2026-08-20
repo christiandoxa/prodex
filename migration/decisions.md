@@ -74,6 +74,41 @@ tokens remain excluded from first-index selection.
 Runtime profile quota scoring and Smart Context byte estimation remain bounded numeric kernels.
 Tokenizer integration and candidate selection remain Rust.
 
+## 2026-08-20: Smart Context pressure is a production integer kernel
+
+Rust continues to estimate tokens, resolve model context limits, and collect accounting-risk
+signals. After that normalization, `smart_context_pressure_snapshot` sends only fixed-width
+values and tags to Mojo. Mojo owns effective-capacity subtraction, saturating pressure arithmetic,
+pressure-band classification, safety-floor clamping, and estimator-confidence classification.
+The result is authoritative in `smart_context_observed_token_accounting_with_calibration`; the
+existing Rust implementation remains the fallback and differential oracle. Float-heavy relevance
+scoring is not part of this boundary.
+
+## 2026-08-20: Runtime candidate ordering crosses one bounded batch
+
+`build_runtime_response_candidate_execution_plan` keeps excluded-profile filtering, quota guard
+construction, health/backoff acquisition, prompt-cache ownership, and all route/affinity state in
+Rust. It sends one 22-field row per remaining candidate to Mojo, which returns stable ready and
+fallback index orders. Mojo's result is authoritative on the feature-enabled path; malformed
+results fall back to the original Rust sort. The fallback list intentionally contains every
+candidate and may overlap ready, matching the existing retry plan contract. A bounded selection
+sort is used at 256 candidates to keep the ABI allocation-free; the stream-commit and affinity
+invariants are unchanged.
+
+## 2026-08-20: Dormant Smart Context candidate planning stays Rust
+
+The candidate score/selection helpers under `prodex-runtime-proxy::smart_context::candidates`
+have no non-test production caller in the current tree. They remain audit-only Rust code rather
+than gaining an unused Mojo wrapper. Revisit only when a real production call graph exists.
+
+## 2026-08-20: Provider constraints and optimistic selection stay Rust for now
+
+Provider request constraints still combine provider parsing, catalog/schema handling, public error
+reconstruction, and numeric rules. The optimistic current-candidate decision also encodes ordered
+runtime predicates around auth, circuit, health, quota evidence, inflight limits, and affinity.
+Both remain Rust until normalized contracts and exhaustive reason-order parity can be isolated;
+no shadow-only Mojo entry point was added.
+
 ## 2026-08-20: Keep accounting and distributed rate limiting in Rust
 
 The generic domain `commit_reservation` and `evaluate_rate_limit` helpers were audited but not
