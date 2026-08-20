@@ -1308,7 +1308,7 @@ jobs:
           package-manager-cache: false
 
       - name: Build host release binary
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu --bin prodex
 
       - name: Smoke staged npm package
         run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release

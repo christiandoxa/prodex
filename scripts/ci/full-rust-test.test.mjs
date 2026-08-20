@@ -154,7 +154,7 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });
 
-test("runtime proxy logical suites fan out without losing filters", () => {
+test("runtime proxy logical suites pack without losing filters", () => {
   const result = spawnSync(process.execPath, ["scripts/ci/runtime-proxy-ci-matrix.mjs", "--github-matrix"], {
     cwd: process.cwd(),
     encoding: "utf8",
@@ -166,10 +166,18 @@ test("runtime proxy logical suites fan out without losing filters", () => {
   const expectedFilters = RUNTIME_CI_BROAD_SHARD_FILTERS.map(
     ({ label, filter }) => `${label}|${filter}`,
   );
-  assert.equal(matrix.include.length, RUNTIME_CI_WORKFLOW_SHARDS.length);
+  assert.equal(matrix.include.length, Math.ceil(RUNTIME_CI_WORKFLOW_SHARDS.length / 2));
+  const midpoint = Math.ceil(RUNTIME_CI_WORKFLOW_SHARDS.length / 2);
+  const tail = RUNTIME_CI_WORKFLOW_SHARDS.slice(midpoint).reverse();
+  const expectedSuites = RUNTIME_CI_WORKFLOW_SHARDS.slice(0, midpoint).map((shard, index) =>
+    [shard, tail[index]]
+      .filter(Boolean)
+      .map((candidate) => candidate.suite)
+      .join("+"),
+  );
   assert.deepEqual(
     matrix.include.map((entry) => entry.suite),
-    RUNTIME_CI_WORKFLOW_SHARDS.map((shard) => shard.suite),
+    expectedSuites,
   );
   assert.ok(matrix.include.every((entry) => entry.filters.trim() !== ""));
   assert.equal(matrix.include.filter((entry) => entry.save_cache).length, 1);

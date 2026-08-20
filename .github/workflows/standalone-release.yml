@@ -337,6 +337,7 @@ jobs:
           PRODEX_MOJO_TARGET="${{ matrix.target }}" \
           PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}" \
           CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/mojo-archive/${{ matrix.target }}" \
+          RUSTC_WRAPPER=sccache \
           cargo build --release --locked --target "${{ matrix.target }}" \
             -p prodex-mojo-core --features "${{ matrix.mojo-features }}"
           archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
