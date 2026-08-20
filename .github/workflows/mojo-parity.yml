@@ -68,17 +68,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --locked --features mojo-quota --bin prodex
+          PRODEX_MOJO_VERSION="${MOJO_VERSION}" cargo build --locked --features mojo-core --bin prodex
           test -x target/debug/prodex
           target/debug/prodex --version
-          quota_archive="$(find target/debug/build -type f -name 'libprodex_quota_mojo.a' -print -quit)"
-          runtime_archive="$(find target/debug/build -type f -name 'libprodex_runtime_quota_mojo.a' -print -quit)"
-          test -n "${quota_archive}"
-          test -n "${runtime_archive}"
-          file "${quota_archive}" "${runtime_archive}"
+          mojo_archive="$(find target/debug/build -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          test -s "${mojo_archive}"
+          file "${mojo_archive}"
+          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-home" target/debug/prodex doctor --runtime --json)"
+          printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
+          printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
 
       - name: Run quota Mojo smoke and parity tests
         run: cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1
 
       - name: Run runtime-proxy Mojo smoke and parity tests
         run: cargo test --locked -q -p prodex-runtime-proxy --features mojo -- --test-threads=1
+
+      - name: Run runtime-quota Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1
+
+      - name: Run provider-routing Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1

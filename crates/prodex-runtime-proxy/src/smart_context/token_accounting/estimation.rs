@@ -2,6 +2,20 @@ pub const SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
 
 pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: usize) -> u64 {
     let body_bytes = u64::try_from(body_bytes).unwrap_or(u64::MAX);
+
+    #[cfg(feature = "mojo")]
+    {
+        crate::quota::mojo::smart_context_estimate_tokens_from_body_bytes(body_bytes)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        smart_context_estimate_tokens_from_body_bytes_rust(body_bytes)
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_estimate_tokens_from_body_bytes_rust(body_bytes: u64) -> u64 {
     body_bytes.saturating_add(SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN - 1)
         / SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN
 }

@@ -11,6 +11,12 @@ use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
 
 mod obligation_filters;
 use obligation_filters::append_provider_obligation_rejection_reasons;
+mod scoring;
+use scoring::score_providers;
+
+#[cfg(feature = "mojo")]
+#[path = "mojo.rs"]
+mod mojo;
 
 pub const ROUTING_SCORE_SCALE: u16 = 10_000;
 pub const MAX_GOVERNED_ROUTING_CANDIDATES: usize = 64;
@@ -476,34 +482,52 @@ pub fn plan_governed_provider_route(
     validate_request(request)?;
 
     let mut routes = Vec::new();
-    let mut candidate_evaluations = Vec::with_capacity(request.registry.providers.len());
+    let mut eligibility = Vec::with_capacity(request.registry.providers.len());
+    let mut eligible_providers = Vec::new();
     for provider in &request.registry.providers {
         let rejection_reasons = provider_rejection_reasons(provider, request);
         if rejection_reasons.is_empty() {
-            let score_breakdown = score_provider(provider, request);
-            routes.push(GovernedRoute {
-                provider: provider.provider,
-                descriptor_revision: provider.revision,
-                pricing_revision: provider.pricing_revision,
-                credential_ref: provider.credential_ref.clone(),
-                score: score_breakdown.score,
-                score_breakdown: score_breakdown.clone(),
-            });
-            candidate_evaluations.push(GovernedCandidateEvaluation {
-                provider: provider.provider,
-                descriptor_revision: provider.revision,
-                outcome: GovernedCandidateOutcome::Eligible,
-                rejection_reasons,
-                score_breakdown: Some(score_breakdown),
-            });
+            eligible_providers.push(provider);
+            eligibility.push(None);
         } else {
-            candidate_evaluations.push(GovernedCandidateEvaluation {
+            eligibility.push(Some(rejection_reasons));
+        }
+    }
+    let score_breakdowns = score_providers(&eligible_providers, request)?;
+    for (provider, score_breakdown) in eligible_providers.iter().zip(score_breakdowns) {
+        routes.push(GovernedRoute {
+            provider: provider.provider,
+            descriptor_revision: provider.revision,
+            pricing_revision: provider.pricing_revision,
+            credential_ref: provider.credential_ref.clone(),
+            score: score_breakdown.score,
+            score_breakdown,
+        });
+    }
+    let mut candidate_evaluations = Vec::with_capacity(eligibility.len());
+    let mut score_index = 0;
+    for (provider, rejection_reasons) in request.registry.providers.iter().zip(eligibility) {
+        match rejection_reasons {
+            Some(rejection_reasons) => candidate_evaluations.push(GovernedCandidateEvaluation {
                 provider: provider.provider,
                 descriptor_revision: provider.revision,
                 outcome: GovernedCandidateOutcome::Rejected,
                 rejection_reasons,
                 score_breakdown: None,
-            });
+            }),
+            None => {
+                let Some(route) = routes.get(score_index) else {
+                    return Err(GovernedRoutingError::InvalidWeights);
+                };
+                candidate_evaluations.push(GovernedCandidateEvaluation {
+                    provider: provider.provider,
+                    descriptor_revision: provider.revision,
+                    outcome: GovernedCandidateOutcome::Eligible,
+                    rejection_reasons: Vec::new(),
+                    score_breakdown: Some(route.score_breakdown.clone()),
+                });
+                score_index += 1;
+            }
         }
     }
     routes.sort_by(|left, right| {
@@ -678,83 +702,5 @@ fn append_provider_static_rejection_reasons(
         .is_empty()
     {
         reasons.push(GovernedHardFilterReason::CapabilityMissing);
-    }
-}
-
-fn score_provider(
-    provider: &GovernedProviderDescriptor,
-    request: &GovernedRoutingRequest<'_>,
-) -> GovernedScoreBreakdown {
-    let weights = request.weights;
-    let inverse = |value: u16| ROUTING_SCORE_SCALE - value;
-    let affinity = if request.affinity_provider == Some(provider.provider) {
-        ROUTING_SCORE_SCALE
-    } else {
-        0
-    };
-    let components = [
-        score_component(
-            GovernedScoreComponentKind::Health,
-            provider.signals.health.unwrap_or(ROUTING_SCORE_SCALE / 2),
-            weights.health,
-        ),
-        score_component(
-            GovernedScoreComponentKind::AvailableCapacity,
-            provider.signals.quota_headroom.map_or_else(
-                || inverse(provider.signals.load),
-                |quota| quota.min(inverse(provider.signals.load)),
-            ),
-            weights.load,
-        ),
-        score_component(
-            GovernedScoreComponentKind::CostEfficiency,
-            inverse(provider.signals.cost),
-            weights.cost,
-        ),
-        score_component(
-            GovernedScoreComponentKind::LatencyEfficiency,
-            inverse(provider.signals.latency),
-            weights.latency,
-        ),
-        score_component(
-            GovernedScoreComponentKind::RiskReduction,
-            inverse(provider.signals.risk),
-            weights.risk,
-        ),
-        score_component(
-            GovernedScoreComponentKind::OperatorPriority,
-            provider.signals.priority,
-            weights.priority,
-        ),
-        score_component(
-            GovernedScoreComponentKind::Affinity,
-            affinity,
-            weights.affinity,
-        ),
-    ];
-    let weighted_total = components
-        .iter()
-        .map(|component| component.weighted_value)
-        .sum::<u64>();
-    let weight_total = request.weights.total().unwrap_or(1) as u16;
-    GovernedScoreBreakdown {
-        score_revision: request.score_revision,
-        components,
-        weighted_total,
-        weight_total,
-        score: (weighted_total / u64::from(weight_total)) as u16,
-    }
-}
-
-fn score_component(
-    kind: GovernedScoreComponentKind,
-    normalized_value: u16,
-    weight: u16,
-) -> GovernedScoreComponent {
-    GovernedScoreComponent {
-        kind,
-        normalized_value,
-        weight,
-        weighted_value: u64::from(normalized_value) * u64::from(weight),
     }
 }

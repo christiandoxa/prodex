@@ -3167,6 +3167,7 @@ name = "prodex-provider-spi"
 version = "0.410.0"
 dependencies = [
  "prodex-domain",
+ "prodex-mojo-core",
  "prodex-provider-core",
 ]
 
@@ -3186,6 +3187,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "chrono",
+ "prodex-mojo-core",
  "prodex-profile-identity",
  "prodex-runtime-state",
  "prodex-terminal-ui",
@@ -3342,6 +3344,7 @@ version = "0.410.0"
 dependencies = [
  "base64 0.23.1",
  "prodex-gateway-core",
+ "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-redaction",
  "prodex-runtime-state",

@@ -10,6 +10,10 @@ repository.workspace = true
 name = "prodex_runtime_quota"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["runtime_proxy_crate/mojo"]
+
 [dependencies]
 chrono = { workspace = true }
 prodex_quota = { workspace = true }

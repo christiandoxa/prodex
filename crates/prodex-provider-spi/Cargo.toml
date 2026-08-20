@@ -10,9 +10,14 @@ repository.workspace = true
 name = "prodex_provider_spi"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-routing"]
+
 [dependencies]
 prodex_domain = { workspace = true }
 prodex_provider_core = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 
 [lints]
 workspace = true
