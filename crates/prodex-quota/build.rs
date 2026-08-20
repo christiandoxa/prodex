@@ -8,10 +8,23 @@ use std::{
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO");
+    println!("cargo:rerun-if-env-changed=PRODEX_MOJO_REQUIRED");
     println!("cargo:rerun-if-env-changed=AR");
     println!("cargo:rustc-check-cfg=cfg(prodex_mojo_fallback)");
+    println!("cargo:rustc-check-cfg=cfg(prodex_mojo_active)");
+    println!("cargo:rustc-check-cfg=cfg(prodex_mojo_required)");
+
+    let mojo_required = mojo_required();
+    if mojo_required {
+        println!("cargo:rustc-cfg=prodex_mojo_required");
+    }
 
     if env::var_os("CARGO_FEATURE_MOJO").is_none() {
+        if mojo_required {
+            panic!(
+                "PRODEX_MOJO_REQUIRED is set but feature `mojo` is disabled; enable the Mojo feature"
+            );
+        }
         return;
     }
 
@@ -38,6 +51,11 @@ fn main() {
     match status {
         Ok(status) if status.success() => {}
         Err(error) if error.kind() == ErrorKind::NotFound && mojo_override.is_none() => {
+            if mojo_required {
+                panic!(
+                    "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
+                );
+            }
             use_rust_fallback("Mojo compiler not found on PATH");
             return;
         }
@@ -56,6 +74,9 @@ fn main() {
     match status {
         Ok(status) if status.success() => {}
         Err(error) if error.kind() == ErrorKind::NotFound && ar_override.is_none() => {
+            if mojo_required {
+                panic!("static archiver was required but not found on PATH");
+            }
             use_rust_fallback("static archiver not found on PATH");
             return;
         }
@@ -68,6 +89,13 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=prodex_quota_mojo");
+    println!("cargo:rustc-cfg=prodex_mojo_active");
+}
+
+fn mojo_required() -> bool {
+    env::var("PRODEX_MOJO_REQUIRED")
+        .map(|value| !matches!(value.as_str(), "" | "0" | "false" | "no"))
+        .unwrap_or(false)
 }
 
 fn use_rust_fallback(reason: &str) {

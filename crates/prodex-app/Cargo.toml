@@ -16,7 +16,7 @@ doctest = false
 default = []
 bench-support = ["dep:prodex_bench_support"]
 allocation-bench-support = ["dep:prodex_bench_support"]
-mojo-quota = ["prodex_quota/mojo"]
+mojo-quota = ["prodex_quota/mojo", "runtime_proxy_crate/mojo"]
 
 [dependencies]
 anyhow = { workspace = true }

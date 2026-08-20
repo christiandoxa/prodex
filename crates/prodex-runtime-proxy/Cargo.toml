@@ -10,6 +10,10 @@ repository.workspace = true
 name = "runtime_proxy"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = []
+
 [dependencies]
 base64 = { workspace = true }
 prodex_gateway_core = { workspace = true }
