@@ -130,7 +130,8 @@ target/debug/prodex doctor --runtime --json
 
 Strict mode fails if the Mojo feature is disabled, the compiler or archiver is missing,
 the checked-out Mojo source does not compile, or the build would activate the Rust
-fallback. The authoritative CI job is `.github/workflows/mojo-parity.yml`; it also runs
+fallback. The authoritative `Real Mojo / parity` job is part of
+`.github/workflows/ci.yml`; it also runs
 the built `prodex --version` binary and checks the generated static archives.
 
 ### Release and installer Mojo checks

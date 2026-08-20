@@ -14,7 +14,7 @@ Captured for the current descendant migration pass on 2026-08-20.
 | Architecture | `x86_64` |
 | Existing bridge | Shared `prodex-mojo-core`, disabled by default; Rust fallback retained |
 | Strict Mojo mode | `PRODEX_MOJO_REQUIRED=1`; missing compiler/archiver or disabled Mojo feature is a hard failure |
-| Real Mojo CI | `.github/workflows/mojo-parity.yml`, Ubuntu 24.04, `mojo==1.0.0` via official uv install |
+| Real Mojo CI | `Real Mojo / parity` in `.github/workflows/ci.yml`, Ubuntu 24.04, `mojo==1.0.0` via official uv install |
 
 The baseline worktree was clean and matched `origin/main` before this pass. Existing
 Rust-only and Mojo-enabled bridge tests are the behavioral starting point.

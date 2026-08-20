@@ -53,7 +53,7 @@ shipping broader Mojo components.
 
 ## Real Mojo CI evidence contract
 
-The dedicated `.github/workflows/mojo-parity.yml` lane compiles the checked-out
+The `Real Mojo / parity` job in `.github/workflows/ci.yml` compiles the checked-out
 `.mojo` sources, links their archives into Rust, runs the Mojo-backed quota and runtime
 proxy tests, and runs the built `prodex --version` binary. The lane uses
 `PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` and the absence of

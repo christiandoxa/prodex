@@ -1735,6 +1735,81 @@ jobs:
           path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
           if-no-files-found: ignore
 
+  real-mojo:
+    name: Real Mojo / parity
+    if: ${{ github.event_name != 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MOJO_VERSION: "1.0.0"
+      UV_VERSION: "0.11.7"
+      PRODEX_MOJO_REQUIRED: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install pinned Mojo toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          mojo_version="$(mojo --version)"
+          printf '%s\n' "${mojo_version}"
+          case "${mojo_version}" in
+            "Mojo ${MOJO_VERSION}"*) ;;
+            *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
+          esac
+          command -v mojo
+          rustc --version
+          cargo --version
+          ar --version | head -n 1
+
+      - name: Build Prodex with real Mojo
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODEX_MOJO_VERSION="${MOJO_VERSION}" cargo build --locked --features mojo-core --bin prodex
+          test -x target/debug/prodex
+          target/debug/prodex --version
+          mojo_archive="$(find target/debug/build -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          test -s "${mojo_archive}"
+          file "${mojo_archive}"
+          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-home" target/debug/prodex doctor --runtime --json)"
+          printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
+          printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
+
+      - name: Run quota Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1
+
+      - name: Run runtime-proxy Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-runtime-proxy --features mojo -- --test-threads=1
+
+      - name: Run runtime-quota Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1
+
+      - name: Run provider-routing Mojo smoke and parity tests
+        run: cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1
+
   ci-duration-telemetry:
     name: CI duration telemetry
     needs:
@@ -1767,6 +1842,7 @@ jobs:
       - runtime-proxy-bench-smoke
       - runtime-load-smoke
       - runtime-stress
+      - real-mojo
     if: ${{ always() && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
