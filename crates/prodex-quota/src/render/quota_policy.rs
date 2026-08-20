@@ -4,7 +4,7 @@ pub(super) fn quota_window_status(
     remaining_percent: i64,
     has_window: bool,
 ) -> RuntimeQuotaWindowStatus {
-    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    #[cfg(feature = "mojo")]
     {
         runtime_quota_window_status_from_code(crate::mojo::window_status(
             remaining_percent,
@@ -12,7 +12,7 @@ pub(super) fn quota_window_status(
         ))
     }
 
-    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    #[cfg(not(feature = "mojo"))]
     {
         if !has_window {
             RuntimeQuotaWindowStatus::Unknown
@@ -32,7 +32,7 @@ pub fn quota_pressure_band_from_windows(
     five_hour: RuntimeQuotaWindowSummary,
     weekly: RuntimeQuotaWindowSummary,
 ) -> RuntimeQuotaPressureBand {
-    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    #[cfg(feature = "mojo")]
     {
         runtime_quota_pressure_band_from_code(crate::mojo::pressure_band(
             runtime_quota_window_status_code(five_hour.status),
@@ -40,7 +40,7 @@ pub fn quota_pressure_band_from_windows(
         ))
     }
 
-    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    #[cfg(not(feature = "mojo"))]
     {
         [five_hour.status, weekly.status]
             .into_iter()
@@ -53,7 +53,7 @@ pub fn quota_pressure_band_from_windows(
 pub fn quota_pressure_band_from_window_status(
     status: RuntimeQuotaWindowStatus,
 ) -> RuntimeQuotaPressureBand {
-    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    #[cfg(feature = "mojo")]
     {
         runtime_quota_pressure_band_from_code(crate::mojo::pressure_band(
             runtime_quota_window_status_code(status),
@@ -61,7 +61,7 @@ pub fn quota_pressure_band_from_window_status(
         ))
     }
 
-    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    #[cfg(not(feature = "mojo"))]
     {
         match status {
             RuntimeQuotaWindowStatus::Ready => RuntimeQuotaPressureBand::Healthy,
@@ -73,7 +73,7 @@ pub fn quota_pressure_band_from_window_status(
     }
 }
 
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 fn runtime_quota_window_status_code(status: RuntimeQuotaWindowStatus) -> i64 {
     match status {
         RuntimeQuotaWindowStatus::Ready => 0,
@@ -84,7 +84,7 @@ fn runtime_quota_window_status_code(status: RuntimeQuotaWindowStatus) -> i64 {
     }
 }
 
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 fn runtime_quota_window_status_from_code(code: i64) -> RuntimeQuotaWindowStatus {
     match code {
         0 => RuntimeQuotaWindowStatus::Ready,
@@ -95,7 +95,7 @@ fn runtime_quota_window_status_from_code(code: i64) -> RuntimeQuotaWindowStatus 
     }
 }
 
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 fn runtime_quota_pressure_band_from_code(code: i64) -> RuntimeQuotaPressureBand {
     match code {
         0 => RuntimeQuotaPressureBand::Healthy,

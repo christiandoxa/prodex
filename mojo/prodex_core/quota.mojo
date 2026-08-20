@@ -42,8 +42,8 @@ def prodex_quota_pressure_band(
     five_hour_status: Int64,
     weekly_status: Int64,
 ) abi("C") -> Int64:
-    five_hour_band = prodex_quota_pressure_band_for_status(five_hour_status)
-    weekly_band = prodex_quota_pressure_band_for_status(weekly_status)
+    var five_hour_band = prodex_quota_pressure_band_for_status(five_hour_status)
+    var weekly_band = prodex_quota_pressure_band_for_status(weekly_status)
     if five_hour_band > weekly_band:
         return five_hour_band
     return weekly_band

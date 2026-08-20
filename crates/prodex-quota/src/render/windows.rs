@@ -104,12 +104,12 @@ pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
     let second_used_percent =
         find_main_window(pair, "weekly").and_then(|window| window.used_percent);
 
-    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    #[cfg(feature = "mojo")]
     {
         crate::mojo::window_pair_has_ready_limit(first_used_percent, second_used_percent)
     }
 
-    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    #[cfg(not(feature = "mojo"))]
     {
         let used_percentages = [first_used_percent, second_used_percent]
             .into_iter()

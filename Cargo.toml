@@ -31,6 +31,7 @@ members = [
     "crates/prodex-domain",
     "crates/prodex-housekeeping",
     "crates/prodex-mcp-stdio",
+    "crates/prodex-mojo-core",
     "crates/prodex-observability",
     "crates/prodex-presidio",
     "crates/prodex-profile-export",
@@ -135,6 +136,7 @@ prodex_gateway_http = { package = "prodex-gateway-http", path = "crates/prodex-g
 prodex_gateway_server = { package = "prodex-gateway-server", path = "crates/prodex-gateway-server", version = "0.410.0" }
 prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.410.0" }
 prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.410.0" }
+prodex_mojo_core = { package = "prodex-mojo-core", path = "crates/prodex-mojo-core", version = "0.410.0" }
 prodex_observability = { package = "prodex-observability", path = "crates/prodex-observability", version = "0.410.0" }
 prodex_presidio = { package = "prodex-presidio", path = "crates/prodex-presidio", version = "0.410.0" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "0.410.0" }

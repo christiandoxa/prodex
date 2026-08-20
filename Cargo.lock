@@ -2832,6 +2832,7 @@ dependencies = [
  "prodex-gateway-server",
  "prodex-housekeeping",
  "prodex-mcp-stdio",
+ "prodex-mojo-core",
  "prodex-observability",
  "prodex-optional-tools",
  "prodex-presidio",
@@ -3082,6 +3083,10 @@ dependencies = [
  "anyhow",
  "serde_json",
 ]
+
+[[package]]
+name = "prodex-mojo-core"
+version = "0.410.0"
 
 [[package]]
 name = "prodex-observability"

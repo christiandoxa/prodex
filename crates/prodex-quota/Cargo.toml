@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-mojo = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-quota"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -24,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 prodex_profile_identity = { workspace = true }
 prodex_runtime_state = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 terminal_ui = { workspace = true }
 zeroize = { workspace = true }
 
