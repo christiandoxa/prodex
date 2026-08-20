@@ -40,7 +40,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 13);
-  assert.equal(ciMatrix.include.length, 26);
+  assert.equal(ciMatrix.include.length, 9);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
   assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -82,6 +82,10 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     assert.ok(skips.includes("main_internal_tests::"));
     assert.ok(skips.includes("profile_commands_internal_tests::"));
   }
+  assert.equal(
+    ciMatrix.include.find((entry) => entry.suite === "launch-providers").filters.split("\n").length,
+    8,
+  );
   const fullFilters = fullMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
   assert.deepEqual(new Set(fullFilters), new Set(PRODEX_APP_LIB_FILTERS));
   assert.equal(

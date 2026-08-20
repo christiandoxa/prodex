@@ -141,13 +141,13 @@ function splitIndependentShards(shards) {
 export const PRODEX_APP_FULL_TEST_SHARDS = Object.freeze(splitIndependentShards(PRODEX_APP_LIB_SHARDS));
 
 // Dedicated Ubuntu jobs own all main-internal and profile-command-internal tests.
-// Windows keeps the canonical app partition unchanged.
+// Keep related filters together so each push/PR job reuses one compilation.
 const CI_TARGETED_SHARDS = Object.freeze(
-  splitIndependentShards(TARGETED_SHARDS.map((shard) => ({
+  TARGETED_SHARDS.map((shard) => ({
     ...shard,
     filters: shard.filters.filter((filter) => !filter.startsWith(MAIN_INTERNAL_FILTER)),
     skipFilters: [MAIN_INTERNAL_FILTER, PROFILE_COMMANDS_INTERNAL_FILTER],
-  })).filter((shard) => shard.filters.length > 0)),
+  })).filter((shard) => shard.filters.length > 0),
 );
 const CI_REMAINDER_SHARD = Object.freeze({
   ...PRODEX_APP_LIB_SHARDS.at(-1),

@@ -80,21 +80,31 @@ function shardFilters(shard, index) {
   });
 }
 
-function matrixEntry(shard, index) {
-  const suite = requireNonEmptyString(shard?.suite, `workflow shard ${index} suite`);
-  const label = requireNonEmptyString(shard?.label, `workflow shard ${index} label`);
+function pairWorkflowShards(shards) {
+  const midpoint = Math.ceil(shards.length / 2);
+  const tail = shards.slice(midpoint).reverse();
+  return shards.slice(0, midpoint).map((shard, index) => [shard, tail[index]].filter(Boolean));
+}
+
+function matrixEntry(shards, index) {
+  const suites = shards.map((shard) =>
+    requireNonEmptyString(shard?.suite, `workflow shard ${index} suite`),
+  );
+  const labels = shards.map((shard) =>
+    requireNonEmptyString(shard?.label, `workflow shard ${index} label`),
+  );
 
   return {
-    suite,
-    label,
-    save_cache: suite === "root",
-    filters: shardFilters(shard, index).join("\n"),
+    suite: suites.join("+"),
+    label: labels.join(" + "),
+    save_cache: index === 0,
+    filters: shards.flatMap((shard) => shardFilters(shard, index)).join("\n"),
   };
 }
 
 function githubMatrix() {
   return {
-    include: RUNTIME_CI_WORKFLOW_SHARDS.map(matrixEntry),
+    include: pairWorkflowShards(RUNTIME_CI_WORKFLOW_SHARDS).map(matrixEntry),
   };
 }
 
