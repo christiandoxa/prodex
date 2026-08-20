@@ -39,15 +39,17 @@ mod tests;
 #[path = "../tests/src/render/quota_policy.rs"]
 mod quota_policy_tests;
 
-#[cfg(all(test, feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(all(test, feature = "mojo"))]
 #[path = "../tests/src/render/mojo.rs"]
 mod mojo_tests;
 
-#[cfg(all(test, feature = "mojo", prodex_mojo_required))]
+#[cfg(all(test, feature = "mojo"))]
 #[test]
 fn mojo_feature_requires_real_compiled_core() {
-    #[cfg(not(prodex_mojo_active))]
-    panic!("Mojo feature unexpectedly built without a real Mojo archive");
-    #[cfg(prodex_mojo_fallback)]
-    panic!("Mojo feature unexpectedly built with the Rust fallback");
+    if prodex_mojo_core::MOJO_REQUIRED {
+        const {
+            assert!(prodex_mojo_core::MOJO_ACTIVE);
+            assert!(!prodex_mojo_core::MOJO_FALLBACK);
+        }
+    }
 }

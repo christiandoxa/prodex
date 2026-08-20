@@ -1,6 +1,6 @@
 mod auth;
 mod models;
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 mod mojo;
 mod render;
 

@@ -1,9 +1,9 @@
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 pub fn remaining_percent(used_percent: Option<i64>) -> i64 {
     crate::mojo::remaining_percent(used_percent)
 }
 
-#[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+#[cfg(not(feature = "mojo"))]
 pub fn remaining_percent(used_percent: Option<i64>) -> i64 {
     let Some(used) = used_percent else {
         return 0;

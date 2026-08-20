@@ -1,0 +1,21 @@
+[package]
+name = "prodex-mojo-core"
+version.workspace = true
+edition.workspace = true
+description = "Verified Rust-to-Mojo deterministic core bridge for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_mojo_core"
+path = "src/lib.rs"
+
+[features]
+default = []
+mojo-quota = []
+mojo-runtime = []
+mojo-routing = []
+mojo-core = ["mojo-quota", "mojo-runtime", "mojo-routing"]
+
+[lints]
+workspace = true
