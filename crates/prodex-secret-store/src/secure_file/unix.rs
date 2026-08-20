@@ -14,17 +14,32 @@ pub(super) struct Directory {
 
 impl Directory {
     pub(super) fn open_path(path: &Path, create: bool) -> io::Result<Self> {
+        Self::open_path_with_access(path, create, true)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn open_searchable_path(path: &Path, create: bool) -> io::Result<Self> {
+        Self::open_path_with_access(path, create, false)
+    }
+
+    fn open_path_with_access(path: &Path, create: bool, readable_final: bool) -> io::Result<Self> {
+        let mut components = path
+            .components()
+            .filter(|component| !matches!(component, Component::RootDir | Component::CurDir))
+            .peekable();
+        let readable_start = components.peek().is_none() && readable_final;
         let mut directory = if path.is_absolute() {
-            Self::open_start(c"/")?
+            Self::open_start(c"/", readable_start)?
         } else {
-            Self::open_start(c".")?
+            Self::open_start(c".", readable_start)?
         };
 
-        for component in path.components() {
+        while let Some(component) = components.next() {
             match component {
                 Component::RootDir | Component::CurDir => {}
                 Component::Normal(name) => {
-                    directory = directory.open_child(name, create)?;
+                    let final_component = components.peek().is_none() && readable_final;
+                    directory = directory.open_path_child(name, create, final_component)?;
                 }
                 Component::ParentDir | Component::Prefix(_) => {
                     return Err(invalid_input("parent traversal is not allowed"));
@@ -35,13 +50,24 @@ impl Directory {
         Ok(directory)
     }
 
-    fn open_start(path: &std::ffi::CStr) -> io::Result<Self> {
+    fn open_start(path: &std::ffi::CStr, readable: bool) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        let access = if readable {
+            libc::O_RDONLY
+        } else {
+            libc::O_PATH
+        };
+        #[cfg(not(target_os = "linux"))]
+        let access = {
+            let _ = readable;
+            libc::O_RDONLY
+        };
         // SAFETY: `path` is a valid, NUL-terminated C string and the returned fd
         // is checked before ownership is transferred to `File`.
         let fd = unsafe {
             libc::open(
                 path.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                access | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
             )
         };
         file_from_fd(fd).map(|file| Self { file })
@@ -52,8 +78,17 @@ impl Directory {
     }
 
     pub(super) fn open_child(&self, name: &OsStr, create: bool) -> io::Result<Self> {
+        self.open_path_child(name, create, true)
+    }
+
+    fn open_path_child(
+        &self,
+        name: &OsStr,
+        create: bool,
+        final_component: bool,
+    ) -> io::Result<Self> {
         let name = c_name(name)?;
-        let mut fd = openat_directory(self.file.as_raw_fd(), &name);
+        let mut fd = openat_directory(self.file.as_raw_fd(), &name, final_component);
         if fd == -1 && create && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
             // SAFETY: the parent fd is live and `name` is a single NUL-terminated
             // component. `mkdirat` cannot follow a final symlink.
@@ -64,7 +99,7 @@ impl Directory {
                     return Err(error);
                 }
             }
-            fd = openat_directory(self.file.as_raw_fd(), &name);
+            fd = openat_directory(self.file.as_raw_fd(), &name, final_component);
         }
         let file = file_from_fd(fd)?;
         validate_directory(&file.metadata()?)?;
@@ -73,7 +108,7 @@ impl Directory {
 
     pub(super) fn ensure_private_child(&self, name: &OsStr) -> io::Result<Self> {
         let name = c_name(name)?;
-        let mut fd = openat_directory(self.file.as_raw_fd(), &name);
+        let mut fd = openat_directory(self.file.as_raw_fd(), &name, true);
         if fd == -1 && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
             // SAFETY: the parent descriptor is live and the single component
             // cannot follow a final symlink.
@@ -84,7 +119,7 @@ impl Directory {
                     return Err(error);
                 }
             }
-            fd = openat_directory(self.file.as_raw_fd(), &name);
+            fd = openat_directory(self.file.as_raw_fd(), &name, true);
         }
         let file = file_from_fd(fd)?;
         if !file.metadata()?.is_dir() {
@@ -198,14 +233,25 @@ impl Directory {
     }
 }
 
-fn openat_directory(parent: RawFd, name: &std::ffi::CStr) -> RawFd {
+fn openat_directory(parent: RawFd, name: &std::ffi::CStr, final_component: bool) -> RawFd {
+    #[cfg(target_os = "linux")]
+    let access = if final_component {
+        libc::O_RDONLY
+    } else {
+        libc::O_PATH
+    };
+    #[cfg(not(target_os = "linux"))]
+    let access = {
+        let _ = final_component;
+        libc::O_RDONLY
+    };
     // SAFETY: `parent` is a live directory fd and `name` is a single valid,
     // NUL-terminated component. The caller validates the returned fd.
     unsafe {
         libc::openat(
             parent,
             name.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            access | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
         )
     }
 }

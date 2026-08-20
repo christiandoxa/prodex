@@ -38,12 +38,15 @@ Notes:
 pub const CLI_LOGIN_AFTER_HELP: &str = "\
 Examples:
   prodex login
+  prodex login main
   prodex login --profile main
   prodex login --device-auth
   prodex login --with-claude
   prodex login --with-antigravity
 
 Notes:
+  A leading non-option argument selects the profile; `status` remains Codex login status.
+  Use --profile when selecting a profile literally named `status`.
   OpenAI/Codex, Claude, and API-key login paths create or update Prodex profiles.
   Google Gemini OAuth is unsupported. Use a Gemini API key for the Codex bridge, or native `prodex s gemini --cli gemini` for supported Vertex AI authentication.
   Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";

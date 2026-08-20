@@ -131,10 +131,11 @@ pub(crate) fn ensure_private_directory(path: &Path) -> io::Result<()> {
         .ok_or_else(|| invalid_input("private directory name cannot be empty"))?;
     validate_name(name)?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    SecureDirectory::open(parent, true)?
-        .0
-        .ensure_private_child(name)
-        .map(drop)
+    #[cfg(target_os = "linux")]
+    let directory = platform::Directory::open_searchable_path(parent, true)?;
+    #[cfg(not(target_os = "linux"))]
+    let directory = SecureDirectory::open(parent, true)?.0;
+    directory.ensure_private_child(name).map(drop)
 }
 
 pub(crate) fn seal_private_file(path: &Path, max_bytes: u64) -> io::Result<bool> {

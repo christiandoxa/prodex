@@ -332,7 +332,7 @@ prodex profile import-current main
 ```bash
 prodex login
 prodex profile add second
-prodex login --profile second
+prodex login second
 prodex login --with-claude
 prodex login --with-antigravity
 ```
@@ -958,7 +958,7 @@ catalog behavior, and non-goals.
 prodex profile list
 prodex profile add second
 prodex profile import-current main
-prodex login --profile second
+prodex login second
 prodex use --profile main
 prodex logout --profile main
 ```
