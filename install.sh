@@ -266,6 +266,10 @@ verify_staged_implementation() {
       echo "Downloaded Prodex did not report fallback=false." >&2
       exit 1
     }
+    printf '%s\n' "$diagnostics" | grep -F '"compiler_required": false' >/dev/null 2>&1 || {
+      echo "Downloaded Prodex unexpectedly requires the Mojo compiler." >&2
+      exit 1
+    }
     printf '%s\n' "$diagnostics" | grep -F '"self_test": "passed"' >/dev/null 2>&1 || {
       echo "Downloaded Prodex Mojo self-test failed." >&2
       exit 1

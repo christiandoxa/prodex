@@ -1796,6 +1796,8 @@ jobs:
           diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-home" target/debug/prodex doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
 
       - name: Run quota Mojo smoke and parity tests

@@ -194,6 +194,9 @@ function Verify-StagedImplementation {
         throw "Downloaded Prodex implementation $actualImplementation did not match manifest $ExpectedImplementation."
     }
     if ($ExpectedImplementation -ceq "mojo-compiled-in") {
+        if ([bool]$diagnostics.mojo_core.compiler_required) {
+            throw "Downloaded Prodex unexpectedly requires the Mojo compiler."
+        }
         if ([bool]$diagnostics.mojo_core.fallback -or [string]$diagnostics.mojo_core.self_test -cne "passed") {
             throw "Downloaded Prodex Mojo self-test failed."
         }

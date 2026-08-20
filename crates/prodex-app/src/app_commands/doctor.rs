@@ -264,7 +264,8 @@ fn mojo_core_json_value() -> serde_json::Value {
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
             "fallback": prodex_mojo_core::MOJO_FALLBACK,
-            "compiler_required": prodex_mojo_core::MOJO_REQUIRED,
+            "compiler_required": false,
+            "build_strict": prodex_mojo_core::MOJO_REQUIRED,
             "version": prodex_mojo_core::MOJO_VERSION,
             "implementation": if prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK {
                 "mojo-compiled-in"
@@ -282,6 +283,7 @@ fn mojo_core_json_value() -> serde_json::Value {
         "active": false,
         "fallback": false,
         "compiler_required": false,
+        "build_strict": false,
         "version": serde_json::Value::Null,
         "implementation": "rust",
         "self_test": "not-enabled",
@@ -579,6 +581,11 @@ mod install_only_tests {
     use super::*;
     use crate::test_support::TestEnvVarGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn doctor_reports_mojo_compiler_as_build_time_only() {
+        assert_eq!(mojo_core_json_value()["compiler_required"], false);
+    }
 
     #[test]
     fn install_only_skips_stateful_doctor_startup() {

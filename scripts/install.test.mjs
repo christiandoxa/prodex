@@ -35,7 +35,7 @@ function run(command, args, options = {}) {
   });
 }
 
-async function fixture(t, { validChecksum = true, manifestImplementation = null } = {}) {
+async function fixture(t, { validChecksum = true, manifestImplementation = null, compilerRequired = false } = {}) {
   const target = targetForHost();
   if (!target) {
     t.skip(`installer fixture unsupported on ${process.platform}`);
@@ -51,7 +51,7 @@ async function fixture(t, { validChecksum = true, manifestImplementation = null 
   const binary = Buffer.from(
     manifestImplementation === null
       ? `#!/bin/sh\nprintf 'prodex ${version}\\n'\n`
-      : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
+      : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "compiler_required": ${compilerRequired},'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
   );
   const manifest =
     manifestImplementation === null
@@ -198,6 +198,15 @@ test("installer selects and verifies a compiled-in Mojo release from the manifes
   assert.match(result.stdout, /Release implementation: mojo-compiled-in/);
   const installed = path.join(state.binDir, "prodex");
   assert.equal((await run(installed, ["--version"])).stdout, `prodex ${version}\n`);
+});
+
+test("installer rejects a Mojo release that requires a compiler at runtime", async (t) => {
+  const state = await fixture(t, { manifestImplementation: "mojo-compiled-in", compilerRequired: true });
+  if (!state) return;
+  const result = await runInstaller(state);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /unexpectedly requires the Mojo compiler/);
+  await assert.rejects(fs.access(path.join(state.binDir, "prodex")));
 });
 
 test("installer require-Mojo mode rejects a Rust compatibility release", async (t) => {
