@@ -45,3 +45,35 @@ per-candidate scalar FFI would be finer-grained than the current bridge justifie
 Route-specific quota pressure is a narrower exception: two already-normalized window
 observations and one route tag form a bounded batch decision. The Mojo entry point returns
 only a pressure-band tag; it does not select profiles or override hard affinity.
+
+## 2026-08-20: Consolidate Mojo build ownership
+
+The repeated per-crate build scripts were replaced with `prodex-mojo-core`. It owns the unsafe
+FFI declarations, source selection, archive creation, strict-mode behavior, target flags, and
+activation cfgs. Consumer crates expose safe typed wrappers. This keeps the ABI small and makes
+the release feature set (`mojo-core`) explicit without making Mojo a default dependency.
+
+## 2026-08-20: Batch only normalized numeric kernels
+
+Runtime profile quota scoring and provider routing scores cross flat `Int64` arrays with a
+maximum of 64 records. Rust performs model lookup, policy/credential checks, hard eligibility,
+affinity, stable ordering, and user-facing errors. Mojo performs only bounded arithmetic and
+returns caller-owned numeric results. Smart Context migration is limited to byte-size arithmetic;
+tokenizer and candidate selection remain Rust.
+
+## 2026-08-20: Linux Mojo release is fail-closed
+
+The release matrix enables compiled-in Mojo only for `x86_64-unknown-linux-gnu`. Mojo is compiled
+into a target archive in an isolated Cargo target directory, then the final Rust binary is linked
+through the existing cross container with the archive path and strict Mojo variables explicitly
+forwarded. This prevents host build-script binaries or host GLIBC from defining the deployment
+baseline. Other platforms remain Rust-only until final-link, runtime, signing, and clean-machine
+evidence exists.
+
+## 2026-08-20: Release metadata drives installation
+
+Release CI renders `release-manifest.tsv` and JSON from one target matrix and covers the metadata
+with `SHA256SUMS`. `install.sh` and `install.ps1` select by target and verify the staged binary's
+own `doctor --runtime --json` implementation and Mojo self-test. They never inspect or install a
+user Mojo compiler. WSL naturally uses the Linux shell installer; native Windows remains a
+Rust-compatible artifact while its target is not release-approved for Mojo.

@@ -1,8 +1,8 @@
 # Rust and Mojo equivalents
 
 This is a semantic mapping for current Prodex usage, not a syntax translation guide.
-The quota and route-pressure rows are enabled in production code behind the opt-in
-Cargo feature; Rust fallback remains the default.
+The quota, runtime scoring, provider scoring, and byte-estimation rows are enabled in
+production code behind the opt-in `mojo-core` feature; Rust fallback remains the default.
 
 | Rust construct / usage | Current Prodex location | Mojo equivalent verified or expected | Confidence | Complexity | External dependencies | Candidate | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -12,6 +12,9 @@ Cargo feature; Rust fallback remains the default.
 | quota pressure aggregation | `prodex-quota::render::quota_pressure_band_from_windows` | Two status tags and one band tag | Verified | Low | None | `MOVE_NOW` | Mojo applies the same ordered max mapping |
 | quota pair eligibility | `prodex-quota::render::window_pair_has_ready_limit` | Four scalar values plus presence flags | Verified | Low | None | `MOVE_NOW` | One batch call covers both windows |
 | route-specific quota pressure | `prodex-runtime-proxy::runtime_proxy_quota_pressure_band_for_route` | Five scalar inputs and one band tag | Verified | Medium | None | `MOVE_NOW` | Rust builds observations; Mojo applies route thresholds in one call |
+| bounded profile quota scoring | `prodex-runtime-quota::selection::ready_profile_scores_for_candidates` | Flat `Int64` arrays, four flat output arrays, explicit count/status | Verified | Medium | None after normalization | `MOVE_NOW` | Maximum 64 records; Rust keeps saturation/oracle fallback |
+| provider routing score | `prodex-provider-spi::governed_routing::score_provider_rust` | Flat normalized signal arrays plus weights and score outputs | Verified | Medium | None after hard filtering | `MOVE_NOW` | Mojo does arithmetic only; Rust owns eligibility, affinity, ordering, and policy |
+| Smart Context byte estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body_bytes` | `UInt64` bytes to saturated `UInt64` estimate | Verified | Low | None | `MOVE_NOW` | Text tokenization remains Rust |
 | `u64` checked/saturating arithmetic | `prodex-domain::accounting` | `UInt64` plus explicit overflow branches | Unverified | Low | None | `EXPERIMENT` | Compile a representative pair before migration |
 | small Rust structs | domain and quota models | Mojo `struct` with scalar fields | Documented, unverified here | Low/medium | None | `EXPERIMENT` | Do not expose these structs across FFI until layout is tested |
 | Rust enums / tagged decisions | domain and provider plans | Mojo enum-like tagged representation or explicit integer tag | Unverified | Medium | None | `EXPERIMENT` | Keep Rust enum authoritative at first |

@@ -64,21 +64,22 @@ failing tool or a Mojo compile error fails the build.
 
 ## Build contract
 
-`crates/prodex-quota/build.rs` and `crates/prodex-runtime-proxy/build.rs`:
+`crates/prodex-mojo-core/build.rs` is the single build script. It:
 
-1. runs only when feature `mojo` is enabled;
-2. invokes `mojo build --emit object --optimization-level=3`;
-3. archives the generated object as `libprodex_quota_mojo.a`;
-4. forwards that static library to final Cargo link targets;
-5. accepts `PRODEX_MOJO` and `AR` only as local tool path overrides;
-6. emits `prodex_mojo_active` only after the current source object is archived;
-7. treats `PRODEX_MOJO_REQUIRED=1` as strict mode: a disabled feature, missing
-   compiler/archiver, or failed build is a hard error;
+1. runs only when a `prodex-mojo-core` feature is enabled;
+2. invokes the current `mojo build --emit object --optimization-level=3` for each selected source;
+3. archives the objects as one `libprodex_mojo_core.a`;
+4. forwards that static archive to final Cargo link targets;
+5. accepts `PRODEX_MOJO`, `AR`, and `PRODEX_MOJO_ARCHIVE` only as local build overrides;
+6. emits `prodex_mojo_active` only after the current source archive is ready;
+7. treats `PRODEX_MOJO_REQUIRED=1` as strict mode: a missing compiler/archiver, missing
+   prebuilt archive, or failed build is a hard error;
 8. never downloads tools or invokes network access.
 
-The object path is a Cargo build artifact. It must not be committed or copied into a
-release by this slice. Cross-compilation and non-Linux targets need an explicit follow-up
-probe before enabling the feature there.
+Generated objects and archives are never committed. Release cross-linking builds a target
+archive outside the final Cargo output directory, then sets `PRODEX_MOJO_ARCHIVE` so the Rust
+target linker consumes that exact archive. Other target rows remain Rust-only until final-link,
+runtime, and deployment evidence exists.
 
 The Rust-only default and optional local Mojo build may still use the Rust fallback when
 the compiler is not installed. The dedicated real-Mojo CI lane sets
@@ -102,3 +103,64 @@ prodex_runtime_quota_pressure_band_for_route(
 Route tags are `Responses=0`, `Compact=1`, `Websocket=2`, and `Standard=3`. The result
 uses the pressure-band tags above. Rust still owns observation construction, route enums,
 fallback execution, and all transport/affinity behavior.
+
+## Shared core and batch boundaries
+
+`prodex-mojo-core` is the only crate that declares unsafe FFI symbols. Consumer crates call safe
+Rust wrappers and never declare a Mojo symbol themselves. The shared static archive currently
+contains these additional deterministic entry points:
+
+```text
+prodex_runtime_quota_profile_score_batch(..., count: Int64) -> Int64
+prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64
+prodex_routing_score_batch(..., count: Int64, weights...) -> Int64
+```
+
+The batch calls use parallel flat `Int64` arrays and caller-owned output arrays. They accept at
+most 64 records. A zero-length batch is valid and does not dereference any pointer. Non-zero
+batches require every pointer to reference at least `count` input or output elements; null
+non-zero pointers are invalid and must never be passed. Rust keeps all vectors alive for the
+synchronous call, and Mojo does not retain any pointer after return.
+
+The routing batch writes seven normalized components, one weighted total, and one final score per
+record. The runtime quota batch writes four `Int64` values per record. Status `0` means success;
+non-zero statuses mean invalid bounded input and the Rust wrapper keeps the Rust oracle result.
+The wrapper also validates integer conversions before exposing results to its callers.
+
+| Concern | Batch contract |
+| --- | --- |
+| Allocation | Rust allocates all flat input/output vectors; Mojo allocates nothing across the ABI |
+| Ownership | Rust owns and may mutate output buffers; Mojo only reads inputs and writes outputs during the call |
+| Lifetime | Pointer lifetime is one synchronous call; no pointer escapes |
+| Alignment | Rust slices provide native `i64` alignment; Mojo pointers are typed `Int64` pointers |
+| Thread safety | Functions are stateless and reentrant; concurrent calls use disjoint caller-owned buffers |
+| Nullability | Null is valid only for zero-count buffers; Rust uses zero-length slices and Mojo returns before dereference |
+| Error propagation | Explicit integer status; no panic, exception, Rust enum, `Vec`, `String`, or `Result` crosses the boundary |
+| Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Invalid runtime batch input is handled by the Rust oracle and is not a compiler fallback |
+
+## Shared build contract
+
+`crates/prodex-mojo-core/build.rs` compiles the feature-selected current Mojo sources into one
+`libprodex_mojo_core.a`. It passes the Cargo target triple and an explicit safe target CPU to
+`mojo build --emit object --optimization-level=3`. Release cross-linking may set
+`PRODEX_MOJO_ARCHIVE` to a separately generated target archive; the archive is copied into the
+Cargo output directory and is still linked statically. The archive path must not be the Cargo
+output archive itself.
+
+The supported strict controls are:
+
+```text
+PRODEX_MOJO_REQUIRED=1
+PRODEX_MOJO_VERSION=1.0.0
+PRODEX_MOJO_TARGET=<Cargo target triple>
+PRODEX_MOJO_TARGET_CPU=<verified Mojo CPU name>
+PRODEX_MOJO_ARCHIVE=<verified target archive, release cross-link only>
+```
+
+Relative archive paths resolve from the workspace root so the same path works on the host and
+inside the `cross` build container. Strict release builds forward the Mojo variables through
+`CROSS_CONTAINER_OPTS`.
+
+No generated object or archive is committed. The final Linux release is verified for static
+Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on
+`PATH`.

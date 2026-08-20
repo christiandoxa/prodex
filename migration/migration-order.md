@@ -10,21 +10,22 @@
 6. Quota window status and pressure-band policy port.
 7. Batched quota window-pair readiness port.
 8. Runtime route-specific quota pressure-band decision port.
+9. Shared `prodex-mojo-core` archive and target-aware build path.
+10. Runtime profile quota scoring batch with saturation parity.
+11. Provider-independent numeric scoring batch after Rust hard eligibility.
+12. Smart Context byte-size token estimate.
+13. Strict release/installer metadata and compiled-in Linux artifact gate.
 
 ## Next order
 
-1. Measure a batch quota calculation before adding more one-value FFI calls.
-2. If useful, extract Rust-only quota fraction/amount conversion and port the complete
-   calculation as one coarse-grained function.
-3. Evaluate provider-independent candidate filtering as a batch algorithm; keep hard
-   affinity and runtime state in Rust.
-4. Evaluate Smart Context scoring as a batch algorithm; keep tokenizer and input
-   collection in Rust.
-5. Extract provider-independent routing scores from hard eligibility and affinity, then
-   run offline differential fixtures.
-6. Revisit policy validation only after security and error contracts are explicit.
-7. Reevaluate the matrix after a Mojo release changes string, collection, serialization,
-   or platform support.
+1. Measure a complete batch quota/routing workload including FFI conversion.
+2. Evaluate provider-independent candidate filtering as a batch algorithm; keep hard
+   affinity, authorization, and runtime state in Rust.
+3. Evaluate Smart Context candidate scoring as a batch algorithm; keep tokenizer and
+   input collection in Rust.
+4. Revisit normalized policy validation only after security and error contracts are explicit.
+5. Evaluate accounting/budget arithmetic only as a candidate result; Rust retains enforcement.
+6. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
 
 ## Stop conditions
 

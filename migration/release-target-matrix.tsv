@@ -1,0 +1,7 @@
+# target	asset	implementation	mojo_version	mojo_features	runtime_bundle	minimum_glibc
+x86_64-unknown-linux-gnu	prodex-x86_64-unknown-linux-gnu	mojo-compiled-in	1.0.0	mojo-core	false	GLIBC_2.23
+aarch64-unknown-linux-gnu	prodex-aarch64-unknown-linux-gnu	rust			false	GLIBC_2.23
+x86_64-apple-darwin	prodex-x86_64-apple-darwin	rust			false	-
+aarch64-apple-darwin	prodex-aarch64-apple-darwin	rust			false	-
+x86_64-pc-windows-msvc	prodex-x86_64-pc-windows-msvc.exe	rust			false	-
+aarch64-pc-windows-msvc	prodex-aarch64-pc-windows-msvc.exe	rust			false	-

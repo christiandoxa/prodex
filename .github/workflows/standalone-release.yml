@@ -25,6 +25,8 @@ env:
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
   KIRO_CLI_VERSION: "2.18.1"
+  MOJO_VERSION: "1.0.0"
+  UV_VERSION: "0.11.7"
 
 jobs:
   verify-ci:
@@ -153,6 +155,62 @@ jobs:
             sleep 30
           done
 
+      - name: Wait for Real Mojo parity success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 30 * 60))
+          while true; do
+            runs_json="$(gh run list --workflow mojo-parity.yml --limit 50 --json headSha,status,conclusion,url)"
+            set +e
+            result="$(
+              RUNS_JSON="${runs_json}" python - <<'PY'
+          import json
+          import os
+          import sys
+
+          target = os.environ["TARGET_SHA"]
+          runs = [run for run in json.loads(os.environ["RUNS_JSON"]) if run.get("headSha") == target]
+          if not runs:
+              print("not-found")
+              sys.exit(3)
+          successful = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "success"]
+          if successful:
+              run = successful[0]
+              print(f"{run.get('conclusion')} {run.get('url')}")
+              sys.exit(0)
+          pending = [run for run in runs if run.get("status") != "completed"]
+          if pending:
+              run = pending[0]
+              print(f"{run.get('status')}/{run.get('conclusion') or 'pending'} {run.get('url')}")
+              sys.exit(2)
+          run = runs[0]
+          print(f"{run.get('conclusion')} {run.get('url')}")
+          sys.exit(0)
+          PY
+            )"
+            status=$?
+            set -e
+            if [ "${status}" -eq 0 ]; then
+              conclusion="${result%% *}"
+              if [ "${conclusion}" = "success" ]; then
+                echo "Real Mojo parity success for ${TARGET_SHA}: ${result#* }"
+                exit 0
+              fi
+              echo "Real Mojo parity did not pass for ${TARGET_SHA}: ${result}" >&2
+              exit 1
+            fi
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "timed out waiting for Real Mojo parity for ${TARGET_SHA}: ${result}" >&2
+              exit 1
+            fi
+            echo "Real Mojo parity for ${TARGET_SHA}: ${result}; polling again in 30s"
+            sleep 30
+          done
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
@@ -170,6 +228,9 @@ jobs:
             use-cross: true
             can-native-smoke: true
             max-glibc: GLIBC_2.23
+            mojo-release: true
+            mojo-target-cpu: x86-64
+            mojo-features: mojo-core
           - target: aarch64-unknown-linux-gnu
             runs-on: ubuntu-latest
             artifact-name: aarch64-unknown-linux-gnu
@@ -177,30 +238,45 @@ jobs:
             use-cross: true
             can-native-smoke: false
             max-glibc: GLIBC_2.23
+            mojo-release: false
+            mojo-target-cpu: generic
+            mojo-features: ""
           - target: x86_64-apple-darwin
             runs-on: macos-15-intel
             artifact-name: x86_64-apple-darwin
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
+            mojo-release: false
+            mojo-target-cpu: x86-64
+            mojo-features: ""
           - target: aarch64-apple-darwin
             runs-on: macos-14
             artifact-name: aarch64-apple-darwin
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
+            mojo-release: false
+            mojo-target-cpu: generic
+            mojo-features: ""
           - target: x86_64-pc-windows-msvc
             runs-on: windows-latest
             artifact-name: x86_64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: true
+            mojo-release: false
+            mojo-target-cpu: x86-64
+            mojo-features: ""
           - target: aarch64-pc-windows-msvc
             runs-on: windows-latest
             artifact-name: aarch64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: false
+            mojo-release: false
+            mojo-target-cpu: generic
+            mojo-features: ""
 
     steps:
       - name: Check out repository
@@ -208,11 +284,51 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate release target policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          row="$(awk -F '\t' -v target='${{ matrix.target }}' '$1 == target { print; exit }' migration/release-target-matrix.tsv)"
+          test -n "${row}"
+          expected_asset="$(printf '%s\n' "${row}" | awk -F '\t' '{ print $2 }')"
+          expected_implementation="$(printf '%s\n' "${row}" | awk -F '\t' '{ print $3 }')"
+          expected_glibc="$(printf '%s\n' "${row}" | awk -F '\t' '{ print $7 }')"
+          expected_asset_name="prodex-${{ matrix.artifact-name }}"
+          if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
+            expected_asset_name="${expected_asset_name}.exe"
+          fi
+          test "${expected_asset}" = "${expected_asset_name}"
+          if [ "${{ matrix.mojo-release }}" = true ]; then
+            test "${expected_implementation}" = mojo-compiled-in
+          else
+            test "${expected_implementation}" = rust
+          fi
+          if [[ '${{ matrix.target }}' == *-unknown-linux-gnu ]]; then
+            test "${expected_glibc}" = '${{ matrix.max-glibc }}'
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.1
           targets: ${{ matrix.target }}
+
+      - name: Install pinned uv for Mojo release
+        if: ${{ matrix.mojo-release }}
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install pinned Mojo toolchain for release
+        if: ${{ matrix.mojo-release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+          mojo --version
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -256,13 +372,32 @@ jobs:
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
-          if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
+          if ! CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/native-test/${{ matrix.target }}" \
+            RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
           fi
           if grep -Fq 'running 0 tests' "${test_log}"; then
             echo "native desktop launcher test matched no tests" >&2
             exit 1
           fi
+
+      - name: Build target Mojo archive
+        if: ${{ matrix.mojo-release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_dir="${GITHUB_WORKSPACE}/target/mojo-release/${{ matrix.target }}"
+          mkdir -p "${archive_dir}"
+          PRODEX_MOJO_REQUIRED=1 \
+          PRODEX_MOJO_VERSION="${MOJO_VERSION}" \
+          PRODEX_MOJO_TARGET="${{ matrix.target }}" \
+          PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}" \
+          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/mojo-archive/${{ matrix.target }}" \
+          cargo build --release --locked --target "${{ matrix.target }}" \
+            -p prodex-mojo-core --features "${{ matrix.mojo-features }}"
+          archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          test -s "${archive}"
+          cp "${archive}" "${archive_dir}/libprodex_mojo_core.a"
 
       - name: Build prodex
         shell: bash
@@ -272,17 +407,57 @@ jobs:
             export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
+          build_args=(--release --locked --target "${{ matrix.target }}")
+          if [ "${{ matrix.mojo-release }}" = "true" ]; then
+            export PRODEX_MOJO_REQUIRED=1
+            export PRODEX_MOJO_VERSION="${MOJO_VERSION}"
+            export PRODEX_MOJO_TARGET="${{ matrix.target }}"
+            export PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}"
+            export PRODEX_MOJO_ARCHIVE="target/mojo-release/${{ matrix.target }}/libprodex_mojo_core.a"
+            export CROSS_CONTAINER_OPTS="${CROSS_CONTAINER_OPTS:-} --env PRODEX_MOJO_REQUIRED=1 --env PRODEX_MOJO_VERSION=${MOJO_VERSION} --env PRODEX_MOJO_TARGET=${{ matrix.target }} --env PRODEX_MOJO_TARGET_CPU=${{ matrix.mojo-target-cpu }} --env PRODEX_MOJO_ARCHIVE=${PRODEX_MOJO_ARCHIVE}"
+            test -s "${PRODEX_MOJO_ARCHIVE}"
+            build_args+=(--features "${{ matrix.mojo-features }}")
+          fi
           for attempt in 1 2 3; do
             if [ "${{ matrix.use-cross }}" = "true" ]; then
-              cross build --release --locked --target "${{ matrix.target }}" && exit 0
+              cross build "${build_args[@]}" && exit 0
             else
-              RUSTC_WRAPPER=sccache cargo build --release --locked --target "${{ matrix.target }}" && exit 0
+              RUSTC_WRAPPER=sccache cargo build "${build_args[@]}" && exit 0
             fi
             if [ "${attempt}" = "3" ]; then
               exit 1
             fi
             sleep "$((attempt * 10))"
           done
+
+      - name: Verify compiled-in Mojo release
+        if: ${{ matrix.mojo-release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          archive="$(find "target/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          test -s "${archive}"
+          nm -g "${archive}" | grep -F 'prodex_quota_remaining_percent'
+          if readelf --dynamic "${binary}" | grep -Eiq 'lib(mojo|modular)|RPATH|RUNPATH'; then
+            echo "Mojo release binary has an unexpected dynamic Mojo dependency or build path" >&2
+            readelf --dynamic "${binary}" >&2
+            exit 1
+          fi
+          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary}" doctor --runtime --json)"
+          printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
+          printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
+          printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
+          clean_root="$(mktemp -d)"
+          trap 'rm -rf "${clean_root}"' EXIT
+          if PATH="/usr/bin:/bin" command -v mojo >/dev/null 2>&1; then
+            echo "clean-machine smoke unexpectedly found Mojo" >&2
+            exit 1
+          fi
+          env -i PATH="/usr/bin:/bin" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
+            "${binary}" doctor --runtime --json > "${clean_root}/diagnostics.json"
+          grep -F '"implementation": "mojo-compiled-in"' "${clean_root}/diagnostics.json"
+          grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"
 
       - name: Verify Linux GLIBC baseline
         if: ${{ contains(matrix.target, 'unknown-linux-gnu') }}
@@ -818,13 +993,29 @@ jobs:
           cp install.ps1 release-assets/install.ps1
           chmod 0755 release-assets/install.sh
 
+      - name: Generate release capability manifests
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release/render-release-manifest.mjs \
+            --version "${RELEASE_VERSION}" \
+            --commit "${RELEASE_SHA}" \
+            --input migration/release-target-matrix.tsv \
+            --output-tsv release-assets/release-manifest.tsv \
+            --output-json release-assets/release-manifest.json
+          awk -F '\t' -v sha="${RELEASE_SHA}" '$1 == "commit" && $2 == sha { found = 1 } END { exit found ? 0 : 1 }' release-assets/release-manifest.tsv
+          RELEASE_SHA="${RELEASE_SHA}" RELEASE_VERSION="${RELEASE_VERSION}" node -e 'const m=require("./release-assets/release-manifest.json"); if(m.commit!==process.env.RELEASE_SHA || m.version!==process.env.RELEASE_VERSION) process.exit(1)'
+
       - name: Generate and verify release checksums
         shell: bash
         run: |
           set -euo pipefail
           (
             cd release-assets
-            sha256sum install.sh install.ps1 prodex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 
@@ -900,6 +1091,8 @@ jobs:
           subject-path: |
             release-assets/install.sh
             release-assets/install.ps1
+            release-assets/release-manifest.tsv
+            release-assets/release-manifest.json
 
       - name: Verify release provenance
         env:

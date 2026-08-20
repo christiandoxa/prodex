@@ -1,18 +1,18 @@
 # Migration baseline
 
-Captured at the start of the large migration pass on 2026-08-20.
+Captured for the current descendant migration pass on 2026-08-20.
 
 | Item | Value |
 | --- | --- |
-| Effective Prodex commit | `89869552fa5441be0605f071c4d5ccc1e1693630` (`feat(mojo): add opt-in quota core bridge`) |
+| Effective Prodex commit | `99f73371784c1ef4f38dd44060eadca0b126a78a` (`feat(mojo): expand quota core and enforce real CI parity`) |
 | Prodex version | `0.410.0` |
 | Rust toolchain | `rustc 1.97.1 (8bab26f4f 2026-07-14)`; `cargo 1.97.1 (c980f4866 2026-06-30)` |
-| Cargo.lock SHA-256 | `20f591119cafe2d7a6a8e9257655aa268c231eda5c9fffa0e7bbe67f71904f52` |
+| Cargo.lock SHA-256 | Updated by this uncommitted migration; recompute at commit time (`b0cd59526ef4a886b550f7b81e0b45791eba7b3840343170c7ebfde186fd9e2a`) |
 | Mojo compiler | `Mojo 1.0.0 (ed45d567)` |
 | Modular CLI | No `modular` executable installed locally |
 | Platform | Linux `7.0.0-29-generic` |
 | Architecture | `x86_64` |
-| Existing bridge | `prodex-quota/mojo`, disabled by default; Rust fallback retained |
+| Existing bridge | Shared `prodex-mojo-core`, disabled by default; Rust fallback retained |
 | Strict Mojo mode | `PRODEX_MOJO_REQUIRED=1`; missing compiler/archiver or disabled Mojo feature is a hard failure |
 | Real Mojo CI | `.github/workflows/mojo-parity.yml`, Ubuntu 24.04, `mojo==1.0.0` via official uv install |
 

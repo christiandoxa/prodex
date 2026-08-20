@@ -9,11 +9,13 @@ Rust remains the behavioral oracle. Rows are promoted only after exact output pa
 | Quota pressure band | Rust status mapping and max aggregation | `prodex_quota_pressure_band` | every status pair and single status | Exact band tag | `quota_pressure_band_matches_rust_oracle` | `MOJO_ENABLED` |
 | Quota window-pair readiness | Rust `window_pair_has_ready_limit` | `prodex_quota_window_pair_has_ready_limit` | empty, partial, ready, exhausted, extreme values | Exact boolean | `quota_window_pair_readiness_matches_rust_oracle` | `MOJO_ENABLED` |
 | Runtime route quota pressure | Rust `runtime_proxy_quota_pressure_band_for_route` | `prodex_runtime_quota_pressure_band_for_route` | four routes, missing/negative/threshold/exhausted windows | Exact band tag | `route_pressure_band_matches_rust_oracle_for_all_routes_and_boundaries` | `MOJO_ENABLED` |
+| Runtime profile quota scoring | `runtime_proxy_quota_profile_score_rust` | `prodex_runtime_quota_profile_score_batch` | bounded profile batches, saturation, missing-window sentinels | Exact four-field score | `profile_score_batch_matches_the_rust_arithmetic_oracle` | `MOJO_ENABLED` |
 | Quota fraction/amount conversion | `gemini_bucket_remaining_percent` | Not started | Fractions, amounts, missing totals | Exact rounded `i64`/`Option` | Existing Rust tests | `AUDIT_ONLY` |
 | Quota pool aggregation | `aggregate_main_quota` and pool render helpers | Not started | Multiple provider reports | Exact aggregate/sort output | Existing Rust tests | `AUDIT_ONLY` |
-| Provider ranking | `runtime_response_candidate_plan` and provider SPI routing | Not started | Normalized candidate batch | Exact order and skip reasons | Runtime replay suites | `AUDIT_ONLY` |
+| Provider ranking score | `prodex-provider-spi::score_provider_rust` | `prodex_routing_score_batch` | normalized provider signals, weights, affinity, ties | Exact components, weighted total, score | `routing_score_batch_matches_rust_oracle_for_seeded_vectors` | `MOJO_ENABLED` |
 | Session affinity | Runtime proxy binding/selection helpers | Not started | `previous_response_id`, turn state, `session_id` | Same owning profile | Runtime serial suites | `KEEP_RUST` |
-| Smart Context scoring | `smart_context_candidate_score` and selection | Not started | Normalized candidate batch | Exact score/order | Smart Context regression fixtures | `AUDIT_ONLY` |
+| Smart Context byte estimate | `smart_context_estimate_tokens_from_body_bytes` Rust branch | `prodex_smart_context_estimate_tokens_from_body_bytes` | zero, rounding boundaries, `usize::MAX` | Exact saturated `u64` estimate | `smart_context_byte_estimate_matches_rust_oracle_at_boundaries` | `MOJO_ENABLED` |
+| Smart Context candidate scoring | `smart_context_candidate_score` and selection | Not started | Normalized candidate batch | Exact score/order | Smart Context regression fixtures | `AUDIT_ONLY` |
 
 ## Promotion rule
 
@@ -27,3 +29,6 @@ keeps Rust production behavior until the root cause is fixed.
 | --- | --- | --- | --- | --- |
 | Quota core | Yes | Yes, including C-ABI smoke and differential tests | Yes, `PRODEX_MOJO_REQUIRED=1` plus activation assertion | Ubuntu 24.04 x86_64 |
 | Runtime route quota pressure | Yes | Yes, boundary differential tests | Yes, `PRODEX_MOJO_REQUIRED=1` plus activation assertion | Ubuntu 24.04 x86_64 |
+| Runtime profile quota scoring | Yes | Yes, saturation/batch differential tests | Yes, strict activation assertion | Ubuntu 24.04 x86_64 |
+| Provider ranking score | Yes | Yes, 64-candidate seeded differential test | Yes, strict activation assertion | Ubuntu 24.04 x86_64 |
+| Smart Context byte estimate | Yes | Yes, boundary differential test and binary self-test path | Yes, strict activation assertion | Ubuntu 24.04 x86_64 |
