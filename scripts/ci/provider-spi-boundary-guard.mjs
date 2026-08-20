@@ -10,7 +10,12 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const SPI_MANIFEST = "crates/prodex-provider-spi/Cargo.toml";
 const SPI_SRC_DIR = "crates/prodex-provider-spi/src";
 const SPI_LIB = "crates/prodex-provider-spi/src/lib.rs";
-const ALLOWED_DEPENDENCIES = new Set(["prodex_domain", "prodex_provider_core"]);
+const ALLOWED_DEPENDENCIES = new Set([
+  "prodex_domain",
+  "prodex_provider_core",
+  // Optional, transport-neutral deterministic scoring core.
+  "prodex_mojo_core",
+]);
 const ALLOWED_DEV_DEPENDENCIES = new Set([]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
@@ -146,6 +151,12 @@ prodex_domain = { workspace = true }
 prodex_provider_core = { workspace = true }
 `;
   assertSelfTest(validateProviderSpiManifest(valid, "valid/Cargo.toml").length === 0, "valid manifest rejected");
+
+  const validMojo = `${valid}\nprodex_mojo_core = { workspace = true, optional = true }\n`;
+  assertSelfTest(
+    validateProviderSpiManifest(validMojo, "valid-mojo/Cargo.toml").length === 0,
+    "optional deterministic Mojo dependency rejected",
+  );
 
   const invalidRuntime = `${valid}\nreqwest = "0.12"\n`;
   assertSelfTest(

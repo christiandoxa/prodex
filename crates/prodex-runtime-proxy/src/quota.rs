@@ -6,9 +6,9 @@ use crate::{
     runtime_quota_window_precommit_guard,
 };
 
-#[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+#[cfg(feature = "mojo")]
 #[path = "mojo.rs"]
-mod mojo;
+pub(crate) mod mojo;
 
 pub type RuntimeProxyQuotaPressureSortKey = (
     RuntimeSelectionQuotaPressureBand,
@@ -64,6 +64,70 @@ pub struct RuntimeProxyQuotaScore {
     pub five_hour_remaining: i64,
     pub weekly_reset_at: i64,
     pub five_hour_reset_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProxyQuotaProfileScoreInput {
+    pub weekly_pressure: i64,
+    pub five_hour_pressure: i64,
+    pub scale_bps: i64,
+    pub weekly_remaining: i64,
+    pub five_hour_remaining: i64,
+    pub reserve_bias: i64,
+    pub weekly_weight: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProxyQuotaProfileScore {
+    pub total_pressure: i64,
+    pub weekly_pressure: i64,
+    pub five_hour_pressure: i64,
+    pub reserve_floor: i64,
+}
+
+pub fn runtime_proxy_quota_profile_scores_batch(
+    inputs: &[RuntimeProxyQuotaProfileScoreInput],
+) -> Vec<RuntimeProxyQuotaProfileScore> {
+    #[cfg(feature = "mojo")]
+    {
+        mojo::profile_scores_batch(inputs)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        inputs
+            .iter()
+            .copied()
+            .map(runtime_proxy_quota_profile_score_rust)
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_proxy_quota_profile_score_rust(
+    input: RuntimeProxyQuotaProfileScoreInput,
+) -> RuntimeProxyQuotaProfileScore {
+    let scale = |pressure: i64| {
+        if pressure == i64::MAX {
+            return i64::MAX;
+        }
+        pressure
+            .saturating_mul(input.scale_bps.max(0))
+            .checked_div(10_000)
+            .unwrap_or(i64::MAX)
+    };
+    let weekly_pressure = scale(input.weekly_pressure);
+    let five_hour_pressure = scale(input.five_hour_pressure);
+    let total_pressure = input
+        .reserve_bias
+        .saturating_add(weekly_pressure.saturating_mul(input.weekly_weight))
+        .saturating_add(five_hour_pressure);
+    RuntimeProxyQuotaProfileScore {
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor: input.weekly_remaining.min(input.five_hour_remaining),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -451,12 +515,12 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeSelectionQuotaPressureBand {
-    #[cfg(all(feature = "mojo", not(prodex_mojo_fallback)))]
+    #[cfg(feature = "mojo")]
     {
         mojo::pressure_band_for_route(five_hour, weekly, route_kind)
     }
 
-    #[cfg(any(not(feature = "mojo"), prodex_mojo_fallback))]
+    #[cfg(not(feature = "mojo"))]
     {
         if weekly.is_none() && five_hour.is_none() {
             return RuntimeSelectionQuotaPressureBand::Unknown;

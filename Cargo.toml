@@ -208,6 +208,8 @@ default = []
 bench-support = ["prodex_app/bench-support"]
 allocation-bench-support = ["prodex_app/allocation-bench-support"]
 mojo-quota = ["prodex_app/mojo-quota"]
+mojo-routing = ["prodex_app/mojo-routing"]
+mojo-core = ["prodex_app/mojo-core"]
 
 [[example]]
 name = "runtime_allocator_trim_evidence"

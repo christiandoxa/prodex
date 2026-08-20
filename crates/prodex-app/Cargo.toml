@@ -16,7 +16,19 @@ doctest = false
 default = []
 bench-support = ["dep:prodex_bench_support"]
 allocation-bench-support = ["dep:prodex_bench_support"]
-mojo-quota = ["prodex_quota/mojo", "runtime_proxy_crate/mojo"]
+mojo-quota = [
+    "prodex_quota/mojo",
+    "runtime_proxy_crate/mojo",
+    "prodex_runtime_quota/mojo",
+]
+mojo-routing = ["prodex_provider_spi/mojo"]
+mojo-core = [
+    "mojo-quota",
+    "mojo-routing",
+    "dep:prodex_mojo_core",
+    "prodex_mojo_core/mojo-core",
+    "prodex_runtime_quota/mojo",
+]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -47,6 +59,7 @@ prodex_config = { workspace = true }
 prodex_control_plane = { workspace = true }
 prodex_context = { workspace = true }
 prodex_domain = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 prodex_core = { workspace = true }
 prodex_gateway_core = { workspace = true }
 prodex_gateway_http = { workspace = true }

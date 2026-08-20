@@ -105,6 +105,8 @@ The optional local path keeps the Rust fallback available when `mojo` is absent:
 ```bash
 cargo test --locked -p prodex-quota --features mojo
 cargo test --locked -p prodex-runtime-proxy --features mojo
+cargo test --locked -p prodex-runtime-quota --features mojo
+cargo test --locked -p prodex-provider-spi --features mojo
 ```
 
 For a strict real-Mojo check, install the pinned stable Mojo package from the
@@ -112,15 +114,43 @@ For a strict real-Mojo check, install the pinned stable Mojo package from the
 (`mojo==1.0.0` via `uv`), then run:
 
 ```bash
-PRODEX_MOJO_REQUIRED=1 cargo build --locked --features mojo-quota --bin prodex
-PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-quota --features mojo
-PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-runtime-proxy --features mojo
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo build --locked --features mojo-core --bin prodex
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-quota --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-runtime-proxy --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-runtime-quota --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-provider-spi --features mojo -- --test-threads=1
+
+target/debug/prodex doctor --runtime --json
 ```
 
 Strict mode fails if the Mojo feature is disabled, the compiler or archiver is missing,
 the checked-out Mojo source does not compile, or the build would activate the Rust
 fallback. The authoritative CI job is `.github/workflows/mojo-parity.yml`; it also runs
 the built `prodex --version` binary and checks the generated static archives.
+
+### Release and installer Mojo checks
+
+Only the `x86_64-unknown-linux-gnu` row is currently configured as a Mojo-enabled release.
+The release workflow compiles a target archive with the pinned Mojo toolchain in an isolated
+Cargo target directory, links the final Rust binary through the target container with strict Mojo
+variables forwarded explicitly, checks dynamic dependencies and GLIBC baseline, and runs the
+final artifact with `mojo` absent from `PATH`. Unsupported release rows remain Rust-only; see
+`migration/release-target-matrix.md`.
+
+The published `release-manifest.tsv` is generated from the same target matrix and is covered by
+`SHA256SUMS`. `install.sh`, `install.ps1`, and `prodex update` select the release-approved
+implementation from that metadata and verify the staged binary's `doctor --runtime --json`
+implementation and deterministic Mojo self-test. They never install or invoke the Mojo compiler.
+
+`PRODEX_INSTALL_REQUIRE_MOJO=1` is an optional strict installer mode; it rejects a
+release-approved Rust compatibility artifact rather than guessing or compiling locally. Native
+Windows continues to use `install.ps1`; WSL is Linux and uses `install.sh` from inside the
+distribution.
 
 Current CI building blocks include:
 

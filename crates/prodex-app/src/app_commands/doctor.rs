@@ -198,6 +198,7 @@ fn append_doctor_runtime_json_fields(
         );
     }
     object.insert("secret_backend".to_string(), secret_backend_json_value());
+    object.insert("mojo_core".to_string(), mojo_core_json_value());
     object.insert("runtime_logs".to_string(), runtime_logs_json_value());
     object.insert("audit_logs".to_string(), audit_logs_json_value());
     object.insert(
@@ -252,6 +253,39 @@ fn append_doctor_runtime_json_fields(
             doctor_quota_reports_json_value(context.state),
         );
     }
+}
+
+fn mojo_core_json_value() -> serde_json::Value {
+    #[cfg(feature = "mojo-core")]
+    {
+        let expected = 58;
+        let actual = prodex_mojo_core::quota::remaining_percent(Some(42));
+        serde_json::json!({
+            "feature_enabled": true,
+            "active": prodex_mojo_core::MOJO_ACTIVE,
+            "fallback": prodex_mojo_core::MOJO_FALLBACK,
+            "compiler_required": prodex_mojo_core::MOJO_REQUIRED,
+            "version": prodex_mojo_core::MOJO_VERSION,
+            "implementation": if prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK {
+                "mojo-compiled-in"
+            } else {
+                "rust-fallback"
+            },
+            "self_test": if actual == expected { "passed" } else { "failed" },
+            "self_test_value": actual,
+        })
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    serde_json::json!({
+        "feature_enabled": false,
+        "active": false,
+        "fallback": false,
+        "compiler_required": false,
+        "version": serde_json::Value::Null,
+        "implementation": "rust",
+        "self_test": "not-enabled",
+    })
 }
 
 fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
