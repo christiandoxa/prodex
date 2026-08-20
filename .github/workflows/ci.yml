@@ -1812,6 +1812,9 @@ jobs:
       - name: Run provider-routing Mojo smoke and parity tests
         run: cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1
 
+      - name: Run Mojo core kernel tests
+        run: cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1
+
   ci-duration-telemetry:
     name: CI duration telemetry
     needs:

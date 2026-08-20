@@ -258,8 +258,7 @@ fn append_doctor_runtime_json_fields(
 fn mojo_core_json_value() -> serde_json::Value {
     #[cfg(feature = "mojo-core")]
     {
-        let expected = 58;
-        let actual = prodex_mojo_core::quota::remaining_percent(Some(42));
+        let self_test = prodex_mojo_core::self_test();
         serde_json::json!({
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
@@ -267,13 +266,22 @@ fn mojo_core_json_value() -> serde_json::Value {
             "compiler_required": false,
             "build_strict": prodex_mojo_core::MOJO_REQUIRED,
             "version": prodex_mojo_core::MOJO_VERSION,
+            "abi_version": prodex_mojo_core::routing::abi_version(),
             "implementation": if prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK {
                 "mojo-compiled-in"
             } else {
                 "rust-fallback"
             },
-            "self_test": if actual == expected { "passed" } else { "failed" },
-            "self_test_value": actual,
+            "self_test": if self_test { "passed" } else { "failed" },
+            "modules": {
+                "quota": true,
+                "runtime_quota": true,
+                "routing_score": true,
+                "candidate_filter": self_test,
+                "routing_plan": self_test,
+                "provider_capability": self_test,
+                "smart_context": self_test,
+            },
         })
     }
 
@@ -285,8 +293,10 @@ fn mojo_core_json_value() -> serde_json::Value {
         "compiler_required": false,
         "build_strict": false,
         "version": serde_json::Value::Null,
+        "abi_version": serde_json::Value::Null,
         "implementation": "rust",
         "self_test": "not-enabled",
+        "modules": {},
     })
 }
 

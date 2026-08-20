@@ -15,7 +15,11 @@ default = []
 mojo-quota = []
 mojo-runtime = []
 mojo-routing = []
-mojo-core = ["mojo-quota", "mojo-runtime", "mojo-routing"]
+mojo-core = [
+    "mojo-quota",
+    "mojo-runtime",
+    "mojo-routing",
+]
 
 [lints]
 workspace = true

@@ -7,6 +7,9 @@
 
 mod governed_routing;
 
+#[cfg(feature = "mojo")]
+mod capability_mojo;
+
 pub use governed_routing::{
     GOVERNED_SCORE_COMPONENT_COUNT, GovernedCandidateEvaluation, GovernedCandidateOutcome,
     GovernedHardFilterReason, GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute,
@@ -233,6 +236,42 @@ pub fn negotiate_provider_route_capability(
         .iter()
         .map(ProviderRouteCapabilityCandidate::model_candidate)
         .collect::<Vec<_>>();
+
+    #[cfg(feature = "mojo")]
+    if let Some(mojo_plan) = capability_mojo::match_candidates(request, candidates) {
+        if let Some(index) = mojo_plan.first_compatible {
+            let Some(candidate) = candidates.get(index) else {
+                return ProviderCapabilityNegotiationDecision::Incompatible(
+                    CapabilityDecision::NoCandidate,
+                );
+            };
+            return ProviderCapabilityNegotiationDecision::Compatible(
+                ProviderCapabilityNegotiationPlan {
+                    route: candidate.route.clone(),
+                    capabilities: candidate.capabilities.clone(),
+                },
+            );
+        }
+        if let Some(index) = mojo_plan.first_incompatible {
+            let Some(candidate) = model_candidates.get(index) else {
+                return ProviderCapabilityNegotiationDecision::Incompatible(
+                    CapabilityDecision::NoCandidate,
+                );
+            };
+            return ProviderCapabilityNegotiationDecision::Incompatible(
+                CapabilityDecision::Incompatible {
+                    candidate: candidate.clone(),
+                    missing: request
+                        .required
+                        .missing_from(&candidates[index].capabilities),
+                },
+            );
+        }
+        return ProviderCapabilityNegotiationDecision::Incompatible(
+            CapabilityDecision::NoCandidate,
+        );
+    }
+
     match negotiate_capability(request, &model_candidates) {
         CapabilityDecision::Compatible(model) => {
             let Some(candidate) = candidates.iter().find(|candidate| {
@@ -523,5 +562,192 @@ pub fn plan_provider_circuit_breaker_event(
     ProviderCircuitBreakerPlan {
         decision: plan_provider_circuit_breaker(policy, next_state, now_unix_ms),
         next_state,
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_capability_tests {
+    use super::{
+        ProviderCapabilityNegotiationDecision, ProviderRoute, ProviderRouteCapabilityCandidate,
+        negotiate_provider_route_capability,
+    };
+    use prodex_domain::{
+        CapabilityDecision, CapabilityRequest, CapabilitySet, ModelCapability, negotiate_capability,
+    };
+    use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+
+    const PROVIDERS: [ProviderId; 7] = [
+        ProviderId::OpenAi,
+        ProviderId::Anthropic,
+        ProviderId::Copilot,
+        ProviderId::DeepSeek,
+        ProviderId::Gemini,
+        ProviderId::Kiro,
+        ProviderId::Local,
+    ];
+    const CAPABILITIES: [ModelCapability; 7] = [
+        ModelCapability::ResponsesApi,
+        ModelCapability::Streaming,
+        ModelCapability::Tools,
+        ModelCapability::Vision,
+        ModelCapability::JsonMode,
+        ModelCapability::RemoteCompact,
+        ModelCapability::WebSocket,
+    ];
+
+    #[derive(Clone, Copy)]
+    struct FixedSeed(u64);
+
+    impl FixedSeed {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
+
+        fn below(&mut self, upper: u64) -> u64 {
+            self.next() % upper
+        }
+    }
+
+    fn capability_set(mask: u8) -> CapabilitySet {
+        CapabilitySet::new(
+            CAPABILITIES
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, capability)| {
+                    (mask & (1_u8 << index) != 0).then_some(capability)
+                })
+                .collect(),
+        )
+    }
+
+    fn candidate(
+        provider: ProviderId,
+        model: impl Into<String>,
+        capability_mask: u8,
+    ) -> ProviderRouteCapabilityCandidate {
+        ProviderRouteCapabilityCandidate::new(
+            ProviderRoute::new(
+                provider,
+                ProviderEndpoint::Responses,
+                ProviderWireFormat::OpenAiResponses,
+                model,
+            )
+            .unwrap(),
+            capability_set(capability_mask),
+        )
+    }
+
+    fn rust_oracle(
+        request: &CapabilityRequest,
+        candidates: &[ProviderRouteCapabilityCandidate],
+    ) -> ProviderCapabilityNegotiationDecision {
+        let model_candidates = candidates
+            .iter()
+            .map(ProviderRouteCapabilityCandidate::model_candidate)
+            .collect::<Vec<_>>();
+        match negotiate_capability(request, &model_candidates) {
+            CapabilityDecision::Compatible(model) => {
+                let Some(candidate) = candidates.iter().find(|candidate| {
+                    candidate.route.provider.label() == model.provider
+                        && candidate.route.model.eq_ignore_ascii_case(&model.model)
+                }) else {
+                    return ProviderCapabilityNegotiationDecision::Incompatible(
+                        CapabilityDecision::NoCandidate,
+                    );
+                };
+                ProviderCapabilityNegotiationDecision::Compatible(
+                    super::ProviderCapabilityNegotiationPlan {
+                        route: candidate.route.clone(),
+                        capabilities: candidate.capabilities.clone(),
+                    },
+                )
+            }
+            decision => ProviderCapabilityNegotiationDecision::Incompatible(decision),
+        }
+    }
+
+    #[test]
+    fn capability_matching_matches_rust_oracle_for_fixed_seed_batches() {
+        for seed in [0x51a7_u64, 0xbeef_u64, 0x1357_9bdf_u64, 0xcafe_f00d_u64] {
+            let mut rng = FixedSeed(seed);
+            for case in 0..256 {
+                let count = rng.below(8) as usize;
+                let required_mask = match case % 9 {
+                    0 => 0,
+                    1 => 0x7f,
+                    2 => 1,
+                    _ => rng.below(128) as u8,
+                };
+                let mut providers = PROVIDERS;
+                for index in (1..providers.len()).rev() {
+                    providers.swap(index, rng.below((index + 1) as u64) as usize);
+                }
+                let candidates = providers
+                    .into_iter()
+                    .take(count)
+                    .enumerate()
+                    .map(|(index, provider)| {
+                        let mut candidate = candidate(
+                            provider,
+                            format!("model-{seed:x}-{case}-{index}"),
+                            if case % 11 == 0 {
+                                0
+                            } else {
+                                rng.below(128) as u8
+                            },
+                        );
+                        if case % 7 == 0 && index == 0 {
+                            candidate.route.model.clear();
+                        }
+                        candidate
+                    })
+                    .collect::<Vec<_>>();
+                let request = CapabilityRequest::new(capability_set(required_mask));
+                let expected = rust_oracle(&request, &candidates);
+                let actual = negotiate_provider_route_capability(&request, &candidates);
+                assert_eq!(actual, expected, "seed={seed:#x} case={case}");
+            }
+        }
+    }
+
+    #[test]
+    fn capability_matching_keeps_first_missing_candidate_and_skips_malformed_routes() {
+        let request = CapabilityRequest::new(capability_set(0b101));
+        let mut malformed = candidate(ProviderId::OpenAi, "model-malformed", 0b101);
+        malformed.route.model = String::new();
+        let candidates = vec![
+            malformed,
+            candidate(ProviderId::Anthropic, "model-missing", 0b001),
+            candidate(ProviderId::Copilot, "model-compatible", 0b101),
+        ];
+        let expected = rust_oracle(&request, &candidates);
+        let actual = negotiate_provider_route_capability(&request, &candidates);
+        assert_eq!(actual, expected);
+        let ProviderCapabilityNegotiationDecision::Compatible(plan) = actual else {
+            panic!("expected later compatible candidate");
+        };
+        assert_eq!(plan.route.provider, ProviderId::Copilot);
+        assert!(plan.capabilities.contains(ModelCapability::Tools));
+
+        let candidates = vec![
+            candidate(ProviderId::OpenAi, "model-missing", 0b001),
+            candidate(ProviderId::Anthropic, "model-missing-later", 0b001),
+        ];
+        let request = CapabilityRequest::new(capability_set(0b101));
+        let expected = rust_oracle(&request, &candidates);
+        let actual = negotiate_provider_route_capability(&request, &candidates);
+        assert_eq!(actual, expected);
+        let ProviderCapabilityNegotiationDecision::Incompatible(CapabilityDecision::Incompatible {
+            candidate,
+            ..
+        }) = actual
+        else {
+            panic!("expected capability rejection");
+        };
+        assert_eq!(candidate.provider, "openai");
     }
 }

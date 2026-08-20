@@ -12,11 +12,14 @@ use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
 mod obligation_filters;
 use obligation_filters::append_provider_obligation_rejection_reasons;
 mod scoring;
+#[cfg(any(not(feature = "mojo"), test))]
 use scoring::score_providers;
 
 #[cfg(feature = "mojo")]
 #[path = "mojo.rs"]
 mod mojo;
+#[cfg(feature = "mojo")]
+mod mojo_plan;
 
 pub const ROUTING_SCORE_SCALE: u16 = 10_000;
 pub const MAX_GOVERNED_ROUTING_CANDIDATES: usize = 64;
@@ -481,6 +484,21 @@ pub fn plan_governed_provider_route(
 ) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
     validate_request(request)?;
 
+    #[cfg(feature = "mojo")]
+    {
+        mojo_plan::plan_governed_provider_route_mojo(request)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        plan_governed_provider_route_rust(request)
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn plan_governed_provider_route_rust(
+    request: &GovernedRoutingRequest<'_>,
+) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
     let mut routes = Vec::new();
     let mut eligibility = Vec::with_capacity(request.registry.providers.len());
     let mut eligible_providers = Vec::new();
@@ -659,6 +677,7 @@ fn provider_rejection_reasons(
     let obligations = &request.policy.obligations;
     let mut reasons = Vec::with_capacity(MAX_GOVERNED_HARD_FILTER_REASONS);
     append_provider_static_rejection_reasons(provider, request, &mut reasons);
+    append_provider_capability_rejection_reason(provider, request, &mut reasons);
     append_provider_obligation_rejection_reasons(provider, obligations, &mut reasons);
     assert!(reasons.len() <= MAX_GOVERNED_HARD_FILTER_REASONS);
     reasons
@@ -696,6 +715,13 @@ fn append_provider_static_rejection_reasons(
     if request.classification > provider.maximum_classification {
         reasons.push(GovernedHardFilterReason::ClassificationUnsupported);
     }
+}
+
+fn append_provider_capability_rejection_reason(
+    provider: &GovernedProviderDescriptor,
+    request: &GovernedRoutingRequest<'_>,
+    reasons: &mut Vec<GovernedHardFilterReason>,
+) {
     if !request
         .required_capabilities
         .missing_from(&provider.capabilities)
