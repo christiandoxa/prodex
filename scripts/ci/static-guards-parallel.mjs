@@ -5,6 +5,7 @@ import { parsePositiveInteger, runStepsParallel } from "./main-internal-test-run
 const steps = [
   ["rust-size", "ci:size-guard"],
   ["rust-allow", "ci:allow-guard"],
+  ["mojo-no-fallback", "ci:mojo-no-fallback-guard"],
   ["optional-tools", "ci:optional-tools-guard"],
   ["smart-context", "ci:smart-context-guard"],
   ["full-test-shards", "ci:full-test-shards"],

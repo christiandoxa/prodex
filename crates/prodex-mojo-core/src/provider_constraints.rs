@@ -43,7 +43,7 @@ pub struct Input {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Result {
+pub struct Evaluation {
     pub decision: i64,
     pub eligible: bool,
     pub missing_feature: Option<i64>,
@@ -100,7 +100,7 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-pub fn evaluate(input: Input) -> Option<Result> {
+pub fn evaluate(input: Input) -> std::result::Result<Evaluation, crate::MojoError> {
     let mut decision = 0_i64;
     let mut eligible = 0_i64;
     let mut missing_feature_present = 0_i64;
@@ -173,9 +173,16 @@ pub fn evaluate(input: Input) -> Option<Result> {
         || (missing_feature_present == 1 && !(0..=8).contains(&missing_feature))
         || warnings & !0x1fff != 0
     {
-        return None;
+        return Err(crate::MojoError::InvalidOutput);
     }
-    Some(Result {
+    if (adjustment_field_present == 1 && !(0..=2).contains(&adjustment_field))
+        || (adjustment_reason_present == 1
+            && !(PROVIDER_CONSTRAINT_COMPATIBLE..=PROVIDER_CONSTRAINT_OUTPUT_CLAMPED)
+                .contains(&adjustment_reason))
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(Evaluation {
         decision,
         eligible: eligible == 1,
         missing_feature: (missing_feature_present == 1).then_some(missing_feature),
@@ -209,7 +216,7 @@ pub fn self_test() -> bool {
         oversized_output_policy: PROVIDER_CONSTRAINT_OVERSIZED_PASSTHROUGH,
         output_limit_field: Some(PROVIDER_CONSTRAINT_OUTPUT_FIELD_MAX_OUTPUT),
     })
-    .is_some_and(|result| {
+    .is_ok_and(|result| {
         result.decision == PROVIDER_CONSTRAINT_COMPATIBLE
             && result.eligible
             && result.total_required_tokens == 30

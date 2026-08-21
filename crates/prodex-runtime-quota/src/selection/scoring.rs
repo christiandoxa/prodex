@@ -3,9 +3,10 @@ use super::{
     RUN_SELECTION_HYSTERESIS_BPS, RUN_SELECTION_NEAR_OPTIMAL_BPS,
 };
 use chrono::Local;
+pub use prodex_quota::required_main_window_snapshot_at;
 use prodex_quota::{
-    MainWindowSnapshot, RuntimeQuotaPressureBand, UsageResponse, find_main_window,
-    remaining_percent, scale_quota_pressure_for_plan, usage_plan_capacity_pressure_scale_bps,
+    RuntimeQuotaPressureBand, UsageResponse, scale_quota_pressure_for_plan,
+    usage_plan_capacity_pressure_scale_bps,
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
@@ -291,31 +292,6 @@ pub fn ready_profile_score_for_route_at(
         weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
         five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
     }
-}
-
-pub fn required_main_window_snapshot_at(
-    usage: &UsageResponse,
-    label: &str,
-    now: i64,
-) -> Option<MainWindowSnapshot> {
-    let window = find_main_window(usage.rate_limit.as_ref()?, label)?;
-    let remaining_percent = remaining_percent(window.used_percent);
-    let reset_at = window.reset_at.unwrap_or(i64::MAX);
-    let seconds_until_reset = if reset_at == i64::MAX {
-        i64::MAX
-    } else {
-        (reset_at - now).max(0)
-    };
-    let pressure_score = seconds_until_reset
-        .saturating_mul(1_000)
-        .checked_div(remaining_percent.max(1))
-        .unwrap_or(i64::MAX);
-
-    Some(MainWindowSnapshot {
-        remaining_percent,
-        reset_at,
-        pressure_score,
-    })
 }
 
 pub fn runtime_quota_pressure_band_for_route(

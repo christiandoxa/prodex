@@ -48,7 +48,6 @@ pub struct RoutingPlan {
 pub const ROUTING_REASON_ELIGIBLE: u8 = 0;
 pub const ROUTING_REASON_HARD_REJECTED: u8 = 1;
 pub const ROUTING_REASON_CAPABILITY_MISSING: u8 = 2;
-#[cfg(not(prodex_mojo_fallback))]
 const SCORE_SCALE: i64 = 10_000;
 pub const CAPABILITY_REASON_MALFORMED: u8 = 0;
 pub const CAPABILITY_REASON_MISSING: u8 = 2;
@@ -107,15 +106,15 @@ pub fn self_test() -> bool {
             affinity: 0,
         },
     );
-    plan.is_some_and(|plan| {
+    plan.is_ok_and(|plan| {
         plan.eligible == [true]
             && plan.reason_tags == [ROUTING_REASON_ELIGIBLE]
             && plan.ordered_indices == [0]
-    }) && capability.is_some_and(|result| {
+    }) && capability.is_ok_and(|result| {
         result.first_compatible == Some(0)
             && result.first_incompatible == Some(1)
             && result.compatible == [true, false]
-    }) && score.is_some_and(|scores| scores[0].score == 10_000)
+    }) && score.is_ok_and(|scores| scores[0].score == 10_000)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +125,6 @@ pub struct CapabilityMatch {
     pub first_incompatible: Option<usize>,
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 unsafe extern "C" {
     fn prodex_mojo_abi_version() -> i64;
     fn prodex_routing_score_batch(
@@ -193,27 +191,26 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-pub fn abi_version() -> Option<u32> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        u32::try_from(unsafe { prodex_mojo_abi_version() }).ok()
-    }
-    #[cfg(prodex_mojo_fallback)]
-    Some(ABI_VERSION)
+pub fn abi_version() -> Result<u32, crate::MojoError> {
+    let version = u32::try_from(unsafe { prodex_mojo_abi_version() })
+        .map_err(|_| crate::MojoError::AbiMismatch)?;
+    (version == ABI_VERSION)
+        .then_some(version)
+        .ok_or(crate::MojoError::AbiMismatch)
 }
 
 pub fn capability_match_batch(
     well_formed: &[bool],
     capability_masks: &[u8],
     required_capability_mask: u8,
-) -> Option<CapabilityMatch> {
+) -> Result<CapabilityMatch, crate::MojoError> {
     if well_formed.len() != capability_masks.len() {
-        return None;
+        return Err(crate::MojoError::InvalidInput);
     }
     capability_match_batch_impl(well_formed, capability_masks, required_capability_mask)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 fn capability_match_batch_impl(
     well_formed: &[bool],
     capability_masks: &[u8],
@@ -308,54 +305,15 @@ fn capability_match_batch_impl(
     }
 }
 
-#[cfg(prodex_mojo_fallback)]
-fn capability_match_batch_impl(
-    well_formed: &[bool],
-    capability_masks: &[u8],
-    required_capability_mask: u8,
-) -> Option<CapabilityMatch> {
-    {
-        let compatible = well_formed
-            .iter()
-            .zip(capability_masks)
-            .map(|(well_formed, mask)| {
-                *well_formed && (*mask & required_capability_mask) == required_capability_mask
-            })
-            .collect::<Vec<_>>();
-        let reason_tags = well_formed
-            .iter()
-            .zip(&compatible)
-            .map(|(well_formed, compatible)| {
-                if !well_formed {
-                    CAPABILITY_REASON_MALFORMED
-                } else if *compatible {
-                    CAPABILITY_REASON_COMPATIBLE
-                } else {
-                    CAPABILITY_REASON_MISSING
-                }
-            })
-            .collect::<Vec<_>>();
-        Some(CapabilityMatch {
-            first_compatible: compatible.iter().position(|value| *value),
-            first_incompatible: well_formed
-                .iter()
-                .zip(&compatible)
-                .position(|(well_formed, compatible)| *well_formed && !*compatible),
-            compatible,
-            reason_tags,
-        })
-    }
-}
-
 pub fn routing_plan_batch(
     inputs: &[RoutingPlanInput],
     required_capability_mask: u8,
     weights: ScoreWeights,
-) -> Option<RoutingPlan> {
+) -> Result<RoutingPlan, crate::MojoError> {
     routing_plan_batch_impl(inputs, required_capability_mask, weights)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 fn routing_plan_batch_impl(
     inputs: &[RoutingPlanInput],
     required_capability_mask: u8,
@@ -533,186 +491,84 @@ fn routing_plan_batch_impl(
     }
 }
 
-#[cfg(prodex_mojo_fallback)]
-fn routing_plan_batch_impl(
-    inputs: &[RoutingPlanInput],
-    required_capability_mask: u8,
+pub fn score_batch(
+    inputs: &[ScoreInput],
     weights: ScoreWeights,
-) -> Option<RoutingPlan> {
-    {
-        let scores = inputs
-            .iter()
-            .map(|input| score_rust(input.score, weights))
-            .collect::<Vec<_>>();
-        let eligible = inputs
-            .iter()
-            .map(|input| {
-                input.hard_eligible
-                    && input.capability_mask & required_capability_mask == required_capability_mask
-            })
-            .collect::<Vec<_>>();
-        let reason_tags = inputs
-            .iter()
-            .zip(&eligible)
-            .map(|(input, eligible)| {
-                if *eligible {
-                    ROUTING_REASON_ELIGIBLE
-                } else if !input.hard_eligible {
-                    ROUTING_REASON_HARD_REJECTED
-                } else {
-                    ROUTING_REASON_CAPABILITY_MISSING
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut ordered_indices = (0..inputs.len())
-            .filter(|&index| eligible[index])
-            .collect::<Vec<_>>();
-        ordered_indices.sort_by(|&left, &right| {
-            inputs[right]
-                .score
-                .affinity
-                .cmp(&inputs[left].score.affinity)
-                .then_with(|| scores[right].score.cmp(&scores[left].score))
-                .then_with(|| {
-                    inputs[left]
-                        .provider_order
-                        .cmp(&inputs[right].provider_order)
-                })
-                .then_with(|| left.cmp(&right))
-        });
-        Some(RoutingPlan {
-            eligible,
-            reason_tags,
-            scores,
-            ordered_indices,
-        })
-    }
+) -> Result<Vec<Score>, crate::MojoError> {
+    score_batch_impl(inputs, weights).ok_or(crate::MojoError::InvalidOutput)
 }
 
-pub fn score_batch(inputs: &[ScoreInput], weights: ScoreWeights) -> Option<Vec<Score>> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let health = inputs.iter().map(|input| input.health).collect::<Vec<_>>();
-        let load = inputs.iter().map(|input| input.load).collect::<Vec<_>>();
-        let quota_headroom = inputs
-            .iter()
-            .map(|input| input.quota_headroom)
-            .collect::<Vec<_>>();
-        let quota_present = inputs
-            .iter()
-            .map(|input| i64::from(input.quota_present))
-            .collect::<Vec<_>>();
-        let cost = inputs.iter().map(|input| input.cost).collect::<Vec<_>>();
-        let latency = inputs.iter().map(|input| input.latency).collect::<Vec<_>>();
-        let risk = inputs.iter().map(|input| input.risk).collect::<Vec<_>>();
-        let priority = inputs
-            .iter()
-            .map(|input| input.priority)
-            .collect::<Vec<_>>();
-        let affinity = inputs
-            .iter()
-            .map(|input| i64::from(input.affinity))
-            .collect::<Vec<_>>();
-        let mut normalized_values = vec![0_i64; inputs.len() * 7];
-        let mut weighted_totals = vec![0_i64; inputs.len()];
-        let mut scores = vec![0_i64; inputs.len()];
-        let status = unsafe {
-            prodex_routing_score_batch(
-                health.as_ptr(),
-                load.as_ptr(),
-                quota_headroom.as_ptr(),
-                quota_present.as_ptr(),
-                cost.as_ptr(),
-                latency.as_ptr(),
-                risk.as_ptr(),
-                priority.as_ptr(),
-                affinity.as_ptr(),
-                normalized_values.as_mut_ptr(),
-                weighted_totals.as_mut_ptr(),
-                scores.as_mut_ptr(),
-                i64::try_from(inputs.len()).ok()?,
-                weights.health,
-                weights.load,
-                weights.cost,
-                weights.latency,
-                weights.risk,
-                weights.priority,
-                weights.affinity,
-            )
-        };
-        if status == 0 {
-            inputs
-                .iter()
-                .enumerate()
-                .map(|(index, _)| {
-                    let base = index * 7;
-                    let components = normalized_values[base..base + 7]
-                        .iter()
-                        .copied()
-                        .map(u16::try_from)
-                        .collect::<Result<Vec<_>, _>>()
-                        .ok()?
-                        .try_into()
-                        .ok()?;
-                    Some(Score {
-                        components,
-                        weighted_total: u64::try_from(weighted_totals[index]).ok()?,
-                        score: u16::try_from(scores[index]).ok()?,
-                    })
-                })
-                .collect()
-        } else {
-            None
-        }
-    }
-
-    #[cfg(prodex_mojo_fallback)]
-    Some(
+fn score_batch_impl(inputs: &[ScoreInput], weights: ScoreWeights) -> Option<Vec<Score>> {
+    let health = inputs.iter().map(|input| input.health).collect::<Vec<_>>();
+    let load = inputs.iter().map(|input| input.load).collect::<Vec<_>>();
+    let quota_headroom = inputs
+        .iter()
+        .map(|input| input.quota_headroom)
+        .collect::<Vec<_>>();
+    let quota_present = inputs
+        .iter()
+        .map(|input| i64::from(input.quota_present))
+        .collect::<Vec<_>>();
+    let cost = inputs.iter().map(|input| input.cost).collect::<Vec<_>>();
+    let latency = inputs.iter().map(|input| input.latency).collect::<Vec<_>>();
+    let risk = inputs.iter().map(|input| input.risk).collect::<Vec<_>>();
+    let priority = inputs
+        .iter()
+        .map(|input| input.priority)
+        .collect::<Vec<_>>();
+    let affinity = inputs
+        .iter()
+        .map(|input| i64::from(input.affinity))
+        .collect::<Vec<_>>();
+    let mut normalized_values = vec![0_i64; inputs.len() * 7];
+    let mut weighted_totals = vec![0_i64; inputs.len()];
+    let mut scores = vec![0_i64; inputs.len()];
+    let status = unsafe {
+        prodex_routing_score_batch(
+            health.as_ptr(),
+            load.as_ptr(),
+            quota_headroom.as_ptr(),
+            quota_present.as_ptr(),
+            cost.as_ptr(),
+            latency.as_ptr(),
+            risk.as_ptr(),
+            priority.as_ptr(),
+            affinity.as_ptr(),
+            normalized_values.as_mut_ptr(),
+            weighted_totals.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            i64::try_from(inputs.len()).ok()?,
+            weights.health,
+            weights.load,
+            weights.cost,
+            weights.latency,
+            weights.risk,
+            weights.priority,
+            weights.affinity,
+        )
+    };
+    if status == 0 {
         inputs
             .iter()
-            .copied()
-            .map(|input| score_rust(input, weights))
-            .collect(),
-    )
-}
-
-#[cfg(prodex_mojo_fallback)]
-fn score_rust(input: ScoreInput, weights: ScoreWeights) -> Score {
-    let inverse = |value: i64| 10_000 - value;
-    let available_capacity = if input.quota_present {
-        input.quota_headroom.min(inverse(input.load))
+            .enumerate()
+            .map(|(index, _)| {
+                let base = index * 7;
+                let components = normalized_values[base..base + 7]
+                    .iter()
+                    .copied()
+                    .map(u16::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?
+                    .try_into()
+                    .ok()?;
+                Some(Score {
+                    components,
+                    weighted_total: u64::try_from(weighted_totals[index]).ok()?,
+                    score: u16::try_from(scores[index]).ok()?,
+                })
+            })
+            .collect()
     } else {
-        inverse(input.load)
-    };
-    let components = [
-        input.health,
-        available_capacity,
-        inverse(input.cost),
-        inverse(input.latency),
-        inverse(input.risk),
-        input.priority,
-        if input.affinity { 10_000 } else { 0 },
-    ];
-    let weights = [
-        weights.health,
-        weights.load,
-        weights.cost,
-        weights.latency,
-        weights.risk,
-        weights.priority,
-        weights.affinity,
-    ];
-    let weighted_total = components
-        .iter()
-        .zip(weights)
-        .map(|(value, weight)| {
-            u64::try_from(*value).unwrap_or(0) * u64::try_from(weight).unwrap_or(0)
-        })
-        .sum::<u64>();
-    let weight_total = weights.into_iter().sum::<i64>().max(1) as u64;
-    Score {
-        components: components.map(|value| value as u16),
-        weighted_total,
-        score: (weighted_total / weight_total) as u16,
+        None
     }
 }

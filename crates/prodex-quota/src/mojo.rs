@@ -19,7 +19,7 @@ pub(super) fn window_pair_has_ready_limit(
 
 pub(crate) fn main_quota_aggregate(
     inputs: &[(Option<i64>, Option<i64>)],
-) -> Option<(usize, i64, Option<i64>)> {
+) -> Result<(usize, i64, Option<i64>), prodex_mojo_core::MojoError> {
     let inputs = inputs
         .iter()
         .copied()
@@ -31,7 +31,7 @@ pub(crate) fn main_quota_aggregate(
         )
         .collect::<Vec<_>>();
     let aggregate = prodex_mojo_core::quota::main_quota_aggregate_batch(&inputs)?;
-    Some((
+    Ok((
         aggregate.profiles_with_data,
         aggregate.pool_remaining,
         aggregate.earliest_reset_at,

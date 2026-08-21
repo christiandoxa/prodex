@@ -3,7 +3,9 @@
 Audit basis: workspace source as of 2026-08-20, `Cargo.toml`, maintained architecture
 and testing contracts, the code knowledge graph, and direct source inspection. The
 workspace contains 58 Cargo packages. This inventory classifies ownership boundaries,
-not every generated fixture or test helper.
+not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
+authoritative on the supported Mojo target: a feature-off Rust implementation is a
+separate Rust-only build or test oracle, never runtime fallback.
 
 `MOVE_NOW` means a narrow pure slice has verified Mojo language/ABI support and a
 useful boundary. `REFACTOR_THEN_MOVE` means the logic is a candidate only after IO,
@@ -36,7 +38,7 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-runtime-proxy::{failure_response,gateway_policy}` | Proxy policy and failure semantics | Pure helpers | HTTP-neutral but hot path | Critical | C | `KEEP_RUST` | Runtime invariants require Rust oracle and extensive replay coverage |
 | `prodex-application::{data_plane,provider,governance,request_context}` | Side-effect-free application plans and ports | Pure plans | security/policy contracts | Critical | B | `REFACTOR_THEN_MOVE` | Move only isolated calculations after boundary tests |
 | `prodex-runtime-policy::validate*` | Semantic runtime policy validation | Pure validation over config | TOML/config models | High | B | `EXPERIMENT` | Parse/config IO stays Rust; validation needs exhaustive parity |
-| `prodex-runtime-quota` | Runtime quota snapshots and adapter helpers | Mixed | runtime state, time | High | B | `EXPERIMENT` | Candidate summaries after quota core proves stable |
+| `prodex-runtime-quota` | Runtime quota snapshots and adapter helpers | Mixed | runtime state, time | High | B | `MOVE_NOW` for normalized window summaries; `KEEP_RUST` for clocks/state/adapters | Active proxy summary classification now reuses compiled quota status/band kernels; runtime state and time remain Rust |
 | `prodex-context` | Context audit, noise filtering, aggregation | Mixed | filesystem/process output | Medium | B | `EXPERIMENT` | Ranking/dedup may move; collection of inputs stays Rust |
 | `prodex-state`, `prodex-runtime-state` | Profile/runtime state models and snapshots | Models plus persistence-facing state | `serde`, state contracts | High | B | `KEEP_RUST` | Cross-process merge semantics and serialization remain Rust |
 | `prodex-runtime-store`, `prodex-session-store` | State/session persistence and merge | IO/stateful | filesystem, JSON | Critical | C | `KEEP_RUST` | Durable writes and affinity persistence are Rust-owned |

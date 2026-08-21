@@ -15,7 +15,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_TARGET_CPU");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_ARCHIVE");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_VERSION");
-    println!("cargo:rustc-check-cfg=cfg(prodex_mojo_fallback)");
     println!("cargo:rustc-check-cfg=cfg(prodex_mojo_active)");
     println!("cargo:rustc-check-cfg=cfg(prodex_mojo_required)");
 

@@ -384,8 +384,7 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     policy: ProviderRequestConstraintPolicy,
     entry: Option<&ProviderCatalogEntry>,
 ) -> ProviderRequestConstraintEvaluation {
-    let mut resolved = resolve_provider_request_requirements(requirements, resolved_model, entry);
-    recalculate_total(&mut resolved);
+    let resolved = resolve_provider_request_requirements(requirements, resolved_model, entry);
 
     #[cfg(feature = "mojo")]
     {
@@ -394,13 +393,17 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     }
 
     #[cfg(not(feature = "mojo"))]
-    evaluate_provider_request_constraints_resolved_rust(
-        provider,
-        requirements,
-        policy,
-        resolved,
-        entry,
-    )
+    {
+        let mut resolved = resolved;
+        recalculate_total(&mut resolved);
+        evaluate_provider_request_constraints_resolved_rust(
+            provider,
+            requirements,
+            policy,
+            resolved,
+            entry,
+        )
+    }
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
@@ -642,6 +645,7 @@ fn apply_context_window_policy(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn recalculate_total(requirements: &mut ProviderRequestRequirements) {
     requirements.total_required_tokens = requirements
         .estimated_input_tokens

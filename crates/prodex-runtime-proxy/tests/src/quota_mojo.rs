@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn mojo_feature_requires_real_compiled_core() {
     if prodex_mojo_core::MOJO_REQUIRED && !prodex_mojo_core::MOJO_ACTIVE {
-        panic!("strict Mojo mode unexpectedly activated the Rust fallback");
+        panic!("strict Mojo mode did not activate the compiled Mojo core");
     }
 }
 
@@ -49,6 +49,24 @@ fn route_pressure_band_matches_rust_oracle_for_all_routes_and_boundaries() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn quota_window_summary_uses_the_compiled_status_kernel() {
+    let cases = [
+        (0, RuntimeSelectionQuotaWindowStatus::Exhausted),
+        (5, RuntimeSelectionQuotaWindowStatus::Critical),
+        (6, RuntimeSelectionQuotaWindowStatus::Thin),
+        (15, RuntimeSelectionQuotaWindowStatus::Thin),
+        (16, RuntimeSelectionQuotaWindowStatus::Ready),
+    ];
+    for (remaining_percent, expected) in cases {
+        assert_eq!(
+            runtime_proxy_quota_window_summary(Some(window(remaining_percent))).status,
+            expected,
+            "remaining_percent={remaining_percent}",
+        );
     }
 }
 

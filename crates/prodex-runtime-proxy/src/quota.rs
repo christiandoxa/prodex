@@ -227,6 +227,10 @@ pub fn runtime_proxy_quota_window_summary(
             reset_at: i64::MAX,
         };
     };
+    #[cfg(feature = "mojo")]
+    let status = mojo::window_status(window.remaining_percent)
+        .expect("Mojo quota window status returned an invalid tag");
+    #[cfg(not(feature = "mojo"))]
     let status = if window.remaining_percent == 0 {
         RuntimeSelectionQuotaWindowStatus::Exhausted
     } else if window.remaining_percent <= 5 {
@@ -518,6 +522,7 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
     #[cfg(feature = "mojo")]
     {
         mojo::pressure_band_for_route(five_hour, weekly, route_kind)
+            .expect("Mojo runtime quota pressure band returned an invalid result")
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -700,6 +705,15 @@ fn runtime_proxy_quota_window_precommit_guard(
     )
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_proxy_quota_pressure_band_from_window_status(
+    status: RuntimeSelectionQuotaWindowStatus,
+) -> RuntimeSelectionQuotaPressureBand {
+    mojo::pressure_band_from_window_status(status)
+        .expect("Mojo quota pressure band returned an invalid tag")
+}
+
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_quota_pressure_band_from_window_status(
     status: RuntimeSelectionQuotaWindowStatus,
 ) -> RuntimeSelectionQuotaPressureBand {

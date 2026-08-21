@@ -32,6 +32,8 @@
     aggregation batch for Gemini/Copilot main quota rows.
 22. Runtime tuning default tuple: one Mojo normalized parallelism batch used by runtime config,
     probe refresh, websocket worker, and async/log default callers.
+23. Runtime quota window summaries: active proxy observation/snapshot classification now reuses
+    compiled quota status and pressure-band kernels; Rust retains clocks, state, and adapters.
 
 ## Next order
 
@@ -54,5 +56,5 @@ owned by the Redis/runtime adapters. Do not add a Mojo wrapper without a real pr
 - Do not expose Rust-owned heap graphs, `String`, `Vec`, maps, secrets, or persistent
   state across FFI until their layout and ownership contracts are independently verified.
 - Do not add a Mojo call inside a hot loop; batch the entire dataset first.
-- Do not enable a component after parity gaps or after a stream/affinity invariant is
-  uncertain.
+- Do not promote a component with parity gaps or an uncertain stream/affinity invariant;
+  after promotion, a mismatch is a validation failure and never selects Rust.

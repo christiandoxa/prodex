@@ -118,12 +118,13 @@ pub fn profile_scores_self_test() -> bool {
         reserve_bias: 0,
         weekly_weight: 1,
     }])
-    .first()
-    .is_some_and(|score| {
-        score.total_pressure == 3_000
-            && score.weekly_pressure == 1_000
-            && score.five_hour_pressure == 2_000
-            && score.reserve_floor == 80
+    .is_ok_and(|scores| {
+        scores.first().is_some_and(|score| {
+            score.total_pressure == 3_000
+                && score.weekly_pressure == 1_000
+                && score.five_hour_pressure == 2_000
+                && score.reserve_floor == 80
+        })
     })
 }
 
@@ -137,13 +138,13 @@ pub fn rehydrate_plan_self_test() -> bool {
         4,
         SMART_CONTEXT_REHYDRATE_EXACT_TIER,
     )
-    .is_some_and(|plan| {
+    .is_ok_and(|plan| {
         plan.action_tags == [SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE] && plan.used_tokens == 4
     })
 }
 
 pub fn tuning_defaults_self_test() -> bool {
-    runtime_tuning_defaults(8).is_some_and(|defaults| {
+    runtime_tuning_defaults(8).is_ok_and(|defaults| {
         defaults.worker_count == 8
             && defaults.long_lived_worker_count == 16
             && defaults.log_queue_capacity == 2_048
@@ -152,7 +153,13 @@ pub fn tuning_defaults_self_test() -> bool {
     })
 }
 
-pub fn optimistic_current_candidate_decision(input: OptimisticCandidateInput) -> Option<i64> {
+pub fn optimistic_current_candidate_decision(
+    input: OptimisticCandidateInput,
+) -> Result<i64, crate::MojoError> {
+    let inflight_count =
+        i64::try_from(input.inflight_count).map_err(|_| crate::MojoError::InvalidInput)?;
+    let inflight_soft_limit =
+        i64::try_from(input.inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
     let result = unsafe {
         prodex_runtime_optimistic_current_candidate_decision(
             input.route_kind,
@@ -166,26 +173,32 @@ pub fn optimistic_current_candidate_decision(input: OptimisticCandidateInput) ->
             input.quota_band,
             i64::from(input.quota_source.is_some()),
             input.quota_source.unwrap_or(0),
-            i64::try_from(input.inflight_count).unwrap_or(i64::MAX),
-            i64::try_from(input.inflight_soft_limit).unwrap_or(i64::MAX),
+            inflight_count,
+            inflight_soft_limit,
             i64::from(input.prompt_cache_present),
             i64::from(input.prompt_cache_owner_matches),
         )
     };
-    (OPTIMISTIC_CANDIDATE_KEEP..=OPTIMISTIC_CANDIDATE_PROMPT_CACHE)
-        .contains(&result)
-        .then_some(result)
+    if (OPTIMISTIC_CANDIDATE_KEEP..=OPTIMISTIC_CANDIDATE_PROMPT_CACHE).contains(&result) {
+        Ok(result)
+    } else {
+        Err(crate::MojoError::InvalidOutput)
+    }
 }
 
 pub fn smart_context_rehydrate_plan_batch(
     inputs: &[SmartContextRehydrateInput],
     token_budget: usize,
     tier: i64,
-) -> Option<SmartContextRehydratePlan> {
+) -> Result<SmartContextRehydratePlan, crate::MojoError> {
     if inputs.len() > SMART_CONTEXT_REHYDRATE_MAX_COUNT {
-        return None;
+        return Err(crate::MojoError::InvalidInput);
     }
-    let token_budget = u64::try_from(token_budget).ok()?;
+    if !(SMART_CONTEXT_REHYDRATE_MINIMAL_TIER..=SMART_CONTEXT_REHYDRATE_EXACT_TIER).contains(&tier)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let token_budget = u64::try_from(token_budget).map_err(|_| crate::MojoError::InvalidInput)?;
     let token_costs = inputs
         .iter()
         .map(|input| input.token_cost)
@@ -207,30 +220,34 @@ pub fn smart_context_rehydrate_plan_batch(
             available.as_ptr(),
             action_tags.as_mut_ptr(),
             &mut used_tokens,
-            i64::try_from(inputs.len()).ok()?,
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
             token_budget,
             tier,
         )
     };
-    if status == 0
-        && action_tags.iter().all(|tag| {
-            (SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE..=SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL)
+    if status != 0
+        || used_tokens > token_budget
+        || action_tags.iter().any(|tag| {
+            !(SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE..=SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL)
                 .contains(tag)
         })
     {
-        return Some(SmartContextRehydratePlan {
-            action_tags,
-            used_tokens,
-        });
+        return Err(crate::MojoError::InvalidOutput);
     }
-    None
+    Ok(SmartContextRehydratePlan {
+        action_tags,
+        used_tokens,
+    })
 }
 
-pub fn runtime_tuning_defaults(parallelism: usize) -> Option<RuntimeTuningDefaults> {
+pub fn runtime_tuning_defaults(
+    parallelism: usize,
+) -> Result<RuntimeTuningDefaults, crate::MojoError> {
+    let parallelism = i64::try_from(parallelism).unwrap_or(i64::MAX);
     let mut values = [0_i64; 7];
     let status = unsafe {
         prodex_runtime_tuning_defaults(
-            i64::try_from(parallelism).unwrap_or(i64::MAX),
+            parallelism,
             &mut values[0],
             &mut values[1],
             &mut values[2],
@@ -240,16 +257,22 @@ pub fn runtime_tuning_defaults(parallelism: usize) -> Option<RuntimeTuningDefaul
             &mut values[6],
         )
     };
-    if status == 0 {
-        return Some(RuntimeTuningDefaults {
-            worker_count: usize::try_from(values[0]).ok()?,
-            long_lived_worker_count: usize::try_from(values[1]).ok()?,
-            probe_refresh_worker_count: usize::try_from(values[2]).ok()?,
-            async_worker_count: usize::try_from(values[3]).ok()?,
-            log_queue_capacity: usize::try_from(values[4]).ok()?,
-            websocket_connect_worker_count: usize::try_from(values[5]).ok()?,
-            websocket_dns_worker_count: usize::try_from(values[6]).ok()?,
-        });
+    if status != 0 || values.iter().any(|value| *value < 0) {
+        return Err(crate::MojoError::InvalidOutput);
     }
-    None
+    Ok(RuntimeTuningDefaults {
+        worker_count: usize::try_from(values[0]).map_err(|_| crate::MojoError::InvalidOutput)?,
+        long_lived_worker_count: usize::try_from(values[1])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        probe_refresh_worker_count: usize::try_from(values[2])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        async_worker_count: usize::try_from(values[3])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        log_queue_capacity: usize::try_from(values[4])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        websocket_connect_worker_count: usize::try_from(values[5])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        websocket_dns_worker_count: usize::try_from(values[6])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+    })
 }
