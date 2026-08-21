@@ -1,10 +1,48 @@
 use prodex_provider_core::{
     EffectiveHarnessMode, PROVIDER_CONTRACT_PROVIDERS, ProviderCapabilityStatus, ProviderEndpoint,
-    ProviderId, ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens, provider_adapter,
-    provider_adapter_contract_matrix, provider_capabilities_markdown, provider_contract_catalog,
-    provider_model_catalog, provider_model_catalog_json, provider_model_fallback_chain,
-    provider_replay_cases, provider_translator,
+    ProviderId, ProviderTransformPhase, ProviderWireFormat,
+    deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes,
+    deepseek_provider_core_validate_function_name,
+    deepseek_provider_core_validate_function_name_with_max_bytes, extract_usage_tokens,
+    provider_adapter, provider_adapter_contract_matrix, provider_capabilities_markdown,
+    provider_contract_catalog, provider_model_catalog, provider_model_catalog_json,
+    provider_model_fallback_chain, provider_replay_cases, provider_translator,
 };
+
+#[test]
+fn provider_function_name_limits_remain_provider_specific() {
+    let name_64 = "a".repeat(64);
+    let name_65 = "b".repeat(65);
+    let name_128 = "c".repeat(128);
+    let name_129 = "d".repeat(129);
+
+    deepseek_provider_core_validate_function_name(&name_64, "DeepSeek").unwrap();
+    assert!(deepseek_provider_core_validate_function_name(&name_65, "DeepSeek").is_err());
+    for name in [&name_65, &name_128] {
+        deepseek_provider_core_validate_function_name_with_max_bytes(name, "Gemini", 128).unwrap();
+    }
+    assert!(
+        deepseek_provider_core_validate_function_name_with_max_bytes(&name_129, "Gemini", 128)
+            .is_err()
+    );
+    assert!(
+        deepseek_provider_core_validate_function_name_with_max_bytes("tool_é", "Gemini", 128)
+            .is_err()
+    );
+
+    let tools = [name_65, name_128]
+        .map(|name| serde_json::json!({"function": {"name": name}}))
+        .into_iter()
+        .collect();
+    assert_eq!(
+        deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
+            tools, false, "Gemini", 128,
+        )
+        .unwrap()
+        .len(),
+        2
+    );
+}
 
 #[test]
 fn adapters_publish_required_contract_surface() {
