@@ -270,7 +270,7 @@ impl Read for DelayedChunkReader {
                 if self.first {
                     self.first = false;
                 } else {
-                    thread::sleep(Duration::from_millis(200));
+                    thread::sleep(Duration::from_millis(100));
                 }
             }
             let read = chunk.read(buffer)?;
