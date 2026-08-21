@@ -205,7 +205,7 @@ fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {
                     .copied()
                     .or_else(|| info.monthly_quotas.get(feature).copied())
                     .unwrap_or(0);
-                ((remaining as f64 / total as f64) * 100.0).round() as i64
+                super::round_quota_float(remaining as f64 / total as f64 * 100.0)
             })
         })
         .min()

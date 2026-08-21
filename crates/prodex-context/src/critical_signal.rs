@@ -85,6 +85,7 @@ impl CriticalSignalCounts {
         self.rust_diagnostics = self.rust_diagnostics.saturating_add(other.rust_diagnostics);
     }
 
+    #[cfg(not(feature = "mojo"))]
     fn subtract_assign(&mut self, other: Self) {
         self.errors = self.errors.saturating_sub(other.errors);
         self.file_locations = self.file_locations.saturating_sub(other.file_locations);
@@ -95,6 +96,7 @@ impl CriticalSignalCounts {
         self.rust_diagnostics = self.rust_diagnostics.saturating_sub(other.rust_diagnostics);
     }
 
+    #[cfg(not(feature = "mojo"))]
     fn overlaps(self, other: Self) -> bool {
         self.errors > 0 && other.errors > 0
             || self.file_locations > 0 && other.file_locations > 0
@@ -198,45 +200,126 @@ pub fn critical_signal_lost_line_ranges_with_options(
         return Vec::new();
     }
 
+    #[cfg(feature = "mojo")]
+    {
+        let (before_rows, mut after_available, line_count) =
+            critical_signal_normalized_rows(before, after)
+                .expect("critical-signal rows fit the Mojo ABI");
+        prodex_mojo_core::context::lost_line_ranges_batch(
+            &before_rows,
+            &mut after_available,
+            &check.lost.values(),
+            line_count,
+            options.context_lines,
+            options.max_ranges,
+            options.max_range_lines,
+        )
+        .expect("Mojo critical-signal range selection returned invalid output")
+        .into_iter()
+        .map(|(start, end)| CriticalSignalLineRange { start, end })
+        .collect()
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let before = normalize_command_output(before);
+        let after = normalize_command_output(after);
+        let before_lines = command_lines(&before);
+        let mut after_available = critical_signal_line_multiset(&after);
+        let mut remaining_loss = check.lost;
+        let mut ranges = Vec::<CriticalSignalLineRange>::new();
+
+        for (line_index, line) in before_lines.iter().enumerate() {
+            if remaining_loss.is_empty() {
+                break;
+            }
+
+            let counts = critical_signal_counts_for_line(line);
+            if counts.is_empty() {
+                continue;
+            }
+
+            let key = critical_signal_line_key(line);
+            if let Some(available) = after_available.get_mut(&key)
+                && *available > 0
+            {
+                *available -= 1;
+                continue;
+            }
+
+            if !counts.overlaps(remaining_loss) {
+                continue;
+            }
+
+            ranges.push(critical_signal_range_around_line(
+                line_index,
+                before_lines.len(),
+                options.context_lines,
+                options.max_range_lines,
+            ));
+            remaining_loss.subtract_assign(counts);
+        }
+
+        merge_critical_signal_ranges(ranges, options.max_ranges)
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn critical_signal_normalized_rows(
+    before: &str,
+    after: &str,
+) -> Result<(Vec<i64>, Vec<i64>, usize), prodex_mojo_core::MojoError> {
     let before = normalize_command_output(before);
     let after = normalize_command_output(after);
     let before_lines = command_lines(&before);
-    let mut after_available = critical_signal_line_multiset(&after);
-    let mut remaining_loss = check.lost;
-    let mut ranges = Vec::<CriticalSignalLineRange>::new();
+    let mut key_ids = BTreeMap::<String, usize>::new();
+    let mut after_available = Vec::<i64>::new();
 
-    for (line_index, line) in before_lines.iter().enumerate() {
-        if remaining_loss.is_empty() {
-            break;
-        }
-
+    for line in command_lines(&after) {
         let counts = critical_signal_counts_for_line(line);
         if counts.is_empty() {
             continue;
         }
-
-        let key = critical_signal_line_key(line);
-        if let Some(available) = after_available.get_mut(&key)
-            && *available > 0
-        {
-            *available -= 1;
-            continue;
+        let next_id = key_ids.len();
+        let key_id = *key_ids
+            .entry(critical_signal_line_key(line))
+            .or_insert(next_id);
+        if key_id == after_available.len() {
+            after_available.push(0);
         }
-
-        if !counts.overlaps(remaining_loss) {
-            continue;
-        }
-
-        ranges.push(critical_signal_range_around_line(
-            line_index,
-            before_lines.len(),
-            options.context_lines,
-            options.max_range_lines,
-        ));
-        remaining_loss.subtract_assign(counts);
+        after_available[key_id] = after_available[key_id]
+            .checked_add(1_i64)
+            .ok_or(prodex_mojo_core::MojoError::InvalidInput)?;
     }
 
-    merge_critical_signal_ranges(ranges, options.max_ranges)
+    let mut before_rows = Vec::with_capacity(
+        before_lines
+            .len()
+            .checked_mul(8)
+            .ok_or(prodex_mojo_core::MojoError::InvalidInput)?,
+    );
+    for line in &before_lines {
+        let counts = critical_signal_counts_for_line(line);
+        let key_id = if counts.is_empty() {
+            -1
+        } else {
+            let next_id = key_ids.len();
+            let key_id = *key_ids
+                .entry(critical_signal_line_key(line))
+                .or_insert(next_id);
+            if key_id == after_available.len() {
+                after_available.push(0);
+            }
+            i64::try_from(key_id).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?
+        };
+        before_rows.push(key_id);
+        for value in counts.values() {
+            before_rows
+                .push(i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?);
+        }
+    }
+
+    Ok((before_rows, after_available, before_lines.len()))
 }
 
 fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
@@ -263,6 +346,7 @@ fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
     counts
 }
 
+#[cfg(not(feature = "mojo"))]
 fn critical_signal_line_multiset(input: &str) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::<String, usize>::new();
     for line in command_lines(input) {
@@ -281,6 +365,7 @@ fn critical_signal_line_key(line: &str) -> String {
     line.trim().to_string()
 }
 
+#[cfg(not(feature = "mojo"))]
 fn critical_signal_range_around_line(
     line_index: usize,
     line_count: usize,
@@ -303,6 +388,7 @@ fn critical_signal_range_around_line(
     CriticalSignalLineRange { start, end }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn merge_critical_signal_ranges(
     mut ranges: Vec<CriticalSignalLineRange>,
     max_ranges: usize,

@@ -18,6 +18,8 @@ pub fn self_test() -> bool {
         && window_status(5, true) == 2
         && pressure_band(1, 2) == 2
         && window_pair_has_ready_limit(Some(20), Some(30))
+        && round_f64(1.5) == 2
+        && round_f64(-0.5) == -1
 }
 
 pub fn main_quota_aggregation_self_test() -> bool {
@@ -39,6 +41,7 @@ pub fn main_quota_aggregation_self_test() -> bool {
 }
 
 unsafe extern "C" {
+    fn prodex_quota_round_f64(value: f64) -> i64;
     fn prodex_quota_remaining_percent(used_percent: i64, has_value: i64) -> i64;
     fn prodex_quota_window_status(remaining_percent: i64, has_window: i64) -> i64;
     fn prodex_quota_pressure_band(five_hour_status: i64, weekly_status: i64) -> i64;
@@ -59,6 +62,10 @@ unsafe extern "C" {
         earliest_present: *mut i64,
         count: i64,
     ) -> i64;
+}
+
+pub fn round_f64(value: f64) -> i64 {
+    unsafe { prodex_quota_round_f64(value) }
 }
 
 pub fn main_quota_aggregate_batch(
@@ -140,5 +147,33 @@ pub fn window_pair_has_ready_limit(first: Option<i64>, second: Option<i64>) -> b
             second.unwrap_or(0),
             i64::from(second.is_some()),
         ) != 0
+    }
+}
+
+#[cfg(all(test, feature = "mojo-quota"))]
+#[test]
+fn round_f64_matches_rust_float_to_int_semantics() {
+    for value in [
+        0.0,
+        -0.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -2.5,
+        -2.499_999_999,
+        -0.500_000_001,
+        -0.5,
+        -0.499_999_999,
+        0.000_000_001,
+        0.499_999_999,
+        0.5,
+        0.500_000_001,
+        1.5,
+        2.5,
+        (i64::MAX as f64) * 0.5,
+        i64::MAX as f64,
+        i64::MIN as f64,
+    ] {
+        assert_eq!(round_f64(value), value.round() as i64, "value={value:?}");
     }
 }

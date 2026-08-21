@@ -52,15 +52,6 @@ pub fn self_test() -> bool {
         },
     );
     let capability = routing::capability_match_batch(&[true, true], &[1, 0], 1);
-    let profile = runtime::profile_scores_batch(&[runtime::ProfileScoreInput {
-        weekly_pressure: 1_000,
-        five_hour_pressure: 2_000,
-        scale_bps: 10_000,
-        weekly_remaining: 90,
-        five_hour_remaining: 80,
-        reserve_bias: 0,
-        weekly_weight: 1,
-    }]);
     let routing_ok = routing.is_ok_and(|plan| {
         plan.eligible == [true]
             && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
@@ -72,15 +63,7 @@ pub fn self_test() -> bool {
             && result.first_incompatible == Some(1)
             && result.compatible == [true, false]
     });
-    let profile_ok = profile.as_ref().is_ok_and(|profile| {
-        profile.first().is_some_and(|score| {
-            score.total_pressure == 3_000
-                && score.weekly_pressure == 1_000
-                && score.five_hour_pressure == 2_000
-                && score.reserve_floor == 80
-        })
-    });
-    let profile_order_ok = runtime::profile_order_self_test();
+    let profile_schedule_ok = runtime::profile_schedule_self_test();
     let candidate_plan_ok = runtime::candidate_plan_self_test();
     let pressure_snapshot_ok = runtime::smart_context_pressure_snapshot_self_test();
     let rehydrate_plan_ok = runtime_decisions::rehydrate_plan_self_test();
@@ -92,8 +75,7 @@ pub fn self_test() -> bool {
     let checks = [
         routing_ok,
         capability_ok,
-        profile_ok,
-        profile_order_ok,
+        profile_schedule_ok,
         candidate_plan_ok,
         pressure_snapshot_ok,
         rehydrate_plan_ok,

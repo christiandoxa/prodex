@@ -1,5 +1,20 @@
 from std.memory import Pointer
 
+comptime INT64_MAX: Int64 = 9223372036854775807
+comptime INT64_MIN: Int64 = -9223372036854775808
+
+@export("prodex_quota_round_f64")
+def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
+    if value != value:
+        return 0
+    if value >= 9223372036854775808.0:
+        return INT64_MAX
+    if value <= -9223372036854775808.0:
+        return INT64_MIN
+    if value >= 0.0:
+        return Int64(value + 0.5)
+    return Int64(value - 0.5)
+
 @export("prodex_quota_remaining_percent")
 def prodex_quota_remaining_percent(
     used_percent: Int64,
@@ -66,9 +81,6 @@ def prodex_quota_window_pair_has_ready_limit(
     return 1
 
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
-comptime INT64_MAX: Int64 = 9223372036854775807
-comptime INT64_MIN: Int64 = -9223372036854775807 - 1
-
 def quota_saturating_add(left: Int64, right: Int64) -> Int64:
     if right > 0 and left > INT64_MAX - right:
         return INT64_MAX

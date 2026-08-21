@@ -12,14 +12,14 @@ fn gemini_bucket_remaining(bucket: &GeminiQuotaBucket) -> Option<GeminiBucketRem
         let total = bucket
             .remaining_fraction
             .filter(|fraction| *fraction > 0.0)
-            .map(|fraction| (remaining as f64 / fraction).round() as i64)
+            .map(|fraction| super::round_quota_float(remaining as f64 / fraction))
             .filter(|total| *total >= remaining);
         return Some(GeminiBucketRemaining { remaining, total });
     }
 
     let fraction = bucket.remaining_fraction?;
     Some(GeminiBucketRemaining {
-        remaining: (fraction * 100.0).round() as i64,
+        remaining: super::round_quota_float(fraction * 100.0),
         total: Some(100),
     })
 }
@@ -44,7 +44,7 @@ fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
 
 pub(super) fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Option<i64> {
     if let Some(fraction) = bucket.remaining_fraction {
-        return Some((fraction * 100.0).round() as i64);
+        return Some(super::round_quota_float(fraction * 100.0));
     }
     let GeminiBucketRemaining {
         remaining,
@@ -53,7 +53,7 @@ pub(super) fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Opt
     else {
         return None;
     };
-    (total > 0).then(|| ((remaining as f64 / total as f64) * 100.0).round() as i64)
+    (total > 0).then(|| super::round_quota_float(remaining as f64 / total as f64 * 100.0))
 }
 
 fn gemini_blocked_buckets(info: &GeminiQuotaInfo) -> Vec<String> {

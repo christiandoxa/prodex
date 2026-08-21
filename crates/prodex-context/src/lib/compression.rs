@@ -303,8 +303,31 @@ fn is_context_filler_word(word: &str) -> bool {
     )
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn estimate_context_tokens(chars: usize, words: usize) -> usize {
+    prodex_mojo_core::context::estimate_tokens(chars, words)
+        .expect("Mojo context token estimator returned invalid output")
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn estimate_context_tokens(chars: usize, words: usize) -> usize {
     chars.div_ceil(4).max((words * 4).div_ceil(3))
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::estimate_context_tokens;
+
+    #[test]
+    fn mojo_context_token_estimate_matches_rust_arithmetic() {
+        for (chars, words) in [(0, 0), (1, 0), (4, 1), (5, 2), (99, 17), (4_096, 1_024)] {
+            assert_eq!(
+                estimate_context_tokens(chars, words),
+                chars.div_ceil(4).max((words * 4).div_ceil(3)),
+                "chars={chars}, words={words}"
+            );
+        }
+    }
 }
 
 pub(crate) fn is_compressible_context_file(path: &Path) -> bool {
