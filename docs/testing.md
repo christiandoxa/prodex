@@ -216,14 +216,15 @@ node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
-To reproduce the two-turn Responses chain against real Codex 0.147 and 0.148
+To reproduce the two-turn Responses chain against real Codex 0.147, 0.148, and 0.149
 binaries with one local provider, profile, model, WebSocket connection, and no
 rotation:
 
 ```bash
 npm run compat:previous-response-repro -- \
   --codex-0147 /path/to/codex-0.147 \
-  --codex-0148 /path/to/codex-0.148
+  --codex-0148 /path/to/codex-0.148 \
+  --codex-0149 /path/to/codex-0.149
 ```
 
 The deterministic upstream asserts that turn two sends the `response.id` from
@@ -366,14 +367,17 @@ Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtu
 
 Use `npm run compat:capture -- --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
-Codex 0.147 and 0.148 app-server replay fixtures live under
-crates/prodex-app/tests/fixtures/compat_replay/codex-0.147 and codex-0.148.
+Codex 0.147 through 0.149 app-server replay fixtures live under
+crates/prodex-app/tests/fixtures/compat_replay/codex-0.147, codex-0.148, and
+codex-0.149.
 The main fixtures are sanitized protocol frames derived from the checked-out
 upstream schemas and are byte-preserving in broker observation mode. The
 0.148 directory also contains `app-server-live-smoke.jsonl`, a redacted
 initialize/status/model-list capture from the locally checked-out Codex
-0.148.0 binary. The fixture set covers thread queue/revert notifications,
-archive/restore, multiAgentVersion, pluginId, and packagedDefaults. Run the
+0.148.0 binary. The 0.149 fixture adds named `permissions`, queue delivery,
+agent activity, and `max`/`ultra` reasoning metadata. The fixture set covers
+thread queue/revert notifications, archive/restore, multiAgentVersion,
+pluginId, and packagedDefaults. Run the
 focused replay checks with:
 
     cargo test --locked -q -p prodex-app --lib app_server_broker_compat -- --test-threads=1
@@ -383,7 +387,7 @@ focused replay checks with:
 The invalid-response regression matrix is deterministic and uses a local
 mock-upstream for HTTP and WebSocket. It verifies profile ownership, one-shot
 same-profile full-history recovery, no post-commit rotation, and no retry loop.
-The four live provider combinations (old/new Prodex x Codex 0.147/0.148) are
+The six live provider combinations (old/new Prodex x Codex 0.147/0.148/0.149) are
 not run in CI because they require credentials and incur provider cost; any
 live A/B run must use disposable homes and explicit authorization.
 

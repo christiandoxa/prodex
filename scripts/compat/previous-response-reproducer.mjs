@@ -13,19 +13,23 @@ function parseArgs(argv) {
     prodex: "./target/debug/prodex",
     codex0147: process.env.PRODEX_CODEX_0147_BIN,
     codex0148: process.env.PRODEX_CODEX_0148_BIN,
+    codex0149: process.env.PRODEX_CODEX_0149_BIN,
   };
   const names = new Map([
     ["--prodex-bin", "prodex"],
     ["--codex-0147", "codex0147"],
     ["--codex-0148", "codex0148"],
+    ["--codex-0149", "codex0149"],
   ]);
   for (let index = 2; index < argv.length; index += 2) {
     const key = names.get(argv[index]);
     if (!key || !argv[index + 1]) throw new Error(`unknown or incomplete argument: ${argv[index]}`);
     args[key] = argv[index + 1];
   }
-  if (!args.codex0147 || !args.codex0148) {
-    throw new Error("pass --codex-0147 and --codex-0148 (or set the matching PRODEX_CODEX_*_BIN variables)");
+  if (!args.codex0147 || !args.codex0148 || !args.codex0149) {
+    throw new Error(
+      "pass --codex-0147, --codex-0148, and --codex-0149 (or set the matching PRODEX_CODEX_*_BIN variables)",
+    );
   }
   if (path.isAbsolute(args.prodex) || args.prodex.includes("/") || args.prodex.includes("\\")) {
     args.prodex = path.resolve(args.prodex);
@@ -308,6 +312,7 @@ try {
   const results = [];
   results.push(await reproduce(args, upstream, args.codex0147, "0.147.0"));
   results.push(await reproduce(args, upstream, args.codex0148, "0.148.0"));
+  results.push(await reproduce(args, upstream, args.codex0149, "0.149.0"));
   process.stdout.write(`${JSON.stringify({ status: "passed", provider: "reproducer", profile: "repro", model: "mock-model", rotation: false, results }, null, 2)}\n`);
 } finally {
   await upstream.close();
