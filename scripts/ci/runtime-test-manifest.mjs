@@ -771,7 +771,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: CONTINUATION_TAGS,
   },
   {
-    name: "runtime_proxy_http_invalid_previous_response_id_workaround_is_off_for_0_147",
+    name: "runtime_proxy_http_invalid_previous_response_id_requires_owned_binding",
     tags: CONTINUATION_TAGS,
   },
   {
@@ -784,6 +784,14 @@ export const RUNTIME_CI_TEST_CASES = [
   },
   {
     name: "runtime_proxy_websocket_0_147_reconnect_invalid_previous_response_replays_full_context",
+    tags: CONTINUATION_TAGS,
+  },
+  {
+    name: "runtime_proxy_websocket_0_149_reconnect_invalid_previous_response_replays_full_context",
+    tags: CONTINUATION_TAGS,
+  },
+  {
+    name: "runtime_proxy_websocket_future_reconnect_invalid_previous_response_replays_full_context",
     tags: CONTINUATION_TAGS,
   },
   {

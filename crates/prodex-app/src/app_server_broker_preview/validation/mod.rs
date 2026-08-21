@@ -14,6 +14,24 @@ use std::fmt;
 pub(super) const APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS: usize = 4_096;
 const APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS: usize = 4_096;
 
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(super) enum ProtocolDirection {
+    #[default]
+    SingleStream,
+    ClientToServer,
+    ServerToClient,
+}
+
+impl ProtocolDirection {
+    fn requester_for_response(self) -> Self {
+        match self {
+            Self::SingleStream => Self::SingleStream,
+            Self::ClientToServer => Self::ServerToClient,
+            Self::ServerToClient => Self::ClientToServer,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ValidationFailure {
     pub(super) reason: &'static str,
@@ -164,8 +182,11 @@ impl PreviewSession {
         previews
             .into_iter()
             .map(|(mut preview, frame)| {
-                self.request_response
-                    .annotate_response_schema(&mut preview, frame.as_ref());
+                self.request_response.annotate_response_schema(
+                    &mut preview,
+                    frame.as_ref(),
+                    ProtocolDirection::SingleStream,
+                );
                 self.request_response.observe_for_schema_tracking(&preview);
                 self.record_preview(&preview);
                 preview
@@ -178,17 +199,31 @@ impl PreviewSession {
         line_index: usize,
         line: &str,
     ) -> Vec<PreviewObservation> {
+        self.validate_line_in_direction(line_index, line, ProtocolDirection::SingleStream)
+    }
+
+    pub(super) fn validate_line_in_direction(
+        &mut self,
+        line_index: usize,
+        line: &str,
+        direction: ProtocolDirection,
+    ) -> Vec<PreviewObservation> {
         let previews = self.parsed_previews(line_index, line);
         self.record_line(&previews[0].0);
         previews
             .into_iter()
             .map(|(mut preview, frame)| {
-                self.request_response
-                    .annotate_response_schema(&mut preview, frame.as_ref());
+                self.request_response.annotate_response_schema(
+                    &mut preview,
+                    frame.as_ref(),
+                    direction,
+                );
                 let lifecycle_failure = self.lifecycle.observe_preview(&preview);
-                let request_response_failure = self
-                    .request_response
-                    .observe_preview_and_frame(&preview, frame.as_ref());
+                let request_response_failure = self.request_response.observe_preview_and_frame(
+                    &preview,
+                    frame.as_ref(),
+                    direction,
+                );
                 let lifecycle_payload_failure = self
                     .lifecycle_payload
                     .observe_preview_and_frame(&preview, frame.as_ref());

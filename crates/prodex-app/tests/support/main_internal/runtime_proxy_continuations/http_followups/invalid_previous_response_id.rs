@@ -57,7 +57,7 @@ fn runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once
         "backend-api/codex/responses",
         &[runtime_continuation_header(
             "user-agent",
-            "codex_exec/0.148.0 (Linux; x86_64)",
+            "codex_exec/future (Linux; x86_64)",
         )],
         serde_json::json!({
             "model": "gpt-5.6",
@@ -293,7 +293,7 @@ fn runtime_proxy_http_stale_overlay_resume_after_restart_recovers_chain_once() {
 }
 
 #[test]
-fn runtime_proxy_http_invalid_previous_response_id_workaround_is_off_for_0_147() {
+fn runtime_proxy_http_invalid_previous_response_id_requires_owned_binding() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_invalid_previous_response_id(),
         "second",
@@ -305,7 +305,7 @@ fn runtime_proxy_http_invalid_previous_response_id_workaround_is_off_for_0_147()
         "backend-api/codex/responses",
         &[runtime_continuation_header(
             "user-agent",
-            "codex-cli/0.147.0",
+            "codex-cli/future",
         )],
         serde_json::json!({
             "model": "gpt-5.6",

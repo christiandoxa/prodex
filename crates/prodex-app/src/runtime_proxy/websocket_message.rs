@@ -167,8 +167,6 @@ struct RuntimeWebsocketTextMessageFlow<'a> {
     saw_previous_response_not_found: bool,
     websocket_reuse_fresh_retry_profiles: BTreeSet<String>,
     websocket_reuse_fresh_retry_pending: bool,
-    codex_previous_response_id_regression: bool,
-    codex_previous_response_id_websocket_reconnect_regression: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -366,8 +364,6 @@ pub(super) mod test_support {
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
             websocket_reuse_fresh_retry_pending: false,
-            codex_previous_response_id_regression: false,
-            codex_previous_response_id_websocket_reconnect_regression: false,
         }
     }
 }

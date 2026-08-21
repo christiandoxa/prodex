@@ -3,7 +3,7 @@ use super::super::logging::{
     app_server_broker_log_preview_summary,
 };
 use super::super::parse::APP_SERVER_BROKER_MAX_PREVIEW_LINE_BYTES;
-use super::super::validation::PreviewSession;
+use super::super::validation::{PreviewSession, ProtocolDirection};
 use crate::initialize_runtime_proxy_log_path;
 use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -42,6 +42,11 @@ impl AppServerBrokerLiveValidator {
         if line.is_empty() {
             return Ok(());
         }
+        let protocol_direction = match direction {
+            "client_to_server" => ProtocolDirection::ClientToServer,
+            "server_to_client" => ProtocolDirection::ServerToClient,
+            _ => anyhow::bail!("unknown app-server broker direction {direction}"),
+        };
         let mut state = self
             .state
             .lock()
@@ -51,7 +56,11 @@ impl AppServerBrokerLiveValidator {
         }
         state.line_index = state.line_index.saturating_add(1);
         let line_index = state.line_index;
-        for mut observation in state.session.validate_line(line_index, line) {
+        for mut observation in
+            state
+                .session
+                .validate_line_in_direction(line_index, line, protocol_direction)
+        {
             observation.preview["direction"] = direction.into();
             app_server_broker_log_preview_event(&state.log_path, line_index, &observation.preview);
             serde_json::to_writer(&mut *diagnostics, &observation.preview)?;
@@ -190,6 +199,38 @@ mod tests {
             String::from_utf8(Arc::try_unwrap(diagnostics).unwrap().into_inner().unwrap()).unwrap();
         assert!(diagnostics.contains("client_to_server"));
         assert!(diagnostics.contains("server_to_client"));
+    }
+
+    #[test]
+    fn duplex_live_validation_keeps_request_id_namespaces_directional() {
+        let validator = AppServerBrokerLiveValidator::new().unwrap();
+        let diagnostics = Arc::new(Mutex::new(Vec::new()));
+        let client_request =
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"thread/start\",\"params\":{}}\n";
+        let server_request = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"item/permissions/requestApproval\",\"params\":{}}\n";
+        let server_response = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"synthetic\"}}\n";
+        let client_response =
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"decision\":\"decline\"}}\n";
+
+        for (frame, direction) in [
+            (client_request.as_slice(), "client_to_server"),
+            (server_request.as_slice(), "server_to_client"),
+            (server_response.as_slice(), "server_to_client"),
+            (client_response.as_slice(), "client_to_server"),
+        ] {
+            let mut forwarded = Vec::new();
+            app_server_broker_pump_live_stream(
+                std::io::Cursor::new(frame),
+                &mut forwarded,
+                validator.clone(),
+                Arc::clone(&diagnostics),
+                direction,
+            )
+            .unwrap();
+            assert_eq!(forwarded, frame);
+        }
+
+        validator.finish(&mut *diagnostics.lock().unwrap()).unwrap();
     }
 
     #[test]
