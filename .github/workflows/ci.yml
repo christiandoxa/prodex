@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       heavy: ${{ steps.impact.outputs.heavy }}
+      runtime_bench: ${{ steps.impact.outputs.runtime_bench }}
       reason: ${{ steps.impact.outputs.reason }}
       prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.matrix }}
       windows_prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.windows_matrix }}
@@ -81,6 +82,7 @@ jobs:
       - name: Report CI impact
         run: |
           echo "heavy=${{ steps.impact.outputs.heavy }}"
+          echo "runtime_bench=${{ steps.impact.outputs.runtime_bench }}"
           echo "reason=${{ steps.impact.outputs.reason }}"
 
       - name: Generate runtime proxy shard matrix
@@ -1557,7 +1559,7 @@ jobs:
 
   runtime-proxy-bench-smoke:
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+    if: needs.changes.outputs.runtime_bench == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

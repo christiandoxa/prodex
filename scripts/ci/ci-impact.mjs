@@ -15,11 +15,47 @@ const ALWAYS_HEAVY_PATHS = new Set([
   "scripts/ci/test-impact-manifest.mjs",
 ]);
 
+const RUNTIME_PROXY_BENCH_PATHS = new Set([
+  ".github/workflows/ci.yml",
+  "benches/runtime_proxy_hot_paths.rs",
+  "scripts/ci/benchmark-calibration.mjs",
+  "scripts/ci/ci-impact.mjs",
+  "scripts/ci/ci-impact.test.mjs",
+  "scripts/ci/runtime-proxy-bench-thresholds.json",
+]);
+
+const RUNTIME_PROXY_BENCH_PREFIXES = [
+  "crates/prodex-app/src/bench_support",
+  "crates/prodex-app/src/runtime_proxy",
+  "crates/prodex-bench-support/",
+  "crates/prodex-mojo-core/",
+  "crates/prodex-quota/",
+  "crates/prodex-runtime-proxy/",
+  "crates/prodex-runtime-quota/",
+  "crates/prodex-runtime-state/",
+  "src/",
+];
+
 export function normalizeChangedPath(filePath) {
   return String(filePath ?? "")
     .trim()
     .replaceAll("\\", "/")
     .replace(/^\.\//, "");
+}
+
+export function requiresRuntimeProxyBench(changedPaths) {
+  if (!changedPaths || typeof changedPaths[Symbol.iterator] !== "function") {
+    return true;
+  }
+  const paths = [...new Set([...changedPaths].map(normalizeChangedPath).filter(Boolean))];
+  if (paths.length === 0) {
+    return true;
+  }
+  return paths.some(
+    (filePath) =>
+      RUNTIME_PROXY_BENCH_PATHS.has(filePath) ||
+      RUNTIME_PROXY_BENCH_PREFIXES.some((prefix) => filePath.startsWith(prefix)),
+  );
 }
 
 function pathCategory(filePath) {
@@ -224,7 +260,12 @@ async function appendGithubOutput(result) {
   }
   await fs.appendFile(
     outputPath,
-    [`heavy=${result.heavy ? "true" : "false"}`, `reason=${result.reason}`, ""].join("\n"),
+    [
+      `heavy=${result.heavy ? "true" : "false"}`,
+      `runtime_bench=${result.runtimeBench ? "true" : "false"}`,
+      `reason=${result.reason}`,
+      "",
+    ].join("\n"),
     "utf8",
   );
 }
@@ -244,7 +285,10 @@ async function main() {
       : args.base
         ? await gitDiffNameOnly(args.base, args.head)
         : [];
-  const result = forcedResult ?? classifyChangedPaths(paths);
+  const result = {
+    ...(forcedResult ?? classifyChangedPaths(paths)),
+    runtimeBench: forcedResult ? true : requiresRuntimeProxyBench(paths),
+  };
 
   if (args.githubOutput) {
     await appendGithubOutput(result);
@@ -255,7 +299,9 @@ async function main() {
     return;
   }
 
-  process.stdout.write(`heavy=${result.heavy ? "true" : "false"}\nreason=${result.reason}\n`);
+  process.stdout.write(
+    `heavy=${result.heavy ? "true" : "false"}\nruntime_bench=${result.runtimeBench ? "true" : "false"}\nreason=${result.reason}\n`,
+  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
