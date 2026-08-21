@@ -1,6 +1,82 @@
 use anyhow::{Result, bail};
 use std::path::Path;
 
+pub(super) fn validate_governance_numeric_range(
+    value: Option<u64>,
+    minimum: u64,
+    maximum: u64,
+    path: &Path,
+    message: &str,
+) -> Result<()> {
+    #[cfg(feature = "mojo")]
+    {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let rule = prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
+            value,
+            minimum,
+            maximum,
+            related_value: 0,
+        };
+        let failed = prodex_mojo_core::policy::validate_numeric_rules(&[rule]).map_err(|_| {
+            anyhow::anyhow!("governance policy numeric validation returned invalid output")
+        })?;
+        if !failed.is_empty() {
+            bail!("{message} in {}", path.display());
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        if !(minimum..=maximum).contains(&value) {
+            bail!("{message} in {}", path.display());
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn validate_governance_numeric_non_zero(
+    value: Option<u64>,
+    path: &Path,
+    message: &str,
+) -> Result<()> {
+    #[cfg(feature = "mojo")]
+    {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let rule = prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
+            value,
+            minimum: 0,
+            maximum: u64::MAX,
+            related_value: 0,
+        };
+        let failed = prodex_mojo_core::policy::validate_numeric_rules(&[rule]).map_err(|_| {
+            anyhow::anyhow!("governance policy numeric validation returned invalid output")
+        })?;
+        if !failed.is_empty() {
+            bail!("{message} in {}", path.display());
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        if value == 0 {
+            bail!("{message} in {}", path.display());
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn validate_governance_session(
     governance: &crate::types::RuntimePolicyGovernanceSettings,
     path: &Path,
@@ -9,9 +85,10 @@ pub(super) fn validate_governance_session(
     {
         validate_governance_session_mojo(governance, path)
     }
-
     #[cfg(not(feature = "mojo"))]
-    validate_governance_session_rust(governance, path)
+    {
+        validate_governance_session_rust(governance, path)
+    }
 }
 
 #[cfg(any(not(feature = "mojo"), test))]

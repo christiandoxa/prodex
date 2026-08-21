@@ -15,6 +15,23 @@ def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
         return Int64(value + 0.5)
     return Int64(value - 0.5)
 
+# Test-only numeric probe for the Gemini conversion expressions. Keeping the
+# three expressions together makes the Rust parity test exercise the exact
+# operations used by the batch kernel below.
+@export("prodex_quota_gemini_float_probe")
+def prodex_quota_gemini_float_probe(
+    first: Float64,
+    second: Float64,
+    operation: Int64,
+) abi("C") -> Float64:
+    if operation == 0:
+        return first * 100.0
+    if operation == 1:
+        return first / second
+    if operation == 2:
+        return first / second * 100.0
+    return 0.0
+
 @export("prodex_quota_remaining_percent")
 def prodex_quota_remaining_percent(
     used_percent: Int64,
@@ -79,6 +96,75 @@ def prodex_quota_window_pair_has_ready_limit(
     if second_has_value != 0 and second_used_percent >= 100:
         return 0
     return 1
+
+comptime QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT: Int64 = 1_024
+
+@export("prodex_quota_gemini_bucket_batch")
+def prodex_quota_gemini_bucket_batch(
+    remaining_amount: Pointer[mut=False, Int64, _],
+    remaining_amount_state: Pointer[mut=False, Int64, _],
+    remaining_fraction: Pointer[mut=False, Float64, _],
+    remaining_fraction_present: Pointer[mut=False, Int64, _],
+    remaining: Pointer[mut=True, Int64, _],
+    remaining_present: Pointer[mut=True, Int64, _],
+    total: Pointer[mut=True, Int64, _],
+    total_present: Pointer[mut=True, Int64, _],
+    remaining_percent: Pointer[mut=True, Int64, _],
+    remaining_percent_present: Pointer[mut=True, Int64, _],
+    exhausted: Pointer[mut=True, Int64, _],
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT:
+        return 1
+
+    for index in range(count):
+        var amount_state = remaining_amount_state[unsafe_offset=index]
+        var has_fraction = remaining_fraction_present[unsafe_offset=index]
+        if amount_state < 0 or amount_state > 2:
+            return 2
+        if has_fraction != 0 and has_fraction != 1:
+            return 2
+
+        var has_remaining: Int64 = 0
+        var remaining_value: Int64 = 0
+        var has_total: Int64 = 0
+        var total_value: Int64 = 0
+        var has_percent: Int64 = 0
+        var percent_value: Int64 = 0
+        var exhausted_value: Int64 = 0
+        var fraction = remaining_fraction[unsafe_offset=index]
+
+        if amount_state == 1:
+            remaining_value = remaining_amount[unsafe_offset=index]
+            has_remaining = 1
+            if has_fraction == 1 and fraction > 0.0:
+                total_value = prodex_quota_round_f64(
+                    Float64(remaining_value) / fraction
+                )
+                if total_value >= remaining_value:
+                    has_total = 1
+        if has_fraction == 1:
+            percent_value = prodex_quota_round_f64(fraction * 100.0)
+            has_percent = 1
+        elif has_remaining == 1 and has_total == 1 and total_value > 0:
+            percent_value = prodex_quota_round_f64(
+                Float64(remaining_value) / Float64(total_value) * 100.0
+            )
+            has_percent = 1
+
+        if has_fraction == 1 and fraction <= 0.0:
+            exhausted_value = 1
+        elif has_remaining == 1 and remaining_value <= 0:
+            exhausted_value = 1
+
+        remaining[unsafe_offset=index] = remaining_value
+        remaining_present[unsafe_offset=index] = has_remaining
+        total[unsafe_offset=index] = total_value
+        total_present[unsafe_offset=index] = has_total
+        remaining_percent[unsafe_offset=index] = percent_value
+        remaining_percent_present[unsafe_offset=index] = has_percent
+        exhausted[unsafe_offset=index] = exhausted_value
+    return 0
 
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
 def quota_saturating_add(left: Int64, right: Int64) -> Int64:

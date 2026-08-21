@@ -360,16 +360,15 @@ fn validate_governance_policy_rule<'a>(
             path.display()
         );
     }
-    if rule
-        .condition
-        .minimum_authentication_strength
-        .is_some_and(|strength| !(1..=3).contains(&strength))
-    {
-        bail!(
-            "gateway governance policy authentication strength must be between 1 and 3 in {}",
-            path.display()
-        );
-    }
+    governance_numeric::validate_governance_numeric_range(
+        rule.condition
+            .minimum_authentication_strength
+            .map(u64::from),
+        1,
+        3,
+        path,
+        "gateway governance policy authentication strength must be between 1 and 3",
+    )?;
     for selector in [
         rule.condition.team_id.as_deref(),
         rule.condition.project_id.as_deref(),
@@ -410,16 +409,19 @@ fn validate_governance_policy_obligation(
     obligation: &RuntimeGovernancePolicyObligation,
     path: &Path,
 ) -> Result<()> {
-    if matches!(
-        obligation,
-        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value }
-            if !(1..=3).contains(value)
-    ) {
-        bail!(
-            "gateway governance policy obligation authentication strength must be between 1 and 3 in {}",
-            path.display()
-        );
-    }
+    let authentication_strength = match obligation {
+        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value } => {
+            Some(u64::from(*value))
+        }
+        _ => None,
+    };
+    governance_numeric::validate_governance_numeric_range(
+        authentication_strength,
+        1,
+        3,
+        path,
+        "gateway governance policy obligation authentication strength must be between 1 and 3",
+    )?;
     let selector = match obligation {
         RuntimeGovernancePolicyObligation::AllowProvider { selector }
         | RuntimeGovernancePolicyObligation::DenyProvider { selector }
@@ -434,19 +436,21 @@ fn validate_governance_policy_obligation(
             path.display()
         );
     }
-    if matches!(
-        obligation,
-        RuntimeGovernancePolicyObligation::MaxInputTokens { value: 0 }
-            | RuntimeGovernancePolicyObligation::MaxOutputTokens { value: 0 }
-            | RuntimeGovernancePolicyObligation::MaxContextTokens { value: 0 }
-            | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value: 0 }
-            | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value: 0 }
-    ) {
-        bail!(
-            "governance policy obligation bound must be non-zero in {}",
-            path.display()
-        );
-    }
+    let bound = match obligation {
+        RuntimeGovernancePolicyObligation::MaxInputTokens { value }
+        | RuntimeGovernancePolicyObligation::MaxOutputTokens { value }
+        | RuntimeGovernancePolicyObligation::MaxContextTokens { value }
+        | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value }
+        | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value } => {
+            Some(u64::from(*value))
+        }
+        _ => None,
+    };
+    governance_numeric::validate_governance_numeric_non_zero(
+        bound,
+        path,
+        "governance policy obligation bound must be non-zero",
+    )?;
     Ok(())
 }
 

@@ -172,11 +172,8 @@ pub fn render_profile_gemini_quota_with_width(
     if let Some(reset) = format_gemini_reset_summary(info) {
         fields.push(("Reset".to_string(), reset));
     }
-    for (index, bucket) in info.buckets.iter().enumerate() {
-        fields.push((
-            format!("Bucket {}", index + 1),
-            format_gemini_bucket_summary(bucket),
-        ));
+    for (index, summary) in format_gemini_bucket_summaries(info).into_iter().enumerate() {
+        fields.push((format!("Bucket {}", index + 1), summary));
     }
     render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
 }

@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+#[cfg(any(not(feature = "mojo"), test))]
 use std::path::Path;
 
 pub(crate) fn validate_gateway_route_strategy(value: &str) -> Result<()> {
@@ -100,6 +101,7 @@ pub(crate) fn validate_optional_usize(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str) -> Result<()> {
     if matches!(value, Some(0)) {
         bail!("{field} in {} must be greater than 0", path.display());

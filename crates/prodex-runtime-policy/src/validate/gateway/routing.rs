@@ -1,8 +1,8 @@
 use super::validate_gateway_exact_identifier;
 use crate::types::{RuntimePolicyFile, RuntimePolicyGatewayRouteAlias};
+use crate::validate_helpers::validate_gateway_route_strategy;
 #[cfg(any(not(feature = "mojo"), test))]
-use crate::validate_helpers::validate_optional_usize;
-use crate::validate_helpers::{validate_gateway_route_strategy, validate_optional_u64};
+use crate::validate_helpers::{validate_optional_u64, validate_optional_usize};
 use crate::validate_request_constraints::validate_gateway_request_constraints;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -72,7 +72,7 @@ enum AdaptiveNumericTag {
 }
 
 #[cfg(feature = "mojo")]
-fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+fn validate_gateway_adaptive_numeric_mojo(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let adaptive = &policy.gateway.adaptive_routing;
     let window_size = adaptive.window_size.unwrap_or(128);
     let min_samples = adaptive.min_samples.unwrap_or(8);
@@ -144,9 +144,15 @@ fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) ->
     Ok(())
 }
 
-#[cfg(not(feature = "mojo"))]
 fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    validate_gateway_adaptive_numeric_rust(policy, path)
+    #[cfg(feature = "mojo")]
+    {
+        validate_gateway_adaptive_numeric_mojo(policy, path)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        validate_gateway_adaptive_numeric_rust(policy, path)
+    }
 }
 
 #[cfg(all(test, feature = "mojo"))]
@@ -168,7 +174,8 @@ mod mojo_tests {
             assert_eq!(
                 validate_gateway_adaptive_numeric_rust(&policy, path)
                     .map_err(|error| error.to_string()),
-                validate_gateway_adaptive_numeric(&policy, path).map_err(|error| error.to_string()),
+                validate_gateway_adaptive_numeric_mojo(&policy, path)
+                    .map_err(|error| error.to_string()),
                 "{input}"
             );
         }
@@ -201,21 +208,74 @@ fn validate_gateway_route_alias(
                 path.display()
             );
         }
-        for (name, value) in [
-            (
-                "input_cost_per_million_microusd",
-                metric.input_cost_per_million_microusd,
-            ),
-            (
-                "output_cost_per_million_microusd",
-                metric.output_cost_per_million_microusd,
-            ),
-            ("latency_ms", metric.latency_ms),
-            ("rpm_limit", metric.rpm_limit),
-            ("tpm_limit", metric.tpm_limit),
-        ] {
-            validate_optional_u64(value, path, &format!("{metric_field}.{name}"))?;
-        }
+        validate_gateway_route_metric_numbers(
+            [
+                (
+                    "input_cost_per_million_microusd",
+                    metric.input_cost_per_million_microusd,
+                ),
+                (
+                    "output_cost_per_million_microusd",
+                    metric.output_cost_per_million_microusd,
+                ),
+                ("latency_ms", metric.latency_ms),
+                ("rpm_limit", metric.rpm_limit),
+                ("tpm_limit", metric.tpm_limit),
+            ],
+            &metric_field,
+            path,
+        )?;
     }
     Ok(())
+}
+
+fn validate_gateway_route_metric_numbers(
+    values: [(&'static str, Option<u64>); 5],
+    field: &str,
+    path: &Path,
+) -> Result<()> {
+    #[cfg(feature = "mojo")]
+    {
+        let default_rule = prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
+            value: 0,
+            minimum: 0,
+            maximum: u64::MAX,
+            related_value: 0,
+        };
+        let mut rules = [default_rule; 5];
+        let mut names = [""; 5];
+        let mut count = 0;
+        for (name, value) in values {
+            if let Some(value) = value {
+                rules[count].value = value;
+                names[count] = name;
+                count += 1;
+            }
+        }
+        let failed =
+            prodex_mojo_core::policy::validate_numeric_rules(&rules[..count]).map_err(|_| {
+                anyhow::anyhow!("gateway route metric numeric validation returned invalid output")
+            })?;
+        if let Some(index) = failed.first() {
+            bail!(
+                "{field}.{} in {} must be greater than 0",
+                names[*index],
+                path.display()
+            );
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        for (name, value) in values {
+            if matches!(value, Some(0)) {
+                bail!(
+                    "{field}.{name} in {} must be greater than 0",
+                    path.display()
+                );
+            }
+        }
+        Ok(())
+    }
 }
