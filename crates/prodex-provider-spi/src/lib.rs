@@ -670,42 +670,54 @@ mod mojo_capability_tests {
         }
     }
 
+    fn generated_required_mask(rng: &mut FixedSeed, case: usize) -> u8 {
+        match case % 9 {
+            0 => 0,
+            1 => 0x7f,
+            2 => 1,
+            _ => rng.below(128) as u8,
+        }
+    }
+
+    fn generated_candidates(
+        rng: &mut FixedSeed,
+        seed: u64,
+        case: usize,
+    ) -> Vec<ProviderRouteCapabilityCandidate> {
+        let count = rng.below(8) as usize;
+        let mut providers = PROVIDERS;
+        for index in (1..providers.len()).rev() {
+            providers.swap(index, rng.below((index + 1) as u64) as usize);
+        }
+        providers
+            .into_iter()
+            .take(count)
+            .enumerate()
+            .map(|(index, provider)| {
+                let mut candidate = candidate(
+                    provider,
+                    format!("model-{seed:x}-{case}-{index}"),
+                    if case.is_multiple_of(11) {
+                        0
+                    } else {
+                        rng.below(128) as u8
+                    },
+                );
+                if case.is_multiple_of(7) && index == 0 {
+                    candidate.route.model.clear();
+                }
+                candidate
+            })
+            .collect()
+    }
+
     #[test]
     fn capability_matching_matches_rust_oracle_for_fixed_seed_batches() {
         for seed in [0x51a7_u64, 0xbeef_u64, 0x1357_9bdf_u64, 0xcafe_f00d_u64] {
             let mut rng = FixedSeed(seed);
             for case in 0..256 {
-                let count = rng.below(8) as usize;
-                let required_mask = match case % 9 {
-                    0 => 0,
-                    1 => 0x7f,
-                    2 => 1,
-                    _ => rng.below(128) as u8,
-                };
-                let mut providers = PROVIDERS;
-                for index in (1..providers.len()).rev() {
-                    providers.swap(index, rng.below((index + 1) as u64) as usize);
-                }
-                let candidates = providers
-                    .into_iter()
-                    .take(count)
-                    .enumerate()
-                    .map(|(index, provider)| {
-                        let mut candidate = candidate(
-                            provider,
-                            format!("model-{seed:x}-{case}-{index}"),
-                            if case % 11 == 0 {
-                                0
-                            } else {
-                                rng.below(128) as u8
-                            },
-                        );
-                        if case % 7 == 0 && index == 0 {
-                            candidate.route.model.clear();
-                        }
-                        candidate
-                    })
-                    .collect::<Vec<_>>();
+                let required_mask = generated_required_mask(&mut rng, case);
+                let candidates = generated_candidates(&mut rng, seed, case);
                 let request = CapabilityRequest::new(capability_set(required_mask));
                 let expected = rust_oracle(&request, &candidates);
                 let actual = negotiate_provider_route_capability(&request, &candidates);

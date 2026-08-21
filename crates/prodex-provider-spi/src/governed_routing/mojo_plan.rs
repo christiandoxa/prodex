@@ -24,12 +24,7 @@ pub(super) fn plan_governed_provider_route_mojo(
         request.weights,
     )
     .ok_or(GovernedRoutingError::InvalidWeights)?;
-    if plan.eligible.len() != request.registry.providers.len()
-        || plan.reason_tags.len() != request.registry.providers.len()
-        || plan.scores.len() != request.registry.providers.len()
-    {
-        return Err(GovernedRoutingError::InvalidWeights);
-    }
+    validate_plan_shape(&plan, request.registry.providers.len())?;
 
     let score_breakdowns = plan
         .scores
@@ -39,8 +34,59 @@ pub(super) fn plan_governed_provider_route_mojo(
             scoring::score_breakdown_from_mojo(score, request.score_revision, request.weights)
         })
         .collect::<Vec<_>>();
+    let routes = routes_from_plan(request, &plan, &score_breakdowns)?;
+    let candidate_evaluations = candidate_evaluations_from_plan(request, &plan, &score_breakdowns)?;
+
+    if let Some(affinity_provider) = request.affinity_provider
+        && !routes
+            .iter()
+            .any(|route| route.provider == affinity_provider)
+    {
+        return Err(GovernedRoutingError::NoEligibleProvider);
+    }
+
+    let primary = routes
+        .first()
+        .cloned()
+        .ok_or(GovernedRoutingError::NoEligibleProvider)?;
+    let fallbacks = if request.affinity_provider.is_some() {
+        Vec::new()
+    } else {
+        routes
+            .into_iter()
+            .skip(1)
+            .take(request.max_fallbacks)
+            .collect()
+    };
+    Ok(GovernedRoutingPlan {
+        tenant: request.tenant,
+        registry_revision: request.registry.revision,
+        score_revision: request.score_revision,
+        policy_revision: request.policy.policy_revision,
+        primary,
+        fallbacks,
+        candidate_evaluations,
+    })
+}
+
+fn validate_plan_shape(
+    plan: &mojo::MojoRoutingPlan,
+    provider_count: usize,
+) -> Result<(), GovernedRoutingError> {
+    (plan.eligible.len() == provider_count
+        && plan.reason_tags.len() == provider_count
+        && plan.scores.len() == provider_count)
+        .then_some(())
+        .ok_or(GovernedRoutingError::InvalidWeights)
+}
+
+fn routes_from_plan(
+    request: &GovernedRoutingRequest<'_>,
+    plan: &mojo::MojoRoutingPlan,
+    score_breakdowns: &[GovernedScoreBreakdown],
+) -> Result<Vec<GovernedRoute>, GovernedRoutingError> {
     let mut routes = Vec::with_capacity(plan.ordered_indices.len());
-    for index in plan.ordered_indices {
+    for &index in &plan.ordered_indices {
         let Some(provider) = request.registry.providers.get(index) else {
             return Err(GovernedRoutingError::InvalidWeights);
         };
@@ -59,8 +105,15 @@ pub(super) fn plan_governed_provider_route_mojo(
             score_breakdown,
         });
     }
+    Ok(routes)
+}
 
-    let candidate_evaluations = request
+fn candidate_evaluations_from_plan(
+    request: &GovernedRoutingRequest<'_>,
+    plan: &mojo::MojoRoutingPlan,
+    score_breakdowns: &[GovernedScoreBreakdown],
+) -> Result<Vec<GovernedCandidateEvaluation>, GovernedRoutingError> {
+    request
         .registry
         .providers
         .iter()
@@ -98,38 +151,7 @@ pub(super) fn plan_governed_provider_route_mojo(
                 })
             }
         })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if let Some(affinity_provider) = request.affinity_provider
-        && !routes
-            .iter()
-            .any(|route| route.provider == affinity_provider)
-    {
-        return Err(GovernedRoutingError::NoEligibleProvider);
-    }
-
-    let primary = routes
-        .first()
-        .cloned()
-        .ok_or(GovernedRoutingError::NoEligibleProvider)?;
-    let fallbacks = if request.affinity_provider.is_some() {
-        Vec::new()
-    } else {
-        routes
-            .into_iter()
-            .skip(1)
-            .take(request.max_fallbacks)
-            .collect()
-    };
-    Ok(GovernedRoutingPlan {
-        tenant: request.tenant,
-        registry_revision: request.registry.revision,
-        score_revision: request.score_revision,
-        policy_revision: request.policy.policy_revision,
-        primary,
-        fallbacks,
-        candidate_evaluations,
-    })
+        .collect()
 }
 
 fn capability_mask(capabilities: &CapabilitySet) -> u8 {

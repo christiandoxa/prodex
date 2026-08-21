@@ -545,6 +545,90 @@ mod parity_tests {
         *state
     }
 
+    #[derive(Clone, Copy)]
+    struct PressureCase {
+        model_context_window_tokens: Option<u64>,
+        reserved_output_tokens: u64,
+        effective_input_tokens: u64,
+        source: i64,
+        unknown_window: bool,
+        zero_context_window: bool,
+        reserved_output_consumes_window: bool,
+    }
+
+    fn generated_pressure_case(state: &mut u64, case: usize) -> PressureCase {
+        PressureCase {
+            model_context_window_tokens: if case.is_multiple_of(5) {
+                None
+            } else {
+                Some(next_random(state) % 200_000)
+            },
+            reserved_output_tokens: if case.is_multiple_of(7) {
+                u64::MAX
+            } else {
+                next_random(state) % 200_000
+            },
+            effective_input_tokens: if case.is_multiple_of(11) {
+                u64::MAX
+            } else {
+                next_random(state) % 400_000
+            },
+            source: (case % 4) as i64,
+            unknown_window: case.is_multiple_of(6),
+            zero_context_window: case.is_multiple_of(9),
+            reserved_output_consumes_window: case.is_multiple_of(8),
+        }
+    }
+
+    fn expected_pressure_snapshot(input: PressureCase) -> SmartContextPressureSnapshot {
+        let usable = input
+            .model_context_window_tokens
+            .and_then(|window| window.checked_sub(input.reserved_output_tokens));
+        let pressure_basis_points = usable.and_then(|usable| {
+            (usable > 0).then(|| {
+                input
+                    .effective_input_tokens
+                    .saturating_mul(10_000)
+                    .checked_div(usable)
+                    .unwrap_or(u64::MAX)
+                    .min(u64::from(u32::MAX)) as u32
+            })
+        });
+        let pressure_band = match pressure_basis_points {
+            None => 0,
+            Some(value) if value >= 10_000 => 5,
+            Some(value) if value >= 9_000 => 4,
+            Some(value) if value >= 7_500 => 3,
+            Some(value) if value >= 5_000 => 2,
+            Some(_) => 1,
+        };
+        let estimator_confidence = if input.unknown_window
+            || input.zero_context_window
+            || input.reserved_output_consumes_window
+        {
+            2
+        } else {
+            match input.source {
+                0 | 2 => 0,
+                1 => 1,
+                _ => 2,
+            }
+        };
+        let usable_for_floor = input
+            .model_context_window_tokens
+            .map(|window| window.saturating_sub(input.reserved_output_tokens));
+        SmartContextPressureSnapshot {
+            effective_usable_context_tokens: usable,
+            effective_used_tokens: input.effective_input_tokens,
+            pressure_basis_points,
+            pressure_band,
+            absolute_safety_floor_tokens: usable_for_floor
+                .map(|value| (value / 20).clamp(1_000, 8_000))
+                .unwrap_or(2_000),
+            estimator_confidence,
+        }
+    }
+
     #[test]
     fn candidate_plan_matches_rust_oracle_for_generated_batches() {
         let mut state = 0x6d6f6a6f5f706c61_u64;
@@ -598,74 +682,16 @@ mod parity_tests {
     fn pressure_snapshot_matches_rust_oracle_for_generated_inputs() {
         let mut state = 0x7072657373757265_u64;
         for case in 0..300 {
-            let model_context_window_tokens = if case % 5 == 0 {
-                None
-            } else {
-                Some(next_random(&mut state) % 200_000)
-            };
-            let reserved_output_tokens = if case % 7 == 0 {
-                u64::MAX
-            } else {
-                next_random(&mut state) % 200_000
-            };
-            let effective_input_tokens = if case % 11 == 0 {
-                u64::MAX
-            } else {
-                next_random(&mut state) % 400_000
-            };
-            let source = (case % 4) as i64;
-            let unknown_window = case % 6 == 0;
-            let zero_context_window = case % 9 == 0;
-            let reserved_output_consumes_window = case % 8 == 0;
-            let usable = model_context_window_tokens
-                .and_then(|window| window.checked_sub(reserved_output_tokens));
-            let pressure_basis_points = usable.and_then(|usable| {
-                (usable > 0).then(|| {
-                    effective_input_tokens
-                        .saturating_mul(10_000)
-                        .checked_div(usable)
-                        .unwrap_or(u64::MAX)
-                        .min(u64::from(u32::MAX)) as u32
-                })
-            });
-            let pressure_band = match pressure_basis_points {
-                None => 0,
-                Some(value) if value >= 10_000 => 5,
-                Some(value) if value >= 9_000 => 4,
-                Some(value) if value >= 7_500 => 3,
-                Some(value) if value >= 5_000 => 2,
-                Some(_) => 1,
-            };
-            let estimator_confidence =
-                if unknown_window || zero_context_window || reserved_output_consumes_window {
-                    2
-                } else {
-                    match source {
-                        0 | 2 => 0,
-                        1 => 1,
-                        _ => 2,
-                    }
-                };
-            let usable_for_floor = model_context_window_tokens
-                .map(|window| window.saturating_sub(reserved_output_tokens));
-            let expected = SmartContextPressureSnapshot {
-                effective_usable_context_tokens: usable,
-                effective_used_tokens: effective_input_tokens,
-                pressure_basis_points,
-                pressure_band,
-                absolute_safety_floor_tokens: usable_for_floor
-                    .map(|value| (value / 20).clamp(1_000, 8_000))
-                    .unwrap_or(2_000),
-                estimator_confidence,
-            };
+            let input = generated_pressure_case(&mut state, case);
+            let expected = expected_pressure_snapshot(input);
             let actual = smart_context_pressure_snapshot(
-                model_context_window_tokens,
-                reserved_output_tokens,
-                effective_input_tokens,
-                source,
-                unknown_window,
-                zero_context_window,
-                reserved_output_consumes_window,
+                input.model_context_window_tokens,
+                input.reserved_output_tokens,
+                input.effective_input_tokens,
+                input.source,
+                input.unknown_window,
+                input.zero_context_window,
+                input.reserved_output_consumes_window,
             )
             .expect("strict Mojo pressure snapshot should accept generated input");
             assert_eq!(actual, expected, "pressure case {case}");

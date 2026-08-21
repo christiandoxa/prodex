@@ -147,8 +147,15 @@ pub fn capability_match_batch(
     if well_formed.len() != capability_masks.len() {
         return None;
     }
+    capability_match_batch_impl(well_formed, capability_masks, required_capability_mask)
+}
 
-    #[cfg(not(prodex_mojo_fallback))]
+#[cfg(not(prodex_mojo_fallback))]
+fn capability_match_batch_impl(
+    well_formed: &[bool],
+    capability_masks: &[u8],
+    required_capability_mask: u8,
+) -> Option<CapabilityMatch> {
     {
         let well_formed = well_formed
             .iter()
@@ -236,8 +243,14 @@ pub fn capability_match_batch(
             first_incompatible,
         })
     }
+}
 
-    #[cfg(prodex_mojo_fallback)]
+#[cfg(prodex_mojo_fallback)]
+fn capability_match_batch_impl(
+    well_formed: &[bool],
+    capability_masks: &[u8],
+    required_capability_mask: u8,
+) -> Option<CapabilityMatch> {
     {
         let compatible = well_formed
             .iter()
@@ -276,7 +289,15 @@ pub fn routing_plan_batch(
     required_capability_mask: u8,
     weights: ScoreWeights,
 ) -> Option<RoutingPlan> {
-    #[cfg(not(prodex_mojo_fallback))]
+    routing_plan_batch_impl(inputs, required_capability_mask, weights)
+}
+
+#[cfg(not(prodex_mojo_fallback))]
+fn routing_plan_batch_impl(
+    inputs: &[RoutingPlanInput],
+    required_capability_mask: u8,
+    weights: ScoreWeights,
+) -> Option<RoutingPlan> {
     {
         let hard_eligible = inputs
             .iter()
@@ -447,8 +468,14 @@ pub fn routing_plan_batch(
             ordered_indices,
         })
     }
+}
 
-    #[cfg(prodex_mojo_fallback)]
+#[cfg(prodex_mojo_fallback)]
+fn routing_plan_batch_impl(
+    inputs: &[RoutingPlanInput],
+    required_capability_mask: u8,
+    weights: ScoreWeights,
+) -> Option<RoutingPlan> {
     {
         let scores = inputs
             .iter()
