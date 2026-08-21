@@ -2,6 +2,24 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.411.0 - 2026-08-21
+
+### Runtime
+
+- Recover stale Codex continuations semantically (`7925ac6`)
+- Expand runtime decision kernels (`7a4b297`)
+
+### CLI
+
+- Align Codex provider semantics (`64e9b50`)
+
+### Misc
+
+- Keep fallback Clippy-clean (`fee7b8e`)
+- Preserve Codex 0.149 during migration (`965a5f4`)
+- Align Codex model and tool limits (`958df0d`)
+- Migrate provider routing decisions to Mojo core (`0b7f2b1`)
+
 ## 0.410.1 - 2026-08-20
 
 ### Runtime
