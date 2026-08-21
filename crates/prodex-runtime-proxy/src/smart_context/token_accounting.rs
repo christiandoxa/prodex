@@ -234,17 +234,21 @@ fn smart_context_auto_rehydrate_plan_mojo(
     available: &BTreeSet<String>,
     token_budget: usize,
     tier: SmartContextTokenBudgetTier,
-) -> Option<SmartContextRehydratePlan> {
+) -> Result<SmartContextRehydratePlan, prodex_mojo_core::MojoError> {
     let inputs = refs
         .iter()
         .map(|item| {
-            Some(prodex_mojo_core::runtime::SmartContextRehydrateInput {
-                token_cost: u64::try_from(item.token_cost).ok()?,
-                required: item.required,
-                available: available.contains(&item.id),
-            })
+            u64::try_from(item.token_cost)
+                .map(
+                    |token_cost| prodex_mojo_core::runtime::SmartContextRehydrateInput {
+                        token_cost,
+                        required: item.required,
+                        available: available.contains(&item.id),
+                    },
+                )
+                .map_err(|_| prodex_mojo_core::MojoError::InvalidInput)
         })
-        .collect::<Option<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     let tier = match tier {
         SmartContextTokenBudgetTier::Minimal => {
             prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_MINIMAL_TIER
@@ -265,7 +269,7 @@ fn smart_context_auto_rehydrate_plan_mojo(
         .iter()
         .zip(plan.action_tags)
         .map(|(item, tag)| {
-            Some(match tag {
+            Ok(match tag {
                 prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE => {
                     SmartContextRehydrateAction::Rehydrate {
                         id: item.id.clone(),
@@ -290,13 +294,14 @@ fn smart_context_auto_rehydrate_plan_mojo(
                         reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
                     }
                 }
-                _ => return None,
+                _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
             })
         })
-        .collect::<Option<Vec<_>>>()?;
-    Some(SmartContextRehydratePlan {
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SmartContextRehydratePlan {
         actions,
-        used_tokens: usize::try_from(plan.used_tokens).ok()?,
+        used_tokens: usize::try_from(plan.used_tokens)
+            .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)?,
     })
 }
 

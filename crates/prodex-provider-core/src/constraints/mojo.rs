@@ -6,7 +6,7 @@ pub(super) fn evaluate(
     policy: ProviderRequestConstraintPolicy,
     resolved: &ProviderRequestRequirements,
     entry: Option<&ProviderCatalogEntry>,
-) -> Option<ProviderRequestConstraintEvaluation> {
+) -> Result<ProviderRequestConstraintEvaluation, prodex_mojo_core::MojoError> {
     let input = prodex_mojo_core::provider_constraints::Input {
         policy_enabled: policy.enabled,
         endpoint_supported: endpoint_supported(provider, requirements.endpoint, entry),
@@ -34,9 +34,10 @@ pub(super) fn evaluate(
         output_limit_field: resolved.output_limit_field.map(output_limit_field_tag),
     };
     let result = prodex_mojo_core::provider_constraints::evaluate(input)?;
-    let decision = decision_from_tag(result.decision)?;
+    let decision =
+        decision_from_tag(result.decision).ok_or(prodex_mojo_core::MojoError::InvalidOutput)?;
     let missing_feature = match result.missing_feature {
-        Some(tag) => Some(feature_from_tag(tag)?),
+        Some(tag) => Some(feature_from_tag(tag).ok_or(prodex_mojo_core::MojoError::InvalidOutput)?),
         None => None,
     };
     let mut requirements = resolved.clone();
@@ -76,13 +77,16 @@ pub(super) fn evaluate(
         result.adjustment_reason,
     ) {
         evaluation.adjustment = Some(ProviderOutputAdjustment {
-            field: output_limit_field_from_tag(field)?,
-            requested_tokens: resolved.explicit_output_tokens?,
+            field: output_limit_field_from_tag(field)
+                .ok_or(prodex_mojo_core::MojoError::InvalidOutput)?,
+            requested_tokens: resolved
+                .explicit_output_tokens
+                .ok_or(prodex_mojo_core::MojoError::InvalidOutput)?,
             applied_tokens: applied,
-            reason: decision_from_tag(reason)?,
+            reason: decision_from_tag(reason).ok_or(prodex_mojo_core::MojoError::InvalidOutput)?,
         });
     }
-    Some(evaluation)
+    Ok(evaluation)
 }
 
 fn endpoint_supported(

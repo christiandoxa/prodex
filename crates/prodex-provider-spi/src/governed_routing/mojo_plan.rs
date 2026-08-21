@@ -23,7 +23,7 @@ pub(super) fn plan_governed_provider_route_mojo(
         capability_mask(request.required_capabilities),
         request.weights,
     )
-    .ok_or(GovernedRoutingError::InvalidWeights)?;
+    .map_err(|_| GovernedRoutingError::InvalidWeights)?;
     validate_plan_shape(&plan, request.registry.providers.len())?;
 
     let score_breakdowns = plan

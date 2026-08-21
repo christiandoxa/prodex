@@ -180,7 +180,7 @@ fn score_component(
 #[test]
 fn mojo_feature_requires_real_compiled_routing_core() {
     if prodex_mojo_core::MOJO_REQUIRED && !prodex_mojo_core::MOJO_ACTIVE {
-        panic!("strict Mojo mode unexpectedly activated the Rust fallback");
+        panic!("strict Mojo mode unexpectedly activated the non-Mojo path");
     }
 }
 

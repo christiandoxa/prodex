@@ -31,7 +31,7 @@ pub fn main_quota_aggregation_self_test() -> bool {
             reset_at: Some(10),
         },
     ])
-    .is_some_and(|result| {
+    .is_ok_and(|result| {
         result.profiles_with_data == 2
             && result.pool_remaining == 110
             && result.earliest_reset_at == Some(10)
@@ -63,9 +63,9 @@ unsafe extern "C" {
 
 pub fn main_quota_aggregate_batch(
     inputs: &[MainQuotaAggregationInput],
-) -> Option<MainQuotaAggregation> {
+) -> Result<MainQuotaAggregation, crate::MojoError> {
     if inputs.len() > QUOTA_MAIN_AGGREGATION_MAX_COUNT {
-        return None;
+        return Err(crate::MojoError::InvalidInput);
     }
 
     let remaining_percent = inputs
@@ -98,17 +98,24 @@ pub fn main_quota_aggregate_batch(
             &mut pool_remaining,
             &mut earliest_reset_at,
             &mut earliest_present,
-            i64::try_from(inputs.len()).ok()?,
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
         )
     };
-    if status == 0 && profiles_with_data >= 0 && matches!(earliest_present, 0 | 1) {
-        return Some(MainQuotaAggregation {
-            profiles_with_data: usize::try_from(profiles_with_data).ok()?,
-            pool_remaining,
-            earliest_reset_at: (earliest_present == 1).then_some(earliest_reset_at),
-        });
+    if status != 0
+        || profiles_with_data < 0
+        || usize::try_from(profiles_with_data)
+            .ok()
+            .is_none_or(|count| count > inputs.len())
+        || !matches!(earliest_present, 0 | 1)
+    {
+        return Err(crate::MojoError::InvalidOutput);
     }
-    None
+    Ok(MainQuotaAggregation {
+        profiles_with_data: usize::try_from(profiles_with_data)
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+        pool_remaining,
+        earliest_reset_at: (earliest_present == 1).then_some(earliest_reset_at),
+    })
 }
 
 pub fn remaining_percent(used_percent: Option<i64>) -> i64 {

@@ -74,6 +74,7 @@
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:impact": "node --test scripts/ci/ci-impact.test.mjs",
     "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
+    "ci:mojo-no-fallback-guard": "node scripts/ci/mojo-no-fallback-guard.mjs --self-test && node scripts/ci/mojo-no-fallback-guard.mjs",
     "ci:optional-tools-guard": "node scripts/ci/optional-tools-guard.mjs --self-test",
     "ci:smart-context-guard": "node scripts/ci/smart-context-guard.mjs --self-test",
     "ci:super-wildcard-guard": "node scripts/ci/super-wildcard-guard.mjs",

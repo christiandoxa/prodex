@@ -24,7 +24,7 @@ pub(super) fn plan_batch(
     inputs: &[NormalizedRoutingScoreInput],
     required_capability_mask: u8,
     weights: GovernedRoutingWeights,
-) -> Option<MojoRoutingPlan> {
+) -> Result<MojoRoutingPlan, prodex_mojo_core::MojoError> {
     let inputs = inputs
         .iter()
         .map(|input| prodex_mojo_core::routing::RoutingPlanInput {

@@ -368,7 +368,7 @@ fn runtime_optimistic_current_candidate_decision_rust(
 #[cfg(feature = "mojo")]
 fn optimistic_current_candidate_decision_mojo(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
-) -> Option<RuntimeOptimisticCurrentCandidateDecision> {
+) -> Result<RuntimeOptimisticCurrentCandidateDecision, prodex_mojo_core::MojoError> {
     let prompt_cache_present = prompt_cache_key_present(input.prompt_cache_key);
     let prompt_cache_owner_matches = input
         .prompt_cache_owner_profile
@@ -409,7 +409,7 @@ fn optimistic_current_candidate_decision_mojo(
             prompt_cache_owner_matches,
         },
     )?;
-    Some(match result {
+    Ok(match result {
         prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_KEEP => {
             RuntimeOptimisticCurrentCandidateDecision::Keep
         }
@@ -463,7 +463,7 @@ fn optimistic_current_candidate_decision_mojo(
         prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_PROMPT_CACHE => {
             optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity)
         }
-        _ => return None,
+        _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
     })
 }
 

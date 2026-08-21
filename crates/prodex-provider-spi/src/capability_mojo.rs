@@ -9,7 +9,7 @@ pub(crate) struct CapabilityMatchPlan {
 pub(crate) fn match_candidates(
     request: &CapabilityRequest,
     candidates: &[ProviderRouteCapabilityCandidate],
-) -> Option<CapabilityMatchPlan> {
+) -> Result<CapabilityMatchPlan, prodex_mojo_core::MojoError> {
     let well_formed = candidates
         .iter()
         .map(|candidate| candidate.model_candidate().is_well_formed())

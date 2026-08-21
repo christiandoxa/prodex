@@ -61,7 +61,7 @@ fn main_quota_aggregate_matches_rust_oracle_for_generated_rows() {
         }
         assert_eq!(
             crate::mojo::main_quota_aggregate(&rows),
-            Some((profiles_with_data, pool_remaining, earliest_reset_at)),
+            Ok((profiles_with_data, pool_remaining, earliest_reset_at)),
             "quota aggregation case {case}"
         );
     }

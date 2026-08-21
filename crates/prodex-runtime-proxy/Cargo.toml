@@ -14,6 +14,7 @@ path = "src/lib.rs"
 default = []
 mojo = [
     "dep:prodex_mojo_core",
+    "prodex_mojo_core/mojo-quota",
     "prodex_mojo_core/mojo-runtime",
     "prodex_provider_core/mojo",
 ]

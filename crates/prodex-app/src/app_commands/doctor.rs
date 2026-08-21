@@ -282,7 +282,7 @@ fn mojo_core_json_value() -> serde_json::Value {
             "compiler_required": false,
             "build_strict": prodex_mojo_core::MOJO_REQUIRED,
             "version": prodex_mojo_core::MOJO_VERSION,
-            "abi_version": prodex_mojo_core::routing::abi_version(),
+            "abi_version": prodex_mojo_core::routing::abi_version().ok(),
             "implementation": if prodex_mojo_core::MOJO_ACTIVE {
                 "mojo-compiled-in"
             } else {

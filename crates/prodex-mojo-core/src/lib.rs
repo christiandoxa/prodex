@@ -10,6 +10,13 @@ pub const MOJO_ACTIVE: bool = cfg!(prodex_mojo_active);
 pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);
 pub const MOJO_VERSION: Option<&str> = option_env!("PRODEX_MOJO_VERSION");
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MojoError {
+    InvalidInput,
+    InvalidOutput,
+    AbiMismatch,
+}
+
 #[cfg(feature = "mojo-core")]
 pub fn self_test() -> bool {
     let quota = quota::remaining_percent(Some(42)) == 58
@@ -54,22 +61,24 @@ pub fn self_test() -> bool {
         reserve_bias: 0,
         weekly_weight: 1,
     }]);
-    let routing_ok = routing.is_some_and(|plan| {
+    let routing_ok = routing.is_ok_and(|plan| {
         plan.eligible == [true]
             && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
             && plan.ordered_indices == [0]
             && plan.scores[0].score == 10_000
     });
-    let capability_ok = capability.is_some_and(|result| {
+    let capability_ok = capability.is_ok_and(|result| {
         result.first_compatible == Some(0)
             && result.first_incompatible == Some(1)
             && result.compatible == [true, false]
     });
-    let profile_ok = profile.first().is_some_and(|score| {
-        score.total_pressure == 3_000
-            && score.weekly_pressure == 1_000
-            && score.five_hour_pressure == 2_000
-            && score.reserve_floor == 80
+    let profile_ok = profile.as_ref().is_ok_and(|profile| {
+        profile.first().is_some_and(|score| {
+            score.total_pressure == 3_000
+                && score.weekly_pressure == 1_000
+                && score.five_hour_pressure == 2_000
+                && score.reserve_floor == 80
+        })
     });
     let candidate_plan_ok = runtime::candidate_plan_self_test();
     let pressure_snapshot_ok = runtime::smart_context_pressure_snapshot_self_test();
@@ -87,9 +96,9 @@ pub fn self_test() -> bool {
         quota_aggregation_ok,
         provider_constraints_ok,
         tuning_defaults_ok,
-        routing::abi_version() == Some(routing::ABI_VERSION),
+        routing::abi_version().is_ok(),
         quota,
-        runtime::pressure_band_for_route(Some((4, 1)), None, 0) == 2,
+        runtime::pressure_band_for_route(Some((4, 1)), None, 0).is_ok_and(|band| band == 2),
         runtime::smart_context_estimate_tokens_from_body_bytes(7) == 2,
     ];
     #[cfg(test)]

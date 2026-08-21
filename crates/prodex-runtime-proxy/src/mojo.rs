@@ -2,13 +2,14 @@ use crate::{
     RuntimeProxyQuotaProfileScore, RuntimeProxyQuotaProfileScoreInput,
     RuntimeProxyQuotaWindowObservation, RuntimeResponseCandidatePlanInput,
     RuntimeResponseCandidatePlanOptions, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
+    RuntimeSelectionQuotaWindowStatus,
 };
 
 pub(crate) fn pressure_band_for_route(
     five_hour: Option<RuntimeProxyQuotaWindowObservation>,
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
-) -> RuntimeSelectionQuotaPressureBand {
+) -> Result<RuntimeSelectionQuotaPressureBand, prodex_mojo_core::MojoError> {
     let five_hour = five_hour.map(|window| (window.remaining_percent, 1));
     let weekly = weekly.map(|window| (window.remaining_percent, 1));
     let route_kind = match route_kind {
@@ -17,12 +18,44 @@ pub(crate) fn pressure_band_for_route(
         RuntimeRouteKind::Websocket => 2,
         RuntimeRouteKind::Standard => 3,
     };
-    match prodex_mojo_core::runtime::pressure_band_for_route(five_hour, weekly, route_kind) {
-        0 => RuntimeSelectionQuotaPressureBand::Healthy,
-        1 => RuntimeSelectionQuotaPressureBand::Thin,
-        2 => RuntimeSelectionQuotaPressureBand::Critical,
-        3 => RuntimeSelectionQuotaPressureBand::Exhausted,
-        _ => RuntimeSelectionQuotaPressureBand::Unknown,
+    match prodex_mojo_core::runtime::pressure_band_for_route(five_hour, weekly, route_kind)? {
+        0 => Ok(RuntimeSelectionQuotaPressureBand::Healthy),
+        1 => Ok(RuntimeSelectionQuotaPressureBand::Thin),
+        2 => Ok(RuntimeSelectionQuotaPressureBand::Critical),
+        3 => Ok(RuntimeSelectionQuotaPressureBand::Exhausted),
+        4 => Ok(RuntimeSelectionQuotaPressureBand::Unknown),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
+    }
+}
+
+pub(crate) fn window_status(
+    remaining_percent: i64,
+) -> Result<RuntimeSelectionQuotaWindowStatus, prodex_mojo_core::MojoError> {
+    match prodex_mojo_core::quota::window_status(remaining_percent, true) {
+        0 => Ok(RuntimeSelectionQuotaWindowStatus::Ready),
+        1 => Ok(RuntimeSelectionQuotaWindowStatus::Thin),
+        2 => Ok(RuntimeSelectionQuotaWindowStatus::Critical),
+        3 => Ok(RuntimeSelectionQuotaWindowStatus::Exhausted),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
+    }
+}
+
+pub(crate) fn pressure_band_from_window_status(
+    status: RuntimeSelectionQuotaWindowStatus,
+) -> Result<RuntimeSelectionQuotaPressureBand, prodex_mojo_core::MojoError> {
+    let code = match status {
+        RuntimeSelectionQuotaWindowStatus::Ready => 0,
+        RuntimeSelectionQuotaWindowStatus::Thin => 1,
+        RuntimeSelectionQuotaWindowStatus::Critical => 2,
+        RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+        RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+    };
+    match prodex_mojo_core::quota::pressure_band(code, code) {
+        0 => Ok(RuntimeSelectionQuotaPressureBand::Healthy),
+        1 => Ok(RuntimeSelectionQuotaPressureBand::Thin),
+        2 => Ok(RuntimeSelectionQuotaPressureBand::Critical),
+        3 => Ok(RuntimeSelectionQuotaPressureBand::Exhausted),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
     }
 }
 
@@ -42,6 +75,7 @@ pub(crate) fn profile_scores_batch(
         })
         .collect::<Vec<_>>();
     prodex_mojo_core::runtime::profile_scores_batch(&inputs)
+        .expect("Mojo runtime quota profile score returned invalid output")
         .into_iter()
         .map(|score| RuntimeProxyQuotaProfileScore {
             total_pressure: score.total_pressure,
@@ -64,7 +98,7 @@ pub(crate) fn smart_context_pressure_snapshot(
     unknown_token_window: bool,
     zero_context_window: bool,
     reserved_output_consumes_window: bool,
-) -> Option<prodex_mojo_core::runtime::SmartContextPressureSnapshot> {
+) -> Result<prodex_mojo_core::runtime::SmartContextPressureSnapshot, prodex_mojo_core::MojoError> {
     prodex_mojo_core::runtime::smart_context_pressure_snapshot(
         model_context_window_tokens,
         reserved_output_tokens,
@@ -79,7 +113,7 @@ pub(crate) fn smart_context_pressure_snapshot(
 pub(crate) fn runtime_response_candidate_plan_batch(
     candidates: &[RuntimeResponseCandidatePlanInput],
     options: RuntimeResponseCandidatePlanOptions<'_>,
-) -> Option<prodex_mojo_core::runtime::RuntimeCandidatePlan> {
+) -> Result<prodex_mojo_core::runtime::RuntimeCandidatePlan, prodex_mojo_core::MojoError> {
     let mut fields = Vec::with_capacity(
         candidates.len() * prodex_mojo_core::runtime::RUNTIME_CANDIDATE_PLAN_FIELD_COUNT,
     );
@@ -91,8 +125,9 @@ pub(crate) fn runtime_response_candidate_plan_batch(
                 &candidate.name,
             );
         let push_usize = |fields: &mut Vec<i64>, value: usize| {
-            fields.push(i64::try_from(value).ok()?);
-            Some(())
+            fields
+                .push(i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?);
+            Ok::<(), prodex_mojo_core::MojoError>(())
         };
         fields.push(if candidate.in_selection_backoff { 1 } else { 0 });
         push_usize(&mut fields, candidate.provider_priority)?;

@@ -1,5 +1,3 @@
-use std::cmp::min;
-
 #[cfg(feature = "mojo-runtime")]
 pub use crate::runtime_decisions::*;
 
@@ -42,23 +40,15 @@ pub struct RuntimeCandidatePlan {
 }
 
 pub fn candidate_plan_self_test() -> bool {
-    #[cfg(prodex_mojo_fallback)]
-    {
-        true
-    }
-
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let mut fields = vec![0_i64; RUNTIME_CANDIDATE_PLAN_FIELD_COUNT * 2];
-        fields[1] = 1;
-        fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 16] = 1;
-        runtime_candidate_plan_batch(&fields, 0)
-            .is_some_and(|plan| plan.ready_indices == [1, 0] && plan.fallback_indices == [1, 0])
-    }
+    let mut fields = vec![0_i64; RUNTIME_CANDIDATE_PLAN_FIELD_COUNT * 2];
+    fields[1] = 1;
+    fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 16] = 1;
+    runtime_candidate_plan_batch(&fields, 0)
+        .is_ok_and(|plan| plan.ready_indices == [1, 0] && plan.fallback_indices == [1, 0])
 }
 
 pub fn smart_context_pressure_snapshot_self_test() -> bool {
-    smart_context_pressure_snapshot(Some(100), 20, 72, 0, false, false, false).is_some_and(
+    smart_context_pressure_snapshot(Some(100), 20, 72, 0, false, false, false).is_ok_and(
         |snapshot| {
             snapshot.effective_usable_context_tokens == Some(80)
                 && snapshot.pressure_basis_points == Some(9_000)
@@ -69,7 +59,6 @@ pub fn smart_context_pressure_snapshot_self_test() -> bool {
     )
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 unsafe extern "C" {
     fn prodex_runtime_quota_pressure_band_for_route(
         five_hour_remaining_percent: i64,
@@ -124,151 +113,118 @@ pub fn pressure_band_for_route(
     five_hour: Option<(i64, i64)>,
     weekly: Option<(i64, i64)>,
     route_kind: i64,
-) -> i64 {
-    #[cfg(not(prodex_mojo_fallback))]
+) -> Result<i64, crate::MojoError> {
+    if five_hour.is_some_and(|(_, has_value)| !matches!(has_value, 0 | 1))
+        || weekly.is_some_and(|(_, has_value)| !matches!(has_value, 0 | 1))
+        || !(0..=3).contains(&route_kind)
     {
-        let (five_hour_remaining_percent, five_hour_has_value) = five_hour.unwrap_or((0, 0));
-        let (weekly_remaining_percent, weekly_has_value) = weekly.unwrap_or((0, 0));
-        unsafe {
-            prodex_runtime_quota_pressure_band_for_route(
-                five_hour_remaining_percent,
-                five_hour_has_value,
-                weekly_remaining_percent,
-                weekly_has_value,
-                route_kind,
-            )
-        }
+        return Err(crate::MojoError::InvalidInput);
     }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        if five_hour.is_none() && weekly.is_none() {
-            return 4;
-        }
-        if five_hour.is_some_and(|(remaining, _)| remaining == 0)
-            || weekly.is_some_and(|(remaining, _)| remaining == 0)
-        {
-            return 3;
-        }
-        let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) =
-            if route_kind == 0 || route_kind == 2 {
-                (20, 10, 10, 5)
-            } else {
-                (10, 5, 5, 3)
-            };
-        let band = |value: Option<(i64, i64)>, thin: i64, critical: i64| match value {
-            None => 0,
-            Some((remaining, _)) if remaining <= critical => 2,
-            Some((remaining, _)) if remaining <= thin => 1,
-            Some(_) => 0,
-        };
-        band(weekly, thin_weekly, critical_weekly).max(band(
-            five_hour,
-            thin_five_hour,
-            critical_five_hour,
-        ))
-    }
-}
-
-pub fn profile_scores_batch(inputs: &[ProfileScoreInput]) -> Vec<ProfileScore> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let weekly_pressure = inputs
-            .iter()
-            .map(|input| input.weekly_pressure)
-            .collect::<Vec<_>>();
-        let five_hour_pressure = inputs
-            .iter()
-            .map(|input| input.five_hour_pressure)
-            .collect::<Vec<_>>();
-        let scale_bps = inputs
-            .iter()
-            .map(|input| input.scale_bps)
-            .collect::<Vec<_>>();
-        let weekly_remaining = inputs
-            .iter()
-            .map(|input| input.weekly_remaining)
-            .collect::<Vec<_>>();
-        let five_hour_remaining = inputs
-            .iter()
-            .map(|input| input.five_hour_remaining)
-            .collect::<Vec<_>>();
-        let reserve_bias = inputs
-            .iter()
-            .map(|input| input.reserve_bias)
-            .collect::<Vec<_>>();
-        let weekly_weight = inputs
-            .iter()
-            .map(|input| input.weekly_weight)
-            .collect::<Vec<_>>();
-        let mut total_pressure = vec![0_i64; inputs.len()];
-        let mut scaled_weekly_pressure = vec![0_i64; inputs.len()];
-        let mut scaled_five_hour_pressure = vec![0_i64; inputs.len()];
-        let mut reserve_floor = vec![0_i64; inputs.len()];
-        let status = unsafe {
-            prodex_runtime_quota_profile_score_batch(
-                weekly_pressure.as_ptr(),
-                five_hour_pressure.as_ptr(),
-                scale_bps.as_ptr(),
-                weekly_remaining.as_ptr(),
-                five_hour_remaining.as_ptr(),
-                reserve_bias.as_ptr(),
-                weekly_weight.as_ptr(),
-                total_pressure.as_mut_ptr(),
-                scaled_weekly_pressure.as_mut_ptr(),
-                scaled_five_hour_pressure.as_mut_ptr(),
-                reserve_floor.as_mut_ptr(),
-                i64::try_from(inputs.len()).unwrap_or(i64::MAX),
-            )
-        };
-        if status == 0 {
-            return inputs
-                .iter()
-                .enumerate()
-                .map(|(index, _)| ProfileScore {
-                    total_pressure: total_pressure[index],
-                    weekly_pressure: scaled_weekly_pressure[index],
-                    five_hour_pressure: scaled_five_hour_pressure[index],
-                    reserve_floor: reserve_floor[index],
-                })
-                .collect();
-        }
-    }
-
-    inputs.iter().copied().map(profile_score_rust).collect()
-}
-
-fn profile_score_rust(input: ProfileScoreInput) -> ProfileScore {
-    let scale = |pressure: i64| {
-        if pressure == i64::MAX {
-            return i64::MAX;
-        }
-        pressure
-            .saturating_mul(input.scale_bps.max(0))
-            .checked_div(10_000)
-            .unwrap_or(i64::MAX)
+    let (five_hour_remaining_percent, five_hour_has_value) = five_hour.unwrap_or((0, 0));
+    let (weekly_remaining_percent, weekly_has_value) = weekly.unwrap_or((0, 0));
+    let band = unsafe {
+        prodex_runtime_quota_pressure_band_for_route(
+            five_hour_remaining_percent,
+            five_hour_has_value,
+            weekly_remaining_percent,
+            weekly_has_value,
+            route_kind,
+        )
     };
-    let weekly_pressure = scale(input.weekly_pressure);
-    let five_hour_pressure = scale(input.five_hour_pressure);
-    ProfileScore {
-        total_pressure: input
-            .reserve_bias
-            .saturating_add(weekly_pressure.saturating_mul(input.weekly_weight))
-            .saturating_add(five_hour_pressure),
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor: min(input.weekly_remaining, input.five_hour_remaining),
+    (0..=4)
+        .contains(&band)
+        .then_some(band)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+pub fn profile_scores_batch(
+    inputs: &[ProfileScoreInput],
+) -> Result<Vec<ProfileScore>, crate::MojoError> {
+    if inputs.len() > 64
+        || inputs.iter().any(|input| {
+            input.weekly_pressure < 0
+                || input.five_hour_pressure < 0
+                || input.scale_bps < 0
+                || input.weekly_remaining < 0
+                || input.weekly_remaining > 100
+                || input.five_hour_remaining < 0
+                || input.five_hour_remaining > 100
+                || input.reserve_bias < 0
+                || input.weekly_weight < 0
+        })
+    {
+        return Err(crate::MojoError::InvalidInput);
     }
+    let weekly_pressure = inputs
+        .iter()
+        .map(|input| input.weekly_pressure)
+        .collect::<Vec<_>>();
+    let five_hour_pressure = inputs
+        .iter()
+        .map(|input| input.five_hour_pressure)
+        .collect::<Vec<_>>();
+    let scale_bps = inputs
+        .iter()
+        .map(|input| input.scale_bps)
+        .collect::<Vec<_>>();
+    let weekly_remaining = inputs
+        .iter()
+        .map(|input| input.weekly_remaining)
+        .collect::<Vec<_>>();
+    let five_hour_remaining = inputs
+        .iter()
+        .map(|input| input.five_hour_remaining)
+        .collect::<Vec<_>>();
+    let reserve_bias = inputs
+        .iter()
+        .map(|input| input.reserve_bias)
+        .collect::<Vec<_>>();
+    let weekly_weight = inputs
+        .iter()
+        .map(|input| input.weekly_weight)
+        .collect::<Vec<_>>();
+    let mut total_pressure = vec![0_i64; inputs.len()];
+    let mut scaled_weekly_pressure = vec![0_i64; inputs.len()];
+    let mut scaled_five_hour_pressure = vec![0_i64; inputs.len()];
+    let mut reserve_floor = vec![0_i64; inputs.len()];
+    let status = unsafe {
+        prodex_runtime_quota_profile_score_batch(
+            weekly_pressure.as_ptr(),
+            five_hour_pressure.as_ptr(),
+            scale_bps.as_ptr(),
+            weekly_remaining.as_ptr(),
+            five_hour_remaining.as_ptr(),
+            reserve_bias.as_ptr(),
+            weekly_weight.as_ptr(),
+            total_pressure.as_mut_ptr(),
+            scaled_weekly_pressure.as_mut_ptr(),
+            scaled_five_hour_pressure.as_mut_ptr(),
+            reserve_floor.as_mut_ptr(),
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0
+        || total_pressure.iter().any(|value| *value < 0)
+        || scaled_weekly_pressure.iter().any(|value| *value < 0)
+        || scaled_five_hour_pressure.iter().any(|value| *value < 0)
+        || reserve_floor.iter().any(|value| !(0..=100).contains(value))
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(inputs
+        .iter()
+        .enumerate()
+        .map(|(index, _)| ProfileScore {
+            total_pressure: total_pressure[index],
+            weekly_pressure: scaled_weekly_pressure[index],
+            five_hour_pressure: scaled_five_hour_pressure[index],
+            reserve_floor: reserve_floor[index],
+        })
+        .collect())
 }
 
 pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        unsafe { prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes) }
-    }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        body_bytes.saturating_add(3) / 4
-    }
+    unsafe { prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes) }
 }
 
 pub fn smart_context_pressure_snapshot(
@@ -279,191 +235,126 @@ pub fn smart_context_pressure_snapshot(
     unknown_token_window: bool,
     zero_context_window: bool,
     reserved_output_consumes_window: bool,
-) -> Option<SmartContextPressureSnapshot> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let mut effective_usable_context_tokens = 0;
-        let mut effective_usable_has_value = 0;
-        let mut pressure_basis_points = 0;
-        let mut pressure_has_value = 0;
-        let mut pressure_band = 0;
-        let mut absolute_safety_floor_tokens = 0;
-        let mut estimator_confidence = 0;
-        let status = unsafe {
-            prodex_smart_context_pressure_snapshot(
-                model_context_window_tokens.unwrap_or(0),
-                i64::from(model_context_window_tokens.is_some()),
-                reserved_output_tokens,
-                effective_input_tokens,
-                effective_input_source,
-                i64::from(unknown_token_window),
-                i64::from(zero_context_window),
-                i64::from(reserved_output_consumes_window),
-                &mut effective_usable_context_tokens,
-                &mut effective_usable_has_value,
-                &mut pressure_basis_points,
-                &mut pressure_has_value,
-                &mut pressure_band,
-                &mut absolute_safety_floor_tokens,
-                &mut estimator_confidence,
-            )
-        };
-        if status != 0
-            || !matches!(effective_usable_has_value, 0 | 1)
-            || !matches!(pressure_has_value, 0 | 1)
-            || !matches!(pressure_band, 0..=5)
-            || !matches!(estimator_confidence, 0..=2)
-        {
-            return None;
-        }
-        Some(SmartContextPressureSnapshot {
-            effective_usable_context_tokens: (effective_usable_has_value == 1)
-                .then_some(effective_usable_context_tokens),
-            effective_used_tokens: effective_input_tokens,
-            pressure_basis_points: (pressure_has_value == 1)
-                .then_some(pressure_basis_points.min(u64::from(u32::MAX)) as u32),
-            pressure_band,
-            absolute_safety_floor_tokens,
-            estimator_confidence,
-        })
+) -> Result<SmartContextPressureSnapshot, crate::MojoError> {
+    if !(0..=3).contains(&effective_input_source) {
+        return Err(crate::MojoError::InvalidInput);
     }
-
-    #[cfg(prodex_mojo_fallback)]
+    let mut effective_usable_context_tokens = 0;
+    let mut effective_usable_has_value = 0;
+    let mut pressure_basis_points = 0;
+    let mut pressure_has_value = 0;
+    let mut pressure_band = 0;
+    let mut absolute_safety_floor_tokens = 0;
+    let mut estimator_confidence = 0;
+    let status = unsafe {
+        prodex_smart_context_pressure_snapshot(
+            model_context_window_tokens.unwrap_or(0),
+            i64::from(model_context_window_tokens.is_some()),
+            reserved_output_tokens,
+            effective_input_tokens,
+            effective_input_source,
+            i64::from(unknown_token_window),
+            i64::from(zero_context_window),
+            i64::from(reserved_output_consumes_window),
+            &mut effective_usable_context_tokens,
+            &mut effective_usable_has_value,
+            &mut pressure_basis_points,
+            &mut pressure_has_value,
+            &mut pressure_band,
+            &mut absolute_safety_floor_tokens,
+            &mut estimator_confidence,
+        )
+    };
+    if status != 0
+        || !matches!(effective_usable_has_value, 0 | 1)
+        || !matches!(pressure_has_value, 0 | 1)
+        || !matches!(pressure_band, 0..=5)
+        || !matches!(estimator_confidence, 0..=2)
     {
-        let effective_usable_context_tokens = model_context_window_tokens
-            .and_then(|window| window.checked_sub(reserved_output_tokens));
-        let pressure_basis_points = effective_usable_context_tokens.and_then(|usable| {
-            (usable > 0).then(|| {
-                effective_input_tokens
-                    .saturating_mul(10_000)
-                    .checked_div(usable)
-                    .unwrap_or(u64::MAX)
-                    .min(u64::from(u32::MAX)) as u32
-            })
-        });
-        let pressure_band = match pressure_basis_points {
-            None => 0,
-            Some(value) if value >= 10_000 => 5,
-            Some(value) if value >= 9_000 => 4,
-            Some(value) if value >= 7_500 => 3,
-            Some(value) if value >= 5_000 => 2,
-            Some(_) => 1,
-        };
-        let estimator_confidence =
-            if unknown_token_window || zero_context_window || reserved_output_consumes_window {
-                2
-            } else {
-                match effective_input_source {
-                    0 | 2 => 0,
-                    1 => 1,
-                    _ => 2,
-                }
-            };
-        let usable =
-            model_context_window_tokens.map(|window| window.saturating_sub(reserved_output_tokens));
-        let absolute_safety_floor_tokens = usable
-            .map(|usable| (usable / 20).clamp(1_000, 8_000))
-            .unwrap_or(2_000);
-        Some(SmartContextPressureSnapshot {
-            effective_usable_context_tokens,
-            effective_used_tokens: effective_input_tokens,
-            pressure_basis_points,
-            pressure_band,
-            absolute_safety_floor_tokens,
-            estimator_confidence,
-        })
+        return Err(crate::MojoError::InvalidOutput);
     }
+    Ok(SmartContextPressureSnapshot {
+        effective_usable_context_tokens: (effective_usable_has_value == 1)
+            .then_some(effective_usable_context_tokens),
+        effective_used_tokens: effective_input_tokens,
+        pressure_basis_points: (pressure_has_value == 1)
+            .then_some(pressure_basis_points.min(u64::from(u32::MAX)) as u32),
+        pressure_band,
+        absolute_safety_floor_tokens,
+        estimator_confidence,
+    })
 }
 
 pub fn runtime_candidate_plan_batch(
     fields: &[i64],
     route_kind: i64,
-) -> Option<RuntimeCandidatePlan> {
+) -> Result<RuntimeCandidatePlan, crate::MojoError> {
     if !fields
         .len()
         .is_multiple_of(RUNTIME_CANDIDATE_PLAN_FIELD_COUNT)
     {
-        return None;
+        return Err(crate::MojoError::InvalidInput);
     }
     let count = fields.len() / RUNTIME_CANDIDATE_PLAN_FIELD_COUNT;
     if count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT {
-        return None;
+        return Err(crate::MojoError::InvalidInput);
     }
-
-    #[cfg(not(prodex_mojo_fallback))]
+    if !(0..=3).contains(&route_kind) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut ready_indices = vec![0_i64; count];
+    let mut fallback_indices = vec![0_i64; count];
+    let mut ready_count = 0_i64;
+    let mut fallback_count = 0_i64;
+    let status = unsafe {
+        prodex_runtime_candidate_plan_batch(
+            fields.as_ptr(),
+            ready_indices.as_mut_ptr(),
+            &mut ready_count,
+            fallback_indices.as_mut_ptr(),
+            &mut fallback_count,
+            i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
+            route_kind,
+        )
+    };
+    if status != 0
+        || ready_count < 0
+        || fallback_count < 0
+        || ready_count as usize > count
+        || fallback_count as usize > count
     {
-        let mut ready_indices = vec![0_i64; count];
-        let mut fallback_indices = vec![0_i64; count];
-        let mut ready_count = 0_i64;
-        let mut fallback_count = 0_i64;
-        let status = unsafe {
-            prodex_runtime_candidate_plan_batch(
-                fields.as_ptr(),
-                ready_indices.as_mut_ptr(),
-                &mut ready_count,
-                fallback_indices.as_mut_ptr(),
-                &mut fallback_count,
-                i64::try_from(count).ok()?,
-                route_kind,
-            )
-        };
-        if status != 0
-            || ready_count < 0
-            || fallback_count < 0
-            || ready_count as usize > count
-            || fallback_count as usize > count
-        {
-            return None;
-        }
-        let ready_indices = match runtime_candidate_plan_indices(&ready_indices, ready_count, count)
-        {
-            Some(indices) => indices,
-            None => {
-                return None;
-            }
-        };
-        let fallback_indices =
-            match runtime_candidate_plan_indices(&fallback_indices, fallback_count, count) {
-                Some(indices) => indices,
-                None => {
-                    return None;
-                }
-            };
-        if fallback_indices.len() != count {
-            return None;
-        }
-        let mut seen_ready = vec![false; count];
-        for index in &ready_indices {
-            if seen_ready[*index] {
-                return None;
-            }
-            seen_ready[*index] = true;
-        }
-        let mut seen_fallback = vec![false; count];
-        for index in &fallback_indices {
-            if seen_fallback[*index] {
-                return None;
-            }
-            seen_fallback[*index] = true;
-        }
-        if seen_fallback.iter().any(|value| !value) {
-            return None;
-        }
-        Some(RuntimeCandidatePlan {
-            ready_indices,
-            fallback_indices,
-        })
+        return Err(crate::MojoError::InvalidOutput);
     }
-
-    #[cfg(prodex_mojo_fallback)]
-    {
-        let _ = route_kind;
-        let _ = fields;
-        None
+    let ready_indices = runtime_candidate_plan_indices(&ready_indices, ready_count, count)
+        .ok_or(crate::MojoError::InvalidOutput)?;
+    let fallback_indices = runtime_candidate_plan_indices(&fallback_indices, fallback_count, count)
+        .ok_or(crate::MojoError::InvalidOutput)?;
+    if fallback_indices.len() != count {
+        return Err(crate::MojoError::InvalidOutput);
     }
+    let mut seen_ready = vec![false; count];
+    for index in &ready_indices {
+        if seen_ready[*index] {
+            return Err(crate::MojoError::InvalidOutput);
+        }
+        seen_ready[*index] = true;
+    }
+    let mut seen_fallback = vec![false; count];
+    for index in &fallback_indices {
+        if seen_fallback[*index] {
+            return Err(crate::MojoError::InvalidOutput);
+        }
+        seen_fallback[*index] = true;
+    }
+    if seen_fallback.iter().any(|value| !value) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(RuntimeCandidatePlan {
+        ready_indices,
+        fallback_indices,
+    })
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 fn runtime_candidate_plan_indices(
     values: &[i64],
     count: i64,
@@ -480,7 +371,7 @@ fn runtime_candidate_plan_indices(
         .collect()
 }
 
-#[cfg(all(test, not(prodex_mojo_fallback)))]
+#[cfg(test)]
 mod parity_tests {
     use super::*;
     use std::cmp::Ordering;
