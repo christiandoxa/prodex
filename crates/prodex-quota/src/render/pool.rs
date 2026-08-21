@@ -52,7 +52,7 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                 aggregate_openai_quota(usage, &mut aggregate);
             }
             ProviderQuotaSnapshot::Gemini(info) => main_quota_rows.push((
-                gemini_main_remaining_percent(info),
+                super::gemini_main_remaining_percent(info),
                 gemini_reset_epoch(info),
             )),
             ProviderQuotaSnapshot::Copilot(info) => main_quota_rows.push((
@@ -184,13 +184,6 @@ fn add_ready_pool_window(
     };
     *profiles += 1;
     *remaining += window.remaining_percent;
-}
-
-fn gemini_main_remaining_percent(info: &GeminiQuotaInfo) -> Option<i64> {
-    info.buckets
-        .iter()
-        .filter_map(gemini_bucket_remaining_percent)
-        .min()
 }
 
 fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {

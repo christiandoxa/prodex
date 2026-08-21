@@ -153,7 +153,7 @@ enum SiemNumericTag {
 }
 
 #[cfg(feature = "mojo")]
-fn validate_gateway_siem_numeric(
+fn validate_gateway_siem_numeric_mojo(
     observability: &crate::types::RuntimePolicyGatewayObservabilitySettings,
     path: &Path,
 ) -> Result<()> {
@@ -213,12 +213,18 @@ fn validate_gateway_siem_numeric(
     Ok(())
 }
 
-#[cfg(not(feature = "mojo"))]
 fn validate_gateway_siem_numeric(
     observability: &crate::types::RuntimePolicyGatewayObservabilitySettings,
     path: &Path,
 ) -> Result<()> {
-    validate_gateway_siem_numeric_rust(observability, path)
+    #[cfg(feature = "mojo")]
+    {
+        validate_gateway_siem_numeric_mojo(observability, path)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        validate_gateway_siem_numeric_rust(observability, path)
+    }
 }
 
 #[cfg(all(test, feature = "mojo"))]
@@ -240,7 +246,7 @@ mod mojo_tests {
             assert_eq!(
                 validate_gateway_siem_numeric_rust(&policy.gateway.observability, path)
                     .map_err(|error| error.to_string()),
-                validate_gateway_siem_numeric(&policy.gateway.observability, path)
+                validate_gateway_siem_numeric_mojo(&policy.gateway.observability, path)
                     .map_err(|error| error.to_string()),
                 "{input}"
             );

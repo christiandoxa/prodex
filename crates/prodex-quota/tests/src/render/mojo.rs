@@ -6,6 +6,48 @@ fn real_mojo_quota_smoke_calls_exported_c_abi() {
 }
 
 #[test]
+fn gemini_renderer_uses_normalized_batch_results() {
+    let amount_only = GeminiQuotaBucket {
+        remaining_amount: Some("50".to_string()),
+        remaining_fraction: None,
+        reset_time: None,
+        token_type: None,
+        model_id: Some("models/gemini-test".to_string()),
+    };
+    assert_eq!(format_gemini_bucket_summary(&amount_only), "gemini-test 50");
+    assert_eq!(
+        format_gemini_main_quota(&GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets: vec![amount_only],
+        }),
+        "gemini 50"
+    );
+
+    let invalid_amount_with_fraction = GeminiQuotaBucket {
+        remaining_amount: Some("not-a-number".to_string()),
+        remaining_fraction: Some(0.5),
+        reset_time: None,
+        token_type: None,
+        model_id: Some("models/gemini-test".to_string()),
+    };
+    assert_eq!(
+        format_gemini_bucket_summary(&invalid_amount_with_fraction),
+        "gemini-test quota unknown"
+    );
+    assert_eq!(
+        format_gemini_main_quota(&GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets: vec![invalid_amount_with_fraction],
+        }),
+        "gemini 50%"
+    );
+}
+
+#[test]
 fn remaining_percent_matches_rust_oracle() {
     for (used_percent, expected) in [
         (None, 0),

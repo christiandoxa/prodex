@@ -21,6 +21,12 @@ pub(super) fn window_pair_has_ready_limit(
     prodex_mojo_core::quota::window_pair_has_ready_limit(first_used_percent, second_used_percent)
 }
 
+pub(crate) fn gemini_bucket_numeric_batch(
+    inputs: &[prodex_mojo_core::quota::GeminiBucketNumericInput],
+) -> Result<Vec<prodex_mojo_core::quota::GeminiBucketNumericOutput>, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::quota::gemini_bucket_numeric_batch(inputs)
+}
+
 pub(crate) fn main_quota_aggregate(
     inputs: &[(Option<i64>, Option<i64>)],
 ) -> Result<(usize, i64, Option<i64>), prodex_mojo_core::MojoError> {

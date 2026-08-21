@@ -15,6 +15,16 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-mojo-core/src/policy.rs",
   "crates/prodex-mojo-core/src/context.rs",
+  "crates/prodex-context/src/lib/compression.rs",
+  "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-runtime-policy/src/validate.rs",
+  "crates/prodex-runtime-policy/src/validate/gateway/core.rs",
+  "crates/prodex-runtime-policy/src/validate/gateway/identity.rs",
+  "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
+  "crates/prodex-runtime-policy/src/validate/gateway/telemetry.rs",
+  "crates/prodex-runtime-policy/src/validate/governance_numeric.rs",
+  "crates/prodex-runtime-policy/src/validate/runtime_proxy.rs",
+  "crates/prodex-runtime-policy/src/validate_request_constraints.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

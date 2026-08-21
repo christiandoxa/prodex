@@ -80,9 +80,10 @@ fn validate_gateway_replicas(policy: &RuntimePolicyFile, path: &Path) -> Result<
     {
         validate_gateway_replicas_mojo(policy, path)
     }
-
     #[cfg(not(feature = "mojo"))]
-    validate_gateway_replicas_rust(policy, path)
+    {
+        validate_gateway_replicas_rust(policy, path)
+    }
 }
 
 #[cfg(any(not(feature = "mojo"), test))]

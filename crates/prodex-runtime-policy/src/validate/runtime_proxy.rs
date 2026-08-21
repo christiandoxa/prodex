@@ -13,9 +13,10 @@ pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) ->
     {
         validate_runtime_proxy_policy_mojo(policy, path)
     }
-
     #[cfg(not(feature = "mojo"))]
-    validate_runtime_proxy_policy_rust(policy, path)
+    {
+        validate_runtime_proxy_policy_rust(policy, path)
+    }
 }
 
 #[cfg(any(not(feature = "mojo"), test))]

@@ -319,11 +319,25 @@ mod mojo_tests {
     use super::estimate_context_tokens;
 
     #[test]
-    fn mojo_context_token_estimate_matches_rust_arithmetic() {
-        for (chars, words) in [(0, 0), (1, 0), (4, 1), (5, 2), (99, 17), (4_096, 1_024)] {
+    fn mojo_context_token_estimate_uses_boundary_fixtures() {
+        for (chars, words, expected) in [
+            (0, 0, 0),
+            (1, 0, 1),
+            (3, 0, 1),
+            (4, 0, 1),
+            (5, 0, 2),
+            (0, 1, 2),
+            (0, 2, 3),
+            (0, 3, 4),
+            (1, 1, 2),
+            (4, 1, 2),
+            (5, 2, 3),
+            (99, 17, 25),
+            (4_096, 1_024, 1_366),
+        ] {
             assert_eq!(
                 estimate_context_tokens(chars, words),
-                chars.div_ceil(4).max((words * 4).div_ceil(3)),
+                expected,
                 "chars={chars}, words={words}"
             );
         }
