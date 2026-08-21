@@ -128,6 +128,10 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
   assert.ok(releaseStepOffset >= 0, "native desktop launcher test step missing");
   const releaseStep = releaseBuild.slice(releaseStepOffset);
   assert.match(releaseStep, /grep -Fq 'running 0 tests'/);
+  assert.match(
+    releaseStep,
+    /if \[ "\$\{\{ matrix\.use-cross \}\}" = "true" \]; then[\s\S]*CARGO_TARGET_DIR=.*target\/native-test/,
+  );
 });
 
 test("release hygiene does not inherit an unavailable Rust compiler wrapper", () => {

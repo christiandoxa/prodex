@@ -57,7 +57,7 @@ and linking is faster.
 
 ## CI Impact Gating
 
-The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
+The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, and runtime stress. A narrower fail-closed `runtime_bench` output runs the optimized runtime benchmark for its owning runtime, Mojo, quota, benchmark, and workflow paths; unrelated heavy changes and release-only metadata avoid recompiling the benchmark. Scheduled and manual CI still force both outputs. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
 
 The process guard uses sccache and its own dependency cache, so repeated Smart
 Context evidence compilation is cheaper without adding more runner jobs to the
@@ -142,6 +142,12 @@ Cargo target directory, links the final Rust binary through the target container
 variables forwarded explicitly, checks dynamic dependencies and GLIBC baseline, and runs the
 final artifact with `mojo` absent from `PATH`. Unsupported release rows remain Rust-only; see
 `migration/release-target-matrix.md`.
+
+Each non-cross native release row reuses its target-scoped Cargo artifacts between the
+desktop-launcher test and final binary build. Cargo fingerprints keep the all-feature test and
+final release feature sets distinct while avoiding a second cold dependency build. Cross-built
+Linux rows keep the native smoke in an isolated target directory so host objects cannot enter the
+GLIBC-bounded release link.
 
 The published `release-manifest.tsv` is generated from the same target matrix and is covered by
 `SHA256SUMS`. `install.sh`, `install.ps1`, and `prodex update` select the release-approved

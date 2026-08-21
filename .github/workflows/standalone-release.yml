@@ -328,8 +328,10 @@ jobs:
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
-          if ! CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/native-test/${{ matrix.target }}" \
-            RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            export CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/native-test/${{ matrix.target }}"
+          fi
+          if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
           fi
           if grep -Fq 'running 0 tests' "${test_log}"; then
