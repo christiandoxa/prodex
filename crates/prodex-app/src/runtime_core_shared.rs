@@ -6,7 +6,7 @@ fn runtime_proxy_log_queue_capacity() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    runtime_proxy_log_queue_capacity_default(parallelism)
+    runtime_config::runtime_tuning_defaults(parallelism).log_queue_capacity
 }
 
 #[cfg(test)]

@@ -146,32 +146,33 @@ impl runtime_config::RuntimeConfig {
         let parallelism = thread::available_parallelism()
             .map(|count| count.get())
             .unwrap_or(4);
+        let tuning_defaults = runtime_config::runtime_tuning_defaults(parallelism);
         let worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
                 policy.worker_count,
-                runtime_config::runtime_proxy_worker_count_default(parallelism),
+                tuning_defaults.worker_count,
             )
             .clamp(1, 64);
         let long_lived_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
                 policy.long_lived_worker_count,
-                runtime_config::runtime_proxy_long_lived_worker_count_default(parallelism),
+                tuning_defaults.long_lived_worker_count,
             )
             .clamp(1, 256);
         let async_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
                 policy.async_worker_count,
-                runtime_config::runtime_proxy_async_worker_count_default(parallelism),
+                tuning_defaults.async_worker_count,
             )
             .clamp(2, 8);
         let probe_refresh_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
                 policy.probe_refresh_worker_count,
-                runtime_config::runtime_probe_refresh_worker_count_default(parallelism),
+                tuning_defaults.probe_refresh_worker_count,
             )
             .clamp(1, 8);
         let long_lived_queue_capacity = parser
@@ -200,7 +201,7 @@ impl runtime_config::RuntimeConfig {
             worker_count,
             long_lived_worker_count,
         );
-        let websocket = Self::parse_websocket_tuning(parser, policy, parallelism);
+        let websocket = Self::parse_websocket_tuning(parser, policy, &tuning_defaults);
         let (precommit, pressure_precommit, continuation_precommit) = (
             runtime_proxy::runtime_proxy_precommit_budget(false, false),
             runtime_proxy::runtime_proxy_precommit_budget(false, true),
@@ -386,13 +387,13 @@ impl runtime_config::RuntimeConfig {
     fn parse_websocket_tuning(
         parser: &mut runtime_config::RuntimeConfigParser,
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
-        parallelism: usize,
+        tuning_defaults: &runtime_config::RuntimeTuningDefaults,
     ) -> ParsedWebsocketTuning {
         let connect_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
                 policy.websocket_connect_worker_count,
-                runtime_config::runtime_websocket_tcp_connect_worker_count_default(parallelism),
+                tuning_defaults.websocket_connect_worker_count,
             )
             .max(1);
         let connect_queue_capacity = parser
@@ -409,7 +410,7 @@ impl runtime_config::RuntimeConfig {
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
                 policy.websocket_dns_worker_count,
-                runtime_config::runtime_websocket_dns_resolve_worker_count_default(parallelism),
+                tuning_defaults.websocket_dns_worker_count,
             )
             .max(1);
         let dns_queue_capacity = parser

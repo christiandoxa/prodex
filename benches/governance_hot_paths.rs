@@ -18,7 +18,11 @@ use prodex_domain::{
     TenantId, classify_inspection, compile_classification_rule_set, compile_governance_policy,
     evaluate_governance_policy,
 };
-use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use prodex_provider_core::{
+    ProviderEndpoint, ProviderId, ProviderOversizedOutputPolicy, ProviderRequestConstraintPolicy,
+    ProviderUnknownContextPolicy, ProviderWireFormat, evaluate_provider_request_constraints,
+    provider_request_requirements,
+};
 use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoutingRequest,
     GovernedRoutingSignals, GovernedRoutingWeights, MAX_GOVERNED_ROUTING_CANDIDATES, ProviderRoute,
@@ -35,6 +39,37 @@ fn policy_condition() -> PolicyRuleCondition {
 }
 
 fn benchmark_governance_hot_paths(c: &mut Criterion) {
+    let provider_constraint_body = br#"{
+        "model":"gpt-5.4",
+        "input":[{"role":"user","content":"bounded synthetic benchmark"}],
+        "max_output_tokens":256,
+        "reasoning":{"effort":"high"},
+        "stream":true
+    }"#;
+    let provider_constraint_policy = ProviderRequestConstraintPolicy {
+        enabled: true,
+        unknown_context: ProviderUnknownContextPolicy::SafeWindow,
+        safe_window_tokens: 128_000,
+        oversized_output: ProviderOversizedOutputPolicy::ClampWithNotice,
+    };
+    c.bench_function("provider_constraints_complete_boundary", |b| {
+        b.iter(|| {
+            let requirements = provider_request_requirements(
+                provider_constraint_body,
+                ProviderEndpoint::Responses,
+                "gpt-5.4",
+                &[],
+            )
+            .expect("synthetic provider constraint request should parse");
+            black_box(evaluate_provider_request_constraints(
+                ProviderId::OpenAi,
+                "gpt-5.4",
+                &requirements,
+                provider_constraint_policy,
+            ))
+        })
+    });
+
     let limits = InspectionLimits::default();
     let max_findings = (0..limits.max_findings)
         .map(|index| {

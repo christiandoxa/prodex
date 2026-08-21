@@ -3,6 +3,9 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+#[cfg(feature = "mojo")]
+mod mojo;
+
 #[derive(Debug, Clone)]
 struct RuntimeFaultBudget {
     raw_value: String,
@@ -100,6 +103,40 @@ pub fn runtime_tuning_snapshot_from_input(
     input: RuntimeTuningSnapshotInput,
 ) -> RuntimeTuningSnapshot {
     input.into_snapshot()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeTuningDefaults {
+    pub worker_count: usize,
+    pub long_lived_worker_count: usize,
+    pub probe_refresh_worker_count: usize,
+    pub async_worker_count: usize,
+    pub log_queue_capacity: usize,
+    pub websocket_connect_worker_count: usize,
+    pub websocket_dns_worker_count: usize,
+}
+
+pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
+    #[cfg(feature = "mojo")]
+    if let Some(defaults) = mojo::runtime_tuning_defaults(parallelism) {
+        return defaults;
+    }
+
+    runtime_tuning_defaults_rust(parallelism)
+}
+
+fn runtime_tuning_defaults_rust(parallelism: usize) -> RuntimeTuningDefaults {
+    RuntimeTuningDefaults {
+        worker_count: runtime_proxy_worker_count_default(parallelism),
+        long_lived_worker_count: runtime_proxy_long_lived_worker_count_default(parallelism),
+        probe_refresh_worker_count: runtime_probe_refresh_worker_count_default(parallelism),
+        async_worker_count: runtime_proxy_async_worker_count_default(parallelism),
+        log_queue_capacity: runtime_proxy_log_queue_capacity_default(parallelism),
+        websocket_connect_worker_count: runtime_websocket_tcp_connect_worker_count_default(
+            parallelism,
+        ),
+        websocket_dns_worker_count: runtime_websocket_dns_resolve_worker_count_default(parallelism),
+    }
 }
 
 impl RuntimeTuningSnapshotInput {

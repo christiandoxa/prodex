@@ -3156,6 +3156,7 @@ name = "prodex-provider-core"
 version = "0.411.0"
 dependencies = [
  "base64 0.23.1",
+ "prodex-mojo-core",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3390,6 +3391,9 @@ dependencies = [
 [[package]]
 name = "prodex-runtime-tuning"
 version = "0.411.0"
+dependencies = [
+ "prodex-mojo-core",
+]
 
 [[package]]
 name = "prodex-secret-store"

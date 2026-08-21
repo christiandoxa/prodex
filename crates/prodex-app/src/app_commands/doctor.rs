@@ -258,7 +258,23 @@ fn append_doctor_runtime_json_fields(
 fn mojo_core_json_value() -> serde_json::Value {
     #[cfg(feature = "mojo-core")]
     {
+        let real_mojo = prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK;
         let self_test = prodex_mojo_core::self_test();
+        let quota = real_mojo && prodex_mojo_core::quota::self_test();
+        let quota_aggregation =
+            real_mojo && prodex_mojo_core::quota::main_quota_aggregation_self_test();
+        let runtime_quota =
+            real_mojo && prodex_mojo_core::runtime_decisions::profile_scores_self_test();
+        let routing = real_mojo && prodex_mojo_core::routing::self_test();
+        let smart_context_pressure =
+            real_mojo && prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test();
+        let runtime_candidate_plan =
+            real_mojo && prodex_mojo_core::runtime::candidate_plan_self_test();
+        let smart_context_rehydrate =
+            real_mojo && prodex_mojo_core::runtime_decisions::rehydrate_plan_self_test();
+        let runtime_tuning =
+            real_mojo && prodex_mojo_core::runtime_decisions::tuning_defaults_self_test();
+        let provider_constraints = real_mojo && prodex_mojo_core::provider_constraints::self_test();
         serde_json::json!({
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
@@ -274,15 +290,19 @@ fn mojo_core_json_value() -> serde_json::Value {
             },
             "self_test": if self_test { "passed" } else { "failed" },
             "modules": {
-                "quota": true,
-                "runtime_quota": true,
-                "routing_score": true,
-                "candidate_filter": self_test,
-                "routing_plan": self_test,
-                "provider_capability": self_test,
-                "smart_context": self_test,
-                "runtime_candidate_plan": prodex_mojo_core::runtime::candidate_plan_self_test(),
-                "smart_context_pressure": prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test(),
+                "quota": quota,
+                "quota_aggregation": quota_aggregation,
+                "runtime_quota": runtime_quota,
+                "routing_score": routing,
+                "candidate_filter": routing,
+                "routing_plan": routing,
+                "provider_capability": routing,
+                "provider_constraints": provider_constraints,
+                "smart_context": real_mojo && prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(7) == 2,
+                "smart_context_pressure": smart_context_pressure,
+                "smart_context_rehydrate": smart_context_rehydrate,
+                "runtime_candidate_plan": runtime_candidate_plan,
+                "runtime_tuning": runtime_tuning,
             },
         })
     }

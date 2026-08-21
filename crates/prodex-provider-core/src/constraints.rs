@@ -12,6 +12,8 @@ use crate::{
 #[path = "constraints/features.rs"]
 mod features;
 use self::features::inferred_features;
+#[cfg(feature = "mojo")]
+mod mojo;
 
 pub const PROVIDER_REQUEST_SAFE_WINDOW_TOKENS_DEFAULT: u64 = 128_000;
 
@@ -385,6 +387,27 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     let mut resolved = resolve_provider_request_requirements(requirements, resolved_model, entry);
     recalculate_total(&mut resolved);
 
+    #[cfg(feature = "mojo")]
+    if let Some(evaluation) = mojo::evaluate(provider, requirements, policy, &resolved, entry) {
+        return evaluation;
+    }
+
+    evaluate_provider_request_constraints_resolved_rust(
+        provider,
+        requirements,
+        policy,
+        resolved,
+        entry,
+    )
+}
+
+fn evaluate_provider_request_constraints_resolved_rust(
+    provider: ProviderId,
+    requirements: &ProviderRequestRequirements,
+    policy: ProviderRequestConstraintPolicy,
+    resolved: ProviderRequestRequirements,
+    entry: Option<&ProviderCatalogEntry>,
+) -> ProviderRequestConstraintEvaluation {
     if !policy.enabled {
         return evaluation(
             ProviderRequestConstraintDecision::Compatible,

@@ -1,18 +1,15 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 pub(super) use prodex_runtime_tuning::{
-    RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
-    RuntimeTuningSnapshot, RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,
-    runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
-    runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
-    runtime_proxy_long_lived_queue_capacity_default, runtime_proxy_long_lived_worker_count_default,
-    runtime_proxy_worker_count_default, runtime_take_fault_injection,
-    runtime_take_fault_injection_budget, runtime_websocket_dns_resolve_overflow_capacity_default,
+    RuntimeProxyLaneLimitOverrides, RuntimeTuningDefaults, RuntimeTuningLaneLimits,
+    RuntimeTuningPrecommitBudget, RuntimeTuningSnapshot, RuntimeTuningSnapshotInput,
+    runtime_proxy_active_request_limit_default, runtime_proxy_lane_limits_from_overrides,
+    runtime_proxy_long_lived_queue_capacity_default, runtime_take_fault_injection,
+    runtime_take_fault_injection_budget, runtime_tuning_defaults,
+    runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
-    runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
     runtime_websocket_tcp_connect_queue_capacity_default,
-    runtime_websocket_tcp_connect_worker_count_default,
 };
 
 const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 64 * 1024 * 1024;

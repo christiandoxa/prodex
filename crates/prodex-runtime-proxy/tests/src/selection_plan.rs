@@ -78,6 +78,68 @@ fn optimistic_current_candidate_defers_to_prompt_cache_owner_when_pool_available
     );
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn optimistic_current_candidate_matches_rust_oracle_for_generated_inputs() {
+    let mut state = 0x6f7074696d697374_u64;
+    for case in 0..5_000 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let next = |state: &mut u64| {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *state
+        };
+        let mut quota_summary = healthy_quota_summary();
+        quota_summary.route_band = match next(&mut state) % 5 {
+            0 => RuntimeSelectionQuotaPressureBand::Healthy,
+            1 => RuntimeSelectionQuotaPressureBand::Thin,
+            2 => RuntimeSelectionQuotaPressureBand::Critical,
+            3 => RuntimeSelectionQuotaPressureBand::Exhausted,
+            _ => RuntimeSelectionQuotaPressureBand::Unknown,
+        };
+        let input = RuntimeOptimisticCurrentCandidateInput {
+            current_profile: "main",
+            route_kind: match next(&mut state) % 4 {
+                0 => RuntimeRouteKind::Responses,
+                1 => RuntimeRouteKind::Compact,
+                2 => RuntimeRouteKind::Websocket,
+                _ => RuntimeRouteKind::Standard,
+            },
+            auth_failure_active: next(&mut state) & 1 != 0,
+            in_selection_backoff: next(&mut state) & 1 != 0,
+            circuit_open: next(&mut state) & 1 != 0,
+            health_score: (next(&mut state) % 2) as u32,
+            performance_score: (next(&mut state) % 2) as u32,
+            current_profile_quota_compatible: next(&mut state) & 1 != 0,
+            has_alternative_quota_compatible_profile: next(&mut state) & 1 != 0,
+            quota_summary,
+            quota_source: match next(&mut state) % 3 {
+                0 => None,
+                1 => Some(RuntimeSelectionQuotaSource::LiveProbe),
+                _ => Some(RuntimeSelectionQuotaSource::PersistedSnapshot),
+            },
+            inflight_count: (next(&mut state) % 5) as usize,
+            inflight_soft_limit: (next(&mut state) % 5) as usize,
+            prompt_cache_key: match next(&mut state) % 3 {
+                0 => None,
+                1 => Some("cache"),
+                _ => Some("  cache  "),
+            },
+            prompt_cache_owner_profile: match next(&mut state) % 4 {
+                0 => None,
+                1 => Some("main"),
+                2 => Some("other"),
+                _ => Some("  "),
+            },
+        };
+        let expected = runtime_optimistic_current_candidate_decision_rust(input);
+        let actual = runtime_optimistic_current_candidate_decision(input);
+        assert_eq!(
+            actual, expected,
+            "optimistic candidate case {case}: {input:?}"
+        );
+    }
+}
+
 #[test]
 fn candidate_plan_separates_ready_and_fallback_attempts() {
     let plan = build_runtime_response_candidate_execution_plan(

@@ -2,15 +2,15 @@ use super::*;
 
 #[test]
 fn runtime_proxy_default_worker_counts_stay_defensive() {
-    assert_eq!(runtime_proxy_worker_count_default(1), 4);
-    assert_eq!(runtime_proxy_worker_count_default(4), 4);
-    assert_eq!(runtime_proxy_worker_count_default(8), 8);
-    assert_eq!(runtime_proxy_worker_count_default(32), 12);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(1).worker_count, 4);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(4).worker_count, 4);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(8).worker_count, 8);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(32).worker_count, 12);
 
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(1), 8);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(4), 8);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(8), 16);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(32), 24);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(1).long_lived_worker_count, 8);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(4).long_lived_worker_count, 8);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(8).long_lived_worker_count, 16);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(32).long_lived_worker_count, 24);
 
     assert_eq!(runtime_proxy_long_lived_queue_capacity(1), 128);
     assert_eq!(runtime_proxy_long_lived_queue_capacity(8), 128);
@@ -20,10 +20,10 @@ fn runtime_proxy_default_worker_counts_stay_defensive() {
 
 #[test]
 fn runtime_proxy_async_worker_count_default_scales_with_parallelism() {
-    assert_eq!(runtime_proxy_async_worker_count_default(1), 2);
-    assert_eq!(runtime_proxy_async_worker_count_default(2), 2);
-    assert_eq!(runtime_proxy_async_worker_count_default(4), 4);
-    assert_eq!(runtime_proxy_async_worker_count_default(64), 4);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(1).async_worker_count, 2);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(2).async_worker_count, 2);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(4).async_worker_count, 4);
+    assert_eq!(crate::runtime_config::runtime_tuning_defaults(64).async_worker_count, 4);
 }
 
 #[test]

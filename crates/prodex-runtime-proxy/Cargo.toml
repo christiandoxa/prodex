@@ -12,7 +12,11 @@ path = "src/lib.rs"
 
 [features]
 default = []
-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+mojo = [
+    "dep:prodex_mojo_core",
+    "prodex_mojo_core/mojo-runtime",
+    "prodex_provider_core/mojo",
+]
 
 [dependencies]
 base64 = { workspace = true }

@@ -1,5 +1,8 @@
 use std::cmp::min;
 
+#[cfg(feature = "mojo-runtime")]
+pub use crate::runtime_decisions::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProfileScoreInput {
     pub weekly_pressure: i64,
@@ -117,7 +120,6 @@ unsafe extern "C" {
         route_kind: i64,
     ) -> i64;
 }
-
 pub fn pressure_band_for_route(
     five_hour: Option<(i64, i64)>,
     weekly: Option<(i64, i64)>,

@@ -178,28 +178,44 @@ pub fn smart_context_auto_rehydrate_plan(
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    #[cfg(feature = "mojo")]
+    if let Some(plan) =
+        smart_context_auto_rehydrate_plan_mojo(&refs, &available, token_budget, tier)
+    {
+        return plan;
+    }
+
+    smart_context_auto_rehydrate_plan_rust(&refs, &available, token_budget, tier)
+}
+
+fn smart_context_auto_rehydrate_plan_rust(
+    refs: &[SmartContextRehydrateRef],
+    available: &BTreeSet<String>,
+    token_budget: usize,
+    tier: SmartContextTokenBudgetTier,
+) -> SmartContextRehydratePlan {
     let mut actions = Vec::new();
     let mut used_tokens = 0usize;
     for item in refs {
         if !available.contains(&item.id) {
             actions.push(SmartContextRehydrateAction::Defer {
-                id: item.id,
+                id: item.id.clone(),
                 reason: SmartContextRehydrateDeferReason::MissingArtifact,
             });
         } else if tier == SmartContextTokenBudgetTier::Minimal && !item.required {
             actions.push(SmartContextRehydrateAction::Defer {
-                id: item.id,
+                id: item.id.clone(),
                 reason: SmartContextRehydrateDeferReason::MinimalBudgetTier,
             });
         } else if used_tokens.saturating_add(item.token_cost) <= token_budget {
             used_tokens += item.token_cost;
             actions.push(SmartContextRehydrateAction::Rehydrate {
-                id: item.id,
+                id: item.id.clone(),
                 token_cost: item.token_cost,
             });
         } else {
             actions.push(SmartContextRehydrateAction::Defer {
-                id: item.id,
+                id: item.id.clone(),
                 reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
             });
         }
@@ -209,6 +225,78 @@ pub fn smart_context_auto_rehydrate_plan(
         actions,
         used_tokens,
     }
+}
+
+#[cfg(feature = "mojo")]
+fn smart_context_auto_rehydrate_plan_mojo(
+    refs: &[SmartContextRehydrateRef],
+    available: &BTreeSet<String>,
+    token_budget: usize,
+    tier: SmartContextTokenBudgetTier,
+) -> Option<SmartContextRehydratePlan> {
+    let inputs = refs
+        .iter()
+        .map(|item| {
+            Some(prodex_mojo_core::runtime::SmartContextRehydrateInput {
+                token_cost: u64::try_from(item.token_cost).ok()?,
+                required: item.required,
+                available: available.contains(&item.id),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let tier = match tier {
+        SmartContextTokenBudgetTier::Minimal => {
+            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_MINIMAL_TIER
+        }
+        SmartContextTokenBudgetTier::Condensed => {
+            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_CONDENSED_TIER
+        }
+        SmartContextTokenBudgetTier::Large => {
+            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_LARGE_TIER
+        }
+        SmartContextTokenBudgetTier::Exact => {
+            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_EXACT_TIER
+        }
+    };
+    let plan =
+        prodex_mojo_core::runtime::smart_context_rehydrate_plan_batch(&inputs, token_budget, tier)?;
+    let actions = refs
+        .iter()
+        .zip(plan.action_tags)
+        .map(|(item, tag)| {
+            Some(match tag {
+                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE => {
+                    SmartContextRehydrateAction::Rehydrate {
+                        id: item.id.clone(),
+                        token_cost: item.token_cost,
+                    }
+                }
+                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_MISSING => {
+                    SmartContextRehydrateAction::Defer {
+                        id: item.id.clone(),
+                        reason: SmartContextRehydrateDeferReason::MissingArtifact,
+                    }
+                }
+                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL => {
+                    SmartContextRehydrateAction::Defer {
+                        id: item.id.clone(),
+                        reason: SmartContextRehydrateDeferReason::MinimalBudgetTier,
+                    }
+                }
+                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_BUDGET => {
+                    SmartContextRehydrateAction::Defer {
+                        id: item.id.clone(),
+                        reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
+                    }
+                }
+                _ => return None,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(SmartContextRehydratePlan {
+        actions,
+        used_tokens: usize::try_from(plan.used_tokens).ok()?,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -597,4 +685,61 @@ pub fn smart_context_accounting_safe_for_adaptive_policy(
     accounting: &SmartContextObservedTokenAccounting,
 ) -> bool {
     accounting.accounting_risks.is_empty()
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    #[test]
+    fn rehydrate_plan_matches_rust_oracle_for_generated_inputs() {
+        let mut state = 0x7265687964726174_u64;
+        for case in 0..2_000 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let count = (state % 24) as usize;
+            let mut refs = Vec::with_capacity(count);
+            for index in 0..count {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                refs.push(SmartContextRehydrateRef {
+                    id: format!("artifact-{}", state % 12),
+                    token_cost: (state % 500) as usize,
+                    required: state & 1 != 0,
+                });
+                if index == count.saturating_sub(1) {
+                    break;
+                }
+            }
+            let available = (0..12)
+                .filter(|index| {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    state & 1 != 0 && *index != 11
+                })
+                .map(|index| format!("artifact-{index}"))
+                .collect::<BTreeSet<_>>();
+            let token_budget = (state % 2_000) as usize;
+            let tier = match state % 4 {
+                0 => SmartContextTokenBudgetTier::Minimal,
+                1 => SmartContextTokenBudgetTier::Condensed,
+                2 => SmartContextTokenBudgetTier::Large,
+                _ => SmartContextTokenBudgetTier::Exact,
+            };
+            let mut sorted = refs.clone();
+            sorted.sort_by(|left, right| {
+                right
+                    .required
+                    .cmp(&left.required)
+                    .then_with(|| left.token_cost.cmp(&right.token_cost))
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            let expected =
+                smart_context_auto_rehydrate_plan_rust(&sorted, &available, token_budget, tier);
+            let actual = smart_context_auto_rehydrate_plan(
+                refs,
+                available.iter().cloned(),
+                token_budget,
+                tier,
+            );
+            assert_eq!(actual, expected, "rehydrate case {case}");
+        }
+    }
 }
