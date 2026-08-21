@@ -450,6 +450,50 @@ fn gemini_openai_chat_request_reports_gemini_specific_tool_validation_errors() {
 }
 
 #[test]
+fn gemini_openai_chat_accepts_responses_function_names_through_128_bytes() {
+    for length in [65, 128] {
+        let name = "a".repeat(length);
+        let request = serde_json::json!({
+            "model": "gemini-3.5-flash",
+            "input": "hello",
+            "tools": [{
+                "type": "function",
+                "name": name.clone(),
+                "parameters": {"type": "object"}
+            }],
+            "tool_choice": {"type": "function", "name": name}
+        });
+
+        runtime_provider_chat_compatible_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeProviderBridgeKind::Gemini,
+            "gemini-3.5-flash",
+            true,
+            RuntimeDeepSeekRewriteOptions::default(),
+        )
+        .unwrap_or_else(|error| panic!("{length}-byte Gemini tool name failed: {error}"));
+    }
+
+    let name = "a".repeat(129);
+    let request = serde_json::json!({
+        "model": "gemini-3.5-flash",
+        "input": "hello",
+        "tools": [{"type": "function", "name": name, "parameters": {"type": "object"}}]
+    });
+    let error = runtime_provider_chat_compatible_request_body(
+        &serde_json::to_vec(&request).unwrap(),
+        &conversation_store(),
+        RuntimeProviderBridgeKind::Gemini,
+        "gemini-3.5-flash",
+        true,
+        RuntimeDeepSeekRewriteOptions::default(),
+    )
+    .expect_err("a 129-byte Gemini function name should fail");
+    assert!(error.to_string().contains("at most 128 bytes"), "{error}");
+}
+
+#[test]
 fn gemini_openai_chat_request_reports_gemini_specific_nested_namespace_tool_errors() {
     let request = serde_json::json!({
         "model": "gemini-3.5-flash",

@@ -5,19 +5,32 @@ use std::collections::BTreeSet;
 use crate::deepseek_provider_core_json_string;
 
 use super::{
-    deepseek_provider_core_function_tool_name, deepseek_provider_core_validate_function_name,
+    deepseek_provider_core_function_tool_name,
+    deepseek_provider_core_validate_function_name_with_max_bytes,
 };
 
 pub fn deepseek_provider_core_validate_tool_choice_name(
     tool_choice: &serde_json::Value,
     provider_label: &str,
 ) -> Result<(), String> {
+    deepseek_provider_core_validate_tool_choice_name_with_max_bytes(tool_choice, provider_label, 64)
+}
+
+pub fn deepseek_provider_core_validate_tool_choice_name_with_max_bytes(
+    tool_choice: &serde_json::Value,
+    provider_label: &str,
+    max_name_bytes: usize,
+) -> Result<(), String> {
     if let Some(name) = tool_choice
         .get("function")
         .and_then(|function| function.get("name"))
         .and_then(serde_json::Value::as_str)
     {
-        deepseek_provider_core_validate_function_name(name, provider_label)?;
+        deepseek_provider_core_validate_function_name_with_max_bytes(
+            name,
+            provider_label,
+            max_name_bytes,
+        )?;
     }
     Ok(())
 }

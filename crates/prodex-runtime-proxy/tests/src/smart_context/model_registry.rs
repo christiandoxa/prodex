@@ -26,6 +26,18 @@ fn model_registry_resolves_openai_codex_spark_window() {
 }
 
 #[test]
+fn model_registry_resolves_only_catalogued_gpt_5_6_window() {
+    assert_eq!(
+        smart_context_model_context_window(Some("gpt-5.6-luna")).map(|window| window.tokens),
+        Some(872_000)
+    );
+    assert_eq!(
+        smart_context_model_context_window(Some("local-gpt-5.6-luna")),
+        None
+    );
+}
+
+#[test]
 fn model_registry_resolves_known_provider_windows() {
     assert_eq!(
         smart_context_model_context_window(Some("gemini-3-pro")).map(|window| window.tokens),

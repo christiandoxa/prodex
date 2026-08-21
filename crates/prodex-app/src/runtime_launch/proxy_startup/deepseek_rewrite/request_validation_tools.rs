@@ -2,7 +2,7 @@ use super::super::{RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode};
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
 use prodex_provider_core::{
-    deepseek_provider_core_dedup_and_validate_function_tools,
+    deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes,
     deepseek_provider_core_validate_web_search_options as core_validate_web_search_options,
 };
 
@@ -11,10 +11,11 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_dedup_and_valid
     options: RuntimeDeepSeekRewriteOptions,
     provider_kind: RuntimeProviderBridgeKind,
 ) -> Result<Vec<serde_json::Value>> {
-    deepseek_provider_core_dedup_and_validate_function_tools(
+    deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
         tools,
         options.strict_tools,
         provider_kind.chat_compatible_adapter_label(),
+        provider_kind.function_tool_name_max_bytes(),
     )
     .map_err(anyhow::Error::msg)
 }

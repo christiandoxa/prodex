@@ -66,6 +66,14 @@ mod tests {
         );
         assert_eq!(
             reserve(
+                prodex_provider_core::ProviderId::OpenAi,
+                "gpt-5.6-luna",
+                br#"{"model":"gpt-5.6-luna","input":"hello from prodex"}"#,
+            ),
+            128_005
+        );
+        assert_eq!(
+            reserve(
                 prodex_provider_core::ProviderId::Copilot,
                 "combo:gpt-5.3-codex,gemini-2.5-pro",
                 br#"{"model":"prodex-fallback","input":"hello from prodex"}"#,

@@ -119,6 +119,41 @@ fn smart_context_window_uses_active_model_cache_metadata() {
 }
 
 #[test]
+fn smart_context_window_uses_gpt_5_6_maximum_cache_metadata() {
+    let root = temp_dir("smart-context-window-gpt-5-6-maximum");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("config.toml"), "model = 'gpt-5.6-luna'\n").unwrap();
+    fs::write(
+        root.join("models_cache.json"),
+        r#"{"models":[{"slug":"gpt-5.6-luna","context_window":272000,"max_context_window":872000}]}"#,
+    )
+    .unwrap();
+    let request = RuntimeLaunchRequest {
+        profile: Some("main"),
+        allow_auto_rotate: true,
+        auto_redeem: false,
+        skip_quota_check: false,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
+    };
+
+    assert_eq!(
+        runtime_launch_effective_model_context_window_tokens(&request, &root).unwrap(),
+        Some(872_000)
+    );
+}
+
+#[test]
 fn smart_context_window_keeps_explicit_context_override() {
     let root = temp_dir("smart-context-window-explicit-override");
     fs::create_dir_all(&root).unwrap();

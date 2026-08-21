@@ -5,7 +5,7 @@ pub struct SmartContextModelContextWindow {
     pub registry_version: &'static str,
 }
 
-pub const SMART_CONTEXT_MODEL_REGISTRY_VERSION: &str = "smart-context-model-registry-v1";
+pub const SMART_CONTEXT_MODEL_REGISTRY_VERSION: &str = "smart-context-model-registry-v2";
 
 pub fn smart_context_model_context_window(
     model_name: Option<&str>,
@@ -24,6 +24,7 @@ fn smart_context_registered_model_context_window_tokens(model: &str) -> Option<u
     match model {
         "unsloth/qwen3.5-35b-a3b" => Some(16_384),
         "gpt-5.3-codex-spark" | "gpt-5.3-spark" => Some(128_000),
+        "gpt-5.6-luna" => Some(872_000),
         "gpt-5.3-codex" | "gpt-5.4" | "gpt-5.5" => Some(1_000_000),
         "gpt-5.1-codex" => Some(200_000),
         "claude-sonnet-4-6" => Some(1_000_000),
