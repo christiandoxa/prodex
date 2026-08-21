@@ -338,7 +338,7 @@ fn invalid_tail_values_fail_instead_of_leaking_to_codex() {
         vec![SESSION_ID, "--provider", "not-a-provider"],
         vec![SESSION_ID, "--cli", "not-a-cli"],
         vec![SESSION_ID, "--tool", "not-a-tool"],
-        vec![SESSION_ID, "--sub-agent-model-reasoning-effort", "ultra"],
+        vec![SESSION_ID, "--sub-agent-model-reasoning-effort", "extreme"],
     ] {
         let mut args = super_command(&tail);
         assert!(
@@ -417,10 +417,11 @@ fn sub_agent_reasoning_effort_accepts_all_known_values_case_insensitively() {
         ("high", SubAgentReasoningEffort::High),
         ("XHIGH", SubAgentReasoningEffort::XHigh),
         ("max", SubAgentReasoningEffort::Max),
+        ("ULTRA", SubAgentReasoningEffort::Ultra),
     ] {
         assert_eq!(parse_sub_agent_reasoning_effort(value).unwrap(), expected);
     }
-    assert!(parse_sub_agent_reasoning_effort("ultra").is_err());
+    assert!(parse_sub_agent_reasoning_effort("extreme").is_err());
 }
 
 #[test]

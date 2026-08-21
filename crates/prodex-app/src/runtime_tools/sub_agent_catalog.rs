@@ -41,6 +41,7 @@ pub(crate) fn canonical_sub_agent_efforts(
             ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
             ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
             ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
+            ProviderReasoningEffort::Ultra => Some(SubAgentReasoningEffort::Ultra),
             ProviderReasoningEffort::Unknown => None,
         })
         .collect()

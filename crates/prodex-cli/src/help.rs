@@ -184,7 +184,7 @@ Notes:
   --sub-agent explicitly enables sub-agents; --no-sub-agent explicitly disables them.
   --sub-agent-provider, --sub-agent-model, --sub-agent-model-reasoning-effort, --sub-agent-url, and --sub-agent-max-concurrency require --sub-agent.
   Sub-agent provider names use canonical ProviderId values and default to openai; model ids are arbitrary nonempty strings.
-  Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, or max.
+  Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, max, or ultra.
   Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
   Additional Codex args are appended unchanged after Prodex's generated options.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\

@@ -99,6 +99,7 @@ paths.
 | Domain or shared crates depend on runtime adapters | Policy bypass and untestable side effects | Dependency inversion toward domain/application ports; composition roots alone select concrete adapters |
 | Trace context is dropped at a boundary | Incomplete incident and audit correlation | Validate and propagate bounded end-to-end trace context through gateway, application, provider, storage, and export boundaries |
 | Secret value leaks in domain, logs, environment, or projected paths | Credential compromise | `SecretRef` in domain, production rejection of CLI/environment credential sources, redacted secret material and provider debug output, canonical projected-root containment, private file modes, and log/error redaction |
+| Custom provider inherits ambient OpenAI authentication | OpenAI bearer or account ID disclosure to a non-OpenAI endpoint | Generated Prodex bridge providers require only an explicit local placeholder credential; real provider keys stay in the proxy process, unrelated custom providers remain Codex-owned, and child secret stripping is regression-tested |
 | Upstream provider error rewriting | Compatibility breakage and debugging loss | Pass-through upstream status/body/stream after upstream response exists |
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |

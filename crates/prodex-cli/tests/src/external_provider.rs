@@ -62,6 +62,12 @@ fn super_external_providers_use_openai_responses_wire_api() {
             )),
             "{provider} should disable websocket transport at the OpenAI bridge boundary"
         );
+        assert!(
+            rendered.contains(&format!(
+                "model_providers.{provider_id}.requires_openai_auth=true"
+            )),
+            "{provider} should request only Prodex's explicit bridge credential"
+        );
     }
 }
 

@@ -381,6 +381,7 @@ fn super_local_provider_codex_args(
             toml_string_literal(&base_url)
         ),
         format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.wire_api=\"responses\""),
+        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.requires_openai_auth=true"),
         format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.supports_websockets=false"),
         format!("model_context_window={context_window}"),
         format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
@@ -432,6 +433,7 @@ pub fn super_external_provider_codex_args(
             toml_string_literal(&base_url)
         ),
         format!("model_providers.{provider_id}.wire_api=\"responses\""),
+        format!("model_providers.{provider_id}.requires_openai_auth=true"),
         format!("model_providers.{provider_id}.supports_websockets=false"),
         format!("model_context_window={context_window}"),
         format!("model_auto_compact_token_limit={auto_compact_token_limit}"),

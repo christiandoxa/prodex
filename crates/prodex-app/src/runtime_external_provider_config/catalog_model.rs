@@ -34,6 +34,7 @@ pub(super) fn external_catalog_model(
                 ProviderReasoningEffort::High => "High reasoning effort",
                 ProviderReasoningEffort::XHigh => "Extra-high reasoning effort",
                 ProviderReasoningEffort::Max => "Max reasoning effort",
+                ProviderReasoningEffort::Ultra => "Ultra reasoning effort",
                 ProviderReasoningEffort::Unknown => return None,
             };
             Some(json!({ "effort": effort, "description": description }))

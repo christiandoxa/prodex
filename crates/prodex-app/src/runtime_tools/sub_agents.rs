@@ -175,6 +175,7 @@ pub(crate) fn resolve_super_sub_agent_config(
             SubAgentReasoningEffort::High => ProviderReasoningEffort::High,
             SubAgentReasoningEffort::XHigh => ProviderReasoningEffort::XHigh,
             SubAgentReasoningEffort::Max => ProviderReasoningEffort::Max,
+            SubAgentReasoningEffort::Ultra => ProviderReasoningEffort::Ultra,
         };
         if !supported.contains(&effort) {
             bail!(
@@ -682,6 +683,23 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("must be nonempty"));
+    }
+
+    #[test]
+    fn custom_openai_model_preserves_ultra_for_codex_validation() {
+        let resolved = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                provider: ProviderId::OpenAi,
+                model: Some("gpt-5.6-sol".to_string()),
+                model_reasoning_effort: Some(SubAgentReasoningEffort::Ultra),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(resolved.effort, Some(SubAgentReasoningEffort::Ultra));
     }
 
     #[test]

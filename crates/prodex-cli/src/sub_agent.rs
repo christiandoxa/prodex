@@ -131,10 +131,11 @@ pub enum SubAgentReasoningEffort {
     #[serde(rename = "xhigh")]
     XHigh,
     Max,
+    Ultra,
 }
 
 impl SubAgentReasoningEffort {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::None,
         Self::Minimal,
         Self::Low,
@@ -142,6 +143,7 @@ impl SubAgentReasoningEffort {
         Self::High,
         Self::XHigh,
         Self::Max,
+        Self::Ultra,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -153,6 +155,7 @@ impl SubAgentReasoningEffort {
             Self::High => "high",
             Self::XHigh => "xhigh",
             Self::Max => "max",
+            Self::Ultra => "ultra",
         }
     }
 }
@@ -169,8 +172,9 @@ impl FromStr for SubAgentReasoningEffort {
             "high" => Ok(Self::High),
             "xhigh" => Ok(Self::XHigh),
             "max" => Ok(Self::Max),
+            "ultra" => Ok(Self::Ultra),
             other => Err(format!(
-                "invalid sub-agent reasoning effort: expected none, minimal, low, medium, high, xhigh, or max, got {other:?}"
+                "invalid sub-agent reasoning effort: expected none, minimal, low, medium, high, xhigh, max, or ultra, got {other:?}"
             )),
         }
     }
