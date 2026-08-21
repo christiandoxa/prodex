@@ -106,6 +106,7 @@ pub(crate) fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn validate_optional_i64_percent(
     value: Option<i64>,
     path: &Path,

@@ -103,6 +103,73 @@ def prodex_runtime_quota_profile_score_batch(
 
     return 0
 
+comptime RUNTIME_PROFILE_ORDER_FIELD_COUNT: Int64 = 15
+comptime RUNTIME_PROFILE_ORDER_MAX_COUNT: Int64 = 256
+
+def runtime_profile_order_field(
+    fields: Pointer[mut=False, Int64, _],
+    index: Int64,
+    field: Int64,
+) -> Int64:
+    return fields[unsafe_offset=(index * RUNTIME_PROFILE_ORDER_FIELD_COUNT) + field]
+
+def runtime_profile_order_less(
+    fields: Pointer[mut=False, Int64, _],
+    left: Int64,
+    right: Int64,
+) -> Bool:
+    for field in range(7):
+        var left_value = runtime_profile_order_field(fields, left, Int64(field))
+        var right_value = runtime_profile_order_field(fields, right, Int64(field))
+        if left_value != right_value:
+            return left_value < right_value
+
+    for field in range(7, 10):
+        var left_value = runtime_profile_order_field(fields, left, Int64(field))
+        var right_value = runtime_profile_order_field(fields, right, Int64(field))
+        if left_value != right_value:
+            return left_value > right_value
+
+    for field in range(10, 15):
+        var left_value = runtime_profile_order_field(fields, left, Int64(field))
+        var right_value = runtime_profile_order_field(fields, right, Int64(field))
+        if left_value != right_value:
+            return left_value < right_value
+
+    return left < right
+
+@export("prodex_runtime_quota_profile_order_batch")
+def prodex_runtime_quota_profile_order_batch(
+    fields: Pointer[mut=False, Int64, _],
+    ordered_indices: Pointer[mut=True, Int64, _],
+    ordered_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RUNTIME_PROFILE_ORDER_MAX_COUNT:
+        return 1
+    for index in range(count):
+        var near_optimal = runtime_profile_order_field(fields, index, 1)
+        var recently_used = runtime_profile_order_field(fields, index, 2)
+        var preferred = runtime_profile_order_field(fields, index, 13)
+        if near_optimal < 0 or near_optimal > 1 or recently_used < 0 or recently_used > 1 or preferred < 0 or preferred > 1:
+            return 2
+
+    var sorted_count: Int64 = 0
+    for index in range(count):
+        var position = sorted_count
+        while position > 0 and runtime_profile_order_less(
+            fields,
+            index,
+            ordered_indices[unsafe_offset=position - 1],
+        ):
+            ordered_indices[unsafe_offset=position] = ordered_indices[unsafe_offset=position - 1]
+            position -= 1
+        ordered_indices[unsafe_offset=position] = index
+        sorted_count += 1
+
+    ordered_count[unsafe_offset=0] = sorted_count
+    return 0
+
 comptime INT64_MAX: Int64 = 9223372036854775807
 
 def runtime_quota_saturating_add(left: Int64, right: Int64) -> Int64:

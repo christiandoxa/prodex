@@ -33,6 +33,8 @@ const MAX_GOVERNANCE_SESSION_CONCURRENT: u32 = 10_000;
 mod errors;
 #[path = "validate/gateway/mod.rs"]
 mod gateway;
+#[path = "validate/governance_numeric.rs"]
+mod governance_numeric;
 #[path = "validate/runtime.rs"]
 mod runtime;
 #[path = "validate/runtime_proxy.rs"]
@@ -104,7 +106,7 @@ pub fn validate_runtime_governance_settings(
     validate_governance_artifact_verifiers(governance, path)?;
     validate_governance_inspection_patterns(governance, path)?;
     validate_governance_policy_rules(governance, path)?;
-    validate_governance_session(governance, path)?;
+    governance_numeric::validate_governance_session(governance, path)?;
     if governance_is_enforcing(governance)
         && [
             governance.inspection,
@@ -442,52 +444,6 @@ fn validate_governance_policy_obligation(
     ) {
         bail!(
             "governance policy obligation bound must be non-zero in {}",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-fn validate_governance_session(
-    governance: &crate::types::RuntimePolicyGovernanceSettings,
-    path: &Path,
-) -> Result<()> {
-    let session = &governance.session;
-    if session.absolute_timeout_seconds.is_some_and(|value| {
-        !(MIN_GOVERNANCE_SESSION_ABSOLUTE_TIMEOUT_SECONDS
-            ..=MAX_GOVERNANCE_SESSION_ABSOLUTE_TIMEOUT_SECONDS)
-            .contains(&value)
-    }) {
-        bail!(
-            "governance.session.absolute_timeout_seconds in {} is outside the safe range",
-            path.display()
-        );
-    }
-    if session.idle_timeout_seconds.is_some_and(|value| {
-        !(MIN_GOVERNANCE_SESSION_IDLE_TIMEOUT_SECONDS..=MAX_GOVERNANCE_SESSION_IDLE_TIMEOUT_SECONDS)
-            .contains(&value)
-    }) {
-        bail!(
-            "governance.session.idle_timeout_seconds in {} is outside the safe range",
-            path.display()
-        );
-    }
-    if session
-        .max_concurrent
-        .is_some_and(|value| value == 0 || value > MAX_GOVERNANCE_SESSION_CONCURRENT)
-    {
-        bail!(
-            "governance.session.max_concurrent in {} is outside the safe range",
-            path.display()
-        );
-    }
-    if let (Some(idle), Some(absolute)) = (
-        session.idle_timeout_seconds,
-        session.absolute_timeout_seconds,
-    ) && idle > absolute
-    {
-        bail!(
-            "governance.session.idle_timeout_seconds in {} cannot exceed absolute_timeout_seconds",
             path.display()
         );
     }

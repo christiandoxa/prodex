@@ -13,6 +13,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime.rs",
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  "crates/prodex-mojo-core/src/policy.rs",
+  "crates/prodex-mojo-core/src/context.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

@@ -10,12 +10,17 @@ repository.workspace = true
 name = "prodex_context"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
 [dependencies]
 anyhow = { workspace = true }
 redaction = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 terminal_ui = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

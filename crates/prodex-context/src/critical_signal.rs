@@ -36,6 +36,7 @@ impl CriticalSignalCounts {
         self.total() == 0
     }
 
+    #[cfg(not(feature = "mojo"))]
     fn saturating_loss(self, after: Self) -> Self {
         Self {
             errors: self.errors.saturating_sub(after.errors),
@@ -45,6 +46,32 @@ impl CriticalSignalCounts {
             exit_codes: self.exit_codes.saturating_sub(after.exit_codes),
             stack_markers: self.stack_markers.saturating_sub(after.stack_markers),
             rust_diagnostics: self.rust_diagnostics.saturating_sub(after.rust_diagnostics),
+        }
+    }
+
+    #[cfg(feature = "mojo")]
+    fn values(self) -> [usize; 7] {
+        [
+            self.errors,
+            self.file_locations,
+            self.diff_hunks,
+            self.test_failures,
+            self.exit_codes,
+            self.stack_markers,
+            self.rust_diagnostics,
+        ]
+    }
+
+    #[cfg(feature = "mojo")]
+    fn from_values(values: [usize; 7]) -> Self {
+        Self {
+            errors: values[0],
+            file_locations: values[1],
+            diff_hunks: values[2],
+            test_failures: values[3],
+            exit_codes: values[4],
+            stack_markers: values[5],
+            rust_diagnostics: values[6],
         }
     }
 
@@ -134,11 +161,22 @@ pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
 pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSelfCheck {
     let before = count_critical_signals(before);
     let after = count_critical_signals(after);
+    #[cfg(feature = "mojo")]
+    let (lost, gained) = prodex_mojo_core::context::signal_diff(&before.values(), &after.values())
+        .expect("Mojo critical-signal diff returned invalid output");
+    #[cfg(not(feature = "mojo"))]
+    let (lost, gained) = (before.saturating_loss(after), after.saturating_loss(before));
     CriticalSignalSelfCheck {
         before,
         after,
-        lost: before.saturating_loss(after),
-        gained: after.saturating_loss(before),
+        #[cfg(feature = "mojo")]
+        lost: CriticalSignalCounts::from_values(lost),
+        #[cfg(feature = "mojo")]
+        gained: CriticalSignalCounts::from_values(gained),
+        #[cfg(not(feature = "mojo"))]
+        lost,
+        #[cfg(not(feature = "mojo"))]
+        gained,
     }
 }
 

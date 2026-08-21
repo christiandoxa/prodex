@@ -38,6 +38,62 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
         .min()
         .unwrap_or(i64::MAX);
 
+    #[cfg(feature = "mojo")]
+    {
+        let mut fields = Vec::with_capacity(
+            scored_candidates.len() * runtime_proxy_crate::RUNTIME_PROFILE_ORDER_FIELD_COUNT,
+        );
+        for (candidate, score) in &scored_candidates {
+            let near_optimal = candidate.provider_priority == best_provider_priority
+                && score_within_bps(
+                    score.total_pressure,
+                    best_total_pressure,
+                    RUN_SELECTION_NEAR_OPTIMAL_BPS,
+                );
+            let recently_used = near_optimal
+                && profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now);
+            fields.extend([
+                i64::try_from(candidate.provider_priority).expect("profile priority fits ABI"),
+                if near_optimal { 0 } else { 1 },
+                if recently_used { 1 } else { 0 },
+                if near_optimal {
+                    selection
+                        .last_run_selected_at(&candidate.name)
+                        .unwrap_or(i64::MIN)
+                } else {
+                    i64::MIN
+                },
+                score.total_pressure,
+                score.weekly_pressure,
+                score.five_hour_pressure,
+                score.reserve_floor,
+                score.weekly_remaining,
+                score.five_hour_remaining,
+                score.weekly_reset_at,
+                score.five_hour_reset_at,
+                i64::try_from(runtime_quota_source_sort_key(
+                    RuntimeRouteKind::Responses,
+                    candidate.quota_source,
+                ))
+                .expect("quota source sort key fits ABI"),
+                if candidate.preferred { 0 } else { 1 },
+                i64::try_from(candidate.order_index).expect("profile order index fits ABI"),
+            ]);
+        }
+        let order = runtime_proxy_crate::runtime_proxy_profile_order_batch(&fields)
+            .expect("Mojo runtime profile order returned invalid output");
+        let mut slots = scored_candidates.into_iter().map(Some).collect::<Vec<_>>();
+        scored_candidates = order
+            .into_iter()
+            .map(|index| {
+                slots[index]
+                    .take()
+                    .expect("Mojo profile order index is unique")
+            })
+            .collect();
+    }
+
+    #[cfg(not(feature = "mojo"))]
     scored_candidates.sort_by_key(|(candidate, score)| {
         ready_profile_runtime_sort_key_from_score(
             candidate,

@@ -20,6 +20,9 @@ pub struct ProfileScore {
     pub reserve_floor: i64,
 }
 
+pub const RUNTIME_PROFILE_ORDER_FIELD_COUNT: usize = 15;
+pub const RUNTIME_PROFILE_ORDER_MAX_COUNT: usize = 256;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextPressureSnapshot {
     pub effective_usable_context_tokens: Option<u64>,
@@ -79,6 +82,12 @@ unsafe extern "C" {
         scaled_weekly_pressure: *mut i64,
         scaled_five_hour_pressure: *mut i64,
         reserve_floor: *mut i64,
+        count: i64,
+    ) -> i64;
+    fn prodex_runtime_quota_profile_order_batch(
+        fields: *const i64,
+        ordered_indices: *mut i64,
+        ordered_count: *mut i64,
         count: i64,
     ) -> i64;
     fn prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64;
@@ -221,6 +230,54 @@ pub fn profile_scores_batch(
             reserve_floor: reserve_floor[index],
         })
         .collect())
+}
+
+pub fn profile_order_self_test() -> bool {
+    let mut fields = vec![0_i64; RUNTIME_PROFILE_ORDER_FIELD_COUNT * 2];
+    fields[RUNTIME_PROFILE_ORDER_FIELD_COUNT] = 1;
+    profile_order_batch(&fields).is_ok_and(|order| order == [0, 1])
+}
+
+pub fn profile_order_batch(fields: &[i64]) -> Result<Vec<usize>, crate::MojoError> {
+    if !fields
+        .len()
+        .is_multiple_of(RUNTIME_PROFILE_ORDER_FIELD_COUNT)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let count = fields.len() / RUNTIME_PROFILE_ORDER_FIELD_COUNT;
+    if count > RUNTIME_PROFILE_ORDER_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut ordered_indices = vec![0_i64; count];
+    let mut ordered_count = 0_i64;
+    let status = unsafe {
+        prodex_runtime_quota_profile_order_batch(
+            fields.as_ptr(),
+            ordered_indices.as_mut_ptr(),
+            &mut ordered_count,
+            i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 || ordered_count < 0 || ordered_count as usize != count {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+
+    let mut seen = vec![false; count];
+    ordered_indices
+        .into_iter()
+        .map(|index| {
+            let index = usize::try_from(index)
+                .ok()
+                .filter(|index| *index < count)
+                .ok_or(crate::MojoError::InvalidOutput)?;
+            if seen[index] {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            seen[index] = true;
+            Ok(index)
+        })
+        .collect()
 }
 
 pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
@@ -588,6 +645,62 @@ mod parity_tests {
             )
             .expect("strict Mojo pressure snapshot should accept generated input");
             assert_eq!(actual, expected, "pressure case {case}");
+        }
+    }
+
+    fn profile_field(fields: &[i64], index: usize, offset: usize) -> i64 {
+        fields[index * RUNTIME_PROFILE_ORDER_FIELD_COUNT + offset]
+    }
+
+    fn profile_cmp(fields: &[i64], left: usize, right: usize) -> Ordering {
+        for offset in 0..=6 {
+            let ordering =
+                profile_field(fields, left, offset).cmp(&profile_field(fields, right, offset));
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        for offset in 7..=9 {
+            let ordering =
+                profile_field(fields, right, offset).cmp(&profile_field(fields, left, offset));
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        for offset in 10..RUNTIME_PROFILE_ORDER_FIELD_COUNT {
+            let ordering =
+                profile_field(fields, left, offset).cmp(&profile_field(fields, right, offset));
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        left.cmp(&right)
+    }
+
+    #[test]
+    fn profile_order_matches_rust_oracle_for_generated_batches() {
+        let mut state = 0x70726f66696c65_u64;
+        for case in 0..400 {
+            let count = (next_random(&mut state) % 32) as usize;
+            let mut fields = vec![0_i64; count * RUNTIME_PROFILE_ORDER_FIELD_COUNT];
+            for index in 0..count {
+                let base = index * RUNTIME_PROFILE_ORDER_FIELD_COUNT;
+                fields[base] = (next_random(&mut state) % 8) as i64;
+                fields[base + 1] = (next_random(&mut state) % 2) as i64;
+                fields[base + 2] = (next_random(&mut state) % 2) as i64;
+                fields[base + 3] = next_random(&mut state) as i64;
+                for offset in 4..=11 {
+                    fields[base + offset] = (next_random(&mut state) % 10_000) as i64;
+                }
+                fields[base + 12] = (next_random(&mut state) % 2) as i64;
+                fields[base + 13] = (next_random(&mut state) % 2) as i64;
+                fields[base + 14] = index as i64;
+            }
+            let mut expected = (0..count).collect::<Vec<_>>();
+            expected.sort_by(|left, right| profile_cmp(&fields, *left, *right));
+            let actual = profile_order_batch(&fields)
+                .expect("strict Mojo profile order should accept generated input");
+            assert_eq!(actual, expected, "profile order case {case}");
         }
     }
 }

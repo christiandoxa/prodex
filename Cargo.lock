@@ -2991,6 +2991,7 @@ version = "0.411.0"
 dependencies = [
  "anyhow",
  "libc",
+ "prodex-mojo-core",
  "prodex-redaction",
  "prodex-terminal-ui",
  "serde",
@@ -3332,6 +3333,7 @@ dependencies = [
  "prodex-authn",
  "prodex-core",
  "prodex-domain",
+ "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-secret-store",
  "serde",
