@@ -1,3 +1,7 @@
+#[cfg(feature = "mojo")]
+use super::runtime_tuning_defaults_rust;
+#[cfg(feature = "mojo")]
+use crate::runtime_tuning_defaults;
 use crate::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
     RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,
@@ -55,6 +59,25 @@ fn websocket_dns_defaults_are_bounded() {
         runtime_websocket_dns_resolve_overflow_capacity_default(16, 64),
         128
     );
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn tuning_defaults_match_rust_oracle_for_generated_parallelism() {
+    let mut state = 0x74756e696e675f64_u64;
+    for case in 0..2_000 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let parallelism = match case {
+            0 => 0,
+            1 => usize::MAX,
+            _ => (state % 10_000) as usize,
+        };
+        assert_eq!(
+            runtime_tuning_defaults(parallelism),
+            runtime_tuning_defaults_rust(parallelism),
+            "tuning defaults case {case}"
+        );
+    }
 }
 
 #[test]

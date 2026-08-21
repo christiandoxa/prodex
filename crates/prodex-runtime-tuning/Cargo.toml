@@ -10,5 +10,12 @@ repository.workspace = true
 name = "prodex_runtime_tuning"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
+[dependencies]
+prodex_mojo_core = { workspace = true, optional = true }
+
 [lints]
 workspace = true

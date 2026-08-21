@@ -25,6 +25,8 @@ mojo-routing = ["prodex_provider_spi/mojo"]
 mojo-core = [
     "mojo-quota",
     "mojo-routing",
+    "prodex_provider_core/mojo",
+    "prodex_runtime_tuning/mojo",
     "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-core",
     "prodex_runtime_quota/mojo",

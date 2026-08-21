@@ -22,17 +22,25 @@
     pressure-band, safety-floor, and confidence arithmetic.
 17. Runtime response candidate execution-plan ordering: Rust hard filtering and plan-model
     reconstruction plus one Mojo batch for ready/fallback ordering.
+18. Optimistic current-candidate decision: Rust string normalization plus one Mojo ordered
+    predicate result, promoted after 5,000 exact precedence cases.
+19. Provider request constraint kernel: Rust JSON/catalog/provider normalization plus one Mojo
+    decision covering capability, output-limit, context, reserve, warning, and saturation policy.
+20. Smart Context rehydration admission: Rust artifact identity collection and ordering plus
+    one Mojo bounded budget/action batch.
+21. Quota main-pool aggregation: Rust report/model normalization plus one Mojo bounded numeric
+    aggregation batch for Gemini/Copilot main quota rows.
+22. Runtime tuning default tuple: one Mojo normalized parallelism batch used by runtime config,
+    probe refresh, websocket worker, and async/log default callers.
 
 ## Next order
 
-1. Measure complete routing-plan and capability-matching workloads including FFI conversion
-   and Rust-side plan reconstruction.
+1. Measure complete boundaries for the new provider, rehydration, quota, tuning, and optimistic
+   kernels including Rust normalization and reconstruction.
 2. Revisit the dormant Smart Context candidate scorer/selector only if a non-test production
    caller is restored; do not add an unused Mojo wrapper.
-3. Reevaluate provider request constraints only after parsing, catalog, and error reconstruction
-   are isolated from the normalized numeric kernel.
-4. Revisit normalized policy validation only after security and error contracts are explicit.
-5. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
+3. Revisit normalized policy validation only after security and error contracts are explicit.
+4. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
 
 The generic domain `commit_reservation` and `evaluate_rate_limit` helpers remain Rust-only:
 the former is not the production durable accounting path, and distributed rate limiting is

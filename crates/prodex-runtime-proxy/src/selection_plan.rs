@@ -334,6 +334,17 @@ impl RuntimeOptimisticCurrentCandidateSkipReason {
 pub fn runtime_optimistic_current_candidate_decision(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
+    #[cfg(feature = "mojo")]
+    if let Some(result) = optimistic_current_candidate_decision_mojo(input) {
+        return result;
+    }
+
+    runtime_optimistic_current_candidate_decision_rust(input)
+}
+
+fn runtime_optimistic_current_candidate_decision_rust(
+    input: RuntimeOptimisticCurrentCandidateInput<'_>,
+) -> RuntimeOptimisticCurrentCandidateDecision {
     let reason = RUNTIME_OPTIMISTIC_CURRENT_CANDIDATE_PREDICATES
         .into_iter()
         .find_map(|predicate| predicate.reject(input));
@@ -344,6 +355,117 @@ pub fn runtime_optimistic_current_candidate_decision(
     }
 
     RuntimeOptimisticCurrentCandidateDecision::Keep
+}
+
+#[cfg(feature = "mojo")]
+fn optimistic_current_candidate_decision_mojo(
+    input: RuntimeOptimisticCurrentCandidateInput<'_>,
+) -> Option<RuntimeOptimisticCurrentCandidateDecision> {
+    let prompt_cache_present = prompt_cache_key_present(input.prompt_cache_key);
+    let prompt_cache_owner_matches = input
+        .prompt_cache_owner_profile
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+        == Some(input.current_profile);
+    let quota_source = input.quota_source.map(|source| match source {
+        RuntimeSelectionQuotaSource::LiveProbe => 0,
+        RuntimeSelectionQuotaSource::PersistedSnapshot => 1,
+    });
+    let result = prodex_mojo_core::runtime::optimistic_current_candidate_decision(
+        prodex_mojo_core::runtime::OptimisticCandidateInput {
+            route_kind: match input.route_kind {
+                RuntimeRouteKind::Responses => 0,
+                RuntimeRouteKind::Compact => 1,
+                RuntimeRouteKind::Websocket => 2,
+                RuntimeRouteKind::Standard => 3,
+            },
+            auth_failure_active: input.auth_failure_active,
+            in_selection_backoff: input.in_selection_backoff,
+            circuit_open: input.circuit_open,
+            health_score: input.health_score,
+            performance_score: input.performance_score,
+            current_profile_quota_compatible: input.current_profile_quota_compatible,
+            has_alternative_quota_compatible_profile: input
+                .has_alternative_quota_compatible_profile,
+            quota_band: match input.quota_summary.route_band {
+                RuntimeSelectionQuotaPressureBand::Healthy => 0,
+                RuntimeSelectionQuotaPressureBand::Thin => 1,
+                RuntimeSelectionQuotaPressureBand::Critical => 2,
+                RuntimeSelectionQuotaPressureBand::Exhausted => 3,
+                RuntimeSelectionQuotaPressureBand::Unknown => 4,
+            },
+            quota_source,
+            inflight_count: input.inflight_count,
+            inflight_soft_limit: input.inflight_soft_limit,
+            prompt_cache_present,
+            prompt_cache_owner_matches,
+        },
+    )?;
+    Some(match result {
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_KEEP => {
+            RuntimeOptimisticCurrentCandidateDecision::Keep
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_AUTH_FAILURE => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_HEALTH => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_PERFORMANCE => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_PROBE => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_THIN => optimistic_skip(
+            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                RuntimeSelectionQuotaPressureBand::Thin,
+            ),
+        ),
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL => optimistic_skip(
+            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                RuntimeSelectionQuotaPressureBand::Critical,
+            ),
+        ),
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED => optimistic_skip(
+            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                RuntimeSelectionQuotaPressureBand::Exhausted,
+            ),
+        ),
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN => optimistic_skip(
+            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                RuntimeSelectionQuotaPressureBand::Unknown,
+            ),
+        ),
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_INFLIGHT => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfileInflightSoftLimit)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_INCOMPATIBLE => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::AuthNotQuotaCompatible)
+        }
+        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_PROMPT_CACHE => {
+            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity)
+        }
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "mojo")]
+fn optimistic_skip(
+    reason: RuntimeOptimisticCurrentCandidateSkipReason,
+) -> RuntimeOptimisticCurrentCandidateDecision {
+    RuntimeOptimisticCurrentCandidateDecision::Skip(RuntimeOptimisticCurrentCandidateSkip {
+        reason,
+    })
 }
 
 fn prompt_cache_key_present(prompt_cache_key: Option<&str>) -> bool {

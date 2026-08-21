@@ -33,6 +33,7 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         total_profiles: reports.len(),
         ..QuotaPoolAggregate::default()
     };
+    let mut main_quota_rows = Vec::new();
 
     for report in reports {
         aggregate.last_updated_at = Some(
@@ -50,18 +51,33 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
             ProviderQuotaSnapshot::OpenAi(usage) => {
                 aggregate_openai_quota(usage, &mut aggregate);
             }
-            ProviderQuotaSnapshot::Gemini(info) => aggregate_main_quota(
+            ProviderQuotaSnapshot::Gemini(info) => main_quota_rows.push((
                 gemini_main_remaining_percent(info),
                 gemini_reset_epoch(info),
-                &mut aggregate,
-            ),
-            ProviderQuotaSnapshot::Copilot(info) => aggregate_main_quota(
+            )),
+            ProviderQuotaSnapshot::Copilot(info) => main_quota_rows.push((
                 copilot_main_remaining_percent(info),
                 copilot_reset_epoch(info),
-                &mut aggregate,
-            ),
+            )),
             ProviderQuotaSnapshot::External(_) => {}
         }
+    }
+
+    #[cfg(feature = "mojo")]
+    if let Some((profiles_with_data, pool_remaining, earliest_reset_at)) =
+        crate::mojo::main_quota_aggregate(&main_quota_rows)
+    {
+        aggregate.main_profiles_with_data = profiles_with_data;
+        aggregate.main_pool_remaining = pool_remaining;
+        aggregate.earliest_main_reset_at = earliest_reset_at;
+    } else {
+        for (remaining_percent, reset_at) in main_quota_rows {
+            aggregate_main_quota(remaining_percent, reset_at, &mut aggregate);
+        }
+    }
+    #[cfg(not(feature = "mojo"))]
+    for (remaining_percent, reset_at) in main_quota_rows {
+        aggregate_main_quota(remaining_percent, reset_at, &mut aggregate);
     }
 
     aggregate

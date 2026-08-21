@@ -101,13 +101,14 @@ The candidate score/selection helpers under `prodex-runtime-proxy::smart_context
 have no non-test production caller in the current tree. They remain audit-only Rust code rather
 than gaining an unused Mojo wrapper. Revisit only when a real production call graph exists.
 
-## 2026-08-20: Provider constraints and optimistic selection stay Rust for now
+## 2026-08-20: Provider constraints and optimistic selection were deferred
 
 Provider request constraints still combine provider parsing, catalog/schema handling, public error
 reconstruction, and numeric rules. The optimistic current-candidate decision also encodes ordered
 runtime predicates around auth, circuit, health, quota evidence, inflight limits, and affinity.
-Both remain Rust until normalized contracts and exhaustive reason-order parity can be isolated;
-no shadow-only Mojo entry point was added.
+Both remained Rust at that checkpoint until normalized contracts and exhaustive reason-order
+parity could be isolated; no shadow-only Mojo entry point was added. The 2026-08-21 promotion
+below supersedes this deferred state.
 
 ## 2026-08-20: Keep accounting and distributed rate limiting in Rust
 
@@ -134,3 +135,54 @@ with `SHA256SUMS`. `install.sh` and `install.ps1` select by target and verify th
 own `doctor --runtime --json` implementation and Mojo self-test. They never inspect or install a
 user Mojo compiler. WSL naturally uses the Linux shell installer; native Windows remains a
 Rust-compatible artifact while its target is not release-approved for Mojo.
+
+## 2026-08-21: Promote ordered optimistic candidate selection
+
+`runtime_optimistic_current_candidate_decision` is an active runtime selection caller, so its
+ordered predicate engine now crosses one normalized scalar ABI. Rust trims and compares profile
+and prompt-cache strings, maps route/source/quota tags, retains the Rust predicate oracle, and
+reconstructs the public skip reason. Mojo returns the first matching reason; 5,000 generated
+cases cover simultaneous rejection conditions and precedence. Affinity state, health acquisition,
+continuation ownership, and transport remain Rust.
+
+## 2026-08-21: Provider constraints use one normalized decision kernel
+
+Serde parsing, provider adapter capability lookup, catalog resolution, reasoning-map lookup, and
+human-readable errors remain Rust. The active public constraint evaluator normalizes those values
+into one fixed-width input. Mojo owns endpoint/catalog branches after normalization, missing
+feature classification, reasoning support, output-limit policy, saturating requirement totals,
+context policy, adjustments, and warning tags. Rust reconstructs the existing public evaluation
+and retains the Rust fallback/oracle. The strict provider-core suite includes 2,000 generated
+normalized cases.
+
+## 2026-08-21: Move active Smart Context rehydration admission
+
+The active body-transform path now sorts artifact identities and performs store lookup/token
+estimation in Rust, then sends only ranked numeric rows and availability flags to one Mojo batch.
+Mojo owns required/minimal-tier admission, missing-artifact classification, saturating budget
+admission, and used-token accumulation. Rust maps action tags back to artifact IDs and executes
+rehydration. The dormant relevance scorer remains Rust because it has no production caller and
+uses unprobed float ordering.
+
+## 2026-08-21: Normalize quota aggregation before Mojo
+
+The active quota pool renderer now collects normalized Gemini/Copilot main-quota rows in Rust and
+uses one bounded Mojo batch for profile count, saturating remaining sum, and earliest reset.
+Provider JSON, decimal/floating conversion, clock/reset acquisition, report sorting, labels, and
+terminal rendering remain Rust. The batch has a 1,024-row ceiling and falls back to the Rust
+aggregate if the boundary rejects input.
+
+## 2026-08-21: Move runtime tuning default tuple
+
+Runtime configuration, probe refresh, WebSocket worker setup, async workers, and log queue setup
+share one normalized parallelism batch. Mojo computes only bounded integer defaults; environment
+parsing, overrides, clamping of user values, queue construction, and diagnostics remain Rust.
+The Rust fallback is first-class and the public tuning crate has a 2,000-case differential suite.
+
+## 2026-08-21: Expand compiled-in ownership diagnostics
+
+`prodex doctor --runtime --json` now reports individual real-Mojo module self-tests for quota
+aggregation, provider constraints, Smart Context rehydration, runtime tuning, and the existing
+runtime/routing modules. A module is reported active only when the shared archive is active, the
+fallback is false, and that module self-test passes. The shipped compiler requirement remains
+false.

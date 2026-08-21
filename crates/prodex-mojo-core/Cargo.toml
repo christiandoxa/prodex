@@ -15,10 +15,12 @@ default = []
 mojo-quota = []
 mojo-runtime = []
 mojo-routing = []
+mojo-provider-constraints = []
 mojo-core = [
     "mojo-quota",
     "mojo-runtime",
     "mojo-routing",
+    "mojo-provider-constraints",
 ]
 
 [lints]

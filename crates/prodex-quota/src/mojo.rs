@@ -16,3 +16,24 @@ pub(super) fn window_pair_has_ready_limit(
 ) -> bool {
     prodex_mojo_core::quota::window_pair_has_ready_limit(first_used_percent, second_used_percent)
 }
+
+pub(crate) fn main_quota_aggregate(
+    inputs: &[(Option<i64>, Option<i64>)],
+) -> Option<(usize, i64, Option<i64>)> {
+    let inputs = inputs
+        .iter()
+        .copied()
+        .map(
+            |(remaining_percent, reset_at)| prodex_mojo_core::quota::MainQuotaAggregationInput {
+                remaining_percent,
+                reset_at,
+            },
+        )
+        .collect::<Vec<_>>();
+    let aggregate = prodex_mojo_core::quota::main_quota_aggregate_batch(&inputs)?;
+    Some((
+        aggregate.profiles_with_data,
+        aggregate.pool_remaining,
+        aggregate.earliest_reset_at,
+    ))
+}

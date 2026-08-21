@@ -67,8 +67,23 @@ The current production feature set is `mojo-core`, composed of `mojo-quota`, `mo
 and `mojo-routing`. It compiles the quota, runtime, Smart Context, and routing sources into one
 static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation and
 pressure snapshot, runtime candidate ordering, provider score/routing-plan batching, and
-provider capability matching through their Rust consumers. The new runtime kernels remain under
-the existing `mojo-runtime` feature; no speculative feature was added.
+provider capability matching through their Rust consumers. The current production feature set
+also includes provider constraints and runtime tuning defaults; these reuse shared-core wiring,
+with one explicit `mojo-provider-constraints` feature for the provider-core owner.
+
+## 2026-08-21 promotion evidence
+
+| Kernel | Boundary shape | Maximum / tags | Float or strings | Fallback |
+| --- | --- | --- | --- | --- |
+| Optimistic candidate decision | Fixed scalar integers and normalized booleans | 15 result tags; route/source/quota tags | Rust owns strings and comparisons | Rust ordered predicate oracle |
+| Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Rust resolved-input evaluator |
+| Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Rust admission loop |
+| Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Rust aggregate |
+| Runtime tuning defaults | Seven caller-owned scalar outputs | Bounded integer clamps | Rust owns host/config parsing and overrides | Rust default helpers |
+
+All new calls are stateless and reentrant. No Rust object layout, string, collection, secret,
+path, persistent state, or provider payload crosses the ABI. The shared ABI version remains `1`
+because these are additive exports.
 
 The release matrix is intentionally stricter than object generation:
 

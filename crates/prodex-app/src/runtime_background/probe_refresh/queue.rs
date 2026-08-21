@@ -37,9 +37,9 @@ pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    runtime_probe_refresh_queue_with_worker_count(runtime_probe_refresh_worker_count_default(
-        parallelism,
-    ))
+    runtime_probe_refresh_queue_with_worker_count(
+        runtime_config::runtime_tuning_defaults(parallelism).probe_refresh_worker_count,
+    )
 }
 
 pub(crate) fn runtime_probe_refresh_queue_backlog() -> usize {

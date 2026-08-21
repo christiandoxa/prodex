@@ -53,6 +53,26 @@ performance improvement is claimed.
 | Optimized binary size | `stat` on current stripped host/cross Linux artifacts | 49,681,016 bytes host link; 50,202,496 bytes GLIBC-compatible cross link |
 | Installer fixture | Local file-backed `install.sh` with no Mojo on `PATH` | Pass; manifest/checksum selection and Mojo self-test verified |
 
+## 2026-08-21 complete-boundary measurements
+
+The provider constraint benchmark includes request JSON parsing, Rust requirement normalization,
+catalog resolution, Mojo ABI conversion/evaluation, and Rust public-model reconstruction. It was
+run with the same `provider_constraints_complete_boundary` Criterion target in the strict and
+fallback builds:
+
+| Boundary | Command mode | Result |
+| --- | --- | --- |
+| Provider request constraints | `PRODEX_MOJO_REQUIRED=1`, real Mojo 1.0.0 | `[2.6560 µs 2.8658 µs 3.1268 µs]` |
+| Provider request constraints | `PRODEX_MOJO_REQUIRED=0`, Mojo absent from `PATH` | `[2.4896 µs 2.5925 µs 2.7138 µs]` |
+| Active Smart Context rehydration | `PRODEX_MOJO_REQUIRED=1`, `runtime_smart_context_rehydrate` | `[53.226 µs 54.058 µs 54.916 µs]` |
+
+The Mojo boundary is within local noise of the Rust fallback for this small single-request
+workload; no speedup is claimed. The complete-boundary benchmark is retained so future batching
+can be measured honestly before changing ownership again. The new rehydration boundary has
+2,000-case differential coverage and is also exercised by the existing
+`runtime_smart_context_rehydrate` Criterion path. This boundary includes the active app-side
+artifact normalization/store work, plan construction, and Rust-side execution accounting.
+
 The GLIBC result is intentionally recorded as a limitation of a directly linked host binary.
 Release CI compiles the Mojo target archive first and links the final Linux binary through the
 target cross toolchain; only that final artifact is eligible for publication.

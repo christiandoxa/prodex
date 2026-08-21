@@ -512,3 +512,107 @@ fn catalog_optional_constraint_fields_remain_backward_compatible() {
     assert_eq!(entry.reasoning_reserve_tokens, None);
     assert_eq!(entry.embedding_compatible, None);
 }
+
+#[cfg(feature = "mojo")]
+#[test]
+fn provider_constraints_match_rust_oracle_for_generated_normalized_cases() {
+    let mut state = 0x70726f7669646572_u64;
+    for case in 0..2_000 {
+        let next = |state: &mut u64| {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *state
+        };
+        let endpoint = if next(&mut state) & 1 == 0 {
+            ProviderEndpoint::Responses
+        } else {
+            ProviderEndpoint::Embeddings
+        };
+        let mut model = entry(
+            (next(&mut state) & 1 == 0).then(|| (next(&mut state) % 500).max(1)),
+            (next(&mut state) & 1 == 0).then(|| (next(&mut state) % 200).max(1)),
+        );
+        model.supported_endpoints =
+            if endpoint == ProviderEndpoint::Embeddings && next(&mut state) & 1 != 0 {
+                vec![ProviderEndpoint::Embeddings]
+            } else {
+                vec![ProviderEndpoint::Responses]
+            };
+        model.feature_flags = ProviderCatalogFeatureFlags {
+            tools: next(&mut state) & 1 != 0,
+            json_schema: next(&mut state) & 1 != 0,
+            vision: next(&mut state) & 1 != 0,
+            audio: next(&mut state) & 1 != 0,
+            web_search: next(&mut state) & 1 != 0,
+            reasoning: next(&mut state) & 1 != 0,
+        };
+        model.supported_reasoning_efforts = Some(vec![ProviderReasoningEffort::High]);
+        let required_features = (0..3)
+            .filter_map(|index| {
+                (next(&mut state) & 1 != 0).then_some(match index {
+                    0 => ProviderRequestFeature::Tools,
+                    1 => ProviderRequestFeature::Reasoning,
+                    _ => ProviderRequestFeature::Vision,
+                })
+            })
+            .collect::<Vec<_>>();
+        let explicit_output_tokens = (next(&mut state) & 1 != 0).then(|| next(&mut state) % 300);
+        let requirements = ProviderRequestRequirements {
+            endpoint,
+            requested_model: "synthetic-model".to_string(),
+            resolved_upstream_model: None,
+            estimated_input_tokens: next(&mut state) % 700,
+            explicit_output_tokens,
+            output_limit_field: explicit_output_tokens.map(|_| match next(&mut state) % 3 {
+                0 => ProviderOutputLimitField::MaxOutputTokens,
+                1 => ProviderOutputLimitField::MaxCompletionTokens,
+                _ => ProviderOutputLimitField::MaxTokens,
+            }),
+            default_output_reserve_tokens: (next(&mut state) & 1 != 0)
+                .then(|| next(&mut state) % 100),
+            reasoning_effort: (next(&mut state) & 1 != 0).then(|| {
+                if next(&mut state) & 1 == 0 {
+                    ProviderReasoningEffort::High
+                } else {
+                    ProviderReasoningEffort::Unknown
+                }
+            }),
+            reasoning_reserve_tokens: (next(&mut state) & 1 != 0).then(|| next(&mut state) % 200),
+            total_required_tokens: 0,
+            required_features,
+        };
+        let policy = ProviderRequestConstraintPolicy {
+            enabled: next(&mut state) & 1 != 0,
+            unknown_context: match next(&mut state) % 3 {
+                0 => ProviderUnknownContextPolicy::Allow,
+                1 => ProviderUnknownContextPolicy::SafeWindow,
+                _ => ProviderUnknownContextPolicy::Reject,
+            },
+            safe_window_tokens: next(&mut state) % 500,
+            oversized_output: match next(&mut state) % 3 {
+                0 => ProviderOversizedOutputPolicy::Passthrough,
+                1 => ProviderOversizedOutputPolicy::Reject,
+                _ => ProviderOversizedOutputPolicy::ClampWithNotice,
+            },
+        };
+        let entry = (next(&mut state) & 1 != 0).then_some(model);
+        let entry_ref = entry.as_ref();
+        let mut resolved =
+            resolve_provider_request_requirements(&requirements, "synthetic-model", entry_ref);
+        recalculate_total(&mut resolved);
+        let expected = evaluate_provider_request_constraints_resolved_rust(
+            ProviderId::OpenAi,
+            &requirements,
+            policy,
+            resolved,
+            entry_ref,
+        );
+        let actual = evaluate_provider_request_constraints_with_catalog_entry(
+            ProviderId::OpenAi,
+            "synthetic-model",
+            &requirements,
+            policy,
+            entry_ref,
+        );
+        assert_eq!(actual, expected, "provider constraint case {case}");
+    }
+}

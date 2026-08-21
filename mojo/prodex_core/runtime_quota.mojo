@@ -249,6 +249,176 @@ def runtime_candidate_less(
             return left_value < right_value
     return runtime_candidate_ready_less(fields, left, right, route_kind)
 
+comptime OPTIMISTIC_CANDIDATE_KEEP: Int64 = 0
+comptime OPTIMISTIC_CANDIDATE_AUTH_FAILURE: Int64 = 1
+comptime OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF: Int64 = 2
+comptime OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT: Int64 = 3
+comptime OPTIMISTIC_CANDIDATE_HEALTH: Int64 = 4
+comptime OPTIMISTIC_CANDIDATE_PERFORMANCE: Int64 = 5
+comptime OPTIMISTIC_CANDIDATE_QUOTA_PROBE: Int64 = 6
+comptime OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA: Int64 = 7
+comptime OPTIMISTIC_CANDIDATE_QUOTA_THIN: Int64 = 8
+comptime OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL: Int64 = 9
+comptime OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED: Int64 = 10
+comptime OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN: Int64 = 11
+comptime OPTIMISTIC_CANDIDATE_INFLIGHT: Int64 = 12
+comptime OPTIMISTIC_CANDIDATE_INCOMPATIBLE: Int64 = 13
+comptime OPTIMISTIC_CANDIDATE_PROMPT_CACHE: Int64 = 14
+
+@export("prodex_runtime_optimistic_current_candidate_decision")
+def prodex_runtime_optimistic_current_candidate_decision(
+    route_kind: Int64,
+    auth_failure_active: Int64,
+    in_selection_backoff: Int64,
+    circuit_open: Int64,
+    health_score: Int64,
+    performance_score: Int64,
+    current_profile_quota_compatible: Int64,
+    has_alternative_quota_compatible_profile: Int64,
+    quota_band: Int64,
+    quota_source_present: Int64,
+    quota_source: Int64,
+    inflight_count: Int64,
+    inflight_soft_limit: Int64,
+    prompt_cache_present: Int64,
+    prompt_cache_owner_matches: Int64,
+) abi("C") -> Int64:
+    if route_kind < 0 or route_kind > 3:
+        return -1
+    if auth_failure_active < 0 or auth_failure_active > 1 or in_selection_backoff < 0 or in_selection_backoff > 1 or circuit_open < 0 or circuit_open > 1:
+        return -1
+    if current_profile_quota_compatible < 0 or current_profile_quota_compatible > 1 or has_alternative_quota_compatible_profile < 0 or has_alternative_quota_compatible_profile > 1:
+        return -1
+    if quota_band < 0 or quota_band > 4 or quota_source_present < 0 or quota_source_present > 1 or quota_source < 0 or quota_source > 1:
+        return -1
+    if inflight_count < 0 or inflight_soft_limit < 0 or prompt_cache_present < 0 or prompt_cache_present > 1 or prompt_cache_owner_matches < 0 or prompt_cache_owner_matches > 1:
+        return -1
+
+    if auth_failure_active == 1:
+        return OPTIMISTIC_CANDIDATE_AUTH_FAILURE
+    if in_selection_backoff == 1:
+        return OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF
+    if circuit_open == 1:
+        return OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT
+    if health_score > 0:
+        return OPTIMISTIC_CANDIDATE_HEALTH
+    if performance_score > 0:
+        return OPTIMISTIC_CANDIDATE_PERFORMANCE
+
+    if has_alternative_quota_compatible_profile == 1 and quota_source_present == 0:
+        return OPTIMISTIC_CANDIDATE_QUOTA_PROBE
+    if has_alternative_quota_compatible_profile == 1 and (route_kind == 0 or route_kind == 2) and quota_source != 0:
+        if quota_source == 1:
+            return OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA
+        return OPTIMISTIC_CANDIDATE_QUOTA_PROBE
+
+    if quota_band > 0 and not (quota_band == 4 and has_alternative_quota_compatible_profile == 0):
+        if quota_band == 1:
+            return OPTIMISTIC_CANDIDATE_QUOTA_THIN
+        if quota_band == 2:
+            return OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL
+        if quota_band == 3:
+            return OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED
+        return OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN
+    if inflight_count >= inflight_soft_limit:
+        return OPTIMISTIC_CANDIDATE_INFLIGHT
+    if current_profile_quota_compatible == 0:
+        return OPTIMISTIC_CANDIDATE_INCOMPATIBLE
+    if prompt_cache_present == 1 and (route_kind == 0 or route_kind == 2) and has_alternative_quota_compatible_profile == 1 and prompt_cache_owner_matches == 0:
+        return OPTIMISTIC_CANDIDATE_PROMPT_CACHE
+    return OPTIMISTIC_CANDIDATE_KEEP
+
+comptime SMART_CONTEXT_REHYDRATE_MAX_COUNT: Int64 = 256
+comptime SMART_CONTEXT_REHYDRATE_MINIMAL_TIER: Int64 = 0
+comptime SMART_CONTEXT_REHYDRATE_CONDENSED_TIER: Int64 = 1
+comptime SMART_CONTEXT_REHYDRATE_LARGE_TIER: Int64 = 2
+comptime SMART_CONTEXT_REHYDRATE_EXACT_TIER: Int64 = 3
+comptime SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE: Int64 = 0
+comptime SMART_CONTEXT_REHYDRATE_ACTION_MISSING: Int64 = 1
+comptime SMART_CONTEXT_REHYDRATE_ACTION_BUDGET: Int64 = 2
+comptime SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL: Int64 = 3
+
+@export("prodex_smart_context_rehydrate_plan_batch")
+def prodex_smart_context_rehydrate_plan_batch(
+    token_costs: Pointer[mut=False, UInt64, _],
+    required: Pointer[mut=False, Int64, _],
+    available: Pointer[mut=False, Int64, _],
+    action_tags: Pointer[mut=True, Int64, _],
+    used_tokens: Pointer[mut=True, UInt64, _],
+    count: Int64,
+    token_budget: UInt64,
+    tier: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > SMART_CONTEXT_REHYDRATE_MAX_COUNT:
+        return 1
+    if tier < SMART_CONTEXT_REHYDRATE_MINIMAL_TIER or tier > SMART_CONTEXT_REHYDRATE_EXACT_TIER:
+        return 2
+
+    var used: UInt64 = 0
+    for index in range(count):
+        var required_value = required[unsafe_offset=index]
+        var available_value = available[unsafe_offset=index]
+        if (required_value != 0 and required_value != 1) or (available_value != 0 and available_value != 1):
+            return 2
+        var cost = token_costs[unsafe_offset=index]
+        if available_value == 0:
+            action_tags[unsafe_offset=index] = SMART_CONTEXT_REHYDRATE_ACTION_MISSING
+        elif tier == SMART_CONTEXT_REHYDRATE_MINIMAL_TIER and required_value == 0:
+            action_tags[unsafe_offset=index] = SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL
+        elif cost > token_budget - used:
+            action_tags[unsafe_offset=index] = SMART_CONTEXT_REHYDRATE_ACTION_BUDGET
+        else:
+            used += cost
+            action_tags[unsafe_offset=index] = SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE
+    used_tokens[unsafe_offset=0] = used
+    return 0
+
+comptime RUNTIME_TUNING_INT64_MAX: Int64 = 9223372036854775807
+
+def runtime_tuning_saturating_mul(left: Int64, right: Int64) -> Int64:
+    if left <= 0 or right <= 0:
+        return 0
+    if left > RUNTIME_TUNING_INT64_MAX / right:
+        return RUNTIME_TUNING_INT64_MAX
+    return left * right
+
+def runtime_tuning_clamp(value: Int64, minimum: Int64, maximum: Int64) -> Int64:
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+@export("prodex_runtime_tuning_defaults")
+def prodex_runtime_tuning_defaults(
+    parallelism: Int64,
+    worker_count: Pointer[mut=True, Int64, _],
+    long_lived_worker_count: Pointer[mut=True, Int64, _],
+    probe_refresh_worker_count: Pointer[mut=True, Int64, _],
+    async_worker_count: Pointer[mut=True, Int64, _],
+    log_queue_capacity: Pointer[mut=True, Int64, _],
+    websocket_connect_worker_count: Pointer[mut=True, Int64, _],
+    websocket_dns_worker_count: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if parallelism < 0:
+        return 1
+    worker_count[unsafe_offset=0] = runtime_tuning_clamp(parallelism, 4, 12)
+    long_lived_worker_count[unsafe_offset=0] = runtime_tuning_clamp(
+        runtime_tuning_saturating_mul(parallelism, 2),
+        8,
+        24,
+    )
+    probe_refresh_worker_count[unsafe_offset=0] = runtime_tuning_clamp(parallelism, 2, 4)
+    async_worker_count[unsafe_offset=0] = runtime_tuning_clamp(parallelism, 2, 4)
+    log_queue_capacity[unsafe_offset=0] = runtime_tuning_clamp(
+        runtime_tuning_saturating_mul(parallelism, 256),
+        1_024,
+        8_192,
+    )
+    websocket_connect_worker_count[unsafe_offset=0] = runtime_tuning_clamp(parallelism, 4, 16)
+    websocket_dns_worker_count[unsafe_offset=0] = runtime_tuning_clamp(parallelism, 2, 8)
+    return 0
+
 @export("prodex_runtime_candidate_plan_batch")
 def prodex_runtime_candidate_plan_batch(
     fields: Pointer[mut=False, Int64, _],

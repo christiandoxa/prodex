@@ -55,6 +55,69 @@ pub const CAPABILITY_REASON_MISSING: u8 = 2;
 pub const CAPABILITY_REASON_COMPATIBLE: u8 = 1;
 pub const ABI_VERSION: u32 = 1;
 
+pub fn self_test() -> bool {
+    let plan = routing_plan_batch(
+        &[RoutingPlanInput {
+            hard_eligible: true,
+            capability_mask: 1,
+            provider_order: 0,
+            score: ScoreInput {
+                health: 10_000,
+                load: 0,
+                quota_headroom: 10_000,
+                quota_present: true,
+                cost: 0,
+                latency: 0,
+                risk: 0,
+                priority: 10_000,
+                affinity: true,
+            },
+        }],
+        1,
+        ScoreWeights {
+            health: 10_000,
+            load: 0,
+            cost: 0,
+            latency: 0,
+            risk: 0,
+            priority: 0,
+            affinity: 0,
+        },
+    );
+    let capability = capability_match_batch(&[true, true], &[1, 0], 1);
+    let score = score_batch(
+        &[ScoreInput {
+            health: 10_000,
+            load: 0,
+            quota_headroom: 10_000,
+            quota_present: true,
+            cost: 0,
+            latency: 0,
+            risk: 0,
+            priority: 10_000,
+            affinity: true,
+        }],
+        ScoreWeights {
+            health: 10_000,
+            load: 0,
+            cost: 0,
+            latency: 0,
+            risk: 0,
+            priority: 0,
+            affinity: 0,
+        },
+    );
+    plan.is_some_and(|plan| {
+        plan.eligible == [true]
+            && plan.reason_tags == [ROUTING_REASON_ELIGIBLE]
+            && plan.ordered_indices == [0]
+    }) && capability.is_some_and(|result| {
+        result.first_compatible == Some(0)
+            && result.first_incompatible == Some(1)
+            && result.compatible == [true, false]
+    }) && score.is_some_and(|scores| scores[0].score == 10_000)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityMatch {
     pub compatible: Vec<bool>,

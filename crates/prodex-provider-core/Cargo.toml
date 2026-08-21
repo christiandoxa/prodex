@@ -10,12 +10,17 @@ repository.workspace = true
 name = "prodex_provider_core"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-provider-constraints"]
+
 [dependencies]
 base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 url = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 
 [lints]
 workspace = true

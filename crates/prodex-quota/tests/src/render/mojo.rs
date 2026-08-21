@@ -30,3 +30,39 @@ fn remaining_percent_matches_rust_oracle() {
         assert_eq!(remaining_percent(used_percent), rust);
     }
 }
+
+#[test]
+fn main_quota_aggregate_matches_rust_oracle_for_generated_rows() {
+    let mut state = 0x71756f74615f6167_u64;
+    for case in 0..2_000 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let count = (state % 32) as usize;
+        let mut rows = Vec::with_capacity(count);
+        for _ in 0..count {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let remaining_percent = (state & 3 != 0).then(|| (state % 201) as i64 - 100);
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let reset_at = (state & 3 != 0).then_some((state % 10_000) as i64);
+            rows.push((remaining_percent, reset_at));
+        }
+        let mut profiles_with_data = 0usize;
+        let mut pool_remaining = 0_i64;
+        let mut earliest_reset_at: Option<i64> = None;
+        for (remaining_percent, reset_at) in &rows {
+            let Some(remaining_percent) = remaining_percent else {
+                continue;
+            };
+            profiles_with_data += 1;
+            pool_remaining = pool_remaining.saturating_add(*remaining_percent);
+            if let Some(reset_at) = reset_at {
+                earliest_reset_at =
+                    Some(earliest_reset_at.map_or(*reset_at, |current| current.min(*reset_at)));
+            }
+        }
+        assert_eq!(
+            crate::mojo::main_quota_aggregate(&rows),
+            Some((profiles_with_data, pool_remaining, earliest_reset_at)),
+            "quota aggregation case {case}"
+        );
+    }
+}

@@ -206,6 +206,69 @@ required mask.
 | Error propagation | Explicit integer status; no panic, exception, Rust enum, `Vec`, `String`, or `Result` crosses the boundary |
 | Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Capability negotiation falls back to Rust if its Mojo result is invalid; governed routing rejects an invalid plan result |
 
+The 2026-08-21 additive exports are:
+
+```text
+prodex_runtime_optimistic_current_candidate_decision(
+    route_kind, auth_failure_active, selection_backoff, circuit_open,
+    health_score, performance_score, quota_compatible, alternative_quota_compatible,
+    quota_band, quota_source_present, quota_source, inflight_count, inflight_soft_limit,
+    prompt_cache_present, prompt_cache_owner_matches,
+) -> Int64
+
+prodex_smart_context_rehydrate_plan_batch(
+    token_costs: *const UInt64, required: *const Int64, available: *const Int64,
+    action_tags: *mut Int64, used_tokens: *mut UInt64,
+    count: Int64, token_budget: UInt64, tier: Int64,
+) -> Int64
+
+prodex_quota_main_aggregate_batch(
+    remaining_percent: *const Int64, remaining_present: *const Int64,
+    reset_at: *const Int64, reset_present: *const Int64,
+    profiles_with_data: *mut Int64, pool_remaining: *mut Int64,
+    earliest_reset_at: *mut Int64, earliest_present: *mut Int64,
+    count: Int64,
+) -> Int64
+
+prodex_runtime_tuning_defaults(
+    parallelism: Int64,
+    worker_count: *mut Int64, long_lived_worker_count: *mut Int64,
+    probe_refresh_worker_count: *mut Int64, async_worker_count: *mut Int64,
+    log_queue_capacity: *mut Int64, websocket_connect_worker_count: *mut Int64,
+    websocket_dns_worker_count: *mut Int64,
+) -> Int64
+
+prodex_provider_constraints_evaluate(
+    normalized scalar/presence inputs,
+    caller-owned scalar/presence outputs,
+) -> Int64
+```
+
+Optimistic result tags are `Keep=0`, then `AuthFailure=1`, `SelectionBackoff=2`,
+`RouteCircuit=3`, `Health=4`, `Performance=5`, `QuotaProbe=6`, `StalePersistedQuota=7`,
+`QuotaThin=8`, `QuotaCritical=9`, `QuotaExhausted=10`, `QuotaUnknown=11`, `Inflight=12`,
+`Incompatible=13`, and `PromptCache=14`. Prompt-cache strings and profile identity never cross
+the boundary; Rust sends only presence and owner-match booleans.
+
+Rehydration action tags are `Rehydrate=0`, `MissingArtifact=1`, `TokenBudgetExceeded=2`, and
+`MinimalBudgetTier=3`; its maximum is 256 rows. Quota main aggregation accepts at most 1,024
+rows and returns a saturating remaining sum plus an optional earliest reset. Runtime tuning
+returns seven bounded integer defaults in one call; user overrides and environment parsing remain
+Rust.
+
+Provider constraints use decision tags `Compatible=0`, `EndpointUnsupported=1`,
+`RequiredCapabilityMissing=2`, `CatalogEntryUnavailable=3`, `ContextWindowUnknown=4`,
+`ContextWindowExceeded=5`, `OutputLimitUnknown=6`, `RequestedOutputExceedsModelLimit=7`,
+`ReasoningReserveUnsupported=8`, `ReasoningReserveExcessive=9`, `MalformedRequestLimits=10`,
+and `OutputLimitClamped=11`. Feature tags follow Rust enum order (`Tools=0` through
+`Websocket=8`); output fields are `MaxOutputTokens=0`, `MaxCompletionTokens=1`, and
+`MaxTokens=2`. Unknown-context tags are `Allow=0`, `SafeWindow=1`, `Reject=2`; oversized-output
+tags are `Passthrough=0`, `Reject=1`, `ClampWithNotice=2`. Rust reconstructs warning-bit order.
+
+All new boundaries are additive and keep ABI version `1`. Rust owns every input/output buffer and
+validates status, presence flags, tags, bounds, and conversions. Invalid Mojo results return to
+the Rust oracle; strict builds still fail if current Mojo source cannot compile.
+
 ## Runtime candidate-plan and Smart Context pressure contracts
 
 `prodex_smart_context_pressure_snapshot` is a synchronous fixed-width decision call. Rust passes
