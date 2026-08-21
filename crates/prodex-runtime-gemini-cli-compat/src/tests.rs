@@ -643,7 +643,6 @@ fn gemini_cli_compat_bridges_settings_mcp_over_extension_mcp_and_hooks() {
     assert!(!config.contains("extension-server"));
     assert!(!config.contains("extension-extra-server"));
     assert!(!config.contains("skip-server"));
-
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(codex_home.join("hooks.json")).unwrap()).unwrap();
     let expected_status = format!(

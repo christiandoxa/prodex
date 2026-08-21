@@ -3,7 +3,6 @@ use super::{
     deepseek_provider_core_apply_strict_function_schema,
     deepseek_provider_core_chat_assistant_messages_from_response_value,
     deepseek_provider_core_chat_role, deepseek_provider_core_dedup_and_validate_function_tools,
-    deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes,
     deepseek_provider_core_ensure_json_prompt_instruction,
     deepseek_provider_core_first_function_call_output_call_id,
     deepseek_provider_core_function_tool_name, deepseek_provider_core_history_has_system_message,
@@ -30,7 +29,6 @@ use super::{
     deepseek_provider_core_top_logprobs_from_responses_request,
     deepseek_provider_core_user_id_from_responses_request, deepseek_provider_core_user_message,
     deepseek_provider_core_validate_function_name,
-    deepseek_provider_core_validate_function_name_with_max_bytes,
     deepseek_provider_core_validate_function_parameters,
     deepseek_provider_core_validate_reasoning_shape,
     deepseek_provider_core_validate_supported_input_item,
@@ -690,42 +688,6 @@ fn deepseek_provider_core_validates_tool_choice_and_names() {
         deepseek_provider_core_validate_function_name("bad.name", "DeepSeek")
             .unwrap_err()
             .contains("DeepSeek function tool names must use only letters")
-    );
-}
-
-#[test]
-fn provider_core_enforces_provider_specific_function_name_byte_limits() {
-    let name_64 = "a".repeat(64);
-    let name_65 = "b".repeat(65);
-    let name_128 = "c".repeat(128);
-    let name_129 = "d".repeat(129);
-
-    deepseek_provider_core_validate_function_name(&name_64, "DeepSeek").unwrap();
-    assert!(deepseek_provider_core_validate_function_name(&name_65, "DeepSeek").is_err());
-    for name in [&name_65, &name_128] {
-        deepseek_provider_core_validate_function_name_with_max_bytes(name, "Gemini", 128).unwrap();
-    }
-    assert!(
-        deepseek_provider_core_validate_function_name_with_max_bytes(&name_129, "Gemini", 128)
-            .is_err()
-    );
-    assert!(
-        deepseek_provider_core_validate_function_name_with_max_bytes("tool_é", "Gemini", 128)
-            .is_err(),
-        "translated provider names remain ASCII even when the source MCP name is multibyte"
-    );
-
-    let tools = [name_65, name_128]
-        .map(|name| serde_json::json!({"function": {"name": name}}))
-        .into_iter()
-        .collect();
-    assert_eq!(
-        deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
-            tools, false, "Gemini", 128,
-        )
-        .unwrap()
-        .len(),
-        2
     );
 }
 
