@@ -362,6 +362,7 @@ mod tests {
         assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
         assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
         let luna = provider_catalog_entry(ProviderId::OpenAi, "gpt-5.6-luna").unwrap();
+        assert_eq!(luna.context_window_tokens, Some(872_000));
         assert!(
             luna.supported_reasoning_efforts
                 .as_ref()

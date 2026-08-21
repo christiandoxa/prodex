@@ -319,10 +319,19 @@ fn runtime_launch_openai_model_context_from_models_cache(
                 if !matches_slug {
                     return None;
                 }
-                entry
-                    .get("context_window")
-                    .or_else(|| entry.get("max_context_window"))
-                    .or_else(|| entry.get("max_context_window_tokens"))
+                let context_window = entry.get("context_window");
+                let max_context_window = entry
+                    .get("max_context_window")
+                    .or_else(|| entry.get("max_context_window_tokens"));
+                let context_window = if matches!(
+                    expected.as_str(),
+                    "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
+                ) {
+                    max_context_window.or(context_window)
+                } else {
+                    context_window.or(max_context_window)
+                };
+                context_window
                     .and_then(serde_json::Value::as_u64)
                     .filter(|context_window| *context_window > 1)
             })

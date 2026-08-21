@@ -1,7 +1,10 @@
 //! Openai provider model catalog.
 
 use super::model;
-use super::{OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS, OPENAI_CONTEXT_WINDOW_TOKENS};
+use super::{
+    OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS, OPENAI_CONTEXT_WINDOW_TOKENS,
+    OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS,
+};
 use crate::OPENAI_ENDPOINTS;
 use crate::{ProviderId, ProviderModelSpec};
 
@@ -12,7 +15,7 @@ pub(super) const MODELS: &[ProviderModelSpec] = &[
         "gpt-5.6-luna",
         "GPT-5.6 Luna",
         "GPT-5.6 coding model for clear, repeatable agentic tasks.",
-        Some(OPENAI_CONTEXT_WINDOW_TOKENS),
+        Some(OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         OPENAI_ENDPOINTS,

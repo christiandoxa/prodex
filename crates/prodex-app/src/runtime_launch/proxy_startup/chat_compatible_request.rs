@@ -25,7 +25,7 @@ use prodex_provider_core::{
     deepseek_provider_core_top_logprobs_from_responses_request,
     deepseek_provider_core_user_id_from_responses_request,
     deepseek_provider_core_validate_reasoning_shape,
-    deepseek_provider_core_validate_tool_choice_name,
+    deepseek_provider_core_validate_tool_choice_name_with_max_bytes,
     deepseek_provider_core_validate_tool_choice_shape,
     deepseek_provider_core_validate_tool_choice_target,
     deepseek_provider_core_validate_tools_shape,
@@ -112,6 +112,7 @@ pub(super) fn runtime_provider_chat_compatible_request_body(
         &mut request,
         &tool_names,
         thinking_enabled,
+        provider_kind,
         provider_label,
     )?;
     runtime_provider_chat_compatible_optional_fields(
@@ -242,6 +243,7 @@ fn runtime_provider_chat_compatible_tool_choice(
     request: &mut serde_json::Map<String, serde_json::Value>,
     tool_names: &BTreeSet<String>,
     thinking_enabled: bool,
+    provider_kind: RuntimeProviderBridgeKind,
     provider_label: &str,
 ) -> Result<()> {
     deepseek_provider_core_validate_tool_choice_shape(value, thinking_enabled, provider_label)
@@ -251,8 +253,12 @@ fn runtime_provider_chat_compatible_tool_choice(
     else {
         return Ok(());
     };
-    deepseek_provider_core_validate_tool_choice_name(&tool_choice, provider_label)
-        .map_err(anyhow::Error::msg)?;
+    deepseek_provider_core_validate_tool_choice_name_with_max_bytes(
+        &tool_choice,
+        provider_label,
+        provider_kind.function_tool_name_max_bytes(),
+    )
+    .map_err(anyhow::Error::msg)?;
     deepseek_provider_core_validate_tool_choice_target(&tool_choice, tool_names, provider_label)
         .map_err(anyhow::Error::msg)?;
     request.insert("tool_choice".to_string(), tool_choice);

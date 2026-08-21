@@ -15,11 +15,13 @@ pub use self::function_tools::{
     deepseek_provider_core_function_tool_name, deepseek_provider_core_is_generic_function_tool,
     deepseek_provider_core_tool_name_from_tool_object,
     deepseek_provider_core_validate_function_name,
+    deepseek_provider_core_validate_function_name_with_max_bytes,
     deepseek_provider_core_validate_function_parameters,
 };
 use self::strict_schema::deepseek_provider_core_sanitize_strict_schema;
 pub use self::tool_choice::{
     deepseek_provider_core_validate_tool_choice_name,
+    deepseek_provider_core_validate_tool_choice_name_with_max_bytes,
     deepseek_provider_core_validate_tool_choice_shape,
     deepseek_provider_core_validate_tool_choice_target,
 };
@@ -57,6 +59,20 @@ pub fn deepseek_provider_core_dedup_and_validate_function_tools(
     strict_tools: bool,
     provider_label: &str,
 ) -> Result<Vec<serde_json::Value>, String> {
+    deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
+        tools,
+        strict_tools,
+        provider_label,
+        64,
+    )
+}
+
+pub fn deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
+    tools: Vec<serde_json::Value>,
+    strict_tools: bool,
+    provider_label: &str,
+    max_name_bytes: usize,
+) -> Result<Vec<serde_json::Value>, String> {
     let mut seen_tools = BTreeMap::<String, serde_json::Value>::new();
     let mut deduped = Vec::new();
     for tool in tools {
@@ -64,6 +80,7 @@ pub fn deepseek_provider_core_dedup_and_validate_function_tools(
             tool,
             strict_tools,
             provider_label,
+            max_name_bytes,
             &mut seen_tools,
             &mut deduped,
         )?;
@@ -75,6 +92,7 @@ fn deepseek_provider_core_process_function_tool(
     mut tool: serde_json::Value,
     strict_tools: bool,
     provider_label: &str,
+    max_name_bytes: usize,
     seen_tools: &mut BTreeMap<String, serde_json::Value>,
     deduped: &mut Vec<serde_json::Value>,
 ) -> Result<(), String> {
@@ -82,7 +100,11 @@ fn deepseek_provider_core_process_function_tool(
         deduped.push(tool);
         return Ok(());
     };
-    deepseek_provider_core_validate_function_name(&name, provider_label)?;
+    deepseek_provider_core_validate_function_name_with_max_bytes(
+        &name,
+        provider_label,
+        max_name_bytes,
+    )?;
     deepseek_provider_core_validate_function_parameters(&tool, &name, provider_label)?;
     if !strict_tools
         && tool

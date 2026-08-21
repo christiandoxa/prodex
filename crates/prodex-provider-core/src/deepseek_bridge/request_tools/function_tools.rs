@@ -41,14 +41,22 @@ pub fn deepseek_provider_core_validate_function_name(
     name: &str,
     provider_label: &str,
 ) -> Result<(), String> {
+    deepseek_provider_core_validate_function_name_with_max_bytes(name, provider_label, 64)
+}
+
+pub fn deepseek_provider_core_validate_function_name_with_max_bytes(
+    name: &str,
+    provider_label: &str,
+    max_name_bytes: usize,
+) -> Result<(), String> {
     if name.is_empty()
-        || name.len() > 64
+        || name.len() > max_name_bytes
         || !name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
     {
         return Err(format!(
-            "{provider_label} function tool names must use only letters, numbers, underscores, or dashes and be at most 64 bytes"
+            "{provider_label} function tool names must use only letters, numbers, underscores, or dashes and be at most {max_name_bytes} bytes"
         ));
     }
     Ok(())

@@ -90,6 +90,13 @@ impl RuntimeProviderBridgeKind {
             Self::Kiro => "Kiro",
         }
     }
+
+    pub(super) fn function_tool_name_max_bytes(self) -> usize {
+        match self {
+            Self::Gemini | Self::OpenAiResponses => 128,
+            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Kiro => 64,
+        }
+    }
 }
 
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {
