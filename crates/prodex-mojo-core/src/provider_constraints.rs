@@ -56,7 +56,6 @@ pub struct Result {
     pub adjustment_reason: Option<i64>,
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 unsafe extern "C" {
     fn prodex_provider_constraints_evaluate(
         policy_enabled: i64,
@@ -102,135 +101,117 @@ unsafe extern "C" {
 }
 
 pub fn evaluate(input: Input) -> Option<Result> {
-    #[cfg(not(prodex_mojo_fallback))]
+    let mut decision = 0_i64;
+    let mut eligible = 0_i64;
+    let mut missing_feature_present = 0_i64;
+    let mut missing_feature = 0_i64;
+    let mut adjusted_output_tokens = 0_u64;
+    let mut adjusted_output_present = 0_i64;
+    let mut total_required_tokens = 0_u64;
+    let mut available_context_tokens = 0_u64;
+    let mut available_context_present = 0_i64;
+    let mut max_output_tokens = 0_u64;
+    let mut max_output_present = 0_i64;
+    let mut warnings = 0_u64;
+    let mut adjustment_field = 0_i64;
+    let mut adjustment_field_present = 0_i64;
+    let mut adjustment_reason = 0_i64;
+    let mut adjustment_reason_present = 0_i64;
+    let status = unsafe {
+        prodex_provider_constraints_evaluate(
+            i64::from(input.policy_enabled),
+            i64::from(input.endpoint_supported),
+            i64::from(input.catalog_entry_present),
+            i64::from(input.embeddings_endpoint),
+            i64::from(input.missing_feature.is_some()),
+            input.missing_feature.unwrap_or(0),
+            i64::from(input.reasoning_effort_unsupported),
+            input.estimated_input_tokens,
+            input.explicit_output_tokens.unwrap_or(0),
+            i64::from(input.explicit_output_tokens.is_some()),
+            input.default_output_reserve_tokens.unwrap_or(0),
+            i64::from(input.default_output_reserve_tokens.is_some()),
+            input.reasoning_reserve_tokens.unwrap_or(0),
+            i64::from(input.reasoning_reserve_tokens.is_some()),
+            input.max_output_tokens.unwrap_or(0),
+            i64::from(input.max_output_tokens.is_some()),
+            input.context_window_tokens.unwrap_or(0),
+            i64::from(input.context_window_tokens.is_some()),
+            input.unknown_context_policy,
+            input.safe_window_tokens,
+            input.oversized_output_policy,
+            input.output_limit_field.unwrap_or(0),
+            i64::from(input.output_limit_field.is_some()),
+            &mut decision,
+            &mut eligible,
+            &mut missing_feature_present,
+            &mut missing_feature,
+            &mut adjusted_output_tokens,
+            &mut adjusted_output_present,
+            &mut total_required_tokens,
+            &mut available_context_tokens,
+            &mut available_context_present,
+            &mut max_output_tokens,
+            &mut max_output_present,
+            &mut warnings,
+            &mut adjustment_field,
+            &mut adjustment_field_present,
+            &mut adjustment_reason,
+            &mut adjustment_reason_present,
+        )
+    };
+    if status != 0
+        || !matches!(eligible, 0 | 1)
+        || !matches!(missing_feature_present, 0 | 1)
+        || !matches!(adjusted_output_present, 0 | 1)
+        || !matches!(available_context_present, 0 | 1)
+        || !matches!(max_output_present, 0 | 1)
+        || !matches!(adjustment_field_present, 0 | 1)
+        || !matches!(adjustment_reason_present, 0 | 1)
+        || !(PROVIDER_CONSTRAINT_COMPATIBLE..=PROVIDER_CONSTRAINT_OUTPUT_CLAMPED)
+            .contains(&decision)
+        || (missing_feature_present == 1 && !(0..=8).contains(&missing_feature))
+        || warnings & !0x1fff != 0
     {
-        let mut decision = 0_i64;
-        let mut eligible = 0_i64;
-        let mut missing_feature_present = 0_i64;
-        let mut missing_feature = 0_i64;
-        let mut adjusted_output_tokens = 0_u64;
-        let mut adjusted_output_present = 0_i64;
-        let mut total_required_tokens = 0_u64;
-        let mut available_context_tokens = 0_u64;
-        let mut available_context_present = 0_i64;
-        let mut max_output_tokens = 0_u64;
-        let mut max_output_present = 0_i64;
-        let mut warnings = 0_u64;
-        let mut adjustment_field = 0_i64;
-        let mut adjustment_field_present = 0_i64;
-        let mut adjustment_reason = 0_i64;
-        let mut adjustment_reason_present = 0_i64;
-        let status = unsafe {
-            prodex_provider_constraints_evaluate(
-                i64::from(input.policy_enabled),
-                i64::from(input.endpoint_supported),
-                i64::from(input.catalog_entry_present),
-                i64::from(input.embeddings_endpoint),
-                i64::from(input.missing_feature.is_some()),
-                input.missing_feature.unwrap_or(0),
-                i64::from(input.reasoning_effort_unsupported),
-                input.estimated_input_tokens,
-                input.explicit_output_tokens.unwrap_or(0),
-                i64::from(input.explicit_output_tokens.is_some()),
-                input.default_output_reserve_tokens.unwrap_or(0),
-                i64::from(input.default_output_reserve_tokens.is_some()),
-                input.reasoning_reserve_tokens.unwrap_or(0),
-                i64::from(input.reasoning_reserve_tokens.is_some()),
-                input.max_output_tokens.unwrap_or(0),
-                i64::from(input.max_output_tokens.is_some()),
-                input.context_window_tokens.unwrap_or(0),
-                i64::from(input.context_window_tokens.is_some()),
-                input.unknown_context_policy,
-                input.safe_window_tokens,
-                input.oversized_output_policy,
-                input.output_limit_field.unwrap_or(0),
-                i64::from(input.output_limit_field.is_some()),
-                &mut decision,
-                &mut eligible,
-                &mut missing_feature_present,
-                &mut missing_feature,
-                &mut adjusted_output_tokens,
-                &mut adjusted_output_present,
-                &mut total_required_tokens,
-                &mut available_context_tokens,
-                &mut available_context_present,
-                &mut max_output_tokens,
-                &mut max_output_present,
-                &mut warnings,
-                &mut adjustment_field,
-                &mut adjustment_field_present,
-                &mut adjustment_reason,
-                &mut adjustment_reason_present,
-            )
-        };
-        if status != 0
-            || !matches!(eligible, 0 | 1)
-            || !matches!(missing_feature_present, 0 | 1)
-            || !matches!(adjusted_output_present, 0 | 1)
-            || !matches!(available_context_present, 0 | 1)
-            || !matches!(max_output_present, 0 | 1)
-            || !matches!(adjustment_field_present, 0 | 1)
-            || !matches!(adjustment_reason_present, 0 | 1)
-            || !(PROVIDER_CONSTRAINT_COMPATIBLE..=PROVIDER_CONSTRAINT_OUTPUT_CLAMPED)
-                .contains(&decision)
-            || (missing_feature_present == 1 && !(0..=8).contains(&missing_feature))
-            || warnings & !0x1fff != 0
-        {
-            return None;
-        }
-        Some(Result {
-            decision,
-            eligible: eligible == 1,
-            missing_feature: (missing_feature_present == 1).then_some(missing_feature),
-            adjusted_output_tokens: (adjusted_output_present == 1)
-                .then_some(adjusted_output_tokens),
-            total_required_tokens,
-            available_context_tokens: (available_context_present == 1)
-                .then_some(available_context_tokens),
-            max_output_tokens: (max_output_present == 1).then_some(max_output_tokens),
-            warnings,
-            adjustment_field: (adjustment_field_present == 1).then_some(adjustment_field),
-            adjustment_reason: (adjustment_reason_present == 1).then_some(adjustment_reason),
-        })
+        return None;
     }
-
-    #[cfg(prodex_mojo_fallback)]
-    {
-        let _ = input;
-        None
-    }
+    Some(Result {
+        decision,
+        eligible: eligible == 1,
+        missing_feature: (missing_feature_present == 1).then_some(missing_feature),
+        adjusted_output_tokens: (adjusted_output_present == 1).then_some(adjusted_output_tokens),
+        total_required_tokens,
+        available_context_tokens: (available_context_present == 1)
+            .then_some(available_context_tokens),
+        max_output_tokens: (max_output_present == 1).then_some(max_output_tokens),
+        warnings,
+        adjustment_field: (adjustment_field_present == 1).then_some(adjustment_field),
+        adjustment_reason: (adjustment_reason_present == 1).then_some(adjustment_reason),
+    })
 }
 
 pub fn self_test() -> bool {
-    #[cfg(prodex_mojo_fallback)]
-    {
-        return true;
-    }
-
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        evaluate(Input {
-            policy_enabled: true,
-            endpoint_supported: true,
-            catalog_entry_present: true,
-            embeddings_endpoint: false,
-            missing_feature: None,
-            reasoning_effort_unsupported: false,
-            estimated_input_tokens: 10,
-            explicit_output_tokens: Some(20),
-            default_output_reserve_tokens: None,
-            reasoning_reserve_tokens: None,
-            max_output_tokens: Some(100),
-            context_window_tokens: Some(100),
-            unknown_context_policy: PROVIDER_CONSTRAINT_UNKNOWN_ALLOW,
-            safe_window_tokens: 50,
-            oversized_output_policy: PROVIDER_CONSTRAINT_OVERSIZED_PASSTHROUGH,
-            output_limit_field: Some(PROVIDER_CONSTRAINT_OUTPUT_FIELD_MAX_OUTPUT),
-        })
-        .is_some_and(|result| {
-            result.decision == PROVIDER_CONSTRAINT_COMPATIBLE
-                && result.eligible
-                && result.total_required_tokens == 30
-        })
-    }
+    evaluate(Input {
+        policy_enabled: true,
+        endpoint_supported: true,
+        catalog_entry_present: true,
+        embeddings_endpoint: false,
+        missing_feature: None,
+        reasoning_effort_unsupported: false,
+        estimated_input_tokens: 10,
+        explicit_output_tokens: Some(20),
+        default_output_reserve_tokens: None,
+        reasoning_reserve_tokens: None,
+        max_output_tokens: Some(100),
+        context_window_tokens: Some(100),
+        unknown_context_policy: PROVIDER_CONSTRAINT_UNKNOWN_ALLOW,
+        safe_window_tokens: 50,
+        oversized_output_policy: PROVIDER_CONSTRAINT_OVERSIZED_PASSTHROUGH,
+        output_limit_field: Some(PROVIDER_CONSTRAINT_OUTPUT_FIELD_MAX_OUTPUT),
+    })
+    .is_some_and(|result| {
+        result.decision == PROVIDER_CONSTRAINT_COMPATIBLE
+            && result.eligible
+            && result.total_required_tokens == 30
+    })
 }

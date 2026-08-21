@@ -179,9 +179,7 @@ fn score_component(
 #[cfg(all(test, feature = "mojo"))]
 #[test]
 fn mojo_feature_requires_real_compiled_routing_core() {
-    if prodex_mojo_core::MOJO_REQUIRED
-        && (!prodex_mojo_core::MOJO_ACTIVE || prodex_mojo_core::MOJO_FALLBACK)
-    {
+    if prodex_mojo_core::MOJO_REQUIRED && !prodex_mojo_core::MOJO_ACTIVE {
         panic!("strict Mojo mode unexpectedly activated the Rust fallback");
     }
 }

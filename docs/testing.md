@@ -100,7 +100,7 @@ Normal Rust development does not require Mojo:
 cargo test --locked
 ```
 
-The optional local path keeps the Rust fallback available when `mojo` is absent:
+Rust-only development omits Mojo features; enabling a Mojo feature requires the compiler:
 
 ```bash
 cargo test --locked -p prodex-quota --features mojo
@@ -128,9 +128,8 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
 target/debug/prodex doctor --runtime --json
 ```
 
-Strict mode fails if the Mojo feature is disabled, the compiler or archiver is missing,
-the checked-out Mojo source does not compile, or the build would activate the Rust
-fallback. The authoritative `Real Mojo / parity` job is part of
+Strict Mojo builds fail if the compiler or archiver is missing, the checked-out Mojo source
+does not compile, or the static archive is missing. The authoritative `Real Mojo / parity` job is part of
 `.github/workflows/ci.yml`; it also runs
 the built `prodex --version` binary and checks the generated static archives.
 

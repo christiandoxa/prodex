@@ -38,7 +38,6 @@ pub fn main_quota_aggregation_self_test() -> bool {
     })
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 unsafe extern "C" {
     fn prodex_quota_remaining_percent(used_percent: i64, has_value: i64) -> i64;
     fn prodex_quota_window_status(remaining_percent: i64, has_window: i64) -> i64;
@@ -69,149 +68,70 @@ pub fn main_quota_aggregate_batch(
         return None;
     }
 
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let remaining_percent = inputs
-            .iter()
-            .map(|input| input.remaining_percent.unwrap_or_default())
-            .collect::<Vec<_>>();
-        let remaining_present = inputs
-            .iter()
-            .map(|input| i64::from(input.remaining_percent.is_some()))
-            .collect::<Vec<_>>();
-        let reset_at = inputs
-            .iter()
-            .map(|input| input.reset_at.unwrap_or_default())
-            .collect::<Vec<_>>();
-        let reset_present = inputs
-            .iter()
-            .map(|input| i64::from(input.reset_at.is_some()))
-            .collect::<Vec<_>>();
-        let mut profiles_with_data = 0_i64;
-        let mut pool_remaining = 0_i64;
-        let mut earliest_reset_at = 0_i64;
-        let mut earliest_present = 0_i64;
-        let status = unsafe {
-            prodex_quota_main_aggregate_batch(
-                remaining_percent.as_ptr(),
-                remaining_present.as_ptr(),
-                reset_at.as_ptr(),
-                reset_present.as_ptr(),
-                &mut profiles_with_data,
-                &mut pool_remaining,
-                &mut earliest_reset_at,
-                &mut earliest_present,
-                i64::try_from(inputs.len()).ok()?,
-            )
-        };
-        if status == 0 && profiles_with_data >= 0 && matches!(earliest_present, 0 | 1) {
-            return Some(MainQuotaAggregation {
-                profiles_with_data: usize::try_from(profiles_with_data).ok()?,
-                pool_remaining,
-                earliest_reset_at: (earliest_present == 1).then_some(earliest_reset_at),
-            });
-        }
-    }
-
-    let mut aggregate = MainQuotaAggregation {
-        profiles_with_data: 0,
-        pool_remaining: 0,
-        earliest_reset_at: None,
+    let remaining_percent = inputs
+        .iter()
+        .map(|input| input.remaining_percent.unwrap_or_default())
+        .collect::<Vec<_>>();
+    let remaining_present = inputs
+        .iter()
+        .map(|input| i64::from(input.remaining_percent.is_some()))
+        .collect::<Vec<_>>();
+    let reset_at = inputs
+        .iter()
+        .map(|input| input.reset_at.unwrap_or_default())
+        .collect::<Vec<_>>();
+    let reset_present = inputs
+        .iter()
+        .map(|input| i64::from(input.reset_at.is_some()))
+        .collect::<Vec<_>>();
+    let mut profiles_with_data = 0_i64;
+    let mut pool_remaining = 0_i64;
+    let mut earliest_reset_at = 0_i64;
+    let mut earliest_present = 0_i64;
+    let status = unsafe {
+        prodex_quota_main_aggregate_batch(
+            remaining_percent.as_ptr(),
+            remaining_present.as_ptr(),
+            reset_at.as_ptr(),
+            reset_present.as_ptr(),
+            &mut profiles_with_data,
+            &mut pool_remaining,
+            &mut earliest_reset_at,
+            &mut earliest_present,
+            i64::try_from(inputs.len()).ok()?,
+        )
     };
-    for input in inputs {
-        let Some(remaining_percent) = input.remaining_percent else {
-            continue;
-        };
-        aggregate.profiles_with_data = aggregate.profiles_with_data.saturating_add(1);
-        aggregate.pool_remaining = aggregate.pool_remaining.saturating_add(remaining_percent);
-        if let Some(reset_at) = input.reset_at {
-            aggregate.earliest_reset_at = Some(
-                aggregate
-                    .earliest_reset_at
-                    .map_or(reset_at, |current| current.min(reset_at)),
-            );
-        }
+    if status == 0 && profiles_with_data >= 0 && matches!(earliest_present, 0 | 1) {
+        return Some(MainQuotaAggregation {
+            profiles_with_data: usize::try_from(profiles_with_data).ok()?,
+            pool_remaining,
+            earliest_reset_at: (earliest_present == 1).then_some(earliest_reset_at),
+        });
     }
-    Some(aggregate)
+    None
 }
 
 pub fn remaining_percent(used_percent: Option<i64>) -> i64 {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        unsafe {
-            prodex_quota_remaining_percent(
-                used_percent.unwrap_or(0),
-                i64::from(used_percent.is_some()),
-            )
-        }
-    }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        match used_percent {
-            None => 0,
-            Some(value) if value < 0 => 100,
-            Some(value) if value > 100 => 0,
-            Some(value) => 100 - value,
-        }
+    unsafe {
+        prodex_quota_remaining_percent(used_percent.unwrap_or(0), i64::from(used_percent.is_some()))
     }
 }
 
 pub fn window_status(remaining_percent: i64, has_window: bool) -> i64 {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        unsafe { prodex_quota_window_status(remaining_percent, i64::from(has_window)) }
-    }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        if !has_window {
-            4
-        } else if remaining_percent == 0 {
-            3
-        } else if remaining_percent <= 5 {
-            2
-        } else if remaining_percent <= 15 {
-            1
-        } else {
-            0
-        }
-    }
+    unsafe { prodex_quota_window_status(remaining_percent, i64::from(has_window)) }
 }
 
 pub fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        unsafe { prodex_quota_pressure_band(five_hour_status, weekly_status) }
-    }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        fn band(status: i64) -> i64 {
-            match status {
-                0 => 0,
-                1 => 1,
-                2 => 2,
-                3 => 3,
-                _ => 4,
-            }
-        }
-        band(five_hour_status).max(band(weekly_status))
-    }
+    unsafe { prodex_quota_pressure_band(five_hour_status, weekly_status) }
 }
 
 pub fn window_pair_has_ready_limit(first: Option<i64>, second: Option<i64>) -> bool {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        unsafe {
-            prodex_quota_window_pair_has_ready_limit(
-                first.unwrap_or(0),
-                i64::from(first.is_some()),
-                second.unwrap_or(0),
-                i64::from(second.is_some()),
-            ) != 0
-        }
-    }
-    #[cfg(prodex_mojo_fallback)]
-    {
-        let values = [first, second].into_iter().flatten().collect::<Vec<_>>();
-        !values.is_empty() && values.into_iter().all(|value| value < 100)
+    unsafe {
+        prodex_quota_window_pair_has_ready_limit(
+            first.unwrap_or(0),
+            i64::from(first.is_some()),
+            second.unwrap_or(0),
+            i64::from(second.is_some()),
+        ) != 0
     }
 }

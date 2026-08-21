@@ -191,6 +191,7 @@ pub enum RuntimeOptimisticCurrentCandidateSkipReason {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg(any(not(feature = "mojo"), test))]
 enum RuntimeOptimisticCurrentCandidatePredicate {
     Availability,
     QuotaEvidence,
@@ -200,6 +201,7 @@ enum RuntimeOptimisticCurrentCandidatePredicate {
     PromptCacheAffinity,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 const RUNTIME_OPTIMISTIC_CURRENT_CANDIDATE_PREDICATES:
     [RuntimeOptimisticCurrentCandidatePredicate; 6] = [
     RuntimeOptimisticCurrentCandidatePredicate::Availability,
@@ -210,6 +212,7 @@ const RUNTIME_OPTIMISTIC_CURRENT_CANDIDATE_PREDICATES:
     RuntimeOptimisticCurrentCandidatePredicate::PromptCacheAffinity,
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 impl RuntimeOptimisticCurrentCandidatePredicate {
     fn reject(
         self,
@@ -250,6 +253,7 @@ impl RuntimeOptimisticCurrentCandidatePredicate {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn optimistic_current_availability_rejection(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
@@ -268,6 +272,7 @@ fn optimistic_current_availability_rejection(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn optimistic_current_quota_rejection(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
@@ -335,13 +340,16 @@ pub fn runtime_optimistic_current_candidate_decision(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
     #[cfg(feature = "mojo")]
-    if let Some(result) = optimistic_current_candidate_decision_mojo(input) {
-        return result;
+    {
+        optimistic_current_candidate_decision_mojo(input)
+            .expect("Mojo optimistic candidate decision returned an invalid tag")
     }
 
+    #[cfg(not(feature = "mojo"))]
     runtime_optimistic_current_candidate_decision_rust(input)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_optimistic_current_candidate_decision_rust(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
@@ -524,10 +532,11 @@ pub fn build_runtime_response_candidate_execution_plan(
         .collect::<Vec<_>>();
 
     #[cfg(feature = "mojo")]
-    if let Some(plan) =
-        crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
     {
-        return RuntimeResponseCandidateExecutionPlan {
+        let plan =
+            crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
+                .expect("Mojo runtime candidate plan returned invalid indices");
+        RuntimeResponseCandidateExecutionPlan {
             ready_candidates: plan
                 .ready_indices
                 .into_iter()
@@ -538,45 +547,48 @@ pub fn build_runtime_response_candidate_execution_plan(
                 .into_iter()
                 .map(|index| available_candidates[index].clone())
                 .collect(),
-        };
+        }
     }
 
-    let mut ready_candidates = available_candidates
-        .iter()
-        .filter(|candidate| !candidate.in_selection_backoff)
-        .cloned()
-        .collect::<Vec<_>>();
-    ready_candidates.sort_by_key(|candidate| {
-        (
-            candidate.provider_priority,
-            candidate.quota_sort_key,
-            runtime_response_quota_source_sort_key(options.route_kind, candidate.quota_source),
-            candidate.inflight_count,
-            candidate.health_sort_key,
-            candidate.prompt_cache_affinity_sort_key,
-            candidate.order_index,
-            candidate.jitter,
-        )
-    });
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut ready_candidates = available_candidates
+            .iter()
+            .filter(|candidate| !candidate.in_selection_backoff)
+            .cloned()
+            .collect::<Vec<_>>();
+        ready_candidates.sort_by_key(|candidate| {
+            (
+                candidate.provider_priority,
+                candidate.quota_sort_key,
+                runtime_response_quota_source_sort_key(options.route_kind, candidate.quota_source),
+                candidate.inflight_count,
+                candidate.health_sort_key,
+                candidate.prompt_cache_affinity_sort_key,
+                candidate.order_index,
+                candidate.jitter,
+            )
+        });
 
-    let mut fallback_candidates = available_candidates;
-    fallback_candidates.sort_by_key(|candidate| {
-        (
-            candidate.backoff_sort_key,
-            candidate.provider_priority,
-            candidate.quota_sort_key,
-            runtime_response_quota_source_sort_key(options.route_kind, candidate.quota_source),
-            candidate.inflight_count,
-            candidate.health_sort_key,
-            candidate.prompt_cache_affinity_sort_key,
-            candidate.order_index,
-            candidate.jitter,
-        )
-    });
+        let mut fallback_candidates = available_candidates;
+        fallback_candidates.sort_by_key(|candidate| {
+            (
+                candidate.backoff_sort_key,
+                candidate.provider_priority,
+                candidate.quota_sort_key,
+                runtime_response_quota_source_sort_key(options.route_kind, candidate.quota_source),
+                candidate.inflight_count,
+                candidate.health_sort_key,
+                candidate.prompt_cache_affinity_sort_key,
+                candidate.order_index,
+                candidate.jitter,
+            )
+        });
 
-    RuntimeResponseCandidateExecutionPlan {
-        ready_candidates,
-        fallback_candidates,
+        RuntimeResponseCandidateExecutionPlan {
+            ready_candidates,
+            fallback_candidates,
+        }
     }
 }
 

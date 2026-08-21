@@ -68,7 +68,6 @@ pub struct SmartContextRehydratePlan {
     pub used_tokens: u64,
 }
 
-#[cfg(not(prodex_mojo_fallback))]
 unsafe extern "C" {
     fn prodex_runtime_optimistic_current_candidate_decision(
         route_kind: i64,
@@ -129,26 +128,18 @@ pub fn profile_scores_self_test() -> bool {
 }
 
 pub fn rehydrate_plan_self_test() -> bool {
-    #[cfg(prodex_mojo_fallback)]
-    {
-        return true;
-    }
-
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        smart_context_rehydrate_plan_batch(
-            &[SmartContextRehydrateInput {
-                token_cost: 4,
-                required: true,
-                available: true,
-            }],
-            4,
-            SMART_CONTEXT_REHYDRATE_EXACT_TIER,
-        )
-        .is_some_and(|plan| {
-            plan.action_tags == [SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE] && plan.used_tokens == 4
-        })
-    }
+    smart_context_rehydrate_plan_batch(
+        &[SmartContextRehydrateInput {
+            token_cost: 4,
+            required: true,
+            available: true,
+        }],
+        4,
+        SMART_CONTEXT_REHYDRATE_EXACT_TIER,
+    )
+    .is_some_and(|plan| {
+        plan.action_tags == [SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE] && plan.used_tokens == 4
+    })
 }
 
 pub fn tuning_defaults_self_test() -> bool {
@@ -162,37 +153,28 @@ pub fn tuning_defaults_self_test() -> bool {
 }
 
 pub fn optimistic_current_candidate_decision(input: OptimisticCandidateInput) -> Option<i64> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let result = unsafe {
-            prodex_runtime_optimistic_current_candidate_decision(
-                input.route_kind,
-                i64::from(input.auth_failure_active),
-                i64::from(input.in_selection_backoff),
-                i64::from(input.circuit_open),
-                i64::from(input.health_score),
-                i64::from(input.performance_score),
-                i64::from(input.current_profile_quota_compatible),
-                i64::from(input.has_alternative_quota_compatible_profile),
-                input.quota_band,
-                i64::from(input.quota_source.is_some()),
-                input.quota_source.unwrap_or(0),
-                i64::try_from(input.inflight_count).unwrap_or(i64::MAX),
-                i64::try_from(input.inflight_soft_limit).unwrap_or(i64::MAX),
-                i64::from(input.prompt_cache_present),
-                i64::from(input.prompt_cache_owner_matches),
-            )
-        };
-        (OPTIMISTIC_CANDIDATE_KEEP..=OPTIMISTIC_CANDIDATE_PROMPT_CACHE)
-            .contains(&result)
-            .then_some(result)
-    }
-
-    #[cfg(prodex_mojo_fallback)]
-    {
-        let _ = input;
-        None
-    }
+    let result = unsafe {
+        prodex_runtime_optimistic_current_candidate_decision(
+            input.route_kind,
+            i64::from(input.auth_failure_active),
+            i64::from(input.in_selection_backoff),
+            i64::from(input.circuit_open),
+            i64::from(input.health_score),
+            i64::from(input.performance_score),
+            i64::from(input.current_profile_quota_compatible),
+            i64::from(input.has_alternative_quota_compatible_profile),
+            input.quota_band,
+            i64::from(input.quota_source.is_some()),
+            input.quota_source.unwrap_or(0),
+            i64::try_from(input.inflight_count).unwrap_or(i64::MAX),
+            i64::try_from(input.inflight_soft_limit).unwrap_or(i64::MAX),
+            i64::from(input.prompt_cache_present),
+            i64::from(input.prompt_cache_owner_matches),
+        )
+    };
+    (OPTIMISTIC_CANDIDATE_KEEP..=OPTIMISTIC_CANDIDATE_PROMPT_CACHE)
+        .contains(&result)
+        .then_some(result)
 }
 
 pub fn smart_context_rehydrate_plan_batch(
@@ -204,88 +186,70 @@ pub fn smart_context_rehydrate_plan_batch(
         return None;
     }
     let token_budget = u64::try_from(token_budget).ok()?;
-    #[cfg(prodex_mojo_fallback)]
-    let _ = (token_budget, tier);
-
-    #[cfg(not(prodex_mojo_fallback))]
+    let token_costs = inputs
+        .iter()
+        .map(|input| input.token_cost)
+        .collect::<Vec<_>>();
+    let required = inputs
+        .iter()
+        .map(|input| i64::from(input.required))
+        .collect::<Vec<_>>();
+    let available = inputs
+        .iter()
+        .map(|input| i64::from(input.available))
+        .collect::<Vec<_>>();
+    let mut action_tags = vec![0_i64; inputs.len()];
+    let mut used_tokens = 0_u64;
+    let status = unsafe {
+        prodex_smart_context_rehydrate_plan_batch(
+            token_costs.as_ptr(),
+            required.as_ptr(),
+            available.as_ptr(),
+            action_tags.as_mut_ptr(),
+            &mut used_tokens,
+            i64::try_from(inputs.len()).ok()?,
+            token_budget,
+            tier,
+        )
+    };
+    if status == 0
+        && action_tags.iter().all(|tag| {
+            (SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE..=SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL)
+                .contains(tag)
+        })
     {
-        let token_costs = inputs
-            .iter()
-            .map(|input| input.token_cost)
-            .collect::<Vec<_>>();
-        let required = inputs
-            .iter()
-            .map(|input| i64::from(input.required))
-            .collect::<Vec<_>>();
-        let available = inputs
-            .iter()
-            .map(|input| i64::from(input.available))
-            .collect::<Vec<_>>();
-        let mut action_tags = vec![0_i64; inputs.len()];
-        let mut used_tokens = 0_u64;
-        let status = unsafe {
-            prodex_smart_context_rehydrate_plan_batch(
-                token_costs.as_ptr(),
-                required.as_ptr(),
-                available.as_ptr(),
-                action_tags.as_mut_ptr(),
-                &mut used_tokens,
-                i64::try_from(inputs.len()).ok()?,
-                token_budget,
-                tier,
-            )
-        };
-        if status == 0
-            && action_tags.iter().all(|tag| {
-                (SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE..=SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL)
-                    .contains(tag)
-            })
-        {
-            return Some(SmartContextRehydratePlan {
-                action_tags,
-                used_tokens,
-            });
-        }
+        return Some(SmartContextRehydratePlan {
+            action_tags,
+            used_tokens,
+        });
     }
     None
 }
 
 pub fn runtime_tuning_defaults(parallelism: usize) -> Option<RuntimeTuningDefaults> {
-    #[cfg(not(prodex_mojo_fallback))]
-    {
-        let mut values = [0_i64; 7];
-        let status = unsafe {
-            prodex_runtime_tuning_defaults(
-                i64::try_from(parallelism).unwrap_or(i64::MAX),
-                &mut values[0],
-                &mut values[1],
-                &mut values[2],
-                &mut values[3],
-                &mut values[4],
-                &mut values[5],
-                &mut values[6],
-            )
-        };
-        if status == 0 {
-            return Some(RuntimeTuningDefaults {
-                worker_count: usize::try_from(values[0]).ok()?,
-                long_lived_worker_count: usize::try_from(values[1]).ok()?,
-                probe_refresh_worker_count: usize::try_from(values[2]).ok()?,
-                async_worker_count: usize::try_from(values[3]).ok()?,
-                log_queue_capacity: usize::try_from(values[4]).ok()?,
-                websocket_connect_worker_count: usize::try_from(values[5]).ok()?,
-                websocket_dns_worker_count: usize::try_from(values[6]).ok()?,
-            });
-        }
+    let mut values = [0_i64; 7];
+    let status = unsafe {
+        prodex_runtime_tuning_defaults(
+            i64::try_from(parallelism).unwrap_or(i64::MAX),
+            &mut values[0],
+            &mut values[1],
+            &mut values[2],
+            &mut values[3],
+            &mut values[4],
+            &mut values[5],
+            &mut values[6],
+        )
+    };
+    if status == 0 {
+        return Some(RuntimeTuningDefaults {
+            worker_count: usize::try_from(values[0]).ok()?,
+            long_lived_worker_count: usize::try_from(values[1]).ok()?,
+            probe_refresh_worker_count: usize::try_from(values[2]).ok()?,
+            async_worker_count: usize::try_from(values[3]).ok()?,
+            log_queue_capacity: usize::try_from(values[4]).ok()?,
+            websocket_connect_worker_count: usize::try_from(values[5]).ok()?,
+            websocket_dns_worker_count: usize::try_from(values[6]).ok()?,
+        });
     }
-
-    Some(RuntimeTuningDefaults {
-        worker_count: parallelism.clamp(4, 12),
-        long_lived_worker_count: parallelism.saturating_mul(2).clamp(8, 24),
-        probe_refresh_worker_count: parallelism.clamp(2, 4),
-        async_worker_count: parallelism.clamp(2, 4),
-        log_queue_capacity: parallelism.saturating_mul(256).clamp(1_024, 8_192),
-        websocket_connect_worker_count: parallelism.clamp(4, 16),
-        websocket_dns_worker_count: parallelism.clamp(2, 8),
-    })
+    None
 }

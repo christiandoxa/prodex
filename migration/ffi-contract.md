@@ -130,9 +130,9 @@ archive outside the final Cargo output directory, then sets `PRODEX_MOJO_ARCHIVE
 target linker consumes that exact archive. Other target rows remain Rust-only until final-link,
 runtime, and deployment evidence exists.
 
-The Rust-only default and optional local Mojo build may still use the Rust fallback when
-the compiler is not installed. The dedicated real-Mojo CI lane sets
-`PRODEX_MOJO_REQUIRED=1`, so fallback is not accepted as coverage.
+Rust-only builds omit Mojo features. Once a Mojo feature is enabled, the compiler and archive
+are mandatory; a missing tool fails the build and invalid Mojo output fails the call without
+recomputing in Rust.
 
 ## Runtime-proxy route policy boundary
 
@@ -204,7 +204,7 @@ required mask.
 | Thread safety | Functions are stateless and reentrant; concurrent calls use disjoint caller-owned buffers |
 | Nullability | Non-zero per-record buffers must be valid; zero-count per-record buffers are not read or written, but scalar result pointers still need one writable slot |
 | Error propagation | Explicit integer status; no panic, exception, Rust enum, `Vec`, `String`, or `Result` crosses the boundary |
-| Fallback | Build-time missing Mojo selects the documented Rust fallback; strict builds fail. Capability negotiation falls back to Rust if its Mojo result is invalid; governed routing rejects an invalid plan result |
+| Failure behavior | Mojo-feature builds fail when the compiler/archive is unavailable or a result is invalid; Rust-only builds use their separately compiled Rust path |
 
 The 2026-08-21 additive exports are:
 

@@ -256,8 +256,7 @@ verify_staged_implementation() {
 
   diagnostics="$(PRODEX_HOME="$tmp_dir/verify-home" "$staged_path" doctor --runtime --json 2>/dev/null || true)"
   implementation="$(printf '%s\n' "$diagnostics" | awk -F '"' '/"implementation"[[:space:]]*:/ { print $4; exit }')"
-  if [ "$implementation" != "$expected_implementation" ] \
-    && ! { [ "$expected_implementation" = "rust" ] && [ "$implementation" = "rust-fallback" ]; }; then
+  if [ "$implementation" != "$expected_implementation" ]; then
     echo "Downloaded Prodex implementation $implementation did not match manifest $expected_implementation." >&2
     exit 1
   fi

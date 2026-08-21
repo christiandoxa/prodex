@@ -28,7 +28,7 @@ fn main() {
         );
     }
 
-    let required = mojo_required();
+    let required = !sources.is_empty() || mojo_required();
     if required {
         println!("cargo:rustc-cfg=prodex_mojo_required");
     }
@@ -48,8 +48,7 @@ fn main() {
     let mojo = mojo_override
         .clone()
         .unwrap_or_else(|| OsString::from("mojo"));
-    let ar_override = env::var_os("AR");
-    let ar = ar_override.clone().unwrap_or_else(|| OsString::from("ar"));
+    let ar = env::var_os("AR").unwrap_or_else(|| OsString::from("ar"));
     let target = env::var("PRODEX_MOJO_TARGET")
         .or_else(|_| env::var("TARGET"))
         .unwrap_or_else(|_| "x86_64-unknown-linux-gnu".to_string());
@@ -74,7 +73,6 @@ fn main() {
             &manifest_dir,
             &archive,
             &out_dir,
-            required,
         );
         return;
     }
@@ -82,18 +80,8 @@ fn main() {
     for (index, source) in sources.iter().enumerate() {
         let source = manifest_dir.join(source);
         let object = out_dir.join(format!("prodex_mojo_core_{index}.o"));
-        if !compile_mojo_source(
-            &mojo,
-            mojo_override.is_some(),
-            &target,
-            &target_cpu,
-            &source,
-            &object,
-            required,
-        ) || !archive_object(&ar, ar_override.is_some(), &archive, &object, required)
-        {
-            return;
-        }
+        compile_mojo_source(&mojo, &target, &target_cpu, &source, &object);
+        archive_object(&ar, &archive, &object);
     }
 
     emit_link(&out_dir);
@@ -104,18 +92,13 @@ fn link_prebuilt_archive(
     manifest_dir: &Path,
     archive: &Path,
     out_dir: &Path,
-    required: bool,
 ) {
     let prebuilt_archive = resolve_archive_path(prebuilt_archive, manifest_dir);
     if !prebuilt_archive.is_file() {
-        if required {
-            panic!(
-                "PRODEX_MOJO_ARCHIVE was required but does not exist: {}",
-                prebuilt_archive.display()
-            );
-        }
-        use_rust_fallback("configured Mojo archive does not exist");
-        return;
+        panic!(
+            "PRODEX_MOJO_ARCHIVE was required but does not exist: {}",
+            prebuilt_archive.display()
+        );
     }
     fs::copy(&prebuilt_archive, archive).unwrap_or_else(|error| {
         panic!(
@@ -132,13 +115,11 @@ fn link_prebuilt_archive(
 
 fn compile_mojo_source(
     mojo: &OsString,
-    configured: bool,
     target: &str,
     target_cpu: &str,
     source: &Path,
     object: &Path,
-    required: bool,
-) -> bool {
+) {
     let status = Command::new(mojo)
         .arg("build")
         .arg(source)
@@ -147,21 +128,11 @@ fn compile_mojo_source(
         .arg(object)
         .status();
     match status {
-        Ok(status) if status.success() => true,
+        Ok(status) if status.success() => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            if required {
-                panic!(
-                    "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
-                );
-            }
-            if configured {
-                panic!(
-                    "configured Mojo compiler `{}` was not found; fix PRODEX_MOJO or disable Mojo features",
-                    mojo.to_string_lossy()
-                );
-            }
-            use_rust_fallback("Mojo compiler not found on PATH");
-            false
+            panic!(
+                "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
+            );
         }
         Ok(status) => panic_on_failure("Mojo compiler", status, source),
         Err(error) => panic!(
@@ -171,32 +142,16 @@ fn compile_mojo_source(
     }
 }
 
-fn archive_object(
-    ar: &OsString,
-    configured: bool,
-    archive: &Path,
-    object: &Path,
-    required: bool,
-) -> bool {
+fn archive_object(ar: &OsString, archive: &Path, object: &Path) {
     let status = Command::new(ar)
         .args(["crus"])
         .arg(archive)
         .arg(object)
         .status();
     match status {
-        Ok(status) if status.success() => true,
+        Ok(status) if status.success() => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            if required {
-                panic!("static archiver was required but not found on PATH");
-            }
-            if configured {
-                panic!(
-                    "configured static archiver `{}` was not found; fix AR or disable Mojo features",
-                    ar.to_string_lossy()
-                );
-            }
-            use_rust_fallback("static archiver not found on PATH");
-            false
+            panic!("static archiver was required but not found on PATH");
         }
         Ok(status) => panic_on_failure("static archiver", status, archive),
         Err(error) => panic!(
@@ -258,11 +213,6 @@ fn resolve_archive_path(path: PathBuf, manifest_dir: &Path) -> PathBuf {
     } else {
         manifest_dir.join("../..").join(path)
     }
-}
-
-fn use_rust_fallback(reason: &str) {
-    println!("cargo:warning=prodex-mojo-core using Rust fallback: {reason}");
-    println!("cargo:rustc-cfg=prodex_mojo_fallback");
 }
 
 fn panic_on_failure(tool: &str, status: ExitStatus, path: &Path) -> ! {

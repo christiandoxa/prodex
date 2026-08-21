@@ -57,9 +57,8 @@ The `Real Mojo / parity` job in `.github/workflows/ci.yml` compiles the checked-
 `.mojo` sources, links their archives into Rust, runs the Mojo-backed quota, Smart Context
 pressure, runtime candidate ordering, provider-routing, and capability-negotiation tests, and
 runs the built `prodex --version` binary. The lane uses
-`PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` and the absence of
-`prodex_mojo_fallback` are asserted by tests. Rust-only CI keeps the default fallback
-behavior and does not satisfy this evidence contract.
+`PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` is asserted by tests. Rust-only CI omits
+the Mojo feature and does not satisfy this evidence contract.
 
 ## Shared core and release evidence
 
@@ -73,13 +72,13 @@ with one explicit `mojo-provider-constraints` feature for the provider-core owne
 
 ## 2026-08-21 promotion evidence
 
-| Kernel | Boundary shape | Maximum / tags | Float or strings | Fallback |
+| Kernel | Boundary shape | Maximum / tags | Float or strings | Rust retained outside `MOJO` |
 | --- | --- | --- | --- | --- |
-| Optimistic candidate decision | Fixed scalar integers and normalized booleans | 15 result tags; route/source/quota tags | Rust owns strings and comparisons | Rust ordered predicate oracle |
-| Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Rust resolved-input evaluator |
-| Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Rust admission loop |
-| Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Rust aggregate |
-| Runtime tuning defaults | Seven caller-owned scalar outputs | Bounded integer clamps | Rust owns host/config parsing and overrides | Rust default helpers |
+| Optimistic candidate decision | Fixed scalar integers and normalized booleans | 15 result tags; route/source/quota tags | Rust owns strings and comparisons | Test oracle; Rust-only path |
+| Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Test oracle; Rust-only path |
+| Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Test oracle; Rust-only path |
+| Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Test oracle; Rust-only path |
+| Runtime tuning defaults | Seven caller-owned scalar outputs | Bounded integer clamps | Rust owns host/config parsing and overrides | Test oracle; Rust-only path |
 
 All new calls are stateless and reentrant. No Rust object layout, string, collection, secret,
 path, persistent state, or provider payload crosses the ABI. The shared ABI version remains `1`
@@ -104,5 +103,5 @@ installation state.
 
 `compiler_required=false` is intentional for every compiled-in artifact: the shipped binary
 does not need a Mojo compiler at runtime. `build_strict=true` records that its build used
-`PRODEX_MOJO_REQUIRED=1`, so a missing compiler, archiver, or required target archive fails the
-build instead of selecting the Rust fallback. These fields must not be treated as synonyms.
+the strict Mojo feature path; a missing compiler, archiver, or required target archive fails the
+build. These fields must not be treated as synonyms.

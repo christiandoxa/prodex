@@ -179,15 +179,16 @@ pub fn smart_context_auto_rehydrate_plan(
     });
 
     #[cfg(feature = "mojo")]
-    if let Some(plan) =
-        smart_context_auto_rehydrate_plan_mojo(&refs, &available, token_budget, tier)
     {
-        return plan;
+        smart_context_auto_rehydrate_plan_mojo(&refs, &available, token_budget, tier)
+            .expect("Mojo Smart Context rehydration returned invalid output")
     }
 
+    #[cfg(not(feature = "mojo"))]
     smart_context_auto_rehydrate_plan_rust(&refs, &available, token_budget, tier)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn smart_context_auto_rehydrate_plan_rust(
     refs: &[SmartContextRehydrateRef],
     available: &BTreeSet<String>,
@@ -526,26 +527,28 @@ pub fn smart_context_pressure_snapshot(
     input: SmartContextPressureSnapshotInput<'_>,
 ) -> SmartContextPressureSnapshot {
     #[cfg(feature = "mojo")]
-    if let Some(snapshot) = crate::quota::mojo::smart_context_pressure_snapshot(
-        input.model_context_window_tokens,
-        input.reserved_output_tokens,
-        input.effective_input_tokens,
-        match input.effective_input_source {
-            SmartContextTokenAccountingSource::CurrentRequestTokens => 0,
-            SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => 1,
-            SmartContextTokenAccountingSource::ObservedHistory => 2,
-            SmartContextTokenAccountingSource::Unknown => 3,
-        },
-        input
-            .accounting_risks
-            .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
-        input
-            .accounting_risks
-            .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow),
-        input
-            .accounting_risks
-            .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow),
-    ) {
+    {
+        let snapshot = crate::quota::mojo::smart_context_pressure_snapshot(
+            input.model_context_window_tokens,
+            input.reserved_output_tokens,
+            input.effective_input_tokens,
+            match input.effective_input_source {
+                SmartContextTokenAccountingSource::CurrentRequestTokens => 0,
+                SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => 1,
+                SmartContextTokenAccountingSource::ObservedHistory => 2,
+                SmartContextTokenAccountingSource::Unknown => 3,
+            },
+            input
+                .accounting_risks
+                .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
+            input
+                .accounting_risks
+                .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow),
+            input
+                .accounting_risks
+                .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow),
+        )
+        .expect("Mojo Smart Context pressure snapshot returned invalid output");
         let pressure_band = match snapshot.pressure_band {
             0 => Some(SmartContextPressureBand::Unknown),
             1 => Some(SmartContextPressureBand::Low),
@@ -561,53 +564,57 @@ pub fn smart_context_pressure_snapshot(
             2 => Some(SmartContextEstimatorConfidence::Low),
             _ => None,
         };
-        if let (Some(pressure_band), Some(estimator_confidence)) =
-            (pressure_band, estimator_confidence)
-        {
-            return SmartContextPressureSnapshot {
-                model_context_window_tokens: input.model_context_window_tokens,
-                reserved_output_tokens: input.reserved_output_tokens,
-                effective_usable_context_tokens: snapshot.effective_usable_context_tokens,
-                effective_used_tokens: snapshot.effective_used_tokens,
-                pressure_basis_points: snapshot.pressure_basis_points,
-                pressure_band,
-                absolute_safety_floor_tokens: snapshot.absolute_safety_floor_tokens,
-                available_context_tokens: input.available_context_tokens,
-                estimator_confidence,
-            };
+        let pressure_band = pressure_band.expect("Mojo Smart Context pressure band is invalid");
+        let estimator_confidence =
+            estimator_confidence.expect("Mojo Smart Context estimator confidence is invalid");
+        SmartContextPressureSnapshot {
+            model_context_window_tokens: input.model_context_window_tokens,
+            reserved_output_tokens: input.reserved_output_tokens,
+            effective_usable_context_tokens: snapshot.effective_usable_context_tokens,
+            effective_used_tokens: snapshot.effective_used_tokens,
+            pressure_basis_points: snapshot.pressure_basis_points,
+            pressure_band,
+            absolute_safety_floor_tokens: snapshot.absolute_safety_floor_tokens,
+            available_context_tokens: input.available_context_tokens,
+            estimator_confidence,
         }
     }
 
-    let effective_usable_context_tokens = input
-        .model_context_window_tokens
-        .and_then(|window| window.checked_sub(input.reserved_output_tokens));
-    let pressure_basis_points = effective_usable_context_tokens.and_then(|usable| {
-        (usable > 0).then(|| {
-            input
-                .effective_input_tokens
-                .saturating_mul(10_000)
-                .checked_div(usable)
-                .unwrap_or(u64::MAX)
-                .min(u32::MAX as u64) as u32
-        })
-    });
-    let pressure_band = smart_context_pressure_band(pressure_basis_points);
-    let estimator_confidence =
-        smart_context_estimator_confidence(input.effective_input_source, input.accounting_risks);
+    #[cfg(not(feature = "mojo"))]
+    {
+        let effective_usable_context_tokens = input
+            .model_context_window_tokens
+            .and_then(|window| window.checked_sub(input.reserved_output_tokens));
+        let pressure_basis_points = effective_usable_context_tokens.and_then(|usable| {
+            (usable > 0).then(|| {
+                input
+                    .effective_input_tokens
+                    .saturating_mul(10_000)
+                    .checked_div(usable)
+                    .unwrap_or(u64::MAX)
+                    .min(u32::MAX as u64) as u32
+            })
+        });
+        let pressure_band = smart_context_pressure_band(pressure_basis_points);
+        let estimator_confidence = smart_context_estimator_confidence(
+            input.effective_input_source,
+            input.accounting_risks,
+        );
 
-    SmartContextPressureSnapshot {
-        model_context_window_tokens: input.model_context_window_tokens,
-        reserved_output_tokens: input.reserved_output_tokens,
-        effective_usable_context_tokens,
-        effective_used_tokens: input.effective_input_tokens,
-        pressure_basis_points,
-        pressure_band,
-        absolute_safety_floor_tokens: smart_context_absolute_safety_floor_tokens(
-            input.model_context_window_tokens,
-            input.reserved_output_tokens,
-        ),
-        available_context_tokens: input.available_context_tokens,
-        estimator_confidence,
+        SmartContextPressureSnapshot {
+            model_context_window_tokens: input.model_context_window_tokens,
+            reserved_output_tokens: input.reserved_output_tokens,
+            effective_usable_context_tokens,
+            effective_used_tokens: input.effective_input_tokens,
+            pressure_basis_points,
+            pressure_band,
+            absolute_safety_floor_tokens: smart_context_absolute_safety_floor_tokens(
+                input.model_context_window_tokens,
+                input.reserved_output_tokens,
+            ),
+            available_context_tokens: input.available_context_tokens,
+            estimator_confidence,
+        }
     }
 }
 

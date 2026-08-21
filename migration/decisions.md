@@ -81,8 +81,8 @@ signals. After that normalization, `smart_context_pressure_snapshot` sends only 
 values and tags to Mojo. Mojo owns effective-capacity subtraction, saturating pressure arithmetic,
 pressure-band classification, safety-floor clamping, and estimator-confidence classification.
 The result is authoritative in `smart_context_observed_token_accounting_with_calibration`; the
-existing Rust implementation remains the fallback and differential oracle. Float-heavy relevance
-scoring is not part of this boundary.
+captured Rust calculation remains a test oracle. Float-heavy relevance scoring is not part of
+this boundary.
 
 ## 2026-08-20: Runtime candidate ordering crosses one bounded batch
 
@@ -90,7 +90,7 @@ scoring is not part of this boundary.
 construction, health/backoff acquisition, prompt-cache ownership, and all route/affinity state in
 Rust. It sends one 22-field row per remaining candidate to Mojo, which returns stable ready and
 fallback index orders. Mojo's result is authoritative on the feature-enabled path; malformed
-results fall back to the original Rust sort. The fallback list intentionally contains every
+results fail closed. The fallback list intentionally contains every
 candidate and may overlap ready, matching the existing retry plan contract. A bounded selection
 sort is used at 256 candidates to keep the ABI allocation-free; the stream-commit and affinity
 invariants are unchanged.
@@ -151,9 +151,9 @@ Serde parsing, provider adapter capability lookup, catalog resolution, reasoning
 human-readable errors remain Rust. The active public constraint evaluator normalizes those values
 into one fixed-width input. Mojo owns endpoint/catalog branches after normalization, missing
 feature classification, reasoning support, output-limit policy, saturating requirement totals,
-context policy, adjustments, and warning tags. Rust reconstructs the existing public evaluation
-and retains the Rust fallback/oracle. The strict provider-core suite includes 2,000 generated
-normalized cases.
+context policy, adjustments, and warning tags. Rust reconstructs the existing public evaluation;
+the Rust algorithm remains only as a test oracle and Rust-only build path. The strict provider-core
+suite includes 2,000 generated normalized cases.
 
 ## 2026-08-21: Move active Smart Context rehydration admission
 
@@ -169,20 +169,21 @@ uses unprobed float ordering.
 The active quota pool renderer now collects normalized Gemini/Copilot main-quota rows in Rust and
 uses one bounded Mojo batch for profile count, saturating remaining sum, and earliest reset.
 Provider JSON, decimal/floating conversion, clock/reset acquisition, report sorting, labels, and
-terminal rendering remain Rust. The batch has a 1,024-row ceiling and falls back to the Rust
-aggregate if the boundary rejects input.
+terminal rendering remain Rust. The batch has a 1,024-row ceiling; invalid Mojo output fails
+closed instead of recomputing the aggregate in Rust.
 
 ## 2026-08-21: Move runtime tuning default tuple
 
 Runtime configuration, probe refresh, WebSocket worker setup, async workers, and log queue setup
 share one normalized parallelism batch. Mojo computes only bounded integer defaults; environment
 parsing, overrides, clamping of user values, queue construction, and diagnostics remain Rust.
-The Rust fallback is first-class and the public tuning crate has a 2,000-case differential suite.
+Rust-only builds retain their separate default helpers; the public tuning crate has a 2,000-case
+differential suite.
 
 ## 2026-08-21: Expand compiled-in ownership diagnostics
 
 `prodex doctor --runtime --json` now reports individual real-Mojo module self-tests for quota
 aggregation, provider constraints, Smart Context rehydration, runtime tuning, and the existing
 runtime/routing modules. A module is reported active only when the shared archive is active, the
-fallback is false, and that module self-test passes. The shipped compiler requirement remains
+the archive is active and that module self-test passes. The shipped compiler requirement remains
 false.

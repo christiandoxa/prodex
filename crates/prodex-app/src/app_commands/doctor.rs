@@ -258,7 +258,7 @@ fn append_doctor_runtime_json_fields(
 fn mojo_core_json_value() -> serde_json::Value {
     #[cfg(feature = "mojo-core")]
     {
-        let real_mojo = prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK;
+        let real_mojo = prodex_mojo_core::MOJO_ACTIVE;
         let self_test = prodex_mojo_core::self_test();
         let quota = real_mojo && prodex_mojo_core::quota::self_test();
         let quota_aggregation =
@@ -278,15 +278,15 @@ fn mojo_core_json_value() -> serde_json::Value {
         serde_json::json!({
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
-            "fallback": prodex_mojo_core::MOJO_FALLBACK,
+            "fallback": false,
             "compiler_required": false,
             "build_strict": prodex_mojo_core::MOJO_REQUIRED,
             "version": prodex_mojo_core::MOJO_VERSION,
             "abi_version": prodex_mojo_core::routing::abi_version(),
-            "implementation": if prodex_mojo_core::MOJO_ACTIVE && !prodex_mojo_core::MOJO_FALLBACK {
+            "implementation": if prodex_mojo_core::MOJO_ACTIVE {
                 "mojo-compiled-in"
             } else {
-                "rust-fallback"
+                "invalid-mojo-build"
             },
             "self_test": if self_test { "passed" } else { "failed" },
             "modules": {
