@@ -118,13 +118,15 @@ pub struct RuntimeTuningDefaults {
 
 pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
     #[cfg(feature = "mojo")]
-    if let Some(defaults) = mojo::runtime_tuning_defaults(parallelism) {
-        return defaults;
+    {
+        mojo::runtime_tuning_defaults(parallelism)
     }
 
+    #[cfg(not(feature = "mojo"))]
     runtime_tuning_defaults_rust(parallelism)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_tuning_defaults_rust(parallelism: usize) -> RuntimeTuningDefaults {
     RuntimeTuningDefaults {
         worker_count: runtime_proxy_worker_count_default(parallelism),

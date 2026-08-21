@@ -64,16 +64,13 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
     }
 
     #[cfg(feature = "mojo")]
-    if let Some((profiles_with_data, pool_remaining, earliest_reset_at)) =
-        crate::mojo::main_quota_aggregate(&main_quota_rows)
     {
+        let (profiles_with_data, pool_remaining, earliest_reset_at) =
+            crate::mojo::main_quota_aggregate(&main_quota_rows)
+                .expect("Mojo quota aggregation rejected normalized rows");
         aggregate.main_profiles_with_data = profiles_with_data;
         aggregate.main_pool_remaining = pool_remaining;
         aggregate.earliest_main_reset_at = earliest_reset_at;
-    } else {
-        for (remaining_percent, reset_at) in main_quota_rows {
-            aggregate_main_quota(remaining_percent, reset_at, &mut aggregate);
-        }
     }
     #[cfg(not(feature = "mojo"))]
     for (remaining_percent, reset_at) in main_quota_rows {
@@ -140,6 +137,7 @@ fn aggregate_openai_spark(usage: &UsageResponse, aggregate: &mut QuotaPoolAggreg
     );
 }
 
+#[cfg(not(feature = "mojo"))]
 fn aggregate_main_quota(
     remaining_percent: Option<i64>,
     reset_at: Option<i64>,

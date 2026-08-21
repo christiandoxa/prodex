@@ -7,7 +7,6 @@
 //! collection crosses the ABI.
 
 pub const MOJO_ACTIVE: bool = cfg!(prodex_mojo_active);
-pub const MOJO_FALLBACK: bool = cfg!(prodex_mojo_fallback);
 pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);
 pub const MOJO_VERSION: Option<&str> = option_env!("PRODEX_MOJO_VERSION");
 

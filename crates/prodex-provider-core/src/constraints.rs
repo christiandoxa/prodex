@@ -388,10 +388,12 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     recalculate_total(&mut resolved);
 
     #[cfg(feature = "mojo")]
-    if let Some(evaluation) = mojo::evaluate(provider, requirements, policy, &resolved, entry) {
-        return evaluation;
+    {
+        mojo::evaluate(provider, requirements, policy, &resolved, entry)
+            .expect("Mojo provider constraint evaluation returned invalid output")
     }
 
+    #[cfg(not(feature = "mojo"))]
     evaluate_provider_request_constraints_resolved_rust(
         provider,
         requirements,
@@ -401,6 +403,7 @@ pub fn evaluate_provider_request_constraints_with_catalog_entry(
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn evaluate_provider_request_constraints_resolved_rust(
     provider: ProviderId,
     requirements: &ProviderRequestRequirements,
@@ -473,6 +476,7 @@ fn resolve_provider_request_requirements(
     resolved
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn evaluate_known_provider_constraints(
     provider: ProviderId,
     requirements: &ProviderRequestRequirements,
@@ -543,6 +547,7 @@ fn unsupported_reasoning_effort(
         })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn apply_output_limit_policy(
     result: &mut ProviderRequestConstraintEvaluation,
     max_output_tokens: Option<u64>,
@@ -588,6 +593,7 @@ fn apply_output_limit_policy(
     false
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn apply_context_window_policy(
     result: &mut ProviderRequestConstraintEvaluation,
     context_window_tokens: Option<u64>,
@@ -666,6 +672,7 @@ fn evaluation(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn unknown_catalog_evaluation(
     requirements: ProviderRequestRequirements,
     policy: ProviderRequestConstraintPolicy,

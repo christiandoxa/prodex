@@ -9,7 +9,6 @@ mod governed_routing;
 
 #[cfg(feature = "mojo")]
 mod capability_mojo;
-
 pub use governed_routing::{
     GOVERNED_SCORE_COMPONENT_COUNT, GovernedCandidateEvaluation, GovernedCandidateOutcome,
     GovernedHardFilterReason, GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute,
@@ -27,7 +26,7 @@ use std::fmt;
 use prodex_domain::{
     CallId, CapabilityDecision, CapabilityErrorResponsePlan, CapabilityRequest, CapabilitySet,
     CredentialScope, ModelRouteCandidate, Principal, RequestId, SecretRef, TenantContext,
-    UsageAmount, negotiate_capability, plan_capability_decision_error_response,
+    UsageAmount, plan_capability_decision_error_response,
 };
 use prodex_provider_core::{ProviderEndpoint, ProviderErrorClass, ProviderId, ProviderWireFormat};
 
@@ -238,7 +237,9 @@ pub fn negotiate_provider_route_capability(
         .collect::<Vec<_>>();
 
     #[cfg(feature = "mojo")]
-    if let Some(mojo_plan) = capability_mojo::match_candidates(request, candidates) {
+    {
+        let mojo_plan = capability_mojo::match_candidates(request, candidates)
+            .expect("Mojo capability matching returned invalid output");
         if let Some(index) = mojo_plan.first_compatible {
             let Some(candidate) = candidates.get(index) else {
                 return ProviderCapabilityNegotiationDecision::Incompatible(
@@ -267,27 +268,30 @@ pub fn negotiate_provider_route_capability(
                 },
             );
         }
-        return ProviderCapabilityNegotiationDecision::Incompatible(
-            CapabilityDecision::NoCandidate,
-        );
+        ProviderCapabilityNegotiationDecision::Incompatible(CapabilityDecision::NoCandidate)
     }
 
-    match negotiate_capability(request, &model_candidates) {
-        CapabilityDecision::Compatible(model) => {
-            let Some(candidate) = candidates.iter().find(|candidate| {
-                candidate.route.provider.label() == model.provider
-                    && candidate.route.model.eq_ignore_ascii_case(&model.model)
-            }) else {
-                return ProviderCapabilityNegotiationDecision::Incompatible(
-                    CapabilityDecision::NoCandidate,
-                );
-            };
-            ProviderCapabilityNegotiationDecision::Compatible(ProviderCapabilityNegotiationPlan {
-                route: candidate.route.clone(),
-                capabilities: candidate.capabilities.clone(),
-            })
+    #[cfg(not(feature = "mojo"))]
+    {
+        match prodex_domain::negotiate_capability(request, &model_candidates) {
+            CapabilityDecision::Compatible(model) => {
+                let Some(candidate) = candidates.iter().find(|candidate| {
+                    candidate.route.provider.label() == model.provider
+                        && candidate.route.model.eq_ignore_ascii_case(&model.model)
+                }) else {
+                    return ProviderCapabilityNegotiationDecision::Incompatible(
+                        CapabilityDecision::NoCandidate,
+                    );
+                };
+                ProviderCapabilityNegotiationDecision::Compatible(
+                    ProviderCapabilityNegotiationPlan {
+                        route: candidate.route.clone(),
+                        capabilities: candidate.capabilities.clone(),
+                    },
+                )
+            }
+            decision => ProviderCapabilityNegotiationDecision::Incompatible(decision),
         }
-        decision => ProviderCapabilityNegotiationDecision::Incompatible(decision),
     }
 }
 
