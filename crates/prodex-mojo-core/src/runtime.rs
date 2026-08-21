@@ -41,7 +41,7 @@ pub struct RuntimeCandidatePlan {
 pub fn candidate_plan_self_test() -> bool {
     #[cfg(prodex_mojo_fallback)]
     {
-        return true;
+        true
     }
 
     #[cfg(not(prodex_mojo_fallback))]
