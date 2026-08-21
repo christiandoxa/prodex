@@ -664,6 +664,8 @@ Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config
 
 `prodex mcp-server`, `prodex app-server`, and `prodex exec-server` preserve Codex command-server stdio and protocol arguments. Prodex performs runtime preparation silently: it selects the profile `CODEX_HOME` and routes model HTTP traffic through the same runtime proxy when rotation, pressure controls, or governance require it, without writing launch notices into the protocol stream. The JSON-RPC-aware app-server broker remains an explicit opt-in for validating the stdio frames themselves.
 
+Codex 0.149 commands remain Codex-owned passthrough: `prodex queue --thread THREAD --message TEXT` reaches `codex queue`, and `prodex agents` opens Codex's shared task dashboard. In-session `/cd`, `/pwd`, and `/cwd` are likewise handled by Codex; Prodex consumes turn-time working-directory metadata instead of freezing the launch directory.
+
 `prodex app-server-broker --json` exposes the live-validated broker contract. It recognizes JSON-RPC lifecycle methods such as `initialize`, `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, and `turn/interrupt`, while still accepting compatibility aliases such as `notifications/initialized` and `turn/cancel`. The parser matches upstream wire behavior where `jsonrpc: "2.0"` may be omitted and advertises ordered continuation decisions as `fresh`, `continue-session`, `continue-thread`, and `continue-turn`.
 
 The broker classifies newline-delimited JSON-RPC frames as `batch`, `request`, `notification`, `response`, or `invalid`; bounds stdio reads and rejects lines over 1 MiB before JSON parsing; validates envelope shape, IDs, params, method names, response/error payloads, and lifecycle order; derives session/thread/turn/item metadata plus ordered affinity keys; and exposes invalid-reason counters. Non-empty JSON-RPC batches are bounded to 4,096 members, validated member by member for lifecycle and request/response correlation, and forwarded as the exact original line; empty, oversized, nested, or invalid-member batches fail closed before passthrough. Secret-looking JSON-RPC string fields are redacted from diagnostics and logs. `--experimental-stdio` runs a diagnostic preview, `--experimental-stdio-passthrough-preview` mirrors input with diagnostics on stderr, `--experimental-stdio-validate` fails on invalid input, and `--experimental-stdio-validate-passthrough` forwards only valid frames. `--experimental-stdio-live [--profile NAME]` launches the selected profile's real `codex app-server`, validates both client-to-server and server-to-client streams against one shared lifecycle session, forwards only validated frames, and terminates the child on protocol or transport failure. Default Codex app-server passthrough remains unchanged; the broker does not invent provider routing. Each broker session appends one counts-only local `prodex audit` summary. Schema/replay drift fixtures live under `crates/prodex-app/tests/fixtures/compat_replay/`.
@@ -1073,7 +1075,7 @@ git diff | prodex context compact-output --kind git-diff
 
 For full policy keys, environment overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
-When a support case appears to come from upstream Codex itself, run `codex doctor --json` in the same environment as Prodex. Codex 0.135.0 and newer reports richer environment, Git, terminal, app-server, and thread-inventory diagnostics than Prodex's runtime-proxy doctor owns.
+When a support case appears to come from upstream Codex itself, run `prodex run doctor --json` (or `codex doctor --json`) in the same environment as Prodex. Codex 0.149.0 also diagnoses endpoint protection, network/proxy connectivity, desktop state, and update connectivity; those checks remain separate from Prodex's runtime-proxy doctor.
 
 </details>
 
@@ -1127,7 +1129,7 @@ Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex q
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or Codex 0.148's built-in `amazon-bedrock-runtime`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy. Prodex does not rewrite either provider ID.
 
-Codex 0.148.0 includes upstream Bedrock catalog entries for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`, plus Codex-owned `max` reasoning effort handling. Prodex leaves those model IDs and Bedrock service-tier behavior owned by the direct Codex launch.
+Codex 0.149.0 raises the maximum context override for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna` to 872,000 tokens and refreshes expired AWS credentials for Bedrock. Prodex preserves those model-specific limits and leaves AWS refresh, model IDs, reasoning effort, and service-tier behavior owned by the direct Codex launch.
 
 Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 

@@ -320,6 +320,9 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
     assert!(rendered.contains(&"model=\"qwen3-coder\"".to_string()));
     assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
     assert!(
+        rendered.contains(&"model_providers.prodex-local.requires_openai_auth=true".to_string())
+    );
+    assert!(
         rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string())
     );
 }
@@ -517,6 +520,41 @@ fn codex_archive_commands_default_to_managed_run_passthrough() {
                 .collect::<Vec<_>>()
         );
     }
+}
+
+#[test]
+fn codex_0149_queue_and_agents_default_to_exact_managed_run_passthrough() {
+    for passthrough in [
+        vec![
+            "queue",
+            "--thread",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            "--message",
+            "continue the audit",
+        ],
+        vec!["agents", "--no-alt-screen"],
+    ] {
+        let mut raw_args = vec![OsString::from("prodex")];
+        raw_args.extend(passthrough.iter().map(OsString::from));
+        assert!(should_default_cli_invocation_to_run(&raw_args));
+
+        let Commands::Run(args) =
+            parse_cli_command_from(raw_args).expect("Codex 0.149 command should pass through")
+        else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.codex_args, os_args(&passthrough));
+    }
+}
+
+#[test]
+fn upstream_codex_doctor_remains_available_through_explicit_run() {
+    let Commands::Run(args) = parse_cli_command_from(["prodex", "run", "doctor", "--json"])
+        .expect("explicit upstream doctor should parse")
+    else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.codex_args, os_args(&["doctor", "--json"]));
 }
 #[test]
 fn codex_delete_defaults_to_managed_run_passthrough() {

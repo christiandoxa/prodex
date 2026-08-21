@@ -40,6 +40,7 @@ pub enum ProviderReasoningEffort {
     #[serde(rename = "xhigh")]
     XHigh,
     Max,
+    Ultra,
     Unknown,
 }
 
@@ -53,6 +54,7 @@ impl ProviderReasoningEffort {
             "high" => Self::High,
             "xhigh" => Self::XHigh,
             "max" => Self::Max,
+            "ultra" => Self::Ultra,
             _ => Self::Unknown,
         }
     }
