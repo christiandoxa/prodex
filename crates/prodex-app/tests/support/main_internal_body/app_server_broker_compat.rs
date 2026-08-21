@@ -55,7 +55,7 @@ fn codex_0148_thread_queue_and_revert_frames_keep_thread_affinity() {
 }
 
 #[test]
-fn codex_0147_and_0148_replay_fixtures_are_byte_preserving() {
+fn codex_0147_through_0149_replay_fixtures_are_byte_preserving() {
     for (version, fixture) in [
         (
             "0.147",
@@ -64,6 +64,10 @@ fn codex_0147_and_0148_replay_fixtures_are_byte_preserving() {
         (
             "0.148",
             include_str!("../../fixtures/compat_replay/codex-0.148/app-server.jsonl"),
+        ),
+        (
+            "0.149",
+            include_str!("../../fixtures/compat_replay/codex-0.149/app-server.jsonl"),
         ),
     ] {
         let mut forwarded = Vec::new();
@@ -80,6 +84,33 @@ fn codex_0147_and_0148_replay_fixtures_are_byte_preserving() {
                 serde_json::from_str(line).unwrap_or_else(|error| panic!("{version}: {error}"));
             assert!(value.is_object(), "{version} replay frame must be an object");
         }
+    }
+}
+
+#[test]
+fn codex_0149_permission_fields_are_forwarded_without_translation() {
+    for params in [
+        serde_json::json!({"threadId": "thr_149", "permissions": "dev"}),
+        serde_json::json!({"threadId": "thr_149", "permissionProfile": "obsolete"}),
+    ] {
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "permission-selection",
+            "method": "thread/resume",
+            "params": params,
+        });
+        let input = format!("{frame}\n");
+        let mut forwarded = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        app_server_broker_write_stdio_passthrough_preview_stream(
+            std::io::Cursor::new(input.as_bytes()),
+            &mut forwarded,
+            &mut diagnostics,
+        )
+        .expect("permission fields should remain upstream-owned");
+
+        assert_eq!(forwarded, input.as_bytes());
     }
 }
 

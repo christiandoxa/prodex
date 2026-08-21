@@ -3,17 +3,22 @@ use super::payload::{
     frame_string, frame_value, is_valid_turn_status, preview_id_key, thread_object_has_context,
     thread_response_has_context, thread_response_has_valid_context, thread_status_failure_reason,
 };
-use super::{APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS, ValidationFailure};
+use super::{APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS, ProtocolDirection, ValidationFailure};
 use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct RequestResponseValidation {
-    pending_requests: HashMap<String, Option<String>>,
+    pending_requests: HashMap<(ProtocolDirection, String), Option<String>>,
 }
 
 impl RequestResponseValidation {
-    pub(super) fn annotate_response_schema(&self, preview: &mut Value, frame: Option<&Value>) {
+    pub(super) fn annotate_response_schema(
+        &self,
+        preview: &mut Value,
+        frame: Option<&Value>,
+        direction: ProtocolDirection,
+    ) {
         if preview["preview"]["summary"]["frame_kind"].as_str() != Some("response") {
             return;
         }
@@ -24,7 +29,8 @@ impl RequestResponseValidation {
         let Some(id) = preview_id_key(preview) else {
             return;
         };
-        let Some(Some(lifecycle_stage)) = self.pending_requests.get(&id) else {
+        let key = (direction.requester_for_response(), id);
+        let Some(Some(lifecycle_stage)) = self.pending_requests.get(&key) else {
             return;
         };
         if let Some(schema_file) = app_server_broker_lifecycle_response_schema_file(lifecycle_stage)
@@ -45,15 +51,19 @@ impl RequestResponseValidation {
                         .as_str()
                         .map(str::to_string);
                     if self.pending_requests.len() < APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS
-                        || self.pending_requests.contains_key(&id)
+                        || self
+                            .pending_requests
+                            .contains_key(&(ProtocolDirection::SingleStream, id.clone()))
                     {
-                        self.pending_requests.insert(id, lifecycle_stage);
+                        self.pending_requests
+                            .insert((ProtocolDirection::SingleStream, id), lifecycle_stage);
                     }
                 }
             }
             Some("response") => {
                 if let Some(id) = preview_id_key(preview) {
-                    self.pending_requests.remove(&id);
+                    self.pending_requests
+                        .remove(&(ProtocolDirection::SingleStream, id));
                 }
             }
             _ => {}
@@ -64,18 +74,23 @@ impl RequestResponseValidation {
         &mut self,
         preview: &Value,
         frame: Option<&Value>,
+        direction: ProtocolDirection,
     ) -> Option<ValidationFailure> {
         if !preview["preview"]["parse_ok"].as_bool().unwrap_or_default() {
             return None;
         }
         match preview["preview"]["summary"]["frame_kind"].as_str()? {
-            "request" => self.observe_request(preview),
-            "response" => self.observe_response(preview, frame),
+            "request" => self.observe_request(preview, direction),
+            "response" => self.observe_response(preview, frame, direction),
             _ => None,
         }
     }
 
-    fn observe_request(&mut self, preview: &Value) -> Option<ValidationFailure> {
+    fn observe_request(
+        &mut self,
+        preview: &Value,
+        direction: ProtocolDirection,
+    ) -> Option<ValidationFailure> {
         let Some(id) = preview_id_key(preview) else {
             return Some(ValidationFailure::from_preview(
                 preview,
@@ -85,7 +100,8 @@ impl RequestResponseValidation {
         let lifecycle_stage = preview["preview"]["summary"]["lifecycle_stage"]
             .as_str()
             .map(str::to_string);
-        if self.pending_requests.contains_key(&id) {
+        let key = (direction, id.clone());
+        if self.pending_requests.contains_key(&key) {
             return Some(
                 ValidationFailure::from_preview(preview, "duplicate_pending_request_id")
                     .request_id(id),
@@ -97,7 +113,7 @@ impl RequestResponseValidation {
                     .request_id(id),
             );
         }
-        self.pending_requests.insert(id, lifecycle_stage);
+        self.pending_requests.insert(key, lifecycle_stage);
         None
     }
 
@@ -105,6 +121,7 @@ impl RequestResponseValidation {
         &mut self,
         preview: &Value,
         frame: Option<&Value>,
+        direction: ProtocolDirection,
     ) -> Option<ValidationFailure> {
         let Some(id) = preview_id_key(preview) else {
             return Some(ValidationFailure::from_preview(
@@ -112,7 +129,8 @@ impl RequestResponseValidation {
                 "response_missing_id",
             ));
         };
-        let Some(lifecycle_stage) = self.pending_requests.remove(&id) else {
+        let key = (direction.requester_for_response(), id.clone());
+        let Some(lifecycle_stage) = self.pending_requests.remove(&key) else {
             return Some(
                 ValidationFailure::from_preview(preview, "response_without_request").request_id(id),
             );
@@ -140,7 +158,7 @@ impl RequestResponseValidation {
     }
 
     pub(super) fn finish(&self, line_index: usize) -> Option<ValidationFailure> {
-        let id = self.pending_requests.keys().min()?;
+        let (_, id) = self.pending_requests.keys().min()?;
         Some(
             ValidationFailure::at_eof(line_index, "pending_request_without_response")
                 .request_id(id),

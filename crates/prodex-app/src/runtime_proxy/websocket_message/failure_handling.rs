@@ -126,10 +126,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let transport_generation = self.websocket_session.transport_generation();
         let crossed_transport_generation = owner_transport_generation
             .is_some_and(|owner_generation| owner_generation != transport_generation);
-        let compatibility_retry = (self.codex_previous_response_id_regression
-            || (crossed_transport_generation
-                && self.codex_previous_response_id_websocket_reconnect_regression))
-            && self.previous_response_id.is_some()
+        let recovery_signal = self.previous_response_id.is_some()
             && self.request_session_id.is_some()
             && owner_matches;
         if let Some(previous_response_id) = self.previous_response_id.as_deref() {
@@ -140,7 +137,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 "invalid_previous_response_id",
             )?;
         }
-        if compatibility_retry {
+        if recovery_signal {
             let _ = commit_runtime_proxy_profile_selection_with_policy(
                 self.shared,
                 &profile_name,
@@ -148,7 +145,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 false,
             )?;
         }
-        let (payload, action) = if compatibility_retry {
+        let (payload, action) = if recovery_signal {
             (
                 runtime_proxy_crate::runtime_translate_invalid_previous_response_websocket_error(
                     payload,
@@ -239,7 +236,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                         },
                     ),
                     runtime_proxy_log_field("action", action),
-                    runtime_proxy_log_field("compatibility_gate", compatibility_retry.to_string()),
+                    runtime_proxy_log_field("compatibility_gate", recovery_signal.to_string()),
                 ],
             ),
         );

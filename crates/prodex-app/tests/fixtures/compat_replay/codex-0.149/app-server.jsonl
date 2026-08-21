@@ -1,0 +1,10 @@
+{"jsonrpc":"2.0","id":"initialize","method":"initialize","params":{}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","id":"thread-start","method":"thread/start","params":{"cwd":"/home/test-user/project","model":"gpt-5.6-luna","modelProvider":"openai","permissions":"dev"}}
+{"jsonrpc":"2.0","id":"thread-resume","method":"thread/resume","params":{"threadId":"thr_149","permissions":"workspace-write"}}
+{"jsonrpc":"2.0","id":"thread-fork","method":"thread/fork","params":{"threadId":"thr_149","permissions":"dev"}}
+{"jsonrpc":"2.0","id":"queue-add","method":"thread/queue/add","params":{"threadId":"thr_149","input":[{"type":"text","text":"queued input"}],"clientUserMessageId":"msg_149"}}
+{"jsonrpc":"2.0","method":"thread/queue/changed","params":{"threadId":"thr_149"}}
+{"jsonrpc":"2.0","id":"turn-start","method":"turn/start","params":{"threadId":"thr_149","input":[{"type":"text","text":"Run the compatibility fixture."}],"permissions":"dev"}}
+{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr_149","turnId":"turn_149","startedAtMs":1787274000000,"item":{"type":"collabAgentToolCall","id":"collab_149","tool":"spawnAgent","status":"inProgress","senderThreadId":"thr_149","receiverThreadIds":[],"prompt":"audit compatibility","model":null,"reasoningEffort":null,"agentsStates":{}}}}
+{"jsonrpc":"2.0","id":"model-list","result":{"data":[{"id":"gpt-5.6-luna","model":"gpt-5.6-luna","displayName":"GPT-5.6 Luna","description":"fixture model","hidden":false,"supportedReasoningEfforts":[{"effort":"max","description":"maximum"},{"effort":"ultra","description":"ultra"}],"defaultReasoningEffort":"max","inputModalities":["text"],"supportsPersonality":false,"multiAgentVersion":"v2","additionalSpeedTiers":[],"serviceTiers":[],"defaultServiceTier":null,"isDefault":true}],"nextCursor":null}}

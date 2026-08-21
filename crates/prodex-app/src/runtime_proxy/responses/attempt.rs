@@ -134,13 +134,9 @@ fn runtime_responses_full_history_recovery_request(
     request: &RuntimeProxyRequest,
     previous_response_id: Option<&str>,
     exact_invalid_previous_response_id: bool,
-    codex_previous_response_id_regression: bool,
     full_history_fallback_used: bool,
 ) -> Result<Option<(String, RuntimeProxyRequest)>> {
-    if !exact_invalid_previous_response_id
-        || !codex_previous_response_id_regression
-        || full_history_fallback_used
-    {
+    if !exact_invalid_previous_response_id || full_history_fallback_used {
         return Ok(None);
     }
     let Some(previous_response_id) = previous_response_id else {
@@ -197,8 +193,6 @@ pub(crate) fn attempt_runtime_responses_request(
     let request_thread_id = runtime_proxy_crate::runtime_request_thread_id(request);
     let request_compaction_generation =
         runtime_proxy_crate::runtime_request_compaction_generation(request);
-    let codex_previous_response_id_regression =
-        runtime_codex_previous_response_id_regression(request);
     let mut request_for_attempt = request.clone();
     let mut previous_response_id_for_attempt = request_previous_response_id.clone();
     let mut full_history_fallback_used = false;
@@ -329,7 +323,6 @@ pub(crate) fn attempt_runtime_responses_request(
                     &request_for_attempt,
                     previous_response_id_for_attempt.as_deref(),
                     status == 400 && exact_invalid_previous_response_id,
-                    codex_previous_response_id_regression,
                     full_history_fallback_used,
                 )?
             {
@@ -418,7 +411,6 @@ pub(crate) fn attempt_runtime_responses_request(
                 &request_for_attempt,
                 previous_response_id_for_attempt.as_deref(),
                 exact_sse_invalid_previous_response_id,
-                codex_previous_response_id_regression,
                 full_history_fallback_used,
             )?
         {
