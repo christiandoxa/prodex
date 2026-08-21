@@ -10,6 +10,10 @@ repository.workspace = true
 name = "prodex_runtime_policy"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
 [dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
@@ -17,6 +21,7 @@ prodex_authn = { workspace = true }
 prodex_core = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_provider_core = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 secret_store = { workspace = true }
 url = { workspace = true }
 serde = { workspace = true }

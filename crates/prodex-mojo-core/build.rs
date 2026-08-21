@@ -178,6 +178,8 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/runtime_quota.mojo");
         sources.push("../../mojo/prodex_core/smart_context.mojo");
+        sources.push("../../mojo/prodex_core/policy_validation.mojo");
+        sources.push("../../mojo/prodex_core/context.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

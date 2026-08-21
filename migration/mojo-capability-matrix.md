@@ -65,10 +65,11 @@ the Mojo feature and does not satisfy this evidence contract.
 The current production feature set is `mojo-core`, composed of `mojo-quota`, `mojo-runtime`,
 and `mojo-routing`. It compiles the quota, runtime, Smart Context, and routing sources into one
 static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation and
-pressure snapshot, runtime candidate ordering, provider score/routing-plan batching, and
-provider capability matching through their Rust consumers. The current production feature set
-also includes provider constraints and runtime tuning defaults; these reuse shared-core wiring,
-with one explicit `mojo-provider-constraints` feature for the provider-core owner.
+pressure snapshot, runtime candidate ordering, profile scheduling order, context signal
+arithmetic, provider score/routing-plan batching, and provider capability matching through their
+Rust consumers. The current production feature set also includes provider constraints, runtime
+policy numeric validation, and runtime tuning defaults; these reuse shared-core wiring, with one
+explicit `mojo-provider-constraints` feature for the provider-core owner.
 
 ## 2026-08-21 promotion evidence
 
@@ -78,6 +79,9 @@ with one explicit `mojo-provider-constraints` feature for the provider-core owne
 | Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Test oracle; Rust-only path |
 | Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Test oracle; Rust-only path |
 | Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Test oracle; Rust-only path |
+| Runtime profile scheduling order | Parallel 15-field `Int64` rows and output indices | 256 rows; stable permutation | Rust owns clock/state/name collection and hysteresis | Test oracle; Rust-only path |
+| Runtime policy numeric validation | Parallel `UInt64` values and rule tags | 64 rules; `NonZero=0`, `Range=1`, `LessOrEqual=2` | Rust owns config parsing, paths, security, and exact errors | Test oracle; Rust-only path |
+| Critical-signal loss/gain | Seven `Int64` counters per side and two output arrays | Seven fixed counters | Rust owns line classification, text matching, and range selection | Test oracle; Rust-only path |
 | Runtime tuning defaults | Seven caller-owned scalar outputs | Bounded integer clamps | Rust owns host/config parsing and overrides | Test oracle; Rust-only path |
 
 All new calls are stateless and reentrant. No Rust object layout, string, collection, secret,

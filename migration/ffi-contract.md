@@ -162,6 +162,9 @@ contains these additional deterministic entry points:
 ```text
 prodex_mojo_abi_version() -> Int64
 prodex_runtime_quota_profile_score_batch(..., count: Int64) -> Int64
+prodex_runtime_quota_profile_order_batch(..., count: Int64) -> Int64
+prodex_runtime_policy_validate_numeric(..., count: Int64) -> Int64
+prodex_context_signal_diff(..., seven counters) -> Int64
 prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64
 prodex_routing_score_batch(..., count: Int64, weights...) -> Int64
 prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, weights...) -> Int64
@@ -186,6 +189,18 @@ capability-match batch writes one compatibility flag and reason tag per input pl
 compatible and first well-formed incompatible indices. The runtime quota batch writes four
 `Int64` values per record. The Rust wrappers validate statuses, bounds, indices, and integer
 conversions before exposing results to callers.
+
+The profile-order batch accepts up to 256 rows of 15 signed fields. Rust gathers provider
+priority, near-optimal/cooldown flags, last-selection time, profile score fields, quota source,
+preferred flag, and original order. Mojo returns a stable permutation; Rust retains clock/state
+reads, profile names, and preferred-profile hysteresis. The numeric policy batch accepts up to 64
+rules: `NonZero=0`, `Range=1`, and `LessOrEqual=2`. It returns one `UInt64` failure bitset in
+input order; Rust maps failed indices to existing path-aware errors.
+
+The context signal-diff batch exchanges exactly seven non-negative `Int64` counters for each
+side and writes seven lost plus seven gained counters. Rust classifies lines and performs
+duplicate-line matching; Mojo owns only saturating loss/gain arithmetic. No text, path, or
+range object crosses the ABI.
 
 For routing-plan ordering, Mojo compares eligible candidates by affinity descending, score
 descending, provider order ascending, then original candidate index ascending. Rust maps provider

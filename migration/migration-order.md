@@ -34,6 +34,12 @@
     probe refresh, websocket worker, and async/log default callers.
 23. Runtime quota window summaries: active proxy observation/snapshot classification now reuses
     compiled quota status and pressure-band kernels; Rust retains clocks, state, and adapters.
+24. Runtime policy numeric validation: one Mojo batch now owns active runtime-proxy numeric
+    bounds and governance session range/relation checks; Rust retains security and exact errors.
+25. Runtime profile scheduling order: one Mojo index batch now owns normalized ready-profile
+    ordering; Rust retains clock/state reads, names, and preferred-profile hysteresis.
+26. Critical-signal loss/gain arithmetic: Rust classifies lines and Mojo compares the seven
+    normalized counters; Rust retains duplicate matching, range selection, and text handling.
 
 ## Next order
 
@@ -41,7 +47,8 @@
    kernels including Rust normalization and reconstruction.
 2. Revisit the dormant Smart Context candidate scorer/selector only if a non-test production
    caller is restored; do not add an unused Mojo wrapper.
-3. Revisit normalized policy validation only after security and error contracts are explicit.
+3. Revisit remaining normalized policy numeric rules only after security and error contracts are
+   explicit.
 4. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.
 
 The generic domain `commit_reservation` and `evaluate_rate_limit` helpers remain Rust-only:

@@ -103,6 +103,17 @@ pub fn runtime_proxy_quota_profile_scores_batch(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_profile_order_batch(
+    fields: &[i64],
+) -> Result<Vec<usize>, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::profile_order_batch(fields)
+}
+
+#[cfg(feature = "mojo")]
+pub const RUNTIME_PROFILE_ORDER_FIELD_COUNT: usize =
+    prodex_mojo_core::runtime::RUNTIME_PROFILE_ORDER_FIELD_COUNT;
+
 #[cfg(not(feature = "mojo"))]
 fn runtime_proxy_quota_profile_score_rust(
     input: RuntimeProxyQuotaProfileScoreInput,

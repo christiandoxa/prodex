@@ -1,6 +1,6 @@
 # Rust-to-Mojo migration inventory
 
-Audit basis: workspace source as of 2026-08-20, `Cargo.toml`, maintained architecture
+Audit basis: workspace source as of 2026-08-21, `Cargo.toml`, maintained architecture
 and testing contracts, the code knowledge graph, and direct source inspection. The
 workspace contains 58 Cargo packages. This inventory classifies ownership boundaries,
 not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
@@ -18,7 +18,8 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-quota::render::{quota_window_status,quota_pressure_band_from_windows}` | Classify quota windows and aggregate pressure | Pure | None | Low | A | `MOVE_NOW` | Explicit status/band tags; parity-covered in the existing quota bridge |
 | `prodex-quota::render::window_pair_has_ready_limit` | Decide whether a quota window pair is usable | Pure | None | Low | A | `MOVE_NOW` | Four scalar inputs in one batched ABI call; model lookup stays Rust |
 | `prodex-runtime-proxy::runtime_proxy_quota_pressure_band_for_route` | Apply route-specific quota thresholds to two observations | Pure | None | Medium | A/B | `MOVE_NOW` | Batch scalar ABI preserves route-specific thresholds; affinity and transport remain Rust |
-| `prodex-runtime-proxy::runtime_proxy_quota_profile_scores_batch` | Score bounded profile quota pressure inputs for selection | Pure | None after normalization | Medium | A | `MOVE_NOW` | One flat-buffer batch call; Rust saturation oracle retained; selection ordering remains Rust |
+| `prodex-runtime-proxy::runtime_proxy_quota_profile_scores_batch` | Score bounded profile quota pressure inputs for selection | Pure | None after normalization | Medium | A | `MOVE_NOW` | One flat-buffer batch call; Rust saturation oracle retained; the active profile ordering is now a separate Mojo index batch |
+| `prodex-runtime-quota::schedule_ready_profile_candidates_with_view` | Order ready profiles after quota scoring | Pure after Rust state normalization | profile state view and clock | High | B | `MOVE_NOW` | Mojo returns stable indices for provider priority, cooldown, pressure, reset, source, preferred, and input-order keys; Rust retains state reads, names, clock, and hysteresis |
 | `prodex-provider-spi::score_providers` | Score already-eligible provider descriptors | Pure after hard filtering | normalized provider signals and weights | High | B | `MOVE_NOW` | Mojo score arithmetic is now part of the complete bounded routing-plan batch; Rust still owns normalization and policy inputs |
 | `prodex-provider-spi::plan_governed_provider_route` | Filter, score, and order governed provider candidates | Pure after Rust validation and policy normalization | capability masks, provider order, normalized signals, and weights | High | B | `MOVE_NOW` | One batch covers up to 64 candidates; Mojo applies capability eligibility and stable ordering, while Rust retains hard policy gates, credentials, affinity, route construction, and error semantics |
 | `prodex-provider-spi::negotiate_provider_route_capability` | Match provider routes to required model capabilities | Pure after Rust enum-to-mask normalization | well-formed flags and seven-bit capability masks | High | B | `MOVE_NOW` | Separate flat-buffer capability batch returns first compatible/incompatible indices; Rust retains route/model selection, missing-capability details, and redacted errors |
@@ -37,9 +38,10 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-runtime-proxy::{selection_plan,smart_context}` | Candidate selection, scoring, context algorithms | Mixed | tokenizers, runtime state | Critical | B | `MOVE_NOW` for optimistic decision and rehydration admission; `KEEP_RUST` for affinity/state/transport and dormant float scorer | Optimistic decision and active `smart_context_auto_rehydrate_plan` callers now reach Mojo after string/identity normalization; 5,000 and 2,000 exact generated cases pass |
 | `prodex-runtime-proxy::{failure_response,gateway_policy}` | Proxy policy and failure semantics | Pure helpers | HTTP-neutral but hot path | Critical | C | `KEEP_RUST` | Runtime invariants require Rust oracle and extensive replay coverage |
 | `prodex-application::{data_plane,provider,governance,request_context}` | Side-effect-free application plans and ports | Pure plans | security/policy contracts | Critical | B | `REFACTOR_THEN_MOVE` | Move only isolated calculations after boundary tests |
-| `prodex-runtime-policy::validate*` | Semantic runtime policy validation | Pure validation over config | TOML/config models | High | B | `EXPERIMENT` | Parse/config IO stays Rust; validation needs exhaustive parity |
+| `prodex-runtime-policy::validate*` | Semantic runtime policy validation | Pure validation over config | TOML/config models | High | B | `MOVE_NOW` for normalized numeric rules; `KEEP_RUST` for security/string validation | One bounded Mojo numeric batch validates active runtime-proxy bounds and governance session ranges; Rust preserves parsing, paths, exact errors, selectors, secrets, signatures, and policy gates |
 | `prodex-runtime-quota` | Runtime quota snapshots and adapter helpers | Mixed | runtime state, time | High | B | `MOVE_NOW` for normalized window summaries; `KEEP_RUST` for clocks/state/adapters | Active proxy summary classification now reuses compiled quota status/band kernels; runtime state and time remain Rust |
 | `prodex-context` | Context audit, noise filtering, aggregation | Mixed | filesystem/process output | Medium | B | `EXPERIMENT` | Ranking/dedup may move; collection of inputs stays Rust |
+| `prodex-context::critical_signal_self_check` | Compare normalized critical-signal counters | Pure after Rust line classification | None | Medium | A/B | `MOVE_NOW` for loss/gain arithmetic; `KEEP_RUST` for classifiers/ranges | One seven-counter Mojo call is active in compaction and Smart Context validation; strings, duplicate-line matching, and range mapping stay Rust |
 | `prodex-state`, `prodex-runtime-state` | Profile/runtime state models and snapshots | Models plus persistence-facing state | `serde`, state contracts | High | B | `KEEP_RUST` | Cross-process merge semantics and serialization remain Rust |
 | `prodex-runtime-store`, `prodex-session-store` | State/session persistence and merge | IO/stateful | filesystem, JSON | Critical | C | `KEEP_RUST` | Durable writes and affinity persistence are Rust-owned |
 | `prodex-gateway-core` | HTTP-neutral admission/routing contracts | Mostly pure | no transport | Critical | B | `REFACTOR_THEN_MOVE` | Only after gateway parity and security review |
@@ -58,7 +60,8 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 
 ## Initial conclusion
 
-Quota arithmetic remains the first validated seam. Provider routing now has a complete
+Quota arithmetic remains the first validated seam. Runtime policy numeric validation and profile
+scheduling now also have active Mojo batches. Provider routing now has a complete
 candidate-plan batch after Rust validation and normalization, plus a separate capability-mask
 batch. Runtime candidate ordering and Smart Context pressure accounting are now additional
 production Mojo kernels. Optimistic selection, provider constraints, Smart Context rehydration,

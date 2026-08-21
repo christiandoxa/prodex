@@ -20,6 +20,8 @@ mojo-quota = [
     "prodex_quota/mojo",
     "runtime_proxy_crate/mojo",
     "prodex_runtime_quota/mojo",
+    "prodex_runtime_policy/mojo",
+    "prodex_context/mojo",
 ]
 mojo-routing = ["prodex_provider_spi/mojo"]
 mojo-core = [

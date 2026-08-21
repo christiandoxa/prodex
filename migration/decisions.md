@@ -183,7 +183,7 @@ differential suite.
 ## 2026-08-21: Expand compiled-in ownership diagnostics
 
 `prodex doctor --runtime --json` now reports individual real-Mojo module self-tests for quota
-aggregation, provider constraints, Smart Context rehydration, runtime tuning, and the existing
-runtime/routing modules. A module is reported active only when the shared archive is active, the
-the archive is active and that module self-test passes. The shipped compiler requirement remains
-false.
+aggregation, provider constraints, Smart Context rehydration, runtime tuning, profile scheduling,
+runtime-policy numeric validation, critical-signal arithmetic, and the existing runtime/routing
+modules. A module is reported active only when the shared archive is active and that module
+self-test passes. The shipped compiler requirement remains false.

@@ -80,21 +80,27 @@ pub fn self_test() -> bool {
                 && score.reserve_floor == 80
         })
     });
+    let profile_order_ok = runtime::profile_order_self_test();
     let candidate_plan_ok = runtime::candidate_plan_self_test();
     let pressure_snapshot_ok = runtime::smart_context_pressure_snapshot_self_test();
     let rehydrate_plan_ok = runtime_decisions::rehydrate_plan_self_test();
     let quota_aggregation_ok = quota::main_quota_aggregation_self_test();
     let provider_constraints_ok = provider_constraints::self_test();
+    let policy_validation_ok = policy::self_test();
+    let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
     let checks = [
         routing_ok,
         capability_ok,
         profile_ok,
+        profile_order_ok,
         candidate_plan_ok,
         pressure_snapshot_ok,
         rehydrate_plan_ok,
         quota_aggregation_ok,
         provider_constraints_ok,
+        policy_validation_ok,
+        context_ok,
         tuning_defaults_ok,
         routing::abi_version().is_ok(),
         quota,
@@ -114,6 +120,10 @@ fn compiled_core_self_test_passes() {
     assert!(self_test());
 }
 
+#[cfg(feature = "mojo-runtime")]
+pub mod context;
+#[cfg(feature = "mojo-runtime")]
+pub mod policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
 #[cfg(feature = "mojo-quota")]

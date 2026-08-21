@@ -275,6 +275,10 @@ fn mojo_core_json_value() -> serde_json::Value {
         let runtime_tuning =
             real_mojo && prodex_mojo_core::runtime_decisions::tuning_defaults_self_test();
         let provider_constraints = real_mojo && prodex_mojo_core::provider_constraints::self_test();
+        let runtime_profile_order =
+            real_mojo && prodex_mojo_core::runtime::profile_order_self_test();
+        let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
+        let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
         serde_json::json!({
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
@@ -302,6 +306,9 @@ fn mojo_core_json_value() -> serde_json::Value {
                 "smart_context_pressure": smart_context_pressure,
                 "smart_context_rehydrate": smart_context_rehydrate,
                 "runtime_candidate_plan": runtime_candidate_plan,
+                "runtime_profile_order": runtime_profile_order,
+                "runtime_policy_numeric": runtime_policy_numeric,
+                "context_signal_diff": context_signal_diff,
                 "runtime_tuning": runtime_tuning,
             },
         })
