@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.148.0 release",
+      "baseline_source": "openai/codex rust-v0.149.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -142,9 +142,44 @@
             "\"slug\": \"gpt-5.6-terra\"",
             "\"slug\": \"gpt-5.6-luna\"",
             "\"context_window\": 272000",
-            "\"max_context_window\": 272000",
+            "\"max_context_window\": 872000",
             "\"model_messages\":",
             "\"instructions_template\":"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/auth.rs",
+          "reason": "Owns provider-scoped authentication. Custom providers must not inherit ambient OpenAI credentials, while explicit provider auth and OpenAI providers retain authentication.",
+          "required_contains": [
+            "resolve_provider_auth",
+            "!provider.requires_openai_auth && provider.auth.is_none()",
+            "unauthenticated_auth_provider",
+            "custom_provider_does_not_inherit_ambient_auth_headers",
+            "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
+            "openai_provider_preserves_ambient_auth_headers"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-mcp/src/tools.rs",
+          "reason": "Owns model-visible MCP tool-name normalization, the Responses API 128-byte ceiling, and collision-safe shortening.",
+          "required_contains": [
+            "normalize_tools_for_model_with_prefix",
+            "MAX_TOOL_NAME_LENGTH: usize = 128",
+            "append_hash_suffix",
+            "fit_callable_parts_with_hash",
+            "unique_callable_parts",
+            "used_names"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-mcp/src/connection_manager_tests.rs",
+          "reason": "Owns upstream boundary and collision regression coverage for 128-byte model-visible MCP tool names.",
+          "required_contains": [
+            "test_normalize_tools_respects_responses_api_name_length_boundaries",
+            "test_normalize_tools_long_names_same_server",
+            "test_normalize_tools_disambiguates_sanitized_namespace_collisions",
+            "test_normalize_tools_disambiguates_sanitized_tool_name_collisions",
+            "model_tool_name_len(&model_name), 128"
           ]
         },
         {
@@ -498,12 +533,25 @@
             "ThreadStart => \"thread/start\"",
             "ThreadResume => \"thread/resume\"",
             "ThreadFork => \"thread/fork\"",
+            "ThreadQueueAdd => \"thread/queue/add\"",
             "TurnStart => \"turn/start\"",
             "ThreadStarted => \"thread/started\"",
+            "ThreadQueueChanged => \"thread/queue/changed\"",
             "TurnStarted => \"turn/started\"",
             "JsonSchema",
             "ClientRequest",
             "ServerNotification"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/message_processor.rs",
+          "reason": "Owns app-server request-boundary rejection of removed permissionProfile fields while preserving named permissions profile selection.",
+          "required_contains": [
+            "reject_obsolete_request_fields",
+            "reject_removed_permission_profile",
+            "thread/start\" | \"thread/resume\" | \"thread/fork\" | \"turn/start",
+            "permissionProfile",
+            "use `permissions` with a named profile id instead"
           ]
         },
         {
@@ -915,13 +963,13 @@
           "id": "models-manager.gpt-5-6-bundled-metadata",
           "kind": "model_catalog",
           "file": "codex-rs/models-manager/models.json",
-          "reason": "Codex 0.144.6 refreshes the bundled GPT-5.6 Sol/Terra/Luna instructions and corrects both context-window fields to 272,000 tokens.",
+          "reason": "Codex 0.149.0 keeps the bundled GPT-5.6 Sol/Terra/Luna base window at 272,000 tokens and raises their maximum override to 872,000 tokens.",
           "file_contains_all": [
             "\"slug\": \"gpt-5.6-sol\"",
             "\"slug\": \"gpt-5.6-terra\"",
             "\"slug\": \"gpt-5.6-luna\"",
             "\"context_window\": 272000",
-            "\"max_context_window\": 272000",
+            "\"max_context_window\": 872000",
             "\"model_messages\":",
             "\"instructions_template\":"
           ]
@@ -1234,9 +1282,23 @@
             "ThreadStart => \"thread/start\"",
             "ThreadResume => \"thread/resume\"",
             "ThreadFork => \"thread/fork\"",
+            "ThreadQueueAdd => \"thread/queue/add\"",
             "TurnStart => \"turn/start\"",
             "ThreadStarted => \"thread/started\"",
+            "ThreadQueueChanged => \"thread/queue/changed\"",
             "TurnStarted => \"turn/started\""
+          ]
+        },
+        {
+          "id": "app-server.permission-profile-removal",
+          "kind": "jsonrpc_validation",
+          "file": "codex-rs/app-server/src/message_processor.rs",
+          "reason": "Prodex must forward both current and obsolete fields unchanged so Codex remains the authority that accepts permissions and rejects permissionProfile.",
+          "file_contains_all": [
+            "reject_removed_permission_profile",
+            "thread/start\" | \"thread/resume\" | \"thread/fork\" | \"turn/start",
+            "permissionProfile",
+            "use `permissions` with a named profile id instead"
           ]
         },
         {
@@ -1288,7 +1350,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.148.0",
+      "tested_codex_release": "rust-v0.149.0",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1299,24 +1361,26 @@
           "thread/start",
           "thread/resume",
           "thread/fork",
+          "thread/queue/add",
+          "thread/queue/changed",
           "turn/start",
           "turn/cancel"
         ]
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.148.0",
-      "name": "0.148.0",
-      "published_at": "2026-08-18T22:26:03Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.148.0",
+      "tag_name": "rust-v0.149.0",
+      "name": "0.149.0",
+      "published_at": "2026-08-20T21:04:55Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.149.0",
       "body_head": [
         "## New Features",
-        "- Export complete TUI conversations to Markdown with `/export`, either to the clipboard or a new file. (#37358)",
-        "- Fork sessions with `codex exec fork`, and archive or restore sessions from the TUI resume picker. (#37367, #37369, #37371)",
-        "- Draft prompts while the TUI initializes, with resume and fork progress shown during startup. (#38642, #38788)",
-        "- View estimated thread credits or cost in `/status`, status lines, and terminal titles for eligible workspaces. (#38281, #38282)",
-        "- Use Amazon Bedrock Runtime as a built-in provider with AWS profile, region, and GPT-5.6 routing support. (#38470)",
-        "- Hooks can now run commands asynchronously and invoke MCP tools. (#37533, #38705)"
+        "- Added an interactive `codex agents` dashboard for searching, starting, opening, renaming, and stopping tasks, with configurable shortcuts. (#39094, #39112, #39114, #39142)",
+        "- Added `/cd`, `/pwd`, and `/cwd` commands for managing the working directory in TUI sessions. (#38894)",
+        "- Added `codex queue` for sending messages to existing local or remote sessions. (#39092)",
+        "- Expanded Vim editing with character replacement and more change motions such as `cw`, `c$`, and `cc`. (#39661)",
+        "- `codex doctor` now diagnoses endpoint protection, network/proxy failures, desktop app state, and update connectivity. (#38827, #38918, #39060, #39074)",
+        "- SDK users can now pass exact CLI config overrides and select `max` or `ultra` reasoning effort. (#38817, #39662)"
       ]
     }
   },
