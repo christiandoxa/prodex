@@ -1,5 +1,3 @@
-use super::runtime::{ProfileScoreInput, profile_scores_batch};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeTuningDefaults {
     pub worker_count: usize,
@@ -106,26 +104,6 @@ unsafe extern "C" {
         websocket_connect_worker_count: *mut i64,
         websocket_dns_worker_count: *mut i64,
     ) -> i64;
-}
-
-pub fn profile_scores_self_test() -> bool {
-    profile_scores_batch(&[ProfileScoreInput {
-        weekly_pressure: 1_000,
-        five_hour_pressure: 2_000,
-        scale_bps: 10_000,
-        weekly_remaining: 90,
-        five_hour_remaining: 80,
-        reserve_bias: 0,
-        weekly_weight: 1,
-    }])
-    .is_ok_and(|scores| {
-        scores.first().is_some_and(|score| {
-            score.total_pressure == 3_000
-                && score.weekly_pressure == 1_000
-                && score.five_hour_pressure == 2_000
-                && score.reserve_floor == 80
-        })
-    })
 }
 
 pub fn rehydrate_plan_self_test() -> bool {

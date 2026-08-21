@@ -10,6 +10,12 @@ use crate::{
 #[path = "mojo.rs"]
 pub(crate) mod mojo;
 
+#[cfg(feature = "mojo")]
+#[path = "profile_schedule.rs"]
+mod profile_schedule;
+#[cfg(feature = "mojo")]
+pub use self::profile_schedule::*;
+
 pub type RuntimeProxyQuotaPressureSortKey = (
     RuntimeSelectionQuotaPressureBand,
     i64,
@@ -75,70 +81,6 @@ pub struct RuntimeProxyQuotaProfileScoreInput {
     pub five_hour_remaining: i64,
     pub reserve_bias: i64,
     pub weekly_weight: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeProxyQuotaProfileScore {
-    pub total_pressure: i64,
-    pub weekly_pressure: i64,
-    pub five_hour_pressure: i64,
-    pub reserve_floor: i64,
-}
-
-pub fn runtime_proxy_quota_profile_scores_batch(
-    inputs: &[RuntimeProxyQuotaProfileScoreInput],
-) -> Vec<RuntimeProxyQuotaProfileScore> {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::profile_scores_batch(inputs)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        inputs
-            .iter()
-            .copied()
-            .map(runtime_proxy_quota_profile_score_rust)
-            .collect()
-    }
-}
-
-#[cfg(feature = "mojo")]
-pub fn runtime_proxy_profile_order_batch(
-    fields: &[i64],
-) -> Result<Vec<usize>, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::runtime::profile_order_batch(fields)
-}
-
-#[cfg(feature = "mojo")]
-pub const RUNTIME_PROFILE_ORDER_FIELD_COUNT: usize =
-    prodex_mojo_core::runtime::RUNTIME_PROFILE_ORDER_FIELD_COUNT;
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_proxy_quota_profile_score_rust(
-    input: RuntimeProxyQuotaProfileScoreInput,
-) -> RuntimeProxyQuotaProfileScore {
-    let scale = |pressure: i64| {
-        if pressure == i64::MAX {
-            return i64::MAX;
-        }
-        pressure
-            .saturating_mul(input.scale_bps.max(0))
-            .checked_div(10_000)
-            .unwrap_or(i64::MAX)
-    };
-    let weekly_pressure = scale(input.weekly_pressure);
-    let five_hour_pressure = scale(input.five_hour_pressure);
-    let total_pressure = input
-        .reserve_bias
-        .saturating_add(weekly_pressure.saturating_mul(input.weekly_weight))
-        .saturating_add(five_hour_pressure);
-    RuntimeProxyQuotaProfileScore {
-        total_pressure,
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor: input.weekly_remaining.min(input.five_hour_remaining),
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

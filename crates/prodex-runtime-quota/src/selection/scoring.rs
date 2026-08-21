@@ -1,6 +1,8 @@
+#[cfg(not(feature = "mojo"))]
+use super::RUN_SELECTION_HYSTERESIS_BPS;
 use super::{
     ProfileSelectionProvider, ProfileSelectionRead, RUN_SELECTION_COOLDOWN_SECONDS,
-    RUN_SELECTION_HYSTERESIS_BPS, RUN_SELECTION_NEAR_OPTIMAL_BPS,
+    RUN_SELECTION_NEAR_OPTIMAL_BPS,
 };
 use chrono::Local;
 pub use prodex_quota::required_main_window_snapshot_at;
@@ -11,7 +13,9 @@ use prodex_quota::{
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
 #[cfg(feature = "mojo")]
-use runtime_proxy_crate::RuntimeProxyQuotaProfileScoreInput;
+use runtime_proxy_crate::{
+    RuntimeProxyQuotaProfileScheduleInput, RuntimeProxyQuotaProfileScoreInput,
+};
 use std::cmp::Reverse;
 
 pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
@@ -24,114 +28,129 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     }
 
     let now = Local::now().timestamp();
-    let scores = ready_profile_scores_for_candidates(&candidates, RuntimeRouteKind::Responses, now);
-    let mut scored_candidates = candidates.into_iter().zip(scores).collect::<Vec<_>>();
-    let best_provider_priority = scored_candidates
-        .iter()
-        .map(|(candidate, _)| candidate.provider_priority)
-        .min()
-        .unwrap_or(usize::MAX);
-    let best_total_pressure = scored_candidates
-        .iter()
-        .filter(|(candidate, _)| candidate.provider_priority == best_provider_priority)
-        .map(|(_, score)| score.total_pressure)
-        .min()
-        .unwrap_or(i64::MAX);
 
     #[cfg(feature = "mojo")]
     {
-        let mut fields = Vec::with_capacity(
-            scored_candidates.len() * runtime_proxy_crate::RUNTIME_PROFILE_ORDER_FIELD_COUNT,
-        );
-        for (candidate, score) in &scored_candidates {
-            let near_optimal = candidate.provider_priority == best_provider_priority
-                && score_within_bps(
-                    score.total_pressure,
-                    best_total_pressure,
-                    RUN_SELECTION_NEAR_OPTIMAL_BPS,
-                );
-            let recently_used = near_optimal
-                && profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now);
-            fields.extend([
-                i64::try_from(candidate.provider_priority).expect("profile priority fits ABI"),
-                if near_optimal { 0 } else { 1 },
-                if recently_used { 1 } else { 0 },
-                if near_optimal {
-                    selection
+        let inputs = candidates
+            .iter()
+            .map(|candidate| {
+                let weekly = required_main_window_snapshot_at(&candidate.usage, "weekly", now);
+                let five_hour = required_main_window_snapshot_at(&candidate.usage, "5h", now);
+                let score = RuntimeProxyQuotaProfileScoreInput {
+                    weekly_pressure: weekly.map_or(i64::MAX, |window| window.pressure_score),
+                    five_hour_pressure: five_hour.map_or(i64::MAX, |window| window.pressure_score),
+                    scale_bps: usage_plan_capacity_pressure_scale_bps(&candidate.usage),
+                    weekly_remaining: weekly.map_or(0, |window| window.remaining_percent),
+                    five_hour_remaining: five_hour.map_or(0, |window| window.remaining_percent),
+                    reserve_bias: match runtime_quota_pressure_band_for_route_at(
+                        &candidate.usage,
+                        RuntimeRouteKind::Responses,
+                        now,
+                    ) {
+                        RuntimeQuotaPressureBand::Healthy => 0,
+                        RuntimeQuotaPressureBand::Thin => 250_000,
+                        RuntimeQuotaPressureBand::Critical => 1_000_000,
+                        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => {
+                            i64::MAX / 4
+                        }
+                    },
+                    weekly_weight: 10,
+                };
+                RuntimeProxyQuotaProfileScheduleInput {
+                    score,
+                    provider_priority: i64::try_from(candidate.provider_priority)
+                        .expect("profile priority fits ABI"),
+                    in_selection_cooldown: profile_in_run_selection_cooldown_with_view(
+                        selection,
+                        &candidate.name,
+                        now,
+                    ),
+                    last_selected_at: selection
                         .last_run_selected_at(&candidate.name)
-                        .unwrap_or(i64::MIN)
-                } else {
-                    i64::MIN
-                },
-                score.total_pressure,
-                score.weekly_pressure,
-                score.five_hour_pressure,
-                score.reserve_floor,
-                score.weekly_remaining,
-                score.five_hour_remaining,
-                score.weekly_reset_at,
-                score.five_hour_reset_at,
-                i64::try_from(runtime_quota_source_sort_key(
-                    RuntimeRouteKind::Responses,
-                    candidate.quota_source,
-                ))
-                .expect("quota source sort key fits ABI"),
-                if candidate.preferred { 0 } else { 1 },
-                i64::try_from(candidate.order_index).expect("profile order index fits ABI"),
-            ]);
-        }
-        let order = runtime_proxy_crate::runtime_proxy_profile_order_batch(&fields)
-            .expect("Mojo runtime profile order returned invalid output");
-        let mut slots = scored_candidates.into_iter().map(Some).collect::<Vec<_>>();
-        scored_candidates = order
+                        .unwrap_or(i64::MIN),
+                    weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
+                    five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
+                    quota_source: i64::try_from(runtime_quota_source_sort_key(
+                        RuntimeRouteKind::Responses,
+                        candidate.quota_source,
+                    ))
+                    .expect("quota source sort key fits ABI"),
+                    preferred: candidate.preferred,
+                    affinity_preferred: preferred_profile == Some(candidate.name.as_str()),
+                    order_index: i64::try_from(candidate.order_index)
+                        .expect("profile order index fits ABI"),
+                }
+            })
+            .collect::<Vec<_>>();
+        let order = runtime_proxy_crate::runtime_proxy_profile_schedule_batch(&inputs)
+            .expect("Mojo runtime profile schedule returned invalid output");
+        let mut slots = candidates.into_iter().map(Some).collect::<Vec<_>>();
+        order
             .into_iter()
             .map(|index| {
                 slots[index]
                     .take()
-                    .expect("Mojo profile order index is unique")
+                    .expect("Mojo profile schedule index is unique")
             })
-            .collect();
+            .collect()
     }
 
     #[cfg(not(feature = "mojo"))]
-    scored_candidates.sort_by_key(|(candidate, score)| {
-        ready_profile_runtime_sort_key_from_score(
-            candidate,
-            selection,
-            best_provider_priority,
-            best_total_pressure,
-            now,
-            *score,
-        )
-    });
-
-    if let Some(preferred_name) = preferred_profile
-        && let Some(preferred_index) = scored_candidates.iter().position(|(candidate, _)| {
-            candidate.name == preferred_name
-                && !profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now)
-        })
     {
-        let preferred_score = scored_candidates[preferred_index].1.total_pressure;
-        let selected_score = scored_candidates[0].1.total_pressure;
+        let scores =
+            ready_profile_scores_for_candidates(&candidates, RuntimeRouteKind::Responses, now);
+        let mut scored_candidates = candidates.into_iter().zip(scores).collect::<Vec<_>>();
+        let best_provider_priority = scored_candidates
+            .iter()
+            .map(|(candidate, _)| candidate.provider_priority)
+            .min()
+            .unwrap_or(usize::MAX);
+        let best_total_pressure = scored_candidates
+            .iter()
+            .filter(|(candidate, _)| candidate.provider_priority == best_provider_priority)
+            .map(|(_, score)| score.total_pressure)
+            .min()
+            .unwrap_or(i64::MAX);
 
-        if preferred_index > 0
-            && scored_candidates[preferred_index].0.provider_priority
-                == scored_candidates[0].0.provider_priority
-            && score_within_bps(
-                preferred_score,
-                selected_score,
-                RUN_SELECTION_HYSTERESIS_BPS,
+        scored_candidates.sort_by_key(|(candidate, score)| {
+            ready_profile_runtime_sort_key_from_score(
+                candidate,
+                selection,
+                best_provider_priority,
+                best_total_pressure,
+                now,
+                *score,
             )
-        {
-            let preferred_candidate = scored_candidates.remove(preferred_index);
-            scored_candidates.insert(0, preferred_candidate);
-        }
-    }
+        });
 
-    scored_candidates
-        .into_iter()
-        .map(|(candidate, _)| candidate)
-        .collect()
+        if let Some(preferred_name) = preferred_profile
+            && let Some(preferred_index) = scored_candidates.iter().position(|(candidate, _)| {
+                candidate.name == preferred_name
+                    && !profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now)
+            })
+        {
+            let preferred_score = scored_candidates[preferred_index].1.total_pressure;
+            let selected_score = scored_candidates[0].1.total_pressure;
+
+            if preferred_index > 0
+                && scored_candidates[preferred_index].0.provider_priority
+                    == scored_candidates[0].0.provider_priority
+                && score_within_bps(
+                    preferred_score,
+                    selected_score,
+                    RUN_SELECTION_HYSTERESIS_BPS,
+                )
+            {
+                let preferred_candidate = scored_candidates.remove(preferred_index);
+                scored_candidates.insert(0, preferred_candidate);
+            }
+        }
+
+        scored_candidates
+            .into_iter()
+            .map(|(candidate, _)| candidate)
+            .collect()
+    }
 }
 
 pub type ReadyProfileSortKey = (
@@ -227,74 +246,16 @@ fn ready_profile_sort_key_from_score(
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn ready_profile_scores_for_candidates(
     candidates: &[ReadyProfileCandidate],
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> Vec<ReadyProfileScore> {
-    #[cfg(feature = "mojo")]
-    let normalized = candidates
+    candidates
         .iter()
-        .map(|candidate| {
-            let weekly = required_main_window_snapshot_at(&candidate.usage, "weekly", now);
-            let five_hour = required_main_window_snapshot_at(&candidate.usage, "5h", now);
-            let input = RuntimeProxyQuotaProfileScoreInput {
-                weekly_pressure: weekly.map_or(i64::MAX, |window| window.pressure_score),
-                five_hour_pressure: five_hour.map_or(i64::MAX, |window| window.pressure_score),
-                scale_bps: usage_plan_capacity_pressure_scale_bps(&candidate.usage),
-                weekly_remaining: weekly.map_or(0, |window| window.remaining_percent),
-                five_hour_remaining: five_hour.map_or(0, |window| window.remaining_percent),
-                reserve_bias: match runtime_quota_pressure_band_for_route_at(
-                    &candidate.usage,
-                    route_kind,
-                    now,
-                ) {
-                    RuntimeQuotaPressureBand::Healthy => 0,
-                    RuntimeQuotaPressureBand::Thin => 250_000,
-                    RuntimeQuotaPressureBand::Critical => 1_000_000,
-                    RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => {
-                        i64::MAX / 4
-                    }
-                },
-                weekly_weight: match route_kind {
-                    RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
-                    RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
-                },
-            };
-            (input, weekly, five_hour)
-        })
-        .collect::<Vec<_>>();
-
-    #[cfg(feature = "mojo")]
-    {
-        let inputs = normalized
-            .iter()
-            .map(|(input, _, _)| *input)
-            .collect::<Vec<_>>();
-        let scores = runtime_proxy_crate::runtime_proxy_quota_profile_scores_batch(&inputs);
-        normalized
-            .into_iter()
-            .zip(scores)
-            .map(|((input, weekly, five_hour), score)| ReadyProfileScore {
-                total_pressure: score.total_pressure,
-                weekly_pressure: score.weekly_pressure,
-                five_hour_pressure: score.five_hour_pressure,
-                reserve_floor: score.reserve_floor,
-                weekly_remaining: input.weekly_remaining,
-                five_hour_remaining: input.five_hour_remaining,
-                weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
-                five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
-            })
-            .collect()
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        candidates
-            .iter()
-            .map(|candidate| ready_profile_score_for_route_at(&candidate.usage, route_kind, now))
-            .collect()
-    }
+        .map(|candidate| ready_profile_score_for_route_at(&candidate.usage, route_kind, now))
+        .collect()
 }
 
 pub fn ready_profile_score(candidate: &ReadyProfileCandidate) -> ReadyProfileScore {

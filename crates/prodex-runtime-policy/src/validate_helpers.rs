@@ -88,6 +88,7 @@ pub(crate) fn gateway_observability_http_endpoint_has_http_host(value: &str) -> 
     !host.is_empty() && !host.contains('@')
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn validate_optional_usize(
     value: Option<usize>,
     path: &Path,

@@ -1,23 +1,14 @@
 use super::validate_gateway_exact_identifier;
 use crate::types::{RuntimePolicyFile, RuntimePolicyGatewayRouteAlias};
-use crate::validate_helpers::{
-    validate_gateway_route_strategy, validate_optional_u64, validate_optional_usize,
-};
+#[cfg(any(not(feature = "mojo"), test))]
+use crate::validate_helpers::validate_optional_usize;
+use crate::validate_helpers::{validate_gateway_route_strategy, validate_optional_u64};
 use crate::validate_request_constraints::validate_gateway_request_constraints;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
 pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    validate_optional_usize(
-        policy.gateway.adaptive_routing.window_size,
-        path,
-        "gateway.adaptive_routing.window_size",
-    )?;
-    validate_optional_u64(
-        policy.gateway.adaptive_routing.min_samples,
-        path,
-        "gateway.adaptive_routing.min_samples",
-    )?;
+    validate_gateway_adaptive_numeric(policy, path)?;
     if let Some(rate) = policy.gateway.adaptive_routing.exploration_rate
         && !(0.0..=1.0).contains(&rate)
     {
@@ -26,7 +17,34 @@ pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
+    if policy.gateway.adaptive_routing.enabled == Some(true)
+        && policy.gateway.route_aliases.is_empty()
+    {
+        bail!(
+            "gateway.adaptive_routing.enabled in {} requires at least one gateway.route_aliases entry",
+            path.display()
+        );
+    }
+    validate_gateway_request_constraints(policy, path)?;
+    for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
+        validate_gateway_route_alias(alias, index, path)?;
+    }
+    Ok(())
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn validate_gateway_adaptive_numeric_rust(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let adaptive = &policy.gateway.adaptive_routing;
+    validate_optional_usize(
+        adaptive.window_size,
+        path,
+        "gateway.adaptive_routing.window_size",
+    )?;
+    validate_optional_u64(
+        adaptive.min_samples,
+        path,
+        "gateway.adaptive_routing.min_samples",
+    )?;
     let window_size = adaptive.window_size.unwrap_or(128);
     let min_samples = adaptive.min_samples.unwrap_or(8);
     if window_size > 4_096 {
@@ -41,17 +59,120 @@ pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
-    if adaptive.enabled == Some(true) && policy.gateway.route_aliases.is_empty() {
-        bail!(
-            "gateway.adaptive_routing.enabled in {} requires at least one gateway.route_aliases entry",
-            path.display()
-        );
+    Ok(())
+}
+
+#[cfg(feature = "mojo")]
+#[derive(Debug, Clone, Copy)]
+enum AdaptiveNumericTag {
+    WindowNonZero,
+    MinimumNonZero,
+    WindowMaximum,
+    MinimumRelation,
+}
+
+#[cfg(feature = "mojo")]
+fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let adaptive = &policy.gateway.adaptive_routing;
+    let window_size = adaptive.window_size.unwrap_or(128);
+    let min_samples = adaptive.min_samples.unwrap_or(8);
+    let mut rules = Vec::new();
+    let mut tags = Vec::new();
+
+    if let Some(value) = adaptive.window_size {
+        rules.push(prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
+            value: value as u64,
+            minimum: 0,
+            maximum: u64::MAX,
+            related_value: 0,
+        });
+        tags.push(AdaptiveNumericTag::WindowNonZero);
     }
-    validate_gateway_request_constraints(policy, path)?;
-    for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
-        validate_gateway_route_alias(alias, index, path)?;
+    if let Some(value) = adaptive.min_samples {
+        rules.push(prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
+            value,
+            minimum: 0,
+            maximum: u64::MAX,
+            related_value: 0,
+        });
+        tags.push(AdaptiveNumericTag::MinimumNonZero);
+    }
+    if adaptive.window_size.is_some() {
+        rules.push(prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
+            value: window_size as u64,
+            minimum: 1,
+            maximum: 4_096,
+            related_value: 0,
+        });
+        tags.push(AdaptiveNumericTag::WindowMaximum);
+    }
+    rules.push(prodex_mojo_core::policy::NumericRule {
+        kind: prodex_mojo_core::policy::POLICY_NUMERIC_RELATION_LE,
+        value: min_samples,
+        minimum: 0,
+        maximum: 0,
+        related_value: window_size as u64,
+    });
+    tags.push(AdaptiveNumericTag::MinimumRelation);
+
+    let failed = prodex_mojo_core::policy::validate_numeric_rules(&rules).map_err(|_| {
+        anyhow::anyhow!("gateway adaptive numeric validation returned invalid output")
+    })?;
+    if let Some(index) = failed.first() {
+        match tags[*index] {
+            AdaptiveNumericTag::WindowNonZero => bail!(
+                "gateway.adaptive_routing.window_size in {} must be greater than 0",
+                path.display()
+            ),
+            AdaptiveNumericTag::MinimumNonZero => bail!(
+                "gateway.adaptive_routing.min_samples in {} must be greater than 0",
+                path.display()
+            ),
+            AdaptiveNumericTag::WindowMaximum => bail!(
+                "gateway.adaptive_routing.window_size in {} must be at most 4096",
+                path.display()
+            ),
+            AdaptiveNumericTag::MinimumRelation => bail!(
+                "gateway.adaptive_routing.min_samples in {} must not exceed gateway.adaptive_routing.window_size",
+                path.display()
+            ),
+        }
     }
     Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    validate_gateway_adaptive_numeric_rust(policy, path)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_gateway_adaptive_numeric_validation_matches_rust_oracle() {
+        for input in [
+            "version = 1",
+            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 0",
+            "version = 1\n[gateway.adaptive_routing]\nmin_samples = 0",
+            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 4097",
+            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 4\nmin_samples = 5",
+            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 64\nmin_samples = 8",
+        ] {
+            let policy = toml::from_str::<RuntimePolicyFile>(input).unwrap();
+            let path = Path::new("policy.toml");
+            assert_eq!(
+                validate_gateway_adaptive_numeric_rust(&policy, path)
+                    .map_err(|error| error.to_string()),
+                validate_gateway_adaptive_numeric(&policy, path).map_err(|error| error.to_string()),
+                "{input}"
+            );
+        }
+    }
 }
 
 fn validate_gateway_route_alias(

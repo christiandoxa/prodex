@@ -1,3 +1,7 @@
+pub(super) fn round_f64(value: f64) -> i64 {
+    prodex_mojo_core::quota::round_f64(value)
+}
+
 pub(super) fn remaining_percent(used_percent: Option<i64>) -> i64 {
     prodex_mojo_core::quota::remaining_percent(used_percent)
 }

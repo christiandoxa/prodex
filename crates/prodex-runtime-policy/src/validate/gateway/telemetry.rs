@@ -91,6 +91,23 @@ fn validate_gateway_siem_observability(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
+    validate_gateway_siem_numeric(observability, path)?;
+    if let Some(schema) = observability.http_schema.as_deref() {
+        validate_gateway_observability_http_schema(schema).with_context(|| {
+            format!(
+                "gateway.observability.http_schema in {} is invalid",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn validate_gateway_siem_numeric_rust(
+    observability: &crate::types::RuntimePolicyGatewayObservabilitySettings,
+    path: &Path,
+) -> Result<()> {
     if observability
         .siem_max_batch_events
         .is_some_and(|value| value == 0 || value > 256)
@@ -125,15 +142,110 @@ fn validate_gateway_siem_observability(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
-    if let Some(schema) = observability.http_schema.as_deref() {
-        validate_gateway_observability_http_schema(schema).with_context(|| {
-            format!(
-                "gateway.observability.http_schema in {} is invalid",
+    Ok(())
+}
+
+#[cfg(feature = "mojo")]
+#[derive(Debug, Clone, Copy)]
+enum SiemNumericTag {
+    Bounds,
+    RetryOrdering,
+}
+
+#[cfg(feature = "mojo")]
+fn validate_gateway_siem_numeric(
+    observability: &crate::types::RuntimePolicyGatewayObservabilitySettings,
+    path: &Path,
+) -> Result<()> {
+    let mut rules = Vec::new();
+    let mut tags = Vec::new();
+    for (value, minimum, maximum) in [
+        (observability.siem_max_batch_events.map(u64::from), 1, 256),
+        (
+            observability.siem_max_batch_bytes.map(u64::from),
+            1_024,
+            1_024 * 1_024,
+        ),
+        (observability.siem_max_attempts.map(u64::from), 1, 32),
+        (observability.siem_retry_base_ms, 1, 60_000),
+        (observability.siem_retry_max_ms, 1, 3_600_000),
+        (observability.siem_max_lag_ms, 1_000, 86_400_000),
+    ] {
+        if let Some(value) = value {
+            rules.push(prodex_mojo_core::policy::NumericRule {
+                kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
+                value,
+                minimum,
+                maximum,
+                related_value: 0,
+            });
+            tags.push(SiemNumericTag::Bounds);
+        }
+    }
+    if let (Some(base), Some(max)) = (
+        observability.siem_retry_base_ms,
+        observability.siem_retry_max_ms,
+    ) {
+        rules.push(prodex_mojo_core::policy::NumericRule {
+            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RELATION_LE,
+            value: base,
+            minimum: 0,
+            maximum: 0,
+            related_value: max,
+        });
+        tags.push(SiemNumericTag::RetryOrdering);
+    }
+
+    let failed = prodex_mojo_core::policy::validate_numeric_rules(&rules)
+        .map_err(|_| anyhow::anyhow!("gateway SIEM numeric validation returned invalid output"))?;
+    if let Some(index) = failed.first() {
+        match tags[*index] {
+            SiemNumericTag::Bounds => bail!(
+                "gateway.observability SIEM worker bounds in {} are invalid",
                 path.display()
-            )
-        })?;
+            ),
+            SiemNumericTag::RetryOrdering => bail!(
+                "gateway.observability.siem_retry_max_ms in {} cannot be below siem_retry_base_ms",
+                path.display()
+            ),
+        }
     }
     Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn validate_gateway_siem_numeric(
+    observability: &crate::types::RuntimePolicyGatewayObservabilitySettings,
+    path: &Path,
+) -> Result<()> {
+    validate_gateway_siem_numeric_rust(observability, path)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_gateway_siem_numeric_validation_matches_rust_oracle() {
+        for input in [
+            "version = 1",
+            "version = 1\n[gateway.observability]\nsiem_max_batch_events = 0",
+            "version = 1\n[gateway.observability]\nsiem_max_batch_bytes = 1023",
+            "version = 1\n[gateway.observability]\nsiem_max_attempts = 33",
+            "version = 1\n[gateway.observability]\nsiem_retry_base_ms = 5000\nsiem_retry_max_ms = 1000",
+            "version = 1\n[gateway.observability]\nsiem_max_lag_ms = 86_400_001",
+        ] {
+            let policy = toml::from_str::<RuntimePolicyFile>(input).unwrap();
+            let path = Path::new("policy.toml");
+            assert_eq!(
+                validate_gateway_siem_numeric_rust(&policy.gateway.observability, path)
+                    .map_err(|error| error.to_string()),
+                validate_gateway_siem_numeric(&policy.gateway.observability, path)
+                    .map_err(|error| error.to_string()),
+                "{input}"
+            );
+        }
+    }
 }
 
 pub(super) fn validate_gateway_guardrails(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {

@@ -263,8 +263,7 @@ fn mojo_core_json_value() -> serde_json::Value {
         let quota = real_mojo && prodex_mojo_core::quota::self_test();
         let quota_aggregation =
             real_mojo && prodex_mojo_core::quota::main_quota_aggregation_self_test();
-        let runtime_quota =
-            real_mojo && prodex_mojo_core::runtime_decisions::profile_scores_self_test();
+        let runtime_quota = real_mojo && prodex_mojo_core::runtime::profile_schedule_self_test();
         let routing = real_mojo && prodex_mojo_core::routing::self_test();
         let smart_context_pressure =
             real_mojo && prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test();
@@ -275,8 +274,7 @@ fn mojo_core_json_value() -> serde_json::Value {
         let runtime_tuning =
             real_mojo && prodex_mojo_core::runtime_decisions::tuning_defaults_self_test();
         let provider_constraints = real_mojo && prodex_mojo_core::provider_constraints::self_test();
-        let runtime_profile_order =
-            real_mojo && prodex_mojo_core::runtime::profile_order_self_test();
+        let runtime_profile_order = runtime_quota;
         let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
         let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
         serde_json::json!({

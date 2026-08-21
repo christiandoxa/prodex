@@ -191,6 +191,120 @@ src/main.rs:22:5
 }
 
 #[test]
+fn critical_signal_lost_line_ranges_cover_boundary_matrix() {
+    let cases = [
+        (
+            "error: one\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 8,
+                max_range_lines: 1,
+            },
+            vec![CriticalSignalLineRange { start: 1, end: 1 }],
+        ),
+        (
+            "error: one\nerror: two\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 8,
+                max_range_lines: 1,
+            },
+            vec![
+                CriticalSignalLineRange { start: 1, end: 1 },
+                CriticalSignalLineRange { start: 2, end: 2 },
+            ],
+        ),
+        (
+            "noise\nerror: one\nerror: two\nnoise\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 1,
+                max_ranges: 8,
+                max_range_lines: 8,
+            },
+            vec![CriticalSignalLineRange { start: 1, end: 4 }],
+        ),
+        (
+            "noise\nerror: one\nnoise\nerror: two\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 8,
+                max_range_lines: 1,
+            },
+            vec![
+                CriticalSignalLineRange { start: 2, end: 2 },
+                CriticalSignalLineRange { start: 4, end: 4 },
+            ],
+        ),
+        (
+            "error: first\nnoise\nerror: last\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 100,
+                max_ranges: 8,
+                max_range_lines: 5,
+            },
+            vec![CriticalSignalLineRange { start: 1, end: 3 }],
+        ),
+        (
+            "error: first\nnoise\nerror: last\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 1,
+                max_ranges: 1,
+                max_range_lines: 1,
+            },
+            vec![CriticalSignalLineRange { start: 1, end: 1 }],
+        ),
+        (
+            "error: one\nsrc/a.rs:1:2\ntest tests::x ... FAILED\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 8,
+                max_range_lines: 1,
+            },
+            vec![
+                CriticalSignalLineRange { start: 1, end: 1 },
+                CriticalSignalLineRange { start: 2, end: 2 },
+                CriticalSignalLineRange { start: 3, end: 3 },
+            ],
+        ),
+        (
+            "error: same\nnoise\nerror: same\n",
+            "error: same\n",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 8,
+                max_range_lines: 1,
+            },
+            vec![CriticalSignalLineRange { start: 3, end: 3 }],
+        ),
+        (
+            "error: one\n",
+            "",
+            CriticalSignalLineRangeOptions {
+                context_lines: 0,
+                max_ranges: 0,
+                max_range_lines: 1,
+            },
+            Vec::new(),
+        ),
+    ];
+
+    for (before, after, options, expected) in cases {
+        assert_eq!(
+            critical_signal_lost_line_ranges_with_options(before, after, options),
+            expected,
+            "before={before:?}, after={after:?}, options={options:?}"
+        );
+    }
+}
+
+#[test]
 fn context_static_duplicate_report_detects_repeated_snippets_across_roots() {
     let root = temp_context_root("static-dupes");
     std::fs::create_dir_all(root.join("rules")).expect("rules dir should be created");

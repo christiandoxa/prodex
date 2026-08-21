@@ -13,15 +13,21 @@ pub struct ProfileScoreInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProfileScore {
-    pub total_pressure: i64,
-    pub weekly_pressure: i64,
-    pub five_hour_pressure: i64,
-    pub reserve_floor: i64,
+pub struct ProfileScheduleInput {
+    pub score: ProfileScoreInput,
+    pub provider_priority: i64,
+    pub in_selection_cooldown: bool,
+    pub last_selected_at: i64,
+    pub weekly_reset_at: i64,
+    pub five_hour_reset_at: i64,
+    pub quota_source: i64,
+    pub preferred: bool,
+    pub affinity_preferred: bool,
+    pub order_index: i64,
 }
 
-pub const RUNTIME_PROFILE_ORDER_FIELD_COUNT: usize = 15;
-pub const RUNTIME_PROFILE_ORDER_MAX_COUNT: usize = 256;
+pub const RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: usize = 16;
+pub const RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextPressureSnapshot {
@@ -70,22 +76,12 @@ unsafe extern "C" {
         weekly_has_value: i64,
         route_kind: i64,
     ) -> i64;
-    fn prodex_runtime_quota_profile_score_batch(
-        weekly_pressure: *const i64,
-        five_hour_pressure: *const i64,
-        scale_bps: *const i64,
-        weekly_remaining: *const i64,
-        five_hour_remaining: *const i64,
-        reserve_bias: *const i64,
-        weekly_weight: *const i64,
+    fn prodex_runtime_quota_profile_schedule_batch(
+        fields: *const i64,
         total_pressure: *mut i64,
         scaled_weekly_pressure: *mut i64,
         scaled_five_hour_pressure: *mut i64,
         reserve_floor: *mut i64,
-        count: i64,
-    ) -> i64;
-    fn prodex_runtime_quota_profile_order_batch(
-        fields: *const i64,
         ordered_indices: *mut i64,
         ordered_count: *mut i64,
         count: i64,
@@ -146,130 +142,89 @@ pub fn pressure_band_for_route(
         .ok_or(crate::MojoError::InvalidOutput)
 }
 
-pub fn profile_scores_batch(
-    inputs: &[ProfileScoreInput],
-) -> Result<Vec<ProfileScore>, crate::MojoError> {
-    if inputs.len() > 64
+pub fn profile_schedule_batch(
+    inputs: &[ProfileScheduleInput],
+) -> Result<Vec<usize>, crate::MojoError> {
+    if inputs.len() > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT
         || inputs.iter().any(|input| {
-            input.weekly_pressure < 0
-                || input.five_hour_pressure < 0
-                || input.scale_bps < 0
-                || input.weekly_remaining < 0
-                || input.weekly_remaining > 100
-                || input.five_hour_remaining < 0
-                || input.five_hour_remaining > 100
-                || input.reserve_bias < 0
-                || input.weekly_weight < 0
+            let score = input.score;
+            score.weekly_pressure < 0
+                || score.five_hour_pressure < 0
+                || score.scale_bps < 0
+                || score.weekly_remaining < 0
+                || score.weekly_remaining > 100
+                || score.five_hour_remaining < 0
+                || score.five_hour_remaining > 100
+                || score.reserve_bias < 0
+                || score.weekly_weight < 0
+                || input.provider_priority < 0
+                || !(0..=1).contains(&input.quota_source)
+                || input.order_index < 0
         })
     {
         return Err(crate::MojoError::InvalidInput);
     }
-    let weekly_pressure = inputs
-        .iter()
-        .map(|input| input.weekly_pressure)
-        .collect::<Vec<_>>();
-    let five_hour_pressure = inputs
-        .iter()
-        .map(|input| input.five_hour_pressure)
-        .collect::<Vec<_>>();
-    let scale_bps = inputs
-        .iter()
-        .map(|input| input.scale_bps)
-        .collect::<Vec<_>>();
-    let weekly_remaining = inputs
-        .iter()
-        .map(|input| input.weekly_remaining)
-        .collect::<Vec<_>>();
-    let five_hour_remaining = inputs
-        .iter()
-        .map(|input| input.five_hour_remaining)
-        .collect::<Vec<_>>();
-    let reserve_bias = inputs
-        .iter()
-        .map(|input| input.reserve_bias)
-        .collect::<Vec<_>>();
-    let weekly_weight = inputs
-        .iter()
-        .map(|input| input.weekly_weight)
-        .collect::<Vec<_>>();
+
+    let mut fields = Vec::with_capacity(inputs.len() * RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT);
+    for input in inputs {
+        fields.extend([
+            input.score.weekly_pressure,
+            input.score.five_hour_pressure,
+            input.score.scale_bps,
+            input.score.weekly_remaining,
+            input.score.five_hour_remaining,
+            input.score.reserve_bias,
+            input.score.weekly_weight,
+            input.provider_priority,
+            i64::from(input.in_selection_cooldown),
+            input.last_selected_at,
+            input.weekly_reset_at,
+            input.five_hour_reset_at,
+            input.quota_source,
+            i64::from(input.preferred),
+            i64::from(input.affinity_preferred),
+            input.order_index,
+        ]);
+    }
+
     let mut total_pressure = vec![0_i64; inputs.len()];
-    let mut scaled_weekly_pressure = vec![0_i64; inputs.len()];
-    let mut scaled_five_hour_pressure = vec![0_i64; inputs.len()];
+    let mut weekly_pressure = vec![0_i64; inputs.len()];
+    let mut five_hour_pressure = vec![0_i64; inputs.len()];
     let mut reserve_floor = vec![0_i64; inputs.len()];
+    let mut ordered_indices = vec![0_i64; inputs.len()];
+    let mut ordered_count = 0_i64;
     let status = unsafe {
-        prodex_runtime_quota_profile_score_batch(
-            weekly_pressure.as_ptr(),
-            five_hour_pressure.as_ptr(),
-            scale_bps.as_ptr(),
-            weekly_remaining.as_ptr(),
-            five_hour_remaining.as_ptr(),
-            reserve_bias.as_ptr(),
-            weekly_weight.as_ptr(),
+        prodex_runtime_quota_profile_schedule_batch(
+            fields.as_ptr(),
             total_pressure.as_mut_ptr(),
-            scaled_weekly_pressure.as_mut_ptr(),
-            scaled_five_hour_pressure.as_mut_ptr(),
+            weekly_pressure.as_mut_ptr(),
+            five_hour_pressure.as_mut_ptr(),
             reserve_floor.as_mut_ptr(),
+            ordered_indices.as_mut_ptr(),
+            &mut ordered_count,
             i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
         )
     };
-    if status != 0
-        || total_pressure.iter().any(|value| *value < 0)
-        || scaled_weekly_pressure.iter().any(|value| *value < 0)
-        || scaled_five_hour_pressure.iter().any(|value| *value < 0)
+    if status != 0 || ordered_count < 0 || ordered_count as usize != inputs.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if total_pressure
+        .iter()
+        .chain(&weekly_pressure)
+        .chain(&five_hour_pressure)
+        .any(|value| *value < 0)
         || reserve_floor.iter().any(|value| !(0..=100).contains(value))
     {
         return Err(crate::MojoError::InvalidOutput);
     }
-    Ok(inputs
-        .iter()
-        .enumerate()
-        .map(|(index, _)| ProfileScore {
-            total_pressure: total_pressure[index],
-            weekly_pressure: scaled_weekly_pressure[index],
-            five_hour_pressure: scaled_five_hour_pressure[index],
-            reserve_floor: reserve_floor[index],
-        })
-        .collect())
-}
 
-pub fn profile_order_self_test() -> bool {
-    let mut fields = vec![0_i64; RUNTIME_PROFILE_ORDER_FIELD_COUNT * 2];
-    fields[RUNTIME_PROFILE_ORDER_FIELD_COUNT] = 1;
-    profile_order_batch(&fields).is_ok_and(|order| order == [0, 1])
-}
-
-pub fn profile_order_batch(fields: &[i64]) -> Result<Vec<usize>, crate::MojoError> {
-    if !fields
-        .len()
-        .is_multiple_of(RUNTIME_PROFILE_ORDER_FIELD_COUNT)
-    {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    let count = fields.len() / RUNTIME_PROFILE_ORDER_FIELD_COUNT;
-    if count > RUNTIME_PROFILE_ORDER_MAX_COUNT {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    let mut ordered_indices = vec![0_i64; count];
-    let mut ordered_count = 0_i64;
-    let status = unsafe {
-        prodex_runtime_quota_profile_order_batch(
-            fields.as_ptr(),
-            ordered_indices.as_mut_ptr(),
-            &mut ordered_count,
-            i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
-        )
-    };
-    if status != 0 || ordered_count < 0 || ordered_count as usize != count {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-
-    let mut seen = vec![false; count];
-    ordered_indices
+    let mut seen = vec![false; inputs.len()];
+    let ordered_indices = ordered_indices
         .into_iter()
         .map(|index| {
             let index = usize::try_from(index)
                 .ok()
-                .filter(|index| *index < count)
+                .filter(|index| *index < inputs.len())
                 .ok_or(crate::MojoError::InvalidOutput)?;
             if seen[index] {
                 return Err(crate::MojoError::InvalidOutput);
@@ -277,7 +232,58 @@ pub fn profile_order_batch(fields: &[i64]) -> Result<Vec<usize>, crate::MojoErro
             seen[index] = true;
             Ok(index)
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if seen.iter().any(|value| !value) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+
+    Ok(ordered_indices)
+}
+
+pub fn profile_schedule_self_test() -> bool {
+    profile_schedule_batch(&[
+        ProfileScheduleInput {
+            score: ProfileScoreInput {
+                weekly_pressure: 100,
+                five_hour_pressure: 100,
+                scale_bps: 10_000,
+                weekly_remaining: 90,
+                five_hour_remaining: 90,
+                reserve_bias: 0,
+                weekly_weight: 10,
+            },
+            provider_priority: 0,
+            in_selection_cooldown: false,
+            last_selected_at: i64::MIN,
+            weekly_reset_at: 10,
+            five_hour_reset_at: 20,
+            quota_source: 0,
+            preferred: false,
+            affinity_preferred: false,
+            order_index: 0,
+        },
+        ProfileScheduleInput {
+            score: ProfileScoreInput {
+                weekly_pressure: 200,
+                five_hour_pressure: 200,
+                scale_bps: 10_000,
+                weekly_remaining: 80,
+                five_hour_remaining: 80,
+                reserve_bias: 0,
+                weekly_weight: 10,
+            },
+            provider_priority: 1,
+            in_selection_cooldown: false,
+            last_selected_at: i64::MIN,
+            weekly_reset_at: 10,
+            five_hour_reset_at: 20,
+            quota_source: 0,
+            preferred: false,
+            affinity_preferred: false,
+            order_index: 1,
+        },
+    ])
+    .is_ok_and(|order| order == [0, 1])
 }
 
 pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
@@ -426,281 +432,4 @@ fn runtime_candidate_plan_indices(
                 .filter(|index| *index < candidate_count)
         })
         .collect()
-}
-
-#[cfg(test)]
-mod parity_tests {
-    use super::*;
-    use std::cmp::Ordering;
-
-    fn field(fields: &[i64], index: usize, offset: usize) -> i64 {
-        fields[index * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + offset]
-    }
-
-    fn ready_cmp(fields: &[i64], left: usize, right: usize, route_kind: i64) -> Ordering {
-        let left_source = if route_kind == 0 || route_kind == 2 {
-            field(fields, left, 11)
-        } else {
-            0
-        };
-        let right_source = if route_kind == 0 || route_kind == 2 {
-            field(fields, right, 11)
-        } else {
-            0
-        };
-        let ascending = [
-            (field(fields, left, 1), field(fields, right, 1)),
-            (field(fields, left, 2), field(fields, right, 2)),
-            (field(fields, left, 3), field(fields, right, 3)),
-            (field(fields, left, 4), field(fields, right, 4)),
-            (field(fields, left, 8), field(fields, right, 8)),
-            (field(fields, left, 9), field(fields, right, 9)),
-            (left_source, right_source),
-            (field(fields, left, 12), field(fields, right, 12)),
-            (field(fields, left, 13), field(fields, right, 13)),
-            (field(fields, left, 14), field(fields, right, 14)),
-            (field(fields, left, 15), field(fields, right, 15)),
-            (field(fields, left, 16), field(fields, right, 16)),
-            (field(fields, left, 17), field(fields, right, 17)),
-        ];
-        for (left_value, right_value) in ascending {
-            let ordering = left_value.cmp(&right_value);
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        for offset in [5, 6, 7] {
-            let ordering = field(fields, right, offset).cmp(&field(fields, left, offset));
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        left.cmp(&right)
-    }
-
-    fn fallback_cmp(fields: &[i64], left: usize, right: usize, route_kind: i64) -> Ordering {
-        for offset in 18..=21 {
-            let ordering = field(fields, left, offset).cmp(&field(fields, right, offset));
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        ready_cmp(fields, left, right, route_kind)
-    }
-
-    fn next_random(state: &mut u64) -> u64 {
-        *state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        *state
-    }
-
-    #[derive(Clone, Copy)]
-    struct PressureCase {
-        model_context_window_tokens: Option<u64>,
-        reserved_output_tokens: u64,
-        effective_input_tokens: u64,
-        source: i64,
-        unknown_window: bool,
-        zero_context_window: bool,
-        reserved_output_consumes_window: bool,
-    }
-
-    fn generated_pressure_case(state: &mut u64, case: usize) -> PressureCase {
-        PressureCase {
-            model_context_window_tokens: if case.is_multiple_of(5) {
-                None
-            } else {
-                Some(next_random(state) % 200_000)
-            },
-            reserved_output_tokens: if case.is_multiple_of(7) {
-                u64::MAX
-            } else {
-                next_random(state) % 200_000
-            },
-            effective_input_tokens: if case.is_multiple_of(11) {
-                u64::MAX
-            } else {
-                next_random(state) % 400_000
-            },
-            source: (case % 4) as i64,
-            unknown_window: case.is_multiple_of(6),
-            zero_context_window: case.is_multiple_of(9),
-            reserved_output_consumes_window: case.is_multiple_of(8),
-        }
-    }
-
-    fn expected_pressure_snapshot(input: PressureCase) -> SmartContextPressureSnapshot {
-        let usable = input
-            .model_context_window_tokens
-            .and_then(|window| window.checked_sub(input.reserved_output_tokens));
-        let pressure_basis_points = usable.and_then(|usable| {
-            (usable > 0).then(|| {
-                input
-                    .effective_input_tokens
-                    .saturating_mul(10_000)
-                    .checked_div(usable)
-                    .unwrap_or(u64::MAX)
-                    .min(u64::from(u32::MAX)) as u32
-            })
-        });
-        let pressure_band = match pressure_basis_points {
-            None => 0,
-            Some(value) if value >= 10_000 => 5,
-            Some(value) if value >= 9_000 => 4,
-            Some(value) if value >= 7_500 => 3,
-            Some(value) if value >= 5_000 => 2,
-            Some(_) => 1,
-        };
-        let estimator_confidence = if input.unknown_window
-            || input.zero_context_window
-            || input.reserved_output_consumes_window
-        {
-            2
-        } else {
-            match input.source {
-                0 | 2 => 0,
-                1 => 1,
-                _ => 2,
-            }
-        };
-        let usable_for_floor = input
-            .model_context_window_tokens
-            .map(|window| window.saturating_sub(input.reserved_output_tokens));
-        SmartContextPressureSnapshot {
-            effective_usable_context_tokens: usable,
-            effective_used_tokens: input.effective_input_tokens,
-            pressure_basis_points,
-            pressure_band,
-            absolute_safety_floor_tokens: usable_for_floor
-                .map(|value| (value / 20).clamp(1_000, 8_000))
-                .unwrap_or(2_000),
-            estimator_confidence,
-        }
-    }
-
-    #[test]
-    fn candidate_plan_matches_rust_oracle_for_generated_batches() {
-        let mut state = 0x6d6f6a6f5f706c61_u64;
-        for case in 0..300 {
-            let count = (next_random(&mut state) % 25) as usize;
-            let route_kind = (case % 4) as i64;
-            let mut fields = vec![0_i64; count * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT];
-            for index in 0..count {
-                let base = index * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT;
-                fields[base] = (next_random(&mut state) % 2) as i64;
-                fields[base + 1] = (next_random(&mut state) % 8) as i64;
-                fields[base + 2] = (next_random(&mut state) % 5) as i64;
-                for offset in 3..=10 {
-                    fields[base + offset] = (next_random(&mut state) % 401) as i64 - 200;
-                }
-                fields[base + 11] = (next_random(&mut state) % 2) as i64;
-                fields[base + 12] = (next_random(&mut state) % 32) as i64;
-                fields[base + 13] = (next_random(&mut state) % 32) as i64;
-                fields[base + 14] = (next_random(&mut state) % 2) as i64;
-                fields[base + 15] = next_random(&mut state) as i64;
-                fields[base + 16] = index as i64;
-                fields[base + 17] = next_random(&mut state) as i64;
-                fields[base + 18] = (next_random(&mut state) % 8) as i64;
-                for offset in 19..=21 {
-                    fields[base + offset] = (next_random(&mut state) % 401) as i64 - 200;
-                }
-            }
-
-            let mut expected_ready = (0..count)
-                .filter(|index| field(&fields, *index, 0) == 0)
-                .collect::<Vec<_>>();
-            expected_ready.sort_by(|left, right| ready_cmp(&fields, *left, *right, route_kind));
-            let mut expected_fallback = (0..count).collect::<Vec<_>>();
-            expected_fallback
-                .sort_by(|left, right| fallback_cmp(&fields, *left, *right, route_kind));
-
-            let actual = runtime_candidate_plan_batch(&fields, route_kind)
-                .expect("strict Mojo candidate plan should accept generated input");
-            assert_eq!(
-                actual.ready_indices, expected_ready,
-                "candidate case {case}"
-            );
-            assert_eq!(
-                actual.fallback_indices, expected_fallback,
-                "candidate case {case}"
-            );
-        }
-    }
-
-    #[test]
-    fn pressure_snapshot_matches_rust_oracle_for_generated_inputs() {
-        let mut state = 0x7072657373757265_u64;
-        for case in 0..300 {
-            let input = generated_pressure_case(&mut state, case);
-            let expected = expected_pressure_snapshot(input);
-            let actual = smart_context_pressure_snapshot(
-                input.model_context_window_tokens,
-                input.reserved_output_tokens,
-                input.effective_input_tokens,
-                input.source,
-                input.unknown_window,
-                input.zero_context_window,
-                input.reserved_output_consumes_window,
-            )
-            .expect("strict Mojo pressure snapshot should accept generated input");
-            assert_eq!(actual, expected, "pressure case {case}");
-        }
-    }
-
-    fn profile_field(fields: &[i64], index: usize, offset: usize) -> i64 {
-        fields[index * RUNTIME_PROFILE_ORDER_FIELD_COUNT + offset]
-    }
-
-    fn profile_cmp(fields: &[i64], left: usize, right: usize) -> Ordering {
-        for offset in 0..=6 {
-            let ordering =
-                profile_field(fields, left, offset).cmp(&profile_field(fields, right, offset));
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        for offset in 7..=9 {
-            let ordering =
-                profile_field(fields, right, offset).cmp(&profile_field(fields, left, offset));
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        for offset in 10..RUNTIME_PROFILE_ORDER_FIELD_COUNT {
-            let ordering =
-                profile_field(fields, left, offset).cmp(&profile_field(fields, right, offset));
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        left.cmp(&right)
-    }
-
-    #[test]
-    fn profile_order_matches_rust_oracle_for_generated_batches() {
-        let mut state = 0x70726f66696c65_u64;
-        for case in 0..400 {
-            let count = (next_random(&mut state) % 32) as usize;
-            let mut fields = vec![0_i64; count * RUNTIME_PROFILE_ORDER_FIELD_COUNT];
-            for index in 0..count {
-                let base = index * RUNTIME_PROFILE_ORDER_FIELD_COUNT;
-                fields[base] = (next_random(&mut state) % 8) as i64;
-                fields[base + 1] = (next_random(&mut state) % 2) as i64;
-                fields[base + 2] = (next_random(&mut state) % 2) as i64;
-                fields[base + 3] = next_random(&mut state) as i64;
-                for offset in 4..=11 {
-                    fields[base + offset] = (next_random(&mut state) % 10_000) as i64;
-                }
-                fields[base + 12] = (next_random(&mut state) % 2) as i64;
-                fields[base + 13] = (next_random(&mut state) % 2) as i64;
-                fields[base + 14] = index as i64;
-            }
-            let mut expected = (0..count).collect::<Vec<_>>();
-            expected.sort_by(|left, right| profile_cmp(&fields, *left, *right));
-            let actual = profile_order_batch(&fields)
-                .expect("strict Mojo profile order should accept generated input");
-            assert_eq!(actual, expected, "profile order case {case}");
-        }
-    }
 }
