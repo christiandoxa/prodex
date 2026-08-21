@@ -646,16 +646,25 @@ fn gemini_cli_compat_bridges_settings_mcp_over_extension_mcp_and_hooks() {
 
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(codex_home.join("hooks.json")).unwrap()).unwrap();
-    assert_eq!(
-        hooks["hooks"]["PostToolUse"][0]["matcher"],
-        serde_json::Value::String("Bash".to_string())
+    let expected_status = format!(
+        "prodex-gemini-cli-compat: Gemini extension project:{}: echo done",
+        workspace.display()
     );
+    let hook_group = hooks["hooks"]["PostToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| {
+            group["hooks"].as_array().is_some_and(|hooks| {
+                hooks
+                    .iter()
+                    .any(|hook| hook["statusMessage"].as_str() == Some(&expected_status))
+            })
+        })
+        .expect("project settings hook should be generated");
     assert_eq!(
-        hooks["hooks"]["PostToolUse"][0]["hooks"][0]["statusMessage"],
-        serde_json::Value::String(format!(
-            "prodex-gemini-cli-compat: Gemini extension project:{}: echo done",
-            workspace.display()
-        ))
+        hook_group["matcher"],
+        serde_json::Value::String("Bash".to_string())
     );
     fs::remove_dir_all(root).unwrap();
 }
