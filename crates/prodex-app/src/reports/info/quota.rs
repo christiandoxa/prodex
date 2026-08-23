@@ -1,6 +1,10 @@
 //! Quota aggregation for info reports.
 
-use super::*;
+use super::{
+    BTreeMap, InfoQuotaAggregate, InfoQuotaSource, RunProfileProbeReport,
+    RuntimeProfileUsageSnapshot, required_main_window_snapshot_at,
+    runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
+};
 
 pub fn build_info_quota_aggregate(
     reports: &[RunProfileProbeReport],

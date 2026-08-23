@@ -1,6 +1,6 @@
 //! Runtime-tuning report rendering.
 
-use super::*;
+use super::RuntimeTuningSnapshot;
 
 pub fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
     terminal_ui::format_runtime_tuning_workers_display(terminal_ui::RuntimeTuningWorkersDisplay {
