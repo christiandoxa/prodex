@@ -1,55 +1,13 @@
 #!/usr/bin/env node
 import {
+  assertSingleCommitSelector,
+  parseReleaseGuardArgs,
   releaseEntryFromSubject,
   selectedCommitSummaries as selectedCommits,
 } from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
-  const args = {
-    json: false,
-  };
-
-  for (let index = 2; index < argv.length; index += 1) {
-    const value = argv[index];
-    if (value === "--range") {
-      index += 1;
-      args.range = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--base") {
-      index += 1;
-      args.base = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--head") {
-      index += 1;
-      args.head = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--commit") {
-      index += 1;
-      args.commit = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (value === "--help" || value === "-h") {
-      args.help = true;
-      continue;
-    }
-    throw new Error(`unknown argument: ${value}`);
-  }
-
-  return args;
-}
-
-function requiredValue(value, name) {
-  if (!value) {
-    throw new Error(`${name} requires a value`);
-  }
-  return value;
+  return parseReleaseGuardArgs(argv);
 }
 
 function printHelp() {
@@ -80,17 +38,7 @@ function printHelp() {
 }
 
 function assertSingleSelector(args) {
-  const selectors = [
-    Boolean(args.range),
-    Boolean(args.base || args.head),
-    Boolean(args.commit),
-  ].filter(Boolean).length;
-  if (selectors > 1) {
-    throw new Error("choose only one selector: --range, --base/--head, or --commit");
-  }
-  if ((args.base || args.head) && !(args.base && args.head)) {
-    throw new Error("--base and --head must be used together");
-  }
+  assertSingleCommitSelector(args);
 }
 
 function evaluateCommits(commits) {
