@@ -146,7 +146,7 @@ fn restore_resume_session_settings(
         );
     }
 }
-pub(super) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {
+pub(crate) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {
     let mut index = 0;
     while index + 1 < args.len() {
         let is_config_flag = matches!(args[index].to_str(), Some("-c" | "--config"));

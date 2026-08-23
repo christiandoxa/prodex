@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "run_command_strategy/live_goal_resume.rs"]
 mod live_goal_resume;
+#[path = "run_command_strategy/model_resume.rs"]
+mod model_resume;
 #[path = "run_command_strategy/session_binding.rs"]
 mod session_binding;
 
@@ -1028,45 +1030,4 @@ fn run_command_strategy_carries_profile_v2_name() {
     .unwrap();
 
     assert_eq!(strategy.runtime_request().profile_v2_name, Some("bedrock"));
-}
-
-#[test]
-fn runtime_launch_parses_model_context_window_override() {
-    assert_eq!(
-        runtime_launch_cli_model_context_window_tokens(&[
-            OsString::from("-c"),
-            OsString::from("model_context_window=65536"),
-        ]),
-        Some(65_536)
-    );
-}
-
-#[test]
-fn runtime_launch_reads_profile_v2_model_context_window_overlay() {
-    let root = temp_dir("profile-v2-context-window");
-    fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("config.toml"), "model_context_window = 8192\n").unwrap();
-    fs::write(
-        root.join("local.config.toml"),
-        "model_context_window = 65536\n",
-    )
-    .unwrap();
-
-    assert!(
-        codex_profile_v2_config_path(&root, "local")
-            .unwrap()
-            .exists()
-    );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens(&root),
-        Some(8192)
-    );
-    let local_context =
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("local"))
-            .unwrap();
-    let fallback_context =
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("missing"))
-            .unwrap();
-    assert_eq!(local_context, Some(65_536));
-    assert_eq!(fallback_context, Some(8192));
 }

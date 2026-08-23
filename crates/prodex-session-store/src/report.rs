@@ -124,15 +124,20 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
         }
     }
 
-    if let Some(id) = first_string_value(
-        value,
-        &[
-            &["payload", "id"],
-            &["payload", "session_id"],
-            &["id"],
-            &["session_id"],
-        ],
-    ) {
+    if value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|kind| kind == "session_meta")
+        && let Some(id) = first_string_value(
+            value,
+            &[
+                &["payload", "id"],
+                &["payload", "session_id"],
+                &["id"],
+                &["session_id"],
+            ],
+        )
+    {
         report.id = id;
     }
 

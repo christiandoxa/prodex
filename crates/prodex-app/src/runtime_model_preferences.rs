@@ -60,8 +60,8 @@ struct ConfigSnapshot {
 pub(crate) struct ModelPreferenceContext {
     pub(crate) logical_scope: ModelPreferenceScope,
     pub(crate) remembered: Option<LastModelSelection>,
-    explicit_model: Option<String>,
-    explicit_effort: Option<String>,
+    pub(crate) explicit_model: Option<String>,
+    pub(crate) explicit_effort: Option<String>,
 }
 pub(crate) fn model_preference_scope(
     codex_home: &Path,
