@@ -16,6 +16,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Document compact task interface (`4e4ef10`)
 - Record versioned Mojo ABI (`59adbba`)
 
+### Misc
+
+- Reuse optional ABI tag decoder (`d15b2c7`)
+
 ## 0.413.0 - 2026-08-23
 
 ### Runtime
