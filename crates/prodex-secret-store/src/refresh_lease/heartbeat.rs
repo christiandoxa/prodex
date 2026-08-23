@@ -21,7 +21,7 @@ const MAX_ACTIVE_HEARTBEATS: usize = HEARTBEAT_COMMAND_CAPACITY;
 const HEARTBEAT_WORKER_COUNT: usize = 2;
 const HEARTBEAT_WORK_QUEUE_CAPACITY: usize = 1;
 const HEARTBEAT_SCHEDULER_TICK: Duration = Duration::from_millis(10);
-const HEARTBEAT_COMMAND_DEADLINE: Duration = Duration::from_millis(100);
+const HEARTBEAT_START_DEADLINE: Duration = Duration::from_secs(1);
 const HEARTBEAT_WRITE_DEADLINE: Duration = Duration::from_secs(1);
 const HEARTBEAT_SHUTDOWN_DEADLINE: Duration = Duration::from_millis(250);
 static HEARTBEAT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -196,7 +196,7 @@ impl HeartbeatControl {
     }
 
     fn wait_for_start(&self) -> io::Result<()> {
-        let deadline = Instant::now() + HEARTBEAT_COMMAND_DEADLINE;
+        let deadline = Instant::now() + HEARTBEAT_START_DEADLINE;
         let mut state = self
             .state
             .lock()
