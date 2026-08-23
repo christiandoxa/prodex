@@ -26,6 +26,12 @@ fn main() {
             manifest_dir.join(source).display()
         );
     }
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir
+            .join("../../mojo/prodex_core/runtime_math.mojo")
+            .display()
+    );
 
     let required = !sources.is_empty() || mojo_required();
     if required {
@@ -176,7 +182,11 @@ fn selected_sources() -> Vec<&'static str> {
     if env::var_os("CARGO_FEATURE_MOJO_RUNTIME").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
-        sources.push("../../mojo/prodex_core/runtime_quota.mojo");
+        sources.push("../../mojo/prodex_core/quota_pressure.mojo");
+        sources.push("../../mojo/prodex_core/profile_schedule.mojo");
+        sources.push("../../mojo/prodex_core/candidate_decision.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_rehydrate.mojo");
+        sources.push("../../mojo/prodex_core/runtime_tuning.mojo");
         sources.push("../../mojo/prodex_core/smart_context.mojo");
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
