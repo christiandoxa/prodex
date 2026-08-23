@@ -1,14 +1,13 @@
 use super::validate_gateway_exact_identifier;
 use crate::types::{RuntimePolicyFile, RuntimePolicyGatewayRouteAlias};
-use crate::validate_helpers::validate_gateway_route_strategy;
-#[cfg(any(not(feature = "mojo"), test))]
-use crate::validate_helpers::{validate_optional_u64, validate_optional_usize};
+use crate::validate_helpers::{NumericRule, failed_numeric_rules, validate_gateway_route_strategy};
 use crate::validate_request_constraints::validate_gateway_request_constraints;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
 pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    validate_gateway_adaptive_numeric(policy, path)?;
+    let numeric = gateway_routing_numeric_failures(policy)?;
+    validate_gateway_adaptive_numeric(numeric.adaptive, path)?;
     if let Some(rate) = policy.gateway.adaptive_routing.exploration_rate
         && !(0.0..=1.0).contains(&rate)
     {
@@ -25,44 +24,19 @@ pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
-    validate_gateway_request_constraints(policy, path)?;
-    for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
-        validate_gateway_route_alias(alias, index, path)?;
+    validate_gateway_request_constraints(policy, path, numeric.safe_window)?;
+    for ((index, alias), metric_failures) in policy
+        .gateway
+        .route_aliases
+        .iter()
+        .enumerate()
+        .zip(&numeric.route_metrics)
+    {
+        validate_gateway_route_alias(alias, index, metric_failures, path)?;
     }
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn validate_gateway_adaptive_numeric_rust(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    let adaptive = &policy.gateway.adaptive_routing;
-    validate_optional_usize(
-        adaptive.window_size,
-        path,
-        "gateway.adaptive_routing.window_size",
-    )?;
-    validate_optional_u64(
-        adaptive.min_samples,
-        path,
-        "gateway.adaptive_routing.min_samples",
-    )?;
-    let window_size = adaptive.window_size.unwrap_or(128);
-    let min_samples = adaptive.min_samples.unwrap_or(8);
-    if window_size > 4_096 {
-        bail!(
-            "gateway.adaptive_routing.window_size in {} must be at most 4096",
-            path.display()
-        );
-    }
-    if min_samples > window_size as u64 {
-        bail!(
-            "gateway.adaptive_routing.min_samples in {} must not exceed gateway.adaptive_routing.window_size",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy)]
 enum AdaptiveNumericTag {
     WindowNonZero,
@@ -71,120 +45,148 @@ enum AdaptiveNumericTag {
     MinimumRelation,
 }
 
-#[cfg(feature = "mojo")]
-fn validate_gateway_adaptive_numeric_mojo(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+#[derive(Clone, Copy)]
+enum RoutingNumericLocation {
+    Adaptive(AdaptiveNumericTag),
+    SafeWindow,
+    RouteMetric {
+        alias: usize,
+        metric: usize,
+        name: &'static str,
+    },
+}
+
+struct RoutingNumericFailures {
+    adaptive: Option<AdaptiveNumericTag>,
+    safe_window: bool,
+    route_metrics: Vec<Vec<Option<&'static str>>>,
+}
+
+fn gateway_routing_numeric_failures(policy: &RuntimePolicyFile) -> Result<RoutingNumericFailures> {
     let adaptive = &policy.gateway.adaptive_routing;
-    let window_size = adaptive.window_size.unwrap_or(128);
+    let window_size = adaptive.window_size.unwrap_or(128) as u64;
     let min_samples = adaptive.min_samples.unwrap_or(8);
     let mut rules = Vec::new();
-    let mut tags = Vec::new();
+    let mut locations = Vec::new();
 
     if let Some(value) = adaptive.window_size {
-        rules.push(prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
-            value: value as u64,
-            minimum: 0,
-            maximum: u64::MAX,
-            related_value: 0,
-        });
-        tags.push(AdaptiveNumericTag::WindowNonZero);
+        rules.push(NumericRule::NonZero(value as u64));
+        locations.push(RoutingNumericLocation::Adaptive(
+            AdaptiveNumericTag::WindowNonZero,
+        ));
     }
     if let Some(value) = adaptive.min_samples {
-        rules.push(prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
-            value,
-            minimum: 0,
-            maximum: u64::MAX,
-            related_value: 0,
-        });
-        tags.push(AdaptiveNumericTag::MinimumNonZero);
+        rules.push(NumericRule::NonZero(value));
+        locations.push(RoutingNumericLocation::Adaptive(
+            AdaptiveNumericTag::MinimumNonZero,
+        ));
     }
     if adaptive.window_size.is_some() {
-        rules.push(prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
-            value: window_size as u64,
+        rules.push(NumericRule::Range {
+            value: window_size,
             minimum: 1,
             maximum: 4_096,
-            related_value: 0,
         });
-        tags.push(AdaptiveNumericTag::WindowMaximum);
+        locations.push(RoutingNumericLocation::Adaptive(
+            AdaptiveNumericTag::WindowMaximum,
+        ));
     }
-    rules.push(prodex_mojo_core::policy::NumericRule {
-        kind: prodex_mojo_core::policy::POLICY_NUMERIC_RELATION_LE,
+    rules.push(NumericRule::LessOrEqual {
         value: min_samples,
-        minimum: 0,
-        maximum: 0,
-        related_value: window_size as u64,
+        maximum: window_size,
     });
-    tags.push(AdaptiveNumericTag::MinimumRelation);
+    locations.push(RoutingNumericLocation::Adaptive(
+        AdaptiveNumericTag::MinimumRelation,
+    ));
 
-    let failed = prodex_mojo_core::policy::validate_numeric_rules(&rules).map_err(|_| {
-        anyhow::anyhow!("gateway adaptive numeric validation returned invalid output")
-    })?;
-    if let Some(index) = failed.first() {
-        match tags[*index] {
-            AdaptiveNumericTag::WindowNonZero => bail!(
-                "gateway.adaptive_routing.window_size in {} must be greater than 0",
-                path.display()
-            ),
-            AdaptiveNumericTag::MinimumNonZero => bail!(
-                "gateway.adaptive_routing.min_samples in {} must be greater than 0",
-                path.display()
-            ),
-            AdaptiveNumericTag::WindowMaximum => bail!(
-                "gateway.adaptive_routing.window_size in {} must be at most 4096",
-                path.display()
-            ),
-            AdaptiveNumericTag::MinimumRelation => bail!(
-                "gateway.adaptive_routing.min_samples in {} must not exceed gateway.adaptive_routing.window_size",
-                path.display()
-            ),
+    if let Some(value) = policy.gateway.request_constraints.safe_window_tokens {
+        rules.push(NumericRule::NonZero(value));
+        locations.push(RoutingNumericLocation::SafeWindow);
+    }
+    for (alias_index, alias) in policy.gateway.route_aliases.iter().enumerate() {
+        for (metric_index, metric) in alias.model_metrics.iter().enumerate() {
+            for (name, value) in [
+                (
+                    "input_cost_per_million_microusd",
+                    metric.input_cost_per_million_microusd,
+                ),
+                (
+                    "output_cost_per_million_microusd",
+                    metric.output_cost_per_million_microusd,
+                ),
+                ("latency_ms", metric.latency_ms),
+                ("rpm_limit", metric.rpm_limit),
+                ("tpm_limit", metric.tpm_limit),
+            ] {
+                if let Some(value) = value {
+                    rules.push(NumericRule::NonZero(value));
+                    locations.push(RoutingNumericLocation::RouteMetric {
+                        alias: alias_index,
+                        metric: metric_index,
+                        name,
+                    });
+                }
+            }
         }
     }
-    Ok(())
-}
 
-fn validate_gateway_adaptive_numeric(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        validate_gateway_adaptive_numeric_mojo(policy, path)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        validate_gateway_adaptive_numeric_rust(policy, path)
-    }
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_gateway_adaptive_numeric_validation_matches_rust_oracle() {
-        for input in [
-            "version = 1",
-            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 0",
-            "version = 1\n[gateway.adaptive_routing]\nmin_samples = 0",
-            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 4097",
-            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 4\nmin_samples = 5",
-            "version = 1\n[gateway.adaptive_routing]\nwindow_size = 64\nmin_samples = 8",
-        ] {
-            let policy = toml::from_str::<RuntimePolicyFile>(input).unwrap();
-            let path = Path::new("policy.toml");
-            assert_eq!(
-                validate_gateway_adaptive_numeric_rust(&policy, path)
-                    .map_err(|error| error.to_string()),
-                validate_gateway_adaptive_numeric_mojo(&policy, path)
-                    .map_err(|error| error.to_string()),
-                "{input}"
-            );
+    let mut failures = RoutingNumericFailures {
+        adaptive: None,
+        safe_window: false,
+        route_metrics: policy
+            .gateway
+            .route_aliases
+            .iter()
+            .map(|alias| vec![None; alias.model_metrics.len()])
+            .collect(),
+    };
+    for index in failed_numeric_rules(&rules)? {
+        match locations[index] {
+            RoutingNumericLocation::Adaptive(tag) => {
+                failures.adaptive.get_or_insert(tag);
+            }
+            RoutingNumericLocation::SafeWindow => failures.safe_window = true,
+            RoutingNumericLocation::RouteMetric {
+                alias,
+                metric,
+                name,
+            } => {
+                failures.route_metrics[alias][metric].get_or_insert(name);
+            }
         }
+    }
+    Ok(failures)
+}
+
+fn validate_gateway_adaptive_numeric(
+    failure: Option<AdaptiveNumericTag>,
+    path: &Path,
+) -> Result<()> {
+    match failure {
+        Some(AdaptiveNumericTag::WindowNonZero) => bail!(
+            "gateway.adaptive_routing.window_size in {} must be greater than 0",
+            path.display()
+        ),
+        Some(AdaptiveNumericTag::MinimumNonZero) => bail!(
+            "gateway.adaptive_routing.min_samples in {} must be greater than 0",
+            path.display()
+        ),
+        Some(AdaptiveNumericTag::WindowMaximum) => bail!(
+            "gateway.adaptive_routing.window_size in {} must be at most 4096",
+            path.display()
+        ),
+        Some(AdaptiveNumericTag::MinimumRelation) => bail!(
+            "gateway.adaptive_routing.min_samples in {} must not exceed gateway.adaptive_routing.window_size",
+            path.display()
+        ),
+        None => Ok(()),
     }
 }
 
 fn validate_gateway_route_alias(
     alias: &RuntimePolicyGatewayRouteAlias,
     index: usize,
+    numeric_failures: &[Option<&'static str>],
     path: &Path,
 ) -> Result<()> {
     let field = format!("gateway.route_aliases[{index}]");
@@ -208,74 +210,12 @@ fn validate_gateway_route_alias(
                 path.display()
             );
         }
-        validate_gateway_route_metric_numbers(
-            [
-                (
-                    "input_cost_per_million_microusd",
-                    metric.input_cost_per_million_microusd,
-                ),
-                (
-                    "output_cost_per_million_microusd",
-                    metric.output_cost_per_million_microusd,
-                ),
-                ("latency_ms", metric.latency_ms),
-                ("rpm_limit", metric.rpm_limit),
-                ("tpm_limit", metric.tpm_limit),
-            ],
-            &metric_field,
-            path,
-        )?;
-    }
-    Ok(())
-}
-
-fn validate_gateway_route_metric_numbers(
-    values: [(&'static str, Option<u64>); 5],
-    field: &str,
-    path: &Path,
-) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        let default_rule = prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
-            value: 0,
-            minimum: 0,
-            maximum: u64::MAX,
-            related_value: 0,
-        };
-        let mut rules = [default_rule; 5];
-        let mut names = [""; 5];
-        let mut count = 0;
-        for (name, value) in values {
-            if let Some(value) = value {
-                rules[count].value = value;
-                names[count] = name;
-                count += 1;
-            }
-        }
-        let failed =
-            prodex_mojo_core::policy::validate_numeric_rules(&rules[..count]).map_err(|_| {
-                anyhow::anyhow!("gateway route metric numeric validation returned invalid output")
-            })?;
-        if let Some(index) = failed.first() {
+        if let Some(name) = numeric_failures[metric_index] {
             bail!(
-                "{field}.{} in {} must be greater than 0",
-                names[*index],
+                "{metric_field}.{name} in {} must be greater than 0",
                 path.display()
             );
         }
-        Ok(())
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        for (name, value) in values {
-            if matches!(value, Some(0)) {
-                bail!(
-                    "{field}.{name} in {} must be greater than 0",
-                    path.display()
-                );
-            }
-        }
-        Ok(())
-    }
+    Ok(())
 }
