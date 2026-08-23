@@ -193,9 +193,9 @@ jobs:
             use-cross: true
             can-native-smoke: false
             max-glibc: GLIBC_2.23
-            mojo-release: false
+            mojo-release: true
             mojo-target-cpu: generic
-            mojo-features: ""
+            mojo-features: mojo-core
           - target: x86_64-apple-darwin
             runs-on: macos-15-intel
             artifact-name: x86_64-apple-darwin
@@ -292,7 +292,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Install sccache
-        if: ${{ matrix.use-cross == false || matrix.can-native-smoke }}
+        if: ${{ matrix.use-cross == false || matrix.can-native-smoke || matrix.mojo-release }}
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install cross
@@ -313,13 +313,13 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
-      - name: Install Linux ARM cross compiler
+      - name: Install Linux ARM cross and emulation tools
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
 
       - name: Test native desktop launcher
         if: ${{ matrix.can-native-smoke }}
@@ -410,7 +410,11 @@ jobs:
             readelf --dynamic "${binary}" >&2
             exit 1
           fi
-          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary}" doctor --runtime --json)"
+          binary_command=("${binary}")
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            binary_command=(qemu-aarch64 -L /usr/aarch64-linux-gnu "${binary}")
+          fi
+          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary_command[@]}" doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
           printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
@@ -423,7 +427,7 @@ jobs:
             exit 1
           fi
           env -i PATH="/usr/bin:/bin" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
-            "${binary}" doctor --runtime --json > "${clean_root}/diagnostics.json"
+            "${binary_command[@]}" doctor --runtime --json > "${clean_root}/diagnostics.json"
           grep -F '"implementation": "mojo-compiled-in"' "${clean_root}/diagnostics.json"
           grep -F '"compiler_required": false' "${clean_root}/diagnostics.json"
           grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"

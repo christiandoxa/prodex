@@ -120,13 +120,15 @@ context ranking remain Rust until a real production seam and exact parity contra
 
 ## 2026-08-20: Linux Mojo release is fail-closed
 
-The release matrix enables compiled-in Mojo only for `x86_64-unknown-linux-gnu`. Mojo is compiled
-into a target archive in an isolated Cargo target directory, then the final Rust binary is linked
-through the existing cross container with the archive path and strict Mojo variables explicitly
-forwarded. This prevents host build-script binaries or host GLIBC from defining the deployment
-baseline. Other platforms remain Rust-only until final-link, runtime, signing, and clean-machine
-evidence exists. The compiled-in binary must still report `compiler_required=false` at runtime;
-the release build must report `build_strict=true` under `PRODEX_MOJO_REQUIRED=1`.
+The release matrix enables compiled-in Mojo for `x86_64-unknown-linux-gnu` and, after the
+2026-08-23 promotion, `aarch64-unknown-linux-gnu`. Mojo is compiled into a target archive in an
+isolated Cargo target directory, then the final Rust binary is linked through the existing cross
+container with the archive path and strict Mojo variables explicitly forwarded. This prevents
+host build-script binaries or host GLIBC from defining the deployment baseline. The ARM64 row
+also runs the final artifact and self-test through QEMU. Other platforms remain Rust-only until
+final-link, runtime, signing, and clean-machine evidence exists. A compiled-in binary must report
+`compiler_required=false` at runtime; the release build must report `build_strict=true` under
+`PRODEX_MOJO_REQUIRED=1`.
 
 ## 2026-08-20: Release metadata drives installation
 

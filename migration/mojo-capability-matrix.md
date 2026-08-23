@@ -10,7 +10,7 @@
 | Verified artifact | Strict Cargo builds compile the current sources into the shared static archive; routing and capability exports link into their Rust consumers |
 | Verified Rust call | Strict provider/core/runtime-proxy Mojo tests link the archive and exercise provider planning, capability negotiation, quota, Smart Context pressure, and runtime candidate ordering paths |
 | Shared library | `--emit shared-lib` compiled in the spike; not selected for Cargo because it adds runtime loader/distribution state |
-| Portability | Target-aware object probes exist for Linux x86_64/aarch64, macOS x86_64/arm64, and Windows COFF; only Linux x86_64 has release link/runtime evidence |
+| Portability | Target-aware object probes exist for Linux x86_64/aarch64, macOS x86_64/arm64, and Windows COFF; Linux x86_64 and aarch64 have release link/runtime evidence |
 | Real Mojo CI | Ubuntu 24.04 installs official `mojo==1.0.0` with pinned uv `0.11.7`; `PRODEX_MOJO_REQUIRED=1` forbids fallback |
 
 `--emit object` is currently documented as experimental. That is an intentional, narrow
@@ -21,7 +21,7 @@ integration before shipping broader Mojo components.
 | Capability | Needed by Prodex? | Local status | API maturity for this migration | Rust equivalent | Recommendation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Integers / branches | Yes | Verified | Sufficient for bounded scalar and batch cores | Rust integer types | `MOVE NOW` | quota, runtime, and `mojo/prodex_core/routing_score.mojo` |
-| Floats | Yes, quota fractions/context scores | Available, not tested here | Needs rounding/parity probe | Rust `f32`/`f64` | `EXPERIMENT` | Official Mojo manual/API |
+| Floats | Yes, quota fractions/context scores | Verified for Gemini quota arithmetic | Proven for the existing `f64` ABI and rounding fixtures; keep new float seams separate | Rust `f32`/`f64` | `MOVE NOW` only with exact parity | Gemini batch parity and float probes; official Mojo manual/API |
 | Strings | Yes | Available, not tested here | Keep boundary in Rust | `String`, `str` | `EXPERIMENT` | Official Mojo manual |
 | Collections | Yes | Rust vectors flattened at the boundary; no Mojo collection crosses FFI | Batch-only candidate | `Vec`, `HashMap`, `BTreeMap` | `EXPERIMENT` | `ffi-contract.md`; official Mojo stdlib |
 | Optionality | Yes | Boundary encoded explicitly | FFI representation verified | `Option<T>` | `MOVE NOW` for scalar pairs | `ffi-contract.md` |
@@ -93,7 +93,7 @@ The release matrix is intentionally stricter than object generation:
 | Target | Object probe | Final release status | Reason |
 | --- | --- | --- | --- |
 | `x86_64-unknown-linux-gnu` | Verified with target triple and `x86-64` CPU | `MOJO_RELEASE_SUPPORTED` | Cross-container final link passed with the GLIBC_2.23 release ceiling, no dynamic Mojo dependency/RPATH, and clean execution without `mojo` |
-| `aarch64-unknown-linux-gnu` | Verified object only | `RUST_RELEASE_ONLY` | Final archive/link/emulation evidence is not yet available |
+| `aarch64-unknown-linux-gnu` | Verified object and archive | `MOJO_RELEASE_SUPPORTED` | Final cross link, GLIBC_2.18 ceiling, dependency audit, QEMU execution, clean runtime, and Mojo self-test pass |
 | `x86_64-apple-darwin`, `aarch64-apple-darwin` | Verified objects only | `RUST_RELEASE_ONLY` | Signing, release link, and clean-machine evidence are not yet available |
 | `*-pc-windows-msvc` | Verified objects only | `RUST_RELEASE_ONLY` | Native MSVC final link/runtime evidence is not yet available |
 

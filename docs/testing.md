@@ -135,12 +135,13 @@ binary, and checks the generated static archives.
 
 ### Release and installer Mojo checks
 
-Only the `x86_64-unknown-linux-gnu` row is currently configured as a Mojo-enabled release.
+The `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` rows are configured as
+Mojo-enabled releases.
 The release workflow compiles a target archive with the pinned Mojo toolchain in an isolated
 Cargo target directory, links the final Rust binary through the target container with strict Mojo
-variables forwarded explicitly, checks dynamic dependencies and GLIBC baseline, and runs the
-final artifact with `mojo` absent from `PATH`. Unsupported release rows remain Rust-only; see
-`migration/release-target-matrix.md`.
+variables forwarded explicitly, checks dynamic dependencies and GLIBC baseline, and runs each
+final artifact with `mojo` absent from `PATH`. The ARM64 row runs through QEMU user emulation.
+Unsupported release rows remain Rust-only; see `migration/release-target-matrix.md`.
 
 Each non-cross native release row reuses its target-scoped Cargo artifacts between the
 desktop-launcher test and final binary build. Cargo fingerprints keep the all-feature test and
