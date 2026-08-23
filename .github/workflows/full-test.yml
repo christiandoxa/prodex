@@ -143,7 +143,7 @@ jobs:
                 [ -z "${filter}" ] && continue
                 skip_args+=(--skip "${filter}")
               done <<< "${PRODEX_APP_SKIP_FILTERS}"
-              cargo test --locked -q -p prodex-app --lib --all-features -- \
+              cargo test --locked -q -p prodex-app --lib -- \
                 --test-threads=1 \
                 "${skip_args[@]}" \
                 > "${cargo_log}" 2>&1
@@ -154,7 +154,7 @@ jobs:
               filter_log="${artifact_dir}/filter.log"
               while IFS= read -r filter; do
                 [ -z "${filter}" ] && continue
-                cargo test --locked -q -p prodex-app --lib --all-features \
+                cargo test --locked -q -p prodex-app --lib \
                   "${filter}" -- --test-threads=1 \
                   > "${filter_log}" 2>&1
                 filter_status=$?
@@ -210,8 +210,8 @@ jobs:
             \( -name 'prodex-runtime-*.log' -o -name 'prodex-runtime-latest.path' \) \
             | sort > "${artifact_dir}/runtime-log-files.txt" || true
 
-          cargo run --locked -q --all-features --bin prodex -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
-          cargo run --locked -q --all-features --bin prodex -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
+          cargo run --locked -q --bin prodex -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
+          cargo run --locked -q --bin prodex -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
 
           echo "Full test suite failed. Recent cargo output:"
           cat "${artifact_dir}/cargo-test-tail.txt"
@@ -234,9 +234,9 @@ jobs:
           mkdir -m 700 "${tmp_root}/real"
           ln -s "${tmp_root}/real" "${tmp_root}/alias"
           TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1
+            --lib 'runtime_tools::desktop_tests::' -- --test-threads=1
           TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib --all-features \
+            --lib \
             'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
             -- --test-threads=1
 

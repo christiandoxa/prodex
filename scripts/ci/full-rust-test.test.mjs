@@ -17,7 +17,7 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     result.stdout,
-    /prodex-app:all-lib-tests-serial: cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1/,
+    /prodex-app:all-lib-tests-serial: cargo test --locked -q -p prodex-app --lib -- --test-threads=1/,
   );
   assert.match(result.stdout, /dry-run: 5 parallel step\(s\), jobs=4/);
   assert.doesNotMatch(result.stdout, /full-rust-test:prodex-app/);
@@ -64,8 +64,8 @@ test("no-prodex-app mode excludes prodex-app from workspace execution", () => {
     .split("\n")
     .find((line) => line.includes("workspace:parallel-safe: cargo test "));
   assert.ok(workspaceCommand, "workspace test command missing");
-  assert.match(workspaceCommand, /--workspace --exclude prodex-app --all-features/);
-  assert.doesNotMatch(workspaceCommand, /--workspace --all-features/);
+  assert.match(workspaceCommand, /--workspace --exclude prodex-app -- --test-threads/);
+  assert.doesNotMatch(workspaceCommand, /--all-features/);
 });
 
 test("scheduled full suite runs disjoint workspace and prodex-app partitions in parallel", () => {
@@ -81,6 +81,20 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(workflow, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
   assert.match(workflow, /filter_status=\$\?/);
   assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);
+});
+
+test("generic CI stays compiler-free while the strict Mojo lane owns all-feature lint", () => {
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const full = readFileSync(".github/workflows/full-test.yml", "utf8");
+  const mojoJob = ci.match(/\n  real-mojo:\n([\s\S]*?)\n  ci-duration-telemetry:/);
+
+  assert.ok(mojoJob, "real-mojo job missing");
+  assert.doesNotMatch(ci.replace(mojoJob[0], ""), /--all-features/);
+  assert.doesNotMatch(full, /--all-features/);
+  assert.match(mojoJob[0], /name: Real Mojo \/ parity/);
+  assert.match(mojoJob[0], /Install pinned Mojo toolchain/);
+  assert.match(mojoJob[0], /cargo clippy .* --all-features -- -D warnings/);
+  assert.match(mojoJob[0], /cargo build --locked --features mojo-core --bin prodex/);
 });
 
 test("push CI reuses the disjoint prodex-app library partitions", () => {
@@ -181,6 +195,33 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.match(runtimeProxy, /needs: changes/);
   assert.match(runtimeProxy, /fromJSON\(needs\.changes\.outputs\.runtime_proxy_matrix\)/);
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
+});
+
+test("independent runtime benchmarks run in parallel with one cache writer", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const runtimeProxy = workflow.match(
+    /\n  runtime-proxy-bench-smoke:\n([\s\S]*?)\n  runtime-governance-bench-smoke:/,
+  )?.[1];
+  const governance = workflow.match(
+    /\n  runtime-governance-bench-smoke:\n([\s\S]*?)\n  runtime-load-smoke:/,
+  )?.[1];
+  const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
+
+  assert.ok(runtimeProxy, "runtime proxy benchmark job missing");
+  assert.ok(governance, "governance benchmark job missing");
+  assert.ok(telemetry, "CI duration telemetry job missing");
+  assert.match(runtimeProxy, /PRODEX_RUNTIME_PROXY_BENCH_CHECK/);
+  assert.match(runtimeProxy, /runtime_proxy_hot_paths/);
+  assert.doesNotMatch(runtimeProxy, /governance_hot_paths/);
+  assert.match(governance, /needs\.changes\.outputs\.runtime_bench == 'true'/);
+  assert.match(governance, /github\.event_name == 'schedule'/);
+  assert.match(governance, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(governance, /governance_hot_paths/);
+  assert.equal(runtimeProxy.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length, 1);
+  assert.equal(governance.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length, 1);
+  for (const dependency of ["runtime-proxy-bench-smoke", "runtime-governance-bench-smoke"]) {
+    assert.match(telemetry, new RegExp(`- ${dependency}`));
+  }
 });
 
 test("runtime proxy logical suites pack without losing filters", () => {

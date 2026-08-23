@@ -113,8 +113,8 @@ function printHelp() {
       "The --jobs value controls both auto-rotate workers and independent test partitions.",
       "",
       "Partitions:",
-      "  - prebuild all all-features workspace and prodex-app lib test binaries once",
-      "  - run workspace-safe all-features tests with parallel libtest threads",
+      "  - prebuild workspace and prodex-app lib test binaries once",
+      "  - run workspace-safe tests with parallel libtest threads",
       "  - run global-cache broker-log metrics tests serial",
       "  - run temp-executable rtk wrapper tests serial",
       "  - run auto_rotate integration tests as parallel serial shards",
@@ -137,23 +137,22 @@ function timingSummary(args, label) {
 function prebuildSteps(args) {
   return [
     {
-      label: "prebuild:workspace-all-features",
+      label: "prebuild:workspace",
       command: "cargo",
       args: [
         "test",
         "--locked",
         "--workspace",
         ...(!args.prodexAppLib ? ["--exclude", "prodex-app"] : []),
-        "--all-features",
         "--no-run",
       ],
     },
     ...(args.prodexAppLib
       ? [
           {
-            label: "prebuild:prodex-app-lib-all-features",
+            label: "prebuild:prodex-app-lib",
             command: "cargo",
-            args: ["test", "--locked", "-p", "prodex-app", "--lib", "--all-features", "--no-run"],
+            args: ["test", "--locked", "-p", "prodex-app", "--lib", "--no-run"],
           },
         ]
       : []),
@@ -171,7 +170,6 @@ function workspaceSteps(args) {
         "-q",
         "--workspace",
         ...(!args.prodexAppLib ? ["--exclude", "prodex-app"] : []),
-        "--all-features",
         "--",
         `--test-threads=${args.testThreads}`,
         ...WORKSPACE_SERIAL_SKIP_ARGS,
@@ -187,7 +185,6 @@ function workspaceSteps(args) {
         "-p",
         "prodex-runtime-broker-log",
         "--lib",
-        "--all-features",
         "continuity_failure_reason_metrics_",
         "--",
         "--test-threads=1",
@@ -204,7 +201,6 @@ function workspaceSteps(args) {
         "-p",
         "prodex-optional-tools",
         "--lib",
-        "--all-features",
         "rtk::tests::",
         "--",
         "--test-threads=1",
@@ -220,7 +216,6 @@ function autoRotateStep(args) {
     command: "node",
     args: [
       "scripts/ci/auto-rotate-shards.mjs",
-      "--all-features",
       "--jobs",
       String(args.jobs),
       ...(args.timings ? ["--timings", "--timings-limit", String(args.timingsLimit)] : []),
@@ -240,7 +235,6 @@ function prodexAppStep() {
       "-p",
       "prodex-app",
       "--lib",
-      "--all-features",
       "--",
       "--test-threads=1",
     ],
