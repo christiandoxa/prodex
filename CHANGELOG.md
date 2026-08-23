@@ -2,6 +2,24 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.412.0 - 2026-08-23
+
+### Runtime
+
+- Preserve remembered model on resume (`d5a31c6`)
+
+### CLI
+
+- Make quota default detailed (`defbb4c`)
+
+### Docs
+
+- Refresh migration and validation contracts (`faeaa9d`)
+
+### Misc
+
+- Migrate production decision kernels (`489bb0e`)
+
 ## 0.411.0 - 2026-08-21
 
 ### Runtime
