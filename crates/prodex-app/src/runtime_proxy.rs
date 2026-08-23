@@ -86,6 +86,8 @@ pub(crate) use self::responses::{
 };
 
 #[cfg(test)]
+pub(crate) use prodex_runtime_store::runtime_profile_transport_backoff_key;
+#[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseNotFoundDecisionInput, runtime_previous_response_not_found_decision,
     runtime_previous_response_not_found_observability_outcome,
