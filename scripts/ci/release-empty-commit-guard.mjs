@@ -1,70 +1,15 @@
 #!/usr/bin/env node
-import { isReleaseLikeMessage, selectedChanges } from "./release-guard-common.mjs";
+import {
+  assertSingleChangeSelector,
+  isReleaseLikeMessage,
+  parseReleaseGuardArgs,
+  selectedChanges,
+} from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
-  const args = {
-    json: false,
-  };
-
-  for (let index = 2; index < argv.length; index += 1) {
-    const value = argv[index];
-    if (value === "--range") {
-      index += 1;
-      args.range = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--base") {
-      index += 1;
-      args.base = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--head") {
-      index += 1;
-      args.head = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--commit") {
-      index += 1;
-      args.commit = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--staged") {
-      args.staged = true;
-      continue;
-    }
-    if (value === "--worktree") {
-      args.worktree = true;
-      continue;
-    }
-    if (value === "--message") {
-      index += 1;
-      args.message = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--message-file") {
-      index += 1;
-      args.messageFile = requiredValue(argv[index], value);
-      continue;
-    }
-    if (value === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (value === "--help" || value === "-h") {
-      args.help = true;
-      continue;
-    }
-    throw new Error(`unknown argument: ${value}`);
-  }
-
-  return args;
-}
-
-function requiredValue(value, name) {
-  if (!value) {
-    throw new Error(`${name} requires a value`);
-  }
-  return value;
+  return parseReleaseGuardArgs(argv, {
+    allow: { staged: true, worktree: true, message: true, messageFile: true },
+  });
 }
 
 function printHelp() {
@@ -92,21 +37,7 @@ function printHelp() {
 }
 
 function assertValidArgs(args) {
-  const selectors = [
-    Boolean(args.range),
-    Boolean(args.base || args.head),
-    Boolean(args.commit),
-    Boolean(args.staged),
-    Boolean(args.worktree),
-  ].filter(Boolean).length;
-  if (selectors > 1) {
-    throw new Error(
-      "choose only one selector: --range, --base/--head, --commit, --staged, or --worktree",
-    );
-  }
-  if ((args.base || args.head) && !(args.base && args.head)) {
-    throw new Error("--base and --head must be used together");
-  }
+  assertSingleChangeSelector(args);
   if (args.message && args.messageFile) {
     throw new Error("choose only one message source: --message or --message-file");
   }
