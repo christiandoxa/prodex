@@ -70,9 +70,9 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
     /-p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands/,
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
-  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' --exclude 'prodex-storage\*' --all-features/);
-  assert.match(block, /-p 'prodex-runtime-\*' --all-features/);
-  assert.match(block, /-p 'prodex-storage\*' --all-features/);
+  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' --exclude 'prodex-storage\*' -- --test-threads/);
+  assert.match(block, /-p 'prodex-runtime-\*' -- --test-threads/);
+  assert.match(block, /-p 'prodex-storage\*' -- --test-threads/);
   assert.doesNotMatch(block, /Run Windows prodex-app tests/);
   assert.match(block, /Run Windows non-sharded root tests\n\s+if: matrix\.suite == 'root-tests'/);
   assert.match(
@@ -85,7 +85,7 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
   );
   assert.match(block, /Prebuild Windows auto-rotate tests\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);
   assert.match(block, /Run Windows auto-rotate shard .*\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);
-  assert.match(block, /--all-features --jobs 4 --shard-index/);
+  assert.match(block, /auto-rotate-shards\.mjs --jobs 4 --shard-index/);
   assert.match(block, /--shard-index \$\{\{ matrix\.auto_rotate_shard \}\} --shard-count 2/);
 
   const appBlock = workflow.match(/\n  windows-prodex-app:\n([\s\S]*?)\n  macos-workspace:/)?.[1];

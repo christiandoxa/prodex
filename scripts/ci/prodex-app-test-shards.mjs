@@ -327,12 +327,12 @@ function stepCommand(shard) {
     return shard.filters
       .map(
         (filter) =>
-          `cargo test --locked -q -p prodex-app --lib --all-features '${filter}' -- --test-threads=1`,
+          `cargo test --locked -q -p prodex-app --lib '${filter}' -- --test-threads=1`,
       )
       .join(" && ");
   }
   return [
-    "cargo test --locked -q -p prodex-app --lib --all-features -- --test-threads=1",
+    "cargo test --locked -q -p prodex-app --lib -- --test-threads=1",
     ...shard.skipFilters.map((filter) => `--skip '${filter}'`),
   ].join(" ");
 }

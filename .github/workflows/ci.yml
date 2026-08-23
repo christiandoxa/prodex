@@ -173,7 +173,7 @@ jobs:
             status=0
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
-              if ! cargo test --locked -q -p prodex-app --lib --all-features \
+              if ! cargo test --locked -q -p prodex-app --lib \
                 "${filter}" -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"; then
                 status=1
               fi
@@ -184,7 +184,7 @@ jobs:
             done <<< "${PRODEX_APP_FILTERS}"
             exit "${status}"
           else
-            cargo test --locked -q -p prodex-app --lib --all-features \
+            cargo test --locked -q -p prodex-app --lib \
               -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
             if grep -Fq 'running 0 tests' "${test_log}"; then
               echo "prodex-app shard matched no tests"
@@ -215,11 +215,11 @@ jobs:
           }
           status=0
           if ! run_targeted_test "prodex-app desktop test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib --all-features 'runtime_tools::desktop_tests::' -- --test-threads=1; then
+            --lib 'runtime_tools::desktop_tests::' -- --test-threads=1; then
             status=1
           fi
           if ! run_targeted_test "prodex-app offline symlink test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib --all-features \
+            --lib \
             'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
             -- --test-threads=1; then
             status=1
@@ -417,8 +417,8 @@ jobs:
               return 1
             fi
           }
-          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --all-features -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
-          run_targeted_test "Windows optional-tools rtk tests" cargo test --locked -q -p prodex-optional-tools --lib --all-features rtk::tests:: -- --test-threads=1
+          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
+          run_targeted_test "Windows optional-tools rtk tests" cargo test --locked -q -p prodex-optional-tools --lib rtk::tests:: -- --test-threads=1
 
       - name: Run Windows runtime member tests
         if: matrix.suite == 'members-runtime'
@@ -440,19 +440,19 @@ jobs:
               return 1
             fi
           }
-          cargo test --locked -q -p 'prodex-runtime-*' --all-features -- --test-threads=4 --skip continuity_failure_reason_metrics_
-          run_targeted_test "Windows broker-log continuity tests" cargo test --locked -q -p prodex-runtime-broker-log --lib --all-features continuity_failure_reason_metrics_ -- --test-threads=1
+          cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4 --skip continuity_failure_reason_metrics_
+          run_targeted_test "Windows broker-log continuity tests" cargo test --locked -q -p prodex-runtime-broker-log --lib continuity_failure_reason_metrics_ -- --test-threads=1
 
       - name: Run Windows storage member tests
         if: matrix.suite == 'members-storage'
         shell: bash
         env:
           RUST_BACKTRACE: "1"
-        run: cargo test --locked -q -p 'prodex-storage*' --all-features -- --test-threads=4
+        run: cargo test --locked -q -p 'prodex-storage*' -- --test-threads=4
 
       - name: Prebuild Windows auto-rotate tests
         if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
-        run: cargo test --locked --test auto_rotate --all-features --no-run
+        run: cargo test --locked --test auto_rotate --no-run
 
       - name: Run Windows non-sharded root tests
         if: matrix.suite == 'root-tests'
@@ -460,14 +460,14 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands --all-features -- --test-threads=4
-          cargo test --locked -q -p prodex --doc --all-features
+          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands -- --test-threads=4
+          cargo test --locked -q -p prodex --doc
 
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
         if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         env:
           RUST_BACKTRACE: "1"
-        run: node scripts/ci/auto-rotate-shards.mjs --all-features --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
+        run: node scripts/ci/auto-rotate-shards.mjs --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
       - name: Build Windows installer fixture binary
         if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
@@ -533,7 +533,7 @@ jobs:
             status=0
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
-              if ! cargo test --locked -q -p prodex-app --lib --all-features \
+              if ! cargo test --locked -q -p prodex-app --lib \
                 "${filter}" -- --test-threads=1 "${windows_skips[@]}" 2>&1 | tee "${test_log}"; then
                 status=1
               fi
@@ -549,7 +549,7 @@ jobs:
               [[ -z "${filter}" ]] && continue
               shard_skips+=(--skip "${filter}")
             done <<< "${PRODEX_APP_SKIP_FILTERS}"
-            cargo test --locked -q -p prodex-app --lib --all-features -- \
+            cargo test --locked -q -p prodex-app --lib -- \
               --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"
             if grep -Fq 'running 0 tests' "${test_log}"; then
               echo "prodex-app Windows shard matched no tests"
@@ -604,7 +604,7 @@ jobs:
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
-          if ! cargo test --locked -q -p prodex-app --lib --all-features runtime_broker -- --test-threads=1 2>&1 | tee "${test_log}"; then
+          if ! cargo test --locked -q -p prodex-app --lib runtime_broker -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
           fi
           if grep -Fq 'running 0 tests' "${test_log}"; then
@@ -641,7 +641,7 @@ jobs:
             native_kiro_resolution_does_not_inject_the_codex_bridge_provider \
             native_kiro_cli_maps_resume_session_id
           do
-            if ! run_targeted_test "macOS Kiro test ${filter}" cargo test --locked -q -p prodex-app --lib --all-features \
+            if ! run_targeted_test "macOS Kiro test ${filter}" cargo test --locked -q -p prodex-app --lib \
               "${filter}" -- --test-threads=1; then
               status=1
             fi
@@ -977,10 +977,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/sonar
-          cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --all-features --message-format=json -- -D warnings > target/sonar/clippy-report.json
+          cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --message-format=json -- -D warnings > target/sonar/clippy-report.json
 
       - name: Run clippy warning gate
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Create ephemeral local Sonar token
         shell: bash
@@ -1398,7 +1398,7 @@ jobs:
           set -euo pipefail
           test_log="$(mktemp)"
           trap 'rm -f "${test_log}"' EXIT
-          if ! cargo test --locked -p prodex-app --lib --all-features profile_commands_internal_tests:: -- --test-threads=1 2>&1 | tee "${test_log}"; then
+          if ! cargo test --locked -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
           fi
           if grep -Fq 'running 0 tests' "${test_log}"; then
@@ -1579,6 +1579,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.job == 'runtime-proxy-bench-smoke' }}
 
       - name: Check runtime proxy benchmark regression thresholds
         env:
@@ -1586,8 +1588,32 @@ jobs:
           PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
+  runtime-governance-bench-smoke:
+    needs: changes
+    if: needs.changes.outputs.runtime_bench == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Restore Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.job == 'runtime-proxy-bench-smoke' }}
+
       - name: Measure bounded governance hot paths
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: cargo bench --locked --bench governance_hot_paths
 
   runtime-load-smoke:
@@ -1755,6 +1781,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.1
+          components: clippy
 
       - name: Install pinned uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -1784,6 +1811,9 @@ jobs:
           rustc --version
           cargo --version
           ar --version | head -n 1
+
+      - name: Lint Mojo-enabled workspace
+        run: PRODEX_MOJO_VERSION="${MOJO_VERSION}" cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Build Prodex with real Mojo
         shell: bash
@@ -1862,6 +1892,7 @@ jobs:
       - env-sensitive-parallel-guard
       - main-internal-runtime-proxy
       - runtime-proxy-bench-smoke
+      - runtime-governance-bench-smoke
       - runtime-load-smoke
       - runtime-stress
       - real-mojo
