@@ -163,7 +163,7 @@ Run the same recovery gate used by CI:
 ```bash
 PRODEX_BACKUP_DRILL_MAX_RECOVERY_POINT_AGE_SECONDS=60 \
 PRODEX_BACKUP_DRILL_MAX_RTO_SECONDS=300 \
-npm run ci:backup-restore-drill
+node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
 ```
 
 The command requires Docker plus `psql`, starts disposable PostgreSQL source

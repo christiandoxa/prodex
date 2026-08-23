@@ -314,7 +314,7 @@ files and a directory may have at most 9 near-limit production siblings.
 - Runtime tests must isolate temp homes, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, runtime log paths,
   ports, broker state, and continuation state. Keep global-env/runtime/continuation cases in
   serialized process shards with `--test-threads=1`; prefer independent processes for parallel
-  coverage. Keep runtime test manifests in sync with `npm run ci:runtime-manifest`.
+  coverage. Keep runtime test manifests in sync with `node scripts/ci/runtime-test-manifest-guard.mjs`.
 - Live provider, credential-bearing, network, or cost-bearing tests require explicit
   authorization. Use deterministic fixtures or the offline compatibility gate by default.
 
@@ -343,18 +343,18 @@ cover another OS.
 Use the narrowest meaningful checks first, then broaden for shared or high-risk changes. Report
 exact commands and results; do not claim a skipped or failed command passed.
 
-- Markdown or repository-guidance changes: `npm run docs:lint`, `npm run test:changed`, and
+- Markdown or repository-guidance changes: `npm run docs`, `npm run test:changed`, and
   `git diff --check`.
 - Rust module/API changes: `cargo fmt --check`, a focused `cargo test --locked -q -p <crate>`
   command, and `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
   when shared/API or CI-sensitive code is touched.
-- Runtime proxy changes: `npm run test:runtime-smoke`,
+- Runtime proxy changes: `node scripts/ci/test-serial.mjs --suite runtime-smoke`,
   `cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1`,
-  `npm run ci:runtime-hotpath-guard`, `npm run ci:runtime-manifest`, and
-  `npm run compat:offline-gate`; add bounded load smoke for admission/latency changes.
-- Dependency or boundary changes: `npm run ci:crate-boundary` plus the owning domain,
+  `node scripts/ci/runtime-hotpath-guard.mjs --self-test && node scripts/ci/runtime-hotpath-guard.mjs`, `node scripts/ci/runtime-test-manifest-guard.mjs`, and
+  `node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs`; add bounded load smoke for admission/latency changes.
+- Dependency or boundary changes: `node scripts/ci/crate-boundary-guard.mjs --self-test && node scripts/ci/crate-boundary-guard.mjs` plus the owning domain,
   gateway, storage, auth, provider, or application boundary guard.
-- Broad, release-adjacent, or high-risk changes: `npm run ci:preflight`; add
+- Broad, release-adjacent, or high-risk changes: `npm run ci`; add
   `npm run test:serial -- --suite all` when global state/runtime paths changed and
   `npm run test:full -- --timings` when full workspace evidence is required.
 - Release metadata: after changing `Cargo.toml`, run `npm run npm:sync-version`, review

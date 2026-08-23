@@ -98,14 +98,14 @@ instructions, corrective turns, binary-like output, and duplicate tool output.
 Run strict machine-readable evidence:
 
 ```bash
-npm run smart-context:replay
+cargo run --locked -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict
 ```
 
 Regenerate or verify checked evidence:
 
 ```bash
-npm run docs:smart-context-evidence
-npm run docs:smart-context-evidence:check
+node scripts/docs/smart-context-evidence.mjs --write
+node scripts/docs/smart-context-evidence.mjs --check
 ```
 
 The current [raw report](generated/smart-context-replay-report.json) and

@@ -59,9 +59,9 @@ fixtures for drift. They do not prove native CLI behavior or complete provider
 semantic fidelity:
 
 - [Smart Context replay report](generated/smart-context-replay-report.md) via
-  `npm run docs:smart-context-evidence`;
+  `node scripts/docs/smart-context-evidence.mjs --write`;
 - [Provider capabilities](provider-capabilities.md) via
-  `npm run docs:provider-capabilities`.
+  `node scripts/catalog/provider-capability-matrix.mjs --write`.
 
 Broken local links, duplicate canonical numeric prefixes, and Smart Context replay
 fixture drift are CI failures. The checked-in OpenAPI document describes the

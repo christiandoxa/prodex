@@ -296,15 +296,15 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 npm run test:full -- --timings
 npm ci
 npm test
-npm run docs:lint
-npm run ci:crate-boundary
-npm run ci:domain-boundary-guard
-npm run ci:application-boundary-guard
-npm run ci:auth-boundary-guard
-npm run ci:gateway-core-boundary-guard
-npm run ci:gateway-http-boundary-guard
-npm run ci:deployment-security-guard
-npm run ci:dependency-duplicates
+node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check
+node scripts/ci/crate-boundary-guard.mjs --self-test && node scripts/ci/crate-boundary-guard.mjs
+node scripts/ci/domain-boundary-guard.mjs --self-test && node scripts/ci/domain-boundary-guard.mjs
+node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs
+node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs
+node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs
+node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs
+node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs
+node scripts/ci/dependency-duplicate-guard.mjs
 cargo audit
 cargo deny check advisories sources licenses bans
 ```
@@ -318,12 +318,12 @@ cargo bench --locked --bench governance_hot_paths
 cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 \
   cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
-npm run load:self-test
-npm run load:runtime-proxy
-npm run ci:runtime-load-smoke
-npm run ci:runtime-stress
-npm run ci:backup-restore-drill
-npm run ci:storage-postgres-proof
+node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test
+node tests/load/runtime-proxy-load.mjs
+node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs
+node scripts/ci/runtime-stress.mjs
+node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
+node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs
 ```
 
 ## Release Evidence Gate
