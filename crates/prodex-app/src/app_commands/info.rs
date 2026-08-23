@@ -1,8 +1,8 @@
 use super::*;
 
 #[cfg(test)]
-pub(crate) use prodex_app_reports::collect_info_runtime_load_summary_from_text;
-pub(crate) use prodex_app_reports::{
+pub(crate) use crate::reports::collect_info_runtime_load_summary_from_text;
+pub(crate) use crate::reports::{
     InfoTokenUsageSummary, classify_prodex_process_row,
     collect_info_runtime_load_summary_from_texts, collect_info_token_usage_summary_from_texts,
     format_info_pool_remaining, format_info_process_summary, format_info_quota_data_summary,
@@ -106,7 +106,7 @@ pub(crate) fn build_info_quota_aggregate(
     persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     now: i64,
 ) -> InfoQuotaAggregate {
-    prodex_app_reports::build_info_quota_aggregate(
+    crate::reports::build_info_quota_aggregate(
         reports,
         persisted_usage_snapshots,
         now,
@@ -249,7 +249,7 @@ pub(crate) fn estimate_info_runway(
     current_remaining: i64,
     now: i64,
 ) -> Option<InfoRunwayEstimate> {
-    prodex_app_reports::estimate_info_runway(
+    crate::reports::estimate_info_runway(
         observations,
         window,
         current_remaining,
@@ -262,7 +262,7 @@ pub(crate) fn format_info_load_summary(
     summary: &InfoRuntimeLoadSummary,
     runtime_process_count: usize,
 ) -> String {
-    prodex_app_reports::format_info_load_summary(
+    crate::reports::format_info_load_summary(
         summary,
         runtime_process_count,
         INFO_RECENT_LOAD_WINDOW_SECONDS,
@@ -271,14 +271,14 @@ pub(crate) fn format_info_load_summary(
 
 pub(crate) fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummary>) -> String {
     let path = summary.map(|summary| summary.path.display().to_string());
-    prodex_app_reports::format_runtime_policy_summary(
+    crate::reports::format_runtime_policy_summary(
         path.as_deref(),
         summary.map(|summary| summary.version),
     )
 }
 
 pub(crate) fn format_runtime_proxy_contract_summary() -> String {
-    prodex_app_reports::format_runtime_proxy_contract_summary()
+    crate::reports::format_runtime_proxy_contract_summary()
 }
 
 pub(crate) fn format_runtime_proxy_preset() -> String {
@@ -289,14 +289,14 @@ pub(crate) fn format_runtime_proxy_preset() -> String {
 
 pub(crate) fn format_runtime_logs_summary() -> String {
     let directory = runtime_proxy_log_dir().display().to_string();
-    prodex_app_reports::format_runtime_logs_summary(&directory, runtime_proxy_log_format().as_str())
+    crate::reports::format_runtime_logs_summary(&directory, runtime_proxy_log_format().as_str())
 }
 
 pub(crate) fn runtime_policy_json_value(
     summary: Option<&RuntimePolicySummary>,
 ) -> serde_json::Value {
     let path = summary.map(|summary| summary.path.display().to_string());
-    prodex_app_reports::runtime_policy_json_value(
+    crate::reports::runtime_policy_json_value(
         path.as_deref(),
         summary.map(|summary| summary.version),
     )
@@ -304,33 +304,33 @@ pub(crate) fn runtime_policy_json_value(
 
 pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
     let directory = runtime_proxy_log_dir().display().to_string();
-    prodex_app_reports::runtime_logs_json_value(&directory, runtime_proxy_log_format().as_str())
+    crate::reports::runtime_logs_json_value(&directory, runtime_proxy_log_format().as_str())
 }
 
 pub(crate) fn format_secret_backend_summary() -> String {
     match configured_secret_backend_selection() {
-        Ok(selection) => prodex_app_reports::format_secret_backend_summary_parts(
+        Ok(selection) => crate::reports::format_secret_backend_summary_parts(
             Some(selection.kind().as_str()),
             selection.keyring_service(),
             None,
         ),
         Err(err) => {
             let error = redaction_redact_secret_like_text(&err.to_string());
-            prodex_app_reports::format_secret_backend_summary_parts(None, None, Some(&error))
+            crate::reports::format_secret_backend_summary_parts(None, None, Some(&error))
         }
     }
 }
 
 pub(crate) fn secret_backend_json_value() -> serde_json::Value {
     match configured_secret_backend_selection() {
-        Ok(selection) => prodex_app_reports::secret_backend_json_value_parts(
+        Ok(selection) => crate::reports::secret_backend_json_value_parts(
             Some(selection.kind().as_str()),
             selection.keyring_service(),
             None,
         ),
         Err(err) => {
             let error = redaction_redact_secret_like_text(&err.to_string());
-            prodex_app_reports::secret_backend_json_value_parts(None, None, Some(&error))
+            crate::reports::secret_backend_json_value_parts(None, None, Some(&error))
         }
     }
 }

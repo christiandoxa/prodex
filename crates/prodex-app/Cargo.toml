@@ -51,7 +51,6 @@ libc = { workspace = true }
 portable-pty = { workspace = true }
 os_info = { workspace = true }
 prodex_audit_log = { workspace = true }
-prodex_app_reports = { workspace = true }
 prodex_application = { workspace = true }
 prodex_authn = { workspace = true }
 prodex_authz = { workspace = true }

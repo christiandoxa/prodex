@@ -1,3 +1,5 @@
+//! App-owned session report tests.
+
 use super::*;
 
 #[test]

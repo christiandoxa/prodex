@@ -1,3 +1,5 @@
+//! Runtime-tuning report rendering.
+
 use super::*;
 
 pub fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {

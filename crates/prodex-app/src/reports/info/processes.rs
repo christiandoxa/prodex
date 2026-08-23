@@ -1,3 +1,5 @@
+//! Process classification and runtime-log selection.
+
 use super::*;
 use prodex_cli::Commands;
 
@@ -55,12 +57,6 @@ pub fn is_prodex_process_row(row: &ProcessRow, current_basename: Option<&str>) -
         || prodex_process_row_argv_span(row, current_basename).is_some()
 }
 
-pub fn prodex_process_row_is_runtime(row: &ProcessRow, current_basename: Option<&str>) -> bool {
-    prodex_process_row_command(row, current_basename)
-        .as_ref()
-        .is_some_and(Commands::launches_runtime)
-}
-
 fn prodex_process_row_command(
     row: &ProcessRow,
     current_basename: Option<&str>,
@@ -90,25 +86,11 @@ pub fn process_basename(input: &str) -> &str {
         .unwrap_or(input)
 }
 
-pub fn runtime_log_pid_from_path(path: &Path) -> Option<u32> {
-    runtime_log_pid_from_path_with_prefix(path, "prodex-runtime")
-}
-
 pub fn runtime_log_pid_from_path_with_prefix(path: &Path, prefix: &str) -> Option<u32> {
     let name = path.file_name()?.to_str()?;
     let rest = name.strip_prefix(&format!("{prefix}-"))?;
     let (pid, _) = rest.split_once('-')?;
     pid.parse::<u32>().ok()
-}
-
-pub fn select_active_runtime_log_paths<I>(
-    processes: &[ProdexProcessInfo],
-    log_paths: I,
-) -> Vec<PathBuf>
-where
-    I: IntoIterator<Item = PathBuf>,
-{
-    select_active_runtime_log_paths_with_prefix(processes, log_paths, "prodex-runtime")
 }
 
 pub fn select_active_runtime_log_paths_with_prefix<I>(

@@ -13,9 +13,9 @@ pub(crate) use self::log_stream::{
 pub(crate) use self::log_transcript::{TranscriptEvent, transcript_events_from_session_line};
 #[cfg(test)]
 use crate::app_commands::log_format::local_log_timestamp;
-use anyhow::Result;
 #[cfg(test)]
-use prodex_app_reports::InfoTokenUsageEvent;
+use crate::reports::InfoTokenUsageEvent;
+use anyhow::Result;
 #[cfg(test)]
 use std::collections::VecDeque;
 #[cfg(test)]

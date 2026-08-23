@@ -1,3 +1,5 @@
+//! Quota aggregation for info reports.
+
 use super::*;
 
 pub fn build_info_quota_aggregate(
@@ -98,14 +100,4 @@ fn update_info_quota_aggregate(
             );
         }
     }
-}
-
-pub fn info_main_window_snapshots_at(
-    usage: &UsageResponse,
-    now: i64,
-) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
-    Some((
-        required_main_window_snapshot_at(usage, "5h", now)?,
-        required_main_window_snapshot_at(usage, "weekly", now)?,
-    ))
 }

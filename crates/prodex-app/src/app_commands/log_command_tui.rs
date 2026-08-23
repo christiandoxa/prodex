@@ -18,10 +18,10 @@ use crate::app_commands::log_upstream::{
     latest_upstream_payload_event, stream_upstream_payload_events,
 };
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
+use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
-use prodex_app_reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;

@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn runtime_proxy_contract_summary_maps_to_eight_facets() {
-    let summary = prodex_app_reports::format_runtime_proxy_contract_summary();
+    let summary = crate::reports::format_runtime_proxy_contract_summary();
     let facets = summary.split(", ").collect::<Vec<_>>();
     assert_eq!(
         facets,
@@ -19,11 +19,6 @@ fn runtime_proxy_contract_summary_maps_to_eight_facets() {
             "profile-isolated secrets",
         ]
     );
-
-    let json = prodex_app_reports::runtime_proxy_contract_json_value();
-    let object = json.as_object().expect("contract JSON should be an object");
-    assert_eq!(object.len(), 8);
-    assert!(object.values().all(|value| value == true));
 }
 
 #[test]
