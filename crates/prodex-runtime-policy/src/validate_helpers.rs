@@ -1,6 +1,78 @@
 use anyhow::{Result, bail};
-#[cfg(any(not(feature = "mojo"), test))]
-use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NumericRule {
+    NonZero(u64),
+    Range {
+        value: u64,
+        minimum: u64,
+        maximum: u64,
+    },
+    LessOrEqual {
+        value: u64,
+        maximum: u64,
+    },
+}
+
+pub(crate) fn failed_numeric_rules(rules: &[NumericRule]) -> Result<Vec<usize>> {
+    #[cfg(feature = "mojo")]
+    {
+        let rules = rules
+            .iter()
+            .map(|rule| match *rule {
+                NumericRule::NonZero(value) => prodex_mojo_core::policy::NumericRule {
+                    kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
+                    value,
+                    minimum: 0,
+                    maximum: u64::MAX,
+                    related_value: 0,
+                },
+                NumericRule::Range {
+                    value,
+                    minimum,
+                    maximum,
+                } => prodex_mojo_core::policy::NumericRule {
+                    kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
+                    value,
+                    minimum,
+                    maximum,
+                    related_value: 0,
+                },
+                NumericRule::LessOrEqual { value, maximum } => {
+                    prodex_mojo_core::policy::NumericRule {
+                        kind: prodex_mojo_core::policy::POLICY_NUMERIC_RELATION_LE,
+                        value,
+                        minimum: 0,
+                        maximum: 0,
+                        related_value: maximum,
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        prodex_mojo_core::policy::validate_numeric_rules(&rules).map_err(|_| {
+            anyhow::anyhow!("runtime policy numeric validation returned invalid output")
+        })
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        Ok(rules
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rule)| {
+                let failed = match *rule {
+                    NumericRule::NonZero(value) => value == 0,
+                    NumericRule::Range {
+                        value,
+                        minimum,
+                        maximum,
+                    } => value < minimum || value > maximum,
+                    NumericRule::LessOrEqual { value, maximum } => value > maximum,
+                };
+                failed.then_some(index)
+            })
+            .collect())
+    }
+}
 
 pub(crate) fn validate_gateway_route_strategy(value: &str) -> Result<()> {
     if value.is_empty() {
@@ -87,38 +159,4 @@ pub(crate) fn gateway_observability_http_endpoint_has_http_host(value: &str) -> 
         .unwrap_or_default()
         .trim();
     !host.is_empty() && !host.contains('@')
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn validate_optional_usize(
-    value: Option<usize>,
-    path: &Path,
-    field: &str,
-) -> Result<()> {
-    if matches!(value, Some(0)) {
-        bail!("{field} in {} must be greater than 0", path.display());
-    }
-    Ok(())
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str) -> Result<()> {
-    if matches!(value, Some(0)) {
-        bail!("{field} in {} must be greater than 0", path.display());
-    }
-    Ok(())
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn validate_optional_i64_percent(
-    value: Option<i64>,
-    path: &Path,
-    field: &str,
-) -> Result<()> {
-    if let Some(value) = value
-        && !(1..=10).contains(&value)
-    {
-        bail!("{field} in {} must be between 1 and 10", path.display());
-    }
-    Ok(())
 }

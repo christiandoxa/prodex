@@ -1,6 +1,6 @@
 use super::validate_gateway_exact_identifier;
 use crate::types::{RuntimePolicyFile, RuntimePolicyServiceMode};
-use crate::validate_helpers::validate_gateway_state_backend;
+use crate::validate_helpers::{NumericRule, failed_numeric_rules, validate_gateway_state_backend};
 use crate::validate_secrets::{validate_gateway_secret_ref, validate_gateway_secret_source};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -75,116 +75,45 @@ fn validate_gateway_network(policy: &RuntimePolicyFile, path: &Path) -> Result<(
     Ok(())
 }
 
-fn validate_gateway_replicas(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        validate_gateway_replicas_mojo(policy, path)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        validate_gateway_replicas_rust(policy, path)
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn validate_gateway_replicas_rust(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    if policy
-        .gateway
-        .replica_count
-        .is_some_and(|replicas| !(1..=64).contains(&replicas))
-    {
-        bail!(
-            "gateway.replica_count in {} must be between 1 and 64",
-            path.display()
-        );
-    }
-    if policy.gateway.require_multi_replica_accounting_checks == Some(true)
-        && policy
-            .gateway
-            .replica_count
-            .is_none_or(|replicas| replicas < 2)
-    {
-        bail!(
-            "gateway.require_multi_replica_accounting_checks in {} requires replica_count >= 2",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(feature = "mojo")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 enum GatewayReplicaNumericTag {
     Range,
     AccountingMinimum,
 }
 
-#[cfg(feature = "mojo")]
-fn validate_gateway_replicas_mojo(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+fn validate_gateway_replicas(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let replica_count = policy.gateway.replica_count;
     let mut rules = Vec::new();
     let mut tags = Vec::new();
     if let Some(value) = replica_count {
-        rules.push(prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
+        rules.push(NumericRule::Range {
             value: u64::from(value),
             minimum: 1,
             maximum: 64,
-            related_value: 0,
         });
         tags.push(GatewayReplicaNumericTag::Range);
     }
     if policy.gateway.require_multi_replica_accounting_checks == Some(true) {
-        rules.push(prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RELATION_LE,
+        rules.push(NumericRule::LessOrEqual {
             value: 2,
-            minimum: 0,
-            maximum: 0,
-            related_value: u64::from(replica_count.unwrap_or_default()),
+            maximum: u64::from(replica_count.unwrap_or_default()),
         });
         tags.push(GatewayReplicaNumericTag::AccountingMinimum);
     }
 
-    let failed = prodex_mojo_core::policy::validate_numeric_rules(&rules).map_err(|_| {
-        anyhow::anyhow!("gateway replica numeric validation returned invalid output")
-    })?;
-    if let Some(index) = failed.first() {
-        match tags[*index] {
-            GatewayReplicaNumericTag::Range => bail!(
-                "gateway.replica_count in {} must be between 1 and 64",
-                path.display()
-            ),
+    if let Some(index) = failed_numeric_rules(&rules)?.first().copied() {
+        match tags[index] {
             GatewayReplicaNumericTag::AccountingMinimum => bail!(
                 "gateway.require_multi_replica_accounting_checks in {} requires replica_count >= 2",
+                path.display()
+            ),
+            GatewayReplicaNumericTag::Range => bail!(
+                "gateway.replica_count in {} must be between 1 and 64",
                 path.display()
             ),
         }
     }
     Ok(())
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_gateway_replica_numeric_validation_matches_rust_oracle() {
-        for input in [
-            "version = 1",
-            "version = 1\n[gateway]\nreplica_count = 0",
-            "version = 1\n[gateway]\nreplica_count = 65",
-            "version = 1\n[gateway]\nrequire_multi_replica_accounting_checks = true\nreplica_count = 1",
-            "version = 1\n[gateway]\nrequire_multi_replica_accounting_checks = true",
-        ] {
-            let policy = toml::from_str::<RuntimePolicyFile>(input).unwrap();
-            let path = Path::new("policy.toml");
-            assert_eq!(
-                validate_gateway_replicas_rust(&policy, path).map_err(|error| error.to_string()),
-                validate_gateway_replicas_mojo(&policy, path).map_err(|error| error.to_string()),
-                "{input}"
-            );
-        }
-    }
 }
 
 fn validate_gateway_provider(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {

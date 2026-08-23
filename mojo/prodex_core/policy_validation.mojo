@@ -1,6 +1,5 @@
 from std.memory import Pointer
 
-comptime POLICY_NUMERIC_MAX_COUNT: Int64 = 64
 comptime POLICY_NUMERIC_NON_ZERO: Int64 = 0
 comptime POLICY_NUMERIC_RANGE: Int64 = 1
 comptime POLICY_NUMERIC_RELATION_LE: Int64 = 2
@@ -13,13 +12,12 @@ def prodex_runtime_policy_validate_numeric(
     minimums: Pointer[mut=False, UInt64, _],
     maximums: Pointer[mut=False, UInt64, _],
     related_values: Pointer[mut=False, UInt64, _],
-    failed_rules: Pointer[mut=True, UInt64, _],
+    failed_rules: Pointer[mut=True, Int64, _],
     count: Int64,
 ) abi("C") -> Int64:
-    if count < 0 or count > POLICY_NUMERIC_MAX_COUNT:
+    if count < 0:
         return 1
 
-    var failed: UInt64 = 0
     for index in range(count):
         var kind = kinds[unsafe_offset=index]
         var value = values[unsafe_offset=index]
@@ -34,7 +32,7 @@ def prodex_runtime_policy_validate_numeric(
             return 2
 
         if invalid:
-            failed |= UInt64(1) << UInt64(index)
-
-    failed_rules[unsafe_offset=0] = failed
+            failed_rules[unsafe_offset=index] = 1
+        else:
+            failed_rules[unsafe_offset=index] = 0
     return 0
