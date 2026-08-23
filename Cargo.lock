@@ -2846,7 +2846,6 @@ dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-broker",
  "prodex-runtime-broker-log",
- "prodex-runtime-capabilities",
  "prodex-runtime-claude",
  "prodex-runtime-cookies",
  "prodex-runtime-doctor",
@@ -3234,15 +3233,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-runtime-capabilities"
-version = "0.413.0"
-dependencies = [
- "prodex-runtime-anthropic",
- "prodex-runtime-proxy",
- "serde_json",
-]
-
-[[package]]
 name = "prodex-runtime-claude"
 version = "0.413.0"
 dependencies = [
@@ -3350,6 +3340,7 @@ dependencies = [
  "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-redaction",
+ "prodex-runtime-anthropic",
  "prodex-runtime-state",
  "prodex-runtime-tuning",
  "serde",
