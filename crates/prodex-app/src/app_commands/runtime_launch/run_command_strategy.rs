@@ -132,6 +132,39 @@ impl RunCommandStrategy {
             resume_session_path,
         })
     }
+
+    fn project_in_app_resume_settings(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        codex_args: &mut Vec<OsString>,
+        preference_context: &crate::ModelPreferenceContext,
+    ) -> Result<()> {
+        if self.command_server
+            || prodex_runtime_launch::is_codex_exec_invocation(codex_args)
+            || prodex_runtime_launch::codex_resume_requested(codex_args)
+        {
+            return Ok(());
+        }
+        crate::project_in_app_resume_model_settings(
+            if prepared.managed {
+                &prepared.paths.shared_codex_root
+            } else {
+                &prepared.codex_home
+            },
+            codex_args,
+            [
+                ("model", preference_context.explicit_model.is_none()),
+                (
+                    "model_provider",
+                    !prepared.managed && self.model_provider_override.is_none(),
+                ),
+                (
+                    "model_reasoning_effort",
+                    preference_context.explicit_effort.is_none(),
+                ),
+            ],
+        )
+    }
 }
 
 impl RuntimeLaunchStrategy for RunCommandStrategy {
@@ -195,30 +228,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             false,
             true,
         );
-        if !self.command_server
-            && !prodex_runtime_launch::is_codex_exec_invocation(&codex_args)
-            && !prodex_runtime_launch::codex_resume_requested(&codex_args)
-        {
-            crate::project_in_app_resume_model_settings(
-                if prepared.managed {
-                    &prepared.paths.shared_codex_root
-                } else {
-                    &prepared.codex_home
-                },
-                &mut codex_args,
-                [
-                    ("model", preference_context.explicit_model.is_none()),
-                    (
-                        "model_provider",
-                        !prepared.managed && self.model_provider_override.is_none(),
-                    ),
-                    (
-                        "model_reasoning_effort",
-                        preference_context.explicit_effort.is_none(),
-                    ),
-                ],
-            )?;
-        }
+        self.project_in_app_resume_settings(prepared, &mut codex_args, &preference_context)?;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
                 &prepared.codex_home,
