@@ -3,7 +3,7 @@ use crate::types::{
     RuntimePolicyFile, RuntimePolicyGatewaySsoSettings,
     RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyServiceMode,
 };
-use crate::validate_helpers::validate_gateway_admin_role;
+use crate::validate_helpers::{NumericRule, failed_numeric_rules, validate_gateway_admin_role};
 use crate::validate_secrets::validate_gateway_secret_source;
 use anyhow::{Context, Result, bail};
 use prodex_authn::{
@@ -49,7 +49,14 @@ pub(super) fn validate_gateway_admin_tokens(policy: &RuntimePolicyFile, path: &P
 }
 
 pub(super) fn validate_gateway_virtual_keys(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    for (index, key) in policy.gateway.virtual_keys.iter().enumerate() {
+    let numeric_failures = gateway_virtual_key_numeric_failures(policy)?;
+    for ((index, key), numeric_failure) in policy
+        .gateway
+        .virtual_keys
+        .iter()
+        .enumerate()
+        .zip(numeric_failures)
+    {
         let field = format!("gateway.virtual_keys[{index}]");
         validate_gateway_exact_identifier(&key.name, path, &format!("{field}.name"))?;
         validate_gateway_secret_source(
@@ -84,68 +91,41 @@ pub(super) fn validate_gateway_virtual_keys(policy: &RuntimePolicyFile, path: &P
                 path.display()
             );
         }
-        validate_gateway_virtual_key_numeric(
-            [
-                ("request_budget", key.request_budget),
-                ("rpm_limit", key.rpm_limit),
-                ("tpm_limit", key.tpm_limit),
-            ],
-            &field,
-            path,
-        )?;
+        if let Some(name) = numeric_failure {
+            bail!(
+                "{field}.{name} in {} must be greater than 0",
+                path.display()
+            );
+        }
     }
     Ok(())
 }
 
-fn validate_gateway_virtual_key_numeric(
-    values: [(&'static str, Option<u64>); 3],
-    field: &str,
-    path: &Path,
-) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        let default_rule = prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_NON_ZERO,
-            value: 0,
-            minimum: 0,
-            maximum: u64::MAX,
-            related_value: 0,
-        };
-        let mut rules = [default_rule; 3];
-        let mut names = [""; 3];
-        let mut count = 0;
-        for (name, value) in values {
+fn gateway_virtual_key_numeric_failures(
+    policy: &RuntimePolicyFile,
+) -> Result<Vec<Option<&'static str>>> {
+    let mut failures = vec![None; policy.gateway.virtual_keys.len()];
+    let mut rules = Vec::new();
+    let mut locations = Vec::new();
+
+    for (key_index, key) in policy.gateway.virtual_keys.iter().enumerate() {
+        for (name, value) in [
+            ("request_budget", key.request_budget),
+            ("rpm_limit", key.rpm_limit),
+            ("tpm_limit", key.tpm_limit),
+        ] {
             if let Some(value) = value {
-                rules[count].value = value;
-                names[count] = name;
-                count += 1;
+                rules.push(NumericRule::NonZero(value));
+                locations.push((key_index, name));
             }
         }
-        let failed =
-            prodex_mojo_core::policy::validate_numeric_rules(&rules[..count]).map_err(|_| {
-                anyhow::anyhow!("gateway virtual key numeric validation returned invalid output")
-            })?;
-        if let Some(index) = failed.first() {
-            bail!(
-                "{field}.{} in {} must be greater than 0",
-                names[*index],
-                path.display()
-            );
-        }
-        Ok(())
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        for (name, value) in values {
-            if matches!(value, Some(0)) {
-                bail!(
-                    "{field}.{name} in {} must be greater than 0",
-                    path.display()
-                );
-            }
-        }
-        Ok(())
+
+    for index in failed_numeric_rules(&rules)? {
+        let (key, name) = locations[index];
+        failures[key].get_or_insert(name);
     }
+    Ok(failures)
 }
 
 pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
@@ -273,7 +253,19 @@ fn validate_gateway_sso_shape(sso: &RuntimePolicyGatewaySsoSettings, path: &Path
             path.display()
         );
     }
-    validate_gateway_sso_reauthentication_numeric(sso.reauthentication_max_age_seconds, path)?;
+    if let Some(value) = sso.reauthentication_max_age_seconds
+        && !failed_numeric_rules(&[NumericRule::Range {
+            value,
+            minimum: 1,
+            maximum: 86_400,
+        }])?
+        .is_empty()
+    {
+        bail!(
+            "gateway.sso.reauthentication_max_age_seconds in {} must be between 1 and 86400",
+            path.display()
+        );
+    }
     let browser_configured = sso.browser_flow.is_some()
         || sso.pkce_method.is_some()
         || sso.oidc_authorization_url.is_some()
@@ -294,45 +286,6 @@ fn validate_gateway_sso_shape(sso: &RuntimePolicyGatewaySsoSettings, path: &Path
         );
     }
     Ok(oidc_enabled)
-}
-
-fn validate_gateway_sso_reauthentication_numeric(value: Option<u64>, path: &Path) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        let Some(value) = value else {
-            return Ok(());
-        };
-        let rule = prodex_mojo_core::policy::NumericRule {
-            kind: prodex_mojo_core::policy::POLICY_NUMERIC_RANGE,
-            value,
-            minimum: 1,
-            maximum: 86_400,
-            related_value: 0,
-        };
-        let failed = prodex_mojo_core::policy::validate_numeric_rules(&[rule]).map_err(|_| {
-            anyhow::anyhow!("gateway SSO numeric validation returned invalid output")
-        })?;
-        if !failed.is_empty() {
-            bail!(
-                "gateway.sso.reauthentication_max_age_seconds in {} must be between 1 and 86400",
-                path.display()
-            );
-        }
-        Ok(())
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let Some(value) = value else {
-            return Ok(());
-        };
-        if !(1..=86_400).contains(&value) {
-            bail!(
-                "gateway.sso.reauthentication_max_age_seconds in {} must be between 1 and 86400",
-                path.display()
-            );
-        }
-        Ok(())
-    }
 }
 
 fn validate_gateway_sso_oidc(sso: &RuntimePolicyGatewaySsoSettings, path: &Path) -> Result<()> {
