@@ -28,7 +28,6 @@ const LOW_LEVEL_CRATES = Object.freeze([
 
 const LOW_LEVEL_FORBIDDEN = Object.freeze([
   "prodex-app",
-  "prodex-app-reports",
   "prodex-runtime-doctor",
   "prodex-runtime-launch",
   "prodex-runtime-proxy",
@@ -44,18 +43,10 @@ const RULES = Object.freeze([
     fix: "Put rendering/orchestration in prodex-app or a report crate; keep pure data/helpers low-level.",
   },
   {
-    id: "app-reports-do-not-depend-on-app",
-    from: ({ name }) => name === "prodex-app-reports",
-    to: new Set(["prodex-app", "prodex-runtime-launch"]),
-    reason: "report helpers must be reusable by app-owned screens without importing app orchestration.",
-    fix: "Pass plain data into report helpers instead of depending on command handlers.",
-  },
-  {
     id: "terminal-ui-stays-generic",
     from: ({ name }) => name === "prodex-terminal-ui",
     to: new Set([
       "prodex-app",
-      "prodex-app-reports",
       "prodex-runtime-doctor",
       "prodex-runtime-launch",
       "prodex-runtime-proxy",
@@ -69,7 +60,6 @@ const RULES = Object.freeze([
     from: ({ name }) => name === "prodex-runtime-proxy",
     to: new Set([
       "prodex-app",
-      "prodex-app-reports",
       "prodex-runtime-doctor",
       "prodex-runtime-launch",
       "prodex-runtime-quota",

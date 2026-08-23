@@ -15,11 +15,11 @@ use terminal_ui::{
     tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
 };
 
+use crate::reports::render_session_reports_output;
 use crate::{
     AppPaths, AppState, AppStateIoExt, RunArgs, SessionCommands, SessionResumeArgs, absolutize,
     print_stdout_line, print_stdout_text,
 };
-use prodex_app_reports::render_session_reports_output;
 use prodex_cli::CodexRuntimeFeatureArgs;
 pub(crate) use prodex_session_store::SessionReport;
 

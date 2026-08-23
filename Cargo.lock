@@ -2814,7 +2814,6 @@ dependencies = [
  "os_info",
  "portable-pty",
  "postgres",
- "prodex-app-reports",
  "prodex-application",
  "prodex-audit-log",
  "prodex-authn",
@@ -2888,22 +2887,6 @@ dependencies = [
  "windows-sys 0.61.2",
  "zeroize",
  "zstd",
-]
-
-[[package]]
-name = "prodex-app-reports"
-version = "0.413.0"
-dependencies = [
- "chrono",
- "prodex-cli",
- "prodex-quota",
- "prodex-runtime-quota",
- "prodex-runtime-tuning",
- "prodex-session-store",
- "prodex-shared-types",
- "prodex-terminal-ui",
- "serde",
- "serde_json",
 ]
 
 [[package]]

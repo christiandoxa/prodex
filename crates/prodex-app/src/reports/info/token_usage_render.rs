@@ -1,3 +1,5 @@
+//! Token-usage parsing and rendering.
+
 use super::*;
 
 pub fn collect_info_token_usage_summary_from_text(text: &str) -> InfoTokenUsageSummary {

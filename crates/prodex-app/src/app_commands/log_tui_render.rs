@@ -6,7 +6,7 @@ use crate::app_commands::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines,
 };
 use crate::app_commands::{LogStreamItem, TranscriptEvent};
-use prodex_app_reports::InfoTokenUsageEvent;
+use crate::reports::InfoTokenUsageEvent;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};

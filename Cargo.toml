@@ -12,7 +12,6 @@ rust-version = "1.97.1"
 members = [
     ".",
     "crates/prodex-app",
-    "crates/prodex-app-reports",
     "crates/prodex-application",
     "crates/prodex-authn",
     "crates/prodex-authz",
@@ -119,7 +118,6 @@ prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-l
 prodex_authn = { package = "prodex-authn", path = "crates/prodex-authn", version = "0.413.0" }
 prodex_authz = { package = "prodex-authz", path = "crates/prodex-authz", version = "0.413.0" }
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.413.0" }
-prodex_app_reports = { package = "prodex-app-reports", path = "crates/prodex-app-reports", version = "0.413.0" }
 prodex_application = { package = "prodex-application", path = "crates/prodex-application", version = "0.413.0" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.413.0" }
 prodex_optional_tools = { package = "prodex-optional-tools", path = "crates/prodex-optional-tools", version = "0.413.0" }

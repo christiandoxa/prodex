@@ -2,8 +2,8 @@ use super::{
     StatusOverview, StatusResourceHistory, StatusResourceSnapshot, format_info_load_summary,
     format_info_pool_remaining, format_info_runway, format_info_token_usage_summary,
 };
+use crate::reports::InfoTokenUsageSummary;
 use chrono::{Local, TimeZone};
-use prodex_app_reports::InfoTokenUsageSummary;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

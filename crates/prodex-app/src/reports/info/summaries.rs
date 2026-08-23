@@ -1,3 +1,5 @@
+//! Runtime, policy, and secret-backend summaries.
+
 use super::*;
 
 pub fn format_info_process_summary(processes: &[ProdexProcessInfo]) -> String {
@@ -46,19 +48,6 @@ pub fn format_runtime_proxy_contract_summary() -> String {
         "profile-isolated secrets",
     ]
     .join(", ")
-}
-
-pub fn runtime_proxy_contract_json_value() -> serde_json::Value {
-    serde_json::json!({
-        "scoped_gateway": true,
-        "policy_visible_selection": true,
-        "bounded_precommit_retry": true,
-        "cheap_hot_path": true,
-        "quota_transport_split": true,
-        "structured_observability": true,
-        "connection_reuse": true,
-        "profile_isolated_secrets": true,
-    })
 }
 
 pub fn runtime_policy_json_value(path: Option<&str>, version: Option<u32>) -> serde_json::Value {

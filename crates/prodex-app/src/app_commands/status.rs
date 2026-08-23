@@ -1,12 +1,12 @@
 use super::log_tui::LogTuiTerminal;
-use anyhow::Result;
-use chrono::Local;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use prodex_app_reports::{
+use crate::reports::{
     InfoTokenUsageEvent, InfoTokenUsageSummary, collect_info_token_usage_summary_from_texts,
     info_token_usage_event_from_line, runtime_usage_snapshot_is_usable,
     usage_from_runtime_usage_snapshot,
 };
+use anyhow::Result;
+use chrono::Local;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_quota::required_main_window_snapshot_at;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, IsTerminal};

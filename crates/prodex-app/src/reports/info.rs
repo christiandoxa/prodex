@@ -1,7 +1,6 @@
-use prodex_quota::{MainWindowSnapshot, UsageResponse, format_precise_reset_time};
+use prodex_quota::format_precise_reset_time;
 pub use prodex_runtime_quota::{
     RuntimeProfileUsageSnapshot, required_main_window_snapshot_at,
-    runtime_profile_usage_snapshot_hold_active, runtime_profile_usage_snapshot_hold_expired,
     runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
 };
 use prodex_runtime_tuning::RuntimeTuningSnapshot;
@@ -63,5 +62,5 @@ pub struct InfoTokenUsageProfile {
 }
 
 #[cfg(test)]
-#[path = "../tests/src/info.rs"]
+#[path = "../../tests/src/reports/info.rs"]
 mod tests;

@@ -1,3 +1,5 @@
+//! Runtime-load parsing and summaries.
+
 use super::*;
 
 pub fn collect_info_runtime_load_summary_from_text(

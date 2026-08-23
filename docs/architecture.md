@@ -14,7 +14,7 @@ argv
   -> prodex-app command_dispatch
   -> prodex-app command handler
   -> focused helper crates
-  -> prodex-app-reports / prodex-terminal-ui for human output
+  -> prodex-app reports / prodex-terminal-ui for human output
 ```
 
 Dedicated enterprise flows enter through `prodex-gateway` or `prodex-control-plane`, then cross
@@ -35,13 +35,13 @@ Key crates and files:
 
 - `prodex-cli`: clap argument model, help text, and default `prodex <args>` to `prodex run <args>` rewrite.
 - `prodex-app`: orchestration layer. `command_dispatch.rs` routes parsed commands to handler modules.
-- `prodex-app-reports`: reusable report models/rendering for app-owned screens.
+- `prodex-app::reports`: report models/rendering used only by app-owned screens.
 - `prodex-terminal-ui`: terminal width/layout helpers. Keep it generic; it should not know app or runtime proxy internals.
 
 Common command edit points:
 
-- `prodex session`: `crates/prodex-app/src/app_commands/session.rs`, `crates/prodex-session-store`, `crates/prodex-app-reports/src/session.rs`.
-- `prodex quota`: `crates/prodex-app/src/app_commands/quota.rs`, `crates/prodex-app/src/quota_support`, `prodex-quota`, `prodex-runtime-quota`, `prodex-app-reports`.
+- `prodex session`: `crates/prodex-app/src/app_commands/session.rs`, `crates/prodex-session-store`, `crates/prodex-app/src/reports/session.rs`.
+- `prodex quota`: `crates/prodex-app/src/app_commands/quota.rs`, `crates/prodex-app/src/quota_support`, `prodex-quota`, `prodex-runtime-quota`, `crates/prodex-app/src/reports`.
 - `prodex doctor`: `crates/prodex-app/src/app_commands/doctor.rs`, `crates/prodex-app/src/runtime_doctor`, `prodex-runtime-doctor`, `prodex-runtime-broker-log`.
 - Profile commands: `crates/prodex-app/src/profile_commands`, `prodex-profile-identity`, `prodex-profile-export`, `prodex-shared-codex-fs`.
 - Release metadata: root `Cargo.toml`, crate manifests, lockfile, npm manifests, and versioned docs snippets. Parent release flow wires those together; avoid touching release metadata unless assigned.
@@ -122,7 +122,7 @@ Quota and diagnostics path:
 ```text
 prodex-app command handler
   -> prodex-quota / prodex-runtime-quota / prodex-runtime-doctor
-  -> prodex-app-reports / prodex-terminal-ui
+  -> prodex-app reports / prodex-terminal-ui
   -> terminal for Prodex-owned screens only
 ```
 
@@ -176,13 +176,12 @@ The guard parses workspace Cargo manifests and fails on direct dependency edges 
 
 - focused crates depending on `prodex-app`
 - low-level helper crates depending on app, report, terminal, runtime launch, or runtime proxy layers
-- report/render crates depending on app
 - `prodex-terminal-ui` depending on app or runtime proxy layers
 - `prodex-runtime-proxy` depending on app or terminal/report/orchestration crates
 
 When a rule fires, prefer one of these fixes:
 
 - Move shared DTOs or pure helpers down into a focused helper crate.
-- Keep terminal/report rendering in `prodex-app-reports` or `prodex-terminal-ui`.
+- Keep app-specific report rendering in `prodex-app::reports`; keep generic terminal layout in `prodex-terminal-ui`.
 - Call orchestration upward from `prodex-app`, not from helper crates.
 - Keep hot-path runtime proxy helpers side-effect-free in `prodex-runtime-proxy`.

@@ -149,7 +149,7 @@ test("cargoPublishOrderFromMetadata publishes internal crates before dependents 
     fakeCargoPackage("prodex-app", "crates/prodex-app", ["crates/prodex-core", "crates/prodex-state"]),
     fakeCargoPackage("prodex-core", "crates/prodex-core"),
     fakeCargoPackage("prodex-state", "crates/prodex-state"),
-    fakeCargoPackage("prodex-app-reports", "crates/prodex-app-reports", ["crates/prodex-state"]),
+    fakeCargoPackage("prodex-gateway-core", "crates/prodex-gateway-core", ["crates/prodex-state"]),
   ];
   const metadata = {
     workspace_root: "/fixture",
@@ -159,7 +159,7 @@ test("cargoPublishOrderFromMetadata publishes internal crates before dependents 
 
   assert.deepEqual(
     cargoPublishOrderFromMetadata(metadata).map((packageMetadata) => packageMetadata.name),
-    ["prodex-core", "prodex-state", "prodex-app", "prodex-app-reports", "prodex"],
+    ["prodex-core", "prodex-state", "prodex-app", "prodex-gateway-core", "prodex"],
   );
 });
 

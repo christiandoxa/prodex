@@ -1,9 +1,5 @@
-pub use prodex_session_store::{
-    SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
-    first_i64_value, first_string_value, format_epoch, is_session_metadata_file,
-    session_id_from_path, sort_session_reports, timestamp_label_sort_key, value_at_path,
-};
-pub use terminal_ui::SessionReportDisplay;
+use prodex_session_store::SessionReport;
+use terminal_ui::SessionReportDisplay;
 
 pub fn session_report_display_rows(reports: &[SessionReport]) -> Vec<SessionReportDisplay<'_>> {
     reports
@@ -43,5 +39,5 @@ pub fn render_session_reports_output(
 }
 
 #[cfg(test)]
-#[path = "../tests/src/session.rs"]
+#[path = "../../tests/src/reports/session.rs"]
 mod tests;

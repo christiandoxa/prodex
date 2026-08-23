@@ -58,6 +58,7 @@ mod profile_identity;
 mod profile_local_config;
 mod proxy_config;
 mod quota_support;
+mod reports;
 mod runtime_allocator;
 mod runtime_anthropic;
 mod runtime_background;
