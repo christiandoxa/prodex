@@ -224,12 +224,12 @@ fn quota_raw_uses_builtin_usage_client() {
 }
 
 #[test]
-fn quota_all_detail_shows_main_reset_times() {
+fn quota_defaults_to_all_detail_and_shows_main_reset_times() {
     let fixture = setup_fixture();
 
     let output = run_prodex_with_env(
         &fixture,
-        &["quota", "--all", "--detail", "--once"],
+        &["quota", "--once"],
         &[("PRODEX_TERM_COLUMNS", "110")],
     );
 

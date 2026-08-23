@@ -284,6 +284,14 @@ where
         | Commands::Ponytail(args) => args.translate_legacy_leading_tool_prefixes(),
         _ => {}
     }
+    if let Commands::Quota(args) = &mut command
+        && !args.all
+        && args.profile.is_none()
+        && !args.raw
+    {
+        args.all = true;
+        args.detail = true;
+    }
     Ok(command)
 }
 

@@ -3,7 +3,7 @@ pub const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
 Tips:
   Bare `prodex` invocation defaults to `prodex run`.
   Use `prodex status` for the live quota, token, and resource dashboard.
-  Use `prodex quota --all --detail` for the clearest quota view across profiles.
+  Use `prodex quota` for the detailed live quota view across profiles.
   Use `prodex <command> -h` to see every parameter for that command.
 
 Examples:
@@ -11,7 +11,7 @@ Examples:
   prodex exec \"review this repo\"
   prodex profile list
   prodex status
-  prodex quota --all --detail
+  prodex quota
   prodex redeem main
   prodex run --profile main";
 pub const CLI_PROFILE_AFTER_HELP: &str = "\
@@ -52,13 +52,14 @@ Notes:
   Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
-  Use `prodex quota --all --detail` for the clearest live quota view across profiles.
+  `prodex quota` defaults to the detailed live view across all profiles.
 
 Examples:
   prodex quota
+  prodex quota --once
+  prodex quota --provider openai
   prodex quota --profile main --detail
   prodex quota --all --detail
-  prodex quota --all --detail --provider openai
   prodex quota --all --provider deepseek --base-url https://api.deepseek.com --once
   prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
   prodex quota --all --once
@@ -67,8 +68,9 @@ Examples:
 
 Notes:
   `prodex quota` supports OpenAI/Codex, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
-  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `claude`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
-  Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
+  Use `--provider` to filter the default pool view by provider: `openai`, `gemini`, `anthropic`, `claude`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
+  Use `--auth` to filter the default pool view by auth label or compatibility, for example `no-auth` or `quota-compatible`.
+  Explicit `--all` without `--detail` preserves the compact aggregate view.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or `amazon-bedrock-runtime`, prodex shows a provider snapshot instead of failing the quota view.";
 pub const CLI_REDEEM_AFTER_HELP: &str = "\
 Examples:

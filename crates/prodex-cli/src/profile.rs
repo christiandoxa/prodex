@@ -180,22 +180,30 @@ pub struct ProdexUpdateArgs {}
 
 #[derive(Args)]
 pub struct QuotaArgs {
-    /// Inspect a single profile. If omitted, prodex uses the active profile.
+    /// Inspect a single profile instead of the default detailed pool view.
     #[arg(short, long, value_name = "NAME", conflicts_with = "all")]
     pub profile: Option<String>,
-    /// Show every configured profile in one aggregated view.
+    /// Show every configured profile in a compact aggregated view.
     #[arg(long, conflicts_with = "profile")]
     pub all: bool,
     /// Show only profiles whose auth label or compatibility matches this filter.
     ///
     /// Supported values: no-auth, chatgpt, api-key, invalid-auth, unreadable-auth,
     /// quota-compatible, non-quota-compatible, all.
-    #[arg(long, value_name = "AUTH", requires = "all")]
+    #[arg(
+        long,
+        value_name = "AUTH",
+        conflicts_with_all = ["profile", "raw"]
+    )]
     pub auth: Option<String>,
-    /// Show only profiles for one provider in --all views.
+    /// Show only profiles for one provider in aggregated views.
     ///
     /// Supported values: all, openai, gemini, anthropic, claude, copilot, kiro, deepseek, local, agy.
-    #[arg(long, value_name = "PROVIDER", requires = "all")]
+    #[arg(
+        long,
+        value_name = "PROVIDER",
+        conflicts_with_all = ["profile", "raw"]
+    )]
     pub provider: Option<String>,
     /// Include exact reset timestamps and expanded window details.
     #[arg(long, conflicts_with = "raw")]
