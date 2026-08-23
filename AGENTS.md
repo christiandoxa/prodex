@@ -58,9 +58,10 @@ module in the owning crate.
 
 ## Before changing code
 
-- Reuse existing helpers, types, modules, and test support before writing new code. Do not
-  duplicate behavior; add a new implementation only when reuse cannot preserve the owning
-  boundary or contract.
+- Before adding a helper, type, parser, runner, module, or implementation, search the repository
+  for an equivalent owner and reuse or extend it. A second implementation is allowed only when
+  reuse would violate an explicit ownership, trust, transport, or platform boundary; record that
+  constraint in the change and keep the new surface minimal.
 - Trace callers and the end-to-end flow before changing shared logic; fix the shared root cause.
 - State material assumptions, then make the smallest behavior-preserving change. Avoid
   speculative abstractions, configurability, dependencies, and drive-by refactors.
