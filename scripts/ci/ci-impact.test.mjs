@@ -222,6 +222,17 @@ test("changed-tests keeps uncategorized node scripts conservative", async () => 
   assert.deepEqual(labels, ["node-check:scripts/ci/benchmark-calibration.mjs"]);
 });
 
+test("changed-tests selects the workspace when a crate was removed", async () => {
+  const step = (await buildSteps(["crates/prodex-deleted-fixture/src/lib.rs"]))
+    .find(({ label }) => label === "cargo:workspace:removed-crate");
+
+  assert.deepEqual(step, {
+    label: "cargo:workspace:removed-crate",
+    command: "cargo",
+    args: ["test", "--locked", "-q", "--workspace"],
+  });
+});
+
 test("changed-tests runs enterprise ID guard for boundary identity paths", async () => {
   const labels = (await buildSteps([
     "crates/prodex-domain/src/ids.rs",

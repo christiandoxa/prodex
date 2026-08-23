@@ -386,6 +386,14 @@ async function addCargoSteps(steps, paths) {
   }
 
   for (const crateDir of [...crateDirs].sort()) {
+    if (!(await pathExists(`${crateDir}/Cargo.toml`))) {
+      addStep(steps, "cargo:workspace:removed-crate", {
+        label: "cargo:workspace:removed-crate",
+        command: "cargo",
+        args: ["test", "--locked", "-q", "--workspace"],
+      });
+      continue;
+    }
     const packageName = await packageNameForCrateDir(crateDir);
     addStep(steps, `cargo:${packageName}`, {
       label: `cargo:${packageName}`,
