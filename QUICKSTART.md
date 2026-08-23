@@ -53,12 +53,12 @@ Prodex keeps each managed profile in a separate Codex home.
 ```bash
 prodex profile list
 prodex current
-prodex quota --all --once
+prodex quota --once
 prodex doctor
 ```
 
-Without `--once`, human quota views refresh every five seconds. `--raw` is
-always one-shot.
+Bare `prodex quota` shows the detailed pool view. Without `--once`, human quota
+views refresh every five seconds. `--raw` is always one-shot.
 
 ## 4. Launch
 

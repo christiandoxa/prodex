@@ -8,6 +8,7 @@ mod external_provider;
 mod harness;
 mod ping;
 mod process_reporting;
+mod quota;
 mod redeem;
 mod runtime_features;
 mod session_tail;
@@ -285,20 +286,6 @@ fn capability_list_parse_as_top_level_command() {
         "prodex",
         "capability",
     ])));
-}
-#[test]
-fn quota_rejects_conflicting_output_and_scope_flags() {
-    for args in [
-        ["prodex", "quota", "--profile", "main", "--all"].as_slice(),
-        ["prodex", "quota", "--raw", "--all"].as_slice(),
-        ["prodex", "quota", "--raw", "--detail"].as_slice(),
-        ["prodex", "quota", "--raw", "--once"].as_slice(),
-    ] {
-        assert!(
-            parse_cli_command_from(args.iter().copied()).is_err(),
-            "{args:?}"
-        );
-    }
 }
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
