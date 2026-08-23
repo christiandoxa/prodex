@@ -15,7 +15,6 @@ const LOW_LEVEL_CRATES = Object.freeze([
   "prodex-profile-export",
   "prodex-profile-identity",
   "prodex-provider-core",
-  "prodex-proxy-config",
   "prodex-redaction",
   "prodex-runtime-anthropic",
   "prodex-runtime-cookies",
