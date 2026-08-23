@@ -2,14 +2,30 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.414.0 - 2026-08-23
+
+### Runtime
+
+- Exhaust safe precommit candidates (`2792d48`)
+- Normalize weighted inflight limits (`333b4ea`)
+
+### Docs
+
+- Sync weighted inflight policy (`e9b0731`)
+- Require repository-wide reuse first (`c5d6347`)
+- Document compact task interface (`4e4ef10`)
+- Record versioned Mojo ABI (`59adbba`)
+
 ## 0.413.0 - 2026-08-23
 
 ### Runtime
 
+- Rotate precommit transport failures (`fff6e20`)
 - Drain all positive runtime quota (`5a69440`)
 
 ### CLI
 
+- Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
 
 ## 0.412.0 - 2026-08-23

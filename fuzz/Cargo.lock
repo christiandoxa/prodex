@@ -312,9 +312,9 @@ dependencies = [
 
 [[package]]
 name = "blocking"
-version = "1.6.2"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21"
+checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
 dependencies = [
  "async-channel",
  "async-task",
@@ -1235,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1243,14 +1243,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "serde",
  "sha2 0.11.0",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1307,14 +1307,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1350,14 +1350,25 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
+name = "prodex-runtime-anthropic"
+version = "0.414.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "serde_json",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "prodex-runtime-policy"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1373,12 +1384,13 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "base64 0.23.1",
  "prodex-gateway-core",
  "prodex-provider-core",
  "prodex-redaction",
+ "prodex-runtime-anthropic",
  "prodex-runtime-state",
  "prodex-runtime-tuning",
  "serde",
@@ -1389,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -1397,11 +1409,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.413.0"
+version = "0.414.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -1415,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.413.0"
+version = "0.414.0"
 dependencies = [
  "prodex-domain",
 ]
