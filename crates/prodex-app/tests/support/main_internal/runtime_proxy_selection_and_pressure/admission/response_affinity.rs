@@ -1,4 +1,58 @@
+use super::helpers::*;
 use super::*;
+
+#[test]
+fn responses_hard_affinity_reaches_upstream_despite_persisted_exhaustion() {
+    let backend = RuntimeProxyBackend::start();
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot(
+            "main",
+            runtime_usage_snapshot(quota_window_exhausted(300), quota_window_ready(80, 86_400)),
+        )
+        .profile_usage_snapshot(
+            "second",
+            runtime_usage_snapshot(
+                quota_window_ready(82, 3600),
+                quota_window_ready(83, 86_400),
+            ),
+        )
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp-main","input":[]}"#.to_vec(),
+    };
+
+    match attempt_runtime_responses_request(
+        1,
+        &request,
+        harness.shared(),
+        "main",
+        RuntimeResponsesAttemptOptions {
+            turn_state_override: None,
+            prompt_cache_key: None,
+            hard_affinity: true,
+            selection_attempt: 1,
+        },
+    )
+    .expect("hard-affinity request should reach upstream")
+    {
+        RuntimeResponsesAttempt::QuotaBlocked { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
+        RuntimeResponsesAttempt::LocalSelectionBlocked { reason, .. } => {
+            panic!("persisted quota must not create a local failure for hard affinity: {reason}")
+        }
+        _ => panic!("expected the upstream quota response"),
+    }
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+}
 
 #[test]
 fn runtime_binding_touch_waits_for_full_interval_with_second_precision() {

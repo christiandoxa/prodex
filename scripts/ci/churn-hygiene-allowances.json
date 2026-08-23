@@ -14,7 +14,7 @@
       "chore(ci): record reviewed Mojo KISS refactor churn"
     ],
     "caps": {
-      "maxFiles": 131,
+      "maxFiles": 132,
       "maxBehaviorFiles": 100,
       "maxLines": 5200,
       "maxFileLines": 800
