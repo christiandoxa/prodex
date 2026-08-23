@@ -18,6 +18,10 @@ fn classifies_transport_failure_messages() {
         runtime_transport_failure_kind_from_message("stream closed before response.completed"),
         Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
     );
+    assert_eq!(
+        runtime_transport_failure_kind_from_message("connection closed before message completed"),
+        Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
+    );
 }
 
 #[test]

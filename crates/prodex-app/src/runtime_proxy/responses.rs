@@ -558,6 +558,23 @@ fn handle_runtime_responses_attempt(
             profile_name,
             reason,
         ),
+        RuntimeResponsesAttempt::TransportFailed {
+            profile_name,
+            stage,
+        } => {
+            runtime_proxy_log(
+                context.shared,
+                format!(
+                    "request={} transport=http responses_transport_failure profile={profile_name} stage={stage} hard_affinity={hard_affinity}",
+                    context.request_id,
+                ),
+            );
+            if hard_affinity {
+                return Ok(Some(runtime_responses_local_selection_failure_reply()));
+            }
+            loop_state.excluded_profiles.insert(profile_name);
+            Ok(None)
+        }
         RuntimeResponsesAttempt::PreviousResponseNotFound {
             profile_name,
             response,

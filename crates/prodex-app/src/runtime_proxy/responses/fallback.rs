@@ -189,6 +189,20 @@ fn handle_runtime_responses_direct_attempt(
             profile_name,
             reason,
         ),
+        RuntimeResponsesAttempt::TransportFailed {
+            profile_name,
+            stage,
+        } => {
+            runtime_proxy_log(
+                fallback.shared,
+                format!(
+                    "request={} transport=http responses_transport_failure profile={profile_name} stage={stage} via=direct_current_profile_fallback",
+                    fallback.request_id
+                ),
+            );
+            excluded_profiles.insert(profile_name);
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+        }
     }
 }
 

@@ -55,6 +55,10 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
         RuntimeResponsesAttempt::PreviousResponseNotFound { profile_name, .. } => {
             assert_eq!(profile_name, "main");
         }
+        RuntimeResponsesAttempt::TransportFailed {
+            profile_name,
+            stage,
+        } => panic!("responses transport failed for {profile_name} during {stage}"),
     }
     assert_eq!(
         backend.responses_accounts(),

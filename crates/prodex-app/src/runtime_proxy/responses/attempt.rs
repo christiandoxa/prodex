@@ -274,7 +274,7 @@ pub(crate) fn attempt_runtime_responses_request(
         let upstream_profile_name = profile_name.to_string();
         let upstream_turn_state_override = turn_state_override.map(str::to_string);
         let response =
-            await_runtime_proxy_async_task(shared, "responses_upstream_request", async move {
+            match await_runtime_proxy_async_task(shared, "responses_upstream_request", async move {
                 send_runtime_proxy_upstream_responses_request(
                     request_id,
                     &upstream_request,
@@ -284,16 +284,17 @@ pub(crate) fn attempt_runtime_responses_request(
                     upstream_auth,
                 )
                 .await
-            })
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    "responses_upstream_request",
-                    err,
-                );
-            })?;
+            }) {
+                Ok(response) => response,
+                Err(err) => {
+                    return handle_runtime_responses_precommit_transport_error(
+                        shared,
+                        profile_name,
+                        "responses_upstream_request",
+                        err,
+                    );
+                }
+            };
         let response_turn_state =
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
         if !response.status().is_success() {

@@ -27,6 +27,10 @@ pub(super) enum RuntimeResponsesAttempt {
         profile_name: String,
         reason: &'static str,
     },
+    TransportFailed {
+        profile_name: String,
+        stage: &'static str,
+    },
 }
 
 pub(super) enum RuntimeStandardAttempt {

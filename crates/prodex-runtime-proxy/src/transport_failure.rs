@@ -92,6 +92,7 @@ const RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES: &[RuntimeTransportFailureMessageR
     RuntimeTransportFailureMessageRule {
         kind: RuntimeTransportFailureKind::UpstreamClosedBeforeCommit,
         needles: &[
+            "connection closed before message completed",
             "stream closed before response.completed",
             "closed before response.completed",
         ],

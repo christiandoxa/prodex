@@ -54,21 +54,14 @@ pub(super) fn write_runtime_proxy_backend_http_response(
     headers.push_str("\r\n");
     let _ = stream.write_all(headers.as_bytes());
     let _ = stream.flush();
+    if content_type == "text/event-stream"
+        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetAfterHeaders)
+        && account_id == "main-account"
+    {
+        return;
+    }
     if let Some(delay) = initial_body_stall {
         thread::sleep(delay);
-    }
-    if content_type == "text/event-stream"
-        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetAfterFirstChunk)
-        && account_id == "second-account"
-    {
-        let reset_chunk = body
-            .split("\r\n\r\n")
-            .next()
-            .map(|chunk| format!("{chunk}\r\n\r\n"))
-            .unwrap_or_else(|| body.clone());
-        let _ = stream.write_all(reset_chunk.as_bytes());
-        let _ = stream.flush();
-        return;
     }
     if content_type == "text/event-stream"
         && matches!(

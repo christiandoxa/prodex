@@ -17,6 +17,28 @@ pub(crate) use streaming_writer::{
     write_runtime_gateway_streaming_response, write_runtime_streaming_response,
 };
 
+pub(super) fn handle_runtime_responses_precommit_transport_error(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    stage: &'static str,
+    err: anyhow::Error,
+) -> Result<RuntimeResponsesAttempt> {
+    note_runtime_profile_transport_failure(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Responses,
+        stage,
+        &err,
+    );
+    if is_runtime_proxy_transport_failure(&err) {
+        return Ok(RuntimeResponsesAttempt::TransportFailed {
+            profile_name: profile_name.to_string(),
+            stage,
+        });
+    }
+    Err(err)
+}
+
 pub(super) async fn forward_runtime_proxy_response(
     response: reqwest::Response,
     prelude: Vec<u8>,
@@ -199,7 +221,19 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         &shared.runtime_config,
     );
     let (lookahead, prefetch) =
-        inspect_runtime_sse_lookahead_async(prefetch, shared.log_path.clone(), request_id).await?;
+        match inspect_runtime_sse_lookahead_async(prefetch, shared.log_path.clone(), request_id)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                return handle_runtime_responses_precommit_transport_error(
+                    shared,
+                    profile_name,
+                    "responses_sse_lookahead",
+                    err,
+                );
+            }
+        };
 
     let (prelude, response_ids, lookahead_turn_state) = match lookahead {
         RuntimeSseInspection::Commit {
