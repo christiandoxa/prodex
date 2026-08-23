@@ -31,15 +31,15 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-pub const CAVEMAN_VETTED_VERSION: &str = "1.9.1";
-pub const CAVEMAN_VETTED_COMMIT: &str = "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0";
+pub const CAVEMAN_VETTED_VERSION: &str = "2.2.0";
+pub const CAVEMAN_VETTED_COMMIT: &str = "9aa63945a349bef17206540650db48c30fafbdf2";
 pub const CAVEMAN_VETTED_TREE_SHA256: &str =
-    "863d1a6965ed47f9e130312c8e943617e224cc08f8162296d7e06b8b63d54476";
-pub const PONYTAIL_VETTED_VERSION: &str = "4.8.4";
-pub const PONYTAIL_VETTED_COMMIT: &str = "16f29800fd2681bdf24f3eb4ccffe38be3baec6b";
+    "91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a";
+pub const PONYTAIL_VETTED_VERSION: &str = "4.9.0";
+pub const PONYTAIL_VETTED_COMMIT: &str = "0a4dd63ad4541f4f655c4108a295916f3c1d8fda";
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =
-    "727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d";
-pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
+    "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970";
+pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.79";
 
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";

@@ -47,15 +47,15 @@ external release below:
 
 | Field | Required value |
 | --- | --- |
-| Version | `1.9.1` |
+| Version | `2.2.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0` |
-| Prodex tree SHA-256 | `863d1a6965ed47f9e130312c8e943617e224cc08f8162296d7e06b8b63d54476` |
+| Commit | `9aa63945a349bef17206540650db48c30fafbdf2` |
+| Prodex tree SHA-256 | `91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a` |
 
 Install the exact checked-out tree at:
 
 ```text
-<managed-root>/caveman/1.9.1/
+<managed-root>/caveman/2.2.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -66,10 +66,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "1.9.1",
+  "version": "2.2.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0",
-  "tree_sha256": "863d1a6965ed47f9e130312c8e943617e224cc08f8162296d7e06b8b63d54476"
+  "commit": "9aa63945a349bef17206540650db48c30fafbdf2",
+  "tree_sha256": "91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a"
 }
 ```
 
@@ -85,14 +85,15 @@ versioned path shown above.
 ## Ponytail
 
 Ponytail uses the same manifest and tree-validation contract at
-`<managed-root>/ponytail/4.8.4/`. Its vetted metadata is:
+`<managed-root>/ponytail/4.9.0/`. Its vetted metadata is:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`
-- tree SHA-256: `727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d`
+- commit: `0a4dd63ad4541f4f655c4108a295916f3c1d8fda`
+- tree SHA-256: `88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970`
 
 RTK and Codebase Memory MCP resolve from managed roots first and then `PATH`.
-Codebase Memory MCP must be `0.9.1-rc.1` or newer (or a development build) and
+The README installs the current stable Codebase Memory MCP `0.10.8`; Prodex
+continues to accept `0.9.1-rc.1` or newer (or a development build) and
 expose its native `daemon status` contract. The explicit health check verifies
 this contract; normal optional launch resolution does not synchronously spawn
 the daemon probe. Parallel Codex processes retain
@@ -104,9 +105,10 @@ override is inherited unchanged.
 Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
-Playwright MCP requires validated Node.js 18+, `npx`, and the pinned package to
-pass an offline probe; install the package and browser before launching Super,
-then use `prodex capability super-doctor` to verify it explicitly.
+Playwright MCP requires validated Node.js 18+, `npx`, and the pinned
+`@playwright/mcp@0.0.79` package to pass an offline probe; install the package
+and browser before launching Super, then use `prodex capability super-doctor`
+to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing
 doctor path. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
