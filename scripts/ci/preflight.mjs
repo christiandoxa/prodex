@@ -8,17 +8,16 @@ import { fileURLToPath } from "node:url";
 
 const modulePath = fileURLToPath(import.meta.url);
 
-export function parseArgs(argv) {
+export function parseArgs(argv, environment = process.env) {
   const args = {
-    churnCheck: process.env.PRODEX_PREFLIGHT_CHURN_REPORT_ONLY !== "1",
-    churnIgnoreBefore: process.env.PRODEX_PREFLIGHT_CHURN_IGNORE_BEFORE || null,
-    churnRange: process.env.PRODEX_PREFLIGHT_CHURN_RANGE || null,
+    churnCheck: environment.PRODEX_PREFLIGHT_CHURN_REPORT_ONLY !== "1",
+    churnIgnoreBefore: environment.PRODEX_PREFLIGHT_CHURN_IGNORE_BEFORE || null,
+    churnRange: environment.PRODEX_PREFLIGHT_CHURN_RANGE || null,
     dryRun: false,
     jobs: defaultJobCount(),
     fastTests: true,
     serial: false,
-    storagePostgresProof:
-      process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF === "1",
+    storagePostgresProof: environment.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF === "1",
   };
 
   for (let index = 2; index < argv.length; index += 1) {

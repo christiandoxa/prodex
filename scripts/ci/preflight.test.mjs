@@ -17,37 +17,21 @@ test("preflight enables storage postgres proof from CLI flag", () => {
 });
 
 test("preflight enables storage postgres proof from environment", () => {
-  const previous = process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF;
-  process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF = "1";
-  try {
-    const args = parseArgs(["node", "preflight.mjs"]);
-    const labels = preflightSteps(args).map((step) => step.label);
+  const args = parseArgs(["node", "preflight.mjs"], {
+    PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF: "1",
+  });
+  const labels = preflightSteps(args).map((step) => step.label);
 
-    assert.equal(args.storagePostgresProof, true);
-    assert.ok(labels.includes("storage-postgres-proof"));
-  } finally {
-    if (previous === undefined) {
-      delete process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF;
-    } else {
-      process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF = previous;
-    }
-  }
+  assert.equal(args.storagePostgresProof, true);
+  assert.ok(labels.includes("storage-postgres-proof"));
 });
 
 test("preflight keeps storage postgres proof opt-in by default", () => {
-  const previous = process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF;
-  delete process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF;
-  try {
-    const args = parseArgs(["node", "preflight.mjs"]);
-    const labels = preflightSteps(args).map((step) => step.label);
+  const args = parseArgs(["node", "preflight.mjs"], {});
+  const labels = preflightSteps(args).map((step) => step.label);
 
-    assert.equal(args.storagePostgresProof, false);
-    assert.ok(!labels.includes("storage-postgres-proof"));
-  } finally {
-    if (previous !== undefined) {
-      process.env.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF = previous;
-    }
-  }
+  assert.equal(args.storagePostgresProof, false);
+  assert.ok(!labels.includes("storage-postgres-proof"));
 });
 
 test("preflight runs runtime hotpath guard self-test before scanning workspace", () => {
