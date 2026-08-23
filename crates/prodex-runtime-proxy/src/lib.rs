@@ -1,8 +1,6 @@
 //! Runtime proxy boundary primitives.
-//!
-//! Most modules are side-effect-free boundary types and helpers.
-//! The bounded WebSocket TCP/DNS executor also lives here so the binary can keep
-//! transport policy wiring thin while still owning runtime state and persistence.
+//! Most modules are side-effect-free; the bounded WebSocket TCP/DNS executor
+//! keeps binary wiring thin while owning runtime state and persistence.
 
 use std::{borrow::Cow, fmt};
 

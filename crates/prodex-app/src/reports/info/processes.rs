@@ -1,6 +1,6 @@
 //! Process classification and runtime-log selection.
 
-use super::*;
+use super::{BTreeMap, BTreeSet, Path, PathBuf, ProcessRow, ProdexProcessInfo, SystemTime};
 use prodex_cli::Commands;
 
 pub fn parse_ps_process_rows(text: &str) -> Vec<ProcessRow> {
