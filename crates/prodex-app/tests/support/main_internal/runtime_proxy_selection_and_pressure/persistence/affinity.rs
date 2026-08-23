@@ -202,7 +202,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
 }
 
 #[test]
-fn fresh_websocket_fallback_rejects_critical_quota_below_floor() {
+fn fresh_websocket_fallback_accepts_last_positive_quota_percent() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -297,6 +297,6 @@ fn fresh_websocket_fallback_rejects_critical_quota_below_floor() {
             RuntimeRouteKind::Websocket,
         )
         .expect("candidate lookup should succeed"),
-        None
+        Some("second".to_string())
     );
 }

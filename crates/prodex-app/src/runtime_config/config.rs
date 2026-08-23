@@ -557,7 +557,7 @@ impl runtime_config::RuntimeConfig {
                 .positive_i64(
                     "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
                     policy.responses_critical_floor_percent,
-                    2,
+                    1,
                 )
                 .clamp(1, 10),
             startup_sync_probe_warm_limit: parser

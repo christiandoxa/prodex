@@ -648,7 +648,7 @@ shared-state integration around those operations.
 | `runtime_proxy.broker_health_connect_timeout_ms` | `PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS` | `750` | Broker health check connect timeout. |
 | `runtime_proxy.broker_health_read_timeout_ms` | `PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS` | `1500` | Broker health check read timeout. |
 | `runtime_proxy.sync_probe_pressure_pause_ms` | `PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS` | `5` | Pause before synchronous probe work when local pressure is detected. |
-| `runtime_proxy.responses_critical_floor_percent` | `PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT` | `2` | Minimum remaining Responses quota percentage treated as critical; valid range `1..10`. |
+| `runtime_proxy.responses_critical_floor_percent` | `PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT` | `1` | Responses quota reserve floor; the default permits every positive remaining percentage, and valid values are `1..10`. |
 | `runtime_proxy.startup_sync_probe_warm_limit` | `PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT` | `1` | Startup synchronous quota probe warm-up limit, capped internally at `3`. |
 <!-- END GENERATED RUNTIME_PROXY_KEYS -->
 

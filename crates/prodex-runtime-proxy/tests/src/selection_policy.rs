@@ -375,11 +375,11 @@ fn direct_current_profile_fallback_requires_fresh_unfailed_request() {
 }
 
 #[test]
-fn soft_affinity_allows_response_on_positive_critical_five_hour() {
+fn soft_affinity_allows_response_until_five_hour_quota_is_exhausted() {
     let mut summary = healthy_summary();
     summary.five_hour = RuntimeSelectionQuotaWindowSummary {
         status: RuntimeSelectionQuotaWindowStatus::Critical,
-        remaining_percent: 2,
+        remaining_percent: 1,
     };
     summary.route_band = RuntimeSelectionQuotaPressureBand::Critical;
 
@@ -390,12 +390,12 @@ fn soft_affinity_allows_response_on_positive_critical_five_hour() {
         quota_source: Some(RuntimeSelectionQuotaSource::LiveProbe),
         current_profile_matches_candidate: false,
         has_route_eligible_quota_fallback: true,
-        responses_critical_floor_percent: 2,
+        responses_critical_floor_percent: 1,
     };
 
     assert!(runtime_soft_affinity_allowed(input));
     assert_eq!(
-        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
+        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 1),
         None
     );
 }
