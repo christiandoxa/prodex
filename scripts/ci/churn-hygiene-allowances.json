@@ -1,5 +1,27 @@
 [
   {
+    "id": "audited-mojo-runtime-ci-feature-0.412.0",
+    "requiredSubjects": [
+      "fix(runtime): preserve remembered model on resume",
+      "fix(cli): make quota default detailed",
+      "refactor(policy): batch runtime numeric validation",
+      "refactor(policy): batch remaining numeric validation",
+      "refactor(mojo): make profile scheduling authoritative",
+      "refactor(mojo): remove duplicate Gemini quota arithmetic",
+      "ci: parallelize test shards",
+      "ci: fix release workflow polling",
+      "docs: refresh migration and validation contracts",
+      "chore(ci): record reviewed 0.412.0 migration churn"
+    ],
+    "caps": {
+      "maxFiles": 63,
+      "maxBehaviorFiles": 46,
+      "maxLines": 2811,
+      "maxFileLines": 339
+    },
+    "reason": "Reviewed the bounded 0.412.0 campaign covering remembered resume models, detailed quota defaults, section-level Mojo policy batching, authoritative profile scheduling, duplicate Gemini arithmetic cleanup, disjoint CI test shards, release polling, and migration contract refreshes; exact caps cover the audited commits and churn record while all source, real-Mojo, no-fallback, benchmark, compatibility, and release gates remain mandatory."
+  },
+  {
     "id": "audited-codex-0148-continuation-feature-0.409.0",
     "requiredSubjects": [
       "fix: audit Codex rust-v0.148 compatibility and continuation lifecycle"
