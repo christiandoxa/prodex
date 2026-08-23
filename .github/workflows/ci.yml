@@ -1765,13 +1765,15 @@ jobs:
 
   real-mojo:
     name: Real Mojo / parity
-    if: ${{ github.event_name != 'schedule' }}
+    needs: changes
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       MOJO_VERSION: "1.0.0"
       UV_VERSION: "0.11.7"
       PRODEX_MOJO_REQUIRED: "1"
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -1782,6 +1784,14 @@ jobs:
         with:
           toolchain: 1.97.1
           components: clippy
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-bin: false
 
       - name: Install pinned uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
