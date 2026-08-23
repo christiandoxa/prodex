@@ -107,6 +107,7 @@ fn super_resume_restores_the_session_model_and_reasoning_effort() {
             "{}{}",
             session_meta_line(session_id, &root, Some("openai")),
             r#"{"timestamp":"2026-06-05T01:01:00Z","type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"max"}}
+{"timestamp":"2026-06-05T01:02:00Z","type":"response_item","payload":{"id":"rs_response_item_id"}}
 "#
         ),
     )

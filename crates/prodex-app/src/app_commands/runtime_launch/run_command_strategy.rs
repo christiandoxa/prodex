@@ -195,6 +195,30 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             false,
             true,
         );
+        if !self.command_server
+            && !prodex_runtime_launch::is_codex_exec_invocation(&codex_args)
+            && !prodex_runtime_launch::codex_resume_requested(&codex_args)
+        {
+            crate::project_in_app_resume_model_settings(
+                if prepared.managed {
+                    &prepared.paths.shared_codex_root
+                } else {
+                    &prepared.codex_home
+                },
+                &mut codex_args,
+                [
+                    ("model", preference_context.explicit_model.is_none()),
+                    (
+                        "model_provider",
+                        !prepared.managed && self.model_provider_override.is_none(),
+                    ),
+                    (
+                        "model_reasoning_effort",
+                        preference_context.explicit_effort.is_none(),
+                    ),
+                ],
+            )?;
+        }
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
                 &prepared.codex_home,

@@ -32,12 +32,14 @@ fn remembers_the_latest_turn_model_and_reasoning_effort() {
     apply_session_json_lines(
         &mut report,
         [
+            r#"{"timestamp":"2026-04-29T11:59:00Z","type":"session_meta","payload":{"id":"session-settings"}}"#,
             r#"{"timestamp":"2026-04-29T12:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2-codex","effort":"medium"}}"#,
             r#"{"timestamp":"2026-04-29T12:02:00Z","type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"max"}}"#,
-            r#"{"timestamp":"2026-04-29T12:03:00Z","type":"response_item","payload":{"model":"should-not-win"}}"#,
+            r#"{"timestamp":"2026-04-29T12:03:00Z","type":"response_item","payload":{"id":"response-item","model":"should-not-win"}}"#,
         ],
     );
 
+    assert_eq!(report.id, "session-settings");
     assert_eq!(report.last_model(), Some("gpt-5.6-luna"));
     assert_eq!(report.last_reasoning_effort(), Some("max"));
 }

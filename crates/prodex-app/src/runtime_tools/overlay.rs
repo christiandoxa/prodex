@@ -56,6 +56,52 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
     Ok(plan)
 }
 
+pub(crate) fn project_in_app_resume_model_settings(
+    codex_home: &Path,
+    codex_args: &mut Vec<std::ffi::OsString>,
+    settings_to_project: [(&str, bool); 3],
+) -> Result<()> {
+    let mut projected_args = codex_args.clone();
+    let mut settings = Vec::new();
+    for (key, should_project) in settings_to_project {
+        if !should_project {
+            continue;
+        }
+        let Some(value) = crate::codex_cli_config_override_value(codex_args, key) else {
+            continue;
+        };
+        let mut removed = false;
+        while crate::app_commands::runtime_launch::remove_first_codex_config_override_pair(
+            &mut projected_args,
+            key,
+        ) {
+            removed = true;
+        }
+        if removed {
+            settings.push((key, value));
+        }
+    }
+    if settings.is_empty() {
+        return Ok(());
+    }
+
+    let config_args = settings
+        .into_iter()
+        .flat_map(|(key, value)| {
+            [
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(format!(
+                    "{key}={}",
+                    crate::runtime_catalog_config::toml_string_literal(&value)
+                )),
+            ]
+        })
+        .collect::<Vec<_>>();
+    crate::runtime_desktop::configure_desktop_codex_home(codex_home, &config_args, false, None)?;
+    *codex_args = projected_args;
+    Ok(())
+}
+
 pub(super) fn build_plan(
     strategy: &mut RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
@@ -86,8 +132,25 @@ pub(super) fn build_plan(
         stage_started,
     );
     let stage_started = Instant::now();
-    let runtime_args =
+    let mut runtime_args =
         strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
+    if strategy.desktop_command.is_none()
+        && !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
+        && !prodex_runtime_launch::codex_resume_requested(&runtime_args)
+    {
+        crate::project_in_app_resume_model_settings(
+            &overlay_home,
+            &mut runtime_args,
+            [
+                ("model", preference_context.explicit_model.is_none()),
+                ("model_provider", strategy.model_provider_override.is_none()),
+                (
+                    "model_reasoning_effort",
+                    preference_context.explicit_effort.is_none(),
+                ),
+            ],
+        )?;
+    }
     crate::runtime_launch::emit_runtime_timing(
         "startup.provider_catalog_prepare_ms",
         stage_started,
@@ -324,14 +387,60 @@ mod tests {
         };
 
         let plan = super::build_plan(&mut strategy, &prepared, None).unwrap();
+        for key in ["model", "model_provider", "model_reasoning_effort"] {
+            assert!(
+                crate::codex_cli_config_override_value(&plan.child.args, key).is_none(),
+                "{key} must not prevent Codex from restoring the selected thread model"
+            );
+        }
+        let config: toml::Value = toml::from_str(
+            &std::fs::read_to_string(plan.child.codex_home.join("config.toml"))
+                .expect("overlay config should be readable"),
+        )
+        .expect("overlay config should remain valid TOML");
         assert_eq!(
-            crate::codex_cli_config_override_value(&plan.child.args, "model").as_deref(),
+            config.get("model").and_then(toml::Value::as_str),
             Some("remembered-model")
         );
         assert_eq!(
-            crate::codex_cli_config_override_value(&plan.child.args, "model_reasoning_effort")
-                .as_deref(),
+            config.get("model_provider").and_then(toml::Value::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            config
+                .get("model_reasoning_effort")
+                .and_then(toml::Value::as_str),
             Some("max")
+        );
+
+        let mut mixed_args = vec![
+            "-c".into(),
+            "model=\"explicit-model\"".into(),
+            "-c".into(),
+            "model_provider=\"explicit-provider\"".into(),
+            "-c".into(),
+            "model_reasoning_effort=\"automatic-effort\"".into(),
+        ];
+        crate::project_in_app_resume_model_settings(
+            &plan.child.codex_home,
+            &mut mixed_args,
+            [
+                ("model", false),
+                ("model_provider", false),
+                ("model_reasoning_effort", true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::codex_cli_config_override_value(&mixed_args, "model").as_deref(),
+            Some("explicit-model")
+        );
+        assert_eq!(
+            crate::codex_cli_config_override_value(&mixed_args, "model_provider").as_deref(),
+            Some("explicit-provider")
+        );
+        assert!(
+            crate::codex_cli_config_override_value(&mixed_args, "model_reasoning_effort").is_none()
         );
         drop(plan);
         std::fs::remove_dir_all(root).expect("test root should be removed");

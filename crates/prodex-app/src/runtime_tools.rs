@@ -21,7 +21,9 @@ mod super_trust;
 pub(super) use child_env::{clear_rtk_auto_wrap_control_env, prepend_child_path};
 #[cfg(test)]
 pub(super) use overlay::prepare_prodex_overlay_home;
-pub(crate) use overlay::resolve_runtime_optional_tool_plan;
+pub(crate) use overlay::{
+    project_in_app_resume_model_settings, resolve_runtime_optional_tool_plan,
+};
 #[cfg(test)]
 pub(crate) use provider_auth::PRODEX_PROVIDER_CODEX_API_KEY;
 pub(crate) use provider_auth::{
