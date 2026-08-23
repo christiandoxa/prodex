@@ -10,11 +10,11 @@ mod server;
 
 use payloads::quota_summary;
 use providers::*;
+pub(crate) use server::serve_dashboard;
 #[cfg(test)]
 use server::{
     dashboard_json_body_error_status, dashboard_status_fields, read_dashboard_json_body_limited,
 };
-pub(crate) use server::{open_browser, serve_dashboard};
 use server::{respond_html, respond_json, respond_json_result, respond_status};
 
 use crate::dashboard_html::DASHBOARD_HTML;

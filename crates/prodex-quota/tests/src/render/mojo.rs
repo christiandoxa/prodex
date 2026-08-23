@@ -45,6 +45,18 @@ fn gemini_renderer_uses_normalized_batch_results() {
         }),
         "gemini 50%"
     );
+
+    let fraction_only = GeminiQuotaBucket {
+        remaining_amount: None,
+        remaining_fraction: Some(0.5),
+        reset_time: None,
+        token_type: None,
+        model_id: Some("models/gemini-test".to_string()),
+    };
+    assert_eq!(
+        format_gemini_bucket_summary(&fraction_only),
+        "gemini-test 50/100"
+    );
 }
 
 #[test]
