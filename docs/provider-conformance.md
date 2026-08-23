@@ -73,8 +73,8 @@ Minimum coverage for a provider is:
 Run the provider checks with:
 
 ```bash
-npm run catalog:providers
-npm run docs:provider-capabilities:check
+node scripts/catalog/provider-catalog-check.mjs
+node --test scripts/lib/checked-subprocess.test.mjs && node scripts/catalog/provider-capability-matrix.mjs
 cargo test -q -p prodex-provider-core
 ```
 

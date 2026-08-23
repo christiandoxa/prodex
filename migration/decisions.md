@@ -199,3 +199,12 @@ The authoritative provider kernel therefore uses ABI v2 with exact, separate `In
 flat-buffer schemas. `prodex-mojo-core` owns all unsafe declarations and converts checked tags to
 typed Rust enums; count, version, tag, presence, and output-coherence failures fail closed. The
 shared routing ABI remains version 1.
+
+## 2026-08-23: Keep npm as a small developer interface
+
+The root package exposes 15 maintained commands instead of one alias per focused script. CI
+workflows and focused documentation invoke the existing `scripts/ci`, `scripts/docs`,
+`scripts/compat`, and load runners directly. The enterprise workflow guard now validates those
+real commands and their negative self-tests rather than duplicating the same command map in
+`package.json` and the test-impact manifest. Validation implementations and workflow coverage are
+unchanged; only redundant aliases and alias-consistency machinery were removed.

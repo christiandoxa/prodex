@@ -27,7 +27,7 @@ registry integrity values. Opt-in `PRODEX_CODEX_AUTO_INSTALL` installs that
 exact version and rejects a post-install `codex --version` mismatch. Update the
 canonical file, the standalone installer marker, and the lockfile together,
 then run `npm run npm:sync-version`, `npm ci`, and
-`npm run ci:supply-chain-guard`.
+`node scripts/ci/supply-chain-guard.mjs --self-test`.
 
 Third-party Actions use full 40-character commit SHAs with the corresponding
 major tag in a comment. The tag comment lets Dependabot retain and update the
@@ -138,8 +138,8 @@ The release workflow:
 Run the local policy checks with:
 
 ```bash
-npm run ci:supply-chain-guard
-npm run ci:secret-boundary-guard
+node scripts/ci/supply-chain-guard.mjs --self-test
+node scripts/ci/secret-boundary-guard.mjs --self-test
 mkdir -p target/kics
 docker run --rm \
   --user "$(id -u):$(id -g)" \
