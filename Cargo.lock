@@ -2840,7 +2840,6 @@ dependencies = [
  "prodex-profile-identity",
  "prodex-provider-core",
  "prodex-provider-spi",
- "prodex-proxy-config",
  "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-anthropic",
@@ -3170,15 +3169,6 @@ dependencies = [
  "prodex-domain",
  "prodex-mojo-core",
  "prodex-provider-core",
-]
-
-[[package]]
-name = "prodex-proxy-config"
-version = "0.413.0"
-dependencies = [
- "anyhow",
- "reqwest",
- "tokio",
 ]
 
 [[package]]

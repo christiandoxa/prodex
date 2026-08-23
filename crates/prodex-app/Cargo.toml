@@ -76,7 +76,6 @@ prodex_profile_export = { workspace = true }
 prodex_profile_identity = { workspace = true }
 prodex_provider_core = { workspace = true }
 prodex_provider_spi = { workspace = true }
-prodex_proxy_config = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }

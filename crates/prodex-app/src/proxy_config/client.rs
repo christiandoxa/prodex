@@ -1,8 +1,8 @@
+//! Upstream HTTP client construction owned by the app composition root.
+
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-
-pub const COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER: u64 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpstreamProxyMode {
@@ -56,10 +56,6 @@ pub fn build_runtime_upstream_async_http_client(
         .context("failed to build runtime upstream async HTTP client")
 }
 
-pub fn runtime_compact_request_timeout_ms(stream_idle_timeout_ms: u64) -> u64 {
-    stream_idle_timeout_ms.saturating_mul(COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockingUpstreamClientConfig {
     pub context_label: &'static str,
@@ -92,14 +88,6 @@ mod tests {
     use tokio::runtime::Builder as TokioRuntimeBuilder;
 
     #[test]
-    fn compact_request_timeout_matches_codex_idle_multiplier() {
-        assert_eq!(
-            runtime_compact_request_timeout_ms(250),
-            250 * COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER
-        );
-    }
-
-    #[test]
     fn streaming_async_client_keeps_read_idle_timeout() {
         let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
@@ -126,9 +114,8 @@ mod tests {
 
     #[test]
     fn compact_async_client_allows_full_response_timeout_past_idle_timeout() {
-        let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let compact_timeout_ms = runtime_compact_request_timeout_ms(idle_timeout_ms);
+        let compact_timeout_ms = 800;
         let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
             proxy_mode: UpstreamProxyMode::Disabled,
             connect_timeout: Duration::from_millis(500),
